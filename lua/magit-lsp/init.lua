@@ -143,6 +143,17 @@ local function highlight(lines, map)
   end
 end
 
+--- Replace every line in the status buffer.
+--- The view is read-only, so this is the only place allowed to write to it.
+---@param buf integer
+---@param lines string[]
+local function set_lines(buf, lines)
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modified = false
+  vim.bo[buf].modifiable = false
+end
+
 local function render(status)
   local lines = {}
   local map = {}
@@ -205,7 +216,7 @@ local function render(status)
     add('Working tree clean', { kind = 'message' })
   end
 
-  vim.api.nvim_buf_set_lines(M.buf, 0, -1, false, lines)
+  set_lines(M.buf, lines)
   M.lines = lines
   M.map = map
   M.status = status
@@ -517,6 +528,56 @@ local function enable_folding(win)
   vim.wo[win].foldlevel = 99
 end
 
+-- Text mode will replace this wording once it exists.
+local READ_ONLY_HINT = 'Read-only view. Text mode (to edit/copy as text) is not available yet.'
+
+local WRITE_COMMANDS = { w = true, wr = true, wri = true, writ = true, write = true }
+
+--- True when `cmdline` is a bare `:w`/`:write` (any abbreviation, optional `!`).
+local function is_write_command(cmdline)
+  local cmd = cmdline:match('^%s*(%a+)!?%s*$')
+  return cmd ~= nil and WRITE_COMMANDS[cmd] == true
+end
+
+--- Show the read-only hint once per session.
+local function notify_read_only()
+  if M.read_only_hint_shown then
+    return
+  end
+  M.read_only_hint_shown = true
+  vim.notify(READ_ONLY_HINT, vim.log.levels.INFO)
+end
+
+--- Make `buf` a read-only view of server-owned text.
+---@param buf integer
+local function configure_read_only(buf)
+  vim.api.nvim_create_autocmd('BufWriteCmd', {
+    buffer = buf,
+    callback = function()
+      vim.bo[buf].modified = false
+      notify_read_only()
+    end,
+  })
+
+  -- `nofile` buffers reject `:w` with E382 before BufWriteCmd runs, so also
+  -- swallow a bare write at the command line. Clearing the command line
+  -- cancels it; pcall because that only works while cmdline mode is active.
+  --
+  -- Native E21 edit failures have no autocmd to observe, so the hint is shown
+  -- on the first attempted write for now; text mode will hook real detection.
+  vim.api.nvim_create_autocmd('CmdlineLeave', {
+    buffer = buf,
+    callback = function()
+      if vim.fn.getcmdtype() ~= ':' or not is_write_command(vim.fn.getcmdline()) then
+        return
+      end
+      pcall(vim.fn.setcmdline, '')
+      vim.bo[buf].modified = false
+      notify_read_only()
+    end,
+  })
+end
+
 local function fresh_buffer()
   local existing = vim.fn.bufnr('vcs://status')
   if existing ~= -1 then
@@ -526,7 +587,13 @@ local function fresh_buffer()
   vim.bo[buf].buftype = 'nofile'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
+  -- The view is server-owned and refresh replaces it wholesale.
+  vim.bo[buf].undolevels = -1
+  vim.bo[buf].modified = false
   vim.api.nvim_buf_set_name(buf, 'vcs://status')
+  configure_read_only(buf)
   return buf
 end
 

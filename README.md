@@ -86,7 +86,8 @@ a throwaway git repository under `build/test-repos/`.
    it falls back to `cargo run`.
 
 The status buffer is a `nofile` buffer named `vcs://status`, shown in a vertical
-split.
+split. It is a read-only view: native editing keys are refused and `:w`/`:write`
+is a no-op. Use `gR` to refresh it after changes in the repository.
 
 ## Keys (defaults, subject to customization)
 

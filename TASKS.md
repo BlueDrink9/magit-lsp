@@ -226,6 +226,8 @@ buffer cannot be recovered except by refresh.
 buffer and asserts the lines are unchanged and no error escapes; a second test
 checks that a refresh still works afterwards.
 
+- [x] Done.
+
 ### IMM-5 — Two separate line stagings appear as one staged hunk; audit the diff/patch layer
 
 **Symptom:** staging lines in two different parts of a file seems to produce a

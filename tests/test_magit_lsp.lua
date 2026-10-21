@@ -122,6 +122,25 @@ local function assert_no_line(needle)
   MiniTest.expect.equality(has, false, needle)
 end
 
+-- Type keys that the read-only buffer should refuse. `type_keys()` raises when
+-- `v:errmsg` is set, so accept only the expected native E21 and never a Lua
+-- traceback.
+local function type_edit(keys)
+  local ok, err = pcall(child.type_keys, 50, keys)
+  vim.loop.sleep(50)
+  local errmsg = child.v.errmsg
+  child.v.errmsg = ''
+  if not ok then
+    MiniTest.expect.equality(
+      tostring(err):find('E21', 1, true) ~= nil,
+      true,
+      'unexpected error: ' .. tostring(err)
+    )
+  elseif errmsg ~= '' then
+    MiniTest.expect.equality(errmsg:find('E21', 1, true) ~= nil, true, 'unexpected error: ' .. errmsg)
+  end
+end
+
 local T = MiniTest.new_set({
   hooks = {
     pre_once = function()
@@ -334,6 +353,102 @@ T['enables LSP folding and serves fold ranges'] = function()
     end)()
   ]])
   MiniTest.expect.equality(count > 0, true, 'expected at least one folding range')
+end
+
+T['status buffer is read-only to native edits'] = function()
+  setup_child()
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+
+  local function opt(name)
+    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = M.buf })", name))
+  end
+  MiniTest.expect.equality(opt('buftype'), 'nofile')
+  MiniTest.expect.equality(opt('bufhidden'), 'hide')
+  MiniTest.expect.equality(opt('swapfile'), false)
+  MiniTest.expect.equality(opt('modifiable'), false)
+  MiniTest.expect.equality(opt('readonly'), true)
+  MiniTest.expect.equality(opt('undolevels'), -1)
+  MiniTest.expect.equality(opt('modified'), false)
+
+  -- `u` is mapped to unstage; the cursor sits on the header, so it is a no-op.
+  type_edit('dd')
+  type_edit('x')
+  type_edit('ciw<Esc>')
+  type_edit('u')
+
+  local ok, err = pcall(child.cmd, 's/a/b/')
+  MiniTest.expect.equality(ok, false, 'substitute should be refused')
+  MiniTest.expect.equality(
+    tostring(err):find('E21', 1, true) ~= nil,
+    true,
+    'substitute should fail with E21: ' .. tostring(err)
+  )
+  child.v.errmsg = ''
+
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  MiniTest.expect.equality(after, before)
+  MiniTest.expect.equality(opt('modified'), false)
+end
+
+T['refresh and mutations still work after blocked edits'] = function()
+  setup_child()
+  type_edit('dd')
+  type_edit('x')
+
+  local path = repo .. '/f.txt'
+  local lines = vim.fn.readfile(path)
+  table.insert(lines, 'line11')
+  vim.fn.writefile(lines, path)
+
+  child.lua('M.refresh()')
+  assert_line('    +line11')
+  MiniTest.expect.equality(
+    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = M.buf })"),
+    false
+  )
+
+  child.lua("M.stage_hunk('f.txt', 0)")
+  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
+  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
+  assert_line('Staged changes (1)')
+end
+
+T['write is a no-op and keeps the buffer unmodified'] = function()
+  setup_child()
+  child.lua([[
+    HINTS = {}
+    vim.notify = function(msg, level)
+      table.insert(HINTS, { msg = msg, level = level })
+    end
+  ]])
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+
+  local ok, err = pcall(child.type_keys, 100, ':write<CR>')
+  MiniTest.expect.equality(ok, true, 'write must not raise: ' .. tostring(err))
+  vim.loop.sleep(100)
+  MiniTest.expect.equality(child.v.errmsg, '', 'write must not produce a Vim error')
+  child.v.errmsg = ''
+
+  MiniTest.expect.equality(child.lua_get('#HINTS'), 1)
+  local msg = child.lua_get('HINTS[1].msg')
+  MiniTest.expect.equality(type(msg), 'string')
+  MiniTest.expect.equality(msg:find('Read-only view', 1, true) ~= nil, true, msg)
+  MiniTest.expect.equality(child.lua_get('HINTS[1].level'), vim.log.levels.INFO)
+
+  child.type_keys(100, ':write<CR>')
+  vim.loop.sleep(100)
+  MiniTest.expect.equality(child.lua_get('#HINTS'), 1, 'the hint is shown once per session')
+
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  MiniTest.expect.equality(after, before)
+  MiniTest.expect.equality(
+    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = M.buf })"),
+    false
+  )
+  MiniTest.expect.equality(
+    child.lua_get("vim.api.nvim_get_option_value('modifiable', { buf = M.buf })"),
+    false
+  )
 end
 
 T['navigation targets come from the LSP'] = function()
