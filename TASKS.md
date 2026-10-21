@@ -1189,7 +1189,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 ### Phase 0 — Groundwork
 
 - [x] R-0.1 IMM-1…IMM-9 complete.
-- [ ] R-0.2 `git status --porcelain=v2 -z --branch` parsing; paths with spaces/
+- [x] R-0.2 `git status --porcelain=v2 -z --branch` parsing; paths with spaces/
       quotes/unicode; rename old/new paths. *Done when:* fixtures with each of
       those pass.
 - [ ] R-0.3 Separate **Untracked files** section (currently lumped in Unstaged

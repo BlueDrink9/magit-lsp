@@ -10,6 +10,9 @@ use std::process::{Command, Stdio};
 pub struct FileEntry {
     pub path: String,
     pub status: String,
+    /// Old path for a staged rename or copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orig_path: Option<String>,
     pub hunks: Vec<Hunk>,
 }
 
@@ -18,6 +21,15 @@ pub struct FileEntry {
 pub struct Status {
     pub repo_path: String,
     pub branch: String,
+    /// Commit `HEAD` points at; absent in a repository with no commits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
     pub staged: Vec<FileEntry>,
     pub unstaged: Vec<FileEntry>,
 }
@@ -28,6 +40,10 @@ impl Status {
         Self {
             repo_path: repo_path.into(),
             branch: "HEAD".to_string(),
+            head: None,
+            upstream: None,
+            ahead: None,
+            behind: None,
             staged: Vec::new(),
             unstaged: Vec::new(),
         }
@@ -50,8 +66,35 @@ impl GitFailure {
             exit_code: status.code().unwrap_or(-1),
             stderr: String::from_utf8_lossy(stderr).trim_end().to_string(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
-            subcommand: args.first().copied().unwrap_or("git").to_string(),
+            subcommand: subcommand_of(args).to_string(),
         }
+    }
+}
+
+/// The Git subcommand in `args`, skipping global options such as `-c key=value`.
+fn subcommand_of<'a>(args: &'a [&'a str]) -> &'a str {
+    let mut skip_value = false;
+    for arg in args {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if *arg == "-c" || *arg == "-C" {
+            skip_value = true;
+            continue;
+        }
+        if !arg.starts_with('-') {
+            return arg;
+        }
+    }
+    "git"
+}
+
+/// The status letter for one side of a porcelain-v2 `XY` pair, if it changed.
+fn side_status(flag: Option<u8>) -> Option<String> {
+    match flag {
+        Some(b'.') | Some(b' ') | None => None,
+        Some(flag) => Some((flag as char).to_string()),
     }
 }
 
@@ -93,72 +136,141 @@ impl GitRepo {
     /// Compute the full status: branch, staged files, and unstaged files.
     pub fn status(&self) -> Result<Status> {
         let repo_path = self.root.to_string_lossy().into_owned();
-        let branch = self.current_branch().unwrap_or_else(|_| "HEAD".to_string());
-        let raw = self.run(&["status", "--porcelain=v1", "-z"])?;
+        // `-z` keeps paths verbatim; `--no-optional-locks` keeps a read from
+        // taking the index lock away from a concurrent mutation.
+        let raw = self.run(&[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v2",
+            "-z",
+            "--branch",
+        ])?;
+        self.parse_status(&raw, repo_path)
+    }
 
-        let mut staged: Vec<FileEntry> = Vec::new();
-        let mut unstaged: Vec<FileEntry> = Vec::new();
+    fn parse_status(&self, raw: &str, repo_path: String) -> Result<Status> {
+        let mut status = Status::empty(repo_path);
 
         let mut tokens = raw.split('\0');
-        while let Some(entry) = tokens.next() {
-            if entry.len() < 4 {
+        while let Some(token) = tokens.next() {
+            if token.is_empty() {
                 continue;
             }
-            let xy = &entry[..2];
-            let path = entry[3..].to_string();
-            if xy == "??" {
-                unstaged.push(FileEntry {
-                    status: "?".into(),
-                    hunks: Vec::new(),
-                    path,
-                });
+            if let Some(header) = token.strip_prefix("# ") {
+                self.read_branch_header(&mut status, header);
                 continue;
             }
-            if xy.starts_with('R') || xy.starts_with('C') {
-                let _orig = tokens.next().unwrap_or("").to_string();
-            }
-            let x = xy.as_bytes()[0];
-            let y = xy.as_bytes()[1];
-            if x != b' ' {
-                let hunks = self.hunks_for(path.as_str(), true)?;
-                staged.push(FileEntry {
-                    status: (x as char).to_string(),
-                    hunks,
-                    path: path.clone(),
-                });
-            }
-            if y != b' ' {
-                let hunks = self.hunks_for(path.as_str(), false)?;
-                unstaged.push(FileEntry {
-                    status: (y as char).to_string(),
-                    hunks,
-                    path,
-                });
+            match token.as_bytes()[0] {
+                b'1' | b'2' => {
+                    let renamed = token.as_bytes()[0] == b'2';
+                    // A rename record ends with a second NUL-separated path.
+                    let fields = token
+                        .splitn(if renamed { 10 } else { 9 }, ' ')
+                        .collect::<Vec<_>>();
+                    let path = fields.last().copied().unwrap_or("");
+                    let xy = fields.get(1).copied().unwrap_or("..");
+                    let orig_path = renamed.then(|| tokens.next().unwrap_or("").to_string());
+                    self.push_entry(&mut status, xy, path, orig_path)?;
+                }
+                b'u' => {
+                    let fields = token.splitn(11, ' ').collect::<Vec<_>>();
+                    let path = fields.last().copied().unwrap_or("");
+                    // Unmerged paths need conflict resolution, not staging; the
+                    // section is surfaced as `U` without hunks for now.
+                    status.unstaged.push(FileEntry {
+                        path: path.to_string(),
+                        status: "U".to_string(),
+                        orig_path: None,
+                        hunks: Vec::new(),
+                    });
+                }
+                b'?' => {
+                    if let Some(path) = token.strip_prefix("? ") {
+                        status.unstaged.push(FileEntry {
+                            path: path.to_string(),
+                            status: "?".to_string(),
+                            orig_path: None,
+                            hunks: Vec::new(),
+                        });
+                    }
+                }
+                // Ignored entries are not part of the status view.
+                _ => {}
             }
         }
 
-        Ok(Status {
-            repo_path,
-            branch,
-            staged,
-            unstaged,
-        })
+        Ok(status)
     }
 
-    /// Current branch name, or `HEAD` when detached.
-    pub fn current_branch(&self) -> Result<String> {
-        let out = self.run(&["rev-parse", "--abbrev-ref", "HEAD"])?;
-        Ok(out.trim().to_string())
+    fn read_branch_header(&self, status: &mut Status, header: &str) {
+        if let Some(oid) = header.strip_prefix("branch.oid ") {
+            if oid != "(initial)" {
+                status.head = Some(oid.to_string());
+            }
+        } else if let Some(head) = header.strip_prefix("branch.head ") {
+            status.branch = if head == "(detached)" {
+                "HEAD".to_string()
+            } else {
+                head.to_string()
+            };
+        } else if let Some(upstream) = header.strip_prefix("branch.upstream ") {
+            status.upstream = Some(upstream.to_string());
+        } else if let Some(counts) = header.strip_prefix("branch.ab ") {
+            for count in counts.split_whitespace() {
+                if let Some(ahead) = count.strip_prefix('+') {
+                    status.ahead = ahead.parse().ok();
+                } else if let Some(behind) = count.strip_prefix('-') {
+                    status.behind = behind.parse().ok();
+                }
+            }
+        }
+    }
+
+    fn push_entry(
+        &self,
+        status: &mut Status,
+        xy: &str,
+        path: &str,
+        orig_path: Option<String>,
+    ) -> Result<()> {
+        let bytes = xy.as_bytes();
+        if let Some(staged) = side_status(bytes.first().copied()) {
+            let hunks = self.hunks_for(path, true)?;
+            status.staged.push(FileEntry {
+                path: path.to_string(),
+                status: staged,
+                orig_path: orig_path.clone(),
+                hunks,
+            });
+        }
+        if let Some(unstaged) = side_status(bytes.get(1).copied()) {
+            let hunks = self.hunks_for(path, false)?;
+            status.unstaged.push(FileEntry {
+                path: path.to_string(),
+                status: unstaged,
+                orig_path,
+                hunks,
+            });
+        }
+        Ok(())
     }
 
     /// Unified diff of the unstaged changes to `path` (index vs working tree).
     pub fn diff_unstaged(&self, path: &str) -> Result<String> {
-        self.run(&["diff", "-U3", "--", path])
+        self.run(&["-c", "core.quotepath=false", "diff", "-U3", "--", path])
     }
 
     /// Unified diff of the staged changes to `path` (HEAD vs index).
     pub fn diff_staged(&self, path: &str) -> Result<String> {
-        self.run(&["diff", "--cached", "-U3", "--", path])
+        self.run(&[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "-U3",
+            "--",
+            path,
+        ])
     }
 
     /// Stage the whole unstaged hunk at `hunk_index` for `path`.
@@ -310,8 +422,33 @@ impl GitRepo {
     }
 
     /// Unstage the entire file, leaving the working tree untouched.
+    ///
+    /// A staged rename is reset at both its old and new path so the pair leaves
+    /// the index together.
     pub fn unstage_file(&self, path: &str) -> Result<()> {
-        self.unstage_paths(&[path])
+        match self.rename_origin(path)? {
+            Some(origin) => self.unstage_paths(&[origin.as_str(), path]),
+            None => self.unstage_paths(&[path]),
+        }
+    }
+
+    /// The old path when `path` is staged as a rename or copy.
+    fn rename_origin(&self, path: &str) -> Result<Option<String>> {
+        let raw = self.run(&["diff", "--cached", "--name-status", "-z", "--find-renames"])?;
+        let mut tokens = raw.split('\0');
+        while let Some(status) = tokens.next() {
+            if status.is_empty() {
+                continue;
+            }
+            let first = tokens.next().unwrap_or("");
+            if status.starts_with('R') || status.starts_with('C') {
+                let second = tokens.next().unwrap_or("");
+                if second == path {
+                    return Ok(Some(first.to_string()));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Stage all tracked modifications and deletions.
@@ -406,5 +543,54 @@ impl GitRepo {
             )));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A repo whose root is never touched: these cases need no diffs.
+    fn header_repo() -> GitRepo {
+        GitRepo {
+            root: PathBuf::from("/nonexistent"),
+        }
+    }
+
+    fn parse(raw: &str) -> Status {
+        header_repo()
+            .parse_status(raw, "/repo".to_string())
+            .expect("parse")
+    }
+
+    #[test]
+    fn parses_initial_branch_header() {
+        let status = parse("# branch.oid (initial)\0# branch.head main\0");
+        assert_eq!(status.branch, "main");
+        assert!(status.head.is_none());
+        assert!(status.staged.is_empty());
+    }
+
+    #[test]
+    fn parses_detached_branch_and_upstream_counts() {
+        let raw = "# branch.oid abc123\0# branch.head (detached)\0\
+                   # branch.upstream origin/main\0# branch.ab +2 -3\0";
+        let status = parse(raw);
+        assert_eq!(status.branch, "HEAD");
+        assert_eq!(status.head.as_deref(), Some("abc123"));
+        assert_eq!(status.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((status.ahead, status.behind), (Some(2), Some(3)));
+    }
+
+    #[test]
+    fn parses_unmerged_and_skips_ignored() {
+        let raw = "u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
+                   ! build/\0? new file.txt\0";
+        let status = parse(raw);
+        assert_eq!(status.unstaged.len(), 2);
+        assert_eq!(status.unstaged[0].status, "U");
+        assert_eq!(status.unstaged[0].path, "conflict.txt");
+        assert_eq!(status.unstaged[1].status, "?");
+        assert_eq!(status.unstaged[1].path, "new file.txt");
     }
 }

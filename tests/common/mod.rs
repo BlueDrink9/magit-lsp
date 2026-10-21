@@ -61,8 +61,11 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// Write `content` to `path`.
+/// Write `content` to `path`, creating any missing parent directories.
 pub fn write(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("create parent directories");
+    }
     std::fs::write(path, content).expect("write file");
 }
 
@@ -120,9 +123,11 @@ pub fn make_two_hunks(tmp: &Path) {
 pub struct RepoFixture {
     dir: TempDir,
     commits: Vec<(String, Vec<(String, String)>)>,
+    renames: Vec<(String, String)>,
     staged: Vec<(String, String)>,
     changes: Vec<(String, String)>,
     unborn: bool,
+    detached: bool,
 }
 
 impl RepoFixture {
@@ -132,9 +137,11 @@ impl RepoFixture {
         Self {
             dir: TempDir::new().expect("tempdir"),
             commits: Vec::new(),
+            renames: Vec::new(),
             staged: Vec::new(),
             changes: Vec::new(),
             unborn: false,
+            detached: false,
         }
     }
 
@@ -142,6 +149,19 @@ impl RepoFixture {
     /// the index.
     pub fn unborn(mut self) -> Self {
         self.unborn = true;
+        self
+    }
+
+    /// Detach `HEAD` after the commits are made.
+    pub fn detached(mut self) -> Self {
+        self.detached = true;
+        self
+    }
+
+    /// `git mv` `from` to `to` after the commits, staging the rename.
+    pub fn rename(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
+        assert!(!self.unborn, "an unborn fixture cannot have renames");
+        self.renames.push((from.into(), to.into()));
         self
     }
 
@@ -197,6 +217,15 @@ impl RepoFixture {
             }
             git(&path, &["add", "."]);
             git(&path, &["commit", "-q", "-m", message]);
+        }
+        for (from, to) in &self.renames {
+            if let Some(parent) = path.join(to).parent() {
+                std::fs::create_dir_all(parent).expect("create rename parent");
+            }
+            git(&path, &["mv", from.as_str(), to.as_str()]);
+        }
+        if self.detached {
+            git(&path, &["checkout", "-q", "--detach"]);
         }
         for (name, content) in &self.staged {
             write(&path.join(name), content);

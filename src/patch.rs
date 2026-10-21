@@ -184,21 +184,89 @@ pub enum Selection {
     Ops(Vec<SelectionOp>),
 }
 
+/// Decode a path as Git writes it in a diff header.
+///
+/// Git C-quotes a path that contains whitespace, quotes or backslashes, and
+/// leaves a trailing tab after an unquoted name that contains a space.
+fn decode_header_path(raw: &str) -> String {
+    let raw = raw.strip_suffix('\t').unwrap_or(raw);
+    match raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        Some(quoted) => unquote_c(quoted),
+        None => raw.to_string(),
+    }
+}
+
+/// Undo Git's C-style quoting of a path.
+fn unquote_c(quoted: &str) -> String {
+    let bytes = quoted.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' || i + 1 == bytes.len() {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        let escape = bytes[i + 1];
+        let literal = match escape {
+            b'a' => Some(7),
+            b'b' => Some(8),
+            b'f' => Some(12),
+            b'n' => Some(b'\n'),
+            b'r' => Some(b'\r'),
+            b't' => Some(b'\t'),
+            b'v' => Some(11),
+            b'\\' => Some(b'\\'),
+            b'"' => Some(b'"'),
+            _ => None,
+        };
+        if let Some(byte) = literal {
+            out.push(byte);
+            i += 2;
+        } else if (b'0'..=b'7').contains(&escape) {
+            let mut value = 0u32;
+            let mut digits = 0;
+            while digits < 3 && i + 1 + digits < bytes.len() {
+                let digit = bytes[i + 1 + digits];
+                if !(b'0'..=b'7').contains(&digit) {
+                    break;
+                }
+                value = value * 8 + (digit - b'0') as u32;
+                digits += 1;
+            }
+            out.push(value as u8);
+            i += 1 + digits;
+        } else {
+            out.push(escape);
+            i += 2;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The file path from a one-file diff, preferring the new side.
+///
+/// Only header lines are inspected: a hunk body can start with `+++ `.
 fn diff_path(diff: &str) -> Option<String> {
+    let mut old_side = None;
     for line in diff.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            return Some(path.to_string());
+        if line.starts_with("@@") {
+            break;
         }
-        if let Some(path) = line.strip_prefix("--- a/") {
-            return Some(path.to_string());
+        if let Some(raw) = line.strip_prefix("+++ ") {
+            let path = decode_header_path(raw);
+            if let Some(path) = path.strip_prefix("b/") {
+                return Some(path.to_string());
+            }
         }
-        if let Some(rest) = line.strip_prefix("diff --git ") {
-            if let Some(index) = rest.rfind(" b/") {
-                return Some(rest[index + 3..].to_string());
+        if let Some(raw) = line.strip_prefix("--- ") {
+            let path = decode_header_path(raw);
+            if let Some(path) = path.strip_prefix("a/") {
+                old_side = Some(path.to_string());
             }
         }
     }
-    None
+    old_side
 }
 
 /// Parse a one-file unified diff, keeping its header lines verbatim.
@@ -301,11 +369,37 @@ pub fn is_deleted_file(h: &Hunk) -> bool {
 
 /// A minimal file header for patches that cannot reuse the original one.
 pub fn synthetic_file_header(path: &str, new_file: bool) -> String {
+    let old = quote_header_path(&format!("a/{path}"));
+    let new = quote_header_path(&format!("b/{path}"));
     if new_file {
-        format!("diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n")
+        format!("diff --git {old} {new}\nnew file mode 100644\n--- /dev/null\n+++ {new}\n")
     } else {
-        format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n")
+        format!("diff --git {old} {new}\n--- {old}\n+++ {new}\n")
     }
+}
+
+/// Quote `path` the way Git does when a diff header cannot hold it verbatim.
+fn quote_header_path(path: &str) -> String {
+    if !path
+        .chars()
+        .any(|c| c.is_whitespace() || c == '"' || c == '\\' || c.is_control())
+    {
+        return path.to_string();
+    }
+    let mut out = String::from("\"");
+    for c in path.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() => out.push_str(&format!("\\{:03o}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn parse_hunk_header(header: &str) -> Option<(u32, u32, u32, u32)> {
@@ -653,5 +747,49 @@ index 4083766..31cf455 100644\n\
         assert!(p.contains(" NEW line\n"), "got: {p}");
         // An unselected deletion is dropped so it is not restored.
         assert!(!p.contains("line8"), "got: {p}");
+    }
+
+    #[test]
+    fn diff_path_decodes_git_header_quoting() {
+        let spaced = "diff --git a/a b.txt b/a b.txt\n\
+--- a/a b.txt\t\n\
++++ b/a b.txt\t\n\
+@@ -1 +1 @@\n\
+-a\n\
++b\n";
+        assert_eq!(
+            parse_file_diff(spaced).expect("spaced diff").path,
+            "a b.txt"
+        );
+
+        let quoted = "diff --git \"a/a\\\"b\\\\c.txt\" \"b/a\\\"b\\\\c.txt\"\n\
+--- \"a/a\\\"b\\\\c.txt\"\n\
++++ \"b/a\\\"b\\\\c.txt\"\n\
+@@ -1 +1 @@\n\
+-a\n\
++b\n";
+        assert_eq!(
+            parse_file_diff(quoted).expect("quoted diff").path,
+            "a\"b\\c.txt"
+        );
+    }
+
+    #[test]
+    fn diff_path_ignores_hunk_body_lines() {
+        let diff = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1,2 @@\n\
+ x\n\
++++ b/not-a-path\n";
+        assert_eq!(parse_file_diff(diff).expect("diff").path, "f.txt");
+    }
+
+    #[test]
+    fn synthetic_header_quotes_paths_git_cannot_take_verbatim() {
+        assert!(synthetic_file_header("f.txt", false).contains("--- a/f.txt\n"));
+        let header = synthetic_file_header("a b.txt", false);
+        assert!(header.contains("--- \"a/a b.txt\"\n"), "got: {header}");
+        assert!(header.contains("+++ \"b/a b.txt\"\n"), "got: {header}");
     }
 }
