@@ -1,43 +1,14 @@
+mod common;
+
+use common::*;
 use magit_lsp::errors::map_git_failure;
-use magit_lsp::git::{GitFailure, GitRepo};
+use magit_lsp::git::GitFailure;
 use magit_lsp::protocol::{Effect, MessageLevel};
 use magit_lsp::server;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git");
-    if !out.status.success() {
-        panic!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn write(path: &Path, content: &str) {
-    std::fs::write(path, content).expect("write file");
-}
-
-fn init_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    write(&tmp.path().join("f.txt"), "line1\nline2\nline3\n");
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
 
 fn git_failure(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitFailure {
     let mut command = Command::new("git");

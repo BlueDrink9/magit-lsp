@@ -1,79 +1,9 @@
+mod common;
+
+use common::*;
 use magit_lsp::dispatch::{self, Command, LineRange, NodeKind, Resolution};
-use magit_lsp::git::GitRepo;
 use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::protocol::{Effect, MessageLevel};
-use std::path::Path;
-use std::process::Command as ProcessCommand;
-use tempfile::TempDir;
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = ProcessCommand::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git");
-    if !out.status.success() {
-        panic!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn write(path: &Path, content: &str) {
-    std::fs::write(path, content).expect("write file");
-}
-
-fn init_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    let lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-/// A repository whose tracked `f.txt` already has 40 lines, so edits far
-/// apart stay in separate hunks.
-fn init_repo_40() -> (TempDir, GitRepo) {
-    let (tmp, _repo) = init_repo();
-    let lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "forty"]);
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-fn make_standard_changes(tmp: &Path) {
-    let mut lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    lines[2] = "line3 CHANGED".into();
-    lines.insert(5, "NEW line".into());
-    lines.remove(8);
-    write(&tmp.join("f.txt"), &(lines.join("\n") + "\n"));
-}
-
-fn make_two_hunks(tmp: &Path) {
-    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    lines[4] = "line5 CHANGED".into();
-    lines[34] = "line35 CHANGED".into();
-    write(&tmp.join("f.txt"), &(lines.join("\n") + "\n"));
-}
-
-fn cached_diff(tmp: &Path) -> String {
-    git(tmp, &["diff", "--cached", "-U3", "--", "f.txt"])
-}
-
-fn hunk_count(diff: &str) -> usize {
-    diff.lines().filter(|line| line.starts_with("@@")).count()
-}
 
 fn message_text(resolution: &Resolution) -> &str {
     match resolution {

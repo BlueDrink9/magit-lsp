@@ -293,6 +293,8 @@ Move `init_repo`/`git`/`write`/`make_standard_changes` into
 `tests/common/mod.rs`; add the determinism environment from §8.2; add a
 `RepoFixture` builder. Needed before the tests for IMM-1…6 are written.
 
+- [x] Done.
+
 ### IMM-8 — Spike: colour verification with `:TOhtml`
 
 Prototype only. See §8.4. Produce one script that opens the status buffer in

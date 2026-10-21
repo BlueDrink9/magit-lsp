@@ -1,3 +1,6 @@
+mod common;
+
+use common::*;
 use magit_lsp::git::GitRepo;
 use magit_lsp::patch::{self, FileLayout, Selection, SelectionOp};
 use proptest::prelude::*;
@@ -6,67 +9,19 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("failed to run git");
-    if !out.status.success() {
-        panic!(
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
+#[test]
+fn identical_fixtures_produce_identical_commit_hashes() {
+    let (first, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (second, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
 
-fn write(path: &Path, content: &str) {
-    std::fs::write(path, content).expect("write file");
-}
-
-fn init_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    let lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-fn make_standard_changes(tmp: &Path) {
-    let mut lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    lines[2] = "line3 CHANGED".into();
-    lines.insert(5, "NEW line".into());
-    lines.remove(8);
-    write(&tmp.join("f.txt"), &(lines.join("\n") + "\n"));
-}
-
-/// A repository whose only content is a staged new file (no commits yet).
-fn init_unborn_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    write(&tmp.path().join("f.txt"), "a\nb\nc\n");
-    git(tmp.path(), &["add", "f.txt"]);
-
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-fn read(path: &Path) -> String {
-    std::fs::read_to_string(path).expect("read file")
-}
-
-fn cached_diff(tmp: &Path) -> String {
-    git(tmp, &["diff", "--cached", "-U3", "--", "f.txt"])
+    assert_eq!(
+        first.git(&["rev-parse", "HEAD"]),
+        second.git(&["rev-parse", "HEAD"])
+    );
 }
 
 #[test]
@@ -391,50 +346,6 @@ fn layout_for(repo: &GitRepo, path: &str, staged: bool) -> FileLayout {
     FileLayout::from_diff(&diff, 0).expect("file layout")
 }
 
-/// A repo with a 30-line file, so two distant edits produce two hunks.
-fn init_long_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    let lines: Vec<String> = (1..=30).map(|i| format!("line{i}")).collect();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-/// A repo with two tracked files, both ten lines long.
-fn init_two_file_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    let lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    let body = lines.join("\n") + "\n";
-    write(&tmp.path().join("f.txt"), &body);
-    write(&tmp.path().join("g.txt"), &body);
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
-/// A repo with a 40-line tracked file.
-fn init_40_line_repo() -> (TempDir, GitRepo) {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    let lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    let repo = GitRepo::open(tmp.path()).expect("open repo");
-    (tmp, repo)
-}
-
 /// Stage the replacement of `old` by `new`, recomputing the unstaged layout
 /// first so earlier stagings are reflected.
 fn stage_replacement(repo: &GitRepo, path: &str, old: &str, new: &str) {
@@ -477,10 +388,6 @@ fn assert_staged_hunks_match_git(repo: &GitRepo, tmp: &Path) {
         staged.hunks, expected,
         "status hunks must match git diff --cached -U3\n{cached}"
     );
-}
-
-fn hunk_count(diff: &str) -> usize {
-    diff.lines().filter(|line| line.starts_with("@@")).count()
 }
 
 #[test]
