@@ -48,6 +48,23 @@ fn make_standard_changes(tmp: &Path) {
     write(&tmp.join("f.txt"), &(lines.join("\n") + "\n"));
 }
 
+/// A repository whose only content is a staged new file (no commits yet).
+fn init_unborn_repo() -> (TempDir, GitRepo) {
+    let tmp = TempDir::new().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main"]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "t"]);
+    write(&tmp.path().join("f.txt"), "a\nb\nc\n");
+    git(tmp.path(), &["add", "f.txt"]);
+
+    let repo = GitRepo::open(tmp.path()).expect("open repo");
+    (tmp, repo)
+}
+
+fn read(path: &Path) -> String {
+    std::fs::read_to_string(path).expect("read file")
+}
+
 fn cached_diff(tmp: &Path) -> String {
     git(tmp, &["diff", "--cached", "-U3", "--", "f.txt"])
 }
@@ -249,4 +266,116 @@ fn unstage_all_works_without_commits() {
     assert!(status.staged.is_empty());
     assert_eq!(status.unstaged.len(), 1);
     assert_eq!(status.unstaged[0].status, "?");
+}
+
+#[test]
+fn unstage_file_works_without_commits() {
+    let (_tmp, repo) = init_unborn_repo();
+    assert_eq!(repo.status().expect("status").staged.len(), 1);
+
+    repo.unstage_file("f.txt")
+        .expect("unstage file without HEAD");
+
+    let status = repo.status().expect("status");
+    assert!(status.staged.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
+    assert_eq!(status.unstaged[0].status, "?");
+}
+
+#[test]
+fn unstage_file_keeps_worktree_changes_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    // The index still holds a/b/c while the working tree holds a/B/c.
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    repo.unstage_file("f.txt")
+        .expect("unstage file without HEAD");
+
+    assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
+    let status = repo.status().expect("status");
+    assert!(status.staged.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
+    assert_eq!(status.unstaged[0].status, "?");
+}
+
+#[test]
+fn unstage_hunk_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    repo.unstage_hunk("f.txt", 0)
+        .expect("unstage hunk without HEAD");
+
+    assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
+    assert!(repo.status().expect("status").staged.is_empty());
+}
+
+#[test]
+fn unstage_lines_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    // Hunk lines are +a, +b, +c; unstage only +b.
+    repo.unstage_lines("f.txt", 0, 1, 1)
+        .expect("unstage lines without HEAD");
+
+    assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
+    let status = repo.status().expect("status");
+    assert_eq!(status.staged.len(), 1);
+    let staged = &status.staged[0];
+    assert_eq!(staged.hunks.len(), 1);
+    let text: Vec<&str> = staged.hunks[0]
+        .lines
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect();
+    assert_eq!(text, vec!["a", "c"]);
+}
+
+#[test]
+fn stage_hunk_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    repo.stage_hunk("f.txt", 0)
+        .expect("stage hunk without HEAD");
+
+    assert_eq!(git(tmp.path(), &["show", ":f.txt"]), "a\nB\nc\n");
+    assert!(repo.status().expect("status").unstaged.is_empty());
+}
+
+#[test]
+fn stage_lines_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    // Hunk lines are context a, -b, +B, context c.
+    repo.stage_lines("f.txt", 0, 1, 2)
+        .expect("stage lines without HEAD");
+
+    assert_eq!(git(tmp.path(), &["show", ":f.txt"]), "a\nB\nc\n");
+    assert!(repo.status().expect("status").unstaged.is_empty());
+}
+
+#[test]
+fn stage_file_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("new.txt"), "hello\n");
+
+    repo.stage_file("new.txt").expect("stage file without HEAD");
+
+    let status = repo.status().expect("status");
+    assert_eq!(status.staged.len(), 2);
+    assert!(status.staged.iter().any(|f| f.path == "new.txt"));
+}
+
+#[test]
+fn stage_all_works_without_commits() {
+    let (tmp, repo) = init_unborn_repo();
+    write(&tmp.path().join("f.txt"), "a\nB\nc\n");
+
+    repo.stage_all().expect("stage all without HEAD");
+
+    assert_eq!(git(tmp.path(), &["show", ":f.txt"]), "a\nB\nc\n");
+    assert!(repo.status().expect("status").unstaged.is_empty());
 }

@@ -130,7 +130,7 @@ impl GitRepo {
         let hunk = hunks
             .get(hunk_index)
             .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
-        let patch = file_patch(path, &patch::full_hunk_patch(hunk));
+        let patch = file_patch(path, &patch::full_hunk_patch(hunk), false);
         self.apply_index(&patch, false)
     }
 
@@ -140,7 +140,7 @@ impl GitRepo {
         let hunk = hunks
             .get(hunk_index)
             .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
-        let patch = file_patch(path, &patch::full_hunk_patch(hunk));
+        let patch = file_patch(path, &patch::full_hunk_patch(hunk), is_new_file(hunk));
         self.apply_index(&patch, true)
     }
 
@@ -150,7 +150,7 @@ impl GitRepo {
         let hunk = hunks.get(hunk_index).ok_or_else(|| {
             Error(format!("hunk {hunk_index} not found for {path}"))
         })?;
-        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end));
+        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end), false);
         self.apply_index(&patch, false)
     }
 
@@ -166,7 +166,7 @@ impl GitRepo {
         let hunk = hunks.get(hunk_index).ok_or_else(|| {
             Error(format!("hunk {hunk_index} not found for {path}"))
         })?;
-        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end));
+        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end), false);
         self.apply_index(&patch, true)
     }
 
@@ -177,7 +177,7 @@ impl GitRepo {
 
     /// Unstage the entire file, leaving the working tree untouched.
     pub fn unstage_file(&self, path: &str) -> Result<()> {
-        self.run(&["restore", "--staged", "--", path]).map(|_| ())
+        self.unstage_paths(&[path])
     }
 
     /// Stage all tracked modifications and deletions.
@@ -185,17 +185,23 @@ impl GitRepo {
         self.run(&["add", "-u"]).map(|_| ())
     }
 
-    /// Unstage everything, handling repositories without a commit yet.
+    /// Unstage everything, including repositories without a commit yet.
     pub fn unstage_all(&self) -> Result<()> {
-        if self
-            .run(&["rev-parse", "--verify", "--quiet", "HEAD"])
-            .is_ok()
-        {
-            self.run(&["reset", "-q", "HEAD"]).map(|_| ())
-        } else {
-            self.run(&["rm", "-r", "--cached", "--ignore-unmatch", "-q", "."])
-                .map(|_| ())
+        self.unstage_paths(&["."])
+    }
+
+    /// Unstage `paths`, leaving the working tree untouched. Falls back to
+    /// `git rm --cached` because `git reset` needs a resolvable HEAD.
+    fn unstage_paths(&self, paths: &[&str]) -> Result<()> {
+        let mut reset = vec!["reset", "-q", "--"];
+        reset.extend_from_slice(paths);
+        if self.run(&reset).is_ok() {
+            return Ok(());
         }
+
+        let mut rm = vec!["rm", "--cached", "-q", "-f", "--ignore-unmatch", "--"];
+        rm.extend_from_slice(paths);
+        self.run(&rm).map(|_| ())
     }
 
     fn unstaged_hunks(&self, path: &str) -> Result<Vec<Hunk>> {
@@ -216,7 +222,9 @@ impl GitRepo {
     }
 
     fn apply_index(&self, patch_text: &str, reverse: bool) -> Result<()> {
-        let mut args: Vec<&str> = vec!["apply", "--cached"];
+        // `--unidiff-zero` lets line subsets of a new file apply, where the
+        // hunk has no context lines to anchor it.
+        let mut args: Vec<&str> = vec!["apply", "--cached", "--unidiff-zero"];
         if reverse {
             args.push("-R");
         }
@@ -264,8 +272,18 @@ impl GitRepo {
     }
 }
 
-fn file_patch(path: &str, hunk_patch: &str) -> String {
-    format!(
-        "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{hunk_patch}"
-    )
+fn file_patch(path: &str, hunk_patch: &str, new_file: bool) -> String {
+    if new_file {
+        // Reversing a new file must target `/dev/null`, otherwise `git apply -R`
+        // leaves an empty file in the index instead of removing the entry.
+        format!(
+            "diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n{hunk_patch}"
+        )
+    } else {
+        format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{hunk_patch}")
+    }
+}
+
+fn is_new_file(h: &Hunk) -> bool {
+    h.old_start == 0 && h.old_count == 0
 }

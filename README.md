@@ -35,7 +35,10 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
 
 - Rust (cargo) — builds the `magit-lsp` LSP server
 - Neovim 0.11+ — runs the client and the tests (`vim.lsp.start`)
-- `git` on `PATH` — all VCS reads/writes shell out to the `git` CLI
+- `git` on `PATH` — all VCS reads/writes shell out to the `git` CLI. The
+  integration tests were last verified with `git` 2.55.0 (including the
+  unborn-HEAD unstage path, which uses `git reset -q --` with a
+  `git rm --cached -f` fallback).
 
 ## Running the tests
 
