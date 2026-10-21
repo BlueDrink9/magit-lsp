@@ -1,6 +1,7 @@
 use crate::errors;
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
+use crate::semantic_tokens;
 use crate::session::Session;
 use crate::status_view;
 use crate::transport;
@@ -9,7 +10,11 @@ use crate::view::Viewport;
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::request::Request as LspRequest;
-use lsp_types::{ExecuteCommandOptions, FoldingRangeProviderCapability, ServerCapabilities};
+use lsp_types::{
+    ExecuteCommandOptions, FoldingRangeProviderCapability, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensResult, SemanticTokensServerCapabilities,
+    ServerCapabilities,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -513,6 +518,15 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 .unwrap_or_default();
             Ok(Dispatched::value(serde_json::to_value(ranges)?))
         }
+        "textDocument/semanticTokens/full" => {
+            let p: lsp_types::SemanticTokensParams = from_params(params)?;
+            let tokens = tree_for_positional_request(shared, p.text_document.uri.as_str())
+                .map(|tree| semantic_tokens::encode(&tree))
+                .unwrap_or_default();
+            Ok(Dispatched::value(serde_json::to_value(
+                SemanticTokensResult::Tokens(tokens),
+            )?))
+        }
         TransientMenuRequest::METHOD => Ok(Dispatched::value(serde_json::to_value(
             stub_transient_menu(),
         )?)),
@@ -705,6 +719,14 @@ where
 fn capabilities() -> Result<Value> {
     serde_json::to_value(&ServerCapabilities {
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                legend: semantic_tokens::legend(),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                range: None,
+                work_done_progress_options: Default::default(),
+            },
+        )),
         execute_command_provider: Some(ExecuteCommandOptions {
             commands: vec!["magit-lsp.executeVCSCommand".to_string()],
             ..Default::default()
@@ -724,6 +746,7 @@ fn is_request_method(method: &str) -> bool {
         "initialize"
             | "shutdown"
             | "textDocument/foldingRange"
+            | "textDocument/semanticTokens/full"
             | "workspace/executeCommand"
             | StatusRequest::METHOD
             | DiffRequest::METHOD

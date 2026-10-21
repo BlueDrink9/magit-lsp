@@ -867,7 +867,10 @@ exists in `:highlight` for the built-in schemes):
 | `magit.menu.*` | see §3.11 | `Title`, `Statement`, `Keyword`, `Normal`, `Special`, `String`, `Comment`, `String`, `Comment`, `Comment` | as appropriate |
 | `magit.message.warn` / `.error` | inline notices | `WarningMsg` / `ErrorMsg` | `markup.deleted` |
 
-Modifiers: `staged`, `selected`, `planned`, `disabled`, `bold`.
+Modifiers: `staged`, `selected`, `planned`, `disabled`, `bold`. Neovim applies
+`@lsp.mod.<modifier>.<filetype>` above the type group, so modifier links only
+add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
+`planned` / `disabled` → `Comment`.
 
 ### 3.16 Async runner, refresh, parsing
 
@@ -1215,7 +1218,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       (full + line edits), `view/rendered` ack, `view/resync`, cursor
       successor by Node ID. *Done when:* a test refreshes after a mutation and
       the returned cursor is on the same node.
-- [ ] R-1.3 Semantic tokens from the tree (§3.15 mapping); Neovim defines
+- [x] R-1.3 Semantic tokens from the tree (§3.15 mapping); Neovim defines
       `@lsp.type.magit.*` links.
 - [ ] R-1.4 `documentSymbol` replaces `vcs/targets`; `definition`/`showDocument`
       for visit.
@@ -1442,32 +1445,34 @@ decorations (extmarks). The findings below were confirmed empirically by
      generous value.
 6. **Is the plan-step-5 fallback needed?** For the *current* client
    (extmark-based `Magit*` groups) `:TOhtml` is sufficient and the plan can be
-   implemented as written. It is **not** sufficient once highlighting moves to
-   LSP semantic tokens (§3.15's target), because those are skipped; then the
-   `nvim_buf_get_extmarks(buf, ns, 0, -1, {details = true})` + `nvim_get_hl`
-   dump becomes mandatory. The dump is also the only way to recover the
-   semantic class (token type / `Magit*` name), since HTML classes carry only
-   the resolved group name.
+   implemented as written. It is **not** sufficient now that highlighting
+   comes from LSP semantic tokens (§3.15's target), because those are skipped;
+   the `nvim.lsp.semantic_tokens.get_at_pos()` dump (plus `nvim_get_hl`) is the
+   only way to recover the semantic class, since HTML classes carry only the
+   resolved group name. `scripts/color_spike.lua` therefore dumps the tokens
+   and writes `build/test-output/semantic-tokens.md` (group → link → resolved
+   fg per scheme); the HTML files remain a visual reference only.
 
-**Additional finding (mapping bug):** `MagitDiffAdded` / `MagitDiffRemoved`
-link to `diffAdded` / `diffRemoved`, which do **not** exist in Neovim's
-built-in schemes (`hlexists` = 0; resolved fg is nil in all six tested
-cases). Added/removed lines therefore render uncoloured, and the HTML carries
-an empty `.diffAdded {}` rule. §3.15 already maps `@diff.plus` → `Added` and
-`@diff.minus` → `Removed`; the client should link to those (or
-`DiagnosticOk` / `DiagnosticError`). Note also that `Title` in `habamax` and
-`lunaperche` has no `guifg` (bold only), so "no foreground" is not by itself
-a failure — the §8.4 assertions must inspect all resolved attributes.
+**Additional finding (mapping bug, now fixed):** the old client linked
+`MagitDiffAdded` / `MagitDiffRemoved` to `diffAdded` / `diffRemoved`, which do
+**not** exist in Neovim's built-in schemes (`hlexists` = 0; resolved fg is nil
+in all six tested cases), so added/removed lines rendered uncoloured and the
+HTML carried an empty `.diffAdded {}` rule. The semantic-token links use
+`@diff.plus` → `Added` and `@diff.minus` → `Removed`, which every built-in
+scheme defines. Note also that `Title` in `habamax` and `lunaperche` has no
+`guifg` (bold only), so "no foreground" is not by itself a failure — the §8.4
+assertions must inspect all resolved attributes.
 
-Spike output: `build/test-output/status-<scheme>-<background>.html` plus the
-class → link → resolved fg table printed by `make color-spike`.
+Spike output: `build/test-output/status-<scheme>-<background>.html` plus
+`build/test-output/semantic-tokens.md` (the token group → link → resolved fg
+table) printed by `make color-spike`.
 
 Plan:
 1. Helper `render_status_html(scheme, background)`: start headless Neovim with
    `scripts/minimal_init.lua`, `:set background=…`, `:colorscheme …`, open the
-   status view on a fixture repo, **wait for semantic tokens** (poll for
-   extmarks in the `nvim.lsp.semantic_tokens` namespace), run `:TOhtml`, write
-   `build/test-output/colors/<scheme>-<background>.html`.
+   status view on a fixture repo, **wait for semantic tokens** (poll
+   `vim.lsp.semantic_tokens.get_at_pos()`; extmarks only exist after a draw),
+   run `:TOhtml`, write `build/test-output/colors/<scheme>-<background>.html`.
 2. HTML → cells: parse the `<style>` block (class → fg/bg/bold) and the spans
    into `{text, fg, bg, bold}` runs. Keep this parser small and tested.
 3. Assertions per scheme (use built-in schemes only, no plugins: `default`
@@ -1483,13 +1488,14 @@ Plan:
    - **theme integration:** each `@lsp.type.magit.*` group is a *link*
      (`nvim_get_hl(0, {name = g, link = true})` returns `link`), the link target
      is in the allowed list of §3.15, and the resolved colour **changes** when
-     the colourscheme changes (i.e. nothing is hard-coded).
-4. Emit a legend `build/test-output/colors/legend.md`: token → link target →
+     the colourscheme changes (i.e. nothing is hard-coded). The client
+     re-applies the links from a `ColorScheme` autocmd.
+4. Emit a legend `build/test-output/semantic-tokens.md`: token → link target →
    resolved fg per scheme, so a human can review at a glance. Optionally render
    the HTML to PNG with a headless browser if available (not required).
-5. If `:TOhtml` turns out not to include the tokens, fall back to a custom dump
-   using `nvim_buf_get_extmarks(buf, ns, 0, -1, {details = true})` and
-   `nvim_get_hl`, producing the same cell structure.
+5. `:TOhtml` does not include semantic-token extmarks (finding 2), so the
+   spike's token table comes from `vim.lsp.semantic_tokens.get_at_pos()` and
+   `nvim_get_hl`; the HTML is only a visual reference.
 
 ### 8.5 Protocol-level tests
 

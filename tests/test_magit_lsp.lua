@@ -108,13 +108,53 @@ local function setup_child()
         end
         return false
       end,
-      has_hl = function(group)
-        for _, m in ipairs(vim.api.nvim_buf_get_extmarks(M.buf, M.ns, 0, -1, { details = true })) do
-          if m[4].hl_group == group then
-            return true
+      token_at = function(row, col)
+        local tokens = vim.lsp.semantic_tokens.get_at_pos(M.buf, row, col)
+        return tokens and tokens[1] or nil
+      end,
+      token_type_on = function(text, col)
+        for i, line in ipairs(M.lines) do
+          if line == text then
+            local token = HELPERS.token_at(i - 1, col or 0)
+            return token and token.type or nil
           end
         end
-        return false
+        return nil
+      end,
+      wait_tokens = function()
+        return vim.wait(5000, function()
+          for i = 0, #M.lines - 1 do
+            if HELPERS.token_at(i, 0) then
+              return true
+            end
+          end
+          return false
+        end, 20)
+      end,
+      legend = function()
+        local client = vim.lsp.get_client_by_id(M.client_id)
+        return client.server_capabilities.semanticTokensProvider.legend
+      end,
+      missing_links = function()
+        local legend = HELPERS.legend()
+        local missing = {}
+        local function check(group)
+          local hl = vim.api.nvim_get_hl(0, { name = group, link = true })
+          if not hl.link or hl.fg or hl.bg then
+            missing[#missing + 1] = group
+          end
+        end
+        for _, token_type in ipairs(legend.tokenTypes) do
+          check('@lsp.type.' .. token_type .. '.magit-lsp')
+        end
+        for _, modifier in ipairs(legend.tokenModifiers) do
+          check('@lsp.mod.' .. modifier .. '.magit-lsp')
+        end
+        return missing
+      end,
+      resolved_fg = function(token_type)
+        local group = '@lsp.type.' .. token_type .. '.magit-lsp'
+        return vim.api.nvim_get_hl(0, { name = group, link = false }).fg
       end,
     }
   ]])
@@ -340,13 +380,86 @@ T['visual mode s stages the selected lines'] = function()
   MiniTest.expect.equality(staged, true)
 end
 
-T['colourises sections, files and diff lines'] = function()
+T['semantic tokens highlight sections, files, hunks and diff lines'] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get("HELPERS.has_hl('MagitHeader')"), true)
-  MiniTest.expect.equality(child.lua_get("HELPERS.has_hl('MagitSection')"), true)
-  MiniTest.expect.equality(child.lua_get("HELPERS.has_hl('MagitFileModified')"), true)
-  MiniTest.expect.equality(child.lua_get("HELPERS.has_hl('MagitDiffAdded')"), true)
-  MiniTest.expect.equality(child.lua_get("HELPERS.has_hl('MagitDiffRemoved')"), true)
+  MiniTest.expect.equality(
+    child.lua_get("vim.api.nvim_get_option_value('filetype', { buf = M.buf })"),
+    'magit-lsp'
+  )
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.token_type_on('Unstaged changes (1)', 0)"),
+    'magit.section'
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.token_type_on('  M f.txt', 2)"),
+    'magit.file.modified'
+  )
+  MiniTest.expect.equality(child.lua_get("HELPERS.token_type_on('  M f.txt', 4)"), 'magit.file')
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.token_type_on('    @@ -1,10 +1,10 @@', 4)"),
+    'magit.hunk.header'
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.token_type_on('    +line3 CHANGED', 4)"),
+    'magit.diff.added'
+  )
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.token_type_on('    -line3', 4)"),
+    'magit.diff.removed'
+  )
+end
+
+T['every token type and modifier in the legend links to a theme group'] = function()
+  setup_child()
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+  MiniTest.expect.equality(child.lua_get('HELPERS.missing_links()'), {})
+end
+
+T['theme links survive a colorscheme switch'] = function()
+  setup_child()
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+
+  local added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
+  local removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
+  MiniTest.expect.equality(type(added), 'number', 'added has a foreground')
+  MiniTest.expect.equality(type(removed), 'number', 'removed has a foreground')
+  MiniTest.expect.equality(added ~= removed, true, 'added and removed differ')
+
+  child.lua("vim.cmd('colorscheme vim')")
+  MiniTest.expect.equality(child.lua_get('HELPERS.missing_links()'), {})
+
+  local switched_added = child.lua_get("HELPERS.resolved_fg('magit.diff.added')")
+  local switched_removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
+  MiniTest.expect.equality(switched_added ~= switched_removed, true, 'added and removed differ')
+  MiniTest.expect.equality(switched_added ~= added, true, 'the scheme changed the colour')
+end
+
+T['tokens are refreshed after a mutation'] = function()
+  setup_child()
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
+
+  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
+  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
+  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
+
+  local staged = child.lua_get([[
+    (function()
+      return vim.wait(5000, function()
+        for i, line in ipairs(M.lines) do
+          if line == '  M f.txt' then
+            local token = HELPERS.token_at(i - 1, 2)
+            if token and token.modifiers and token.modifiers.staged then
+              return true
+            end
+          end
+        end
+        return false
+      end, 20)
+    end)()
+  ]])
+  MiniTest.expect.equality(staged, true, 'staged tokens after the mutation')
 end
 
 T['enables LSP folding and serves fold ranges'] = function()

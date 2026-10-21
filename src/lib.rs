@@ -5,6 +5,7 @@ pub mod git;
 pub mod logging;
 pub mod patch;
 pub mod protocol;
+pub mod semantic_tokens;
 pub mod server;
 pub mod session;
 pub mod status_view;

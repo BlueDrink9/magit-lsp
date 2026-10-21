@@ -2,7 +2,9 @@ local M = {}
 
 M.map = {}
 M.lines = {}
-M.ns = vim.api.nvim_create_namespace('magit-lsp')
+
+--- The status buffer's filetype; LSP groups are `@lsp.type.<type>.<filetype>`.
+M.filetype = 'magit-lsp'
 
 local function project_root()
   local source = debug.getinfo(1, 'S').source
@@ -47,21 +49,66 @@ local function apply_effects(effects)
   end
 end
 
+--- Standard theme groups for every token type of TASKS.md §3.15.
+--- The server names the token types; the client only links them to the
+--- colourscheme's own groups, so no colour is ever hard-coded here.
+local TOKEN_LINKS = {
+  ['magit.section'] = 'Title',
+  ['magit.count'] = 'Comment',
+  ['magit.file'] = 'Directory',
+  ['magit.file.modified'] = 'Changed',
+  ['magit.file.added'] = 'Added',
+  ['magit.file.deleted'] = 'Removed',
+  ['magit.file.renamed'] = 'Changed',
+  ['magit.file.untracked'] = 'Comment',
+  ['magit.hunk.header'] = 'Special',
+  ['magit.diff.added'] = '@diff.plus',
+  ['magit.diff.removed'] = '@diff.minus',
+  ['magit.diff.context'] = 'Normal',
+  ['magit.hash'] = 'Constant',
+  ['magit.ref.local'] = 'Type',
+  ['magit.ref.remote'] = 'Special',
+  ['magit.ref.tag'] = 'Label',
+  ['magit.ref.head'] = 'Type',
+  ['magit.author'] = 'Identifier',
+  ['magit.date'] = 'Comment',
+  ['magit.message.warn'] = 'WarningMsg',
+  ['magit.message.error'] = 'ErrorMsg',
+  ['magit.menu.title'] = 'Title',
+  ['magit.menu.group'] = 'Statement',
+  ['magit.menu.key'] = 'Keyword',
+  ['magit.menu.label'] = 'Normal',
+  ['magit.menu.flag'] = 'Special',
+  ['magit.menu.switch.on'] = 'String',
+  ['magit.menu.switch.off'] = 'Comment',
+  ['magit.menu.option'] = 'String',
+  ['magit.menu.value'] = 'String',
+  ['magit.menu.planned'] = 'Comment',
+  ['magit.menu.disabled'] = 'Comment',
+  ['magit.menu.preview'] = 'Comment',
+}
+
+--- Modifier groups are applied above the type, so they should only add
+--- attributes (or a background) and never replace a type's foreground.
+local MODIFIER_LINKS = {
+  staged = 'Bold',
+  selected = 'Visual',
+  planned = 'Comment',
+  disabled = 'Comment',
+  bold = 'Bold',
+}
+
+--- Link every semantic-token group to a standard theme group.
+--- `default = true` keeps a user's own definition; `:colorscheme` clears the
+--- groups, so this runs again on `ColorScheme`.
 local function define_highlights()
-  local hl = {
-    { 'MagitHeader', 'Title' },
-    { 'MagitSection', 'Function' },
-    { 'MagitFileModified', 'DiagnosticWarn' },
-    { 'MagitFileAdded', 'DiagnosticOk' },
-    { 'MagitFileDeleted', 'DiagnosticError' },
-    { 'MagitFileUntracked', 'Comment' },
-    { 'MagitHunkHeader', 'Special' },
-    { 'MagitDiffAdded', 'diffAdded' },
-    { 'MagitDiffRemoved', 'diffRemoved' },
-    { 'MagitMessage', 'Comment' },
-  }
-  for _, g in ipairs(hl) do
-    vim.api.nvim_set_hl(0, g[1], { link = g[2], default = true })
+  for token_type, link in pairs(TOKEN_LINKS) do
+    local group = string.format('@lsp.type.%s.%s', token_type, M.filetype)
+    vim.api.nvim_set_hl(0, group, { link = link, default = true })
+  end
+  for modifier, link in pairs(MODIFIER_LINKS) do
+    local group = string.format('@lsp.mod.%s.%s', modifier, M.filetype)
+    vim.api.nvim_set_hl(0, group, { link = link, default = true })
   end
 end
 
@@ -95,48 +142,11 @@ local function request_sync(method, params)
   return nil, 'timed out waiting for ' .. method
 end
 
-local function file_hl(status)
-  if status == 'A' then
-    return 'MagitFileAdded'
-  elseif status == 'D' then
-    return 'MagitFileDeleted'
-  elseif status == '?' then
-    return 'MagitFileUntracked'
-  end
-  return 'MagitFileModified'
-end
-
-local function highlight(lines, map)
-  vim.api.nvim_buf_clear_namespace(M.buf, M.ns, 0, -1)
-  for i, e in ipairs(map) do
-    local hl
-    if e.kind == 'header' then
-      hl = 'MagitHeader'
-    elseif e.kind == 'section' then
-      hl = 'MagitSection'
-    elseif e.kind == 'message' then
-      hl = 'MagitMessage'
-    elseif e.kind == 'hunk' then
-      hl = 'MagitHunkHeader'
-    elseif e.kind == 'file' then
-      hl = file_hl(e.status)
-    elseif e.kind == 'line' then
-      if e.marker == '+' then
-        hl = 'MagitDiffAdded'
-      elseif e.marker == '-' then
-        hl = 'MagitDiffRemoved'
-      end
-    end
-    if hl then
-      local text = lines[i] or ''
-      vim.api.nvim_buf_set_extmark(M.buf, M.ns, i - 1, 0, {
-        end_row = i - 1,
-        end_col = math.max(1, #text),
-        hl_group = hl,
-        hl_eol = true,
-      })
-    end
-  end
+--- Ask Neovim to re-request semantic tokens for the buffer.
+--- The server owns highlighting, but it only sends tokens on request, so a
+--- re-render has to trigger one.
+local function refresh_tokens()
+  vim.lsp.semantic_tokens.force_refresh(M.buf)
 end
 
 --- Replace every line in the status buffer.
@@ -152,7 +162,7 @@ end
 
 --- Show a server-rendered document in the status buffer.
 --- The server owns the text and the per-line node map; the client only
---- replaces lines and colours them.
+--- replaces lines and asks for the matching semantic tokens.
 ---@param status table structured status (kept for callers and tests)
 ---@param document table|nil { text = string[], nodes = table[], version = integer }
 local function render(status, document)
@@ -166,7 +176,7 @@ local function render(status, document)
   M.status = status
   M.version = document.version
 
-  highlight(lines, M.map)
+  refresh_tokens()
   return status
 end
 
@@ -547,6 +557,8 @@ local function fresh_buffer()
   vim.bo[buf].undolevels = -1
   vim.bo[buf].modified = false
   vim.api.nvim_buf_set_name(buf, 'vcs://status')
+  -- A dedicated filetype keeps the `@lsp.type.*.<filetype>` group names stable.
+  vim.bo[buf].filetype = M.filetype
   configure_read_only(buf)
   return buf
 end
@@ -560,6 +572,12 @@ function M.setup(opts)
   local cmd = opts.cmd or default_cmd()
 
   define_highlights()
+
+  -- `:colorscheme` runs `hi clear`, so re-apply the links afterwards.
+  vim.api.nvim_create_autocmd('ColorScheme', {
+    group = vim.api.nvim_create_augroup('magit_lsp_highlights', { clear = true }),
+    callback = define_highlights,
+  })
 
   vim.api.nvim_create_user_command('MagitLspErrorDetail', M.error_detail, {
     desc = 'Show the last magit-lsp error detail',

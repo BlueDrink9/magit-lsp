@@ -72,6 +72,8 @@ back as an error-level `Effect::Message` with a readable summary (see
   links and the line → node map. Node IDs derive from identity, never position.
 - `src/status_view.rs` — renders `Status` into a `Tree` (text and structure);
   `StatusView` implements the `View` trait.
+- `src/semantic_tokens.rs` — the tree's tokens as LSP semantic tokens: the
+  legend, byte → UTF-16 conversion and delta encoding.
 - `src/view.rs` — `View` trait, `ViewDescriptor`, kinds, placement and viewport.
 - `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
   cursor succession and the tiny R-1.2 command table.
@@ -81,7 +83,7 @@ back as an error-level `Effect::Message` with a readable summary (see
 - `src/server.rs` — `tokio` stdio LSP loop, per-repo tree store, request dispatch.
 - `src/vcs.rs` — vestigial gix-based backend stub; unused, to be deleted.
 - `lua/magit-lsp/init.lua` — Neovim client (display the server document,
-  highlight, folding, keys, read-only buffer).
+  semantic-token links, folding, keys, read-only buffer).
 - `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
   environment (fixed identity/dates, isolated config).
 - `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
@@ -107,15 +109,22 @@ back as an error-level `Effect::Message` with a readable summary (see
 - Test harness extracted to `tests/common/mod.rs` with `RepoFixture` and
   deterministic git env (IMM-7).
 - Colour spike (IMM-8): `scripts/color_spike.lua` writes
-  `build/test-output/status-<scheme>-<background>.html` and prints the class →
-  link → resolved-fg table; findings in `TASKS.md` §8.4.
+  `build/test-output/status-<scheme>-<background>.html`, dumps the buffer's
+  semantic tokens and writes `build/test-output/semantic-tokens.md` (group →
+  link → resolved fg per scheme); findings in `TASKS.md` §8.4.
 - LSP server (`src/server.rs`): request dispatch, per-repo tree store, capabilities.
 - Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `vcs://status` nofile
-  buffer, server-document display, extmark highlighting, LSP folding,
+  buffer, server-document display, semantic-token links, LSP folding,
   navigation.
 - Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
   tokens, symbols, links and a line → node map; `foldingRange` and
   `vcs/targets` come from the tree.
+- Semantic tokens (R-1.3): `src/semantic_tokens.rs` turns the tree's tokens into
+  `textDocument/semanticTokens/full` data (sorted, non-overlapping, UTF-16
+  columns, delta-encoded) and advertises the legend. The client links
+  `@lsp.type.<magit type>.magit-lsp` / `@lsp.mod.<modifier>.magit-lsp` to
+  standard groups per TASKS.md §3.15 and re-applies them on `ColorScheme`;
+  there is no client-side extmark highlighting any more.
 - Sessions and views (R-1.2): `src/session.rs` owns per-repo `Session`s and a
   `ViewStack`; `view/open`, `view/close`, `view/invoke` (`common.refresh`,
   `status.stage`, `status.unstage`), `view/resync`, `view/rendered` acks and
@@ -173,6 +182,19 @@ The roadmap, glossary, protocol reference and phased plan live in
   visual mode; use `line('v')` + `line('.')` instead.
 - **gix wouldn't compile.** `gix 0.57` failed on rustc 1.98; dropped gix for
   the `git` CLI, which is also what Magit/Neogit do and what staging requires.
+- **Added/removed lines had no colour.** The client linked `MagitDiffAdded` /
+  `MagitDiffRemoved` to `diffAdded` / `diffRemoved`, which built-in schemes do
+  not define. The semantic-token links now use `@diff.plus` / `@diff.minus`
+  (→ `Added` / `Removed`).
+- **Dotted semantic token types work as group names.** Neovim builds
+  `@lsp.type.<token type>.<filetype>` and accepts dots in the type, so
+  `magit.diff.added` becomes `@lsp.type.magit.diff.added.magit-lsp` with no
+  name mangling (verified in Neovim 0.12.5). The status buffer's filetype is
+  `magit-lsp`, which keeps those names predictable.
+- **Modifier groups stack above type groups.** Semantic tokens apply
+  `@lsp.mod.*` at a higher priority than `@lsp.type.*`; Neovim merges the
+  attributes, so modifier links must only add attributes (e.g. `staged` →
+  `Bold`) instead of replacing a type's foreground.
 
 ## Known limitations
 

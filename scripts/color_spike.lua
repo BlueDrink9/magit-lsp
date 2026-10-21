@@ -1,16 +1,14 @@
--- IMM-8 spike: capture the rendered status buffer as HTML with `:TOhtml` and
--- report the resolved colours of every `Magit*` highlight group.
+-- IMM-8 spike: open the status view, dump its semantic tokens, and report the
+-- resolved colours of every token group per colourscheme.
 --
 -- Run (from the project root):
 --   nvim --headless --noplugin -u scripts/minimal_init.lua -l scripts/color_spike.lua
 -- or:
 --   make color-spike
 --
--- Prototype only: touches no production code. Writes
--- `build/test-output/status-<scheme>-<background>.html` and prints a table of
--- highlight group -> link target -> resolved foreground per colourscheme.
--- Also probes two `tohtml` questions: are client extmark highlights included,
--- and are LSP semantic-token extmarks included?
+-- Highlighting is owned by the server's semantic tokens, so this no longer
+-- dumps client extmarks. `:TOhtml` skips the `nvim.lsp.semantic_tokens`
+-- namespace, so the HTML is only a reference; the token table is the result.
 
 local script_path = debug.getinfo(1, 'S').source:sub(2)
 local script_dir = vim.fn.fnamemodify(script_path, ':p:h')
@@ -161,6 +159,31 @@ local function probe_tohtml()
   }
 end
 
+--- Every distinct token in the buffer, found by probing each position.
+---@return table[] { type, modifiers, group, line, start_col, end_col }
+local function collect_tokens(buf, lines)
+  local seen, tokens = {}, {}
+  for row = 0, #lines - 1 do
+    local text = lines[row + 1] or ''
+    for col = 0, #text do
+      for _, token in ipairs(vim.lsp.semantic_tokens.get_at_pos(buf, row, col) or {}) do
+        local key = table.concat({
+          token.type,
+          token.start_col,
+          token.end_col,
+          token.line,
+          vim.inspect(token.modifiers),
+        }, '|')
+        if not seen[key] then
+          seen[key] = true
+          tokens[#tokens + 1] = token
+        end
+      end
+    end
+  end
+  return tokens
+end
+
 make_fixture()
 vim.fn.mkdir(out_dir, 'p')
 
@@ -169,10 +192,27 @@ local ok, err = M.setup({ root_dir = repo })
 if not ok then
   error('magit-lsp setup failed: ' .. tostring(err))
 end
-if not vim.wait(15000, function()
-  return M.status ~= nil
-end, 20) then
+if
+  not vim.wait(15000, function()
+    return M.status ~= nil
+  end, 20)
+then
   error('status buffer did not render')
+end
+
+-- Highlighting is requested per render; wait until the first tokens arrive.
+if
+  not vim.wait(15000, function()
+    for row = 0, #M.lines - 1 do
+      local found = vim.lsp.semantic_tokens.get_at_pos(M.buf, row, 0)
+      if found and #found > 0 then
+        return true
+      end
+    end
+    return false
+  end, 20)
+then
+  error('semantic tokens did not arrive')
 end
 
 local win = vim.api.nvim_get_current_win()
@@ -180,22 +220,33 @@ local buf = M.buf
 -- Folds are enabled by the client; closed folds would hide content from HTML.
 vim.wo[win].foldenable = false
 
--- Collect the groups actually used by the buffer's extmarks, in a stable order.
-local seen, groups = {}, {}
-for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, M.ns, 0, -1, { details = true })) do
-  local g = m[4].hl_group
-  if g and not seen[g] then
-    seen[g] = true
-    groups[#groups + 1] = g
+local client = vim.lsp.get_client_by_id(M.client_id)
+local legend = client.server_capabilities.semanticTokensProvider.legend
+
+local tokens = collect_tokens(buf, M.lines)
+local used_types, used_modifiers = {}, {}
+for _, token in ipairs(tokens) do
+  used_types[token.type] = true
+  for modifier in pairs(token.modifiers) do
+    used_modifiers[modifier] = true
   end
 end
-table.sort(groups)
 
--- The colourscheme command clears user groups, so re-apply the links captured
--- from the client instead of duplicating its mapping table here.
-local links = {}
-for _, g in ipairs(groups) do
-  links[g] = vim.api.nvim_get_hl(0, { name = g, link = true }).link
+-- Every group the client is expected to define, in legend order.
+local groups = {}
+for _, token_type in ipairs(legend.tokenTypes) do
+  groups[#groups + 1] = {
+    group = '@lsp.type.' .. token_type .. '.magit-lsp',
+    token = token_type,
+    used = used_types[token_type] == true,
+  }
+end
+for _, modifier in ipairs(legend.tokenModifiers) do
+  groups[#groups + 1] = {
+    group = '@lsp.mod.' .. modifier .. '.magit-lsp',
+    token = modifier,
+    used = used_modifiers[modifier] == true,
+  }
 end
 
 vim.cmd('packadd nvim.tohtml')
@@ -212,40 +263,42 @@ local cases = {
 
 local results = {}
 local background = {}
+local links = {}
 for _, case in ipairs(cases) do
   local scheme, bg = case[1], case[2]
   vim.o.background = bg
   vim.cmd('colorscheme ' .. scheme)
-  for g, link in pairs(links) do
-    if link then
-      vim.api.nvim_set_hl(0, g, { link = link, default = true })
-    end
+  -- The client re-applies its links from a `ColorScheme` autocmd; record what
+  -- survived instead of re-defining anything here.
+  local column = {}
+  for _, entry in ipairs(groups) do
+    local link = vim.api.nvim_get_hl(0, { name = entry.group, link = true }).link
+    links[entry.group] = link
+    local resolved = vim.api.nvim_get_hl(0, { name = entry.group, link = false })
+    column[entry.group] = hex(resolved.fg) .. (resolved.bold and '*' or '')
   end
 
   local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
   background[scheme .. '/' .. bg] = hex(normal.bg)
 
-  local fg = {}
-  for _, g in ipairs(groups) do
-    local d = vim.api.nvim_get_hl(0, { name = g, link = false })
-    fg[g] = hex(d.fg) .. (d.bold and '*' or '')
-  end
-
   local html = tohtml.tohtml(win, { width = 120 })
   local path = string.format('%s/status-%s-%s.html', out_dir, scheme, bg)
   vim.fn.writefile(html, path)
-  results[scheme .. '/' .. bg] = { fg = fg, html = table.concat(html, '\n'), path = path }
+  results[scheme .. '/' .. bg] = { fg = column, html = table.concat(html, '\n'), path = path }
 end
 
 -- Report -------------------------------------------------------------------
 
-print(('IMM-8 colour spike — Neovim %s'):format(vim.version().major .. '.' .. vim.version().minor .. '.' .. vim.version().patch))
+print(
+  ('IMM-8 colour spike — Neovim %s')
+    :format(vim.version().major .. '.' .. vim.version().minor .. '.' .. vim.version().patch)
+)
 print(('fixture: %s'):format(repo))
 print(('html:    %s/status-<scheme>-<background>.html'):format(out_dir))
 print('')
-print('API: require("tohtml").tohtml(winid, opt) -> string[]  (packadd nvim.tohtml first)')
-print('     opt = { title?, number_lines?, font?, width?, range? }')
-print('     "-" = no guifg, "*" = bold')
+print('Highlighting comes from semantic tokens: the client only links')
+print('`@lsp.type.<token>.<filetype>` and `@lsp.mod.<modifier>.<filetype>` groups.')
+print('"-" = no guifg, "*" = bold, "used" = the fixture emits that token.')
 print('')
 
 local columns = {}
@@ -261,21 +314,29 @@ local function pad(s, n)
   return s .. string.rep(' ', n - #s)
 end
 
-local head = pad('class', 24) .. pad('link', 18)
+local head = pad('group', 40) .. pad('link', 14) .. pad('used', 6)
 for _, c in ipairs(columns) do
   head = head .. pad(c, 18)
 end
 print(head)
 print(string.rep('-', #head))
-for _, g in ipairs(groups) do
-  local row = pad(g, 24) .. pad(links[g] or '-', 18)
+local legend_rows = {}
+for _, entry in ipairs(groups) do
+  local row = pad(entry.group, 40) .. pad(links[entry.group] or 'MISSING', 14)
+  row = row .. pad(entry.used and 'yes' or '-', 6)
   for _, c in ipairs(columns) do
-    row = row .. pad(results[c].fg[g], 18)
+    row = row .. pad(results[c].fg[entry.group], 18)
   end
   print(row)
+  legend_rows[#legend_rows + 1] = ('| `%s` | %s | %s | %s |'):format(
+    entry.group,
+    links[entry.group] or 'MISSING',
+    entry.used and 'yes' or '',
+    results[columns[1]].fg[entry.group]
+  )
 end
 print('')
-local bg_row = pad('(Normal bg)', 24) .. pad('', 18)
+local bg_row = pad('(Normal bg)', 40) .. pad('', 14) .. pad('', 6)
 for _, c in ipairs(columns) do
   bg_row = bg_row .. pad(background[c], 18)
 end
@@ -283,37 +344,60 @@ print(bg_row)
 print('')
 
 -- Is each group's class present in the HTML? `tohtml` names classes after the
--- resolved group, so check the link target rather than the Magit* name.
-print('class present in HTML:')
+-- resolved group, so check the link target rather than the token name.
+print('class present in HTML (semantic-token extmarks are skipped by tohtml):')
 local first = results[columns[1]].html
-for _, g in ipairs(groups) do
-  local name = links[g] or resolved_name(g)
+for _, entry in ipairs(groups) do
+  local name = links[entry.group] or resolved_name(entry.group)
   local found = first:find('class="' .. name .. '"', 1, true) ~= nil
-  print(('  %s%s -> %s'):format(pad(g, 24), found and 'yes' or 'NO ', name))
+  print(('  %s%s -> %s'):format(pad(entry.group, 40), found and 'yes' or 'NO ', name))
 end
 print('')
 
-local undefined = {}
-for _, g in ipairs(groups) do
+local missing = {}
+local uncoloured = {}
+for _, entry in ipairs(groups) do
+  if not links[entry.group] then
+    missing[#missing + 1] = entry.group
+  end
   local coloured = false
   for _, c in ipairs(columns) do
-    if results[c].fg[g] ~= '-' then
+    if results[c].fg[entry.group] ~= '-' then
       coloured = true
     end
   end
   if not coloured then
-    undefined[#undefined + 1] = ('%s -> %s'):format(g, links[g] or '?')
+    uncoloured[#uncoloured + 1] = entry.group
   end
 end
-if #undefined > 0 then
-  print('no foreground in any tested scheme:')
-  for _, u in ipairs(undefined) do
-    print('  ' .. u)
+if #missing > 0 then
+  print('groups without a theme link:')
+  for _, group in ipairs(missing) do
+    print('  ' .. group)
+  end
+  print('')
+end
+if #uncoloured > 0 then
+  print('no foreground in any tested scheme (attribute-only groups are expected):')
+  for _, group in ipairs(uncoloured) do
+    print('  ' .. group)
   end
   print('')
 end
 
-print(('wrote %d HTML files to %s'):format(#cases, out_dir))
+local legend_path = out_dir .. '/semantic-tokens.md'
+local legend_lines = {
+  '# Semantic token legend (generated by `make color-spike`)',
+  '',
+  '| group | link | used in fixture | fg (default/dark) |',
+  '| --- | --- | --- | --- |',
+}
+for _, row in ipairs(legend_rows) do
+  legend_lines[#legend_lines + 1] = row
+end
+vim.fn.writefile(legend_lines, legend_path)
+
+print(('wrote %d HTML files and %s'):format(#cases, legend_path))
 print('')
 
 local probe = probe_tohtml()
