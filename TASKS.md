@@ -1202,7 +1202,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-0.5 Hunk identity by content hash everywhere (no hunk indexes in any
       API). *Done when:* a test mutates the file between render and action and
       the action targets the right hunk or is rejected with a message.
-- [ ] R-0.6 `tracing` to stderr/file; child stdout never reaches the LSP pipe.
+- [x] R-0.6 `tracing` to stderr/file; child stdout never reaches the LSP pipe.
 - [ ] R-0.7 Move the stdio loop to `tokio`.
 
 ### Phase 1 — Server-owned document and sessions

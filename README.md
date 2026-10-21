@@ -89,6 +89,20 @@ The status buffer is a `nofile` buffer named `vcs://status`, shown in a vertical
 split. It is a read-only view: native editing keys are refused and `:w`/`:write`
 is a no-op. Use `gR` to refresh it after changes in the repository.
 
+## Logging
+
+The server logs with `tracing` and never writes to stdout, which is the LSP
+pipe. Logs go to stderr by default; two environment variables control them:
+
+| Variable | Meaning |
+| -------- | ------- |
+| `MAGIT_LSP_LOG` | Level filter in `EnvFilter` syntax, e.g. `info`, `magit_lsp=debug`, `trace`. Defaults to `warn`. |
+| `MAGIT_LSP_LOG_FILE` | Path of a file to append logs to instead of stderr. |
+
+Every `git` invocation is logged at `debug` (arguments, working directory, exit
+code, duration); failures are logged at `warn`. Patch contents passed to
+`git apply` are only logged at `trace`.
+
 ## Keys (defaults, subject to customization)
 
 | Key      | Action                                                   |

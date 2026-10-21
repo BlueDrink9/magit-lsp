@@ -2,6 +2,7 @@ pub mod dispatch;
 pub mod document;
 pub mod errors;
 pub mod git;
+pub mod logging;
 pub mod patch;
 pub mod protocol;
 pub mod server;

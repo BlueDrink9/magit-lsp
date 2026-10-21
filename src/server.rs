@@ -16,6 +16,7 @@ type Documents = HashMap<String, String>;
 /// Run the LSP server on stdio until the client requests shutdown.
 pub fn run() -> Result<()> {
     let (connection, io_threads) = Connection::stdio();
+    tracing::debug!("magit-lsp listening on stdio");
 
     let capabilities = serde_json::to_value(&ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -41,6 +42,7 @@ pub fn run() -> Result<()> {
     connection
         .initialize(capabilities)
         .map_err(|e| Error::new(e.to_string()))?;
+    tracing::debug!("client initialised");
 
     let mut documents: Documents = HashMap::new();
 
@@ -51,11 +53,16 @@ pub fn run() -> Result<()> {
                     .handle_shutdown(&req)
                     .map_err(|e| Error::new(e.to_string()))?
                 {
+                    tracing::debug!("shutdown requested");
                     break;
                 }
+                tracing::debug!(method = %req.method, "request");
                 let response = match dispatch(&req, &documents) {
                     Ok(value) => Message::Response(Response::new_ok(req.id, value)),
-                    Err(err) => Message::Response(error_response(req.id, err)),
+                    Err(err) => {
+                        tracing::warn!(method = %req.method, error = %err, "request failed");
+                        Message::Response(error_response(req.id, err))
+                    }
                 };
                 connection
                     .sender
@@ -67,6 +74,9 @@ pub fn run() -> Result<()> {
         }
     }
 
+    // Dropping the connection closes the writer channel; joining first would
+    // wait forever on the writer thread.
+    drop(connection);
     match io_threads.join() {
         Ok(_) => Ok(()),
         Err(e) => Err(Error::new(e.to_string())),

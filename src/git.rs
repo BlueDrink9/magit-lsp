@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 /// A single changed file: its display status char and its diff hunks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -560,12 +561,12 @@ impl GitRepo {
         if reverse {
             args.push("-R");
         }
-        let mut child = Command::new("git")
-            .args(&args)
-            .current_dir(&self.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+        let started = Instant::now();
+        tracing::debug!(cwd = %self.root.display(), args = ?args, "git");
+        // The patch body is user content: only ever visible at trace level.
+        tracing::trace!(patch = %patch_text, "git stdin");
+
+        let mut child = git_command(&self.root, &args, Stdio::piped())
             .spawn()
             .map_err(|e| Error::new(format!("failed to spawn git apply: {e}")))?;
         child
@@ -574,6 +575,13 @@ impl GitRepo {
             .ok_or_else(|| Error::new("failed to open stdin"))?
             .write_all(patch_text.as_bytes())?;
         let out = child.wait_with_output()?;
+        log_finished(
+            &self.root,
+            &args,
+            out.status,
+            started.elapsed(),
+            &out.stderr,
+        );
         if !out.status.success() {
             return Err(Error::git(GitFailure::from_output(
                 &args,
@@ -589,11 +597,12 @@ impl GitRepo {
     }
 
     fn command_in(cwd: &Path, args: &[&str]) -> Result<String> {
-        let out = Command::new("git")
-            .args(args)
-            .current_dir(cwd)
+        let started = Instant::now();
+        tracing::debug!(cwd = %cwd.display(), args = ?args, "git");
+        let out = git_command(cwd, args, Stdio::null())
             .output()
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
+        log_finished(cwd, args, out.status, started.elapsed(), &out.stderr);
         if !out.status.success() {
             return Err(Error::git(GitFailure::from_output(
                 args,
@@ -602,6 +611,44 @@ impl GitRepo {
             )));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+}
+
+/// Build a `git` child that can never write to the server's own stdout and
+/// never prompts on a terminal nobody is reading.
+fn git_command(cwd: &Path, args: &[&str], stdin: Stdio) -> Command {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(stdin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
+/// Record the outcome of one Git invocation.
+fn log_finished(
+    cwd: &Path,
+    args: &[&str],
+    status: std::process::ExitStatus,
+    elapsed: std::time::Duration,
+    stderr: &[u8],
+) {
+    let exit_code = status.code().unwrap_or(-1);
+    let elapsed_ms = elapsed.as_millis();
+    if status.success() {
+        tracing::debug!(cwd = %cwd.display(), args = ?args, exit_code, elapsed_ms, "git ok");
+    } else {
+        tracing::warn!(
+            cwd = %cwd.display(),
+            args = ?args,
+            exit_code,
+            elapsed_ms,
+            stderr = %String::from_utf8_lossy(stderr).trim_end(),
+            "git failed"
+        );
     }
 }
 
