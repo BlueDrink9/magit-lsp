@@ -21,31 +21,33 @@ buffer. Rust server + Lua client, talking LSP over stdio.
 ## Architecture / internals
 
 Data flow: client request → server runs `git` / mutates the index → server
-returns the fresh `Status` → client re-renders. Reads and mutations use the
-same custom request/response pattern (no `workspace/applyEdit`).
+builds a `Tree` for the status view → returns the fresh `Status` plus the
+rendered `Document` → the client replaces its buffer with the server's lines.
+Reads and mutations use the same custom request/response pattern (no
+`workspace/applyEdit`).
 
-The server parses the rendered status document (`src/document.rs`) to serve
-structural LSP features. Because rendering currently lives in the client, the
-client pushes the rendered text to the server via `vcs/didRender` (standard
-`didOpen`/`didChange` sync is also handled).
+The server owns the document. `src/tree.rs` defines nodes, Node IDs, semantic
+tokens, symbols, links and the line → node map; `src/status_view.rs` turns a
+`Status` into that tree. Folding ranges and navigation targets are read from
+the tree, never from parsing rendered text.
 
 ### Custom protocol
 
 | Method | Purpose |
 | ------ | ------- |
-| `vcs/status` | Structured status (branch, staged/unstaged files + hunks) |
+| `vcs/status` | Structured status plus the server-rendered `document` |
 | `vcs/diff` | Unified diff for one file (staged or unstaged) |
 | `vcs/stageHunk` / `vcs/unstageHunk` | Stage/unstage a whole hunk |
 | `vcs/stageLines` / `vcs/unstageLines` | Stage/unstage a line range within a hunk |
 | `vcs/stageFile` / `vcs/unstageFile` | Stage/unstage a whole file |
 | `vcs/stageAll` / `vcs/unstageAll` | Stage/unstage everything |
-| `vcs/targets` | Navigation targets (section/file/hunk + line) |
-| `textDocument/foldingRange` | Fold ranges for sections and files |
+| `vcs/targets` | Navigation targets from the tree (section/file/hunk + line) |
+| `textDocument/foldingRange` | Fold ranges from the tree (sections and files) |
 | `vcs/requestTransient` | **Stub** — commit-menu schema (reserved) |
 
-Every mutation returns a `MutationResponse { status, effects }`, which the
-client renders. A failed `git` command is not a JSON-RPC error: it comes back
-as an error-level `Effect::Message` with a readable summary (see
+Every mutation returns a `MutationResponse { status, effects, document }`, which
+the client displays. A failed `git` command is not a JSON-RPC error: it comes
+back as an error-level `Effect::Message` with a readable summary (see
 `src/errors.rs`). JSON-RPC errors are reserved for protocol faults.
 
 ### Source layout
@@ -59,14 +61,15 @@ as an error-level `Effect::Message` with a readable summary (see
   patch construction. Counts are left stale; `git apply --recount` infers them.
 - `src/dispatch.rs` — maps `(command, node kind, selection)` to an operation and
   executes stage/unstage (discard execution and wiring deferred).
-- `src/document.rs` — **legacy**: parses the rendered status document. Slated for
-  deletion in R-1.1; do not extend it.
-- `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Effect`, …).
+- `src/tree.rs` — view tree: `Node`, `NodeId`, `NodeKind`, tokens, symbols,
+  links and the line → node map. Node IDs derive from identity, never position.
+- `src/status_view.rs` — renders `Status` into a `Tree` (text and structure).
+- `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Document`, …).
 - `src/transport.rs` — `Content-Length` framing over async stdio.
-- `src/server.rs` — `tokio` stdio LSP loop, document store, request dispatch.
+- `src/server.rs` — `tokio` stdio LSP loop, per-repo tree store, request dispatch.
 - `src/vcs.rs` — vestigial gix-based backend stub; unused, to be deleted.
-- `lua/magit-lsp/init.lua` — Neovim client (render, highlight, folding, keys,
-  read-only buffer).
+- `lua/magit-lsp/init.lua` — Neovim client (display the server document,
+  highlight, folding, keys, read-only buffer).
 - `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
   environment (fixed identity/dates, isolated config).
 - `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
@@ -94,15 +97,17 @@ as an error-level `Effect::Message` with a readable summary (see
 - Colour spike (IMM-8): `scripts/color_spike.lua` writes
   `build/test-output/status-<scheme>-<background>.html` and prints the class →
   link → resolved-fg table; findings in `TASKS.md` §8.4.
-- LSP server (`src/server.rs`): request dispatch, document store, capabilities.
+- LSP server (`src/server.rs`): request dispatch, per-repo tree store, capabilities.
 - Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `vcs://status` nofile
-  buffer, rendering, extmark highlighting, LSP folding, navigation.
-- LSP-served structure: `textDocument/foldingRange` and `vcs/targets` from a
-  parser (`src/document.rs`) over the rendered document (legacy, see R-1.1).
+  buffer, server-document display, extmark highlighting, LSP folding,
+  navigation.
+- Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
+  tokens, symbols, links and a line → node map; `foldingRange` and
+  `vcs/targets` come from the tree.
 - Stubs retained for commit menus: `vcs/requestTransient` +
   `magit-lsp.executeVCSCommand`.
-- Tests: Rust unit (patch, document) + integration (git backend, dispatch,
-  errors) + Neovim integration via mini.test (real server + temp repo).
+- Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
+  rendering) + Neovim integration via mini.test (real server + temp repo).
   `make test`.
 
 ## Roadmap
@@ -171,16 +176,16 @@ The roadmap, glossary, protocol reference and phased plan live in
 - **Docstrings**: every external (public) function and type should have a
   concise docstring (`///` in Rust, `---` LuaLS annotations in Lua) describing
   what it does, not how.
-- Keep the server/client rendered-document format in sync (`src/document.rs`
-  parser vs. the Lua renderer).
+- The client displays `document.text` verbatim; never recompose view text in a
+  client.
 - **No backward compatibility.** Rename, reshape and delete protocol methods,
   config keys and Lua APIs freely. Delete the old thing; never leave a shim or
   a deprecated alias behind.
 - **Never address hunks by index.** Hunk identity is a content hash
   (`path` + hunk text), so it survives refreshes and concurrent edits.
-- **Never parse rendered text.** Structure must come from the server's tree.
-  `src/document.rs` parses the rendered document and is legacy, slated for
-  removal in R-1.1; do not extend it.
+- **Never parse rendered text.** Structure must come from the server's tree
+  (`src/tree.rs`); folding ranges, targets and cursor context resolve against
+  nodes, never against line shapes.
 - **Never print raw JSON or Lua tables to the user.** A failed Git command is
   not a JSON-RPC error: return an `Effect::Message` built from a `UserError`
   (`summary` + optional `hint`), with `detail` available on request.

@@ -1,4 +1,5 @@
 use crate::git;
+use crate::tree::Document;
 use serde::{Deserialize, Serialize};
 
 /// Severity of a message effect.
@@ -40,22 +41,33 @@ impl Effect {
     }
 }
 
-/// The result of a mutation: fresh status plus anything the user should see.
+/// The result of a mutation: fresh status, rendered view and user effects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MutationResponse {
     pub status: git::Status,
     pub effects: Vec<Effect>,
+    pub document: Document,
 }
 
-/// `vcs/status`: fetch the structured repository status.
+/// `vcs/status`: fetch the structured repository status and rendered view.
 pub enum StatusRequest {}
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct StatusParams {
     pub repo_path: String,
+    /// Buffer URI; registering it lets later positional requests find the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+/// Status fields stay at the top level; the rendered view rides along.
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    #[serde(flatten)]
+    pub status: git::Status,
+    pub document: Document,
 }
 impl lsp_types::request::Request for StatusRequest {
     type Params = StatusParams;
-    type Result = git::Status;
+    type Result = StatusResponse;
     const METHOD: &'static str = "vcs/status";
 }
 

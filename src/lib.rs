@@ -1,12 +1,13 @@
 pub mod dispatch;
-pub mod document;
 pub mod errors;
 pub mod git;
 pub mod logging;
 pub mod patch;
 pub mod protocol;
 pub mod server;
+pub mod status_view;
 pub mod transport;
+pub mod tree;
 
 use std::fmt;
 

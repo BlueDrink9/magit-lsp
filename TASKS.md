@@ -1207,7 +1207,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 
 ### Phase 1 — Server-owned document and sessions
 
-- [ ] R-1.1 Node tree, Node IDs, renderer for Status in Rust producing text,
+- [x] R-1.1 Node tree, Node IDs, renderer for Status in Rust producing text,
       tokens, symbols, links, line→node map. *Done when:* a snapshot test
       shows the full status text; deleting `src/document.rs` parsing breaks
       nothing.

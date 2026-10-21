@@ -20,10 +20,6 @@ local function default_cmd()
   return { 'cargo', 'run', '--manifest-path', project_root() .. '/Cargo.toml' }
 end
 
-local function is_nil(v)
-  return v == nil or v == vim.NIL
-end
-
 local LEVELS = {
   info = vim.log.levels.INFO,
   warn = vim.log.levels.WARN,
@@ -154,88 +150,39 @@ local function set_lines(buf, lines)
   vim.bo[buf].modifiable = false
 end
 
-local function render(status)
-  local lines = {}
-  local map = {}
-  local function add(text, entry)
-    table.insert(lines, text)
-    table.insert(map, entry or { kind = 'text' })
+--- Show a server-rendered document in the status buffer.
+--- The server owns the text and the per-line node map; the client only
+--- replaces lines and colours them.
+---@param status table structured status (kept for callers and tests)
+---@param document table|nil { text = string[], nodes = table[], version = integer }
+local function render(status, document)
+  if type(document) ~= 'table' or type(document.text) ~= 'table' then
+    return nil, 'server response has no document'
   end
-
-  local branch = status.branch
-  if is_nil(branch) or branch == '' then
-    branch = 'HEAD'
-  end
-  add('Head: ' .. branch, { kind = 'header' })
-
-  local function render_files(title, files, section)
-    add('', { kind = 'blank' })
-    add(string.format('%s (%d)', title, #files), { kind = 'section', section = section })
-    for _, f in ipairs(files) do
-      add('  ' .. f.status .. ' ' .. f.path, {
-        kind = 'file',
-        section = section,
-        path = f.path,
-        status = f.status,
-      })
-      for _, h in ipairs(f.hunks) do
-        add(
-          string.format('    @@ -%d,%d +%d,%d @@', h.old_start, h.old_count, h.new_start, h.new_count),
-          { kind = 'hunk', section = section, path = f.path, hunk_id = h.id }
-        )
-        for li, l in ipairs(h.lines) do
-          add('    ' .. l.marker .. l.text, {
-            kind = 'line',
-            section = section,
-            path = f.path,
-            hunk_id = h.id,
-            line_index = li - 1,
-            marker = l.marker,
-            text = l.text,
-          })
-        end
-      end
-    end
-  end
-
-  render_files('Staged changes', status.staged or {}, 'staged')
-  render_files('Unstaged changes', status.unstaged or {}, 'unstaged')
-  render_files('Untracked files', status.untracked or {}, 'untracked')
-
-  if
-    #(status.staged or {}) == 0
-    and #(status.unstaged or {}) == 0
-    and #(status.untracked or {}) == 0
-  then
-    add('', { kind = 'blank' })
-    add('Working tree clean', { kind = 'message' })
-  end
-
+  local lines = document.text
   set_lines(M.buf, lines)
   M.lines = lines
-  M.map = map
+  M.map = document.nodes or {}
   M.status = status
+  M.version = document.version
 
-  highlight(lines, map)
-
-  if M.client_id then
-    vim.lsp.buf_notify(M.buf, 'vcs/didRender', {
-      uri = vim.uri_from_bufnr(M.buf),
-      text = table.concat(lines, '\n'),
-    })
-  end
+  highlight(lines, M.map)
+  return status
 end
 
---- Fetch the current status and re-render the buffer.
+--- Fetch the current status and replace the buffer with the server's view.
 ---@return table|nil status
 function M.refresh()
-  local status, err = request_sync('vcs/status', { repo_path = M.root })
+  local status, err = request_sync('vcs/status', {
+    repo_path = M.root,
+    uri = vim.uri_from_bufnr(M.buf),
+  })
   if not status then
     M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
     vim.notify('magit-lsp refresh failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
-  render(status)
+  render(status, status.document)
   return status
 end
 
@@ -246,7 +193,7 @@ local function apply_mutation(method, params)
     vim.notify('magit-lsp ' .. method .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
-  render(resp.status)
+  render(resp.status, resp.document)
   apply_effects(resp.effects)
   return resp.status
 end
