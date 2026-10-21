@@ -303,6 +303,11 @@ and prints a table of semantic class → resolved fg colour. Record findings
 (does `:TOhtml` include LSP semantic-token extmarks? what is the exact API in
 the Neovim version in use?) in this file.
 
+- [x] Done. `scripts/color_spike.lua` (`make color-spike`) writes
+  `build/test-output/status-<scheme>-<background>.html` for `default`
+  dark/light, `vim`, `habamax`, `delek`, `lunaperche` and prints the
+  class → link → resolved fg table. Findings in §8.4.
+
 ### IMM-9 — Update `AGENTS.md`
 
 Replace its roadmap section with a link to this file; record the decisions in
@@ -1388,12 +1393,72 @@ only temp paths and timings.
 ### 8.4 Colour and presentation tests with `:TOhtml` (Neovim)
 
 Neovim's `:TOhtml` was rewritten in Lua in 0.10 to support Nvim-specific
-decorations (extmarks); semantic tokens are extmarks, so they should be
-included (a later 0.10 fix specifically ignores LSP *inlay hints*, which
-suggests other LSP extmarks are handled). Exact API: check `:help tohtml` for
-the installed version; it exposes `require("tohtml").tohtml(winid, opts)`
-returning lines. **The implementing agent must explore and confirm** (IMM-8)
-that tokens appear, and record the findings here.
+decorations (extmarks). The findings below were confirmed empirically by
+`scripts/color_spike.lua` (`make color-spike`).
+
+**Findings (IMM-8)** — Neovim 0.12.5:
+
+1. **Client extmark highlights are included.** Ranges from any non-LSP
+   namespace (the client's `magit-lsp` namespace) become
+   `<span class="…">`. The class name is the *resolved* group
+   (`synIDtrans`), so an extmark using `MagitHeader` emits class `Title`, not
+   `MagitHeader`.
+2. **LSP semantic-token extmarks are NOT included.** `tohtml` explicitly skips
+   any extmark whose namespace name contains `nvim.lsp.semantic_tokens` and
+   emits the warning `lsp semantic tokens are not supported, HTML may be
+   incorrect`. Tested with a dummy namespace named
+   `nvim.lsp.semantic_tokens` (the server does not implement
+   `semanticTokens` yet); the real namespaces are
+   `nvim.lsp.semantic_tokens` and `nvim.lsp.semantic_tokens:<client_id>`, both
+   matched by that substring check.
+3. **API:** in 0.12.5 `tohtml` moved to the dist-opt package `nvim.tohtml`, so
+   `:packadd nvim.tohtml` is required first (in 0.10/0.11 it is built in).
+   Then `require('tohtml').tohtml(winid?, opt?) -> string[]`, with
+   `opt = { title?, number_lines?, font?, width?, range? }`. `:TOhtml [file]`
+   is a thin wrapper that writes the lines and splits the HTML buffer.
+4. **`hl_eol` is ignored.** Only the explicit extmark range is styled; the rest
+   of the line gets no class. Verified with `hl_eol = true` and `end_col = 4`:
+   only the first four characters are wrapped.
+5. **Pitfalls:**
+   - Set `termguicolors` *before* `tohtml`. Otherwise it emits no
+     `guifg`/`guibg` and every rule is empty (`{}`).
+   - Closed folds hide their content from the HTML. The client sets
+     `foldmethod=expr` and the default `foldlevel` is 0, so set
+     `foldenable=false` (or `zR`) on the status window first.
+   - `:colorscheme` runs `hi clear`, deleting the client's `default = true`
+     `Magit*` groups. Re-apply the links after every scheme change (the spike
+     captures the links once and re-applies them).
+   - Use `nvim_get_hl(0, {name = g, link = true})` for the link and
+     `link = false` for the resolved `fg`/`bg` (numbers; format `#%06x`).
+   - `tohtml` warnings are batched and delivered from a scheduled
+     `vim.notify`; only the first message text is named. Warm its
+     terminal-colour caches and drain the loop before asserting on a specific
+     warning.
+   - Headless has no terminal colours; with `termguicolors` the scheme's
+     `Normal` `guibg` is used, so background is reported reliably.
+   - `width` only affects fillers/repeat characters, not wrapping; pass a
+     generous value.
+6. **Is the plan-step-5 fallback needed?** For the *current* client
+   (extmark-based `Magit*` groups) `:TOhtml` is sufficient and the plan can be
+   implemented as written. It is **not** sufficient once highlighting moves to
+   LSP semantic tokens (§3.15's target), because those are skipped; then the
+   `nvim_buf_get_extmarks(buf, ns, 0, -1, {details = true})` + `nvim_get_hl`
+   dump becomes mandatory. The dump is also the only way to recover the
+   semantic class (token type / `Magit*` name), since HTML classes carry only
+   the resolved group name.
+
+**Additional finding (mapping bug):** `MagitDiffAdded` / `MagitDiffRemoved`
+link to `diffAdded` / `diffRemoved`, which do **not** exist in Neovim's
+built-in schemes (`hlexists` = 0; resolved fg is nil in all six tested
+cases). Added/removed lines therefore render uncoloured, and the HTML carries
+an empty `.diffAdded {}` rule. §3.15 already maps `@diff.plus` → `Added` and
+`@diff.minus` → `Removed`; the client should link to those (or
+`DiagnosticOk` / `DiagnosticError`). Note also that `Title` in `habamax` and
+`lunaperche` has no `guifg` (bold only), so "no foreground" is not by itself
+a failure — the §8.4 assertions must inspect all resolved attributes.
+
+Spike output: `build/test-output/status-<scheme>-<background>.html` plus the
+class → link → resolved fg table printed by `make color-spike`.
 
 Plan:
 1. Helper `render_status_html(scheme, background)`: start headless Neovim with
