@@ -974,7 +974,7 @@ replacements land.
 | Method | Params | Returns |
 | --- | --- | --- |
 | `initialize` (options) | `clientInfo`, `capabilities: {keymapDelivery: "dynamic"/"static"/"forwardAll", keyModifiers: "full"/"basic", prompts: ["confirm","text","choice","multiChoice"], placements: ["main","side","bottom","float"], editorBridge: bool}`, `profile?`, `viewport` | server capabilities |
-| `view/open` | `{kind, args?, placement?, viewport}` | `ViewDescriptor` |
+| `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
 | `view/invoke` | `{viewId, command, args?, cursor?, selection?}` | `{effects: [...]}` |
@@ -1211,7 +1211,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       tokens, symbols, links, line→node map. *Done when:* a snapshot test
       shows the full status text; deleting `src/document.rs` parsing breaks
       nothing.
-- [ ] R-1.2 `Session`, `View` trait, `ViewStack`, `view/open`, `view/render`
+- [x] R-1.2 `Session`, `View` trait, `ViewStack`, `view/open`, `view/render`
       (full + line edits), `view/rendered` ack, `view/resync`, cursor
       successor by Node ID. *Done when:* a test refreshes after a mutation and
       the returned cursor is on the same node.

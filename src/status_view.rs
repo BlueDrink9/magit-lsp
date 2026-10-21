@@ -3,9 +3,51 @@
 //! The text format is the one the Neovim client has always shown, so clients
 //! only replace buffer lines and never compose the view themselves.
 
-use crate::git::{FileEntry, Status};
+use crate::git::{FileEntry, GitRepo, Status};
 use crate::patch::Hunk;
 use crate::tree::{last_nonblank, LineNode, Link, Node, NodeKind, Symbol, Token, Tree};
+use crate::view::{Ctx, Scope, View, ViewKind};
+use crate::Result;
+
+/// A live status view: the repository root plus the last read status.
+pub struct StatusView {
+    repo_path: String,
+    status: Status,
+}
+
+impl StatusView {
+    /// Read the repository status and prepare a view for it.
+    pub fn open(repo_path: &str) -> Result<Self> {
+        let status = GitRepo::open(repo_path)?.status()?;
+        Ok(Self {
+            repo_path: status.repo_path.clone(),
+            status,
+        })
+    }
+}
+
+impl View for StatusView {
+    fn kind(&self) -> ViewKind {
+        ViewKind::Status
+    }
+
+    fn title(&self) -> String {
+        "Status".to_string()
+    }
+
+    fn scope(&self) -> Scope {
+        Scope::new("status")
+    }
+
+    fn render(&self, _ctx: &Ctx) -> Tree {
+        build(&self.status)
+    }
+
+    fn on_refresh(&mut self) -> Result<()> {
+        self.status = GitRepo::open(&self.repo_path)?.status()?;
+        Ok(())
+    }
+}
 
 /// Build the status view tree from a Git status.
 pub fn build(status: &Status) -> Tree {

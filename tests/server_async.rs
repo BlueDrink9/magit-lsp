@@ -395,3 +395,100 @@ fn unknown_requests_reply_method_not_found() {
     let status = server.finish(Duration::from_secs(10));
     assert!(status.success(), "server exited: {status:?}");
 }
+
+#[test]
+fn view_open_then_invoke_stage_round_trips_over_stdio() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize();
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": repo},
+            "viewport": {"cols": 80, "rows": 24},
+        },
+    }));
+    let opened = server.response_with_id(2);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    assert_eq!(opened["result"]["kind"], json!("status"));
+    assert_eq!(
+        opened["result"]["uri"],
+        json!(format!(
+            "magit://status/{}",
+            tmp.path().to_string_lossy().trim_start_matches('/')
+        ))
+    );
+
+    let initial = server.recv();
+    assert_eq!(initial["method"], json!("view/render"), "{initial}");
+    assert_eq!(initial["params"]["viewId"], json!(view_id));
+    assert_eq!(initial["params"]["version"], json!(1));
+    assert!(initial["params"]["baseVersion"].is_null());
+    let text = initial["params"]["text"]
+        .as_array()
+        .expect("initial full text");
+    let line = text
+        .iter()
+        .position(|line| {
+            line.as_str()
+                .is_some_and(|line| line.trim_start().starts_with('+'))
+        })
+        .expect("a '+' line in the rendered status");
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "view/rendered",
+        "params": {"viewId": view_id, "version": 1},
+    }));
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {
+            "viewId": view_id,
+            "command": "status.stage",
+            "cursor": {"line": line, "column": 0},
+        },
+    }));
+
+    let mut response = None;
+    let mut render = None;
+    while response.is_none() || render.is_none() {
+        let message = server.recv();
+        if message["id"] == json!(3) {
+            response = Some(message);
+        } else if message["method"] == json!("view/render") {
+            render = Some(message);
+        }
+    }
+    let response = response.expect("invoke response");
+    let render = render.expect("render notification");
+    assert_eq!(response["result"]["effects"], json!([]));
+    assert_eq!(render["params"]["viewId"], json!(view_id));
+    assert_eq!(render["params"]["version"], json!(2));
+    assert_eq!(render["params"]["baseVersion"], json!(1));
+    assert!(render["params"]["text"].is_null());
+    assert!(
+        !render["params"]["edits"]
+            .as_array()
+            .expect("edits")
+            .is_empty()
+    );
+    assert!(!render["params"]["cursor"].is_null());
+    assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}

@@ -44,6 +44,13 @@ the tree, never from parsing rendered text.
 | `vcs/targets` | Navigation targets from the tree (section/file/hunk + line) |
 | `textDocument/foldingRange` | Fold ranges from the tree (sections and files) |
 | `vcs/requestTransient` | **Stub** — commit-menu schema (reserved) |
+| `view/open` | Create a view; returns a `ViewDescriptor` plus an initial full `view/render` |
+| `view/close` | Drop a view from its session |
+| `view/invoke` | Run `common.refresh`, `status.stage` or `status.unstage` at the cursor |
+| `view/resync` | Return the current full text after a lost update |
+| `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?, cursor?}` |
+| `view/rendered` (notification) | Client ack `{viewId, version}` |
+| `view/resize` (notification) | Client viewport `{viewId, cols, rows}` |
 
 Every mutation returns a `MutationResponse { status, effects, document }`, which
 the client displays. A failed `git` command is not a JSON-RPC error: it comes
@@ -63,7 +70,12 @@ back as an error-level `Effect::Message` with a readable summary (see
   executes stage/unstage (discard execution and wiring deferred).
 - `src/tree.rs` — view tree: `Node`, `NodeId`, `NodeKind`, tokens, symbols,
   links and the line → node map. Node IDs derive from identity, never position.
-- `src/status_view.rs` — renders `Status` into a `Tree` (text and structure).
+- `src/status_view.rs` — renders `Status` into a `Tree` (text and structure);
+  `StatusView` implements the `View` trait.
+- `src/view.rs` — `View` trait, `ViewDescriptor`, kinds, placement and viewport.
+- `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
+  cursor succession and the tiny R-1.2 command table.
+- `src/diff_text.rs` — common-prefix/suffix line-range edits for `view/render`.
 - `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Document`, …).
 - `src/transport.rs` — `Content-Length` framing over async stdio.
 - `src/server.rs` — `tokio` stdio LSP loop, per-repo tree store, request dispatch.
@@ -104,6 +116,12 @@ back as an error-level `Effect::Message` with a readable summary (see
 - Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
   tokens, symbols, links and a line → node map; `foldingRange` and
   `vcs/targets` come from the tree.
+- Sessions and views (R-1.2): `src/session.rs` owns per-repo `Session`s and a
+  `ViewStack`; `view/open`, `view/close`, `view/invoke` (`common.refresh`,
+  `status.stage`, `status.unstage`), `view/resync`, `view/rendered` acks and
+  `view/resize` are wired. `view/render` sends line-range edits when the client
+  holds the base version, full text otherwise, and a successor cursor by node
+  identity. Position-based requests use the last acked tree.
 - Stubs retained for commit menus: `vcs/requestTransient` +
   `magit-lsp.executeVCSCommand`.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status

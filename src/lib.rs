@@ -1,3 +1,4 @@
+pub mod diff_text;
 pub mod dispatch;
 pub mod errors;
 pub mod git;
@@ -5,9 +6,11 @@ pub mod logging;
 pub mod patch;
 pub mod protocol;
 pub mod server;
+pub mod session;
 pub mod status_view;
 pub mod transport;
 pub mod tree;
+pub mod view;
 
 use std::fmt;
 

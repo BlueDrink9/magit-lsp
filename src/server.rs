@@ -1,15 +1,18 @@
 use crate::errors;
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
+use crate::session::Session;
 use crate::status_view;
 use crate::transport;
 use crate::tree::{Document, Tree};
+use crate::view::Viewport;
 use crate::{Error, Result};
-use lsp_server::{ErrorCode, Message, Request, Response};
+use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::request::Request as LspRequest;
 use lsp_types::{ExecuteCommandOptions, FoldingRangeProviderCapability, ServerCapabilities};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -30,6 +33,12 @@ struct Shared {
     /// Monotonic render version per repository.
     versions: Versions,
     repo_locks: RepoLocks,
+    /// Open views per repository root.
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// View id → repository root, so notifications can find their session.
+    view_repos: Arc<Mutex<HashMap<String, String>>>,
+    /// Global view-id counter; ids are unique across repositories.
+    next_view: Arc<AtomicU64>,
 }
 
 impl Shared {
@@ -39,6 +48,9 @@ impl Shared {
             uri_repos: Arc::new(Mutex::new(HashMap::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            view_repos: Arc::new(Mutex::new(HashMap::new())),
+            next_view: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -85,6 +97,35 @@ impl Shared {
             .get(&repo)
             .cloned()
     }
+
+    /// Allocate a view id, unique for this server process.
+    fn next_view_id(&self) -> String {
+        let next = self.next_view.fetch_add(1, Ordering::Relaxed) + 1;
+        format!("v{next}")
+    }
+
+    /// The repository root that owns `view_id`.
+    fn repo_for_view(&self, view_id: &str) -> Option<String> {
+        self.view_repos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(view_id)
+            .cloned()
+    }
+
+    /// The last acknowledged tree of the view showing `uri`, if any.
+    ///
+    /// Position-based requests use this so they cannot refer to a render the
+    /// client has not applied yet.
+    fn view_tree_for_uri(&self, uri: &str) -> Option<Tree> {
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions
+            .values()
+            .find_map(|session| session.acked_tree_for_uri(uri))
+    }
 }
 
 /// Run the LSP server on stdio until the client requests shutdown.
@@ -129,8 +170,12 @@ async fn serve() -> Result<i32> {
             }
             Ok(Some(Message::Notification(notification))) => match notification.method.as_str() {
                 "exit" => break if shutdown_requested { 0 } else { 1 },
-                // The server owns the document; client notifications are not
-                // needed to keep view state in sync.
+                // Acks and resizes update session state; they never answer.
+                "view/rendered" | "view/resize" => {
+                    handle_view_notification(&shared, &notification)
+                }
+                // The server owns the document; other client notifications are
+                // not needed to keep view state in sync.
                 _ => {}
             },
             Ok(Some(Message::Response(_))) => {}
@@ -174,13 +219,16 @@ async fn handle_request(request: Request, shared: Shared, sender: mpsc::Unbounde
     let id = request.id.clone();
     let method = request.method.clone();
 
-    let response = if !is_request_method(&method) {
-        Response::new_err(
-            id,
-            ErrorCode::MethodNotFound as i32,
-            format!("unknown method: {method}"),
+    let (response, notifications) = if !is_request_method(&method) {
+        (
+            Response::new_err(
+                id,
+                ErrorCode::MethodNotFound as i32,
+                format!("unknown method: {method}"),
+            ),
+            Vec::new(),
         )
-    } else if let Some(repo_path) = mutation_repo_path(&method, &request.params) {
+    } else if let Some(repo_path) = mutation_repo_path(&shared, &method, &request.params) {
         let lock = repository_lock(&shared.repo_locks, &repo_path).await;
         let _guard = lock.lock().await;
         maybe_test_delay().await;
@@ -189,26 +237,113 @@ async fn handle_request(request: Request, shared: Shared, sender: mpsc::Unbounde
         dispatch_response(request, &shared).await
     };
 
+    // The response creates or identifies the view, so it goes first; render
+    // notifications then refer to something the client already knows.
     let _ = sender.send(Message::Response(response));
+    for notification in notifications {
+        let _ = sender.send(notification);
+    }
+}
+
+/// A successful request plus any notifications it produced.
+struct Dispatched {
+    result: Value,
+    notifications: Vec<Message>,
+}
+
+impl Dispatched {
+    fn value(result: Value) -> Self {
+        Self {
+            result,
+            notifications: Vec::new(),
+        }
+    }
+
+    fn with(result: Value, notifications: Vec<Message>) -> Self {
+        Self {
+            result,
+            notifications,
+        }
+    }
 }
 
 /// Run the synchronous Git work off the runtime, keeping the reader free.
-async fn dispatch_response(request: Request, shared: &Shared) -> Response {
+async fn dispatch_response(
+    request: Request,
+    shared: &Shared,
+) -> (Response, Vec<Message>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
 
     match tokio::task::spawn_blocking(move || dispatch(&request, &shared)).await {
-        Ok(Ok(value)) => Response::new_ok(id, value),
+        Ok(Ok(dispatched)) => (
+            Response::new_ok(id, dispatched.result),
+            dispatched.notifications,
+        ),
         Ok(Err(error)) => {
             tracing::warn!(method = %method, error = %error, "request failed");
-            error_response(id, error)
+            (error_response(id, error), Vec::new())
         }
-        Err(error) => Response::new_err(
-            id,
-            ErrorCode::InternalError as i32,
-            format!("request task failed: {error}"),
+        Err(error) => (
+            Response::new_err(
+                id,
+                ErrorCode::InternalError as i32,
+                format!("request task failed: {error}"),
+            ),
+            Vec::new(),
         ),
+    }
+}
+
+/// Apply a client notification that changes session state.
+fn handle_view_notification(shared: &Shared, notification: &Notification) {
+    match notification.method.as_str() {
+        VIEW_RENDERED => {
+            let Ok(params) =
+                serde_json::from_value::<ViewRenderedParams>(notification.params.clone())
+            else {
+                tracing::warn!("ignoring malformed view/rendered");
+                return;
+            };
+            let Some(repo) = shared.repo_for_view(&params.view_id) else {
+                return;
+            };
+            let mut sessions = shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(session) = sessions.get_mut(&repo) {
+                if let Err(error) = session.ack(&params.view_id, params.version) {
+                    tracing::warn!(%error, "failed to record view ack");
+                }
+            }
+        }
+        VIEW_RESIZE => {
+            let Ok(params) =
+                serde_json::from_value::<ViewResizeParams>(notification.params.clone())
+            else {
+                tracing::warn!("ignoring malformed view/resize");
+                return;
+            };
+            let Some(repo) = shared.repo_for_view(&params.view_id) else {
+                return;
+            };
+            let mut sessions = shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(session) = sessions.get_mut(&repo) {
+                let viewport = Viewport {
+                    cols: params.cols,
+                    rows: params.rows,
+                };
+                if let Err(error) = session.resize(&params.view_id, viewport) {
+                    tracing::warn!(%error, "failed to resize view");
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -242,16 +377,21 @@ async fn maybe_test_delay() {
 #[cfg(not(debug_assertions))]
 async fn maybe_test_delay() {}
 
-fn dispatch(request: &Request, shared: &Shared) -> Result<Value> {
+fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     let params = request.params.clone();
     match request.method.as_str() {
-        "initialize" => Ok(serde_json::json!({ "capabilities": capabilities()? })),
-        "shutdown" => Ok(Value::Null),
+        "initialize" => Ok(Dispatched::value(
+            serde_json::json!({ "capabilities": capabilities()? }),
+        )),
+        "shutdown" => Ok(Dispatched::value(Value::Null)),
         StatusRequest::METHOD => {
             let p: StatusParams = from_params(params)?;
             let status = GitRepo::open(&p.repo_path)?.status()?;
             let document = render_status(shared, &status, p.uri.as_deref());
-            Ok(serde_json::to_value(StatusResponse { status, document })?)
+            Ok(Dispatched::value(serde_json::to_value(StatusResponse {
+                status,
+                document,
+            })?))
         }
         DiffRequest::METHOD => {
             let p: DiffParams = from_params(params)?;
@@ -260,86 +400,218 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Value> {
             } else {
                 GitRepo::open(&p.repo_path)?.diff_unstaged(&p.path)?
             };
-            Ok(serde_json::to_value(DiffResponse {
+            Ok(Dispatched::value(serde_json::to_value(DiffResponse {
                 path: p.path,
                 staged: p.staged,
                 diff,
-            })?)
+            })?))
         }
         StageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.stage_hunk(&p.path, &p.hunk_id).map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.stage_hunk(&p.path, &p.hunk_id).map(|_| true),
+            )?)?))
         }
         UnstageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.unstage_hunk(&p.path, &p.hunk_id).map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.unstage_hunk(&p.path, &p.hunk_id).map(|_| true),
+            )?)?))
         }
         StageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.stage_lines(&p.path, &p.hunk_id, p.start, p.end)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.stage_lines(&p.path, &p.hunk_id, p.start, p.end),
+            )?)?))
         }
         UnstageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.unstage_lines(&p.path, &p.hunk_id, p.start, p.end)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.unstage_lines(&p.path, &p.hunk_id, p.start, p.end),
+            )?)?))
         }
         StageFileRequest::METHOD => {
             let p: FileMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.stage_file(&p.path).map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.stage_file(&p.path).map(|_| true),
+            )?)?))
         }
         UnstageFileRequest::METHOD => {
             let p: FileMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.unstage_file(&p.path).map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.unstage_file(&p.path).map(|_| true),
+            )?)?))
         }
         StageAllRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.stage_all().map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.stage_all().map(|_| true),
+            )?)?))
         }
         StageUntrackedRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.stage_untracked().map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.stage_untracked().map(|_| true),
+            )?)?))
         }
         UnstageAllRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
-            Ok(serde_json::to_value(run_mutation(shared, &p.repo_path, |repo| {
-                repo.unstage_all().map(|_| true)
-            })?)?)
+            Ok(Dispatched::value(serde_json::to_value(run_mutation(
+                shared,
+                &p.repo_path,
+                |repo| repo.unstage_all().map(|_| true),
+            )?)?))
+        }
+        ViewOpenRequest::METHOD => open_view(shared, params),
+        ViewCloseRequest::METHOD => close_view(shared, params),
+        ViewInvokeRequest::METHOD => invoke_view(shared, params),
+        ViewResyncRequest::METHOD => {
+            let p: ViewResyncParams = from_params(params)?;
+            let repo = shared
+                .repo_for_view(&p.view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+            let sessions = shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let session = sessions
+                .get(&repo)
+                .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+            Ok(Dispatched::value(serde_json::to_value(
+                session.resync(&p.view_id)?,
+            )?))
         }
         TargetsRequest::METHOD => {
             let p: TargetsParams = from_params(params)?;
-            let targets = shared
-                .tree_for_uri(&p.uri)
+            let targets = tree_for_positional_request(shared, &p.uri)
                 .map(|tree| tree.targets())
                 .unwrap_or_default();
-            Ok(serde_json::to_value(TargetsResponse { targets })?)
+            Ok(Dispatched::value(serde_json::to_value(TargetsResponse {
+                targets,
+            })?))
         }
         "textDocument/foldingRange" => {
             let p: lsp_types::FoldingRangeParams = from_params(params)?;
-            let ranges = shared
-                .tree_for_uri(p.text_document.uri.as_str())
+            let ranges = tree_for_positional_request(shared, p.text_document.uri.as_str())
                 .map(|tree| tree.folding_ranges())
                 .unwrap_or_default();
-            Ok(serde_json::to_value(ranges)?)
+            Ok(Dispatched::value(serde_json::to_value(ranges)?))
         }
-        TransientMenuRequest::METHOD => Ok(serde_json::to_value(stub_transient_menu())?),
-        "workspace/executeCommand" => Ok(Value::Null),
+        TransientMenuRequest::METHOD => Ok(Dispatched::value(serde_json::to_value(
+            stub_transient_menu(),
+        )?)),
+        "workspace/executeCommand" => Ok(Dispatched::value(Value::Null)),
         other => Err(Error::new(format!("unknown method: {other}"))),
     }
+}
+
+/// The last acked tree of a view, falling back to the legacy `vcs/status` tree.
+fn tree_for_positional_request(shared: &Shared, uri: &str) -> Option<Tree> {
+    shared
+        .view_tree_for_uri(uri)
+        .or_else(|| shared.tree_for_uri(uri))
+}
+
+fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let p: ViewOpenParams = from_params(params)?;
+    let repo = p
+        .repo_path()
+        .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
+        .to_string();
+    let id = shared.next_view_id();
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .entry(repo.clone())
+        .or_insert_with(|| Session::new(&repo));
+    let (descriptor, render) = session.open(
+        id.clone(),
+        p.kind,
+        p.placement.unwrap_or_default(),
+        p.viewport,
+    )?;
+    drop(sessions);
+    shared
+        .view_repos
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(id, repo);
+
+    let notification = Notification::new(VIEW_RENDER.to_string(), render);
+    Ok(Dispatched::with(
+        serde_json::to_value(descriptor)?,
+        vec![Message::Notification(notification)],
+    ))
+}
+
+fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let p: ViewCloseParams = from_params(params)?;
+    let repo = shared
+        .repo_for_view(&p.view_id)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get_mut(&repo)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    session.close(&p.view_id)?;
+    drop(sessions);
+    shared
+        .view_repos
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&p.view_id);
+    Ok(Dispatched::value(Value::Null))
+}
+
+fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let p: ViewInvokeParams = from_params(params)?;
+    let repo = shared
+        .repo_for_view(&p.view_id)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get_mut(&repo)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let outcome = session.invoke(&p)?;
+    drop(sessions);
+
+    let notifications = outcome
+        .render
+        .map(|render| vec![Message::Notification(Notification::new(
+            VIEW_RENDER.to_string(),
+            render,
+        ))])
+        .unwrap_or_default();
+    Ok(Dispatched::with(
+        serde_json::to_value(ViewInvokeResponse {
+            effects: outcome.effects,
+        })?,
+        notifications,
+    ))
 }
 
 /// Build, version and remember the tree for `status`; register the buffer URI.
@@ -466,10 +738,24 @@ fn is_request_method(method: &str) -> bool {
             | UnstageAllRequest::METHOD
             | TargetsRequest::METHOD
             | TransientMenuRequest::METHOD
+            | ViewOpenRequest::METHOD
+            | ViewCloseRequest::METHOD
+            | ViewInvokeRequest::METHOD
+            | ViewResyncRequest::METHOD
     )
 }
 
-fn mutation_repo_path(method: &str, params: &Value) -> Option<String> {
+fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<String> {
+    if method == ViewInvokeRequest::METHOD {
+        // Only stage/unstage touch the index; refresh stays a read.
+        let command = params.get("command").and_then(Value::as_str)?;
+        if !matches!(command, "status.stage" | "status.unstage") {
+            return None;
+        }
+        let view_id = params.get("viewId").and_then(Value::as_str)?;
+        return shared.repo_for_view(view_id);
+    }
+
     let is_mutation = matches!(
         method,
         StageHunkRequest::METHOD
