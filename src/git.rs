@@ -22,6 +22,45 @@ pub struct Status {
     pub unstaged: Vec<FileEntry>,
 }
 
+impl Status {
+    /// An empty status, used when a path cannot be opened as a repository.
+    pub fn empty(repo_path: impl Into<String>) -> Self {
+        Self {
+            repo_path: repo_path.into(),
+            branch: "HEAD".to_string(),
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+        }
+    }
+}
+
+/// A failed `git` invocation, kept structured so it can be explained.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitFailure {
+    pub exit_code: i32,
+    pub stderr: String,
+    pub args: Vec<String>,
+    pub subcommand: String,
+}
+
+impl GitFailure {
+    /// Build a failure from a finished Git invocation.
+    pub fn from_output(args: &[&str], status: std::process::ExitStatus, stderr: &[u8]) -> Self {
+        Self {
+            exit_code: status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(stderr).trim_end().to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
+            subcommand: args.first().copied().unwrap_or("git").to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for GitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "git {} failed: {}", self.args.join(" "), self.stderr)
+    }
+}
+
 /// A Git repository driven through the `git` CLI.
 pub struct GitRepo {
     root: PathBuf,
@@ -39,7 +78,7 @@ impl GitRepo {
         let out = Self::command_in(&cwd, &["rev-parse", "--show-toplevel"])?;
         let root = out.trim().to_string();
         if root.is_empty() {
-            return Err(Error("not inside a git repository".into()));
+            return Err(Error::new("not inside a git repository"));
         }
         Ok(Self {
             root: PathBuf::from(root),
@@ -127,7 +166,7 @@ impl GitRepo {
         let layout = self.file_layout(path, false)?;
         let patch = layout
             .whole_hunk_patch(hunk_index)
-            .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
+            .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
         self.apply_index(&patch, false)
     }
 
@@ -136,7 +175,7 @@ impl GitRepo {
         let layout = self.file_layout(path, true)?;
         let patch = layout
             .whole_hunk_patch(hunk_index)
-            .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
+            .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
         self.apply_index(&patch, true)
     }
 
@@ -204,7 +243,7 @@ impl GitRepo {
                 match op {
                     SelectionOp::WholeHunk { hunk_index, .. } => {
                         let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
-                            Error(format!("hunk {hunk_index} not found for {}", file.path))
+                            Error::new(format!("hunk {hunk_index} not found for {}", file.path))
                         })?;
                         body.push_str(&patch::full_hunk_patch(&hunk.hunk));
                     }
@@ -212,7 +251,7 @@ impl GitRepo {
                         hunk_index, lines, ..
                     } => {
                         let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
-                            Error(format!("hunk {hunk_index} not found for {}", file.path))
+                            Error::new(format!("hunk {hunk_index} not found for {}", file.path))
                         })?;
                         // A partial apply of a file creation or deletion needs
                         // a normal header instead of the original `/dev/null`.
@@ -249,7 +288,7 @@ impl GitRepo {
             let hunk = layout
                 .hunks
                 .get(hunk_index)
-                .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
+                .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
             (hunk.first_line, hunk.hunk.lines.len())
         };
         if len == 0 {
@@ -305,7 +344,7 @@ impl GitRepo {
         } else {
             self.diff_unstaged(path)?
         };
-        FileLayout::from_diff(&diff, 0).ok_or_else(|| Error(format!("no diff for {path}")))
+        FileLayout::from_diff(&diff, 0).ok_or_else(|| Error::new(format!("no diff for {path}")))
     }
 
     fn hunks_for(&self, path: &str, staged: bool) -> Result<Vec<Hunk>> {
@@ -332,17 +371,18 @@ impl GitRepo {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| Error(format!("failed to spawn git apply: {e}")))?;
+            .map_err(|e| Error::new(format!("failed to spawn git apply: {e}")))?;
         child
             .stdin
             .as_mut()
-            .ok_or_else(|| Error("failed to open stdin".into()))?
+            .ok_or_else(|| Error::new("failed to open stdin"))?
             .write_all(patch_text.as_bytes())?;
         let out = child.wait_with_output()?;
         if !out.status.success() {
-            return Err(Error(format!(
-                "git apply failed: {}",
-                String::from_utf8_lossy(&out.stderr)
+            return Err(Error::git(GitFailure::from_output(
+                &args,
+                out.status,
+                &out.stderr,
             )));
         }
         Ok(())
@@ -357,12 +397,12 @@ impl GitRepo {
             .args(args)
             .current_dir(cwd)
             .output()
-            .map_err(|e| Error(format!("failed to run git: {e}")))?;
+            .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
         if !out.status.success() {
-            return Err(Error(format!(
-                "git {} failed: {}",
-                args.join(" "),
-                String::from_utf8_lossy(&out.stderr)
+            return Err(Error::git(GitFailure::from_output(
+                args,
+                out.status,
+                &out.stderr,
             )));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())

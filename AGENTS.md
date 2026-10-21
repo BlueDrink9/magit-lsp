@@ -43,11 +43,15 @@ client pushes the rendered text to the server via `vcs/didRender` (standard
 | `textDocument/foldingRange` | Fold ranges for sections and files |
 | `vcs/requestTransient` | **Stub** — commit-menu schema (reserved) |
 
-Every mutation returns the new `Status`, which the client renders.
+Every mutation returns a `MutationResponse { status, effects }`, which the
+client renders. A failed `git` command is not a JSON-RPC error: it comes back
+as an error-level `Effect::Message` with a readable summary (see
+`src/errors.rs`). JSON-RPC errors are reserved for protocol faults.
 
 ### Source layout
 
 - `src/git.rs` — `git` CLI backend (status, diff, staging).
+- `src/errors.rs` — maps Git failures to readable `UserError`s and effects.
 - `src/patch.rs` — unified-diff parsing and hunk/line patch reconstruction.
 - `src/document.rs` — parses the rendered status document into structure
   (sections/files/hunks) for folding ranges and targets.

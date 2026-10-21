@@ -24,6 +24,33 @@ local function is_nil(v)
   return v == nil or v == vim.NIL
 end
 
+local LEVELS = {
+  info = vim.log.levels.INFO,
+  warn = vim.log.levels.WARN,
+  error = vim.log.levels.ERROR,
+}
+
+local function error_message(err)
+  if type(err) == 'table' then
+    return tostring(err.message or err)
+  end
+  return tostring(err)
+end
+
+--- Show one notification per message effect, at the requested level.
+local function apply_effects(effects)
+  for _, effect in ipairs(effects or {}) do
+    if effect.type == 'message' then
+      M.last_error_detail = effect.detail
+      local text = effect.text or ''
+      if effect.hint then
+        text = text .. '\n' .. effect.hint
+      end
+      vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
+    end
+  end
+end
+
 local function define_highlights()
   local hl = {
     { 'MagitHeader', 'Title' },
@@ -198,7 +225,8 @@ end
 function M.refresh()
   local status, err = request_sync('vcs/status', { repo_path = M.root })
   if not status then
-    vim.notify('magit-lsp refresh failed: ' .. vim.inspect(err), vim.log.levels.WARN)
+    M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
+    vim.notify('magit-lsp refresh failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
   render(status)
@@ -206,13 +234,15 @@ function M.refresh()
 end
 
 local function apply_mutation(method, params)
-  local status, err = request_sync(method, params)
-  if not status then
-    vim.notify('magit-lsp ' .. method .. ' failed: ' .. vim.inspect(err), vim.log.levels.WARN)
+  local resp, err = request_sync(method, params)
+  if not resp then
+    M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
+    vim.notify('magit-lsp ' .. method .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
-  render(status)
-  return status
+  render(resp.status)
+  apply_effects(resp.effects)
+  return resp.status
 end
 
 --- Stage a whole hunk of a file.
@@ -275,7 +305,8 @@ function M.diff(path, staged)
     staged = staged or false,
   })
   if not resp then
-    vim.notify('magit-lsp diff failed: ' .. vim.inspect(err), vim.log.levels.WARN)
+    M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
+    vim.notify('magit-lsp diff failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
   return resp
@@ -432,6 +463,23 @@ function M.diff_at()
   return M.show_diff(e.path, e.section == 'staged')
 end
 
+--- Open the detail of the last error in a scratch split.
+function M.error_detail()
+  local detail = M.last_error_detail
+  if not detail or detail == '' then
+    vim.notify('magit-lsp: no error detail to show', vim.log.levels.INFO)
+    return
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_name(buf, 'magit-lsp://error')
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(detail, '\n', { plain = true }))
+  vim.cmd('botright split')
+  vim.api.nvim_win_set_buf(0, buf)
+end
+
 local function keymaps()
   local opts = { buffer = M.buf, nowait = true, noremap = true, silent = true }
   vim.keymap.set('n', 's', M.stage_at, vim.tbl_extend('force', opts, { desc = 'Stage file/hunk' }))
@@ -491,6 +539,11 @@ function M.setup(opts)
   local cmd = opts.cmd or default_cmd()
 
   define_highlights()
+
+  vim.api.nvim_create_user_command('MagitLspErrorDetail', M.error_detail, {
+    desc = 'Show the last magit-lsp error detail',
+    force = true,
+  })
 
   M.buf = fresh_buffer()
 

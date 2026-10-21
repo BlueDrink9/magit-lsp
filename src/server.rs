@@ -1,8 +1,9 @@
 use crate::document;
-use crate::git::GitRepo;
+use crate::errors;
+use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::{Error, Result};
-use lsp_server::{Connection, Message, Notification};
+use lsp_server::{Connection, Message, Notification, Response};
 use lsp_types::request::Request;
 use lsp_types::{
     ExecuteCommandOptions, FoldingRangeProviderCapability, ServerCapabilities,
@@ -35,11 +36,11 @@ pub fn run() -> Result<()> {
         })),
         ..Default::default()
     })
-    .map_err(|e| Error(e.to_string()))?;
+    .map_err(|e| Error::new(e.to_string()))?;
 
     connection
         .initialize(capabilities)
-        .map_err(|e| Error(e.to_string()))?;
+        .map_err(|e| Error::new(e.to_string()))?;
 
     let mut documents: Documents = HashMap::new();
 
@@ -48,22 +49,18 @@ pub fn run() -> Result<()> {
             Message::Request(req) => {
                 if connection
                     .handle_shutdown(&req)
-                    .map_err(|e| Error(e.to_string()))?
+                    .map_err(|e| Error::new(e.to_string()))?
                 {
                     break;
                 }
                 let response = match dispatch(&req, &documents) {
-                    Ok(value) => Message::Response(lsp_server::Response::new_ok(req.id, value)),
-                    Err(err) => Message::Response(lsp_server::Response::new_err(
-                        req.id,
-                        lsp_server::ErrorCode::InternalError as i32,
-                        err.to_string(),
-                    )),
+                    Ok(value) => Message::Response(Response::new_ok(req.id, value)),
+                    Err(err) => Message::Response(error_response(req.id, err)),
                 };
                 connection
                     .sender
                     .send(response)
-                    .map_err(|e| Error(e.to_string()))?;
+                    .map_err(|e| Error::new(e.to_string()))?;
             }
             Message::Notification(not) => handle_notification(&not, &mut documents),
             Message::Response(_) => {}
@@ -72,7 +69,7 @@ pub fn run() -> Result<()> {
 
     match io_threads.join() {
         Ok(_) => Ok(()),
-        Err(e) => Err(Error(e.to_string())),
+        Err(e) => Err(Error::new(e.to_string())),
     }
 }
 
@@ -156,51 +153,51 @@ fn dispatch(req: &lsp_server::Request, documents: &Documents) -> Result<serde_js
         }
         StageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.stage_hunk(&p.path, p.hunk_index)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.stage_hunk(&p.path, p.hunk_index).map(|_| true)
+            })?)?)
         }
         UnstageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.unstage_hunk(&p.path, p.hunk_index)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.unstage_hunk(&p.path, p.hunk_index).map(|_| true)
+            })?)?)
         }
         StageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.stage_lines(&p.path, p.hunk_index, p.start, p.end)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.stage_lines(&p.path, p.hunk_index, p.start, p.end)
+            })?)?)
         }
         UnstageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.unstage_lines(&p.path, p.hunk_index, p.start, p.end)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.unstage_lines(&p.path, p.hunk_index, p.start, p.end)
+            })?)?)
         }
         StageFileRequest::METHOD => {
             let p: FileMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.stage_file(&p.path)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.stage_file(&p.path).map(|_| true)
+            })?)?)
         }
         UnstageFileRequest::METHOD => {
             let p: FileMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.unstage_file(&p.path)?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.unstage_file(&p.path).map(|_| true)
+            })?)?)
         }
         StageAllRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.stage_all()?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.stage_all().map(|_| true)
+            })?)?)
         }
         UnstageAllRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
-            let repo = GitRepo::open(&p.repo_path)?;
-            repo.unstage_all()?;
-            Ok(serde_json::to_value(repo.status()?)?)
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.unstage_all().map(|_| true)
+            })?)?)
         }
         TargetsRequest::METHOD => {
             let p: TargetsParams = from_params(params)?;
@@ -219,8 +216,60 @@ fn dispatch(req: &lsp_server::Request, documents: &Documents) -> Result<serde_js
         }
         TransientMenuRequest::METHOD => Ok(serde_json::to_value(stub_transient_menu())?),
         "workspace/executeCommand" => Ok(serde_json::Value::Null),
-        other => Err(Error(format!("unknown method: {other}"))),
+        other => Err(Error::new(format!("unknown method: {other}"))),
     }
+}
+
+/// Run a mutation for `repo_path`, reporting Git failures as message effects.
+///
+/// A failed Git command still produces a successful response with the current
+/// status; only internal faults become JSON-RPC errors.
+pub fn mutation<F>(repo_path: &str, op: F) -> Result<MutationResponse>
+where
+    F: FnOnce(&GitRepo) -> Result<bool>,
+{
+    let repo = match GitRepo::open(repo_path) {
+        Ok(repo) => repo,
+        Err(err) => {
+            let effect = Effect::from_error(&err).ok_or(err)?;
+            return Ok(MutationResponse {
+                status: git::Status::empty(repo_path),
+                effects: vec![effect],
+            });
+        }
+    };
+
+    let effects = errors::effects_for_result(op(&repo))?;
+    let status = match repo.status() {
+        Ok(status) => status,
+        Err(err) => match Effect::from_error(&err) {
+            Some(effect) => {
+                let mut effects = effects;
+                effects.push(effect);
+                return Ok(MutationResponse {
+                    status: git::Status::empty(repo_path),
+                    effects,
+                });
+            }
+            None => return Err(err),
+        },
+    };
+    Ok(MutationResponse { status, effects })
+}
+
+fn error_response(id: lsp_server::RequestId, err: Error) -> Response {
+    let mut response = Response::new_err(
+        id,
+        lsp_server::ErrorCode::InternalError as i32,
+        err.to_string(),
+    );
+    if let Some(user) = err.user_error() {
+        if let Err(error) = &mut response.response_result {
+            error.message = user.summary.clone();
+            error.data = serde_json::to_value(user).ok();
+        }
+    }
+    response
 }
 
 fn stub_transient_menu() -> TransientMenuResponse {
@@ -240,5 +289,5 @@ fn stub_transient_menu() -> TransientMenuResponse {
 }
 
 fn from_params<T: serde::de::DeserializeOwned>(params: serde_json::Value) -> Result<T> {
-    serde_json::from_value(params).map_err(|e| Error(e.to_string()))
+    serde_json::from_value(params).map_err(|e| Error::new(e.to_string()))
 }

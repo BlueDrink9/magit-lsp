@@ -205,6 +205,8 @@ that passes `git apply --cached --check`.
 exact `Message` effect; the Neovim client has a test asserting a failed command
 produces one `vim.notify` with the summary text and no table dump.
 
+- [x] Done.
+
 ### IMM-4 — Neovim status buffer must be read-only
 
 **Symptom:** lines can be deleted or changed and undo is clobbered, so the

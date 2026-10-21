@@ -265,6 +265,31 @@ T['U unstages all without a commit'] = function()
   MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
 end
 
+T['a failed mutation notifies once with a readable summary'] = function()
+  setup_child()
+  child.lua([[
+    NOTIFIES = {}
+    vim.notify = function(msg, level)
+      table.insert(NOTIFIES, { msg = msg, level = level })
+    end
+  ]])
+  vim.fn.writefile({}, repo .. '/.git/index.lock')
+  child.lua('R = M.stage_all()')
+  vim.fn.delete(repo .. '/.git/index.lock')
+
+  MiniTest.expect.equality(child.lua_get('R ~= nil'), true)
+  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
+  local msg = child.lua_get('NOTIFIES[1].msg')
+  MiniTest.expect.equality(type(msg), 'string')
+  MiniTest.expect.equality(
+    msg:find('Another Git process is running in this repository.', 1, true) ~= nil,
+    true
+  )
+  MiniTest.expect.equality(msg:find('{', 1, true), nil)
+  MiniTest.expect.equality(msg:find('<metatable>', 1, true), nil)
+  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
+end
+
 T['visual mode s stages the selected lines'] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")

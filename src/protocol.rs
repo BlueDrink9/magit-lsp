@@ -1,6 +1,52 @@
 use crate::git;
 use serde::{Deserialize, Serialize};
 
+/// Severity of a message effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// A user-facing consequence of a request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Effect {
+    /// Show a notification; `detail` and `processLogId` are optional extras.
+    Message {
+        level: MessageLevel,
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        #[serde(rename = "processLogId", skip_serializing_if = "Option::is_none")]
+        process_log_id: Option<u64>,
+    },
+}
+
+impl Effect {
+    /// Create a plain message effect with no hint or detail.
+    pub fn message(level: MessageLevel, text: impl Into<String>) -> Self {
+        Effect::Message {
+            level,
+            text: text.into(),
+            hint: None,
+            detail: None,
+            process_log_id: None,
+        }
+    }
+}
+
+/// The result of a mutation: fresh status plus anything the user should see.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MutationResponse {
+    pub status: git::Status,
+    pub effects: Vec<Effect>,
+}
+
 /// `vcs/status`: fetch the structured repository status.
 pub enum StatusRequest {}
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -38,7 +84,7 @@ macro_rules! mutation_request {
         pub enum $name {}
         impl lsp_types::request::Request for $name {
             type Params = $params;
-            type Result = git::Status;
+            type Result = MutationResponse;
             const METHOD: &'static str = $method;
         }
     };
