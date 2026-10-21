@@ -1,3 +1,4 @@
+pub mod dispatch;
 pub mod document;
 pub mod errors;
 pub mod git;

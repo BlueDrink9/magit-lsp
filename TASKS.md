@@ -284,6 +284,9 @@ maps `(command, node kind, selection)` to an operation:
 
 **Done when:** every row has an in-process test.
 
+- [x] Done. (node-kind dispatch + executor for stage/unstage in
+  `src/dispatch.rs`; discard execution and server/client wiring deferred.)
+
 ### IMM-7 — Extract the test harness
 
 Move `init_repo`/`git`/`write`/`make_standard_changes` into
