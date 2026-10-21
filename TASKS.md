@@ -164,6 +164,8 @@ range crossing two files, and selection inside a staged hunk for unstage. Add
 a proptest that random selections over random diffs always produce a patch
 that passes `git apply --cached --check`.
 
+- [x] Done.
+
 ### IMM-3 — Error messages must be readable
 
 **Symptom:** the Neovim client prints raw Lua tables

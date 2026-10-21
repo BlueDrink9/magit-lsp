@@ -1,4 +1,4 @@
-use crate::patch::{self, Hunk};
+use crate::patch::{self, FileLayout, Hunk, Selection, SelectionOp};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -54,9 +54,7 @@ impl GitRepo {
     /// Compute the full status: branch, staged files, and unstaged files.
     pub fn status(&self) -> Result<Status> {
         let repo_path = self.root.to_string_lossy().into_owned();
-        let branch = self
-            .current_branch()
-            .unwrap_or_else(|_| "HEAD".to_string());
+        let branch = self.current_branch().unwrap_or_else(|_| "HEAD".to_string());
         let raw = self.run(&["status", "--porcelain=v1", "-z"])?;
 
         let mut staged: Vec<FileEntry> = Vec::new();
@@ -126,48 +124,145 @@ impl GitRepo {
 
     /// Stage the whole unstaged hunk at `hunk_index` for `path`.
     pub fn stage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
-        let hunks = self.unstaged_hunks(path)?;
-        let hunk = hunks
-            .get(hunk_index)
+        let layout = self.file_layout(path, false)?;
+        let patch = layout
+            .whole_hunk_patch(hunk_index)
             .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
-        let patch = file_patch(path, &patch::full_hunk_patch(hunk), false);
         self.apply_index(&patch, false)
     }
 
     /// Unstage the whole staged hunk at `hunk_index` for `path`.
     pub fn unstage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
-        let hunks = self.staged_hunks(path)?;
-        let hunk = hunks
-            .get(hunk_index)
+        let layout = self.file_layout(path, true)?;
+        let patch = layout
+            .whole_hunk_patch(hunk_index)
             .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
-        let patch = file_patch(path, &patch::full_hunk_patch(hunk), is_new_file(hunk));
         self.apply_index(&patch, true)
     }
 
     /// Stage the lines in `start..=end` of the unstaged hunk at `hunk_index`.
-    pub fn stage_lines(&self, path: &str, hunk_index: usize, start: usize, end: usize) -> Result<()> {
-        let hunks = self.unstaged_hunks(path)?;
-        let hunk = hunks.get(hunk_index).ok_or_else(|| {
-            Error(format!("hunk {hunk_index} not found for {path}"))
-        })?;
-        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end), false);
-        self.apply_index(&patch, false)
+    /// Returns `false` when the range contains no changed lines.
+    pub fn stage_lines(
+        &self,
+        path: &str,
+        hunk_index: usize,
+        start: usize,
+        end: usize,
+    ) -> Result<bool> {
+        self.apply_hunk_lines(path, hunk_index, start, end, false)
     }
 
     /// Unstage the lines in `start..=end` of the staged hunk at `hunk_index`.
+    /// Returns `false` when the range contains no changed lines.
     pub fn unstage_lines(
         &self,
         path: &str,
         hunk_index: usize,
         start: usize,
         end: usize,
-    ) -> Result<()> {
-        let hunks = self.staged_hunks(path)?;
-        let hunk = hunks.get(hunk_index).ok_or_else(|| {
-            Error(format!("hunk {hunk_index} not found for {path}"))
-        })?;
-        let patch = file_patch(path, &patch::subset_hunk_patch(hunk, start, end), false);
-        self.apply_index(&patch, true)
+    ) -> Result<bool> {
+        self.apply_hunk_lines(path, hunk_index, start, end, true)
+    }
+
+    /// Apply a document-line selection, one `git apply` per affected file.
+    ///
+    /// Returns `false` when the selection contains no changed lines.
+    pub fn apply_selection(
+        &self,
+        files: &[FileLayout],
+        start: u32,
+        end: u32,
+        reverse: bool,
+    ) -> Result<bool> {
+        let Selection::Ops(ops) = patch::normalise_selection(files, start, end) else {
+            return Ok(false);
+        };
+
+        for file in files {
+            let file_ops: Vec<&SelectionOp> = ops
+                .iter()
+                .filter(|op| op.path() == file.path.as_str())
+                .collect();
+            if file_ops.is_empty() {
+                continue;
+            }
+            if file_ops
+                .iter()
+                .any(|op| matches!(op, SelectionOp::WholeFile { .. }))
+            {
+                if reverse {
+                    self.unstage_file(&file.path)?;
+                } else {
+                    self.stage_file(&file.path)?;
+                }
+                continue;
+            }
+
+            let mut body = String::new();
+            let mut synthetic_header = false;
+            for op in file_ops {
+                match op {
+                    SelectionOp::WholeHunk { hunk_index, .. } => {
+                        let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
+                            Error(format!("hunk {hunk_index} not found for {}", file.path))
+                        })?;
+                        body.push_str(&patch::full_hunk_patch(&hunk.hunk));
+                    }
+                    SelectionOp::Lines {
+                        hunk_index, lines, ..
+                    } => {
+                        let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
+                            Error(format!("hunk {hunk_index} not found for {}", file.path))
+                        })?;
+                        // A partial apply of a file creation or deletion needs
+                        // a normal header instead of the original `/dev/null`.
+                        if (reverse && patch::is_new_file(&hunk.hunk))
+                            || (!reverse && patch::is_deleted_file(&hunk.hunk))
+                        {
+                            synthetic_header = true;
+                        }
+                        body.push_str(&patch::selected_hunk_patch(&hunk.hunk, lines, reverse));
+                    }
+                    SelectionOp::WholeFile { .. } => unreachable!(),
+                }
+            }
+            let header = if synthetic_header {
+                patch::synthetic_file_header(&file.path, false)
+            } else {
+                file.header.clone()
+            };
+            self.apply_index(&format!("{header}{body}"), reverse)?;
+        }
+        Ok(true)
+    }
+
+    fn apply_hunk_lines(
+        &self,
+        path: &str,
+        hunk_index: usize,
+        start: usize,
+        end: usize,
+        reverse: bool,
+    ) -> Result<bool> {
+        let layout = self.file_layout(path, reverse)?;
+        let (first_line, len) = {
+            let hunk = layout
+                .hunks
+                .get(hunk_index)
+                .ok_or_else(|| Error(format!("hunk {hunk_index} not found for {path}")))?;
+            (hunk.first_line, hunk.hunk.lines.len())
+        };
+        if len == 0 {
+            return Ok(false);
+        }
+        let start = start.min(len - 1) as u32;
+        let end = end.min(len - 1) as u32;
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        self.apply_selection(&[layout], first_line + start, first_line + end, reverse)
     }
 
     /// Stage the entire file, including untracked files.
@@ -204,12 +299,13 @@ impl GitRepo {
         self.run(&rm).map(|_| ())
     }
 
-    fn unstaged_hunks(&self, path: &str) -> Result<Vec<Hunk>> {
-        Ok(patch::parse_unified_diff(&self.diff_unstaged(path)?))
-    }
-
-    fn staged_hunks(&self, path: &str) -> Result<Vec<Hunk>> {
-        Ok(patch::parse_unified_diff(&self.diff_staged(path)?))
+    fn file_layout(&self, path: &str, staged: bool) -> Result<FileLayout> {
+        let diff = if staged {
+            self.diff_staged(path)?
+        } else {
+            self.diff_unstaged(path)?
+        };
+        FileLayout::from_diff(&diff, 0).ok_or_else(|| Error(format!("no diff for {path}")))
     }
 
     fn hunks_for(&self, path: &str, staged: bool) -> Result<Vec<Hunk>> {
@@ -223,8 +319,9 @@ impl GitRepo {
 
     fn apply_index(&self, patch_text: &str, reverse: bool) -> Result<()> {
         // `--unidiff-zero` lets line subsets of a new file apply, where the
-        // hunk has no context lines to anchor it.
-        let mut args: Vec<&str> = vec!["apply", "--cached", "--unidiff-zero"];
+        // hunk has no context lines to anchor it. `--recount` lets us keep the
+        // original hunk header counts after neutralising unselected lines.
+        let mut args: Vec<&str> = vec!["apply", "--cached", "--unidiff-zero", "--recount"];
         if reverse {
             args.push("-R");
         }
@@ -270,20 +367,4 @@ impl GitRepo {
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
-}
-
-fn file_patch(path: &str, hunk_patch: &str, new_file: bool) -> String {
-    if new_file {
-        // Reversing a new file must target `/dev/null`, otherwise `git apply -R`
-        // leaves an empty file in the index instead of removing the entry.
-        format!(
-            "diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n{hunk_patch}"
-        )
-    } else {
-        format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{hunk_patch}")
-    }
-}
-
-fn is_new_file(h: &Hunk) -> bool {
-    h.old_start == 0 && h.old_count == 0
 }
