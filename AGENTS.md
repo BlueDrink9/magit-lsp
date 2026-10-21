@@ -50,36 +50,81 @@ as an error-level `Effect::Message` with a readable summary (see
 
 ### Source layout
 
-- `src/git.rs` — `git` CLI backend (status, diff, staging).
-- `src/errors.rs` — maps Git failures to readable `UserError`s and effects.
-- `src/patch.rs` — unified-diff parsing and hunk/line patch reconstruction.
-- `src/document.rs` — parses the rendered status document into structure
-  (sections/files/hunks) for folding ranges and targets.
-- `src/protocol.rs` — custom JSON-RPC request/response types.
+- `src/lib.rs` — crate root; `Error` (message + optional structured Git failure).
+- `src/git.rs` — `git` CLI backend (status, diff, staging). Every index
+  unstaging goes through `unstage_paths` (works on unborn HEAD).
+- `src/errors.rs` — `UserError` mapping (exit code + stderr → summary/hint)
+  and conversion to an error-level `Effect::Message`.
+- `src/patch.rs` — unified-diff parsing, selection normalisation, and hunk/line
+  patch construction. Counts are left stale; `git apply --recount` infers them.
+- `src/dispatch.rs` — maps `(command, node kind, selection)` to an operation and
+  executes stage/unstage (discard execution and wiring deferred).
+- `src/document.rs` — **legacy**: parses the rendered status document. Slated for
+  deletion in R-1.1; do not extend it.
+- `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Effect`, …).
 - `src/server.rs` — stdio LSP loop, document store, request dispatch.
-- `lua/magit-lsp/init.lua` — Neovim client (render, highlight, folding, keys).
-- `tests/` — `git_backend.rs` (Rust) and `test_magit_lsp.lua` (Neovim).
+- `src/vcs.rs` — vestigial gix-based backend stub; unused, to be deleted.
+- `lua/magit-lsp/init.lua` — Neovim client (render, highlight, folding, keys,
+  read-only buffer).
+- `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
+  environment (fixed identity/dates, isolated config).
+- `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
+  integration tests on temp repos.
+- `tests/test_magit_lsp.lua` — Neovim integration via mini.test (real server).
+- `scripts/color_spike.lua` — `:TOhtml` colour-verification spike
+  (`make color-spike`).
 
 ## Progress (done)
 
 - Git backend via the `git` CLI: status, per-file diffs, stage/unstage of
-  whole file, whole hunk, and line ranges; stage/unstage all.
-- Patch engine (`src/patch.rs`): unified-diff parsing + hunk/line patch
-  reconstruction with correct line renumbering; applied with `git apply
-  --cached`.
+  whole file, whole hunk, and line ranges; stage/unstage all. Unstaging a path
+  works on an unborn HEAD (`unstage_paths`, IMM-1).
+- Selection normalisation in `patch.rs` (IMM-2): only `+`/`-` lines in a
+  selection are staged; headers select the whole file/hunk; patches are applied
+  with `git apply --cached --recount` (IMM-5 audit: no diff computation outside
+  `git diff` parsing).
+- Readable errors (IMM-3): Git failures become a `UserError` carried in an
+  `Effect::Message`; `MutationResponse { status, effects }` on every mutation.
+- Neovim status buffer is read-only (IMM-4): `modifiable=false`,
+  `readonly=true`, `undolevels=-1`, a single `set_lines` writer, `:w` blocked.
+- Node-kind dispatch for stage/unstage in `src/dispatch.rs` (IMM-6).
+- Test harness extracted to `tests/common/mod.rs` with `RepoFixture` and
+  deterministic git env (IMM-7).
+- Colour spike (IMM-8): `scripts/color_spike.lua` writes
+  `build/test-output/status-<scheme>-<background>.html` and prints the class →
+  link → resolved-fg table; findings in `TASKS.md` §8.4.
 - LSP server (`src/server.rs`): request dispatch, document store, capabilities.
 - Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `vcs://status` nofile
   buffer, rendering, extmark highlighting, LSP folding, navigation.
 - LSP-served structure: `textDocument/foldingRange` and `vcs/targets` from a
-  parser (`src/document.rs`) over the rendered document.
+  parser (`src/document.rs`) over the rendered document (legacy, see R-1.1).
 - Stubs retained for commit menus: `vcs/requestTransient` +
   `magit-lsp.executeVCSCommand`.
-- Tests: Rust unit (patch, document) + integration (git backend on temp repos)
-  + Neovim integration via mini.test (real server + temp repo). `make test`.
+- Tests: Rust unit (patch, document) + integration (git backend, dispatch,
+  errors) + Neovim integration via mini.test (real server + temp repo).
+  `make test`.
 
 ## Roadmap
 
-See [roadmap.md](./roadmap.md)
+The roadmap, glossary, protocol reference and phased plan live in
+[TASKS.md](./TASKS.md). Do not add roadmap notes here.
+
+### Decisions already made
+
+| Topic | Decision |
+| --- | --- |
+| Async runtime | `tokio` |
+| Config format | TOML, with `include` of other TOML files (absolute or relative), default location from the OS config dir (XDG on Linux) |
+| Neovim default profile | `vim` (evil-style) |
+| Non-modal default profile | `standard` (Magit mnemonics, direct keys, no Emacs idioms) |
+| Emacs idioms (`C-c C-c`, `M-n`, …) | Not kept. No `emacs` profile is shipped |
+| Key notation | W3C `KeyboardEvent.key` names + VSCode-style `ctrl+shift+x` modifiers (TASKS.md §3.8) |
+| Section folding | Server-owned, but triggered by the client's own fold keys wherever possible (§3.9) |
+| Unimplemented Magit operations | Shown in menus, greyed out, with their default key and description (Neogit style) (§3.12) |
+| jj | May be a semi-hard fork. Do not complicate the Git design or drop Git features for jj's sake |
+| Diff/patch | Git computes diffs; we parse its output and build patches for `git apply` (this is what Magit does, §3.13) |
+| Rendering | Server re-renders fully (as Magit does) and sends line-range edits, so clients stay stable (§3.3) |
+| Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few (§8) |
 
 ## Bugs addressed / challenges
 
@@ -124,4 +169,17 @@ See [roadmap.md](./roadmap.md)
   what it does, not how.
 - Keep the server/client rendered-document format in sync (`src/document.rs`
   parser vs. the Lua renderer).
+- **No backward compatibility.** Rename, reshape and delete protocol methods,
+  config keys and Lua APIs freely. Delete the old thing; never leave a shim or
+  a deprecated alias behind.
+- **Never address hunks by index.** Hunk identity is a content hash
+  (`path` + hunk text), so it survives refreshes and concurrent edits. Known
+  gap: the current code still uses indices in places — tracked by R-0.5; do not
+  add new index-addressed APIs.
+- **Never parse rendered text.** Structure must come from the server's tree.
+  `src/document.rs` parses the rendered document and is legacy, slated for
+  removal in R-1.1; do not extend it.
+- **Never print raw JSON or Lua tables to the user.** A failed Git command is
+  not a JSON-RPC error: return an `Effect::Message` built from a `UserError`
+  (`summary` + optional `hint`), with `detail` available on request.
 - Run `make test` before finishing; ensure no orphan `magit-lsp` processes.

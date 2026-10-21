@@ -314,6 +314,8 @@ Replace its roadmap section with a link to this file; record the decisions in
 §0 and the conventions: no backward compatibility, never address hunks by
 index, never parse rendered text, never print raw JSON/Lua tables to the user.
 
+- [x] Done.
+
 ---
 
 ## 3. Design decisions (expanded)
@@ -1186,7 +1188,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 
 ### Phase 0 — Groundwork
 
-- [ ] R-0.1 IMM-1…IMM-9 complete.
+- [x] R-0.1 IMM-1…IMM-9 complete.
 - [ ] R-0.2 `git status --porcelain=v2 -z --branch` parsing; paths with spaces/
       quotes/unicode; rename old/new paths. *Done when:* fixtures with each of
       those pass.
