@@ -131,13 +131,15 @@ fn stage_file_stages_untracked_file() {
     write(&tmp.path().join("new.txt"), "hello\n");
 
     let status = repo.status().expect("status");
-    assert_eq!(status.unstaged.len(), 1);
-    assert_eq!(status.unstaged[0].status, "?");
+    assert!(status.unstaged.is_empty());
+    assert_eq!(status.untracked.len(), 1);
+    assert_eq!(status.untracked[0].status, "?");
 
     repo.stage_file("new.txt").expect("stage file");
 
     let status = repo.status().expect("status");
     assert!(status.unstaged.is_empty());
+    assert!(status.untracked.is_empty());
     assert_eq!(status.staged.len(), 1);
     assert_eq!(status.staged[0].path, "new.txt");
 }
@@ -221,8 +223,9 @@ fn unstage_all_works_without_commits() {
 
     let status = repo.status().expect("status");
     assert!(status.staged.is_empty());
-    assert_eq!(status.unstaged.len(), 1);
-    assert_eq!(status.unstaged[0].status, "?");
+    assert!(status.unstaged.is_empty());
+    assert_eq!(status.untracked.len(), 1);
+    assert_eq!(status.untracked[0].status, "?");
 }
 
 #[test]
@@ -235,8 +238,9 @@ fn unstage_file_works_without_commits() {
 
     let status = repo.status().expect("status");
     assert!(status.staged.is_empty());
-    assert_eq!(status.unstaged.len(), 1);
-    assert_eq!(status.unstaged[0].status, "?");
+    assert!(status.unstaged.is_empty());
+    assert_eq!(status.untracked.len(), 1);
+    assert_eq!(status.untracked[0].status, "?");
 }
 
 #[test]
@@ -251,8 +255,9 @@ fn unstage_file_keeps_worktree_changes_without_commits() {
     assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
     let status = repo.status().expect("status");
     assert!(status.staged.is_empty());
-    assert_eq!(status.unstaged.len(), 1);
-    assert_eq!(status.unstaged[0].status, "?");
+    assert!(status.unstaged.is_empty());
+    assert_eq!(status.untracked.len(), 1);
+    assert_eq!(status.untracked[0].status, "?");
 }
 
 #[test]

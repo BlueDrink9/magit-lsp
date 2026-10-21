@@ -188,10 +188,7 @@ pub fn execute(
             Ok(Vec::new())
         }
         Resolution::StageAllUntracked => {
-            let status = repo.status()?;
-            for file in status.unstaged.iter().filter(|file| file.status == "?") {
-                repo.stage_file(&file.path)?;
-            }
+            repo.stage_untracked()?;
             Ok(Vec::new())
         }
         Resolution::StageFile { path } => {

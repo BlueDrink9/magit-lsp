@@ -13,6 +13,12 @@ fn status_paths(status: &magit_lsp::git::Status, staged: bool) -> Vec<String> {
     files.iter().map(|f| f.path.clone()).collect()
 }
 
+fn untracked_paths(status: &magit_lsp::git::Status) -> Vec<String> {
+    let mut paths: Vec<String> = status.untracked.iter().map(|f| f.path.clone()).collect();
+    paths.sort();
+    paths
+}
+
 #[test]
 fn status_reports_path_with_spaces() {
     let (tmp, repo) = RepoFixture::new()
@@ -143,12 +149,9 @@ fn unstage_file_on_rename_restores_both_paths() {
 
     let status = repo.status().expect("status");
     assert!(status.staged.is_empty(), "staged: {:?}", status.staged);
-    assert_eq!(
-        status_paths(&status, false),
-        vec!["f.txt", "renamed file.txt"]
-    );
+    assert_eq!(status_paths(&status, false), vec!["f.txt"]);
     assert_eq!(status.unstaged[0].status, "D");
-    assert_eq!(status.unstaged[1].status, "?");
+    assert_eq!(untracked_paths(&status), vec!["renamed file.txt"]);
     // The working tree keeps the new name.
     assert!(tmp.path().join("renamed file.txt").exists());
 }
@@ -193,4 +196,56 @@ fn status_reports_renamed_path_hunks() {
     assert_eq!(status.unstaged.len(), 1);
     assert_eq!(status.unstaged[0].path, "renamed file.txt");
     assert_eq!(status.unstaged[0].hunks.len(), 1);
+}
+
+#[test]
+fn untracked_files_are_separate_from_unstaged() {
+    let (tmp, repo) = init_repo();
+    make_standard_changes(tmp.path());
+    write(&tmp.path().join("new.txt"), "new\n");
+    write(&tmp.path().join("spaced name.txt"), "spaced\n");
+
+    let status = repo.status().expect("status");
+    assert_eq!(status_paths(&status, false), vec!["f.txt"]);
+    assert_eq!(
+        untracked_paths(&status),
+        vec!["new.txt", "spaced name.txt"]
+    );
+    for file in &status.untracked {
+        assert_eq!(file.status, "?");
+        assert!(file.hunks.is_empty());
+    }
+}
+
+#[test]
+fn stage_untracked_stages_only_untracked_files() {
+    let (tmp, repo) = init_repo();
+    make_standard_changes(tmp.path());
+    write(&tmp.path().join("new.txt"), "new\n");
+    write(&tmp.path().join("spaced name.txt"), "spaced\n");
+
+    repo.stage_untracked().expect("stage untracked");
+
+    let status = repo.status().expect("status");
+    assert!(status.untracked.is_empty());
+    let staged: Vec<String> = status.staged.iter().map(|f| f.path.clone()).collect();
+    assert_eq!(staged, vec!["new.txt", "spaced name.txt"]);
+    // The tracked modification stays in the working tree.
+    assert_eq!(status_paths(&status, false), vec!["f.txt"]);
+    let cached = git(tmp.path(), &["diff", "--cached", "--name-only"]);
+    assert!(!cached.contains("f.txt"), "got: {cached}");
+}
+
+#[test]
+fn stage_untracked_works_on_unborn_head() {
+    let (tmp, repo) = RepoFixture::new().unborn().build();
+    write(&tmp.path().join("new.txt"), "new\n");
+
+    repo.stage_untracked().expect("stage untracked");
+
+    let status = repo.status().expect("status");
+    assert!(status.untracked.is_empty());
+    assert_eq!(status.staged.len(), 1);
+    assert_eq!(status.staged[0].path, "new.txt");
+    assert_eq!(status.staged[0].status, "A");
 }

@@ -442,13 +442,20 @@ fn execute_stage_all_untracked_stages_only_untracked() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
     write(&tmp.path().join("new.txt"), "brand new\n");
+    write(&tmp.path().join("spaced name.txt"), "spaced\n");
 
     dispatch::execute(&repo, &Resolution::StageAllUntracked, &[]).expect("execute");
 
     let porcelain = git(tmp.path(), &["status", "--porcelain"]);
     assert!(porcelain.contains("A  new.txt"), "got: {porcelain}");
+    assert!(porcelain.contains("spaced name.txt"), "got: {porcelain}");
     // The tracked modification is left unstaged.
     assert!(porcelain.contains(" M f.txt"), "got: {porcelain}");
+
+    let status = repo.status().expect("status");
+    assert!(status.untracked.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
+    assert_eq!(status.unstaged[0].path, "f.txt");
 }
 
 #[test]

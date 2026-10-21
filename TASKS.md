@@ -1192,7 +1192,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-0.2 `git status --porcelain=v2 -z --branch` parsing; paths with spaces/
       quotes/unicode; rename old/new paths. *Done when:* fixtures with each of
       those pass.
-- [ ] R-0.3 Separate **Untracked files** section (currently lumped in Unstaged
+- [x] R-0.3 Separate **Untracked files** section (currently lumped in Unstaged
       with status `?`); stage/unstage them via UI; `stage_all` also stages
       untracked when `status.stage-all` is invoked on the Untracked header.
       *Done when:* snapshot of a repo with untracked files shows the section.

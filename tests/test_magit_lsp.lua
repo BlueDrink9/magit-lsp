@@ -64,6 +64,14 @@ local function make_unborn_repo()
   return path
 end
 
+--- A repo with a tracked modification plus two untracked files, one spaced.
+local function make_untracked_repo()
+  local path = make_repo()
+  vim.fn.writefile({ 'untracked' }, path .. '/new.txt')
+  vim.fn.writefile({ 'untracked' }, path .. '/a b.txt')
+  return path
+end
+
 local function setup_child()
   child.lua(string.format("M = require('magit-lsp'); M.setup({ root_dir = %s })", vim.inspect(repo)))
   child.lua([[
@@ -281,7 +289,8 @@ T['U unstages all without a commit'] = function()
   child.lua("S = M.unstage_all()")
   MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
   MiniTest.expect.equality(child.lua_get('#M.status.staged'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
+  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 1)
 end
 
 T['a failed mutation notifies once with a readable summary'] = function()
@@ -469,6 +478,83 @@ T['navigation targets come from the LSP'] = function()
   child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("file", 1)')
   MiniTest.expect.equality(child.lua_get('type(J)'), 'number')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), child.lua_get('J'))
+end
+
+T['renders untracked files in their own section'] = function()
+  repo = make_untracked_repo()
+  setup_child()
+  MiniTest.expect.equality(child.lua_get('M.lines'), {
+    'Head: main',
+    '',
+    'Staged changes (0)',
+    '',
+    'Unstaged changes (1)',
+    '  M f.txt',
+    '    @@ -1,10 +1,10 @@',
+    '     line1',
+    '     line2',
+    '    -line3',
+    '    +line3 CHANGED',
+    '     line4',
+    '     line5',
+    '    +NEW line',
+    '     line6',
+    '     line7',
+    '    -line8',
+    '     line9',
+    '     line10',
+    '',
+    'Untracked files (2)',
+    '  ? a b.txt',
+    '  ? new.txt',
+  })
+  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 2)
+end
+
+T['stage_at on an untracked file stages it'] = function()
+  repo = make_untracked_repo()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_first('file', 'untracked')")
+  MiniTest.expect.equality(type(target), 'number', 'untracked file line index')
+  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
+  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
+  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 1)
+  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
+  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  assert_line('Untracked files (1)')
+  assert_line('  A a b.txt')
+end
+
+T['stage_at on the untracked section stages all untracked'] = function()
+  repo = make_untracked_repo()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_first('section', 'untracked')")
+  MiniTest.expect.equality(type(target), 'number', 'untracked section line index')
+  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
+  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
+  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 0)
+  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 2)
+  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  assert_line('Untracked files (0)')
+  assert_line('  A new.txt')
+end
+
+T['unstage_at on an untracked file reports nothing to unstage'] = function()
+  repo = make_untracked_repo()
+  setup_child()
+  child.lua([[
+    NOTIFIES = {}
+    vim.notify = function(msg, level)
+      table.insert(NOTIFIES, { msg = msg, level = level })
+    end
+  ]])
+  local target = child.lua_get("HELPERS.find_first('file', 'untracked')")
+  MiniTest.expect.equality(type(target), 'number', 'untracked file line index')
+  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); U = M.unstage_at()')
+  MiniTest.expect.equality(child.lua_get('U == nil'), true)
+  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
+  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].msg'), 'Nothing to unstage here')
 end
 
 return T

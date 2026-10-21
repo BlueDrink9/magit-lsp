@@ -128,6 +128,7 @@ pub struct RepoMutationParams {
 }
 mutation_request!(StageAllRequest, "vcs/stageAll", RepoMutationParams);
 mutation_request!(UnstageAllRequest, "vcs/unstageAll", RepoMutationParams);
+mutation_request!(StageUntrackedRequest, "vcs/stageUntracked", RepoMutationParams);
 
 /// `vcs/requestTransient`: reserved SDUI schema for commit-style menus (stub).
 pub enum TransientMenuRequest {}

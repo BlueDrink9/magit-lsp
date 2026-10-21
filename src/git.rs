@@ -32,6 +32,8 @@ pub struct Status {
     pub behind: Option<u32>,
     pub staged: Vec<FileEntry>,
     pub unstaged: Vec<FileEntry>,
+    /// Files Git does not track yet; they have no hunks.
+    pub untracked: Vec<FileEntry>,
 }
 
 impl Status {
@@ -46,6 +48,7 @@ impl Status {
             behind: None,
             staged: Vec::new(),
             unstaged: Vec::new(),
+            untracked: Vec::new(),
         }
     }
 }
@@ -186,7 +189,7 @@ impl GitRepo {
                 }
                 b'?' => {
                     if let Some(path) = token.strip_prefix("? ") {
-                        status.unstaged.push(FileEntry {
+                        status.untracked.push(FileEntry {
                             path: path.to_string(),
                             status: "?".to_string(),
                             orig_path: None,
@@ -456,6 +459,20 @@ impl GitRepo {
         self.run(&["add", "-u"]).map(|_| ())
     }
 
+    /// Stage every untracked file, leaving tracked changes alone.
+    ///
+    /// Paths come from the status so spaces and non-ASCII names stay intact;
+    /// `git add -A` would also stage tracked modifications.
+    pub fn stage_untracked(&self) -> Result<()> {
+        let status = self.status()?;
+        let mut args = vec!["add", "--"];
+        args.extend(status.untracked.iter().map(|file| file.path.as_str()));
+        if args.len() == 2 {
+            return Ok(());
+        }
+        self.run(&args).map(|_| ())
+    }
+
     /// Unstage everything, including repositories without a commit yet.
     pub fn unstage_all(&self) -> Result<()> {
         self.unstage_paths(&["."])
@@ -587,10 +604,11 @@ mod tests {
         let raw = "u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
                    ! build/\0? new file.txt\0";
         let status = parse(raw);
-        assert_eq!(status.unstaged.len(), 2);
+        assert_eq!(status.unstaged.len(), 1);
         assert_eq!(status.unstaged[0].status, "U");
         assert_eq!(status.unstaged[0].path, "conflict.txt");
-        assert_eq!(status.unstaged[1].status, "?");
-        assert_eq!(status.unstaged[1].path, "new file.txt");
+        assert_eq!(status.untracked.len(), 1);
+        assert_eq!(status.untracked[0].status, "?");
+        assert_eq!(status.untracked[0].path, "new file.txt");
     }
 }

@@ -193,6 +193,12 @@ fn dispatch(req: &lsp_server::Request, documents: &Documents) -> Result<serde_js
                 repo.stage_all().map(|_| true)
             })?)?)
         }
+        StageUntrackedRequest::METHOD => {
+            let p: RepoMutationParams = from_params(params)?;
+            Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
+                repo.stage_untracked().map(|_| true)
+            })?)?)
+        }
         UnstageAllRequest::METHOD => {
             let p: RepoMutationParams = from_params(params)?;
             Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {

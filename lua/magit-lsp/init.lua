@@ -198,20 +198,15 @@ local function render(status)
     end
   end
 
-  local modified, untracked = {}, {}
-  for _, f in ipairs(status.unstaged or {}) do
-    if f.status == '?' then
-      table.insert(untracked, f)
-    else
-      table.insert(modified, f)
-    end
-  end
-
   render_files('Staged changes', status.staged or {}, 'staged')
-  render_files('Unstaged changes', modified, 'unstaged')
-  render_files('Untracked files', untracked, 'untracked')
+  render_files('Unstaged changes', status.unstaged or {}, 'unstaged')
+  render_files('Untracked files', status.untracked or {}, 'untracked')
 
-  if #(status.staged or {}) == 0 and #modified == 0 and #untracked == 0 then
+  if
+    #(status.staged or {}) == 0
+    and #(status.unstaged or {}) == 0
+    and #(status.untracked or {}) == 0
+  then
     add('', { kind = 'blank' })
     add('Working tree clean', { kind = 'message' })
   end
@@ -303,6 +298,11 @@ function M.stage_all()
   return apply_mutation('vcs/stageAll', { repo_path = M.root })
 end
 
+--- Stage all untracked files, leaving tracked changes unstaged.
+function M.stage_untracked()
+  return apply_mutation('vcs/stageUntracked', { repo_path = M.root })
+end
+
 --- Unstage everything.
 function M.unstage_all()
   return apply_mutation('vcs/unstageAll', { repo_path = M.root })
@@ -377,6 +377,9 @@ function M.stage_at()
   if e.section ~= 'unstaged' and e.section ~= 'untracked' then
     return nil, 'no unstaged item under cursor'
   end
+  if e.kind == 'section' and e.section == 'untracked' then
+    return M.stage_untracked()
+  end
   if e.kind == 'file' then
     return M.stage_file(e.path)
   end
@@ -389,6 +392,10 @@ end
 --- Unstage the file or hunk under the cursor.
 function M.unstage_at()
   local e = cursor_entry()
+  if e and e.section == 'untracked' then
+    vim.notify('Nothing to unstage here', vim.log.levels.INFO)
+    return nil, 'nothing to unstage here'
+  end
   if not e or e.section ~= 'staged' then
     return nil, 'no staged item under cursor'
   end
