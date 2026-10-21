@@ -421,6 +421,134 @@ fn init_two_file_repo() -> (TempDir, GitRepo) {
     (tmp, repo)
 }
 
+/// A repo with a 40-line tracked file.
+fn init_40_line_repo() -> (TempDir, GitRepo) {
+    let tmp = TempDir::new().expect("tempdir");
+    git(tmp.path(), &["init", "-q", "-b", "main"]);
+    git(tmp.path(), &["config", "user.email", "t@example.com"]);
+    git(tmp.path(), &["config", "user.name", "t"]);
+    let lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    git(tmp.path(), &["add", "."]);
+    git(tmp.path(), &["commit", "-q", "-m", "init"]);
+    let repo = GitRepo::open(tmp.path()).expect("open repo");
+    (tmp, repo)
+}
+
+/// Stage the replacement of `old` by `new`, recomputing the unstaged layout
+/// first so earlier stagings are reflected.
+fn stage_replacement(repo: &GitRepo, path: &str, old: &str, new: &str) {
+    let layout = layout_for(repo, path, false);
+    let (hunk_index, lines) = layout
+        .hunks
+        .iter()
+        .enumerate()
+        .find_map(|(hunk_index, hunk)| {
+            let lines: Vec<usize> = hunk
+                .hunk
+                .lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| {
+                    (line.marker == '-' && line.text == old)
+                        || (line.marker == '+' && line.text == new)
+                })
+                .map(|(index, _)| index)
+                .collect();
+            (!lines.is_empty()).then_some((hunk_index, lines))
+        })
+        .unwrap_or_else(|| panic!("no change {old} -> {new}"));
+    repo.stage_lines(path, hunk_index, lines[0], lines[lines.len() - 1])
+        .expect("stage change");
+}
+
+/// Assert the status view's staged hunks equal what `git diff --cached -U3`
+/// printed for `f.txt`.
+fn assert_staged_hunks_match_git(repo: &GitRepo, tmp: &Path) {
+    let cached = cached_diff(tmp);
+    let expected = patch::parse_unified_diff(&cached);
+    let status = repo.status().expect("status");
+    let staged = status
+        .staged
+        .iter()
+        .find(|file| file.path == "f.txt")
+        .expect("f.txt is staged");
+    assert_eq!(
+        staged.hunks, expected,
+        "status hunks must match git diff --cached -U3\n{cached}"
+    );
+}
+
+fn hunk_count(diff: &str) -> usize {
+    diff.lines().filter(|line| line.starts_with("@@")).count()
+}
+
+#[test]
+fn two_distant_line_stagings_show_two_staged_hunks() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[4] = "line5 CHANGED".into();
+    lines[34] = "line35 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+    stage_replacement(&repo, "f.txt", "line5", "line5 CHANGED");
+    stage_replacement(&repo, "f.txt", "line35", "line35 CHANGED");
+
+    let cached = cached_diff(tmp.path());
+    assert!(cached.contains("-line5\n"), "got: {cached}");
+    assert!(cached.contains("+line5 CHANGED\n"), "got: {cached}");
+    assert!(cached.contains("-line35\n"), "got: {cached}");
+    assert!(cached.contains("+line35 CHANGED\n"), "got: {cached}");
+    assert_eq!(hunk_count(&cached), 2, "got: {cached}");
+    assert_staged_hunks_match_git(&repo, tmp.path());
+}
+
+#[test]
+fn nearby_line_stagings_show_one_staged_hunk() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[4] = "line5 CHANGED".into();
+    lines[8] = "line9 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+    stage_replacement(&repo, "f.txt", "line5", "line5 CHANGED");
+    stage_replacement(&repo, "f.txt", "line9", "line9 CHANGED");
+
+    let cached = cached_diff(tmp.path());
+    assert!(cached.contains("-line9\n"), "got: {cached}");
+    assert!(cached.contains("+line9 CHANGED\n"), "got: {cached}");
+    assert_eq!(hunk_count(&cached), 1, "got: {cached}");
+    assert_staged_hunks_match_git(&repo, tmp.path());
+}
+
+#[test]
+fn status_hunks_match_git_when_staged_together() {
+    for (first, second) in [(4usize, 34usize), (4, 8)] {
+        let (tmp, repo) = init_40_line_repo();
+        let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+        lines[first] = format!("line{} CHANGED", first + 1);
+        lines[second] = format!("line{} CHANGED", second + 1);
+        write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+        let layout = layout_for(&repo, "f.txt", false);
+        let start = layout.hunks.first().expect("hunk").first_line;
+        let end = layout
+            .hunks
+            .last()
+            .map(|hunk| hunk.first_line + hunk.hunk.lines.len() as u32 - 1)
+            .expect("hunk");
+        let applied = repo
+            .apply_selection(&[layout], start, end, false)
+            .expect("apply selection");
+        assert!(applied);
+
+        let cached = cached_diff(tmp.path());
+        let expected_hunks = if second - first - 1 > 6 { 2 } else { 1 };
+        assert_eq!(hunk_count(&cached), expected_hunks, "got: {cached}");
+        assert_staged_hunks_match_git(&repo, tmp.path());
+    }
+}
+
 fn apply_check(dir: &Path, patch_text: &str) -> Result<(), String> {
     let mut child = Command::new("git")
         .args([

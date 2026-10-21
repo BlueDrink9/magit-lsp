@@ -262,6 +262,8 @@ deleted. Details in §3.13.
 renumbering algorithm with a written reason or is simplified using
 `git apply --recount` (see §3.13) with the proptests passing.
 
+- [x] Done.
+
 ### IMM-6 — Node-kind dispatch for stage/unstage/discard
 
 Rule: **stage, unstage, discard, reverse and apply act on the smallest node under
