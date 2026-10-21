@@ -260,38 +260,72 @@ impl GitRepo {
 
     /// Unified diff of the unstaged changes to `path` (index vs working tree).
     pub fn diff_unstaged(&self, path: &str) -> Result<String> {
-        self.run(&["-c", "core.quotepath=false", "diff", "-U3", "--", path])
+        self.diff_side(path, false)
     }
 
     /// Unified diff of the staged changes to `path` (HEAD vs index).
     pub fn diff_staged(&self, path: &str) -> Result<String> {
-        self.run(&[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--cached",
-            "-U3",
-            "--",
-            path,
-        ])
+        self.diff_side(path, true)
+    }
+
+    /// Diff one side of `path`, including the old path of a rename.
+    ///
+    /// Path limiting disables Git's rename detection, so a rename pair has to
+    /// be passed to `git diff` together or it looks like a new file.
+    fn diff_side(&self, path: &str, staged: bool) -> Result<String> {
+        let mut args = vec!["-c", "core.quotepath=false", "diff"];
+        if staged {
+            args.push("--cached");
+        }
+        args.extend(["-M", "-U3", "--"]);
+        let origin = self.rename_origin(path, staged)?;
+        match &origin {
+            Some(origin) => {
+                args.push(origin);
+                args.push(path);
+            }
+            None => args.push(path),
+        }
+        self.run(&args)
     }
 
     /// Stage the whole unstaged hunk at `hunk_index` for `path`.
     pub fn stage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
         let layout = self.file_layout(path, false)?;
-        let patch = layout
-            .whole_hunk_patch(hunk_index)
-            .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
-        self.apply_index(&patch, false)
+        match layout.hunks.get(hunk_index) {
+            Some(hunk) => self.apply_index(
+                &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
+                false,
+            ),
+            None if layout.hunks.is_empty() => self.apply_without_hunks(&layout, false),
+            None => Err(Error::new(format!(
+                "hunk {hunk_index} not found for {path}"
+            ))),
+        }
     }
 
     /// Unstage the whole staged hunk at `hunk_index` for `path`.
     pub fn unstage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
         let layout = self.file_layout(path, true)?;
-        let patch = layout
-            .whole_hunk_patch(hunk_index)
-            .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
-        self.apply_index(&patch, true)
+        match layout.hunks.get(hunk_index) {
+            Some(hunk) => self.apply_index(
+                &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
+                true,
+            ),
+            None if layout.hunks.is_empty() => self.apply_without_hunks(&layout, true),
+            None => Err(Error::new(format!(
+                "hunk {hunk_index} not found for {path}"
+            ))),
+        }
+    }
+
+    /// Apply a header-only diff when the file has no hunks.
+    ///
+    /// Whole-file changes (mode, rename, binary) have no hunk to select. Let
+    /// `git apply` decide: a mode or rename applies, a binary diff fails with
+    /// Git's own explanation instead of a patch we built ourselves.
+    fn apply_without_hunks(&self, layout: &FileLayout, reverse: bool) -> Result<()> {
+        self.apply_index(&layout.whole_file_patch(), reverse)
     }
 
     /// Stage the lines in `start..=end` of the unstaged hunk at `hunk_index`.
@@ -399,6 +433,11 @@ impl GitRepo {
         reverse: bool,
     ) -> Result<bool> {
         let layout = self.file_layout(path, reverse)?;
+        if layout.hunks.is_empty() {
+            // No lines exist to select; a header-only change is whole-file only.
+            self.apply_without_hunks(&layout, reverse)?;
+            return Ok(true);
+        }
         let (first_line, len) = {
             let hunk = layout
                 .hunks
@@ -419,9 +458,12 @@ impl GitRepo {
         self.apply_selection(&[layout], first_line + start, first_line + end, reverse)
     }
 
-    /// Stage the entire file, including untracked files.
+    /// Stage the entire file, including untracked files and rename pairs.
     pub fn stage_file(&self, path: &str) -> Result<()> {
-        self.run(&["add", "--", path]).map(|_| ())
+        match self.rename_origin(path, false)? {
+            Some(origin) => self.run(&["add", "--", origin.as_str(), path]).map(|_| ()),
+            None => self.run(&["add", "--", path]).map(|_| ()),
+        }
     }
 
     /// Unstage the entire file, leaving the working tree untouched.
@@ -429,15 +471,20 @@ impl GitRepo {
     /// A staged rename is reset at both its old and new path so the pair leaves
     /// the index together.
     pub fn unstage_file(&self, path: &str) -> Result<()> {
-        match self.rename_origin(path)? {
+        match self.rename_origin(path, true)? {
             Some(origin) => self.unstage_paths(&[origin.as_str(), path]),
             None => self.unstage_paths(&[path]),
         }
     }
 
-    /// The old path when `path` is staged as a rename or copy.
-    fn rename_origin(&self, path: &str) -> Result<Option<String>> {
-        let raw = self.run(&["diff", "--cached", "--name-status", "-z", "--find-renames"])?;
+    /// The old path when `path` is the new side of a rename or copy.
+    fn rename_origin(&self, path: &str, staged: bool) -> Result<Option<String>> {
+        let mut args = vec!["diff"];
+        if staged {
+            args.push("--cached");
+        }
+        args.extend(["--name-status", "-z", "--find-renames"]);
+        let raw = self.run(&args)?;
         let mut tokens = raw.split('\0');
         while let Some(status) = tokens.next() {
             if status.is_empty() {
@@ -507,7 +554,11 @@ impl GitRepo {
         } else {
             self.diff_unstaged(path)?
         };
-        Ok(patch::parse_unified_diff(&diff))
+        // A type change renders as two file sections and has no single hunk
+        // list; treat it as whole-file only so the status view stays honest.
+        Ok(patch::parse_file_diff(&diff)
+            .map(|file| file.hunks)
+            .unwrap_or_default())
     }
 
     fn apply_index(&self, patch_text: &str, reverse: bool) -> Result<()> {

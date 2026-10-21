@@ -152,10 +152,13 @@ The roadmap, glossary, protocol reference and phased plan live in
 
 ## Known limitations
 
-- Renames/copies show only the new path; no hunk-level staging for them.
-- Binary files expose no hunks (whole-file staging only).
-- No-trailing-newline handling is implemented but lightly tested.
-- Paths with spaces/special characters may need patch-header quoting.
+- Binary files, mode-only changes and symlink type changes expose no hunks;
+  stage/unstage them as a whole file. A hunk/line request for a binary file
+  fails with Git's own explanation instead of a patch we built ourselves.
+- Copies are not detected (`git diff` runs with `-M`, not `-C`), so a copy
+  appears as a new file. Renames keep hunk/line staging.
+- Paths with spaces/special characters may need patch-header quoting when a
+  synthetic header is unavoidable.
 - `stage_all` uses `git add -u` (tracked files only); untracked files must be
   staged individually.
 

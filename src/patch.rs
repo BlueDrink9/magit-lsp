@@ -247,8 +247,12 @@ fn unquote_c(quoted: &str) -> String {
 /// The file path from a one-file diff, preferring the new side.
 ///
 /// Only header lines are inspected: a hunk body can start with `+++ `.
+/// Header-only diffs (mode changes, binary files, pure renames) have no
+/// `---`/`+++` lines, so the `rename to` and `diff --git` lines are fallbacks.
 fn diff_path(diff: &str) -> Option<String> {
     let mut old_side = None;
+    let mut rename_to = None;
+    let mut diff_git = None;
     for line in diff.lines() {
         if line.starts_with("@@") {
             break;
@@ -265,16 +269,73 @@ fn diff_path(diff: &str) -> Option<String> {
                 old_side = Some(path.to_string());
             }
         }
+        if let Some(raw) = line.strip_prefix("rename to ") {
+            rename_to = Some(decode_header_path(raw));
+        }
+        if line.starts_with("diff --git ") {
+            diff_git = split_diff_git_paths(line).map(|(_, new)| new);
+        }
     }
-    old_side
+    old_side.or(rename_to).or(diff_git)
+}
+
+/// Split the two paths on a `diff --git` line.
+///
+/// Git C-quotes a path that needs it; otherwise the sides are separated by the
+/// last ` b/` (or ` a/`) boundary, which tolerates spaces in either name.
+fn split_diff_git_paths(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("diff --git ")?;
+    if rest.starts_with('"') {
+        let (old, rest) = take_quoted(rest)?;
+        let rest = rest.strip_prefix(' ')?;
+        let (new, _) = take_quoted(rest)?;
+        return Some((strip_prefix_side(&old, 'a'), strip_prefix_side(&new, 'b')));
+    }
+    let index = rest.rfind(" b/")?;
+    let old = decode_header_path(&rest[..index]);
+    let new = decode_header_path(&rest[index + 1..]);
+    Some((strip_prefix_side(&old, 'a'), strip_prefix_side(&new, 'b')))
+}
+
+/// Remove Git's `a/` or `b/` prefix from a diff path.
+fn strip_prefix_side(path: &str, side: char) -> String {
+    path.strip_prefix(&format!("{side}/"))
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// Read one C-quoted token, returning it unquoted plus the remainder.
+fn take_quoted(input: &str) -> Option<(String, &str)> {
+    let quoted = input.strip_prefix('"')?;
+    let bytes = quoted.as_bytes();
+    let mut end = 0;
+    while end < bytes.len() {
+        match bytes[end] {
+            b'\\' => end += 2,
+            b'"' => break,
+            _ => end += 1,
+        }
+    }
+    if end >= bytes.len() {
+        return None;
+    }
+    Some((unquote_c(&quoted[..end]), &quoted[end + 1..]))
 }
 
 /// Parse a one-file unified diff, keeping its header lines verbatim.
+///
+/// A header-only diff (mode change, binary file, pure rename) yields a file
+/// with no hunks. A path that Git rendered as several file sections, such as a
+/// type change, is refused: no single header describes it.
 pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
-    let hunks = parse_unified_diff(diff);
-    if hunks.is_empty() {
+    let sections = diff
+        .lines()
+        .filter(|line| line.starts_with("diff --git "))
+        .count();
+    if sections != 1 {
         return None;
     }
+    let hunks = parse_unified_diff(diff);
     let mut header = String::new();
     for line in diff.lines() {
         if line.starts_with("@@") {
@@ -434,7 +495,7 @@ pub fn parse_unified_diff(diff: &str) -> Vec<Hunk> {
     let mut old_pos: u32 = 0;
     let mut new_pos: u32 = 0;
 
-    for raw in diff.lines() {
+    for raw in diff.split('\n') {
         if raw.starts_with("@@") {
             if let Some(h) = cur.take() {
                 hunks.push(h);

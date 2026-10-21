@@ -1196,7 +1196,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       with status `?`); stage/unstage them via UI; `stage_all` also stages
       untracked when `status.stage-all` is invoked on the Untracked header.
       *Done when:* snapshot of a repo with untracked files shows the section.
-- [ ] R-0.4 `patch.rs`: original headers preserved; renames, mode changes,
+- [x] R-0.4 `patch.rs`: original headers preserved; renames, mode changes,
       symlinks, binary (whole-file only), no-trailing-newline, CRLF. *Done when:*
       one fixture and test per case.
 - [ ] R-0.5 Hunk identity by content hash everywhere (no hunk indexes in any
