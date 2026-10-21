@@ -1,3 +1,4 @@
+use crate::errors;
 use crate::git::GitRepo;
 use crate::patch::{self, FileLayout};
 use crate::protocol::{Effect, MessageLevel};
@@ -21,11 +22,11 @@ pub enum NodeKind {
     SectionStaged,
     SectionUntracked,
     FileHeader { path: String },
-    HunkHeader { path: String, hunk_index: usize },
+    HunkHeader { path: String, hunk_id: String },
     DiffLine {
         changed: bool,
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
     },
     Other,
 }
@@ -51,11 +52,11 @@ pub enum Resolution {
     },
     StageHunk {
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
     },
     UnstageHunk {
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
     },
     /// Delegate to IMM-2's `normalise_selection`; `reverse` selects unstage.
     Selection {
@@ -75,7 +76,7 @@ pub enum Resolution {
     },
     DiscardHunk {
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
         needs_confirm: bool,
     },
     DiscardSelection {
@@ -128,20 +129,20 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
             NodeKind::SectionStaged => info(NOTHING_TO_STAGE),
             NodeKind::SectionUntracked => Resolution::StageAllUntracked,
             NodeKind::FileHeader { path } => Resolution::StageFile { path },
-            NodeKind::HunkHeader { path, hunk_index }
+            NodeKind::HunkHeader { path, hunk_id }
             | NodeKind::DiffLine {
-                path, hunk_index, ..
-            } => Resolution::StageHunk { path, hunk_index },
+                path, hunk_id, ..
+            } => Resolution::StageHunk { path, hunk_id },
             NodeKind::Other => info(NOTHING_TO_STAGE),
         },
         Command::Unstage => match target {
             NodeKind::SectionStaged => Resolution::UnstageAllStaged,
             NodeKind::SectionUnstaged | NodeKind::SectionUntracked => info(NOTHING_TO_UNSTAGE),
             NodeKind::FileHeader { path } => Resolution::UnstageFile { path },
-            NodeKind::HunkHeader { path, hunk_index }
+            NodeKind::HunkHeader { path, hunk_id }
             | NodeKind::DiffLine {
-                path, hunk_index, ..
-            } => Resolution::UnstageHunk { path, hunk_index },
+                path, hunk_id, ..
+            } => Resolution::UnstageHunk { path, hunk_id },
             NodeKind::Other => info(NOTHING_TO_UNSTAGE),
         },
         Command::Discard => match target {
@@ -156,12 +157,12 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
                 path,
                 needs_confirm: true,
             },
-            NodeKind::HunkHeader { path, hunk_index }
+            NodeKind::HunkHeader { path, hunk_id }
             | NodeKind::DiffLine {
-                path, hunk_index, ..
+                path, hunk_id, ..
             } => Resolution::DiscardHunk {
                 path,
-                hunk_index,
+                hunk_id,
                 needs_confirm: true,
             },
             NodeKind::Other => info(NOTHING_TO_DISCARD),
@@ -199,13 +200,11 @@ pub fn execute(
             repo.unstage_file(path)?;
             Ok(Vec::new())
         }
-        Resolution::StageHunk { path, hunk_index } => {
-            repo.stage_hunk(path, *hunk_index)?;
-            Ok(Vec::new())
+        Resolution::StageHunk { path, hunk_id } => {
+            errors::effects_for_result(repo.stage_hunk(path, hunk_id).map(|_| true))
         }
-        Resolution::UnstageHunk { path, hunk_index } => {
-            repo.unstage_hunk(path, *hunk_index)?;
-            Ok(Vec::new())
+        Resolution::UnstageHunk { path, hunk_id } => {
+            errors::effects_for_result(repo.unstage_hunk(path, hunk_id).map(|_| true))
         }
         Resolution::Selection {
             start,
@@ -240,9 +239,7 @@ fn deferred_text(resolution: &Resolution) -> String {
         Resolution::DiscardAllUnstaged { .. } => "discard all unstaged changes".to_string(),
         Resolution::DiscardAllUntracked { .. } => "discard all untracked files".to_string(),
         Resolution::DiscardFile { path, .. } => format!("discard {path}"),
-        Resolution::DiscardHunk {
-            path, hunk_index, ..
-        } => format!("discard hunk {hunk_index} of {path}"),
+        Resolution::DiscardHunk { path, .. } => format!("discard a hunk of {path}"),
         Resolution::DiscardSelection { .. } => "discard the selection".to_string(),
         _ => "discard".to_string(),
     };

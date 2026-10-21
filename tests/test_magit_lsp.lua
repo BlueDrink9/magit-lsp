@@ -203,7 +203,9 @@ end
 
 T['staging a hunk moves the file to staged section'] = function()
   setup_child()
-  child.lua("M.stage_hunk('f.txt', 0)")
+  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
+  MiniTest.expect.equality(type(hunk_id), 'string', 'hunk id')
+  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
   MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
   MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
   assert_line('Staged changes (1)')
@@ -239,8 +241,10 @@ end
 
 T['unstaging a hunk reverts the file to unstaged'] = function()
   setup_child()
-  child.lua("M.stage_hunk('f.txt', 0)")
-  child.lua("M.unstage_hunk('f.txt', 0)")
+  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
+  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
+  local staged_id = child.lua_get('M.status.staged[1].hunks[1].id')
+  child.lua(string.format("M.unstage_hunk('f.txt', %q)", staged_id))
   MiniTest.expect.equality(child.lua_get('#M.status.staged'), 0)
   MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
 end
@@ -416,7 +420,8 @@ T['refresh and mutations still work after blocked edits'] = function()
     false
   )
 
-  child.lua("M.stage_hunk('f.txt', 0)")
+  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
+  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
   MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
   MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
   assert_line('Staged changes (1)')

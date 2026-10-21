@@ -1,7 +1,11 @@
 use crate::git::GitFailure;
 use crate::protocol::{Effect, MessageLevel};
-use crate::{Error, Result};
+use crate::{Error, ErrorKind, Result};
 use serde::{Deserialize, Serialize};
+
+/// Shown when a hunk action no longer matches the current diff.
+pub const HUNK_CHANGED: &str =
+    "That hunk changed since it was displayed. The view has been refreshed.";
 
 /// A Git failure explained in terms a user can act on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +134,9 @@ pub fn effects_for_result(result: Result<bool>) -> Result<Vec<Effect>> {
             MessageLevel::Info,
             crate::patch::NO_CHANGED_LINES,
         )]),
+        Err(err) if err.kind == ErrorKind::HunkNotFound => {
+            Ok(vec![Effect::message(MessageLevel::Warn, HUNK_CHANGED)])
+        }
         Err(err) => match Effect::from_error(&err) {
             Some(effect) => Ok(vec![effect]),
             None => Err(err),

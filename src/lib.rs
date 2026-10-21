@@ -8,11 +8,20 @@ pub mod server;
 
 use std::fmt;
 
+/// Why an error happened, when callers need to tell cases apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    Internal,
+    /// The action addressed a hunk that is no longer in the current diff.
+    HunkNotFound,
+}
+
 /// A crate-wide error, optionally carrying a structured Git failure.
 #[derive(Debug, Clone)]
 pub struct Error {
     pub message: String,
     pub git: Option<git::GitFailure>,
+    pub kind: ErrorKind,
 }
 
 impl Error {
@@ -21,6 +30,7 @@ impl Error {
         Self {
             message: message.into(),
             git: None,
+            kind: ErrorKind::Internal,
         }
     }
 
@@ -29,6 +39,16 @@ impl Error {
         Self {
             message: failure.to_string(),
             git: Some(failure),
+            kind: ErrorKind::Internal,
+        }
+    }
+
+    /// The addressed hunk is absent from the current diff for `path`.
+    pub fn hunk_not_found(path: &str) -> Self {
+        Self {
+            message: format!("hunk not found for {path}"),
+            git: None,
+            kind: ErrorKind::HunkNotFound,
         }
     }
 

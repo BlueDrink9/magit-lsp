@@ -1199,7 +1199,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-0.4 `patch.rs`: original headers preserved; renames, mode changes,
       symlinks, binary (whole-file only), no-trailing-newline, CRLF. *Done when:*
       one fixture and test per case.
-- [ ] R-0.5 Hunk identity by content hash everywhere (no hunk indexes in any
+- [x] R-0.5 Hunk identity by content hash everywhere (no hunk indexes in any
       API). *Done when:* a test mutates the file between render and action and
       the action targets the right hunk or is rejected with a message.
 - [ ] R-0.6 `tracing` to stderr/file; child stdout never reaches the LSP pipe.

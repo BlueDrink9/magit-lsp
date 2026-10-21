@@ -178,17 +178,17 @@ local function render(status)
         path = f.path,
         status = f.status,
       })
-      for hi, h in ipairs(f.hunks) do
+      for _, h in ipairs(f.hunks) do
         add(
           string.format('    @@ -%d,%d +%d,%d @@', h.old_start, h.old_count, h.new_start, h.new_count),
-          { kind = 'hunk', section = section, path = f.path, hunk_index = hi - 1 }
+          { kind = 'hunk', section = section, path = f.path, hunk_id = h.id }
         )
         for li, l in ipairs(h.lines) do
           add('    ' .. l.marker .. l.text, {
             kind = 'line',
             section = section,
             path = f.path,
-            hunk_index = hi - 1,
+            hunk_id = h.id,
             line_index = li - 1,
             marker = l.marker,
             text = l.text,
@@ -252,32 +252,32 @@ local function apply_mutation(method, params)
 end
 
 --- Stage a whole hunk of a file.
-function M.stage_hunk(path, hunk_index)
-  return apply_mutation('vcs/stageHunk', { repo_path = M.root, path = path, hunk_index = hunk_index })
+function M.stage_hunk(path, hunk_id)
+  return apply_mutation('vcs/stageHunk', { repo_path = M.root, path = path, hunk_id = hunk_id })
 end
 
 --- Unstage a whole hunk of a file.
-function M.unstage_hunk(path, hunk_index)
-  return apply_mutation('vcs/unstageHunk', { repo_path = M.root, path = path, hunk_index = hunk_index })
+function M.unstage_hunk(path, hunk_id)
+  return apply_mutation('vcs/unstageHunk', { repo_path = M.root, path = path, hunk_id = hunk_id })
 end
 
 --- Stage lines `start..finish` (0-based, within the hunk) of a file.
-function M.stage_lines(path, hunk_index, start, finish)
+function M.stage_lines(path, hunk_id, start, finish)
   return apply_mutation('vcs/stageLines', {
     repo_path = M.root,
     path = path,
-    hunk_index = hunk_index,
+    hunk_id = hunk_id,
     start = start,
     ['end'] = finish,
   })
 end
 
 --- Unstage lines `start..finish` (0-based, within the hunk) of a file.
-function M.unstage_lines(path, hunk_index, start, finish)
+function M.unstage_lines(path, hunk_id, start, finish)
   return apply_mutation('vcs/unstageLines', {
     repo_path = M.root,
     path = path,
-    hunk_index = hunk_index,
+    hunk_id = hunk_id,
     start = start,
     ['end'] = finish,
   })
@@ -384,7 +384,7 @@ function M.stage_at()
     return M.stage_file(e.path)
   end
   if e.kind == 'hunk' or e.kind == 'line' then
-    return M.stage_hunk(e.path, e.hunk_index)
+    return M.stage_hunk(e.path, e.hunk_id)
   end
   return nil, 'nothing to stage here'
 end
@@ -403,7 +403,7 @@ function M.unstage_at()
     return M.unstage_file(e.path)
   end
   if e.kind == 'hunk' or e.kind == 'line' then
-    return M.unstage_hunk(e.path, e.hunk_index)
+    return M.unstage_hunk(e.path, e.hunk_id)
   end
   return nil, 'nothing to unstage here'
 end
@@ -415,7 +415,7 @@ function M.stage_line_range(from, to)
   if not a or not b or a.kind ~= 'line' or b.kind ~= 'line' then
     return nil, 'selection must be on change lines'
   end
-  if a.path ~= b.path or a.hunk_index ~= b.hunk_index then
+  if a.path ~= b.path or a.hunk_id ~= b.hunk_id then
     return nil, 'selection spans multiple hunks'
   end
   if a.section ~= 'unstaged' then
@@ -423,7 +423,7 @@ function M.stage_line_range(from, to)
   end
   local lo = math.min(a.line_index, b.line_index)
   local hi = math.max(a.line_index, b.line_index)
-  return M.stage_lines(a.path, a.hunk_index, lo, hi)
+  return M.stage_lines(a.path, a.hunk_id, lo, hi)
 end
 
 --- Unstage the lines between buffer lines `from` and `to` (inclusive).
@@ -438,7 +438,7 @@ function M.unstage_line_range(from, to)
   end
   local lo = math.min(a.line_index, b.line_index)
   local hi = math.max(a.line_index, b.line_index)
-  return M.unstage_lines(a.path, a.hunk_index, lo, hi)
+  return M.unstage_lines(a.path, a.hunk_id, lo, hi)
 end
 
 --- Stage the current visual selection (visual-mode mapping target).

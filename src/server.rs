@@ -154,25 +154,25 @@ fn dispatch(req: &lsp_server::Request, documents: &Documents) -> Result<serde_js
         StageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
             Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
-                repo.stage_hunk(&p.path, p.hunk_index).map(|_| true)
+                repo.stage_hunk(&p.path, &p.hunk_id).map(|_| true)
             })?)?)
         }
         UnstageHunkRequest::METHOD => {
             let p: HunkMutationParams = from_params(params)?;
             Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
-                repo.unstage_hunk(&p.path, p.hunk_index).map(|_| true)
+                repo.unstage_hunk(&p.path, &p.hunk_id).map(|_| true)
             })?)?)
         }
         StageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
             Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
-                repo.stage_lines(&p.path, p.hunk_index, p.start, p.end)
+                repo.stage_lines(&p.path, &p.hunk_id, p.start, p.end)
             })?)?)
         }
         UnstageLinesRequest::METHOD => {
             let p: LinesMutationParams = from_params(params)?;
             Ok(serde_json::to_value(mutation(&p.repo_path, |repo| {
-                repo.unstage_lines(&p.path, p.hunk_index, p.start, p.end)
+                repo.unstage_lines(&p.path, &p.hunk_id, p.start, p.end)
             })?)?)
         }
         StageFileRequest::METHOD => {

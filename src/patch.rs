@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::fmt::Write as _;
 
 /// The role of a line within a hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,9 +32,31 @@ pub struct Hunk {
     pub new_start: u32,
     pub new_count: u32,
     pub lines: Vec<DiffLine>,
+    /// Stable content id; line numbers are excluded so it survives shifts.
+    pub id: String,
 }
 
 impl Hunk {
+    /// Compute `id` from the hunk's line markers and text.
+    ///
+    /// `@@` line numbers are deliberately excluded: inserting lines above a
+    /// hunk must not change its identity.
+    fn compute_id(&mut self) {
+        let mut hasher = Sha256::new();
+        for line in &self.lines {
+            hasher.update([line.marker as u8]);
+            hasher.update(line.text.as_bytes());
+            hasher.update([u8::from(line.no_newline)]);
+            hasher.update(b"\n");
+        }
+        let digest = hasher.finalize();
+        let mut id = String::with_capacity(16);
+        for byte in &digest[..8] {
+            write!(id, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        self.id = id;
+    }
+
     /// Classify a line as context, added, or removed.
     pub fn kind(&self, line: &DiffLine) -> LineKind {
         match line.marker {
@@ -114,20 +139,20 @@ impl FileLayout {
         out
     }
 
-    /// Patch text for one whole hunk.
-    pub fn whole_hunk_patch(&self, hunk_index: usize) -> Option<String> {
-        let hunk = self.hunks.get(hunk_index)?;
+    /// Patch text for one whole hunk, found by its content id.
+    pub fn whole_hunk_patch(&self, hunk_id: &str) -> Option<String> {
+        let hunk = self.hunks.iter().find(|h| h.hunk.id == hunk_id)?;
         Some(format!("{}{}", self.header, full_hunk_patch(&hunk.hunk)))
     }
 
-    /// Patch text for selected change lines within one hunk.
+    /// Patch text for selected change lines within one hunk, found by id.
     pub fn lines_patch(
         &self,
-        hunk_index: usize,
+        hunk_id: &str,
         selected: &[usize],
         reverse: bool,
     ) -> Option<String> {
-        let hunk = self.hunks.get(hunk_index)?;
+        let hunk = self.hunks.iter().find(|h| h.hunk.id == hunk_id)?;
         let changes_file_kind =
             (reverse && is_new_file(&hunk.hunk)) || (!reverse && is_deleted_file(&hunk.hunk));
         let header = if changes_file_kind {
@@ -153,11 +178,11 @@ pub enum SelectionOp {
     },
     WholeHunk {
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
     },
     Lines {
         path: String,
-        hunk_index: usize,
+        hunk_id: String,
         /// Indices of selected `+`/`-` lines within the hunk.
         lines: Vec<usize>,
     },
@@ -335,7 +360,8 @@ pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
     if sections != 1 {
         return None;
     }
-    let hunks = parse_unified_diff(diff);
+    let mut hunks = parse_unified_diff(diff);
+    disambiguate_hunk_ids(&mut hunks);
     let mut header = String::new();
     for line in diff.lines() {
         if line.starts_with("@@") {
@@ -349,6 +375,23 @@ pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
         header,
         hunks,
     })
+}
+
+/// Give identical-content hunks in one file distinct, deterministic ids.
+///
+/// The first occurrence keeps the content id; later ones append an occurrence
+/// counter (`id-1`, `id-2`, …) so a file with repeated hunks can address each
+/// one independently.
+fn disambiguate_hunk_ids(hunks: &mut [Hunk]) {
+    let mut occurrences: HashMap<String, usize> = HashMap::new();
+    for hunk in hunks.iter_mut() {
+        let base = hunk.id.clone();
+        let count = occurrences.entry(base.clone()).or_insert(0);
+        if *count > 0 {
+            hunk.id = format!("{base}-{count}");
+        }
+        *count += 1;
+    }
 }
 
 /// Normalise an inclusive document-line selection into per-file operations.
@@ -378,7 +421,7 @@ pub fn normalise_selection(files: &[FileLayout], start: u32, end: u32) -> Select
             continue;
         }
 
-        for (hunk_index, hunk) in file.hunks.iter().enumerate() {
+        for hunk in &file.hunks {
             let hunk_end = hunk.first_line + hunk.hunk.lines.len() as u32;
             if end < hunk.header_line || start > hunk_end {
                 continue;
@@ -386,7 +429,7 @@ pub fn normalise_selection(files: &[FileLayout], start: u32, end: u32) -> Select
             if start <= hunk.header_line && hunk.header_line <= end {
                 ops.push(SelectionOp::WholeHunk {
                     path: file.path.clone(),
-                    hunk_index,
+                    hunk_id: hunk.hunk.id.clone(),
                 });
                 continue;
             }
@@ -404,7 +447,7 @@ pub fn normalise_selection(files: &[FileLayout], start: u32, end: u32) -> Select
             if !lines.is_empty() {
                 ops.push(SelectionOp::Lines {
                     path: file.path.clone(),
-                    hunk_index,
+                    hunk_id: hunk.hunk.id.clone(),
                     lines,
                 });
             }
@@ -497,7 +540,8 @@ pub fn parse_unified_diff(diff: &str) -> Vec<Hunk> {
 
     for raw in diff.split('\n') {
         if raw.starts_with("@@") {
-            if let Some(h) = cur.take() {
+            if let Some(mut h) = cur.take() {
+                h.compute_id();
                 hunks.push(h);
             }
             if let Some((old_start, old_count, new_start, new_count)) = parse_hunk_header(raw) {
@@ -509,6 +553,7 @@ pub fn parse_unified_diff(diff: &str) -> Vec<Hunk> {
                     new_start,
                     new_count,
                     lines: Vec::new(),
+                    id: String::new(),
                 });
             }
             continue;
@@ -561,7 +606,8 @@ pub fn parse_unified_diff(diff: &str) -> Vec<Hunk> {
         h.lines.push(line);
     }
 
-    if let Some(h) = cur.take() {
+    if let Some(mut h) = cur.take() {
+        h.compute_id();
         hunks.push(h);
     }
     hunks
@@ -674,6 +720,36 @@ index 4083766..31cf455 100644\n\
         assert!(p.contains("-line8\n"));
     }
 
+    #[test]
+    fn hunk_id_ignores_line_numbers() {
+        let shifted = SAMPLE.replace("@@ -1,10 +1,10 @@", "@@ -101,10 +201,10 @@");
+        let original = parse_unified_diff(SAMPLE);
+        let shifted = parse_unified_diff(&shifted);
+        assert_eq!(original[0].id, shifted[0].id);
+        assert_eq!(original[0].id.len(), 16);
+    }
+
+    #[test]
+    fn identical_hunks_in_one_file_get_distinct_ids() {
+        let repeated = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1,3 +1,3 @@\n\
+ a\n\
+-target\n\
++changed\n\
+ c\n\
+@@ -20,3 +20,3 @@\n\
+ a\n\
+-target\n\
++changed\n\
+ c\n";
+        let file = parse_file_diff(repeated).expect("diff");
+        assert_eq!(file.hunks.len(), 2);
+        assert_ne!(file.hunks[0].id, file.hunks[1].id);
+        assert_eq!(file.hunks[1].id, format!("{}-1", file.hunks[0].id));
+    }
+
     const TWO_HUNKS: &str = "diff --git a/f.txt b/f.txt\n\
 --- a/f.txt\n\
 +++ b/f.txt\n\
@@ -713,23 +789,27 @@ index 4083766..31cf455 100644\n\
 
     #[test]
     fn normalise_hunk_header_selects_whole_hunk() {
+        let layout = sample_layout();
+        let hunk_id = layout.hunks[0].hunk.id.clone();
         assert_eq!(
-            normalise_selection(&[sample_layout()], 1, 1),
+            normalise_selection(&[layout], 1, 1),
             Selection::Ops(vec![SelectionOp::WholeHunk {
                 path: "f.txt".to_string(),
-                hunk_index: 0
+                hunk_id
             }])
         );
     }
 
     #[test]
     fn normalise_context_and_change_selects_only_changes() {
+        let layout = sample_layout();
+        let hunk_id = layout.hunks[0].hunk.id.clone();
         // Context line1 (doc 2) through the line3 replacement (doc 4..=5).
         assert_eq!(
-            normalise_selection(&[sample_layout()], 2, 5),
+            normalise_selection(&[layout], 2, 5),
             Selection::Ops(vec![SelectionOp::Lines {
                 path: "f.txt".to_string(),
-                hunk_index: 0,
+                hunk_id,
                 lines: vec![2, 3]
             }])
         );
@@ -738,6 +818,8 @@ index 4083766..31cf455 100644\n\
     #[test]
     fn normalise_range_crossing_two_hunks() {
         let layout = FileLayout::from_diff(TWO_HUNKS, 0).expect("layout");
+        let first_id = layout.hunks[0].hunk.id.clone();
+        let second_id = layout.hunks[1].hunk.id.clone();
         // First hunk's change is at doc 3..=4; the second hunk header is doc 6.
         match normalise_selection(&[layout], 3, 8) {
             Selection::Ops(ops) => {
@@ -745,7 +827,7 @@ index 4083766..31cf455 100644\n\
                     ops[0],
                     SelectionOp::Lines {
                         path: "f.txt".to_string(),
-                        hunk_index: 0,
+                        hunk_id: first_id,
                         lines: vec![1, 2]
                     }
                 );
@@ -753,7 +835,7 @@ index 4083766..31cf455 100644\n\
                     ops[1],
                     SelectionOp::WholeHunk {
                         path: "f.txt".to_string(),
-                        hunk_index: 1
+                        hunk_id: second_id
                     }
                 );
             }
@@ -765,13 +847,14 @@ index 4083766..31cf455 100644\n\
     fn normalise_range_crossing_two_files() {
         let first = FileLayout::from_diff(SAMPLE, 0).expect("first");
         let second = FileLayout::from_diff(TWO_HUNKS, 100).expect("second");
+        let first_id = first.hunks[0].hunk.id.clone();
         match normalise_selection(&[first, second], 4, 103) {
             Selection::Ops(ops) => {
                 assert_eq!(
                     ops[0],
                     SelectionOp::Lines {
                         path: "f.txt".to_string(),
-                        hunk_index: 0,
+                        hunk_id: first_id,
                         lines: vec![2, 3, 6, 9]
                     }
                 );

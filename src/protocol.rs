@@ -95,7 +95,7 @@ macro_rules! mutation_request {
 pub struct HunkMutationParams {
     pub repo_path: String,
     pub path: String,
-    pub hunk_index: usize,
+    pub hunk_id: String,
 }
 mutation_request!(StageHunkRequest, "vcs/stageHunk", HunkMutationParams);
 mutation_request!(UnstageHunkRequest, "vcs/unstageHunk", HunkMutationParams);
@@ -105,7 +105,7 @@ mutation_request!(UnstageHunkRequest, "vcs/unstageHunk", HunkMutationParams);
 pub struct LinesMutationParams {
     pub repo_path: String,
     pub path: String,
-    pub hunk_index: usize,
+    pub hunk_id: String,
     pub start: usize,
     pub end: usize,
 }

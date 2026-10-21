@@ -64,7 +64,11 @@ fn stage_lines_works_on_spaced_path() {
         .build();
     write(&tmp.path().join("a b.txt"), &standard_changes());
 
-    repo.stage_lines("a b.txt", 0, 2, 3).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("a b.txt", &hunk_id, 2, 3)
+        .expect("stage lines");
 
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "a b.txt"]);
     assert!(cached.contains("-line3"), "got: {cached}");
@@ -82,7 +86,10 @@ fn unstage_hunk_works_on_unicode_path() {
     write(&tmp.path().join(path), &standard_changes());
     repo.stage_file(path).expect("stage file");
 
-    repo.unstage_hunk(path, 0).expect("unstage hunk");
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
+    repo.unstage_hunk(path, &hunk_id).expect("unstage hunk");
 
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", path]);
     assert!(cached.is_empty(), "got: {cached}");
@@ -99,7 +106,11 @@ fn stage_lines_works_on_quote_and_backslash_path() {
         .build();
     write(&tmp.path().join(path), &standard_changes());
 
-    repo.stage_lines(path, 0, 2, 3).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines(path, &hunk_id, 2, 3)
+        .expect("stage lines");
 
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", path]);
     assert!(cached.contains("+line3 CHANGED"), "got: {cached}");
@@ -113,7 +124,12 @@ fn stage_lines_partial_deletion_works_on_spaced_path() {
         .build();
     std::fs::remove_file(tmp.path().join("a b.txt")).expect("remove file");
 
-    let applied = repo.stage_lines("a b.txt", 0, 2, 2).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    let applied = repo
+        .stage_lines("a b.txt", &hunk_id, 2, 2)
+        .expect("stage lines");
 
     assert!(applied);
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "a b.txt"]);

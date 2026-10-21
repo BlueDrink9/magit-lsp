@@ -243,8 +243,11 @@ fn no_op_selection_returns_an_info_effect() {
     write(&tmp.path().join("f.txt"), "line1\nline2 CHANGED\nline3\n");
 
     // The first hunk line is context, so nothing is selected.
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
     let response = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
-        repo.stage_lines("f.txt", 0, 0, 0)
+        repo.stage_lines("f.txt", &hunk_id, 0, 0)
     })
     .expect("mutation response");
 

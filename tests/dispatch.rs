@@ -2,6 +2,7 @@ mod common;
 
 use common::*;
 use magit_lsp::dispatch::{self, Command, LineRange, NodeKind, Resolution};
+use magit_lsp::errors;
 use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::protocol::{Effect, MessageLevel};
 
@@ -24,7 +25,7 @@ fn file_target() -> NodeKind {
 fn hunk_target() -> NodeKind {
     NodeKind::HunkHeader {
         path: "f.txt".to_string(),
-        hunk_index: 0,
+        hunk_id: "h0".to_string(),
     }
 }
 
@@ -32,7 +33,7 @@ fn diff_line_target(changed: bool) -> NodeKind {
     NodeKind::DiffLine {
         changed,
         path: "f.txt".to_string(),
-        hunk_index: 0,
+        hunk_id: "h0".to_string(),
     }
 }
 
@@ -76,7 +77,7 @@ fn stage_hunk_header_stages_hunk() {
         dispatch::resolve(Command::Stage, hunk_target(), None),
         Resolution::StageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -87,7 +88,7 @@ fn stage_changed_line_stages_whole_hunk() {
         dispatch::resolve(Command::Stage, diff_line_target(true), None),
         Resolution::StageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -98,7 +99,7 @@ fn stage_context_line_stages_whole_hunk() {
         dispatch::resolve(Command::Stage, diff_line_target(false), None),
         Resolution::StageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -163,7 +164,7 @@ fn unstage_hunk_header_unstages_hunk() {
         dispatch::resolve(Command::Unstage, hunk_target(), None),
         Resolution::UnstageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -174,7 +175,7 @@ fn unstage_changed_line_unstages_whole_hunk() {
         dispatch::resolve(Command::Unstage, diff_line_target(true), None),
         Resolution::UnstageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -185,7 +186,7 @@ fn unstage_context_line_unstages_whole_hunk() {
         dispatch::resolve(Command::Unstage, diff_line_target(false), None),
         Resolution::UnstageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -257,7 +258,7 @@ fn discard_hunk_header_needs_confirm() {
         dispatch::resolve(Command::Discard, hunk_target(), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id: "h0".to_string(),
             needs_confirm: true
         }
     );
@@ -269,7 +270,7 @@ fn discard_changed_line_needs_confirm() {
         dispatch::resolve(Command::Discard, diff_line_target(true), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id: "h0".to_string(),
             needs_confirm: true
         }
     );
@@ -281,7 +282,7 @@ fn discard_context_line_needs_confirm() {
         dispatch::resolve(Command::Discard, diff_line_target(false), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id: "h0".to_string(),
             needs_confirm: true
         }
     );
@@ -370,12 +371,15 @@ fn execute_unstage_file_unstages_it() {
 fn execute_stage_hunk_stages_only_that_hunk() {
     let (tmp, repo) = init_repo_40();
     make_two_hunks(tmp.path());
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
 
     dispatch::execute(
         &repo,
         &Resolution::StageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id,
         },
         &[],
     )
@@ -392,12 +396,15 @@ fn execute_unstage_hunk_unstages_only_that_hunk() {
     let (tmp, repo) = init_repo_40();
     make_two_hunks(tmp.path());
     repo.stage_file("f.txt").expect("stage");
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
 
     dispatch::execute(
         &repo,
         &Resolution::UnstageHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id,
         },
         &[],
     )
@@ -407,6 +414,65 @@ fn execute_unstage_hunk_unstages_only_that_hunk() {
     assert_eq!(hunk_count(&cached), 1, "got: {cached}");
     assert!(cached.contains("+line35 CHANGED"), "got: {cached}");
     assert!(!cached.contains("line5 CHANGED"), "got: {cached}");
+}
+
+#[test]
+fn execute_stage_hunk_reports_hunk_changed_since_display() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[34] = "line35 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+
+    // The rendered hunk no longer exists once its content changes.
+    lines[34] = "line35 DIFFERENT".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+    let effects = dispatch::execute(
+        &repo,
+        &Resolution::StageHunk {
+            path: "f.txt".to_string(),
+            hunk_id,
+        },
+        &[],
+    )
+    .expect("execute");
+
+    assert_eq!(
+        effects,
+        vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]
+    );
+    assert!(
+        cached_diff(tmp.path()).is_empty(),
+        "the index must stay untouched"
+    );
+}
+
+#[test]
+fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[34] = "line35 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    lines[34] = "line35 DIFFERENT".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+    let response = magit_lsp::server::mutation(tmp.path().to_str().expect("utf-8 path"), |repo| {
+        repo.stage_hunk("f.txt", &hunk_id).map(|_| true)
+    })
+    .expect("mutation");
+
+    assert_eq!(
+        response.effects,
+        vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]
+    );
+    assert!(response.status.staged.is_empty());
+    assert_eq!(response.status.unstaged.len(), 1);
 }
 
 #[test]
@@ -567,7 +633,7 @@ fn execute_every_discard_variant_is_deferred() {
         },
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_index: 0,
+            hunk_id: "h0".to_string(),
             needs_confirm: true,
         },
         Resolution::DiscardSelection {

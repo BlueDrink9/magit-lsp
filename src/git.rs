@@ -289,67 +289,59 @@ impl GitRepo {
         self.run(&args)
     }
 
-    /// Stage the whole unstaged hunk at `hunk_index` for `path`.
-    pub fn stage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
-        let layout = self.file_layout(path, false)?;
-        match layout.hunks.get(hunk_index) {
-            Some(hunk) => self.apply_index(
-                &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
-                false,
-            ),
-            None if layout.hunks.is_empty() => self.apply_without_hunks(&layout, false),
-            None => Err(Error::new(format!(
-                "hunk {hunk_index} not found for {path}"
-            ))),
-        }
-    }
-
-    /// Unstage the whole staged hunk at `hunk_index` for `path`.
-    pub fn unstage_hunk(&self, path: &str, hunk_index: usize) -> Result<()> {
-        let layout = self.file_layout(path, true)?;
-        match layout.hunks.get(hunk_index) {
-            Some(hunk) => self.apply_index(
-                &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
-                true,
-            ),
-            None if layout.hunks.is_empty() => self.apply_without_hunks(&layout, true),
-            None => Err(Error::new(format!(
-                "hunk {hunk_index} not found for {path}"
-            ))),
-        }
-    }
-
-    /// Apply a header-only diff when the file has no hunks.
+    /// Stage the whole unstaged hunk with `hunk_id` for `path`.
     ///
-    /// Whole-file changes (mode, rename, binary) have no hunk to select. Let
-    /// `git apply` decide: a mode or rename applies, a binary diff fails with
-    /// Git's own explanation instead of a patch we built ourselves.
-    fn apply_without_hunks(&self, layout: &FileLayout, reverse: bool) -> Result<()> {
-        self.apply_index(&layout.whole_file_patch(), reverse)
+    /// The diff is re-read first, so the hunk is located by content even when
+    /// lines above it shifted since the status was rendered.
+    pub fn stage_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
+        let layout = self.file_layout(path, false)?;
+        let hunk = layout
+            .hunks
+            .iter()
+            .find(|h| h.hunk.id == hunk_id)
+            .ok_or_else(|| Error::hunk_not_found(path))?;
+        self.apply_index(
+            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
+            false,
+        )
     }
 
-    /// Stage the lines in `start..=end` of the unstaged hunk at `hunk_index`.
+    /// Unstage the whole staged hunk with `hunk_id` for `path`.
+    pub fn unstage_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
+        let layout = self.file_layout(path, true)?;
+        let hunk = layout
+            .hunks
+            .iter()
+            .find(|h| h.hunk.id == hunk_id)
+            .ok_or_else(|| Error::hunk_not_found(path))?;
+        self.apply_index(
+            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
+            true,
+        )
+    }
+
+    /// Stage the lines in `start..=end` of the unstaged hunk with `hunk_id`.
     /// Returns `false` when the range contains no changed lines.
     pub fn stage_lines(
         &self,
         path: &str,
-        hunk_index: usize,
+        hunk_id: &str,
         start: usize,
         end: usize,
     ) -> Result<bool> {
-        self.apply_hunk_lines(path, hunk_index, start, end, false)
+        self.apply_hunk_lines(path, hunk_id, start, end, false)
     }
 
-    /// Unstage the lines in `start..=end` of the staged hunk at `hunk_index`.
+    /// Unstage the lines in `start..=end` of the staged hunk with `hunk_id`.
     /// Returns `false` when the range contains no changed lines.
     pub fn unstage_lines(
         &self,
         path: &str,
-        hunk_index: usize,
+        hunk_id: &str,
         start: usize,
         end: usize,
     ) -> Result<bool> {
-        self.apply_hunk_lines(path, hunk_index, start, end, true)
+        self.apply_hunk_lines(path, hunk_id, start, end, true)
     }
 
     /// Apply a document-line selection, one `git apply` per affected file.
@@ -390,18 +382,22 @@ impl GitRepo {
             let mut synthetic_header = false;
             for op in file_ops {
                 match op {
-                    SelectionOp::WholeHunk { hunk_index, .. } => {
-                        let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
-                            Error::new(format!("hunk {hunk_index} not found for {}", file.path))
-                        })?;
+                    SelectionOp::WholeHunk { hunk_id, .. } => {
+                        let hunk = file
+                            .hunks
+                            .iter()
+                            .find(|h| &h.hunk.id == hunk_id)
+                            .ok_or_else(|| Error::hunk_not_found(&file.path))?;
                         body.push_str(&patch::full_hunk_patch(&hunk.hunk));
                     }
                     SelectionOp::Lines {
-                        hunk_index, lines, ..
+                        hunk_id, lines, ..
                     } => {
-                        let hunk = file.hunks.get(*hunk_index).ok_or_else(|| {
-                            Error::new(format!("hunk {hunk_index} not found for {}", file.path))
-                        })?;
+                        let hunk = file
+                            .hunks
+                            .iter()
+                            .find(|h| &h.hunk.id == hunk_id)
+                            .ok_or_else(|| Error::hunk_not_found(&file.path))?;
                         // A partial apply of a file creation or deletion needs
                         // a normal header instead of the original `/dev/null`.
                         if (reverse && patch::is_new_file(&hunk.hunk))
@@ -427,24 +423,19 @@ impl GitRepo {
     fn apply_hunk_lines(
         &self,
         path: &str,
-        hunk_index: usize,
+        hunk_id: &str,
         start: usize,
         end: usize,
         reverse: bool,
     ) -> Result<bool> {
         let layout = self.file_layout(path, reverse)?;
-        if layout.hunks.is_empty() {
-            // No lines exist to select; a header-only change is whole-file only.
-            self.apply_without_hunks(&layout, reverse)?;
-            return Ok(true);
-        }
-        let (first_line, len) = {
-            let hunk = layout
-                .hunks
-                .get(hunk_index)
-                .ok_or_else(|| Error::new(format!("hunk {hunk_index} not found for {path}")))?;
-            (hunk.first_line, hunk.hunk.lines.len())
-        };
+        let hunk = layout
+            .hunks
+            .iter()
+            .find(|h| h.hunk.id == hunk_id)
+            .ok_or_else(|| Error::hunk_not_found(path))?;
+        let first_line = hunk.first_line;
+        let len = hunk.hunk.lines.len();
         if len == 0 {
             return Ok(false);
         }

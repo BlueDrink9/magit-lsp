@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use magit_lsp::git::GitRepo;
 use magit_lsp::patch::{self, FileLayout, Selection, SelectionOp};
+use magit_lsp::ErrorKind;
 use proptest::prelude::*;
 use std::io::Write;
 use std::path::Path;
@@ -54,8 +55,11 @@ fn diff_unstaged_returns_full_diff() {
 fn stage_hunk_stages_entire_file() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
 
-    repo.stage_hunk("f.txt", 0).expect("stage hunk");
+    repo.stage_hunk("f.txt", &hunk_id).expect("stage hunk");
 
     let cached = cached_diff(tmp.path());
     assert!(cached.contains("-line3"));
@@ -69,12 +73,102 @@ fn stage_hunk_stages_entire_file() {
 }
 
 #[test]
+fn stage_hunk_by_id_survives_line_shifts() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[34] = "line35 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+
+    // Insert lines above the hunk: its line numbers move, its content does not.
+    let mut shifted = vec!["inserted1".to_string(), "inserted2".to_string()];
+    shifted.extend(lines);
+    write(&tmp.path().join("f.txt"), &(shifted.join("\n") + "\n"));
+
+    repo.stage_hunk("f.txt", &hunk_id)
+        .expect("stage the shifted hunk by id");
+
+    let cached = cached_diff(tmp.path());
+    assert!(cached.contains("+line35 CHANGED"), "got: {cached}");
+    assert!(!cached.contains("inserted1"), "got: {cached}");
+    assert!(!cached.contains("inserted2"), "got: {cached}");
+}
+
+#[test]
+fn stage_hunk_rejects_hunk_changed_since_render() {
+    let (tmp, repo) = init_40_line_repo();
+    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
+    lines[34] = "line35 CHANGED".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+
+    lines[34] = "line35 DIFFERENT".into();
+    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+
+    let err = repo
+        .stage_hunk("f.txt", &hunk_id)
+        .expect_err("the old hunk id must not resolve");
+    assert_eq!(err.kind, ErrorKind::HunkNotFound);
+    assert!(
+        cached_diff(tmp.path()).is_empty(),
+        "the index must stay untouched"
+    );
+}
+
+#[test]
+fn duplicate_content_hunks_get_distinct_ids_and_stage_independently() {
+    let block = ["A", "B", "C", "D", "target", "E", "F", "G", "H", "I"];
+    let filler: Vec<String> = (1..=10).map(|i| format!("J{i}")).collect();
+    let mut original: Vec<String> = block.iter().map(|s| s.to_string()).collect();
+    original.extend(filler.iter().cloned());
+    original.extend(block.iter().map(|s| s.to_string()));
+    let original = original.join("\n") + "\n";
+    let modified = original.replace("target\n", "changed\n");
+
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", original)])
+        .build();
+    write(&tmp.path().join("f.txt"), &modified);
+
+    let status = repo.status().expect("status");
+    let hunks = &status.unstaged[0].hunks;
+    assert_eq!(hunks.len(), 2, "the edits are far enough apart");
+    assert_ne!(hunks[0].id, hunks[1].id);
+    assert_eq!(hunks[1].id, format!("{}-1", hunks[0].id));
+
+    // Stage only the second occurrence.
+    repo.stage_hunk("f.txt", &hunks[1].id)
+        .expect("stage the second duplicate");
+    let cached = cached_diff(tmp.path());
+    assert_eq!(cached.matches("+changed").count(), 1, "got: {cached}");
+    assert_eq!(
+        repo.status().expect("status").unstaged[0].hunks.len(),
+        1,
+        "the first duplicate stays unstaged"
+    );
+
+    // The remaining occurrence still has the base id and can be staged.
+    repo.stage_hunk("f.txt", &hunks[0].id)
+        .expect("stage the first duplicate");
+    let cached = cached_diff(tmp.path());
+    assert_eq!(cached.matches("+changed").count(), 2, "got: {cached}");
+}
+
+#[test]
 fn stage_lines_stages_only_modification() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
 
     // line3 modification is hunk lines 2..=3
-    repo.stage_lines("f.txt", 0, 2, 3).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("f.txt", &hunk_id, 2, 3)
+        .expect("stage lines");
 
     let cached = cached_diff(tmp.path());
     assert!(cached.contains("-line3"));
@@ -88,7 +182,11 @@ fn stage_lines_stages_only_addition() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
 
-    repo.stage_lines("f.txt", 0, 6, 6).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("f.txt", &hunk_id, 6, 6)
+        .expect("stage lines");
 
     let cached = cached_diff(tmp.path());
     assert!(cached.contains("+NEW line"));
@@ -101,7 +199,11 @@ fn stage_lines_stages_only_deletion() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
 
-    repo.stage_lines("f.txt", 0, 9, 9).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("f.txt", &hunk_id, 9, 9)
+        .expect("stage lines");
 
     let cached = cached_diff(tmp.path());
     assert!(cached.contains("-line8"));
@@ -113,10 +215,16 @@ fn stage_lines_stages_only_deletion() {
 fn unstage_hunk_reverts_staged_hunk() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
-    repo.stage_hunk("f.txt", 0).expect("stage");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_hunk("f.txt", &hunk_id).expect("stage");
     assert!(!cached_diff(tmp.path()).is_empty());
 
-    repo.unstage_hunk("f.txt", 0).expect("unstage");
+    let staged_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
+    repo.unstage_hunk("f.txt", &staged_id).expect("unstage");
 
     let cached = cached_diff(tmp.path());
     assert!(!cached.contains("line3 CHANGED"));
@@ -162,7 +270,11 @@ fn unstage_file_unstages_staged_file() {
 fn status_reports_partially_staged_as_both() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
-    repo.stage_lines("f.txt", 0, 2, 3).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("f.txt", &hunk_id, 2, 3)
+        .expect("stage lines");
 
     let status = repo.status().expect("status");
     assert_eq!(status.staged.len(), 1);
@@ -265,7 +377,10 @@ fn unstage_hunk_works_without_commits() {
     let (tmp, repo) = init_unborn_repo();
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
-    repo.unstage_hunk("f.txt", 0)
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
+    repo.unstage_hunk("f.txt", &hunk_id)
         .expect("unstage hunk without HEAD");
 
     assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
@@ -278,7 +393,10 @@ fn unstage_lines_works_without_commits() {
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
     // Hunk lines are +a, +b, +c; unstage only +b.
-    repo.unstage_lines("f.txt", 0, 1, 1)
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
+    repo.unstage_lines("f.txt", &hunk_id, 1, 1)
         .expect("unstage lines without HEAD");
 
     assert_eq!(read(&tmp.path().join("f.txt")), "a\nB\nc\n");
@@ -299,7 +417,10 @@ fn stage_hunk_works_without_commits() {
     let (tmp, repo) = init_unborn_repo();
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
-    repo.stage_hunk("f.txt", 0)
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_hunk("f.txt", &hunk_id)
         .expect("stage hunk without HEAD");
 
     assert_eq!(git(tmp.path(), &["show", ":f.txt"]), "a\nB\nc\n");
@@ -312,7 +433,10 @@ fn stage_lines_works_without_commits() {
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
     // Hunk lines are context a, -b, +B, context c.
-    repo.stage_lines("f.txt", 0, 1, 2)
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("f.txt", &hunk_id, 1, 2)
         .expect("stage lines without HEAD");
 
     assert_eq!(git(tmp.path(), &["show", ":f.txt"]), "a\nB\nc\n");
@@ -355,11 +479,10 @@ fn layout_for(repo: &GitRepo, path: &str, staged: bool) -> FileLayout {
 /// first so earlier stagings are reflected.
 fn stage_replacement(repo: &GitRepo, path: &str, old: &str, new: &str) {
     let layout = layout_for(repo, path, false);
-    let (hunk_index, lines) = layout
+    let (hunk_id, lines) = layout
         .hunks
         .iter()
-        .enumerate()
-        .find_map(|(hunk_index, hunk)| {
+        .find_map(|hunk| {
             let lines: Vec<usize> = hunk
                 .hunk
                 .lines
@@ -371,10 +494,10 @@ fn stage_replacement(repo: &GitRepo, path: &str, old: &str, new: &str) {
                 })
                 .map(|(index, _)| index)
                 .collect();
-            (!lines.is_empty()).then_some((hunk_index, lines))
+            (!lines.is_empty()).then_some((hunk.hunk.id.clone(), lines))
         })
         .unwrap_or_else(|| panic!("no change {old} -> {new}"));
-    repo.stage_lines(path, hunk_index, lines[0], lines[lines.len() - 1])
+    repo.stage_lines(path, &hunk_id, lines[0], lines[lines.len() - 1])
         .expect("stage change");
 }
 
@@ -617,7 +740,12 @@ fn stage_lines_context_only_returns_false() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
 
-    let applied = repo.stage_lines("f.txt", 0, 0, 0).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    let applied = repo
+        .stage_lines("f.txt", &hunk_id, 0, 0)
+        .expect("stage lines");
 
     assert!(!applied);
     assert!(cached_diff(tmp.path()).is_empty());
@@ -681,11 +809,11 @@ proptest! {
                 for op in ops {
                     let text = match op {
                         SelectionOp::WholeFile { .. } => layout.whole_file_patch(),
-                        SelectionOp::WholeHunk { hunk_index, .. } => {
-                            layout.whole_hunk_patch(hunk_index).expect("hunk patch")
+                        SelectionOp::WholeHunk { hunk_id, .. } => {
+                            layout.whole_hunk_patch(&hunk_id).expect("hunk patch")
                         }
-                        SelectionOp::Lines { hunk_index, lines, .. } => {
-                            layout.lines_patch(hunk_index, &lines, false).expect("lines patch")
+                        SelectionOp::Lines { hunk_id, lines, .. } => {
+                            layout.lines_patch(&hunk_id, &lines, false).expect("lines patch")
                         }
                     };
                     if let Err(e) = apply_check(tmp.path(), &text) {
@@ -703,7 +831,12 @@ fn stage_lines_partial_deletion_uses_normal_header() {
     std::fs::remove_file(tmp.path().join("f.txt")).expect("remove file");
 
     // The deletion hunk is -line1 .. -line10; stage only -line3.
-    let applied = repo.stage_lines("f.txt", 0, 2, 2).expect("stage lines");
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    let applied = repo
+        .stage_lines("f.txt", &hunk_id, 2, 2)
+        .expect("stage lines");
 
     assert!(applied);
     let cached = cached_diff(tmp.path());
@@ -800,11 +933,11 @@ proptest! {
                 for op in ops {
                     let text = match op {
                         SelectionOp::WholeFile { .. } => layout.whole_file_patch(),
-                        SelectionOp::WholeHunk { hunk_index, .. } => {
-                            layout.whole_hunk_patch(hunk_index).expect("hunk patch")
+                        SelectionOp::WholeHunk { hunk_id, .. } => {
+                            layout.whole_hunk_patch(&hunk_id).expect("hunk patch")
                         }
-                        SelectionOp::Lines { hunk_index, lines, .. } => {
-                            layout.lines_patch(hunk_index, &lines, true).expect("lines patch")
+                        SelectionOp::Lines { hunk_id, lines, .. } => {
+                            layout.lines_patch(&hunk_id, &lines, true).expect("lines patch")
                         }
                     };
                     if let Err(e) = apply_check_reverse(tmp.path(), &text) {

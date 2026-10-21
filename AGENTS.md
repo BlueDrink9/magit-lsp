@@ -176,9 +176,7 @@ The roadmap, glossary, protocol reference and phased plan live in
   config keys and Lua APIs freely. Delete the old thing; never leave a shim or
   a deprecated alias behind.
 - **Never address hunks by index.** Hunk identity is a content hash
-  (`path` + hunk text), so it survives refreshes and concurrent edits. Known
-  gap: the current code still uses indices in places — tracked by R-0.5; do not
-  add new index-addressed APIs.
+  (`path` + hunk text), so it survives refreshes and concurrent edits.
 - **Never parse rendered text.** Structure must come from the server's tree.
   `src/document.rs` parses the rendered document and is legacy, slated for
   removal in R-1.1; do not extend it.

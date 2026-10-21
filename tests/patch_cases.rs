@@ -5,6 +5,7 @@ mod common;
 use common::*;
 use magit_lsp::git::GitRepo;
 use magit_lsp::patch::FileLayout;
+use magit_lsp::ErrorKind;
 use std::path::Path;
 use std::process::Command;
 
@@ -76,7 +77,8 @@ fn rename_with_modifications_stages_hunks_and_unstages() {
     assert_eq!(entry.status, "R");
     assert_eq!(entry.hunks.len(), 1);
 
-    repo.stage_hunk("g.txt", 0).expect("stage rename hunk");
+    let hunk_id = entry.hunks[0].id.clone();
+    repo.stage_hunk("g.txt", &hunk_id).expect("stage rename hunk");
     let cached = git(tmp.path(), &["diff", "--cached", "-M", "-U3"]);
     assert!(cached.contains("rename from f.txt"), "got: {cached}");
     assert!(cached.contains("rename to g.txt"), "got: {cached}");
@@ -85,12 +87,19 @@ fn rename_with_modifications_stages_hunks_and_unstages() {
     assert!(git(tmp.path(), &["ls-files", "--", "f.txt"]).is_empty());
     assert_eq!(repo.status().expect("status").staged.len(), 1);
 
-    repo.unstage_hunk("g.txt", 0).expect("unstage rename hunk");
+    let staged_id = repo.status().expect("status").staged[0].hunks[0]
+        .id
+        .clone();
+    repo.unstage_hunk("g.txt", &staged_id)
+        .expect("unstage rename hunk");
     assert_eq!(index_text(tmp.path(), "f.txt"), TEN_LINES);
     assert!(git(tmp.path(), &["ls-files", "--", "g.txt"]).is_empty());
 
     git(tmp.path(), &["add", "-N", "g.txt"]);
-    repo.stage_lines("g.txt", 0, 2, 3)
+    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("g.txt", &hunk_id, 2, 3)
         .expect("stage rename lines");
     let cached = git(tmp.path(), &["diff", "--cached", "-M", "-U3"]);
     assert!(cached.contains("rename from f.txt"), "got: {cached}");
@@ -171,14 +180,18 @@ fn mode_and_content_change_keeps_mode_lines_in_hunk_headers() {
         "{}",
         layout.header
     );
-    let whole = layout.whole_hunk_patch(0).expect("hunk patch");
+    let hunk_id = layout.hunks[0].hunk.id.clone();
+    let whole = layout.whole_hunk_patch(&hunk_id).expect("hunk patch");
     assert!(whole.contains("old mode 100644"), "got: {whole}");
     assert!(whole.contains("new mode 100755"), "got: {whole}");
-    let lines = layout.lines_patch(0, &[2, 3], false).expect("lines patch");
+    let lines = layout
+        .lines_patch(&hunk_id, &[2, 3], false)
+        .expect("lines patch");
     assert!(lines.contains("old mode 100644"), "got: {lines}");
     assert!(lines.contains("new mode 100755"), "got: {lines}");
 
-    repo.stage_lines("f.txt", 0, 2, 3).expect("stage lines");
+    repo.stage_lines("f.txt", &hunk_id, 2, 3)
+        .expect("stage lines");
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "f.txt"]);
     assert!(cached.contains("old mode 100644"), "got: {cached}");
     assert!(cached.contains("new mode 100755"), "got: {cached}");
@@ -217,7 +230,7 @@ fn symlink_type_change_is_whole_file_only() {
     assert!(entry.hunks.is_empty());
 
     // Hunk staging must refuse rather than apply only the deletion half.
-    assert!(repo.stage_hunk("regular", 0).is_err());
+    assert!(repo.stage_hunk("regular", "0000000000000000").is_err());
     assert_eq!(index_text(tmp.path(), "regular"), "x\n");
     assert_eq!(index_mode(tmp.path(), "regular"), "100644");
 
@@ -260,23 +273,17 @@ fn binary_file_is_whole_file_only_and_hunk_requests_fail_cleanly() {
     assert_eq!(entry.path, "f.txt");
     assert!(entry.hunks.is_empty());
 
-    let err = repo.stage_hunk("f.txt", 0).expect_err("no hunk to stage");
-    assert!(err.git.is_some(), "must surface Git's own failure");
-    let user = err.user_error().expect("user error");
-    assert!(
-        user.detail
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase()
-            .contains("binary"),
-        "got: {user:?}"
-    );
+    // A binary file exposes no hunks, so any hunk id is stale by definition.
+    let err = repo
+        .stage_hunk("f.txt", "0000000000000000")
+        .expect_err("no hunk to stage");
+    assert_eq!(err.kind, ErrorKind::HunkNotFound);
     assert_eq!(index_bytes(tmp.path(), "f.txt"), TEN_LINES.as_bytes());
 
     let err = repo
-        .stage_lines("f.txt", 0, 0, 0)
+        .stage_lines("f.txt", "0000000000000000", 0, 0)
         .expect_err("no lines to stage");
-    assert!(err.git.is_some());
+    assert_eq!(err.kind, ErrorKind::HunkNotFound);
     assert_eq!(index_bytes(tmp.path(), "f.txt"), TEN_LINES.as_bytes());
 
     repo.stage_file("f.txt").expect("stage binary file");
@@ -308,7 +315,17 @@ fn no_trailing_newline_markers_survive_line_staging() {
     write(&tmp.path().join("both.txt"), "a\nB");
 
     for path in ["old_side.txt", "new_side.txt", "both.txt"] {
-        repo.stage_lines(path, 0, 1, 2)
+        let hunk_id = repo
+            .status()
+            .expect("status")
+            .unstaged
+            .iter()
+            .find(|file| file.path == path)
+            .expect("unstaged path")
+            .hunks[0]
+            .id
+            .clone();
+        repo.stage_lines(path, &hunk_id, 1, 2)
             .unwrap_or_else(|err| panic!("stage {path}: {err}"));
     }
 
@@ -342,10 +359,30 @@ fn crlf_line_staging_preserves_carriage_returns() {
     write(&tmp.path().join("add.txt"), addition);
 
     // Replace line2: hunk lines are context, -line2, +line2 CHANGED, context.
-    repo.stage_lines("replace.txt", 0, 1, 2)
+    let replace_id = repo
+        .status()
+        .expect("status")
+        .unstaged
+        .iter()
+        .find(|file| file.path == "replace.txt")
+        .expect("replace.txt is unstaged")
+        .hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("replace.txt", &replace_id, 1, 2)
         .expect("stage replacement");
     // Add line2b: select the single added line.
-    repo.stage_lines("add.txt", 0, 2, 2)
+    let add_id = repo
+        .status()
+        .expect("status")
+        .unstaged
+        .iter()
+        .find(|file| file.path == "add.txt")
+        .expect("add.txt is unstaged")
+        .hunks[0]
+        .id
+        .clone();
+    repo.stage_lines("add.txt", &add_id, 2, 2)
         .expect("stage addition");
 
     assert_eq!(index_text(tmp.path(), "replace.txt"), replacement);
