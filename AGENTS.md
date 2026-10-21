@@ -62,7 +62,8 @@ as an error-level `Effect::Message` with a readable summary (see
 - `src/document.rs` — **legacy**: parses the rendered status document. Slated for
   deletion in R-1.1; do not extend it.
 - `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Effect`, …).
-- `src/server.rs` — stdio LSP loop, document store, request dispatch.
+- `src/transport.rs` — `Content-Length` framing over async stdio.
+- `src/server.rs` — `tokio` stdio LSP loop, document store, request dispatch.
 - `src/vcs.rs` — vestigial gix-based backend stub; unused, to be deleted.
 - `lua/magit-lsp/init.lua` — Neovim client (render, highlight, folding, keys,
   read-only buffer).

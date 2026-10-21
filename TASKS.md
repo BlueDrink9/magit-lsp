@@ -1203,7 +1203,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       API). *Done when:* a test mutates the file between render and action and
       the action targets the right hunk or is rejected with a message.
 - [x] R-0.6 `tracing` to stderr/file; child stdout never reaches the LSP pipe.
-- [ ] R-0.7 Move the stdio loop to `tokio`.
+- [x] R-0.7 Move the stdio loop to `tokio`.
 
 ### Phase 1 — Server-owned document and sessions
 

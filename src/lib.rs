@@ -6,6 +6,7 @@ pub mod logging;
 pub mod patch;
 pub mod protocol;
 pub mod server;
+pub mod transport;
 
 use std::fmt;
 
