@@ -10,10 +10,71 @@ use lsp_types::{
     SymbolKind, Uri,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 /// Stable identity of a node, derived from what the node is, never its position.
 pub type NodeId = String;
+
+/// Whether a node's body is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisibilityState {
+    Expanded,
+    Collapsed,
+}
+
+/// Per-view visibility, keyed by stable node id so it survives a refresh.
+///
+/// Unknown nodes are expanded: the server only records a state when the user
+/// changes it, so a refresh that adds a file shows it expanded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Visibility {
+    states: HashMap<NodeId, VisibilityState>,
+}
+
+impl Visibility {
+    /// An empty map, where every node is expanded.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether `id`'s body is shown.
+    pub fn is_expanded(&self, id: &str) -> bool {
+        self.states.get(id) != Some(&VisibilityState::Collapsed)
+    }
+
+    /// Record `state` for `id`.
+    pub fn set(&mut self, id: impl Into<NodeId>, state: VisibilityState) {
+        self.states.insert(id.into(), state);
+    }
+
+    /// Expand `id`.
+    pub fn show(&mut self, id: impl Into<NodeId>) {
+        self.set(id, VisibilityState::Expanded);
+    }
+
+    /// Collapse `id`.
+    pub fn hide(&mut self, id: impl Into<NodeId>) {
+        self.set(id, VisibilityState::Collapsed);
+    }
+
+    /// Flip `id` and return its new state.
+    pub fn toggle(&mut self, id: &str) -> VisibilityState {
+        let next = if self.is_expanded(id) {
+            VisibilityState::Collapsed
+        } else {
+            VisibilityState::Expanded
+        };
+        self.set(id.to_string(), next);
+        next
+    }
+
+    /// Forget every recorded state, expanding all nodes.
+    pub fn show_all(&mut self) {
+        self.states.clear();
+    }
+}
 
 /// What a rendered line or tree node represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

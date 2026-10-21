@@ -1,9 +1,11 @@
 use crate::patch::{self, FileLayout, Hunk, Selection, SelectionOp};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 /// A single changed file: its display status char and its diff hunks.
@@ -137,8 +139,23 @@ impl GitRepo {
         &self.root
     }
 
-    /// Compute the full status: branch, staged files, and unstaged files.
+    /// Compute the full status with every file's diff hunks.
+    ///
+    /// Views that hide bodies use [`Self::status_listing`] and load hunks only
+    /// for visible files with [`Self::file_hunks`].
     pub fn status(&self) -> Result<Status> {
+        let mut status = self.status_listing()?;
+        for file in &mut status.staged {
+            file.hunks = self.file_hunks(&file.path, true)?;
+        }
+        for file in &mut status.unstaged {
+            file.hunks = self.file_hunks(&file.path, false)?;
+        }
+        Ok(status)
+    }
+
+    /// Compute the status without reading any file's diff.
+    pub fn status_listing(&self) -> Result<Status> {
         let repo_path = self.root.to_string_lossy().into_owned();
         // `-z` keeps paths verbatim; `--no-optional-locks` keeps a read from
         // taking the index lock away from a concurrent mutation.
@@ -239,21 +256,19 @@ impl GitRepo {
     ) -> Result<()> {
         let bytes = xy.as_bytes();
         if let Some(staged) = side_status(bytes.first().copied()) {
-            let hunks = self.hunks_for(path, true)?;
             status.staged.push(FileEntry {
                 path: path.to_string(),
                 status: staged,
                 orig_path: orig_path.clone(),
-                hunks,
+                hunks: Vec::new(),
             });
         }
         if let Some(unstaged) = side_status(bytes.get(1).copied()) {
-            let hunks = self.hunks_for(path, false)?;
             status.unstaged.push(FileEntry {
                 path: path.to_string(),
                 status: unstaged,
                 orig_path,
-                hunks,
+                hunks: Vec::new(),
             });
         }
         Ok(())
@@ -274,6 +289,7 @@ impl GitRepo {
     /// Path limiting disables Git's rename detection, so a rename pair has to
     /// be passed to `git diff` together or it looks like a new file.
     fn diff_side(&self, path: &str, staged: bool) -> Result<String> {
+        record_diff_call(&self.root.join(path));
         let mut args = vec!["-c", "core.quotepath=false", "diff"];
         if staged {
             args.push("--cached");
@@ -503,7 +519,7 @@ impl GitRepo {
     /// Paths come from the status so spaces and non-ASCII names stay intact;
     /// `git add -A` would also stage tracked modifications.
     pub fn stage_untracked(&self) -> Result<()> {
-        let status = self.status()?;
+        let status = self.status_listing()?;
         let mut args = vec!["add", "--"];
         args.extend(status.untracked.iter().map(|file| file.path.as_str()));
         if args.len() == 2 {
@@ -540,14 +556,16 @@ impl GitRepo {
         FileLayout::from_diff(&diff, 0).ok_or_else(|| Error::new(format!("no diff for {path}")))
     }
 
-    fn hunks_for(&self, path: &str, staged: bool) -> Result<Vec<Hunk>> {
+    /// The diff hunks for one file, reading its diff from Git.
+    ///
+    /// A type change renders as two file sections and has no single hunk list;
+    /// treat it as whole-file only so the status view stays honest.
+    pub fn file_hunks(&self, path: &str, staged: bool) -> Result<Vec<Hunk>> {
         let diff = if staged {
             self.diff_staged(path)?
         } else {
             self.diff_unstaged(path)?
         };
-        // A type change renders as two file sections and has no single hunk
-        // list; treat it as whole-file only so the status view stays honest.
         Ok(patch::parse_file_diff(&diff)
             .map(|file| file.hunks)
             .unwrap_or_default())
@@ -612,6 +630,33 @@ impl GitRepo {
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
+}
+
+/// Per-file `git diff` counters, used by tests to prove lazy bodies.
+fn diff_calls() -> &'static Mutex<HashMap<PathBuf, usize>> {
+    static CALLS: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
+    CALLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// How many `git diff` invocations this process made for `path`.
+///
+/// Keyed by absolute path, so concurrent tests with separate repositories do
+/// not observe each other.
+pub fn diff_invocation_count(path: &Path) -> usize {
+    diff_calls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(path)
+        .copied()
+        .unwrap_or(0)
+}
+
+fn record_diff_call(path: &Path) {
+    *diff_calls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(path.to_path_buf())
+        .or_insert(0) += 1;
 }
 
 /// Build a `git` child that can never write to the server's own stdout and

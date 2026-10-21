@@ -137,6 +137,25 @@ pub struct Ctx {
     pub viewport: Viewport,
 }
 
+/// A visibility change requested by one of the `common.*` fold commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibilityCommand {
+    /// Show or hide the node under the cursor.
+    Toggle { recursive: bool },
+    /// Expand the node under the cursor.
+    Show { recursive: bool },
+    /// Collapse the node under the cursor.
+    Hide { recursive: bool },
+    /// Expand every node.
+    ShowAll,
+    /// Collapse every section.
+    HideAll,
+    /// Show one more level of detail.
+    MoreDetail,
+    /// Show one less level of detail.
+    LessDetail,
+}
+
 /// One server-owned screen.
 pub trait View: Send {
     /// The view kind this implementation renders.
@@ -159,7 +178,19 @@ pub trait View: Send {
     }
 
     /// Render the current state. Must not touch the repository; refresh first.
-    fn render(&self, ctx: &Ctx) -> Tree;
+    fn render(&mut self, ctx: &Ctx) -> Tree;
+
+    /// Apply a visibility command to the node at `line` of `tree`.
+    ///
+    /// Returns `false` when the view has no visibility model.
+    fn set_visibility(
+        &mut self,
+        _tree: &Tree,
+        _line: Option<usize>,
+        _command: VisibilityCommand,
+    ) -> bool {
+        false
+    }
 
     /// Re-read whatever backs this view before the next render.
     fn on_refresh(&mut self) -> Result<()> {

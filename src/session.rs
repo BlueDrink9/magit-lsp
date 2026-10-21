@@ -12,7 +12,7 @@ use crate::git::GitRepo;
 use crate::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewRender};
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
-use crate::view::{Ctx, Placement, View, ViewDescriptor, ViewKind, Viewport};
+use crate::view::{Ctx, Placement, View, ViewDescriptor, ViewKind, Viewport, VisibilityCommand};
 use crate::{Error, Result};
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
@@ -58,16 +58,25 @@ impl OpenView {
 
     /// Re-read the backing state, then render and diff against the last tree.
     fn refresh_and_render(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
+        self.view.on_refresh()?;
+        self.render(cursor, None)
+    }
+
+    /// Render without touching the repository, diffing against the last tree.
+    ///
+    /// `forced` replaces the identity-based successor cursor; section
+    /// navigation uses it to move somewhere the old node cannot describe.
+    fn render(&mut self, cursor: Option<Cursor>, forced: Option<Cursor>) -> Result<ViewRender> {
         let old = self.tree.clone();
         let old_version = self.version;
-        self.view.on_refresh()?;
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
         });
         let version = old_version + 1;
         tree.version = version;
 
-        let successor = cursor.map(|cursor| successor_cursor(&old, &tree, cursor));
+        let successor =
+            forced.or_else(|| cursor.map(|cursor| successor_cursor(&old, &tree, cursor)));
         // Edits are only safe when the client holds exactly the previous
         // version; otherwise fall back to a full replace.
         let base_version = (self.acked_version == Some(old_version)).then_some(old_version);
@@ -181,7 +190,7 @@ impl Session {
             return Err(Error::new(format!("view already open: {id}")));
         }
 
-        let view = create_view(&self.repo_path, &kind)?;
+        let mut view = create_view(&self.repo_path, &kind)?;
         let mut tree = view.render(&Ctx { viewport });
         let version = 1;
         tree.version = version;
@@ -273,6 +282,7 @@ impl Session {
             .get_mut(&params.view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
 
+        let mut forced = None;
         let effects = match params.command.as_str() {
             "common.refresh" => Vec::new(),
             "status.stage" => {
@@ -281,10 +291,37 @@ impl Session {
             "status.unstage" => {
                 stage_or_unstage(view, &repo_path, dispatch::Command::Unstage, params.cursor)?
             }
-            other => return Err(Error::new(format!("unknown command: {other}"))),
+            "common.next-section" => {
+                forced = section_cursor(view, params.cursor, true);
+                Vec::new()
+            }
+            "common.prev-section" => {
+                forced = section_cursor(view, params.cursor, false);
+                Vec::new()
+            }
+            other => {
+                let Some(command) = visibility_command(other, recursive_arg(params)) else {
+                    return Err(Error::new(format!("unknown command: {other}")));
+                };
+                // Resolve against the acked tree, like every other action.
+                let source = view
+                    .acked_tree()
+                    .cloned()
+                    .unwrap_or_else(|| view.tree().clone());
+                view.view
+                    .set_visibility(&source, params.cursor.map(|cursor| cursor.line), command);
+                Vec::new()
+            }
         };
 
-        let render = view.refresh_and_render(params.cursor)?;
+        let render = if matches!(
+            params.command.as_str(),
+            "common.refresh" | "status.stage" | "status.unstage"
+        ) {
+            view.refresh_and_render(params.cursor)?
+        } else {
+            view.render(params.cursor, forced)?
+        };
         Ok(InvokeResult {
             effects,
             render: Some(render),
@@ -307,6 +344,60 @@ fn create_view(repo_path: &str, kind: &ViewKind) -> Result<Box<dyn View>> {
             "The `{name}` view is not implemented yet."
         ))),
     }
+}
+
+/// The `recursive` argument of a fold command, as sent by `zA`/`zO`/`zC`.
+fn recursive_arg(params: &ViewInvokeParams) -> bool {
+    params
+        .args
+        .as_ref()
+        .and_then(|args| args.get("recursive"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+/// Map a `common.*` fold command id to its visibility operation.
+fn visibility_command(command: &str, recursive: bool) -> Option<VisibilityCommand> {
+    match command {
+        "common.toggle-section" => Some(VisibilityCommand::Toggle { recursive }),
+        "common.show-section" => Some(VisibilityCommand::Show { recursive }),
+        "common.hide-section" => Some(VisibilityCommand::Hide { recursive }),
+        "common.show-all" => Some(VisibilityCommand::ShowAll),
+        "common.hide-all" => Some(VisibilityCommand::HideAll),
+        "common.more-detail" => Some(VisibilityCommand::MoreDetail),
+        "common.less-detail" => Some(VisibilityCommand::LessDetail),
+        _ => None,
+    }
+}
+
+/// The cursor line of the next or previous section header.
+fn section_cursor(view: &OpenView, cursor: Option<Cursor>, forward: bool) -> Option<Cursor> {
+    let cursor = cursor?;
+    let source = view.acked_tree().unwrap_or_else(|| view.tree());
+    let sections: Vec<&Node> = source
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Section)
+        .collect();
+    let current = source
+        .line_nodes
+        .get(cursor.line)
+        .and_then(|line| line.section.as_deref());
+    let index = current.and_then(|section| {
+        sections
+            .iter()
+            .position(|node| node.section.as_deref() == Some(section))
+    });
+    let target = match (index, forward) {
+        (Some(index), true) => sections.get(index + 1),
+        (Some(index), false) => index.checked_sub(1).and_then(|index| sections.get(index)),
+        (None, true) => sections.first(),
+        (None, false) => sections.last(),
+    }?;
+    Some(Cursor {
+        line: target.start_line,
+        column: 0,
+    })
 }
 
 fn stage_or_unstage(

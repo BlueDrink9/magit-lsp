@@ -1222,7 +1222,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       `@lsp.type.magit.*` links.
 - [x] R-1.4 `documentSymbol` replaces `vcs/targets`; `definition`/`showDocument`
       for visit.
-- [ ] R-1.5 Server-owned visibility with lazy bodies; `common.toggle-section`,
+- [x] R-1.5 Server-owned visibility with lazy bodies; `common.toggle-section`,
       level commands.
 - [ ] R-1.6 Delete `vcs/didRender`, `vcs/status` and all old `vcs/*` methods;
       the Lua client keeps only buffer replacement, key forwarding and

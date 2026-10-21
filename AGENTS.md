@@ -140,6 +140,14 @@ back as an error-level `Effect::Message` with a readable summary (see
   `view/resize` are wired. `view/render` sends line-range edits when the client
   holds the base version, full text otherwise, and a successor cursor by node
   identity. Position-based requests use the last acked tree.
+- Visibility (R-1.5): `Visibility` in `src/tree.rs` stores `expanded`/
+  `collapsed` per node id, so it survives refreshes. `StatusView` reads a
+  porcelain listing (`GitRepo::status_listing`) and calls `file_hunks` only for
+  visible files, caching hunks per refresh; collapsed bodies are never diffed.
+  `view/invoke` handles `common.toggle/show/hide-section` (with `recursive`),
+  `show-all`, `hide-all`, `more-detail`/`less-detail` (levels 1–3) and
+  `next-section`/`prev-section`. Folding it on a diff line acts on its file.
+  `GitRepo::diff_invocation_count` backs the laziness test.
 - Stubs retained for commit menus: `vcs/requestTransient` +
   `magit-lsp.executeVCSCommand`.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status

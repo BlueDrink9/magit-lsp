@@ -5,25 +5,226 @@
 
 use crate::git::{FileEntry, GitRepo, Status};
 use crate::patch::Hunk;
-use crate::tree::{last_nonblank, LineNode, Link, Node, NodeKind, Symbol, Token, Tree};
-use crate::view::{Ctx, Scope, View, ViewKind};
+use crate::tree::{
+    last_nonblank, LineNode, Link, Node, NodeKind, Symbol, Token, Tree, Visibility, VisibilityState,
+};
+use crate::view::{Ctx, Scope, View, ViewKind, VisibilityCommand};
 use crate::Result;
+use std::collections::HashMap;
+
+/// The shallowest visibility level: section headers only.
+const LEVEL_MIN: u8 = 1;
+/// The deepest visibility level: sections, files and hunks.
+const LEVEL_MAX: u8 = 3;
+/// The level the status view opens at, which matches the old full render.
+const LEVEL_DEFAULT: u8 = LEVEL_MAX;
 
 /// A live status view: the repository root plus the last read status.
 pub struct StatusView {
-    repo_path: String,
+    repo: GitRepo,
+    /// The last listing: branch and file entries, without any hunks.
     status: Status,
+    /// Hunks loaded for visible files this refresh, keyed by `(path, staged)`.
+    hunks: HashMap<(String, bool), Vec<Hunk>>,
+    /// Per-view visibility, keyed by node id so it survives a refresh.
+    visibility: Visibility,
+    /// The last visibility level set by `more-detail`/`less-detail`.
+    level: u8,
 }
 
 impl StatusView {
     /// Read the repository status and prepare a view for it.
     pub fn open(repo_path: &str) -> Result<Self> {
-        let status = GitRepo::open(repo_path)?.status()?;
+        let repo = GitRepo::open(repo_path)?;
+        let status = repo.status_listing()?;
         Ok(Self {
-            repo_path: status.repo_path.clone(),
+            repo,
             status,
+            hunks: HashMap::new(),
+            visibility: Visibility::new(),
+            level: LEVEL_DEFAULT,
         })
     }
+
+    /// Render the visible tree, loading hunks only for expanded files.
+    fn render_tree(&mut self) -> Tree {
+        let status = &self.status;
+        let visibility = &self.visibility;
+        let hunks = &mut self.hunks;
+        let repo = &self.repo;
+        build_with(status, visibility, |section, file| {
+            if section == "untracked" {
+                return Vec::new();
+            }
+            let staged = section == "staged";
+            let key = (file.path.clone(), staged);
+            if let Some(cached) = hunks.get(&key) {
+                return cached.clone();
+            }
+            // A failed diff stays an empty body; the refresh path reports it.
+            let loaded = match repo.file_hunks(&file.path, staged) {
+                Ok(hunks) => hunks,
+                Err(error) => {
+                    tracing::warn!(path = %file.path, %error, "failed to load file body");
+                    Vec::new()
+                }
+            };
+            hunks.insert(key, loaded.clone());
+            loaded
+        })
+    }
+
+    /// All `(section, path)` pairs in the listing, cloned so callers may mutate.
+    fn file_keys(&self) -> Vec<(String, String)> {
+        ["staged", "unstaged", "untracked"]
+            .iter()
+            .flat_map(|section| {
+                self.entries(section)
+                    .iter()
+                    .map(move |file| (section.to_string(), file.path.clone()))
+            })
+            .collect()
+    }
+
+    fn entries(&self, section: &str) -> &[FileEntry] {
+        match section {
+            "staged" => &self.status.staged,
+            "unstaged" => &self.status.unstaged,
+            _ => &self.status.untracked,
+        }
+    }
+
+    /// The hunk node ids loaded for one file, if its body was ever visible.
+    fn hunk_ids(&self, section: &str, path: &str) -> Vec<String> {
+        let key = (path.to_string(), section == "staged");
+        self.hunks
+            .get(&key)
+            .map(|hunks| {
+                hunks
+                    .iter()
+                    .map(|hunk| format!("{section}/{path}/hunk:{}", hunk.id))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Apply a `more-detail`/`less-detail` level to every known node.
+    fn apply_level(&mut self, level: u8) {
+        self.level = level.clamp(LEVEL_MIN, LEVEL_MAX);
+        let level = self.level;
+        let section_state = if level >= 2 {
+            VisibilityState::Expanded
+        } else {
+            VisibilityState::Collapsed
+        };
+        let body_state = if level >= 3 {
+            VisibilityState::Expanded
+        } else {
+            VisibilityState::Collapsed
+        };
+        for section in ["staged", "unstaged", "untracked"] {
+            self.visibility
+                .set(format!("section:{section}"), section_state);
+        }
+        for (section, path) in self.file_keys() {
+            self.visibility.set(format!("{section}/{path}"), body_state);
+            for hunk_id in self.hunk_ids(&section, &path) {
+                self.visibility.set(hunk_id, body_state);
+            }
+        }
+    }
+
+    /// Toggle/show/hide the node at `line`, optionally with its descendants.
+    fn apply_at(
+        &mut self,
+        tree: &Tree,
+        line: Option<usize>,
+        state: Option<VisibilityState>,
+        recursive: bool,
+    ) -> bool {
+        let Some(node) = line.and_then(|line| {
+            tree.line_nodes
+                .get(line)
+                .and_then(|entry| tree.node(&entry.node))
+        }) else {
+            return false;
+        };
+        let Some(target) = collapsible_node(tree, node) else {
+            return false;
+        };
+        let state = state.unwrap_or_else(|| {
+            if self.visibility.is_expanded(&target.id) {
+                VisibilityState::Collapsed
+            } else {
+                VisibilityState::Expanded
+            }
+        });
+        self.visibility.set(target.id.clone(), state);
+        if recursive {
+            for id in self.descendants(target) {
+                self.visibility.set(id, state);
+            }
+        }
+        true
+    }
+
+    /// The collapsible descendants of `node`: files below a section, hunks
+    /// below a file. Lines follow their hunk, so they carry no separate state.
+    fn descendants(&self, node: &Node) -> Vec<String> {
+        match node.kind {
+            NodeKind::Section => {
+                let section = node.section.as_deref().unwrap_or_default();
+                self.file_keys()
+                    .into_iter()
+                    .filter(|(key, _)| key == section)
+                    .flat_map(|(key, path)| {
+                        let file_id = format!("{key}/{path}");
+                        let mut ids = vec![file_id];
+                        ids.extend(self.hunk_ids(&key, &path));
+                        ids
+                    })
+                    .collect()
+            }
+            NodeKind::File => {
+                let section = node.section.as_deref().unwrap_or_default();
+                let path = node.path.as_deref().unwrap_or_default();
+                self.hunk_ids(section, path)
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The node a fold command acts on: the node itself, or its nearest
+/// collapsible ancestor.
+///
+/// A diff line belongs to a hunk, but folding it acts on the file so a file
+/// body can be collapsed from any of its lines.
+fn collapsible_node<'a>(tree: &'a Tree, node: &'a Node) -> Option<&'a Node> {
+    if matches!(
+        node.kind,
+        NodeKind::Section | NodeKind::File | NodeKind::Hunk
+    ) {
+        return Some(node);
+    }
+    let skip_hunk = node.kind == NodeKind::Line;
+    let mut current = node;
+    while let Some(parent) = tree
+        .nodes
+        .iter()
+        .find(|candidate| candidate.children.iter().any(|id| id == &current.id))
+    {
+        let collapsible = match parent.kind {
+            NodeKind::Section | NodeKind::File => true,
+            NodeKind::Hunk => !skip_hunk,
+            _ => false,
+        };
+        if collapsible {
+            return Some(parent);
+        }
+        current = parent;
+    }
+    None
 }
 
 impl View for StatusView {
@@ -39,19 +240,71 @@ impl View for StatusView {
         Scope::new("status")
     }
 
-    fn render(&self, _ctx: &Ctx) -> Tree {
-        build(&self.status)
+    fn render(&mut self, _ctx: &Ctx) -> Tree {
+        self.render_tree()
     }
 
     fn on_refresh(&mut self) -> Result<()> {
-        self.status = GitRepo::open(&self.repo_path)?.status()?;
+        self.status = self.repo.status_listing()?;
+        // Hunk bodies are reloaded lazily from the fresh listing.
+        self.hunks.clear();
         Ok(())
+    }
+
+    fn set_visibility(
+        &mut self,
+        tree: &Tree,
+        line: Option<usize>,
+        command: VisibilityCommand,
+    ) -> bool {
+        match command {
+            VisibilityCommand::ShowAll => {
+                self.visibility.show_all();
+                self.level = LEVEL_MAX;
+                true
+            }
+            VisibilityCommand::HideAll => {
+                self.apply_level(LEVEL_MIN);
+                true
+            }
+            VisibilityCommand::MoreDetail => {
+                self.apply_level(self.level.saturating_add(1));
+                true
+            }
+            VisibilityCommand::LessDetail => {
+                self.apply_level(self.level.saturating_sub(1));
+                true
+            }
+            VisibilityCommand::Show { recursive } => {
+                self.apply_at(tree, line, Some(VisibilityState::Expanded), recursive)
+            }
+            VisibilityCommand::Hide { recursive } => {
+                self.apply_at(tree, line, Some(VisibilityState::Collapsed), recursive)
+            }
+            VisibilityCommand::Toggle { recursive } => self.apply_at(tree, line, None, recursive),
+        }
     }
 }
 
 /// Build the status view tree from a Git status.
 pub fn build(status: &Status) -> Tree {
-    let mut builder = Builder::new();
+    // The tree-only builder keeps the old fully-expanded rendering.
+    build_with(status, &Visibility::new(), |section, file| {
+        if section == "untracked" {
+            Vec::new()
+        } else {
+            file.hunks.clone()
+        }
+    })
+}
+
+/// Build the status view tree, using `visibility` and loading hunks only for
+/// files whose body is visible.
+pub(crate) fn build_with<F>(status: &Status, visibility: &Visibility, mut load: F) -> Tree
+where
+    F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
+{
+    let mut builder = Builder::new(visibility, &mut load);
     builder.header(status);
     builder.section("staged", "Staged changes", &status.staged);
     builder.section("unstaged", "Unstaged changes", &status.unstaged);
@@ -62,12 +315,17 @@ pub fn build(status: &Status) -> Tree {
     builder.finish()
 }
 
-struct Builder {
+struct Builder<'a, F> {
     tree: Tree,
+    visibility: &'a Visibility,
+    load: &'a mut F,
 }
 
-impl Builder {
-    fn new() -> Self {
+impl<'a, F> Builder<'a, F>
+where
+    F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
+{
+    fn new(visibility: &'a Visibility, load: &'a mut F) -> Self {
         Self {
             tree: Tree {
                 version: 0,
@@ -78,6 +336,8 @@ impl Builder {
                 symbols: Vec::new(),
                 links: Vec::new(),
             },
+            visibility,
+            load,
         }
     }
 
@@ -133,11 +393,13 @@ impl Builder {
             modifiers: Vec::new(),
         });
 
-        let children = files
-            .iter()
-            .map(|file| self.file(key, file))
-            .collect::<Vec<_>>();
-        self.tree.nodes[index].children = children;
+        if self.visibility.is_expanded(&section_id) {
+            let children = files
+                .iter()
+                .map(|file| self.file(key, file))
+                .collect::<Vec<_>>();
+            self.tree.nodes[index].children = children;
+        }
     }
 
     fn file(&mut self, section: &str, file: &FileEntry) -> String {
@@ -188,12 +450,14 @@ impl Builder {
             path: file.path.clone(),
         });
 
-        let children = file
-            .hunks
-            .iter()
-            .map(|hunk| self.hunk(section, file, &file_id, hunk))
-            .collect::<Vec<_>>();
-        self.tree.nodes[index].children = children;
+        if self.visibility.is_expanded(&file_id) {
+            let hunks = (self.load)(section, file);
+            let children = hunks
+                .iter()
+                .map(|hunk| self.hunk(section, file, &file_id, hunk))
+                .collect::<Vec<_>>();
+            self.tree.nodes[index].children = children;
+        }
         file_id
     }
 
@@ -237,8 +501,12 @@ impl Builder {
 
         // A removed line has no new-side line; it visits the new line before it.
         let mut last_new = hunk.new_start;
-        let children = hunk
-            .lines
+        let lines: &[_] = if self.visibility.is_expanded(&hunk_id) {
+            &hunk.lines
+        } else {
+            &[]
+        };
+        let children = lines
             .iter()
             .enumerate()
             .map(|(offset, diff_line)| {
