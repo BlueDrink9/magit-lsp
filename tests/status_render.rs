@@ -5,6 +5,7 @@ mod common;
 
 use common::*;
 use expect_test::expect;
+use lsp_types::{Position, SymbolKind};
 use magit_lsp::git::{FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
 use magit_lsp::status_view;
@@ -286,7 +287,7 @@ fn line_map_resolves_every_rendered_line() {
 }
 
 #[test]
-fn targets_and_folding_match_the_old_parser() {
+fn document_symbols_nest_sections_files_and_hunks() {
     let tree = status_view::build(&old_parser_status());
     assert_eq!(
         tree.lines,
@@ -296,67 +297,78 @@ fn targets_and_folding_match_the_old_parser() {
             .collect::<Vec<_>>()
     );
 
-    let targets: Vec<(String, String, u32, Option<String>, Option<String>)> = tree
-        .targets()
-        .into_iter()
-        .map(|target| {
-            (
-                target.kind,
-                target.label,
-                target.line,
-                target.section,
-                target.path,
-            )
-        })
-        .collect();
+    let symbols = tree.document_symbols();
+    let names: Vec<&str> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
     assert_eq!(
-        targets,
-        vec![
-            (
-                "section".to_string(),
-                "Staged changes".to_string(),
-                3,
-                Some("staged".to_string()),
-                None
-            ),
-            (
-                "section".to_string(),
-                "Unstaged changes".to_string(),
-                5,
-                Some("unstaged".to_string()),
-                None
-            ),
-            (
-                "file".to_string(),
-                "f.txt".to_string(),
-                6,
-                Some("unstaged".to_string()),
-                Some("f.txt".to_string())
-            ),
-            (
-                "hunk".to_string(),
-                "@@".to_string(),
-                7,
-                Some("unstaged".to_string()),
-                Some("f.txt".to_string())
-            ),
-            (
-                "section".to_string(),
-                "Untracked files".to_string(),
-                13,
-                Some("untracked".to_string()),
-                None
-            ),
-            (
-                "file".to_string(),
-                "new.txt".to_string(),
-                14,
-                Some("untracked".to_string()),
-                Some("new.txt".to_string())
-            ),
-        ]
+        names,
+        vec!["Staged changes", "Unstaged changes", "Untracked files"]
+    );
+    assert!(symbols
+        .iter()
+        .all(|symbol| symbol.kind == SymbolKind::NAMESPACE));
+
+    let staged = &symbols[0];
+    assert_eq!(staged.detail.as_deref(), Some("0"));
+    assert!(
+        staged.children.is_none(),
+        "an empty section has no children"
     );
 
+    let unstaged = &symbols[1];
+    assert_eq!(unstaged.detail.as_deref(), Some("1"));
+    assert_eq!(unstaged.range.start, Position::new(4, 0));
+    assert_eq!(unstaged.range.end, Position::new(10, 6));
+    assert_eq!(unstaged.selection_range.start, Position::new(4, 0));
+    assert_eq!(unstaged.selection_range.end, Position::new(4, 16));
+
+    let children = unstaged.children.as_ref().expect("unstaged files");
+    let file = &children[0];
+    assert_eq!(file.name, "f.txt");
+    assert_eq!(file.kind, SymbolKind::FILE);
+    assert_eq!(file.detail.as_deref(), Some("M"));
+    assert_eq!(file.selection_range.start, Position::new(5, 4));
+    assert_eq!(file.selection_range.end, Position::new(5, 9));
+
+    let hunk = &file.children.as_ref().expect("hunks")[0];
+    assert_eq!(hunk.name, "@@");
+    assert_eq!(hunk.kind, SymbolKind::METHOD);
+    assert_eq!(hunk.range.start, Position::new(6, 0));
+    assert_eq!(hunk.range.end, Position::new(10, 6));
+}
+
+#[test]
+fn document_symbols_use_utf16_columns_for_a_unicode_path() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .rename("f.txt", "é😀.txt")
+        .modify("é😀.txt", standard_changes())
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+
+    let tree = status_view::build(&repo.status().expect("status"));
+    let symbols = tree.document_symbols();
+    let staged_file = symbols[0].children.as_ref().expect("staged")[0].clone();
+    assert_eq!(staged_file.name, "é😀.txt");
+    assert_eq!(staged_file.kind, SymbolKind::FILE);
+    assert_eq!(staged_file.detail.as_deref(), Some("R"));
+
+    // "é" is two UTF-8 bytes but one UTF-16 code unit; "😀" is four bytes
+    // and two code units. The prefix "  R " is ASCII, so the path starts at 4.
+    assert_eq!(staged_file.selection_range.start.character, 4);
+    assert_eq!(staged_file.selection_range.end.character, 11);
+
+    let unstaged_file = symbols[1].children.as_ref().expect("unstaged")[0].clone();
+    let hunk = &unstaged_file.children.as_ref().expect("hunks")[0];
+    assert_eq!(hunk.kind, SymbolKind::METHOD);
+    assert_eq!(
+        symbols[2].children.as_ref().expect("untracked")[0].name,
+        "new.txt"
+    );
+}
+
+#[test]
+fn folding_matches_the_old_parser() {
+    let tree = status_view::build(&old_parser_status());
     let ranges: Vec<(u32, u32)> = tree
         .folding_ranges()
         .into_iter()

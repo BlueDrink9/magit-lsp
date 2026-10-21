@@ -5,9 +5,12 @@
 //! ranges and the node hierarchy itself. Structure comes from this tree, never
 //! from parsing the rendered text.
 
-use crate::protocol::Target;
-use lsp_types::{FoldingRange, FoldingRangeKind};
+use lsp_types::{
+    DocumentLink, DocumentSymbol, FoldingRange, FoldingRangeKind, Location, Position, Range,
+    SymbolKind, Uri,
+};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Stable identity of a node, derived from what the node is, never its position.
 pub type NodeId = String;
@@ -46,6 +49,9 @@ pub struct Node {
     pub marker: Option<char>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_index: Option<usize>,
+    /// Line in the new (worktree) file this node visits, 1-based.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u32>,
     /// Ids of the child nodes, in document order.
     pub children: Vec<NodeId>,
 }
@@ -68,6 +74,9 @@ pub struct LineNode {
     pub marker: Option<char>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_index: Option<usize>,
+    /// Line in the new (worktree) file this node visits, 1-based.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u32>,
     /// Hunk line text without its marker, for clients that need to compare it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -87,6 +96,9 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
     pub name: String,
+    /// Extra outline text: a section's file count or a file's status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     /// `section`, `file` or `hunk`.
     pub kind: String,
     pub node: NodeId,
@@ -140,38 +152,78 @@ impl Tree {
         self.nodes.iter().find(|node| node.id == id)
     }
 
-    /// Navigation targets derived from the tree, sorted by line.
-    pub fn targets(&self) -> Vec<Target> {
-        let mut targets: Vec<Target> = self
-            .nodes
+    /// The tree's symbols as hierarchical `DocumentSymbol`s.
+    ///
+    /// A section is a `NAMESPACE`, a file is a `FILE` and a hunk is a `METHOD`:
+    /// hunks are the smallest navigable unit inside a file, like a method body.
+    pub fn document_symbols(&self) -> Vec<DocumentSymbol> {
+        self.symbols
             .iter()
-            .filter_map(|node| match node.kind {
-                NodeKind::Section => Some(Target {
-                    kind: "section".to_string(),
-                    label: node.label.clone(),
-                    line: node.start_line as u32 + 1,
-                    section: node.section.clone(),
-                    path: None,
-                }),
-                NodeKind::File => Some(Target {
-                    kind: "file".to_string(),
-                    label: node.path.clone().unwrap_or_else(|| node.label.clone()),
-                    line: node.start_line as u32 + 1,
-                    section: node.section.clone(),
-                    path: node.path.clone(),
-                }),
-                NodeKind::Hunk => Some(Target {
-                    kind: "hunk".to_string(),
-                    label: "@@".to_string(),
-                    line: node.start_line as u32 + 1,
-                    section: node.section.clone(),
-                    path: node.path.clone(),
-                }),
-                _ => None,
+            .map(|symbol| self.document_symbol(symbol))
+            .collect()
+    }
+
+    #[allow(deprecated)]
+    fn document_symbol(&self, symbol: &Symbol) -> DocumentSymbol {
+        DocumentSymbol {
+            name: symbol.name.clone(),
+            detail: symbol.detail.clone(),
+            kind: symbol_kind(&symbol.kind),
+            tags: None,
+            deprecated: None,
+            range: self.line_range(symbol.start_line, symbol.end_line),
+            selection_range: self.selection_range(symbol),
+            children: if symbol.children.is_empty() {
+                None
+            } else {
+                Some(
+                    symbol
+                        .children
+                        .iter()
+                        .map(|child| self.document_symbol(child))
+                        .collect(),
+                )
+            },
+        }
+    }
+
+    /// The file-path links of the rendered document, as `DocumentLink`s.
+    pub fn document_links(&self, repo_root: &str) -> Vec<DocumentLink> {
+        self.links
+            .iter()
+            .filter_map(|link| {
+                Some(DocumentLink {
+                    range: self.link_range(link),
+                    target: Some(file_uri(repo_root, &link.path)?),
+                    tooltip: Some(link.path.clone()),
+                    data: None,
+                })
             })
-            .collect();
-        targets.sort_by_key(|target| target.line);
-        targets
+            .collect()
+    }
+
+    /// Where the real file for `position` is, as a `definition` location.
+    ///
+    /// File lines visit line 1; hunk and diff lines visit the new-side line
+    /// they belong to. Deleted files have no worktree file, so they return no
+    /// location; untracked files exist and are visited normally.
+    pub fn definition(&self, repo_root: &str, position: Position) -> Option<Location> {
+        let line = self.line_nodes.get(position.line as usize)?;
+        let path = line.path.as_deref()?;
+        if line.status.as_deref() == Some("D") {
+            return None;
+        }
+        let new_line = match line.kind {
+            NodeKind::File => 0,
+            NodeKind::Hunk | NodeKind::Line => {
+                u32::from(line.new_line.unwrap_or(1).saturating_sub(1))
+            }
+            _ => return None,
+        };
+        Some(Location {
+            uri: file_uri(repo_root, path)?,
+            range: Range::new(Position::new(new_line, 0), Position::new(new_line, 0)),
+        })
     }
 
     /// Fold ranges for each section and file block (0-based, LSP convention).
@@ -223,6 +275,101 @@ impl Tree {
 
         ranges
     }
+
+    /// A full-line LSP range from the first to the last line of a symbol.
+    fn line_range(&self, start_line: usize, end_line: usize) -> Range {
+        let last = self.lines.len().saturating_sub(1);
+        let end = end_line.min(last);
+        let start = start_line.min(end);
+        Range::new(
+            Position::new(start as u32, 0),
+            Position::new(end as u32, self.line_utf16_len(end)),
+        )
+    }
+
+    /// The range to reveal when a symbol is picked: its name or path.
+    fn selection_range(&self, symbol: &Symbol) -> Range {
+        let line = symbol.start_line;
+        if symbol.kind == "file" {
+            if let Some(link) = self
+                .links
+                .iter()
+                .find(|link| link.line == line && link.path == symbol.name)
+            {
+                return self.link_range(link);
+            }
+        }
+        if symbol.kind == "section" {
+            let start = Position::new(line as u32, 0);
+            let end = Position::new(
+                line as u32,
+                self.line_utf16_len(line).min(utf16_len(&symbol.name)),
+            );
+            return Range::new(start, end);
+        }
+        self.line_range(line, line)
+    }
+
+    /// A link's byte offsets as an LSP range.
+    fn link_range(&self, link: &Link) -> Range {
+        let text = self.lines.get(link.line).map(String::as_str).unwrap_or("");
+        let start = utf16_col(text, link.start);
+        let end = utf16_col(text, link.start.saturating_add(link.length));
+        Range::new(
+            Position::new(link.line as u32, start),
+            Position::new(link.line as u32, end),
+        )
+    }
+
+    /// Length of line `line` in UTF-16 code units.
+    fn line_utf16_len(&self, line: usize) -> u32 {
+        self.lines
+            .get(line)
+            .map(|text| utf16_len(text))
+            .unwrap_or(0)
+    }
+}
+
+/// The LSP symbol kind for a tree symbol kind.
+fn symbol_kind(kind: &str) -> SymbolKind {
+    match kind {
+        "section" => SymbolKind::NAMESPACE,
+        "file" => SymbolKind::FILE,
+        "hunk" => SymbolKind::METHOD,
+        _ => SymbolKind::OBJECT,
+    }
+}
+
+/// A `file://` URI for `path` inside `repo_root`, percent-encoding as needed.
+fn file_uri(repo_root: &str, path: &str) -> Option<Uri> {
+    let mut full = String::from(repo_root.trim_end_matches('/'));
+    full.push('/');
+    full.push_str(path);
+
+    let mut encoded = String::from("file://");
+    for byte in full.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                encoded.push(char::from(byte));
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    Uri::from_str(&encoded).ok()
+}
+
+/// Length of `text` in UTF-16 code units, the unit LSP columns use.
+fn utf16_len(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
+}
+
+/// UTF-16 column of a byte offset into `text`.
+fn utf16_col(text: &str, byte: usize) -> u32 {
+    let mut byte = byte.min(text.len());
+    while !text.is_char_boundary(byte) {
+        byte -= 1;
+    }
+    utf16_len(&text[..byte])
 }
 
 /// The last non-blank line in `start..end`, if any.

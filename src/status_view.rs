@@ -210,6 +210,7 @@ impl Builder {
         entry.section = Some(section.to_string());
         entry.path = Some(file.path.clone());
         entry.hunk_id = Some(hunk.id.clone());
+        entry.new_line = Some(hunk.new_start);
         self.tree.line_nodes.push(entry);
 
         let index = self.tree.nodes.len();
@@ -217,6 +218,7 @@ impl Builder {
         hunk_node.section = Some(section.to_string());
         hunk_node.path = Some(file.path.clone());
         hunk_node.hunk_id = Some(hunk.id.clone());
+        hunk_node.new_line = Some(hunk.new_start);
         self.tree.nodes.push(hunk_node);
 
         let staged = section == "staged";
@@ -233,6 +235,8 @@ impl Builder {
             modifiers: modifiers.clone(),
         });
 
+        // A removed line has no new-side line; it visits the new line before it.
+        let mut last_new = hunk.new_start;
         let children = hunk
             .lines
             .iter()
@@ -243,12 +247,21 @@ impl Builder {
                 self.tree.lines.push(text.clone());
                 let id = format!("{hunk_id}/line:{offset}");
 
+                let new_line = match diff_line.marker {
+                    '+' | ' ' => diff_line.new_no.unwrap_or(last_new),
+                    _ => last_new,
+                };
+                if matches!(diff_line.marker, '+' | ' ') {
+                    last_new = new_line;
+                }
+
                 let mut entry = line_node(&id, NodeKind::Line);
                 entry.section = Some(section.to_string());
                 entry.path = Some(file.path.clone());
                 entry.hunk_id = Some(hunk.id.clone());
                 entry.marker = Some(diff_line.marker);
                 entry.line_index = Some(offset);
+                entry.new_line = Some(new_line);
                 entry.text = Some(diff_line.text.clone());
                 self.tree.line_nodes.push(entry);
 
@@ -258,6 +271,7 @@ impl Builder {
                 line_node.hunk_id = Some(hunk.id.clone());
                 line_node.marker = Some(diff_line.marker);
                 line_node.line_index = Some(offset);
+                line_node.new_line = Some(new_line);
                 self.tree.nodes.push(line_node);
 
                 let token_type = match diff_line.marker {
@@ -355,6 +369,7 @@ impl Builder {
         let tree = &self.tree;
         let hunk_symbol = |hunk: &Node| Symbol {
             name: hunk.label.clone(),
+            detail: None,
             kind: "hunk".to_string(),
             node: hunk.id.clone(),
             start_line: hunk.start_line,
@@ -363,6 +378,7 @@ impl Builder {
         };
         let file_symbol = |file: &Node| Symbol {
             name: file.label.clone(),
+            detail: file.status.clone(),
             kind: "file".to_string(),
             node: file.id.clone(),
             start_line: file.start_line,
@@ -380,6 +396,7 @@ impl Builder {
             .filter(|node| node.kind == NodeKind::Section)
             .map(|section| Symbol {
                 name: section.label.clone(),
+                detail: Some(section.children.len().to_string()),
                 kind: "section".to_string(),
                 node: section.id.clone(),
                 start_line: section.start_line,
@@ -406,6 +423,7 @@ fn line_node(id: &str, kind: NodeKind) -> LineNode {
         status: None,
         marker: None,
         line_index: None,
+        new_line: None,
         text: None,
     }
 }
@@ -423,6 +441,7 @@ fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -
         status: None,
         marker: None,
         line_index: None,
+        new_line: None,
         children: Vec::new(),
     }
 }

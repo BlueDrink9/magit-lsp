@@ -1220,7 +1220,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       the returned cursor is on the same node.
 - [x] R-1.3 Semantic tokens from the tree (§3.15 mapping); Neovim defines
       `@lsp.type.magit.*` links.
-- [ ] R-1.4 `documentSymbol` replaces `vcs/targets`; `definition`/`showDocument`
+- [x] R-1.4 `documentSymbol` replaces `vcs/targets`; `definition`/`showDocument`
       for visit.
 - [ ] R-1.5 Server-owned visibility with lazy bodies; `common.toggle-section`,
       level commands.

@@ -11,9 +11,9 @@ use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::request::Request as LspRequest;
 use lsp_types::{
-    ExecuteCommandOptions, FoldingRangeProviderCapability, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities,
+    DocumentLinkOptions, ExecuteCommandOptions, FoldingRangeProviderCapability, OneOf,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -86,6 +86,30 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(uri.to_string(), repo_path.to_string());
+    }
+
+    /// The repository root that owns `uri`, from a status request or an open view.
+    fn repo_for_uri(&self, uri: &str) -> Option<String> {
+        if let Some(repo) = self
+            .uri_repos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(uri)
+            .cloned()
+        {
+            return Some(repo);
+        }
+        self.sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .find(|(_, session)| {
+                session
+                    .views()
+                    .iter()
+                    .any(|view| view.descriptor().uri == uri)
+            })
+            .map(|(repo, _)| repo.clone())
     }
 
     /// The tree displayed by `uri`, if a status request registered it.
@@ -502,14 +526,33 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 session.resync(&p.view_id)?,
             )?))
         }
-        TargetsRequest::METHOD => {
-            let p: TargetsParams = from_params(params)?;
-            let targets = tree_for_positional_request(shared, &p.uri)
-                .map(|tree| tree.targets())
+        "textDocument/documentSymbol" => {
+            let p: lsp_types::DocumentSymbolParams = from_params(params)?;
+            let symbols = tree_for_positional_request(shared, p.text_document.uri.as_str())
+                .map(|tree| tree.document_symbols())
                 .unwrap_or_default();
-            Ok(Dispatched::value(serde_json::to_value(TargetsResponse {
-                targets,
-            })?))
+            Ok(Dispatched::value(serde_json::to_value(symbols)?))
+        }
+        "textDocument/definition" => {
+            let p: lsp_types::GotoDefinitionParams = from_params(params)?;
+            let position = p.text_document_position_params;
+            let uri = position.text_document.uri.as_str();
+            let location = tree_for_positional_request(shared, uri).and_then(|tree| {
+                let repo = shared.repo_for_uri(uri)?;
+                tree.definition(&repo, position.position)
+            });
+            Ok(Dispatched::value(serde_json::to_value(location)?))
+        }
+        "textDocument/documentLink" => {
+            let p: lsp_types::DocumentLinkParams = from_params(params)?;
+            let uri = p.text_document.uri.as_str();
+            let links = tree_for_positional_request(shared, uri)
+                .and_then(|tree| {
+                    let repo = shared.repo_for_uri(uri)?;
+                    Some(tree.document_links(&repo))
+                })
+                .unwrap_or_default();
+            Ok(Dispatched::value(serde_json::to_value(links)?))
         }
         "textDocument/foldingRange" => {
             let p: lsp_types::FoldingRangeParams = from_params(params)?;
@@ -718,6 +761,12 @@ where
 
 fn capabilities() -> Result<Value> {
     serde_json::to_value(&ServerCapabilities {
+        document_symbol_provider: Some(OneOf::Left(true)),
+        definition_provider: Some(OneOf::Left(true)),
+        document_link_provider: Some(DocumentLinkOptions {
+            resolve_provider: Some(false),
+            work_done_progress_options: Default::default(),
+        }),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
@@ -745,6 +794,9 @@ fn is_request_method(method: &str) -> bool {
         method,
         "initialize"
             | "shutdown"
+            | "textDocument/documentSymbol"
+            | "textDocument/definition"
+            | "textDocument/documentLink"
             | "textDocument/foldingRange"
             | "textDocument/semanticTokens/full"
             | "workspace/executeCommand"
@@ -759,7 +811,6 @@ fn is_request_method(method: &str) -> bool {
             | StageAllRequest::METHOD
             | StageUntrackedRequest::METHOD
             | UnstageAllRequest::METHOD
-            | TargetsRequest::METHOD
             | TransientMenuRequest::METHOD
             | ViewOpenRequest::METHOD
             | ViewCloseRequest::METHOD

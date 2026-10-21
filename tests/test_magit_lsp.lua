@@ -578,24 +578,83 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
   )
 end
 
-T['navigation targets come from the LSP'] = function()
+T['navigation jumps follow document symbols'] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('type(M.targets())'), 'table')
-  local has_section = child.lua_get([[
+  local symbols = child.lua_get([[
     (function()
-      for _, t in ipairs(M.targets()) do
-        if t.kind == 'section' then
-          return true
-        end
+      local r = vim.lsp.buf_request_sync(M.buf, 'textDocument/documentSymbol', {
+        textDocument = { uri = vim.uri_from_bufnr(M.buf) },
+      }, 5000)
+      for _, res in pairs(r or {}) do
+        return res.result or {}
       end
-      return false
+      return {}
     end)()
   ]])
-  MiniTest.expect.equality(has_section, true)
+  MiniTest.expect.equality(#symbols > 0, true, 'documentSymbol returns items')
 
+  local staged_line, unstaged_section_line, unstaged_line, hunk_line
+  for i, line in ipairs(child.lua_get('M.lines')) do
+    if line == 'Staged changes (0)' then
+      staged_line = i
+    elseif line == 'Unstaged changes (1)' then
+      unstaged_section_line = i
+    elseif line == '  M f.txt' then
+      unstaged_line = i
+    elseif line == '    @@ -1,10 +1,10 @@' then
+      hunk_line = i
+    end
+  end
+
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("section", 1)')
+  MiniTest.expect.equality(child.lua_get('J'), staged_line)
   child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("file", 1)')
-  MiniTest.expect.equality(child.lua_get('type(J)'), 'number')
-  MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), child.lua_get('J'))
+  MiniTest.expect.equality(child.lua_get('J'), unstaged_line)
+  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("hunk", 1)')
+  MiniTest.expect.equality(child.lua_get('J'), hunk_line)
+
+  child.lua('vim.api.nvim_win_set_cursor(0, { vim.fn.line("$"), 0 }); J = M.jump("section", -1)')
+  MiniTest.expect.equality(child.lua_get('J'), unstaged_section_line)
+end
+
+T['gO outline lists document symbols'] = function()
+  setup_child()
+  local items = child.lua_get([[
+    (function()
+      local captured
+      vim.lsp.buf.document_symbol({ on_list = function(t) captured = t.items end })
+      vim.wait(5000, function() return captured ~= nil end, 20)
+      return captured or {}
+    end)()
+  ]])
+  MiniTest.expect.equality(#items > 0, true, 'the outline has symbols')
+  local has_section = false
+  for _, item in ipairs(items) do
+    if item.text:find('Unstaged changes', 1, true) then
+      has_section = true
+    end
+  end
+  MiniTest.expect.equality(has_section, true)
+end
+
+T['<CR> on a change line opens the real file at the new-side line'] = function()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, '<CR>')
+
+  local opened = false
+  for _ = 1, 100 do
+    local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
+    if name:match('f%.txt$') then
+      opened = true
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(opened, true, 'the worktree file opened')
+  MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
 
 T['renders untracked files in their own section'] = function()

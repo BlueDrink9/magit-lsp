@@ -317,29 +317,3 @@ impl lsp_types::request::Request for TransientMenuRequest {
     type Result = TransientMenuResponse;
     const METHOD: &'static str = "vcs/requestTransient";
 }
-
-/// A jump destination in the status document.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Target {
-    pub kind: String,
-    pub label: String,
-    pub line: u32,
-    pub section: Option<String>,
-    pub path: Option<String>,
-}
-
-/// `vcs/targets`: navigation targets derived from the rendered document.
-pub enum TargetsRequest {}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TargetsParams {
-    pub uri: String,
-}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TargetsResponse {
-    pub targets: Vec<Target>,
-}
-impl lsp_types::request::Request for TargetsRequest {
-    type Params = TargetsParams;
-    type Result = TargetsResponse;
-    const METHOD: &'static str = "vcs/targets";
-}

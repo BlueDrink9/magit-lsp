@@ -280,34 +280,49 @@ function M.diff(path, staged)
   return resp
 end
 
---- Fetch navigation targets (section/file/hunk) from the server.
-function M.targets()
-  local resp, err = request_sync('vcs/targets', { uri = vim.uri_from_bufnr(M.buf) })
-  if not resp then
+--- LSP `SymbolKind` values for the server's section/file/hunk outline.
+local SYMBOL_KINDS = { section = 3, file = 1, hunk = 6 }
+
+--- Fetch the document's hierarchical symbol tree (section → file → hunk).
+function M.symbols()
+  local symbols, err = request_sync('textDocument/documentSymbol', {
+    textDocument = { uri = vim.uri_from_bufnr(M.buf) },
+  })
+  if not symbols then
     return nil, err
   end
-  return resp.targets
+  return symbols
 end
 
---- Move the cursor to the next/previous target of `kind` (`dir` is 1 or -1).
+local function collect_symbol_lines(symbols, kind, lines)
+  for _, symbol in ipairs(symbols or {}) do
+    if symbol.kind == kind then
+      table.insert(lines, symbol.range.start.line + 1)
+    end
+    collect_symbol_lines(symbol.children, kind, lines)
+  end
+end
+
+--- Move the cursor to the next/previous symbol of `kind` (`dir` is 1 or -1).
 function M.jump(kind, dir)
-  local targets, err = M.targets()
-  if not targets then
+  local symbols, err = M.symbols()
+  if not symbols then
     return nil, err
   end
-  local cur = vim.fn.line('.')
-  local lines = {}
-  for _, t in ipairs(targets) do
-    if kind == 'any' or t.kind == kind then
-      table.insert(lines, t.line)
-    end
+  local wanted = SYMBOL_KINDS[kind]
+  if not wanted then
+    return nil, 'unknown symbol kind: ' .. tostring(kind)
   end
+  local lines = {}
+  collect_symbol_lines(symbols, wanted, lines)
   table.sort(lines)
+
+  local cur = vim.fn.line('.')
   if dir > 0 then
-    for _, l in ipairs(lines) do
-      if l > cur then
-        vim.api.nvim_win_set_cursor(0, { l, 0 })
-        return l
+    for _, line in ipairs(lines) do
+      if line > cur then
+        vim.api.nvim_win_set_cursor(0, { line, 0 })
+        return line
       end
     end
   else
@@ -318,11 +333,36 @@ function M.jump(kind, dir)
       end
     end
   end
-  return nil, 'no ' .. kind .. ' target'
+  return nil, 'no ' .. kind .. ' symbol'
 end
 
 local function cursor_entry()
   return M.map[vim.fn.line('.')]
+end
+
+--- Visit the file (and new-side line) under the cursor.
+--- Opens it in the window the status view was split from, so the status
+--- buffer stays visible.
+function M.visit()
+  local e = cursor_entry()
+  if not e or not e.path then
+    return nil, 'no file under cursor'
+  end
+  local win = vim.api.nvim_get_current_win()
+  vim.lsp.buf.definition({
+    on_list = function(options)
+      local item = options.items[1]
+      if not item or not item.filename then
+        return
+      end
+      if vim.api.nvim_get_current_win() == win then
+        vim.cmd('wincmd p')
+      end
+      vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
+      vim.api.nvim_win_set_cursor(0, { item.lnum, math.max((item.col or 1) - 1, 0) })
+    end,
+  })
+  return e.path
 end
 
 --- Stage the file or hunk under the cursor (lines only via visual mode).
@@ -463,7 +503,8 @@ local function keymaps()
   vim.keymap.set('x', 'u', M.unstage_visual, vim.tbl_extend('force', opts, { desc = 'Unstage selected lines' }))
   vim.keymap.set('n', 'S', M.stage_all, vim.tbl_extend('force', opts, { desc = 'Stage all' }))
   vim.keymap.set('n', 'U', M.unstage_all, vim.tbl_extend('force', opts, { desc = 'Unstage all' }))
-  vim.keymap.set('n', '<CR>', M.diff_at, vim.tbl_extend('force', opts, { desc = 'Show diff' }))
+  vim.keymap.set('n', '<CR>', M.visit, vim.tbl_extend('force', opts, { desc = 'Visit file at line' }))
+  vim.keymap.set('n', 'D', M.diff_at, vim.tbl_extend('force', opts, { desc = 'Show diff' }))
   vim.keymap.set('n', 'gR', M.refresh, vim.tbl_extend('force', opts, { desc = 'Refresh status' }))
   vim.keymap.set('n', ']s', function()
     M.jump('section', 1)

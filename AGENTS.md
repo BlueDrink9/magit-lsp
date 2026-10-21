@@ -28,8 +28,8 @@ Reads and mutations use the same custom request/response pattern (no
 
 The server owns the document. `src/tree.rs` defines nodes, Node IDs, semantic
 tokens, symbols, links and the line → node map; `src/status_view.rs` turns a
-`Status` into that tree. Folding ranges and navigation targets are read from
-the tree, never from parsing rendered text.
+`Status` into that tree. Folding ranges, document symbols and definition/link
+targets are read from the tree, never from parsing rendered text.
 
 ### Custom protocol
 
@@ -41,7 +41,9 @@ the tree, never from parsing rendered text.
 | `vcs/stageLines` / `vcs/unstageLines` | Stage/unstage a line range within a hunk |
 | `vcs/stageFile` / `vcs/unstageFile` | Stage/unstage a whole file |
 | `vcs/stageAll` / `vcs/unstageAll` | Stage/unstage everything |
-| `vcs/targets` | Navigation targets from the tree (section/file/hunk + line) |
+| `textDocument/documentSymbol` | Section → file → hunk outline; the client's jump navigation |
+| `textDocument/definition` | Visit the file/new-side line under the cursor |
+| `textDocument/documentLink` | File paths as `file://` links |
 | `textDocument/foldingRange` | Fold ranges from the tree (sections and files) |
 | `vcs/requestTransient` | **Stub** — commit-menu schema (reserved) |
 | `view/open` | Create a view; returns a `ViewDescriptor` plus an initial full `view/render` |
@@ -70,6 +72,7 @@ back as an error-level `Effect::Message` with a readable summary (see
   executes stage/unstage (discard execution and wiring deferred).
 - `src/tree.rs` — view tree: `Node`, `NodeId`, `NodeKind`, tokens, symbols,
   links and the line → node map. Node IDs derive from identity, never position.
+  Also converts symbols to `DocumentSymbol`s and resolves `definition`/links.
 - `src/status_view.rs` — renders `Status` into a `Tree` (text and structure);
   `StatusView` implements the `View` trait.
 - `src/semantic_tokens.rs` — the tree's tokens as LSP semantic tokens: the
@@ -115,10 +118,16 @@ back as an error-level `Effect::Message` with a readable summary (see
 - LSP server (`src/server.rs`): request dispatch, per-repo tree store, capabilities.
 - Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `vcs://status` nofile
   buffer, server-document display, semantic-token links, LSP folding,
-  navigation.
+  symbol-based navigation and `definition` for visit.
 - Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
   tokens, symbols, links and a line → node map; `foldingRange` and
-  `vcs/targets` come from the tree.
+  `documentSymbol` come from the tree.
+- Navigation (R-1.4): `textDocument/documentSymbol` exposes the section → file →
+  hunk tree and replaces `vcs/targets`; `textDocument/definition` is the visit
+  mechanism (a `+`/`-`/context line resolves to the new-side line), and
+  `textDocument/documentLink` turns path ranges into `file://` links. Deleted
+  files have no worktree file, so their definition result is empty. No
+  `window/showDocument` request is needed for visit.
 - Semantic tokens (R-1.3): `src/semantic_tokens.rs` turns the tree's tokens into
   `textDocument/semanticTokens/full` data (sorted, non-overlapping, UTF-16
   columns, delta-encoded) and advertises the legend. The client links
@@ -224,8 +233,8 @@ The roadmap, glossary, protocol reference and phased plan live in
 - **Never address hunks by index.** Hunk identity is a content hash
   (`path` + hunk text), so it survives refreshes and concurrent edits.
 - **Never parse rendered text.** Structure must come from the server's tree
-  (`src/tree.rs`); folding ranges, targets and cursor context resolve against
-  nodes, never against line shapes.
+  (`src/tree.rs`); folding ranges, symbols, definitions and cursor context
+  resolve against nodes, never against line shapes.
 - **Never print raw JSON or Lua tables to the user.** A failed Git command is
   not a JSON-RPC error: return an `Effect::Message` built from a `UserError`
   (`summary` + optional `hint`), with `detail` available on request.
