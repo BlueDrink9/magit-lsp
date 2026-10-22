@@ -139,6 +139,48 @@ Every `git` invocation is logged at `debug` (arguments, working directory, exit
 code, duration); failures are logged at `warn`. Patch contents passed to
 `git apply` are only logged at `trace`.
 
+## Command line
+
+With no subcommand `magit-lsp` runs the LSP server on stdio, so editors can
+spawn it directly. `--config <path>` selects a config file for that server, and
+`--version` / `--help` print and exit.
+
+The `keymap` subcommand prints the static keymap manifest — every profile ×
+scope × binding — and never speaks LSP, so its output goes to stdout:
+
+```sh
+magit-lsp keymap --format json|vscode|neovim|markdown [--profile standard|vim] [--config <path>] [--check]
+```
+
+- `json` is the full manifest (`{profiles: [{profile, scopes: [{scope, bindings}]}]}`).
+- `vscode` is an array of `contributes.keybindings` entries targeting
+  `magit.key`, with `args.key` as the canonical key and a `when` clause such as
+  `magit.active && magit.scope == 'status' && !magit.textMode`. It includes a
+  second entry for `common.toggle-text-mode` guarded by `magit.textMode`, so
+  text mode can be left. Capture mode is dynamic (`type` registration) and has
+  no static entries. Generate VSCode keybindings with `--profile`; without it
+  both profiles are emitted.
+- `neovim` is a list of `{lhs, command, modes, scope}` in Neovim notation.
+- `markdown` is one table per profile and scope.
+
+Without `--profile` every shipped profile is emitted. `--check` validates the
+merged keymap (conflicts, unknown commands, unparsable keys and profile
+coverage) and prints `OK`, or exits non-zero with `file:line` messages. Combine
+it with `--format`: the check runs first and output follows only when valid.
+
+Generated VSCode keys are checked against a deny-list of workbench shortcuts
+(`ctrl+p`, `ctrl+w`, `ctrl+tab`, `F1`, …); the deliberate overrides live in
+`src/manifest.rs` with reasons: `ctrl+t` (`common.toggle-text-mode`),
+`ctrl+c` (`common.cancel` passes through to copy when nothing is cancelable),
+and `ctrl+s`/`ctrl+r`, which are scoped to menu views.
+
+Snapshots of all four formats for both profiles are committed under
+`tests/snapshots/`. Regenerate them with:
+
+```sh
+UPDATE_SNAPSHOTS=1 cargo test --test manifest
+```
+
 ## Configuration
 
 The server reads TOML. Layers, lowest to highest precedence:

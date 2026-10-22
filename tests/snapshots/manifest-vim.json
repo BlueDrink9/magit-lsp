@@ -1,0 +1,2140 @@
+{
+  "profiles": [
+    {
+      "profile": "vim",
+      "scopes": [
+        {
+          "scope": "common",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "common"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "common"
+            }
+          ]
+        },
+        {
+          "scope": "status",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "status.stage",
+              "keys": [
+                "s"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Stage the change at point",
+              "doc": "Stage the change at point",
+              "group": "status",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "status.unstage",
+              "keys": [
+                "u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unstage the change at point",
+              "doc": "Unstage the change at point",
+              "group": "status",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "status.stage-all",
+              "keys": [
+                "S"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Stage all unstaged changes",
+              "doc": "Stage all unstaged changes",
+              "group": "status",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "status.unstage-all",
+              "keys": [
+                "U"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unstage all staged changes",
+              "doc": "Unstage all staged changes",
+              "group": "status",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "common.visit",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Visit the thing at point",
+              "doc": "Visit the thing at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "status.discard",
+              "keys": [
+                "x"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Discard the change at point",
+              "doc": "Discard the change at point",
+              "group": "status",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "status.reverse",
+              "keys": [
+                "R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Reverse-apply the change at point",
+              "doc": "Reverse-apply the change at point",
+              "group": "status",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "status.apply",
+              "keys": [
+                "a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Apply the change at point",
+              "doc": "Apply the change at point",
+              "group": "status",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.commit",
+              "keys": [
+                "c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the commit menu",
+              "doc": "Open the commit menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.branch",
+              "keys": [
+                "b"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the branch menu",
+              "doc": "Open the branch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.log",
+              "keys": [
+                "g l"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the log menu",
+              "doc": "Open the log menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.diff",
+              "keys": [
+                "d"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the diff menu",
+              "doc": "Open the diff menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.fetch",
+              "keys": [
+                "f"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the fetch menu",
+              "doc": "Open the fetch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.pull",
+              "keys": [
+                "F"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the pull menu",
+              "doc": "Open the pull menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.push",
+              "keys": [
+                "P"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the push menu",
+              "doc": "Open the push menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.merge",
+              "keys": [
+                "m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the merge menu",
+              "doc": "Open the merge menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.rebase",
+              "keys": [
+                "r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the rebase menu",
+              "doc": "Open the rebase menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.stash",
+              "keys": [
+                "Z"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the stash menu",
+              "doc": "Open the stash menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.tag",
+              "keys": [
+                "t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the tag menu",
+              "doc": "Open the tag menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.reset",
+              "keys": [
+                "X"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the reset menu",
+              "doc": "Open the reset menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.revert",
+              "keys": [
+                "-"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the revert menu",
+              "doc": "Open the revert menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.cherry-pick",
+              "keys": [
+                "A"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the cherry-pick menu",
+              "doc": "Open the cherry-pick menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.bisect",
+              "keys": [
+                "B"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the bisect menu",
+              "doc": "Open the bisect menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.remote",
+              "keys": [
+                "M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the remote menu",
+              "doc": "Open the remote menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.submodule",
+              "keys": [
+                "o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the submodule menu",
+              "doc": "Open the submodule menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.worktree",
+              "keys": [
+                "g %"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the worktree menu",
+              "doc": "Open the worktree menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.ignore",
+              "keys": [
+                "i"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the ignore menu",
+              "doc": "Open the ignore menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.refs",
+              "keys": [
+                "g y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the refs view",
+              "doc": "Open the refs view",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.cherries",
+              "keys": [
+                "g Y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the cherry view",
+              "doc": "Open the cherry view",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.patch-apply",
+              "keys": [
+                "w"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Apply a patch",
+              "doc": "Apply a patch",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.patch-create",
+              "keys": [
+                "W"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Create a patch",
+              "doc": "Create a patch",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.run",
+              "keys": [
+                "!"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Run a Git command",
+              "doc": "Run a Git command",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            },
+            {
+              "command": "open.process-log",
+              "keys": [
+                "g $"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the process log",
+              "doc": "Open the process log",
+              "group": "open",
+              "status": "planned",
+              "scope": "status"
+            }
+          ]
+        },
+        {
+          "scope": "select",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "select.toggle-mark",
+              "keys": [
+                "Space"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle the mark on the thing at point",
+              "doc": "Toggle the mark on the thing at point",
+              "group": "select",
+              "status": "planned",
+              "scope": "select"
+            },
+            {
+              "command": "select.enter-rev",
+              "keys": [
+                "i"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Enter a revision by hand",
+              "doc": "Enter a revision by hand",
+              "group": "select",
+              "status": "planned",
+              "scope": "select"
+            }
+          ]
+        },
+        {
+          "scope": "menu",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "menu.save-args",
+              "keys": [
+                "ctrl+s"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Save the menu arguments",
+              "doc": "Save the menu arguments",
+              "group": "menu",
+              "status": "planned",
+              "scope": "menu"
+            },
+            {
+              "command": "menu.reset-args",
+              "keys": [
+                "ctrl+r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Reset the menu arguments",
+              "doc": "Reset the menu arguments",
+              "group": "menu",
+              "status": "planned",
+              "scope": "menu"
+            }
+          ]
+        },
+        {
+          "scope": "commit-message",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Z Q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Z Z",
+                "ctrl+Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "commit-message.history-prev",
+              "keys": [
+                "[ m"
+              ],
+              "modes": [
+                "normal"
+              ],
+              "label": "Recall the previous commit message",
+              "doc": "Recall the previous commit message",
+              "group": "commit-message",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "commit-message.history-next",
+              "keys": [
+                "] m"
+              ],
+              "modes": [
+                "normal"
+              ],
+              "label": "Recall the next commit message",
+              "doc": "Recall the next commit message",
+              "group": "commit-message",
+              "status": "planned",
+              "scope": "commit-message"
+            },
+            {
+              "command": "commit-message.add-signoff",
+              "keys": [
+                "g s"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Add a Signed-off-by trailer",
+              "doc": "Add a Signed-off-by trailer",
+              "group": "commit-message",
+              "status": "planned",
+              "scope": "commit-message"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

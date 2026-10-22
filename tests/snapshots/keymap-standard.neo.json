@@ -1,0 +1,1226 @@
+[
+  {
+    "lhs": "<F5>",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "g",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-1>",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-2>",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "n",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "p",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<Esc>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<C-c>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<CR>",
+    "command": "common.confirm",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-Down>",
+    "command": "common.next-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-Up>",
+    "command": "common.prev-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-Left>",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<C-S-c>",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<F5>",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "g",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-1>",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-2>",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "n",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "p",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "s",
+    "command": "status.stage",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "u",
+    "command": "status.unstage",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "S",
+    "command": "status.stage-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "U",
+    "command": "status.unstage-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<Esc>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<C-c>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-Down>",
+    "command": "common.next-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-Up>",
+    "command": "common.prev-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-Left>",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<C-S-c>",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<CR>",
+    "command": "common.visit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<Del>",
+    "command": "status.discard",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "v",
+    "command": "status.reverse",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "a",
+    "command": "status.apply",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "c",
+    "command": "open.commit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "b",
+    "command": "open.branch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "l",
+    "command": "open.log",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "d",
+    "command": "open.diff",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "f",
+    "command": "open.fetch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "F",
+    "command": "open.pull",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "P",
+    "command": "open.push",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "m",
+    "command": "open.merge",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "r",
+    "command": "open.rebase",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "z",
+    "command": "open.stash",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "t",
+    "command": "open.tag",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "x",
+    "command": "open.reset",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "V",
+    "command": "open.revert",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "A",
+    "command": "open.cherry-pick",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "B",
+    "command": "open.bisect",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "M",
+    "command": "open.remote",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "o",
+    "command": "open.submodule",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "%",
+    "command": "open.worktree",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "i",
+    "command": "open.ignore",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "y",
+    "command": "open.refs",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "Y",
+    "command": "open.cherries",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "w",
+    "command": "open.patch-apply",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "W",
+    "command": "open.patch-create",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "!",
+    "command": "open.run",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "$",
+    "command": "open.process-log",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<F5>",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "g",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-1>",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-2>",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "n",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "p",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<Esc>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<C-c>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<CR>",
+    "command": "common.confirm",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-Down>",
+    "command": "common.next-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-Up>",
+    "command": "common.prev-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-Left>",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<C-S-c>",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<Space>",
+    "command": "select.toggle-mark",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "/",
+    "command": "select.enter-rev",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<F5>",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "g",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-1>",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-2>",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "n",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "p",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<Esc>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<C-c>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<CR>",
+    "command": "common.confirm",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-Down>",
+    "command": "common.next-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-Up>",
+    "command": "common.prev-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-Left>",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<C-S-c>",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<C-s>",
+    "command": "menu.save-args",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<C-r>",
+    "command": "menu.reset-args",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<F5>",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "g",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-1>",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-2>",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "n",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "p",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<C-S-x>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<C-CR>",
+    "command": "common.confirm",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-Left>",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<C-S-c>",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-Up>",
+    "command": "commit-message.history-prev",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-Down>",
+    "command": "commit-message.history-next",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<C-A-s>",
+    "command": "commit-message.add-signoff",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  }
+]

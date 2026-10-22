@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # TODO: cache the Rust target dir and Neovim once CI time matters.
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: make test
+        run: make test
+
+      # The snapshot comparison is part of `make test`; run it explicitly so a
+      # stale manifest is reported as its own failure.
+      - name: manifest snapshots
+        run: cargo test --test manifest

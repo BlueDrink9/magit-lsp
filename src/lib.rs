@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod diff_text;
@@ -8,6 +9,7 @@ pub mod keyhandler;
 pub mod keymap;
 pub mod keys;
 pub mod logging;
+pub mod manifest;
 pub mod patch;
 pub mod protocol;
 pub mod semantic_tokens;

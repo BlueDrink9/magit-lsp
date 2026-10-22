@@ -39,6 +39,139 @@ impl KeyStep {
             key,
         }
     }
+
+    /// The VSCode `keybindings.json` spelling of this step (§3.8).
+    ///
+    /// Shifted printable characters become `shift+<base>` because VSCode
+    /// resolves bindings by the physical key plus modifiers.
+    pub fn to_vscode(&self) -> String {
+        let (base, shifted) = match &self.key {
+            Key::Char(c) => vscode_char(*c),
+            Key::Named(name) => (vscode_named(name), false),
+        };
+        let mut parts = Vec::new();
+        if self.ctrl {
+            parts.push("ctrl");
+        }
+        if self.alt {
+            parts.push("alt");
+        }
+        if self.shift || shifted {
+            parts.push("shift");
+        }
+        if self.meta {
+            parts.push("meta");
+        }
+        parts.push(&base);
+        parts.join("+")
+    }
+
+    /// The Neovim `lhs` spelling of this step (§3.8).
+    pub fn to_neovim(&self) -> String {
+        let base = match &self.key {
+            Key::Char(' ') => "<Space>".to_string(),
+            Key::Char('<') => "<lt>".to_string(),
+            Key::Char(c) => c.to_string(),
+            Key::Named(name) => format!("<{}>", neovim_named(name)),
+        };
+        let mut modifiers = String::new();
+        if self.ctrl {
+            modifiers.push_str("C-");
+        }
+        if self.alt {
+            modifiers.push_str("A-");
+        }
+        if self.shift {
+            modifiers.push_str("S-");
+        }
+        if self.meta {
+            modifiers.push_str("M-");
+        }
+        if modifiers.is_empty() {
+            return base;
+        }
+        // Named keys already carry angle brackets; insert the modifiers inside.
+        if base.starts_with('<') && base.ends_with('>') {
+            format!("<{modifiers}{}>", &base[1..base.len() - 1])
+        } else {
+            format!("<{modifiers}{base}>")
+        }
+    }
+}
+
+/// The VSCode base key and whether it implies shift for a printable character.
+fn vscode_char(c: char) -> (String, bool) {
+    let shifted = match c {
+        'A'..='Z' => Some(c.to_ascii_lowercase()),
+        '!' => Some('1'),
+        '@' => Some('2'),
+        '#' => Some('3'),
+        '$' => Some('4'),
+        '%' => Some('5'),
+        '^' => Some('6'),
+        '&' => Some('7'),
+        '*' => Some('8'),
+        '(' => Some('9'),
+        ')' => Some('0'),
+        '_' => Some('-'),
+        '+' => Some('='),
+        '{' => Some('['),
+        '}' => Some(']'),
+        '|' => Some('\\'),
+        ':' => Some(';'),
+        '"' => Some('\''),
+        '<' => Some(','),
+        '>' => Some('.'),
+        '?' => Some('/'),
+        '~' => Some('`'),
+        _ => None,
+    };
+    match shifted {
+        Some(base) => (base.to_string(), true),
+        None if c == ' ' => ("space".to_string(), false),
+        None => (c.to_string(), false),
+    }
+}
+
+fn vscode_named(name: &str) -> String {
+    let lower = match name {
+        "Enter" => "enter",
+        "Escape" => "escape",
+        "Tab" => "tab",
+        "Backspace" => "backspace",
+        "Delete" => "delete",
+        "Insert" => "insert",
+        "Home" => "home",
+        "End" => "end",
+        "PageUp" => "pageup",
+        "PageDown" => "pagedown",
+        "ArrowUp" => "up",
+        "ArrowDown" => "down",
+        "ArrowLeft" => "left",
+        "ArrowRight" => "right",
+        other => other,
+    };
+    lower.to_ascii_lowercase()
+}
+
+fn neovim_named(name: &str) -> &str {
+    match name {
+        "Enter" => "CR",
+        "Escape" => "Esc",
+        "Tab" => "Tab",
+        "Backspace" => "BS",
+        "Delete" => "Del",
+        "Insert" => "Insert",
+        "Home" => "Home",
+        "End" => "End",
+        "PageUp" => "PageUp",
+        "PageDown" => "PageDown",
+        "ArrowUp" => "Up",
+        "ArrowDown" => "Down",
+        "ArrowLeft" => "Left",
+        "ArrowRight" => "Right",
+        other => other,
+    }
 }
 
 /// A sequence of one or more keys, e.g. `g r`.
@@ -107,6 +240,20 @@ impl KeyChord {
             .map(format_step)
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// The VSCode `keybindings.json` key string; chord steps are space-separated.
+    pub fn to_vscode(&self) -> String {
+        self.0
+            .iter()
+            .map(KeyStep::to_vscode)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The Neovim `lhs`; chord steps are concatenated into one string.
+    pub fn to_neovim(&self) -> String {
+        self.0.iter().map(KeyStep::to_neovim).collect()
     }
 
     /// The individual key presses of the chord.
@@ -269,6 +416,71 @@ mod tests {
             "ctrl+ctrl+s",
         ] {
             assert!(KeyChord::parse(case).is_err(), "expected rejection: {case:?}");
+        }
+    }
+
+    #[test]
+    fn translates_to_vscode_keybindings() {
+        let cases = [
+            ("s", "s"),
+            ("S", "shift+s"),
+            ("?", "shift+/"),
+            ("%", "shift+5"),
+            ("$", "shift+4"),
+            ("Enter", "enter"),
+            ("Escape", "escape"),
+            ("Tab", "tab"),
+            ("shift+Tab", "shift+tab"),
+            ("Delete", "delete"),
+            ("Backspace", "backspace"),
+            ("ArrowUp", "up"),
+            ("ctrl+c", "ctrl+c"),
+            ("alt+ArrowDown", "alt+down"),
+            ("ctrl+Enter", "ctrl+enter"),
+            ("ctrl+shift+c", "ctrl+shift+c"),
+            ("g r", "g r"),
+            ("] ]", "] ]"),
+            ("F5", "f5"),
+            ("Space", "space"),
+        ];
+        for (canonical, expected) in cases {
+            assert_eq!(
+                KeyChord::parse(canonical).unwrap().to_vscode(),
+                expected,
+                "{canonical}"
+            );
+        }
+    }
+
+    #[test]
+    fn translates_to_neovim_lhs() {
+        let cases = [
+            ("s", "s"),
+            ("S", "S"),
+            ("?", "?"),
+            ("Enter", "<CR>"),
+            ("Escape", "<Esc>"),
+            ("Tab", "<Tab>"),
+            ("shift+Tab", "<S-Tab>"),
+            ("Delete", "<Del>"),
+            ("Backspace", "<BS>"),
+            ("ArrowUp", "<Up>"),
+            ("ctrl+c", "<C-c>"),
+            ("alt+ArrowDown", "<A-Down>"),
+            ("ctrl+Enter", "<C-CR>"),
+            ("ctrl+shift+c", "<C-S-c>"),
+            ("g r", "gr"),
+            ("z a", "za"),
+            ("] ]", "]]"),
+            ("Space", "<Space>"),
+            ("F5", "<F5>"),
+        ];
+        for (canonical, expected) in cases {
+            assert_eq!(
+                KeyChord::parse(canonical).unwrap().to_neovim(),
+                expected,
+                "{canonical}"
+            );
         }
     }
 }
