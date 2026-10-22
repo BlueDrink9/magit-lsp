@@ -1,5 +1,8 @@
 local M = {}
 
+local keys = require('magit-lsp.keys')
+local keymap = require('magit-lsp.keymap')
+
 --- The last text the server sent, for clients and tests that need it.
 M.lines = {}
 
@@ -22,6 +25,30 @@ local function default_cmd()
   return { 'cargo', 'run', '--manifest-path', project_root() .. '/Cargo.toml' }
 end
 
+--- How faithfully this client can report key modifiers (§3.8).
+--- Terminals cannot distinguish most `ctrl+shift`/`alt` combinations.
+local function detect_key_modifiers()
+  if vim.fn.has('gui_running') == 1 then
+    return 'full'
+  end
+  local program = vim.env.TERM_PROGRAM
+  if program == 'iTerm.app' or program == 'WezTerm' or vim.env.KITTY_WINDOW_ID then
+    return 'full'
+  end
+  return 'basic'
+end
+
+--- The client capabilities the server reads, plus the key-delivery contract.
+local function client_capabilities()
+  local capabilities = vim.lsp.protocol.make_client_capabilities()
+  capabilities.keymapDelivery = 'dynamic'
+  capabilities.keyModifiers = detect_key_modifiers()
+  capabilities.prompts = true
+  capabilities.placements = { 'main', 'side', 'bottom', 'float' }
+  capabilities.editorBridge = false
+  return capabilities
+end
+
 local LEVELS = {
   info = vim.log.levels.INFO,
   warn = vim.log.levels.WARN,
@@ -35,16 +62,43 @@ local function error_message(err)
   return tostring(err)
 end
 
+--- Show one message effect as a notification at its level.
+local function notify_effect(effect)
+  M.last_error_detail = effect.detail
+  local text = effect.text or ''
+  if effect.hint then
+    text = text .. '\n' .. effect.hint
+  end
+  vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
+end
+
 --- Show one notification per message effect, at the requested level.
 local function apply_effects(effects)
   for _, effect in ipairs(effects or {}) do
     if effect.type == 'message' then
-      M.last_error_detail = effect.detail
-      local text = effect.text or ''
-      if effect.hint then
-        text = text .. '\n' .. effect.hint
-      end
-      vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
+      notify_effect(effect)
+    end
+  end
+end
+
+--- Replay a server `passThrough` key natively, without re-triggering our maps.
+---@param key string canonical chord, e.g. `Escape` or `g Q`
+local function replay(key)
+  local lhs = keys.to_lhs(key)
+  if not lhs then
+    return
+  end
+  -- `n` means "do not remap", so the client's own buffer-local map is skipped.
+  vim.api.nvim_feedkeys(keys.termcodes(lhs), 'n', false)
+end
+
+--- Apply the effects of a `view/key`: messages, and native replay of passes.
+local function apply_key_effects(effects)
+  for _, effect in ipairs(effects or {}) do
+    if effect.type == 'message' then
+      notify_effect(effect)
+    elseif effect.type == 'passThrough' then
+      replay(effect.key)
     end
   end
 end
@@ -275,9 +329,55 @@ local function visual_selection()
   }
 end
 
+--- The editor mode a key press should report.
+local function editor_mode()
+  local mode = vim.fn.mode()
+  if mode == 'v' or mode == 'V' or mode == '\22' then
+    return 'visual'
+  end
+  return 'normal'
+end
+
+--- Send one key's canonical steps and apply the answer.
+---
+--- A chord is sent as its steps in order; the server tracks the pending
+--- prefix. Cursor, mode and selection are fixed at press time so every step
+--- resolves against the same context.
+---@param steps string[] canonical key steps
+function M.press(steps)
+  if not M.view_id then
+    return
+  end
+  local mode = editor_mode()
+  local selection = mode == 'visual' and visual_selection() or nil
+  local cursor = current_cursor()
+  local effects = {}
+  for _, step in ipairs(steps) do
+    local resp, err = request_sync('view/key', {
+      viewId = M.view_id,
+      version = M.version or 0,
+      key = step,
+      editorMode = mode,
+      cursor = cursor,
+      selection = selection,
+    })
+    if not resp then
+      vim.notify('magit-lsp key ' .. step .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
+      return
+    end
+    vim.list_extend(effects, resp.effects or {})
+  end
+  apply_key_effects(effects)
+end
+
+--- Run a command from a client-side fold mirror.
+local function run_command(command, args)
+  return M.invoke(command, { args = args })
+end
+
 --- Run a command against the open view.
 ---@param command string
----@param opts table|nil { cursor?: table, selection?: boolean|table }
+---@param opts table|nil { cursor?: table, selection?: boolean|table, args?: table }
 ---@return table|nil response
 function M.invoke(command, opts)
   opts = opts or {}
@@ -297,6 +397,7 @@ function M.invoke(command, opts)
     command = command,
     cursor = cursor,
     selection = selection,
+    args = opts.args,
   })
   if not resp then
     M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
@@ -313,9 +414,50 @@ function M.invoke(command, opts)
   return resp
 end
 
+--- Apply a `view/keymap` notification atomically (§3.9).
+---
+--- The map set is the server's bindings translated to Neovim keys plus the
+--- client-side fold mirrors and, for the status scope, the temporary visit
+--- exception until `common.visit` is implemented.
+---@param notice table `view/keymap` params
+function M.apply_keymap(notice)
+  if type(notice) ~= 'table' or not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+    return
+  end
+  M.last_keymap = notice
+  if M.view_id and notice.viewId ~= M.view_id then
+    return
+  end
+
+  local visit
+  if notice.scope == 'status' then
+    local binding
+    for _, candidate in ipairs(notice.bindings or {}) do
+      if candidate.command == 'common.visit' then
+        binding = candidate
+        break
+      end
+    end
+    if not binding or binding.status ~= 'implemented' then
+      visit = { lhs = M.visit_key, fn = function()
+        M.visit()
+      end }
+    end
+  end
+
+  keymap.apply(M.buf, notice, { press = M.press, command = run_command }, {
+    visit = visit,
+    fold_keys = M.fold_keys,
+  })
+  M.capture = notice.capture == true
+  M.keymap_ready = true
+end
+
 --- Open the status view in the current buffer.
 ---@return table|nil descriptor
 function M.open()
+  M.keymap_ready = false
+  M.last_keymap = nil
   local descriptor, err = request_sync('view/open', {
     kind = 'status',
     args = { repo_path = M.root },
@@ -346,6 +488,12 @@ function M.open()
     vim.notify('magit-lsp did not render the view', vim.log.levels.ERROR)
     return nil, 'no initial render'
   end
+
+  -- `view/keymap` follows the render; the client only holds keys the server
+  -- sent, so wait for the first one before reporting the view open.
+  vim.wait(5000, function()
+    return M.keymap_ready == true
+  end, 10)
   return descriptor
 end
 
@@ -461,57 +609,10 @@ function M.error_detail()
   vim.api.nvim_win_set_buf(0, buf)
 end
 
-local function invoke(command, opts)
-  return M.invoke(command, opts)
-end
-
-local function keymaps()
-  local opts = { buffer = M.buf, nowait = true, noremap = true, silent = true }
-  vim.keymap.set('n', 's', function()
-    invoke('status.stage')
-  end, vim.tbl_extend('force', opts, { desc = 'Stage at cursor' }))
-  vim.keymap.set('n', 'u', function()
-    invoke('status.unstage')
-  end, vim.tbl_extend('force', opts, { desc = 'Unstage at cursor' }))
-  vim.keymap.set('x', 's', function()
-    invoke('status.stage', { selection = true })
-  end, vim.tbl_extend('force', opts, { desc = 'Stage selection' }))
-  vim.keymap.set('x', 'u', function()
-    invoke('status.unstage', { selection = true })
-  end, vim.tbl_extend('force', opts, { desc = 'Unstage selection' }))
-  vim.keymap.set('n', 'S', function()
-    invoke('status.stage-all')
-  end, vim.tbl_extend('force', opts, { desc = 'Stage all' }))
-  vim.keymap.set('n', 'U', function()
-    invoke('status.unstage-all')
-  end, vim.tbl_extend('force', opts, { desc = 'Unstage all' }))
-  vim.keymap.set('n', '<CR>', M.visit, vim.tbl_extend('force', opts, { desc = 'Visit file at line' }))
-  vim.keymap.set('n', 'gR', M.refresh, vim.tbl_extend('force', opts, { desc = 'Refresh status' }))
-  vim.keymap.set('n', ']s', function()
-    M.jump('section', 1)
-  end, vim.tbl_extend('force', opts, { desc = 'Next section' }))
-  vim.keymap.set('n', '[s', function()
-    M.jump('section', -1)
-  end, vim.tbl_extend('force', opts, { desc = 'Previous section' }))
-  vim.keymap.set('n', ']f', function()
-    M.jump('file', 1)
-  end, vim.tbl_extend('force', opts, { desc = 'Next file' }))
-  vim.keymap.set('n', '[f', function()
-    M.jump('file', -1)
-  end, vim.tbl_extend('force', opts, { desc = 'Previous file' }))
-  vim.keymap.set('n', ']h', function()
-    M.jump('hunk', 1)
-  end, vim.tbl_extend('force', opts, { desc = 'Next hunk' }))
-  vim.keymap.set('n', '[h', function()
-    M.jump('hunk', -1)
-  end, vim.tbl_extend('force', opts, { desc = 'Previous hunk' }))
-end
-
 local function enable_folding(win)
-  vim.wo[win].foldmethod = 'expr'
-  vim.wo[win].foldexpr = 'v:lua.vim.lsp.foldexpr()'
-  vim.wo[win].foldenable = true
-  vim.wo[win].foldlevel = 99
+  -- The server owns section visibility; native folding must never interfere.
+  vim.wo[win].foldmethod = 'manual'
+  vim.wo[win].foldenable = false
 end
 
 -- Text mode will replace this wording once it exists.
@@ -581,11 +682,15 @@ local function fresh_buffer()
 end
 
 --- Start the server and open the status view.
----@param opts table|nil { root_dir?: string, cmd?: string[] }
+---@param opts table|nil { root_dir?: string, cmd?: string[], profile?: string, visit_key?: string, fold_keys?: table<string, string> }
 ---@return table|nil descriptor
 function M.setup(opts)
   opts = opts or {}
   M.root = opts.root_dir or vim.fn.getcwd()
+  M.profile = opts.profile or 'vim'
+  M.visit_key = opts.visit_key or '<CR>'
+  M.fold_keys = opts.fold_keys or {}
+  M.keyModifiers = detect_key_modifiers()
   local cmd = opts.cmd or default_cmd()
 
   define_highlights()
@@ -601,9 +706,12 @@ function M.setup(opts)
     force = true,
   })
 
-  -- The server sends render updates as notifications.
+  -- The server sends render and keymap updates as notifications.
   vim.lsp.handlers['view/render'] = function(_, result)
     M.apply_render(result)
+  end
+  vim.lsp.handlers['view/keymap'] = function(_, result)
+    M.apply_keymap(result)
   end
 
   M.buf = fresh_buffer()
@@ -611,6 +719,9 @@ function M.setup(opts)
   M.version = nil
   M.view_id = nil
   M.uri = nil
+  M.keymap_ready = false
+  M.last_keymap = nil
+  keymap.clear(M.buf)
 
   vim.cmd('vsplit')
   local win = vim.api.nvim_get_current_win()
@@ -621,6 +732,8 @@ function M.setup(opts)
     name = 'magit-lsp',
     cmd = cmd,
     root_dir = M.root,
+    capabilities = client_capabilities(),
+    init_options = { profile = M.profile },
   }, { bufnr = M.buf })
 
   if not M.client_id then
@@ -628,7 +741,16 @@ function M.setup(opts)
     return nil, 'failed to start client'
   end
 
-  keymaps()
+  -- A user can add fold mappings while the server is running; re-scan them
+  -- whenever the view regains focus.
+  vim.api.nvim_create_autocmd('BufEnter', {
+    buffer = M.buf,
+    callback = function()
+      if M.last_keymap then
+        M.apply_keymap(M.last_keymap)
+      end
+    end,
+  })
 
   vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
     group = vim.api.nvim_create_augroup('magit_lsp_resize', { clear = true }),

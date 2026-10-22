@@ -1235,7 +1235,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       with `include`/`include_optional`, XDG location, `--config`,
       `MAGIT_LSP_CONFIG`, hot reload, validation messages.
 - [x] R-2.3 `view/key`, `view/invoke`, `view/keymap`, `passThrough`, capture mode.
-- [ ] R-2.4 Neovim: atomic keymap apply (tracked buffer-local set), visual
+- [x] R-2.4 Neovim: atomic keymap apply (tracked buffer-local set), visual
       selection forwarding, capture mode, fold-key mirroring (§3.9, incl.
       scanning user mappings), default profile `vim`.
 - [ ] R-2.5 `magit-lsp keymap --format json|vscode|neovim|markdown --check`;

@@ -77,8 +77,14 @@ local function make_untracked_repo()
   return path
 end
 
-local function setup_child()
-  child.lua(string.format("M = require('magit-lsp'); M.setup({ root_dir = %s })", vim.inspect(repo)))
+local function setup_child(opts)
+  local init = { root_dir = repo }
+  for key, value in pairs(opts or {}) do
+    init[key] = value
+  end
+  child.lua(
+    string.format("M = require('magit-lsp'); M.setup(%s)", vim.inspect(init))
+  )
   child.lua([[
     HELPERS = {
       lines = function()
@@ -223,6 +229,70 @@ local function setup_child()
       end,
       cursor_to = function(line)
         vim.api.nvim_win_set_cursor(0, { line, 0 })
+      end,
+      normalize_lhs = function(lhs, mode)
+        local buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_keymap(buf, mode or 'n', lhs, '', {})
+        local map = vim.api.nvim_buf_get_keymap(buf, mode or 'n')[1]
+        vim.api.nvim_buf_delete(buf, { force = true })
+        return map and map.lhs
+      end,
+      applied_lhs = function(mode)
+        local out = {}
+        for _, map in ipairs(vim.api.nvim_buf_get_keymap(M.buf, mode or 'n')) do
+          out[map.lhs] = true
+        end
+        return out
+      end,
+      expected_keymap = function(notice, mode)
+        mode = mode or 'n'
+        local keys = require('magit-lsp.keys')
+        local want = mode == 'n' and 'normal' or 'visual'
+        local out = {}
+        local visit_implemented = false
+        for _, binding in ipairs(notice.bindings or {}) do
+          if binding.command == 'common.visit' and binding.status == 'implemented' then
+            visit_implemented = true
+          end
+          local modes = binding.modes or { 'normal', 'visual' }
+          if vim.tbl_contains(modes, want) then
+            for _, chord in ipairs(binding.keys or {}) do
+              out[HELPERS.normalize_lhs(keys.to_lhs(chord), mode)] = true
+            end
+          end
+        end
+        local visit = not visit_implemented and notice.scope == 'status'
+        if visit then
+          out[HELPERS.normalize_lhs('<CR>', mode)] = (mode == 'n') or nil
+        end
+        if mode == 'n' then
+          for _, native in ipairs({ 'za', 'zA', 'zo', 'zO', 'zc', 'zC', 'zR', 'zM', 'zr', 'zm', 'zj', 'zk' }) do
+            out[HELPERS.normalize_lhs(native, mode)] = true
+          end
+        end
+        return out
+      end,
+      diff_keys = function(got, want)
+        local missing, extra = {}, {}
+        for key in pairs(want) do
+          if not got[key] then
+            missing[#missing + 1] = key
+          end
+        end
+        for key in pairs(got) do
+          if not want[key] then
+            extra[#extra + 1] = key
+          end
+        end
+        table.sort(missing)
+        table.sort(extra)
+        return missing, extra
+      end,
+      keymap_diff = function(mode)
+        local want = HELPERS.expected_keymap(M.last_keymap, mode or 'n')
+        local got = HELPERS.applied_lhs(mode or 'n')
+        local missing, extra = HELPERS.diff_keys(got, want)
+        return { missing = missing, extra = extra }
       end,
     }
   ]])
@@ -528,10 +598,10 @@ T['tokens are refreshed after a mutation'] = function()
   MiniTest.expect.equality(staged, true, 'staged tokens after the mutation')
 end
 
-T['enables LSP folding and serves fold ranges'] = function()
+T['uses manual folding and serves fold ranges from the server'] = function()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('vim.wo.foldmethod'), 'expr')
-  MiniTest.expect.equality(child.lua_get('vim.wo.foldexpr'), 'v:lua.vim.lsp.foldexpr()')
+  MiniTest.expect.equality(child.lua_get('vim.wo.foldmethod'), 'manual')
+  MiniTest.expect.equality(child.lua_get('vim.wo.foldenable'), false)
 
   local count = child.lua_get([[
     (function()
@@ -823,6 +893,265 @@ T['a lost update triggers a full resync'] = function()
   MiniTest.expect.equality(buffer, resync.text)
   MiniTest.expect.equality(child.lua_get('M.version'), resync.version)
   assert_line('Staged changes (1)')
+end
+
+T['buffer-local maps match the server keymap (vim profile)'] = function()
+  setup_child()
+  for _, mode in ipairs({ 'n', 'x' }) do
+    local diff = child.lua_get(string.format('HELPERS.keymap_diff(%q)', mode))
+    MiniTest.expect.equality(diff.missing, {}, 'missing maps in mode ' .. mode)
+    MiniTest.expect.equality(diff.extra, {}, 'stale maps in mode ' .. mode)
+  end
+end
+
+T['buffer-local maps match the server keymap (standard profile)'] = function()
+  setup_child({ profile = 'standard' })
+  for _, mode in ipairs({ 'n', 'x' }) do
+    local diff = child.lua_get(string.format('HELPERS.keymap_diff(%q)', mode))
+    MiniTest.expect.equality(diff.missing, {}, 'missing maps in mode ' .. mode)
+    MiniTest.expect.equality(diff.extra, {}, 'stale maps in mode ' .. mode)
+  end
+end
+
+T['a second view/keymap replaces the applied maps'] = function()
+  setup_child()
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['u'] ~= nil"), true)
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['gr'] ~= nil"), true)
+
+  child.lua([[
+    M.apply_keymap({
+      viewId = M.view_id,
+      scope = 'status',
+      version = M.version,
+      capture = false,
+      bindings = {
+        {
+          command = 'status.stage',
+          keys = { 's' },
+          modes = { 'normal', 'visual' },
+          label = 'Stage',
+          doc = '',
+          group = 'status',
+          status = 'implemented',
+        },
+      },
+    })
+  ]])
+
+  local normal = child.lua_get("HELPERS.applied_lhs('n')")
+  MiniTest.expect.equality(normal['u'], nil, 'the old unstage map is gone')
+  MiniTest.expect.equality(normal['gr'], nil, 'the old chord is gone')
+  MiniTest.expect.equality(normal['s'] ~= nil, true, 'the new map is applied')
+end
+
+T['pressing s stages the change under the cursor'] = function()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, 's')
+
+  local staged = false
+  for _ = 1, 40 do
+    staged = child.lua_get("HELPERS.has_line('Staged changes (1)')")
+    if staged then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(staged, true)
+  MiniTest.expect.equality(
+    git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' }):find('+NEW line', 1, true) ~= nil,
+    true
+  )
+end
+
+T['the g r chord refreshes the view'] = function()
+  setup_child()
+  local path = repo .. '/f.txt'
+  local lines = vim.fn.readfile(path)
+  table.insert(lines, 'line11')
+  vim.fn.writefile(lines, path)
+
+  child.type_keys(50, 'g', 'r')
+  local refreshed = false
+  for _ = 1, 40 do
+    refreshed = child.lua_get("HELPERS.has_line('    +line11')")
+    if refreshed then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(refreshed, true)
+end
+
+T['Tab toggles a file section through the server'] = function()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'file line index')
+  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, '<Tab>')
+
+  local collapsed = false
+  for _ = 1, 40 do
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    if collapsed then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(collapsed, true, 'the file body collapsed')
+  assert_no_line('    +NEW line')
+end
+
+T['an unbound key passes through natively'] = function()
+  setup_child()
+  child.api.nvim_win_set_cursor(0, { 1, 0 })
+  child.type_keys(50, 'l')
+  MiniTest.expect.equality(child.lua_get('vim.fn.col(".")'), 2)
+end
+
+T['Escape with a selection passes through and leaves visual mode'] = function()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, 'V', '<Esc>')
+  MiniTest.expect.equality(child.lua_get('vim.fn.mode()'), 'n')
+end
+
+T['mirrors a user mapping whose rhs is a fold command'] = function()
+  child.cmd('nnoremap <F2> za')
+  setup_child()
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F2>'] ~= nil"), true)
+
+  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, '<F2>')
+
+  local collapsed = false
+  for _ = 1, 40 do
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    if collapsed then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(collapsed, true, 'the mirrored fold key collapsed the file')
+end
+
+T['a user Tab fold mapping toggles the section'] = function()
+  child.cmd('nnoremap <Tab> za')
+  setup_child()
+  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, '<Tab>')
+
+  local collapsed = false
+  for _ = 1, 40 do
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    if collapsed then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(collapsed, true, 'the user Tab mapping toggled the file')
+end
+
+T['fold_keys mirrors a Lua-function fold mapping'] = function()
+  setup_child({ fold_keys = { ['<F3>'] = 'common.toggle-section' } })
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F3>'] ~= nil"), true)
+
+  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, '<F3>')
+
+  local collapsed = false
+  for _ = 1, 40 do
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    if collapsed then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(collapsed, true, 'the configured fold key collapsed the file')
+end
+
+T['capture mode forwards printable keys and shows the server hint'] = function()
+  setup_child()
+  child.lua([[
+    M.apply_keymap({
+      viewId = M.view_id,
+      scope = 'menu',
+      version = M.version,
+      capture = true,
+      bindings = {},
+    })
+    SENT = {}
+    vim.lsp.buf_request_sync = function(_, method, params)
+      if method == 'view/key' then
+        SENT[#SENT + 1] = params.key
+        return {
+          [1] = {
+            result = {
+              effects = {
+                { type = 'message', level = 3, text = 'Unbound key: ' .. params.key },
+              },
+            },
+          },
+        }
+      end
+      return nil
+    end
+    NOTIFIES = {}
+    vim.notify = function(msg, level)
+      table.insert(NOTIFIES, { msg = msg, level = level })
+    end
+  ]])
+
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['Q'] ~= nil"), true)
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  child.type_keys(50, 'Q')
+
+  MiniTest.expect.equality(child.lua_get('SENT'), { 'Q' })
+  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
+  local msg = child.lua_get('NOTIFIES[1].msg')
+  MiniTest.expect.equality(msg:find('Unbound key: Q', 1, true) ~= nil, true, msg)
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  MiniTest.expect.equality(after, before)
+end
+
+T['visit_key overrides the planned common.visit binding'] = function()
+  setup_child({ visit_key = '<F4>' })
+  local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+
+  -- `common.visit` is Planned, so Enter must not leave the view.
+  child.type_keys(50, '<CR>')
+  vim.loop.sleep(100)
+  MiniTest.expect.equality(
+    child.lua_get('vim.api.nvim_buf_get_name(0)'):match('magit://') ~= nil,
+    true,
+    'Enter stays in the view until common.visit is implemented'
+  )
+
+  child.type_keys(50, '<F4>')
+  local opened = false
+  for _ = 1, 100 do
+    local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
+    if name:match('f%.txt$') then
+      opened = true
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(opened, true, 'the configured visit key opened the file')
+  MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
 
 return T

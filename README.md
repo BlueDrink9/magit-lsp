@@ -14,7 +14,7 @@ Two processes talking over LSP (JSON-RPC on stdio):
   features (folding).
 - **Neovim client (`lua/magit-lsp`).** Starts the server, opens a status view,
   renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
-  buffer, and forwards keys as `view/invoke` commands.
+  buffer, and forwards keys as `view/key` steps against the server's keymap.
 
 The server is designed to do as much as possible so that clients are thin and
 easy to build for any editor. See `AGENTS.md` for the protocol and internals.
@@ -29,7 +29,8 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
 - **Visit**: open the real file at the new-side line of the item under the
   cursor (via LSP `definition`).
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
-- **Foldable** sections and files via LSP folding.
+- **Foldable** sections and files: the server owns visibility, and the client
+  mirrors Neovim's fold keys to server commands.
 - **LSP-provided navigation targets** for jumping between sections, files, and
   hunks.
 
@@ -89,8 +90,40 @@ a throwaway git repository under `build/test-repos/`.
 
 The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in a
 vertical split. It is a read-only view: native editing keys are refused and
-`:w`/`:write` is a no-op. Use `gR` to refresh it after changes in the
+`:w`/`:write` is a no-op. Use `g r` to refresh it after changes in the
 repository.
+
+## Client configuration
+
+`setup()` takes these options:
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `root_dir` | `vim.fn.getcwd()` | Repository to show |
+| `cmd` | `target/debug/magit-lsp`, else `cargo run` | Server command |
+| `profile` | `"vim"` | Shipped keymap profile, forwarded as `initializationOptions.profile` |
+| `visit_key` | `"<CR>"` | Client-side visit key (see below) |
+| `fold_keys` | `{}` | Extra fold mirrors, e.g. `{ ['<Tab>'] = 'common.toggle-section' }` |
+
+The client declares `keymapDelivery = "dynamic"` and `keyModifiers = "basic"`
+in terminals (`"full"` in a GUI), then applies every `view/keymap` the server
+sends atomically: it deletes exactly the maps it applied last time, sets the
+new buffer-local maps and records them in one synchronous call. Keys are
+translated from the canonical notation of TASKS.md §3.8 (`ctrl+c`, `g r`,
+`shift+Tab`, …) by `lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
+binding comes from the server.
+
+Folding is server-owned. The view window uses `foldmethod=manual` with
+`foldenable=false`; the client mirrors the native fold keys (`za`, `zA`, `zo`,
+`zO`, `zc`, `zC`, `zR`, `zM`, `zr`, `zm`) to the matching `common.*` commands,
+`zj`/`zk` to section navigation, and re-maps any user mapping whose right-hand
+side is a fold command (e.g. `nnoremap <Tab> za`). `fold_keys` covers
+Lua-function mappings, which cannot be inspected.
+
+`common.visit` is still `Planned` (R-4/R-5), so `visit_key` is a documented
+temporary client-side exception: while the server's binding is not
+`implemented`, the client maps `visit_key` (normal mode) to its own `visit`.
+It disappears as soon as the server implements `common.visit`.
 
 ## Logging
 
@@ -155,25 +188,36 @@ shows one message naming the file and line.
 
 ## Keys (defaults, subject to customization)
 
-| Key      | Action                                                   |
-| -------- | -------------------------------------------------------- |
-| `s`      | Stage file (on a file headline) or hunk (on a hunk line) |
-| `s` (v)  | Stage the visually selected lines                        |
-| `u`      | Unstage file or hunk at cursor                           |
-| `u` (v)  | Unstage the visually selected lines                      |
-| `S`      | Stage all                                                |
-| `U`      | Unstage all                                              |
-| `<CR>`   | Visit the file at the new-side line under the cursor    |
-| `gR`     | Refresh status                                           |
-| `]s`/`[s`| Next/previous section                                    |
-| `]f`/`[f`| Next/previous file                                       |
-| `]h`/`[h`| Next/previous hunk                                       |
+The client hard-codes no keys: these are the `vim` profile defaults from
+TASKS.md §5. Select `standard` with `setup({ profile = 'standard' })`, or
+rebind in `config.toml`.
+
+| Key        | Action                                                   |
+| ---------- | -------------------------------------------------------- |
+| `s`        | Stage file (on a file headline) or hunk (on a hunk line) |
+| `s` (v)    | Stage the visually selected lines                        |
+| `u`        | Unstage file or hunk at cursor                           |
+| `u` (v)    | Unstage the visually selected lines                      |
+| `S`        | Stage all                                                |
+| `U`        | Unstage all                                              |
+| `Enter`    | Visit the file at the new-side line under the cursor     |
+| `g r`      | Refresh status                                           |
+| `Tab`, `z a` | Fold/unfold the section or file at point               |
+| `z o`/`z c` | Unfold/fold at point                                    |
+| `z R`/`z M` | Unfold/fold everything                                  |
+| `z r`/`z m` | More/less detail                                        |
+| `z j`/`z k` | Next/previous section                                   |
+| `] ]`/`[ [` | Next/previous section                                   |
+| `g j`/`g k` | Next/previous sibling                                   |
+| `g u`      | Parent section                                           |
+| `Escape`, `ctrl+c` | Cancel                                           |
+| `q`        | Quit                                                     |
 
 ## Notes
 
 - The client is deliberately thin: it opens the view, applies `view/render`
   text/edits, acks versions, resyncs on a lost update, and forwards keys as
-  `view/invoke` commands. All status structure, staging decisions and cursor
+  `view/key` steps. All status structure, staging decisions, keymaps and cursor
   succession live in the server.
 - Like Magit and Neogit, mutations shell out to `git` (e.g. `git apply
   --cached`) rather than using a native git library, so behavior stays on

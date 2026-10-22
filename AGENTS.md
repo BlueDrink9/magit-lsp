@@ -92,8 +92,12 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - `src/server.rs` — `tokio` stdio LSP loop, view/session registry, request
   dispatch.
 - `lua/magit-lsp/init.lua` — Neovim client (open the view, apply
-  `view/render`, forward keys as `view/invoke`, semantic-token links, folding,
-  read-only buffer).
+  `view/render`, apply `view/keymap` and forward keys as `view/key` steps,
+  semantic-token links, server-owned folding, read-only buffer).
+- `lua/magit-lsp/keys.lua` — canonical key notation (§3.8) ⇄ Neovim `lhs`
+  translation, a pure function pair with unit tests.
+- `lua/magit-lsp/keymap.lua` — atomic buffer-local keymap apply (tracked
+  `applied[bufnr]`), fold-key mirroring and capture-key listing.
 - `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
   environment (fixed identity/dates, isolated config).
 - `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
@@ -127,8 +131,8 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `magit://status/<repo>`
   nofile buffer named from the server's `ViewDescriptor`, `view/render`
   application (full text or line edits, then `view/rendered` ack, `view/resync`
-  on a lost update), semantic-token links, LSP folding, symbol-based navigation
-  and `definition` for visit.
+  on a lost update), semantic-token links, symbol-based navigation and
+  `definition` for visit.
 - Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
   tokens, symbols, links and a line → node map; `foldingRange` and
   `documentSymbol` come from the tree.
@@ -169,6 +173,7 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - R-2.1: `src/commands.rs` is the one command registry (`Command{id, scope, doc, status, run}` with `Implemented`/`Planned{roadmap_id}`/`Unavailable{reason}`, `Registry::get/iter/by_scope`, built once). Every id named in TASKS.md §5.1–§5.5 is registered: the 14 previously-implemented commands plus all others as `Planned`. `Session::invoke` no longer matches on command names: it looks the command up, answers `Planned`/`Unavailable`/scope mismatches with an info `Effect::Message`, and hands execution to a sync `CommandCtx` handler (async `Ui` in R-3.1). `tests/commands.rs` enumerates the registry and checks Planned commands change nothing.
 - R-2.2: `src/keys.rs` parses/formats the `[modifier+]*key` notation with round-trip tests; `profiles/standard.toml` and `profiles/vim.toml` (shipped via `include_str!`) transcribe §5. `src/config.rs` loads TOML with `include`/`include_optional` (relative/absolute/`~`/`$VAR`), detects cycles, merges tables key-by-key with array replacement, tracks `file:line` origins and layers defaults → profile → user config → `initializationOptions` → trusted `.magit-lsp.toml`. `src/keymap.rs` resolves per-scope bindings in the §3.9 order, detects conflicts and answers prefix lookups. `src/main.rs` takes `--config`; `src/server.rs` loads at `initialize`, handles `workspace/didChangeConfiguration` and polls loaded files (150 ms) with one `window/showMessage` per failure, keeping the previous config. Deviations from §5: `common.visit` is declared in the `status` scope (not `common`) so its `Enter` does not clash with `common.confirm`; vim binds `open.log` to `g l` rather than `l` so rule R4 (`h j k l` never rebound) holds.
 - R-2.3: `view/key` and `view/keymap` plus `Effect::PassThrough` and capture mode. `src/keyhandler.rs` holds each view's pending chord and resolves one canonical key step via `Keymap::lookup` (`Prefix` keeps collecting, `Exact` runs the command, `None` clears and either passes the whole chord back or swallows it with an "Unbound key" hint when the view captures). `Session::key` shares `run_command` with `Session::invoke`, so the two entry points cannot diverge; cursor and selection come from the request and the node is resolved against the acked tree by identity, never by line index. A pending chord is discarded when the cursor moves and by `common.cancel` (now `Implemented`, which replies `PassThrough` only when a selection is present). `view/keymap` is pushed after `view/open` and re-pushed for every open view on a config hot reload, gated by the client's `capabilities.keymapDelivery` (`dynamic`/`static`/`forwardAll`); `keyModifiers` is stored for later profile warnings. `src/protocol.rs` adds the request/notification types and `KeymapDelivery`/`KeyModifiers`. Tests: `tests/keys_protocol.rs` (in process) and two real-binary stdio tests in `tests/server_async.rs`.
+- R-2.4: the Neovim client is fully server-driven. `lua/magit-lsp/keys.lua` translates every §3.8 row both ways (`s`, `S`, `?`, `Enter`↔`<CR>`, `Escape`↔`<Esc>`, `Tab`/`shift+Tab`, `Delete`/`Backspace`, arrows, `ctrl+c`, `alt+ArrowDown`, `ctrl+Enter`, chords, `Space`, `Plus`, F-keys, `ctrl+shift+c`); `lua/magit-lsp/keymap.lua` keeps `applied[bufnr]` and applies each `view/keymap` in one synchronous function (delete exactly the old set, set the new one). Every mapped key sends `view/key` with the canonical step, the mode at press time, the 0-based cursor and the visual selection; a chord maps its full `lhs` and sends its steps in order. `passThrough` is replayed with `nvim_feedkeys(..., 'n', ...)` so the client's own map is not re-triggered. Capture mode adds every printable ASCII key. The hard-coded `keymaps()` set is gone. Folding is `foldmethod=manual`/`nofoldenable`; native fold keys and user mappings whose `rhs` mirrors a fold command are re-mapped to `common.*` (server bindings win), with `fold_keys` for Lua-function mappings. `setup{ profile }` is forwarded as `initializationOptions.profile` and the client declares `keymapDelivery = "dynamic"` + `keyModifiers`. `common.visit` is still `Planned`, so `visit_key` (default `<CR>`) is a documented temporary client-side exception that disappears once the server binding reports `implemented`. Tests: `tests/test_keymap.lua` (translator unit tests) and the keymap/keys/capture/fold cases in `tests/test_magit_lsp.lua`.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
   rendering, views) + Neovim integration via mini.test (real server + temp
   repo). `make test`.
@@ -243,6 +248,14 @@ The roadmap, glossary, protocol reference and phased plan live in
   synthetic header is unavoidable.
 - `stage_all` uses `git add -u` (tracked files only); untracked files must be
   staged individually.
+- A chord is mapped as its full `lhs` (`g r` → `gr`), which is simpler than
+  capturing the next key after a prefix, but Neovim waits `timeoutlen` after a
+  prefix (`g`, `z`) before deciding. The server still owns the pending chord.
+- No view sets `capture = true` yet (menus arrive in R-2.7), so the client's
+  capture behaviour is covered by a synthetic `view/keymap` in the mini.test
+  suite rather than by a real capturing view.
+- `common.visit` is `Planned`, so `visit_key` maps Enter client-side for now; it
+  is removed automatically once the server's binding is `implemented`.
 
 ## Conventions
 
