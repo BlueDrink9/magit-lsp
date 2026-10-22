@@ -75,9 +75,19 @@ const EXPECTED: &[&str] = &[
     "commit-message.history-prev",
     "commit-message.history-next",
     "commit-message.add-signoff",
+    // §5.6 process log
+    "process-log.clear",
 ];
 
-const NAMESPACES: &[&str] = &["common", "status", "open", "select", "menu", "commit-message"];
+const NAMESPACES: &[&str] = &[
+    "common",
+    "status",
+    "open",
+    "select",
+    "menu",
+    "commit-message",
+    "process-log",
+];
 
 /// Namespaces used only by commands that a menu item binds (R-2.8).
 const MENU_NAMESPACES: &[&str] = &[
@@ -179,6 +189,7 @@ fn the_registry_lists_every_named_command_once() {
         Scope::Select,
         Scope::Menu,
         Scope::CommitMessage,
+        Scope::ProcessLog,
         Scope::MenuAction,
     ]
     .iter()

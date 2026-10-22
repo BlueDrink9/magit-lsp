@@ -14,7 +14,7 @@ use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, Selection};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
-use crate::view::{ViewMode, VisibilityCommand};
+use crate::view::{Placement, ViewKind, ViewMode, VisibilityCommand};
 use crate::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -28,6 +28,8 @@ pub enum Scope {
     Select,
     Menu,
     CommitMessage,
+    /// The read-only process log.
+    ProcessLog,
     /// A command run from inside a menu. It is bound by the menu item, not by
     /// a profile, so it has no profile-scope keymap of its own.
     MenuAction,
@@ -42,6 +44,7 @@ impl Scope {
             Scope::Select => "select",
             Scope::Menu => "menu",
             Scope::CommitMessage => "commit-message",
+            Scope::ProcessLog => "process-log",
             Scope::MenuAction => "menu-action",
         }
     }
@@ -95,6 +98,8 @@ pub struct CommandOutcome {
     pub mode: Option<ViewMode>,
     /// Push a new menu view and return to the current one on `popView`.
     pub open_menu: Option<Menu>,
+    /// Push a non-menu view (with its placement) above the current one.
+    pub open_view: Option<(ViewKind, Placement)>,
     /// Close the current view and return to the previous one.
     pub pop: bool,
 }
@@ -436,7 +441,20 @@ fn build() -> Registry {
         planned("open.refs", Scope::Status, "Open the refs view", "R-5.3"),
         planned("open.cherries", Scope::Status, "Open the cherry view", "R-7.2"),
         planned("open.run", Scope::Status, "Run a Git command", "R-8.2"),
-        planned("open.process-log", Scope::Status, "Open the process log", "R-3.3"),
+        Command {
+            id: "open.process-log",
+            scope: Scope::Status,
+            doc: "Open the process log",
+            status: CommandStatus::Implemented,
+            run: open_process_log,
+        },
+        Command {
+            id: "process-log.clear",
+            scope: Scope::ProcessLog,
+            doc: "Clear the process log",
+            status: CommandStatus::Implemented,
+            run: clear_process_log,
+        },
         planned(
             "select.toggle-mark",
             Scope::Select,
@@ -535,6 +553,23 @@ fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 /// Open the dispatch menu, including from inside another menu.
 fn open_dispatch(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     open_menu(ctx, "dispatch")
+}
+
+/// Open the process log view; the session creates and pushes it.
+fn open_process_log(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        open_view: Some((ViewKind::ProcessLog, Placement::Main)),
+        ..Default::default()
+    })
+}
+
+/// Drop every record from the process log and re-render the view.
+fn clear_process_log(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    crate::runner::global_log().clear();
+    Ok(CommandOutcome {
+        refresh: true,
+        ..Default::default()
+    })
 }
 
 macro_rules! menu_opener {

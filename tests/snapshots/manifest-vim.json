@@ -1105,7 +1105,7 @@
               "label": "Open the process log",
               "doc": "Open the process log",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             }
           ]
@@ -2131,6 +2131,328 @@
               "group": "commit-message",
               "status": "planned",
               "scope": "commit-message"
+            }
+          ]
+        },
+        {
+          "scope": "process-log",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "g r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "doc": "Refresh the view",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab",
+                "z a"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "doc": "Fold or unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [
+                "z o"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "doc": "Unfold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [
+                "z c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "doc": "Fold the section at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [
+                "z R"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "doc": "Unfold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [
+                "z M"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "doc": "Fold every section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [
+                "z r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "doc": "Show one more level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [
+                "z m"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "] ]"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "doc": "Move to the next section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [
+                "[ ["
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "doc": "Move to the previous section",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "doc": "Cancel the current operation",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "doc": "Confirm the current selection",
+              "group": "common",
+              "status": "planned",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "doc": "Close all views",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "doc": "Cycle the visibility of every section",
+              "group": "common",
+              "status": "planned",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "g j"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "doc": "Move to the next sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "g k"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "doc": "Move to the previous sibling",
+              "group": "common",
+              "status": "planned",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "g u"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "doc": "Move to the parent section",
+              "group": "common",
+              "status": "planned",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "doc": "Toggle text mode",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "y y"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "doc": "Copy the value at point",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "g ?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "doc": "Show the dispatch menu",
+              "group": "open",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "process-log.clear",
+              "keys": [
+                "c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Clear the process log",
+              "doc": "Clear the process log",
+              "group": "process-log",
+              "status": "implemented",
+              "scope": "process-log"
             }
           ]
         }

@@ -10,6 +10,7 @@ use crate::diff_text;
 use crate::keyhandler::{self, MenuPrefix, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
+use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
     ViewKeyParams, ViewKeymapParams, ViewPromptParams, ViewRender, ViewSetModeParams,
@@ -909,12 +910,39 @@ impl Session {
 
     /// Push a menu above `parent_id` and return its descriptor and first render.
     fn push_menu(&mut self, parent_id: &str, menu: Menu) -> Result<(ViewDescriptor, ViewRender)> {
+        let kind = ViewKind::Menu(format!("menu.{}", menu.id));
+        self.push_view(
+            parent_id,
+            kind,
+            Placement::Bottom,
+            Box::new(MenuView::new(menu)),
+        )
+    }
+
+    /// Create a non-menu view and push it above `parent_id`.
+    fn push_kind(
+        &mut self,
+        parent_id: &str,
+        kind: ViewKind,
+        placement: Placement,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        let view = create_view(&self.repo_path, &kind, None, &self.keymaps)?;
+        self.push_view(parent_id, kind, placement, view)
+    }
+
+    /// Push `view` above `parent_id` under a fresh id and render it once.
+    fn push_view(
+        &mut self,
+        parent_id: &str,
+        kind: ViewKind,
+        placement: Placement,
+        mut view: Box<dyn View>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         let viewport = self
             .views
             .get(parent_id)
             .map(|view| view.descriptor().viewport)
             .unwrap_or_default();
-        let kind = ViewKind::Menu(format!("menu.{}", menu.id));
         let base = format!("{parent_id}:{}", kind.as_str());
         let mut id = base.clone();
         let mut suffix = 2;
@@ -923,7 +951,6 @@ impl Session {
             suffix += 1;
         }
 
-        let mut view = MenuView::new(menu);
         let mut tree = view.render(&Ctx { viewport });
         let version = 1;
         tree.version = version;
@@ -932,7 +959,7 @@ impl Session {
             kind: view.kind(),
             uri: view_uri(&self.repo_path, &kind, &id),
             title: view.title(),
-            placement: Placement::Bottom,
+            placement,
             mode: view.mode(),
             scope: view.scope(),
             capture: view.capture(),
@@ -950,7 +977,7 @@ impl Session {
         };
         self.views.push(OpenView {
             descriptor: descriptor.clone(),
-            view: Box::new(view),
+            view,
             tree,
             version,
             acked: None,
@@ -1050,7 +1077,7 @@ impl Session {
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
 
-            if outcome.pop || outcome.open_menu.is_some() {
+            if outcome.pop || outcome.open_menu.is_some() || outcome.open_view.is_some() {
                 (effects, outcome, None)
             } else {
                 let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
@@ -1091,6 +1118,19 @@ impl Session {
 
         if let Some(menu) = outcome.open_menu {
             let (descriptor, render) = self.push_menu(view_id, menu)?;
+            let mut all = effects;
+            all.push(Effect::PushView { descriptor });
+            let keymap = self.keymap_notice(&render.view_id);
+            return Ok(InvokeResult {
+                effects: all,
+                render: None,
+                keymap: None,
+                opened: vec![(render, keymap)],
+            });
+        }
+
+        if let Some((kind, placement)) = outcome.open_view {
+            let (descriptor, render) = self.push_kind(view_id, kind, placement)?;
             let mut all = effects;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
@@ -1210,6 +1250,7 @@ fn create_view(
 ) -> Result<Box<dyn View>> {
     match kind {
         ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
+        ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
         ViewKind::Menu(name) => {
             let name = name.trim_start_matches("menu.");
             let mut menu = crate::menus::by_name(name, keymaps)

@@ -81,7 +81,7 @@
 | `open.refs` | `y` | planned | Open the refs view |
 | `open.cherries` | `Y` | planned | Open the cherry view |
 | `open.run` | `!` | planned | Run a Git command |
-| `open.process-log` | `$` | planned | Open the process log |
+| `open.process-log` | `$` | implemented | Open the process log |
 
 ## select
 
@@ -164,4 +164,30 @@
 | `commit-message.history-prev` | `alt+ArrowUp` | planned | Recall the previous commit message |
 | `commit-message.history-next` | `alt+ArrowDown` | planned | Recall the next commit message |
 | `commit-message.add-signoff` | `ctrl+alt+s` | planned | Add a Signed-off-by trailer |
+
+## process-log
+
+| Command | Keys | Status | Description |
+| --- | --- | --- | --- |
+| `common.refresh` | `F5`, `g` | implemented | Refresh the view |
+| `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
+| `common.show-section` | (unbound) | implemented | Unfold the section at point |
+| `common.hide-section` | (unbound) | implemented | Fold the section at point |
+| `common.show-all` | `alt+4` | implemented | Unfold every section |
+| `common.hide-all` | `alt+1` | implemented | Fold every section |
+| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
+| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.next-section` | `n` | implemented | Move to the next section |
+| `common.prev-section` | `p` | implemented | Move to the previous section |
+| `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
+| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.quit` | `q` | implemented | Close all views |
+| `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
+| `common.next-sibling` | `alt+ArrowDown` | planned | Move to the next sibling |
+| `common.prev-sibling` | `alt+ArrowUp` | planned | Move to the previous sibling |
+| `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
+| `open.dispatch` | `?` | implemented | Show the dispatch menu |
+| `process-log.clear` | `c` | implemented | Clear the process log |
 

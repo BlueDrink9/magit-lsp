@@ -1256,7 +1256,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-3.1 `Ui` handle and `view/prompt` with the four kinds (§3.6); Neovim
       and VSCode mappings; `ScriptedUi` for tests. Menu option prompts now work.
 - [x] R-3.2 Process runner (queue, progress, cancel, ring buffer).
-- [ ] R-3.3 **Process log view.**
+- [x] R-3.3 **Process log view.**
 - [ ] R-3.4 Editor bridge: helper subcommand, socket, `editDocument` effect,
       Neovim and VSCode handling, confirm/cancel/close semantics, askpass
       (§3.10). *Done when:* a Rust test runs `git commit` with the fake client
@@ -1542,10 +1542,10 @@ on the oldest supported git version.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1 and R-3.2 (`make test` green: Rust +
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.3 (`make test` green: Rust +
 Neovim mini.test + the VSCode node tests). The VSCode client is the thin second
 client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
-R-3.3…R-3.7 and Phases 4–9.
+R-3.4…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1598,6 +1598,13 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   because the standard library has no portable kill-by-pid and `libc` is not a
   dependency. Cancellation is consumed by the child it kills, so the failed
   mutation can still read a fresh status to report the failure.
+- **R-3.3:** the process log is a read-only view over `runner::global_log()`
+  (`ViewKind::ProcessLog`, scope `process-log`). `open.process-log` stays in the
+  `status` scope and pushes a `Placement::Main` view through the same
+  view-push/render/keymap pipeline as menus; `process-log.clear` is the only
+  `process-log` command. Record nodes derive from the monotonic record id, and
+  their first line records `git <args>` as `Node.copy`, so refreshes and copy
+  resolve by identity rather than line shape. No new token types were added.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

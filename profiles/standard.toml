@@ -83,3 +83,6 @@ cancel = ["ctrl+shift+x"]
 history-prev = ["alt+ArrowUp"]
 history-next = ["alt+ArrowDown"]
 add-signoff = ["ctrl+alt+s"]
+
+[keys.process-log]
+clear = ["c"]

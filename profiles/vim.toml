@@ -84,3 +84,6 @@ cancel = ["Z Q"]
 history-prev = { keys = ["[ m"], modes = ["normal"] }
 history-next = { keys = ["] m"], modes = ["normal"] }
 add-signoff = ["g s"]
+
+[keys.process-log]
+clear = ["c"]

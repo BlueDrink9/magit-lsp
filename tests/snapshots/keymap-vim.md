@@ -81,7 +81,7 @@
 | `open.refs` | `g y` | planned | Open the refs view |
 | `open.cherries` | `g Y` | planned | Open the cherry view |
 | `open.run` | `!` | planned | Run a Git command |
-| `open.process-log` | `g $` | planned | Open the process log |
+| `open.process-log` | `g $` | implemented | Open the process log |
 
 ## select
 
@@ -164,4 +164,30 @@
 | `commit-message.history-prev` | `[ m` | planned | Recall the previous commit message |
 | `commit-message.history-next` | `] m` | planned | Recall the next commit message |
 | `commit-message.add-signoff` | `g s` | planned | Add a Signed-off-by trailer |
+
+## process-log
+
+| Command | Keys | Status | Description |
+| --- | --- | --- | --- |
+| `common.refresh` | `g r` | implemented | Refresh the view |
+| `common.toggle-section` | `Tab`, `z a` | implemented | Fold or unfold the section at point |
+| `common.show-section` | `z o` | implemented | Unfold the section at point |
+| `common.hide-section` | `z c` | implemented | Fold the section at point |
+| `common.show-all` | `z R` | implemented | Unfold every section |
+| `common.hide-all` | `z M` | implemented | Fold every section |
+| `common.more-detail` | `z r` | implemented | Show one more level of detail |
+| `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.next-section` | `] ]` | implemented | Move to the next section |
+| `common.prev-section` | `[ [` | implemented | Move to the previous section |
+| `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
+| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.quit` | `q` | implemented | Close all views |
+| `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
+| `common.next-sibling` | `g j` | planned | Move to the next sibling |
+| `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
+| `common.parent-section` | `g u` | planned | Move to the parent section |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `y y` | implemented | Copy the value at point |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
+| `process-log.clear` | `c` | implemented | Clear the process log |
 

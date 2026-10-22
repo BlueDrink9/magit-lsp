@@ -1337,5 +1337,212 @@
       "visual"
     ],
     "scope": "commit-message"
+  },
+  {
+    "lhs": "gr",
+    "command": "common.refresh",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<Tab>",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "za",
+    "command": "common.toggle-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zo",
+    "command": "common.show-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zc",
+    "command": "common.hide-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zR",
+    "command": "common.show-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zM",
+    "command": "common.hide-all",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zr",
+    "command": "common.more-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "zm",
+    "command": "common.less-detail",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "]]",
+    "command": "common.next-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "[[",
+    "command": "common.prev-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<Esc>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<C-c>",
+    "command": "common.cancel",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<CR>",
+    "command": "common.confirm",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "q",
+    "command": "common.quit",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<S-Tab>",
+    "command": "common.cycle-visibility",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "gj",
+    "command": "common.next-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "gk",
+    "command": "common.prev-sibling",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "gu",
+    "command": "common.parent-section",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<C-t>",
+    "command": "common.toggle-text-mode",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "yy",
+    "command": "common.copy-value",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "g?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "c",
+    "command": "process-log.clear",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
   }
 ]

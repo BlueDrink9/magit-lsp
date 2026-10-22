@@ -19,7 +19,14 @@ use toml_edit::{Array, Document, InlineTable, Item, Table, Value as TomlValue};
 pub const CONFIG_ENV: &str = "MAGIT_LSP_CONFIG";
 
 /// View scopes the server resolves keymaps for.
-pub const VIEW_SCOPES: &[&str] = &["common", "status", "select", "menu", "commit-message"];
+pub const VIEW_SCOPES: &[&str] = &[
+    "common",
+    "status",
+    "select",
+    "menu",
+    "commit-message",
+    "process-log",
+];
 
 /// A shipped default profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

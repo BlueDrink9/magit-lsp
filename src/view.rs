@@ -14,6 +14,8 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ViewKind {
     Status,
+    /// The read-only log of finished Git invocations.
+    ProcessLog,
     /// A menu (Magit transient), stored by its wire name, e.g. `menu.commit`.
     Menu(String),
     /// A known-but-unimplemented or future kind, kept verbatim on the wire.
@@ -25,6 +27,7 @@ impl ViewKind {
     pub fn as_str(&self) -> &str {
         match self {
             ViewKind::Status => "status",
+            ViewKind::ProcessLog => "process-log",
             ViewKind::Menu(name) => name,
             ViewKind::Other(name) => name,
         }
@@ -61,6 +64,7 @@ impl<'de> Deserialize<'de> for ViewKind {
         let name = String::deserialize(deserializer)?;
         Ok(match name.as_str() {
             "status" => ViewKind::Status,
+            "process-log" => ViewKind::ProcessLog,
             other if other.starts_with("menu.") => ViewKind::Menu(other.to_string()),
             _ => ViewKind::Other(name),
         })

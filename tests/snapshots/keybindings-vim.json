@@ -1230,5 +1230,197 @@
       "key": "g s"
     },
     "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+  },
+  {
+    "key": "g r",
+    "command": "magit.key",
+    "args": {
+      "key": "g r"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "tab",
+    "command": "magit.key",
+    "args": {
+      "key": "Tab"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z a",
+    "command": "magit.key",
+    "args": {
+      "key": "z a"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z o",
+    "command": "magit.key",
+    "args": {
+      "key": "z o"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z c",
+    "command": "magit.key",
+    "args": {
+      "key": "z c"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z shift+r",
+    "command": "magit.key",
+    "args": {
+      "key": "z R"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z shift+m",
+    "command": "magit.key",
+    "args": {
+      "key": "z M"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z r",
+    "command": "magit.key",
+    "args": {
+      "key": "z r"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "z m",
+    "command": "magit.key",
+    "args": {
+      "key": "z m"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "] ]",
+    "command": "magit.key",
+    "args": {
+      "key": "] ]"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "[ [",
+    "command": "magit.key",
+    "args": {
+      "key": "[ ["
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "escape",
+    "command": "magit.key",
+    "args": {
+      "key": "Escape"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+c",
+    "command": "magit.key",
+    "args": {
+      "key": "ctrl+c"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "enter",
+    "command": "magit.key",
+    "args": {
+      "key": "Enter"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "q",
+    "command": "magit.key",
+    "args": {
+      "key": "q"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "shift+tab",
+    "command": "magit.key",
+    "args": {
+      "key": "shift+Tab"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "g j",
+    "command": "magit.key",
+    "args": {
+      "key": "g j"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "g k",
+    "command": "magit.key",
+    "args": {
+      "key": "g k"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "g u",
+    "command": "magit.key",
+    "args": {
+      "key": "g u"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+t",
+    "command": "magit.key",
+    "args": {
+      "key": "ctrl+t"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+t",
+    "command": "magit.key",
+    "args": {
+      "key": "ctrl+t"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && magit.textMode"
+  },
+  {
+    "key": "y y",
+    "command": "magit.key",
+    "args": {
+      "key": "y y"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "g shift+/",
+    "command": "magit.key",
+    "args": {
+      "key": "g ?"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "c",
+    "command": "magit.key",
+    "args": {
+      "key": "c"
+    },
+    "when": "magit.active && magit.scope == 'process-log' && !magit.textMode"
   }
 ]
