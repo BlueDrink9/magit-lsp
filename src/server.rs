@@ -1,4 +1,5 @@
 use crate::errors;
+use crate::config::{ConfigService, LoadOptions};
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::semantic_tokens;
@@ -24,6 +25,13 @@ use tokio::task::JoinSet;
 
 type RepoLocks = Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>;
 
+/// Startup options parsed from the command line.
+#[derive(Debug, Clone, Default)]
+pub struct ServerOptions {
+    /// Explicit `--config <path>`; wins over `MAGIT_LSP_CONFIG`.
+    pub config_path: Option<std::path::PathBuf>,
+}
+
 /// Server state shared by concurrent request handlers.
 #[derive(Clone)]
 struct Shared {
@@ -34,15 +42,21 @@ struct Shared {
     view_repos: Arc<Mutex<HashMap<String, String>>>,
     /// Global view-id counter; ids are unique across repositories.
     next_view: Arc<AtomicU64>,
+    /// Configuration and resolved keymaps.
+    config: Arc<ConfigService>,
+    /// Why the initial configuration load failed, if it did.
+    startup_error: Option<String>,
 }
 
 impl Shared {
-    fn new() -> Self {
+    fn new(config: Arc<ConfigService>, startup_error: Option<String>) -> Self {
         Self {
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             view_repos: Arc::new(Mutex::new(HashMap::new())),
             next_view: Arc::new(AtomicU64::new(0)),
+            config,
+            startup_error,
         }
     }
 
@@ -93,12 +107,17 @@ impl Shared {
 
 /// Run the LSP server on stdio until the client requests shutdown.
 pub fn run() -> Result<()> {
+    run_with(ServerOptions::default())
+}
+
+/// Run the LSP server with the given startup options.
+pub fn run_with(options: ServerOptions) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(Error::from)?;
 
-    let code = runtime.block_on(serve())?;
+    let code = runtime.block_on(serve(options))?;
     if code != 0 {
         std::process::exit(code);
     }
@@ -106,11 +125,54 @@ pub fn run() -> Result<()> {
 }
 
 /// Read framed messages until `exit`, then return the process exit code.
-async fn serve() -> Result<i32> {
+async fn serve(options: ServerOptions) -> Result<i32> {
     let mut reader = BufReader::new(tokio::io::stdin());
     let (sender, receiver) = mpsc::unbounded_channel();
     let writer = tokio::spawn(writer_loop(tokio::io::stdout(), receiver));
-    let shared = Shared::new();
+
+    // The config is loaded before the client connects, so a broken file in the
+    // default location cannot prevent startup. Its error is shown on initialize.
+    let load_options = LoadOptions {
+        config_path: options.config_path.clone(),
+        ..Default::default()
+    };
+    let (config, startup_error) = match ConfigService::load(load_options.clone()) {
+        Ok(service) => (Arc::new(service), None),
+        Err(error) => {
+            tracing::warn!(%error, "configuration failed to load; using defaults");
+            let message = error.to_string();
+            (
+                Arc::new(ConfigService::with_defaults(load_options, error)),
+                Some(message),
+            )
+        }
+    };
+    let shared = Shared::new(config, startup_error);
+
+    // Poll the loaded files for changes. A 150 ms interval doubles as the
+    // debounce, so a burst of writes reloads once.
+    let watcher = {
+        let config = shared.config.clone();
+        let sender = sender.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                let reload = config.clone();
+                let outcome = tokio::task::spawn_blocking(move || reload.reload(false))
+                    .await
+                    .unwrap_or_default();
+                let changed = outcome.changed;
+                let had_errors = !outcome.errors.is_empty();
+                for error in outcome.errors {
+                    let _ = sender.send(show_message(1, format!("magit-lsp config: {error}")));
+                }
+                if changed && !had_errors {
+                    tracing::debug!("configuration reloaded");
+                }
+            }
+        })
+    };
+
     let mut handlers = JoinSet::new();
     let mut shutdown_requested = false;
 
@@ -137,6 +199,18 @@ async fn serve() -> Result<i32> {
                 "view/rendered" | "view/resize" => {
                     handle_view_notification(&shared, &notification)
                 }
+                // The client's settings changed; reload and report failures.
+                "workspace/didChangeConfiguration" => {
+                    let config = shared.config.clone();
+                    let outcome = tokio::task::spawn_blocking(move || config.reload(true))
+                        .await
+                        .unwrap_or_default();
+                    for error in outcome.errors {
+                        let _ =
+                            sender.send(show_message(1, format!("magit-lsp config: {error}")));
+                    }
+                    tracing::debug!("configuration reloaded on client request");
+                }
                 // The server owns the document; other client notifications are
                 // not needed to keep view state in sync.
                 _ => {}
@@ -151,6 +225,8 @@ async fn serve() -> Result<i32> {
 
     // In-flight work must not keep the process alive after `exit`; queued
     // responses are already on the writer channel.
+    watcher.abort();
+    let _ = watcher.await;
     handlers.abort_all();
     while handlers.join_next().await.is_some() {}
     drop(sender);
@@ -340,9 +416,27 @@ async fn maybe_test_delay() {}
 fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     let params = request.params.clone();
     match request.method.as_str() {
-        "initialize" => Ok(Dispatched::value(
-            serde_json::json!({ "capabilities": capabilities()? }),
-        )),
+        "initialize" => {
+            let mut notifications = Vec::new();
+            let init = params
+                .get("initializationOptions")
+                .cloned()
+                .filter(|value| !value.is_null());
+            if let Some(value) = init {
+                let outcome = shared.config.set_initialization(Some(value));
+                for error in &outcome.errors {
+                    notifications.push(show_message(1, format!("magit-lsp config: {error}")));
+                }
+            }
+            if let Some(error) = &shared.startup_error {
+                notifications.push(show_message(1, format!("magit-lsp config: {error}")));
+            }
+            tracing::debug!(files = ?shared.config.files(), "configuration ready");
+            Ok(Dispatched::with(
+                serde_json::json!({ "capabilities": capabilities()? }),
+                notifications,
+            ))
+        }
         "shutdown" => Ok(Dispatched::value(Value::Null)),
         ViewOpenRequest::METHOD => open_view(shared, params),
         ViewCloseRequest::METHOD => close_view(shared, params),
@@ -532,6 +626,14 @@ where
             None => Err(err),
         },
     }
+}
+
+/// A `window/showMessage` notification: 1 error, 2 warning, 3 info, 4 log.
+fn show_message(kind: u8, message: String) -> Message {
+    Message::Notification(Notification::new(
+        "window/showMessage".to_string(),
+        serde_json::json!({ "type": kind, "message": message }),
+    ))
 }
 
 fn capabilities() -> Result<Value> {

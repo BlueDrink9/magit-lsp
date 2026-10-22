@@ -1,0 +1,86 @@
+# magit-lsp `vim` profile (Neovim default; see TASKS.md §5).
+#
+# Binding tables are `[keys.<scope>] <name> = ["Key", ...]`, where `<name>`
+# is the command id without its scope prefix (`stage` = `status.stage`), a full
+# id for openers and selectors (`open.commit`, `select.toggle-mark`) or a
+# `common.*` name used from a view scope (`confirm`). An empty array means the
+# command is deliberately unbound in this profile. `common.visit` is declared
+# in `status` rather than `common` so that its `Enter` does not clash with
+# `common.confirm` in non-select views. R4: no visual-mode keys, counts,
+# `h j k l`, `gg`, `G`, `ctrl+d/u/f/b`, `/`, `H` or `L` appear below.
+
+profile = "vim"
+
+[keys.common]
+confirm = ["Enter"]
+cancel = ["Escape", "ctrl+c"]
+quit = ["q"]
+refresh = ["g r"]
+toggle-section = ["Tab", "z a"]
+show-section = ["z o"]
+hide-section = ["z c"]
+cycle-visibility = ["shift+Tab"]
+show-all = ["z R"]
+hide-all = ["z M"]
+more-detail = ["z r"]
+less-detail = ["z m"]
+next-section = ["] ]"]
+prev-section = ["[ ["]
+next-sibling = ["g j"]
+prev-sibling = ["g k"]
+parent-section = ["g u"]
+toggle-text-mode = ["ctrl+t"]
+copy-value = ["y y"]
+"open.dispatch" = ["g ?"]
+
+[keys.status]
+visit = ["Enter"]
+stage = ["s"]
+unstage = ["u"]
+stage-all = ["S"]
+unstage-all = ["U"]
+discard = ["x"]
+reverse = ["R"]
+apply = ["a"]
+"open.commit" = ["c"]
+"open.branch" = ["b"]
+"open.log" = ["g l"]
+"open.diff" = ["d"]
+"open.fetch" = ["f"]
+"open.pull" = ["F"]
+"open.push" = ["P"]
+"open.merge" = ["m"]
+"open.rebase" = ["r"]
+"open.stash" = ["Z"]
+"open.tag" = ["t"]
+"open.reset" = ["X"]
+"open.revert" = ["-"]
+"open.cherry-pick" = ["A"]
+"open.bisect" = ["B"]
+"open.remote" = ["M"]
+"open.submodule" = ["o"]
+"open.worktree" = ["g %"]
+"open.ignore" = ["i"]
+"open.refs" = ["g y"]
+"open.cherries" = ["g Y"]
+"open.patch-apply" = ["w"]
+"open.patch-create" = ["W"]
+"open.run" = ["!"]
+"open.process-log" = ["g $"]
+
+[keys.select]
+confirm = ["Enter"]
+toggle-mark = ["Space"]
+enter-rev = ["i"]
+cancel = ["Escape", "ctrl+c"]
+
+[keys.menu]
+save-args = ["ctrl+s"]
+reset-args = ["ctrl+r"]
+
+[keys.commit-message]
+confirm = ["Z Z", "ctrl+Enter"]
+cancel = ["Z Q"]
+history-prev = { keys = ["[ m"], modes = ["normal"] }
+history-next = { keys = ["] m"], modes = ["normal"] }
+add-signoff = ["g s"]

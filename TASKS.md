@@ -1231,7 +1231,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 ### Phase 2 — Commands, keymaps, config, text mode, menu framework, second client
 
 - [x] R-2.1 Command registry (`id`, `scope`, `doc`, `status`, `run`).
-- [ ] R-2.2 Keymap resolution, profiles `standard` and `vim` (§5), TOML config
+- [x] R-2.2 Keymap resolution, profiles `standard` and `vim` (§5), TOML config
       with `include`/`include_optional`, XDG location, `--config`,
       `MAGIT_LSP_CONFIG`, hot reload, validation messages.
 - [ ] R-2.3 `view/key`, `view/invoke`, `view/keymap`, `passThrough`, capture mode.

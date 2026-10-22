@@ -77,6 +77,10 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - `src/view.rs` — `View` trait, `ViewDescriptor`, kinds, placement and viewport.
 - `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
   cursor succession and the tiny R-1.2 command table.
+- `src/keys.rs` — key notation: parse/format canonical key strings.
+- `src/keymap.rs` — resolves bindings per scope and validates the merged keymap.
+- `src/config.rs` — TOML config (includes, layers, origin tracking, hot reload).
+- `profiles/standard.toml`, `profiles/vim.toml` — shipped default bindings.
 - `src/diff_text.rs` — common-prefix/suffix line-range edits for `view/render`.
 - `src/protocol.rs` — custom JSON-RPC types (`Effect`, `ViewRender`, `view/*`
   params and responses).
@@ -159,6 +163,7 @@ comes back as an error-level `Effect::Message` with a readable summary (see
   Lua client is thin: it opens the view, applies `view/render`, acks, resyncs on
   a lost update, and forwards keys; it holds no per-hunk/file/line logic.
 - R-2.1: `src/commands.rs` is the one command registry (`Command{id, scope, doc, status, run}` with `Implemented`/`Planned{roadmap_id}`/`Unavailable{reason}`, `Registry::get/iter/by_scope`, built once). Every id named in TASKS.md §5.1–§5.5 is registered: the 14 previously-implemented commands plus all others as `Planned`. `Session::invoke` no longer matches on command names: it looks the command up, answers `Planned`/`Unavailable`/scope mismatches with an info `Effect::Message`, and hands execution to a sync `CommandCtx` handler (async `Ui` in R-3.1). `tests/commands.rs` enumerates the registry and checks Planned commands change nothing.
+- R-2.2: `src/keys.rs` parses/formats the `[modifier+]*key` notation with round-trip tests; `profiles/standard.toml` and `profiles/vim.toml` (shipped via `include_str!`) transcribe §5. `src/config.rs` loads TOML with `include`/`include_optional` (relative/absolute/`~`/`$VAR`), detects cycles, merges tables key-by-key with array replacement, tracks `file:line` origins and layers defaults → profile → user config → `initializationOptions` → trusted `.magit-lsp.toml`. `src/keymap.rs` resolves per-scope bindings in the §3.9 order, detects conflicts and answers prefix lookups. `src/main.rs` takes `--config`; `src/server.rs` loads at `initialize`, handles `workspace/didChangeConfiguration` and polls loaded files (150 ms) with one `window/showMessage` per failure, keeping the previous config. Deviations from §5: `common.visit` is declared in the `status` scope (not `common`) so its `Enter` does not clash with `common.confirm`; vim binds `open.log` to `g l` rather than `l` so rule R4 (`h j k l` never rebound) holds.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
   rendering, views) + Neovim integration via mini.test (real server + temp
   repo). `make test`.

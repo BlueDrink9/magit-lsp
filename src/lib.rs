@@ -1,8 +1,11 @@
 pub mod commands;
+pub mod config;
 pub mod diff_text;
 pub mod dispatch;
 pub mod errors;
 pub mod git;
+pub mod keymap;
+pub mod keys;
 pub mod logging;
 pub mod patch;
 pub mod protocol;

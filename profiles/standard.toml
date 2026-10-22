@@ -1,0 +1,85 @@
+# magit-lsp `standard` profile (non-modal editors; see TASKS.md §5).
+#
+# Binding tables are `[keys.<scope>] <name> = ["Key", ...]`, where `<name>`
+# is the command id without its scope prefix (`stage` = `status.stage`), a full
+# id for openers and selectors (`open.commit`, `select.toggle-mark`) or a
+# `common.*` name used from a view scope (`confirm`). An empty array means the
+# command is deliberately unbound in this profile. `common.visit` is declared
+# in `status` rather than `common` so that its `Enter` does not clash with
+# `common.confirm` in non-select views.
+
+profile = "standard"
+
+[keys.common]
+confirm = ["Enter"]
+cancel = ["Escape", "ctrl+c"]
+quit = ["q"]
+refresh = ["g", "F5"]
+toggle-section = ["Tab"]
+show-section = []
+hide-section = []
+cycle-visibility = ["shift+Tab"]
+show-all = ["alt+4"]
+hide-all = ["alt+1"]
+more-detail = ["alt+3"]
+less-detail = ["alt+2"]
+next-section = ["n"]
+prev-section = ["p"]
+next-sibling = ["alt+ArrowDown"]
+prev-sibling = ["alt+ArrowUp"]
+parent-section = ["alt+ArrowLeft"]
+toggle-text-mode = ["ctrl+t"]
+copy-value = ["ctrl+shift+c"]
+"open.dispatch" = ["?"]
+
+[keys.status]
+visit = ["Enter"]
+stage = ["s"]
+unstage = ["u"]
+stage-all = ["S"]
+unstage-all = ["U"]
+discard = ["Delete"]
+reverse = ["v"]
+apply = ["a"]
+"open.commit" = ["c"]
+"open.branch" = ["b"]
+"open.log" = ["l"]
+"open.diff" = ["d"]
+"open.fetch" = ["f"]
+"open.pull" = ["F"]
+"open.push" = ["P"]
+"open.merge" = ["m"]
+"open.rebase" = ["r"]
+"open.stash" = ["z"]
+"open.tag" = ["t"]
+"open.reset" = ["x"]
+"open.revert" = ["V"]
+"open.cherry-pick" = ["A"]
+"open.bisect" = ["B"]
+"open.remote" = ["M"]
+"open.submodule" = ["o"]
+"open.worktree" = ["%"]
+"open.ignore" = ["i"]
+"open.refs" = ["y"]
+"open.cherries" = ["Y"]
+"open.patch-apply" = ["w"]
+"open.patch-create" = ["W"]
+"open.run" = ["!"]
+"open.process-log" = ["$"]
+
+[keys.select]
+confirm = ["Enter"]
+toggle-mark = ["Space"]
+enter-rev = ["/"]
+cancel = ["Escape", "ctrl+c"]
+
+[keys.menu]
+save-args = ["ctrl+s"]
+reset-args = ["ctrl+r"]
+
+[keys.commit-message]
+confirm = ["ctrl+Enter"]
+cancel = ["ctrl+shift+x"]
+history-prev = ["alt+ArrowUp"]
+history-next = ["alt+ArrowDown"]
+add-signoff = ["ctrl+alt+s"]

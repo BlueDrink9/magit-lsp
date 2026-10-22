@@ -106,6 +106,53 @@ Every `git` invocation is logged at `debug` (arguments, working directory, exit
 code, duration); failures are logged at `warn`. Patch contents passed to
 `git apply` are only logged at `trace`.
 
+## Configuration
+
+The server reads TOML. Layers, lowest to highest precedence:
+
+1. built-in defaults
+2. the shipped profile (`profile = "vim"` — the default — or `"standard"`)
+3. the user config, plus its `include`d files
+4. the client's `initializationOptions`
+5. a per-repository `.magit-lsp.toml` (only keys and display settings, and
+   only when the user config sets `trust_repo_config = true`)
+
+The config path is, in order: `--config <path>`, the `MAGIT_LSP_CONFIG`
+environment variable, then `<config>/magit-lsp/config.toml` where `<config>` is
+`$XDG_CONFIG_HOME` or `~/.config` on Unix (`%APPDATA%` on Windows).
+
+```toml
+profile = "vim"                 # "standard" | "vim"
+trust_repo_config = false       # allow a repo's .magit-lsp.toml
+
+include = ["keys-work.toml"]    # loaded first; this file overrides them
+include_optional = ["local.toml"]  # a missing file is not an error
+
+[keys.common]
+confirm = ["Enter"]              # replaces the profile's keys for common.confirm
+cancel  = ["Escape", "ctrl+c"]
+
+[keys.status]
+stage   = ["s"]
+unstage = ["u"]
+unbind  = ["x"]                  # remove the profile's binding for x
+
+[keys."commit-message"]
+history-prev = { keys = ["[ m"], modes = ["normal"] }
+
+[diff]
+context = 3
+```
+
+Keys use the notation of §3.8: `ctrl+e`, `alt+ArrowDown`, `Enter`,
+`shift+Tab`, `Space`, `Plus`, and chords such as `g r`. Includes may be
+relative to the including file, absolute, `~`-prefixed, or use `$VAR` /
+`${VAR}`. Tables merge key by key; arrays replace. Cycles and missing required
+includes are reported with the offending file and line. Configuration is hot
+reloaded when a loaded file changes or the client sends
+`workspace/didChangeConfiguration`; a broken edit keeps the previous config and
+shows one message naming the file and line.
+
 ## Keys (defaults, subject to customization)
 
 | Key      | Action                                                   |
