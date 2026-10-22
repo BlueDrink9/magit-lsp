@@ -1433,30 +1433,31 @@ T['planned menu actions are greyed with the menu.planned token'] = function()
   local state = wait_menu()
   MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
 
-  local row = child.lua_get(string.format([[
+  local position = child.lua_get(string.format([[
     (function()
       local menu = require('magit-lsp.menu')
       local view = menu.views[%q]
       for i, line in ipairs(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)) do
-        if line:find('  c  Commit', 1, true) then return i - 1 end
+        local column = line:find('Extend', 1, true)
+        if column then return { row = i - 1, column = column - 1 } end
       end
       return nil
     end)()
   ]], state.id))
-  MiniTest.expect.equality(type(row), 'number', 'the Commit action line')
+  MiniTest.expect.equality(type(position), 'table', 'the Extend action line')
 
   local token = child.lua_get(string.format([[
     (function()
       local menu = require('magit-lsp.menu')
       local view = menu.views[%q]
       local ok = vim.wait(5000, function()
-        return vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, 5) ~= nil
+        return vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d) ~= nil
       end, 20)
       if not ok then return nil end
-      local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, 5)
+      local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d)
       return tokens and tokens[1] and tokens[1].type or nil
     end)()
-  ]], state.id, row, row))
+  ]], state.id, position.row, position.column, position.row, position.column))
   MiniTest.expect.equality(token, 'magit.menu.planned')
 end
 
@@ -1472,14 +1473,14 @@ T['a planned menu action notifies once and keeps the menu open'] = function()
       table.insert(NOTIFIES, { msg = msg, level = level })
     end
   ]])
-  child.type_keys(50, 'c')
+  child.type_keys(50, 'e')
   vim.wait(5000, function()
     return child.lua_get('#NOTIFIES') > 0
   end, 20)
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
   MiniTest.expect.equality(
     child.lua_get('NOTIFIES[1].msg'),
-    'Not implemented yet: Commit (roadmap R-4.1)'
+    'Not implemented yet: Extend (roadmap R-4.1)'
   )
   MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.INFO)
   MiniTest.expect.equality(menu_closed(state.id), false, 'the menu stays open')

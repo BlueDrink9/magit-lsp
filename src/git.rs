@@ -585,7 +585,7 @@ impl GitRepo {
         // The patch body is user content: only ever visible at trace level.
         tracing::trace!(patch = %patch_text, "git stdin");
 
-        let mut child = git_command(&self.root, &args, Stdio::piped())
+        let mut child = git_command(&self.root, &args, Stdio::piped(), &[])
             .spawn()
             .map_err(|e| Error::new(format!("failed to spawn git apply: {e}")))?;
         let cancel = runner::current_cancel();
@@ -628,14 +628,34 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Run `git commit` with extra environment variables and return the
+    /// committed message as read back by `git log -1 --format=%B`.
+    pub fn commit(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
+        let mut commit_args = vec!["commit"];
+        commit_args.extend_from_slice(args);
+        self.run_with_env(&commit_args, env)?;
+        Ok(self
+            .run(&["log", "-1", "--format=%B"])?
+            .trim_end()
+            .to_string())
+    }
+
     fn run(&self, args: &[&str]) -> Result<String> {
         Self::command_in(&self.root, args)
     }
 
+    fn run_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
+        Self::command_in_with_env(&self.root, args, env)
+    }
+
     fn command_in(cwd: &Path, args: &[&str]) -> Result<String> {
+        Self::command_in_with_env(cwd, args, &[])
+    }
+
+    fn command_in_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
         let started = Instant::now();
         tracing::debug!(cwd = %cwd.display(), args = ?args, "git");
-        let mut child = git_command(cwd, args, Stdio::null())
+        let mut child = git_command(cwd, args, Stdio::null(), env)
             .spawn()
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
         let pid = child.id();
@@ -697,7 +717,7 @@ fn record_diff_call(path: &Path) {
 
 /// Build a `git` child that can never write to the server's own stdout and
 /// never prompts on a terminal nobody is reading.
-fn git_command(cwd: &Path, args: &[&str], stdin: Stdio) -> Command {
+fn git_command(cwd: &Path, args: &[&str], stdin: Stdio, env: &[(&str, &str)]) -> Command {
     let mut command = Command::new("git");
     command
         .args(args)
@@ -706,6 +726,9 @@ fn git_command(cwd: &Path, args: &[&str], stdin: Stdio) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("GIT_TERMINAL_PROMPT", "0");
+    for (key, value) in env {
+        command.env(key, value);
+    }
     command
 }
 

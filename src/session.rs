@@ -285,6 +285,8 @@ pub struct InvokeResult {
     pub keymap: Option<ViewKeymapParams>,
     /// Initial renders and keymaps for views the effects pushed or opened.
     pub opened: Vec<(ViewRender, Option<ViewKeymapParams>)>,
+    /// The repository whose `git commit` must run on a detached worker.
+    pub commit: Option<String>,
 }
 
 impl InvokeResult {
@@ -294,6 +296,7 @@ impl InvokeResult {
             render: None,
             keymap: None,
             opened: Vec::new(),
+            commit: None,
         }
     }
 }
@@ -897,6 +900,7 @@ impl Session {
             render: None,
             keymap,
             opened: Vec::new(),
+            commit: None,
         })
     }
 
@@ -1077,7 +1081,11 @@ impl Session {
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
 
-            if outcome.pop || outcome.open_menu.is_some() || outcome.open_view.is_some() {
+            if outcome.pop
+                || outcome.open_menu.is_some()
+                || outcome.open_view.is_some()
+                || outcome.commit
+            {
                 (effects, outcome, None)
             } else {
                 let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
@@ -1126,6 +1134,7 @@ impl Session {
                 render: None,
                 keymap: None,
                 opened: vec![(render, keymap)],
+                commit: None,
             });
         }
 
@@ -1139,6 +1148,7 @@ impl Session {
                 render: None,
                 keymap: None,
                 opened: vec![(render, keymap)],
+                commit: None,
             });
         }
 
@@ -1152,6 +1162,7 @@ impl Session {
             render,
             keymap,
             opened: Vec::new(),
+            commit: outcome.commit.then(|| self.repo_path.clone()),
         })
     }
 

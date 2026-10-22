@@ -48,6 +48,15 @@ pub enum Effect {
     },
     /// Close every view of the session.
     Quit,
+    /// Open a Git-owned file in the client's own editor and keep the operation
+    /// that spawned Git waiting until `common.confirm`/`common.cancel` answers
+    /// with the same `edit_id`.
+    EditDocument {
+        #[serde(rename = "editId")]
+        edit_id: String,
+        path: String,
+        kind: String,
+    },
 }
 
 impl Effect {
@@ -110,6 +119,16 @@ pub struct ViewRender {
 
 /// Method name of the server's render notification.
 pub const VIEW_RENDER: &str = "view/render";
+/// Method name of the server's asynchronous effect notification.
+pub const VIEW_EFFECTS: &str = "view/effects";
+
+/// `view/effects`: effects produced after a request already answered, such as
+/// an `editDocument` from a detached Git process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewEffectsParams {
+    pub effects: Vec<Effect>,
+}
 /// Method name of the client's ack notification.
 pub const VIEW_RENDERED: &str = "view/rendered";
 /// Method name of the client's viewport notification.

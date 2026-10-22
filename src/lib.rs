@@ -3,6 +3,7 @@ pub mod commands;
 pub mod config;
 pub mod diff_text;
 pub mod dispatch;
+pub mod editor;
 pub mod errors;
 pub mod git;
 pub mod keyhandler;

@@ -1,5 +1,6 @@
 use crate::errors;
 use crate::config::{ConfigService, LoadOptions};
+use crate::editor;
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
@@ -492,6 +493,19 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         }
     };
     let shared = Shared::new(config, startup_error, sender.clone());
+    if let Some(path) = editor::start_listener({
+        let sender = sender.downgrade();
+        Arc::new(move |effects: Vec<Effect>| {
+            if let Some(sender) = sender.upgrade() {
+                let _ = sender.send(Message::Notification(Notification::new(
+                    VIEW_EFFECTS.to_string(),
+                    ViewEffectsParams { effects },
+                )));
+            }
+        })
+    }) {
+        tracing::debug!(socket = %path.display(), "editor bridge listening");
+    }
 
     // Poll the loaded files for changes. A 150 ms interval doubles as the
     // debounce, so a burst of writes reloads once.
@@ -1081,6 +1095,11 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 /// Turn a command outcome into its response plus render/keymap notifications.
 fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
     let mut notifications = Vec::new();
+    if outcome.commit.is_some() {
+        // Git must not run while this request still holds any session or repo
+        // lock: it waits for the user to edit and confirm.
+        spawn_commit(shared.clone(), repo.to_string());
+    }
     if let Some(render) = outcome.render {
         notifications.push(Message::Notification(Notification::new(
             VIEW_RENDER.to_string(),
@@ -1142,6 +1161,66 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
         })?,
         notifications,
     ))
+}
+
+/// Run `git commit` on a detached worker and refresh the views afterwards.
+///
+/// The worker owns the editor wait, so neither the sessions mutex nor the repo
+/// lock is held while Git blocks on the helper. Only the final refresh takes
+/// the session lock again, briefly.
+fn spawn_commit(shared: Shared, repo: String) {
+    let sender = shared.sender.clone();
+    let worker = std::thread::Builder::new()
+        .name("magit-lsp-commit".to_string())
+        .spawn(move || {
+            let edit_id = editor::registry().create(&repo);
+            let result = match editor::socket_path() {
+                Some(socket) => editor::commit(&repo, &edit_id, socket),
+                None => Err(Error::new("the editor bridge is not running")),
+            };
+            editor::registry().remove(&edit_id);
+
+            let mut messages = Vec::new();
+            match result {
+                Ok(_message) => {
+                    let renders: Vec<ViewRender> = {
+                        let mut sessions = shared
+                            .sessions
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let Some(session) = sessions.get_mut(&repo) else {
+                            return;
+                        };
+                        let ids: Vec<String> = session
+                            .views()
+                            .iter()
+                            .map(|view| view.descriptor().id.clone())
+                            .collect();
+                        ids.into_iter()
+                            .filter_map(|id| session.refresh(&id).ok().flatten())
+                            .collect()
+                    };
+                    messages.extend(renders.into_iter().map(|render| {
+                        Message::Notification(Notification::new(VIEW_RENDER.to_string(), render))
+                    }));
+                }
+                Err(error) => {
+                    let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
+                        vec![Effect::message(MessageLevel::Error, error.to_string())]
+                    });
+                    messages.push(Message::Notification(Notification::new(
+                        VIEW_EFFECTS.to_string(),
+                        ViewEffectsParams { effects },
+                    )));
+                }
+            }
+            for message in messages {
+                let _ = sender.send(message);
+            }
+        });
+    if let Err(error) = worker {
+        tracing::warn!(%error, "failed to start the commit worker");
+    }
 }
 
 /// Run a mutation for `repo_path`, reporting Git failures as message effects.

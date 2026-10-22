@@ -296,18 +296,18 @@ fn a_planned_action_reports_its_roadmap_and_changes_nothing() {
     let outcome = press(
         &mut session,
         &descriptor.id,
-        "c",
+        "e",
         Cursor { line: 0, column: 0 },
     );
     assert_eq!(
         messages(&outcome.effects),
-        vec!["Not implemented yet: Commit (roadmap R-4.1)"]
+        vec!["Not implemented yet: Extend (roadmap R-4.1)"]
     );
     assert_eq!(
         outcome.effects,
         vec![Effect::message(
             MessageLevel::Info,
-            "Not implemented yet: Commit (roadmap R-4.1)"
+            "Not implemented yet: Extend (roadmap R-4.1)"
         )]
     );
     assert!(outcome.render.is_none());
@@ -517,13 +517,18 @@ fn the_registry_exposes_open_commit_and_the_menu_commands() {
         );
     }
 
-    // A menu action's status is separate from the registry: every commit
-    // action is Planned until R-4.1.
+    // A menu action's status is separate from the registry: most commit
+    // actions stay Planned until R-4.1, `c` is implemented.
     let menu = menus::named("commit").expect("commit menu");
-    for key in ["c", "e", "f", "a"] {
+    for key in ["e", "f", "a"] {
         match menu.item(key).map(|item| item.status()) {
             Some(MenuStatus::Planned { roadmap_id }) => assert_eq!(roadmap_id, "R-4.1"),
             other => panic!("{key} is planned, got {other:?}"),
         }
     }
+    assert_eq!(
+        menu.item("c").map(|item| item.status()),
+        Some(&MenuStatus::Implemented),
+        "c is implemented"
+    );
 }

@@ -38,13 +38,7 @@ pub fn definition() -> MenuDef {
             ),
             group(
                 "Create",
-                vec![action(
-                    "c",
-                    "commit.create",
-                    "Commit",
-                    "magit-commit-create",
-                    "R-4.1",
-                )],
+                vec![action("c", "commit.create", "Commit", "magit-commit-create", "")],
             ),
             group(
                 "Edit HEAD",

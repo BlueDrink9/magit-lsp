@@ -1257,10 +1257,11 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       and VSCode mappings; `ScriptedUi` for tests. Menu option prompts now work.
 - [x] R-3.2 Process runner (queue, progress, cancel, ring buffer).
 - [x] R-3.3 **Process log view.**
-- [ ] R-3.4 Editor bridge: helper subcommand, socket, `editDocument` effect,
-      Neovim and VSCode handling, confirm/cancel/close semantics, askpass
-      (§3.10). *Done when:* a Rust test runs `git commit` with the fake client
-      answering the `editDocument` effect and the commit has the typed message.
+- [x] R-3.4 Editor bridge (core): helper subcommand, socket, `editDocument`
+      effect, confirm/cancel semantics (§3.10). *Done when:* a Rust test runs
+      `git commit` with the fake client answering the `editDocument` effect and
+      the commit has the typed message. Neovim/VSCode document handling and
+      askpass remain a follow-up; `--askpass` is a usage error for now.
 - [ ] R-3.5 File watcher auto-refresh; `index.lock` handling.
 - [ ] R-3.6 Discard (`status.discard`) for files, hunks, selections, with
       `confirm` prompt (`destructive: true`); consider saving discarded content
@@ -1542,10 +1543,10 @@ on the oldest supported git version.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.3 (`make test` green: Rust +
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core) (`make test` green: Rust +
 Neovim mini.test + the VSCode node tests). The VSCode client is the thin second
 client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
-R-3.4…R-3.7 and Phases 4–9.
+R-3.5…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1605,6 +1606,17 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   `process-log` command. Record nodes derive from the monotonic record id, and
   their first line records `git <args>` as `Node.copy`, so refreshes and copy
   resolve by identity rather than line shape. No new token types were added.
+- **R-3.4 (core):** the bridge is server-side only. `magit-lsp
+  --editor-helper <path>` connects to a per-process Unix socket, sends
+  `{editId, path, kind}` and blocks for `{ok}`; `--askpass` is still a usage
+  error. The worker that spawns `git commit` holds neither the sessions mutex
+  nor the repo lock while Git waits: `commit.create` returns immediately,
+  `common.confirm`/`common.cancel` answer the `editId`, and the worker
+  re-acquires the session only to push the refreshed render (or an error
+  `view/effects`). The minimal `commit.create` lands here while switches, amend
+  and extend stay R-4.1; Neovim/VSCode handling of `editDocument` is a
+  follow-up, so the Rust test is the client. Other kinds (`rebase-todo`,
+  `merge-message`, `tag-message`) are not emitted yet.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

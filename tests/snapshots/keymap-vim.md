@@ -15,7 +15,7 @@
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
-| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.confirm` | `Enter` | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
@@ -44,7 +44,7 @@
 | `status.stage-all` | `S` | implemented | Stage all unstaged changes |
 | `status.unstage-all` | `U` | implemented | Unstage all staged changes |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
-| `common.confirm` | (unbound) | planned | Confirm the current selection |
+| `common.confirm` | (unbound) | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
@@ -98,7 +98,7 @@
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
-| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.confirm` | `Enter` | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
@@ -125,7 +125,7 @@
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
-| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.confirm` | `Enter` | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
@@ -152,7 +152,7 @@
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Z Q` | implemented | Cancel the current operation |
-| `common.confirm` | `Z Z`, `ctrl+Enter` | planned | Confirm the current selection |
+| `common.confirm` | `Z Z`, `ctrl+Enter` | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
@@ -180,7 +180,7 @@
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
-| `common.confirm` | `Enter` | planned | Confirm the current selection |
+| `common.confirm` | `Enter` | implemented | Confirm the current selection |
 | `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |

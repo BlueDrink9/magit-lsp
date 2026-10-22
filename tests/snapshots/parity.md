@@ -11,7 +11,7 @@
 | `-` | `=S` | `-` | Implemented | commit |
 | `-` | `=C` | `-` | Implemented | commit |
 | `-` | `=c` | `-` | Implemented | commit |
-| `magit-commit-create` | `c c` | `commit.create` | Planned R-4.1 | commit |
+| `magit-commit-create` | `c c` | `commit.create` | Implemented | commit |
 | `magit-commit-extend` | `c e` | `commit.extend` | Planned R-4.1 | commit |
 | `magit-commit-amend` | `c a` | `commit.amend` | Planned R-4.1 | commit |
 | `magit-commit-reword` | `c w` | `commit.reword` | Planned R-4.1 | commit |

@@ -181,7 +181,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "common"
             },
             {
@@ -542,7 +542,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1280,7 +1280,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "select"
             },
             {
@@ -1613,7 +1613,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -1945,7 +1945,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "commit-message"
             },
             {
@@ -2289,7 +2289,7 @@
               "label": "Confirm the current selection",
               "doc": "Confirm the current selection",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "process-log"
             },
             {

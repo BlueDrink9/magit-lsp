@@ -21,10 +21,13 @@ const USAGE: &str = "\
 Usage: magit-lsp [--config <path>]
        magit-lsp keymap [--format json|vscode|neovim|markdown] [--profile standard|vim] [--config <path>] [--check]
        magit-lsp parity [--format markdown|json]
+       magit-lsp --editor-helper <path>
        magit-lsp --version | --help
 
 With no subcommand, run the LSP server on stdio. The keymap and parity
-subcommands print generated tables and never speak LSP.
+subcommands print generated tables and never speak LSP. `--editor-helper` is
+Git's editor: it forwards the file to the running server and blocks until the
+client confirms or cancels.
 ";
 
 const PARITY_USAGE: &str = "\
@@ -58,6 +61,11 @@ fn dispatch(args: Vec<String>, out: &mut impl Write, err: &mut impl Write) -> Ou
         None => Outcome::Server(ServerOptions::default()),
         Some("keymap") => run_keymap(&args[1..], out, err),
         Some("parity") => run_parity(&args[1..], out, err),
+        Some("--editor-helper") => run_editor_helper(&args[1..], err),
+        Some("--askpass") => {
+            let _ = writeln!(err, "`--askpass` is not implemented yet\n\n{USAGE}");
+            Outcome::Done(2)
+        }
         Some("--version") | Some("-V") => {
             let _ = writeln!(out, "magit-lsp {}", env!("CARGO_PKG_VERSION"));
             Outcome::Done(0)
@@ -186,6 +194,29 @@ fn run_keymap(args: &[String], out: &mut impl Write, err: &mut impl Write) -> Ou
         return Outcome::Done(1);
     }
     Outcome::Done(0)
+}
+
+/// Git's editor: forward the file to the running server, then wait for a reply.
+fn run_editor_helper(args: &[String], err: &mut impl Write) -> Outcome {
+    let path = match args {
+        [path] => path,
+        _ => {
+            let _ = writeln!(
+                err,
+                "`--editor-helper` needs exactly one file path\n\n{USAGE}"
+            );
+            return Outcome::Done(2);
+        }
+    };
+    match crate::editor::run_helper(path) {
+        Ok(true) => Outcome::Done(0),
+        // `false` lets Git abort the operation, which is what cancel means.
+        Ok(false) => Outcome::Done(1),
+        Err(error) => {
+            let _ = writeln!(err, "{error}");
+            Outcome::Done(1)
+        }
+    }
 }
 
 /// Print the Magit parity table.

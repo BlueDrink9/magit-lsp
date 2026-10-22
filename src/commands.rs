@@ -6,6 +6,7 @@
 //! new capabilities are added so that change stays mechanical.
 
 use crate::dispatch;
+use crate::editor::{self, Reply};
 use crate::errors;
 use crate::git::GitRepo;
 use crate::keymap::Keymap;
@@ -102,6 +103,9 @@ pub struct CommandOutcome {
     pub open_view: Option<(ViewKind, Placement)>,
     /// Close the current view and return to the previous one.
     pub pop: bool,
+    /// Spawn `git commit` on a detached worker once this command returns; the
+    /// editor bridge keeps Git waiting until the client confirms.
+    pub commit: bool,
 }
 
 /// Everything a command handler may touch, plus the effects it collected.
@@ -171,6 +175,11 @@ impl<'a> CommandCtx<'a> {
             .and_then(|args| args.get("recursive"))
             .and_then(Value::as_bool)
             .unwrap_or(false)
+    }
+
+    /// The pending edit a confirm/cancel invocation refers to.
+    pub fn edit_id(&self) -> Option<&str> {
+        self.args?.get("editId")?.as_str()
     }
 
     /// Take the collected effects, consuming the context.
@@ -351,7 +360,13 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: cancel,
         },
-        planned("common.confirm", Scope::Common, "Confirm the current selection", "R-3.1"),
+        Command {
+            id: "common.confirm",
+            scope: Scope::Common,
+            doc: "Confirm the current selection",
+            status: CommandStatus::Implemented,
+            run: confirm,
+        },
         Command {
             id: "common.quit",
             scope: Scope::Common,
@@ -409,6 +424,13 @@ fn build() -> Registry {
             doc: "Open the commit menu",
             status: CommandStatus::Implemented,
             run: open_commit,
+        },
+        Command {
+            id: "commit.create",
+            scope: Scope::MenuAction,
+            doc: "Commit",
+            status: CommandStatus::Implemented,
+            run: commit_create,
         },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
@@ -550,6 +572,17 @@ fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     open_menu(ctx, "commit")
 }
 
+/// Commit asks the server to launch `git commit` on a detached worker.
+///
+/// Minimally complete: menu switches and amend/extend land with R-4.1.
+fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ctx.info("Committing…");
+    Ok(CommandOutcome {
+        commit: true,
+        ..Default::default()
+    })
+}
+
 /// Open the dispatch menu, including from inside another menu.
 fn open_dispatch(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     open_menu(ctx, "dispatch")
@@ -658,9 +691,27 @@ fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-/// Cancel closes a menu; elsewhere it falls through when the user has a visual
-/// selection and is a quiet no-op otherwise.
+/// Confirm answers the pending editor bridge edit, if the invocation names one.
+fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let Some(edit_id) = ctx.edit_id() else {
+        ctx.info("Nothing to confirm");
+        return Ok(CommandOutcome::default());
+    };
+    if editor::registry().resolve(edit_id, Reply::Ok) {
+        return Ok(CommandOutcome::default());
+    }
+    ctx.info("Nothing to confirm");
+    Ok(CommandOutcome::default())
+}
+
+/// Cancel closes a menu, aborts a pending editor bridge edit, falls through
+/// when the user has a visual selection, and is a quiet no-op otherwise.
 fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if let Some(edit_id) = ctx.edit_id() {
+        if editor::registry().resolve(edit_id, Reply::Abort) {
+            return Ok(CommandOutcome::default());
+        }
+    }
     if ctx.view.menu().is_some() {
         return Ok(CommandOutcome {
             pop: true,
