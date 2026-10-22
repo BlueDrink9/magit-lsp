@@ -7,7 +7,8 @@ use common::*;
 use expect_test::expect_file;
 use magit_lsp::config::{Config, Profile};
 use magit_lsp::keymap::{self, Keymap};
-use magit_lsp::menu::{Menu, MenuStatus};
+use magit_lsp::menu::MenuStatus;
+use magit_lsp::menus;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewKeyParams};
 use magit_lsp::semantic_tokens;
 use magit_lsp::session::{InvokeResult, Session};
@@ -122,7 +123,7 @@ fn preview_line(render: &magit_lsp::protocol::ViewRender) -> Option<String> {
 #[test]
 fn the_commit_menu_reflows_its_action_columns() {
     for cols in [60u32, 100, 140] {
-        let tree = Menu::commit().render(Viewport { cols, rows: 30 });
+        let tree = menus::named("commit").expect("commit menu").render(Viewport { cols, rows: 30 });
         let text = tree.lines.join("\n");
         match cols {
             60 => expect_file!["snapshots/menu-60.txt"].assert_eq(&text),
@@ -135,7 +136,7 @@ fn the_commit_menu_reflows_its_action_columns() {
 
 #[test]
 fn the_argument_preview_follows_the_switches_and_options() {
-    let mut menu = Menu::commit();
+    let mut menu = menus::named("commit").expect("commit menu");
     assert_eq!(menu.preview(), "git commit");
 
     assert!(menu.toggle_switch("-a"));
@@ -423,7 +424,7 @@ fn save_and_reset_args_restore_the_saved_switches() {
 
 #[test]
 fn menu_tokens_decode_to_the_documented_types() {
-    let tree = Menu::commit().render(Viewport { cols: 100, rows: 30 });
+    let tree = menus::named("commit").expect("commit menu").render(Viewport { cols: 100, rows: 30 });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
     let types = semantic_tokens::TOKEN_TYPES;
     let mut seen = Vec::new();
@@ -448,7 +449,7 @@ fn menu_tokens_decode_to_the_documented_types() {
     }
 
     // The switch marker changes type when the switch is on.
-    let mut menu = Menu::commit();
+    let mut menu = menus::named("commit").expect("commit menu");
     menu.toggle_switch("-a");
     let tree = menu.render(Viewport { cols: 100, rows: 30 });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
@@ -473,7 +474,7 @@ fn the_registry_exposes_open_commit_and_the_menu_commands() {
 
     // A menu action's status is separate from the registry: every commit
     // action is Planned until R-4.1.
-    let menu = Menu::commit();
+    let menu = menus::named("commit").expect("commit menu");
     for key in ["c", "e", "f", "a"] {
         match menu.item(key).map(|item| item.status()) {
             Some(MenuStatus::Planned { roadmap_id }) => assert_eq!(roadmap_id, "R-4.1"),

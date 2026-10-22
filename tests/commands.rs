@@ -79,6 +79,31 @@ const EXPECTED: &[&str] = &[
 
 const NAMESPACES: &[&str] = &["common", "status", "open", "select", "menu", "commit-message"];
 
+/// Namespaces used only by commands that a menu item binds (R-2.8).
+const MENU_NAMESPACES: &[&str] = &[
+    "commit",
+    "branch",
+    "fetch",
+    "pull",
+    "push",
+    "merge",
+    "rebase",
+    "stash",
+    "tag",
+    "reset",
+    "cherry-pick",
+    "revert",
+    "bisect",
+    "remote",
+    "submodule",
+    "worktree",
+    "ignore",
+    "log",
+    "diff",
+    "patch",
+    "blame",
+];
+
 fn open_status(session: &mut Session) {
     session
         .open(
@@ -93,6 +118,7 @@ fn open_status(session: &mut Session) {
 #[test]
 fn the_registry_lists_every_named_command_once() {
     let mut seen = std::collections::HashSet::new();
+    let mut profile_commands = 0;
     for command in registry().iter() {
         assert!(seen.insert(command.id), "duplicate command id {}", command.id);
         let namespace = command
@@ -101,17 +127,50 @@ fn the_registry_lists_every_named_command_once() {
             .next()
             .expect("an id has a namespace");
         assert!(
-            NAMESPACES.contains(&namespace),
+            NAMESPACES.contains(&namespace) || MENU_NAMESPACES.contains(&namespace),
             "{} has no known namespace",
             command.id
         );
         assert!(!command.doc.trim().is_empty(), "{} has no doc", command.id);
+        if !MENU_NAMESPACES.contains(&namespace) {
+            profile_commands += 1;
+        }
     }
 
     for id in EXPECTED {
         assert!(registry().get(id).is_some(), "missing command {id}");
     }
-    assert_eq!(seen.len(), EXPECTED.len(), "unexpected extra commands");
+    assert_eq!(
+        profile_commands,
+        EXPECTED.len(),
+        "unexpected extra profile command"
+    );
+
+    // Menu actions are registered too, with the status their menu item shows.
+    for def in magit_lsp::menus::all() {
+        for group in &def.groups {
+            for item in &group.items {
+                let magit_lsp::menus::ItemDef::Action {
+                    command, roadmap, ..
+                } = item
+                else {
+                    continue;
+                };
+                if roadmap.is_empty() {
+                    continue;
+                }
+                let registered = registry()
+                    .get(command)
+                    .unwrap_or_else(|| panic!("{command} is registered"));
+                assert_eq!(registered.scope, Scope::MenuAction, "{command}");
+                assert_eq!(
+                    registered.status,
+                    CommandStatus::Planned { roadmap_id: roadmap },
+                    "{command}"
+                );
+            }
+        }
+    }
 
     // `by_scope` partitions the registry.
     let by_scope: usize = [
@@ -120,11 +179,12 @@ fn the_registry_lists_every_named_command_once() {
         Scope::Select,
         Scope::Menu,
         Scope::CommitMessage,
+        Scope::MenuAction,
     ]
     .iter()
     .map(|&scope| registry().by_scope(scope).count())
     .sum();
-    assert_eq!(by_scope, EXPECTED.len());
+    assert_eq!(by_scope, seen.len());
     assert_eq!(registry().by_scope(Scope::Status).count(), 32);
 }
 

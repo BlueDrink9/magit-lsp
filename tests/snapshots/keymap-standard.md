@@ -58,28 +58,28 @@
 | `status.apply` | `a` | planned | Apply the change at point |
 | `open.dispatch` | `?` | implemented | Show the dispatch menu |
 | `open.commit` | `c` | implemented | Open the commit menu |
-| `open.branch` | `b` | planned | Open the branch menu |
-| `open.log` | `l` | planned | Open the log menu |
-| `open.diff` | `d` | planned | Open the diff menu |
-| `open.fetch` | `f` | planned | Open the fetch menu |
-| `open.pull` | `F` | planned | Open the pull menu |
-| `open.push` | `P` | planned | Open the push menu |
-| `open.merge` | `m` | planned | Open the merge menu |
-| `open.rebase` | `r` | planned | Open the rebase menu |
-| `open.stash` | `z` | planned | Open the stash menu |
-| `open.tag` | `t` | planned | Open the tag menu |
-| `open.reset` | `x` | planned | Open the reset menu |
-| `open.revert` | `V` | planned | Open the revert menu |
-| `open.cherry-pick` | `A` | planned | Open the cherry-pick menu |
-| `open.bisect` | `B` | planned | Open the bisect menu |
-| `open.remote` | `M` | planned | Open the remote menu |
-| `open.submodule` | `o` | planned | Open the submodule menu |
-| `open.worktree` | `%` | planned | Open the worktree menu |
-| `open.ignore` | `i` | planned | Open the ignore menu |
+| `open.branch` | `b` | implemented | Open the branch menu |
+| `open.log` | `l` | implemented | Open the log menu |
+| `open.diff` | `d` | implemented | Open the diff menu |
+| `open.fetch` | `f` | implemented | Open the fetch menu |
+| `open.pull` | `F` | implemented | Open the pull menu |
+| `open.push` | `P` | implemented | Open the push menu |
+| `open.merge` | `m` | implemented | Open the merge menu |
+| `open.rebase` | `r` | implemented | Open the rebase menu |
+| `open.stash` | `z` | implemented | Open the stash menu |
+| `open.tag` | `t` | implemented | Open the tag menu |
+| `open.reset` | `x` | implemented | Open the reset menu |
+| `open.revert` | `V` | implemented | Open the revert menu |
+| `open.cherry-pick` | `A` | implemented | Open the cherry-pick menu |
+| `open.bisect` | `B` | implemented | Open the bisect menu |
+| `open.remote` | `M` | implemented | Open the remote menu |
+| `open.submodule` | `o` | implemented | Open the submodule menu |
+| `open.worktree` | `%` | implemented | Open the worktree menu |
+| `open.ignore` | `i` | implemented | Open the ignore menu |
+| `open.patch-apply` | `w` | implemented | Open the apply-patches menu |
+| `open.patch-create` | `W` | implemented | Open the format-patches menu |
 | `open.refs` | `y` | planned | Open the refs view |
 | `open.cherries` | `Y` | planned | Open the cherry view |
-| `open.patch-apply` | `w` | planned | Apply a patch |
-| `open.patch-create` | `W` | planned | Create a patch |
 | `open.run` | `!` | planned | Run a Git command |
 | `open.process-log` | `$` | planned | Open the process log |
 

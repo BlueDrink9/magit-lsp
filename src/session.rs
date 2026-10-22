@@ -5,7 +5,7 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, CommandStatus};
+use crate::commands::{self, CommandStatus, Scope};
 use crate::diff_text;
 use crate::keyhandler::{self, MenuPrefix, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
@@ -374,7 +374,7 @@ impl Session {
             return Err(Error::new(format!("view already open: {id}")));
         }
 
-        let mut view = create_view(&self.repo_path, &kind, args)?;
+        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
         let mut tree = view.render(&Ctx { viewport });
         let version = 1;
         tree.version = version;
@@ -557,7 +557,17 @@ impl Session {
             if cursor_moved {
                 view.menu_pending = MenuPrefix::None;
             }
-            keyhandler::resolve_menu(&mut view.menu_pending, &params.key)
+            let keys: Vec<String> = view
+                .menu()
+                .map(|menu| {
+                    menu.groups
+                        .iter()
+                        .flat_map(|group| &group.items)
+                        .map(|item| item.key().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            keyhandler::resolve_menu(&mut view.menu_pending, &params.key, &keys)
         };
 
         match resolution {
@@ -631,9 +641,7 @@ impl Session {
                     })
                 }
             }
-            MenuResolution::Action(letter) => {
-                self.menu_action(&params.view_id, letter, params)
-            }
+            MenuResolution::Action(key) => self.menu_action(&params.view_id, &key, params),
         }
     }
 
@@ -642,15 +650,14 @@ impl Session {
     fn menu_action(
         &mut self,
         view_id: &str,
-        letter: char,
+        key: &str,
         params: &ViewKeyParams,
     ) -> Result<InvokeResult> {
-        let key = letter.to_string();
         let action = self
             .views
             .get(view_id)
             .and_then(|view| view.menu())
-            .and_then(|menu| menu.item(&key).cloned());
+            .and_then(|menu| menu.item(key).cloned());
         let Some(crate::menu::Item::Action {
             command,
             label,
@@ -658,7 +665,7 @@ impl Session {
             ..
         }) = action
         else {
-            return Ok(unbound(&key));
+            return Ok(unbound(key));
         };
 
         match status {
@@ -695,38 +702,72 @@ impl Session {
                         Some(params.cursor),
                         params.selection,
                         None,
-                        Some(key),
+                        Some(key.to_string()),
                     );
                 }
 
-                // The action belongs to the previous view: close this menu and
-                // run it there, so e.g. an action that refreshes the status
-                // buffer never runs against the menu.
-                let previous = self
-                    .views
-                    .previous_of(view_id)
-                    .map(|view| view.descriptor().id.clone());
-                let Some(previous) = previous else {
-                    return Ok(InvokeResult {
-                        effects: vec![Effect::message(
-                            MessageLevel::Info,
-                            "Not available in this view",
-                        )],
-                        ..InvokeResult::empty()
-                    });
+                // The action belongs to an earlier view: close this menu (and
+                // any menus stacked above it) and run the command there, so
+                // e.g. an action that refreshes the status buffer never runs
+                // against a menu.
+                let target = match self.matching_ancestor(view_id, registered.scope) {
+                    Some(target) => target,
+                    None => {
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Info,
+                                "Not available in this view",
+                            )],
+                            ..InvokeResult::empty()
+                        });
+                    }
                 };
-                let pop = self.pop_view(view_id)?;
-                let mut run =
-                    self.run_command(&previous, registered.id, None, None, None, Some(key))?;
-                let mut effects = pop.effects;
+
+                let mut effects = Vec::new();
+                let mut keymap = None;
+                loop {
+                    let top = match self.views.iter().last() {
+                        Some(view) => view.descriptor().id.clone(),
+                        None => break,
+                    };
+                    if top == target {
+                        break;
+                    }
+                    let popped = self.pop_view(&top)?;
+                    effects.extend(popped.effects);
+                    if popped.keymap.is_some() {
+                        keymap = popped.keymap;
+                    }
+                }
+                let mut run = self.run_command(
+                    &target,
+                    registered.id,
+                    None,
+                    None,
+                    None,
+                    Some(key.to_string()),
+                )?;
                 effects.extend(run.effects);
                 run.effects = effects;
                 if run.keymap.is_none() {
-                    run.keymap = pop.keymap;
+                    run.keymap = keymap;
                 }
                 Ok(run)
             }
         }
+    }
+
+    /// The nearest view below `view_id` that a command in `scope` applies to.
+    fn matching_ancestor(&self, view_id: &str, scope: Scope) -> Option<String> {
+        let mut current = self.views.previous_of(view_id);
+        while let Some(view) = current {
+            let id = view.descriptor().id.clone();
+            if scope.matches(view.descriptor().scope.as_str()) {
+                return Some(id);
+            }
+            current = self.views.previous_of(&id);
+        }
+        None
     }
 
     /// Remove a view and return focus to the one below it.
@@ -893,8 +934,9 @@ impl Session {
                 });
             }
 
+            let keymaps = Arc::clone(&self.keymaps);
             let mut ctx =
-                commands::CommandCtx::new(view, &repo_path, cursor, selection, args, key);
+                commands::CommandCtx::new(view, &repo_path, &keymaps, cursor, selection, args, key);
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
 
@@ -1023,12 +1065,17 @@ impl Session {
     }
 }
 
-fn create_view(repo_path: &str, kind: &ViewKind, args: Option<&Value>) -> Result<Box<dyn View>> {
+fn create_view(
+    repo_path: &str,
+    kind: &ViewKind,
+    args: Option<&Value>,
+    keymaps: &BTreeMap<String, Keymap>,
+) -> Result<Box<dyn View>> {
     match kind {
         ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
         ViewKind::Menu(name) => {
             let name = name.trim_start_matches("menu.");
-            let mut menu = Menu::by_name(name)
+            let mut menu = crate::menus::by_name(name, keymaps)
                 .ok_or_else(|| Error::new(format!("The `{name}` menu is not implemented yet.")))?;
             if let Some(saved) = args.and_then(|args| args.get("saved_args")) {
                 if let Ok(saved) = serde_json::from_value::<crate::menu::Args>(saved.clone()) {

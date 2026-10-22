@@ -1244,7 +1244,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-2.7 **Menu framework** (§3.11): model, text rendering with columns from
       `viewport`, switches/options/actions, argument preview, structured model
       in `view/render`, `bottom` placement in Neovim (float and split).
-- [ ] R-2.8 **Planned-feature menus** (§3.12): create every dispatch menu
+- [x] R-2.8 **Planned-feature menus** (§3.12): create every dispatch menu
       with its full Magit action list as `Planned`; `open.dispatch` view
       generated from the registry; `cargo xtask parity`.
 - [ ] R-2.9 **Second client to prove decoupling:** a minimal VSCode extension

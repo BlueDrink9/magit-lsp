@@ -1,0 +1,30 @@
+ Rebase
+ Arguments
+  -k  Keep empty commits (--keep-empty)  [ ]
+  -p  Preserve merges (--preserve-merges)  [ ]
+  -r  Rebase merges (--rebase-merges)  [ ]
+  -u  Update branches (--update-refs)  [ ]
+  =s  Strategy (--strategy=)
+  =X  Strategy option (--strategy-option=)
+  =a  Diff algorithm (--diff-algorithm=)
+  -f  Force rebase (--force-rebase)  [ ]
+  -d  Use author date as committer date (--committer-date-is-author-date)  [ ]
+  -t  Use current time as author date (--ignore-date)  [ ]
+  -A  Autosquash (--autosquash)  [ ]
+  -S  Autostash (--autostash)  [ ]
+  -i  Interactive (--interactive)  [ ]
+  -h  Disable hooks (--no-verify)  [ ]
+  =x  Run command after commits (--exec=)
+  -g  Sign using gpg (--gpg-sign)  [ ]
+  -s  Add Signed-off-by trailer (--signoff)  [ ]
+ git rebase
+ Rebase onto       Rebase                   Actions
+  p  push-remote    i  interactively         r  Continue
+  u  upstream       s  a subset              a  Abort
+  e  elsewhere      m  to modify a commit
+                    w  to reword a commit
+                    k  to remove a commit
+                    f  to autosquash
+                    t  to change dates
+ Menu
+  ?  Show the dispatch menu

@@ -594,24 +594,6 @@
     "scope": "status"
   },
   {
-    "lhs": "y",
-    "command": "open.refs",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "status"
-  },
-  {
-    "lhs": "Y",
-    "command": "open.cherries",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "status"
-  },
-  {
     "lhs": "w",
     "command": "open.patch-apply",
     "modes": [
@@ -623,6 +605,24 @@
   {
     "lhs": "W",
     "command": "open.patch-create",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "y",
+    "command": "open.refs",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "Y",
+    "command": "open.cherries",
     "modes": [
       "normal",
       "visual"

@@ -576,22 +576,6 @@
     "when": "magit.active && magit.scope == 'status' && !magit.textMode"
   },
   {
-    "key": "g y",
-    "command": "magit.key",
-    "args": {
-      "key": "g y"
-    },
-    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
-  },
-  {
-    "key": "g shift+y",
-    "command": "magit.key",
-    "args": {
-      "key": "g Y"
-    },
-    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
-  },
-  {
     "key": "w",
     "command": "magit.key",
     "args": {
@@ -604,6 +588,22 @@
     "command": "magit.key",
     "args": {
       "key": "W"
+    },
+    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+  },
+  {
+    "key": "g y",
+    "command": "magit.key",
+    "args": {
+      "key": "g y"
+    },
+    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+  },
+  {
+    "key": "g shift+y",
+    "command": "magit.key",
+    "args": {
+      "key": "g Y"
     },
     "when": "magit.active && magit.scope == 'status' && !magit.textMode"
   },

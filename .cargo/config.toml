@@ -1,0 +1,5 @@
+[alias]
+# `cargo xtask parity` runs the generated parity table through the binary.
+# A separate xtask crate would add a second build target; the subcommand is
+# the same code path and shares this workspace's target directory.
+xtask = "run --quiet --bin magit-lsp --"

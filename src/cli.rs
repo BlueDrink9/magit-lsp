@@ -20,10 +20,18 @@ pub enum Outcome {
 const USAGE: &str = "\
 Usage: magit-lsp [--config <path>]
        magit-lsp keymap [--format json|vscode|neovim|markdown] [--profile standard|vim] [--config <path>] [--check]
+       magit-lsp parity [--format markdown|json]
        magit-lsp --version | --help
 
-With no subcommand, run the LSP server on stdio. The keymap subcommand prints
-the static keymap manifest and never speaks LSP.
+With no subcommand, run the LSP server on stdio. The keymap and parity
+subcommands print generated tables and never speak LSP.
+";
+
+const PARITY_USAGE: &str = "\
+Usage: magit-lsp parity [--format markdown|json]
+
+Print the Magit command parity table. `cargo xtask parity` is the same
+command through the cargo alias.
 ";
 
 const KEYMAP_USAGE: &str = "\
@@ -49,6 +57,7 @@ fn dispatch(args: Vec<String>, out: &mut impl Write, err: &mut impl Write) -> Ou
     match args.first().map(String::as_str) {
         None => Outcome::Server(ServerOptions::default()),
         Some("keymap") => run_keymap(&args[1..], out, err),
+        Some("parity") => run_parity(&args[1..], out, err),
         Some("--version") | Some("-V") => {
             let _ = writeln!(out, "magit-lsp {}", env!("CARGO_PKG_VERSION"));
             Outcome::Done(0)
@@ -176,5 +185,44 @@ fn run_keymap(args: &[String], out: &mut impl Write, err: &mut impl Write) -> Ou
         let _ = writeln!(err, "{error}");
         return Outcome::Done(1);
     }
+    Outcome::Done(0)
+}
+
+/// Print the Magit parity table.
+fn run_parity(args: &[String], out: &mut impl Write, err: &mut impl Write) -> Outcome {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        let _ = write!(out, "{PARITY_USAGE}");
+        return Outcome::Done(0);
+    }
+    let mut format = "markdown";
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--format" {
+            match iter.next() {
+                Some(value) => format = value,
+                None => {
+                    let _ = writeln!(err, "`--format` needs a value\n\n{PARITY_USAGE}");
+                    return Outcome::Done(2);
+                }
+            }
+        } else if let Some(value) = arg.strip_prefix("--format=") {
+            format = value;
+        } else {
+            let _ = writeln!(err, "unknown option `{arg}`\n\n{PARITY_USAGE}");
+            return Outcome::Done(2);
+        }
+    }
+    let text = match format {
+        "markdown" => crate::parity::markdown(),
+        "json" => crate::parity::json(),
+        other => {
+            let _ = writeln!(
+                err,
+                "unknown format `{other}`; expected markdown or json\n\n{PARITY_USAGE}"
+            );
+            return Outcome::Done(2);
+        }
+    };
+    let _ = out.write_all(text.as_bytes());
     Outcome::Done(0)
 }

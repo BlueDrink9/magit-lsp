@@ -42,6 +42,10 @@ fn every_profile_parses_and_covers_every_command() {
             }
         }
         for command in commands::registry().iter() {
+            // Menu actions are bound by their menu item, not by a profile.
+            if command.scope == commands::Scope::MenuAction {
+                continue;
+            }
             assert!(
                 declared.contains(command.id),
                 "{} profile does not bind or explicitly unbind `{}`",

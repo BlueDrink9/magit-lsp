@@ -8,13 +8,15 @@ use crate::keymap::{EditorMode, Keymap, Match};
 use crate::keys::{KeyChord, KeyStep};
 use crate::Result;
 
-/// Which two-step prefix a menu is waiting for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Which prefix a menu is waiting for.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum MenuPrefix {
     #[default]
     None,
     Switch,
     Option,
+    /// Keys collected for a multi-step binding such as `g l`.
+    Chord(String),
 }
 
 /// What one key press means inside a menu.
@@ -26,8 +28,8 @@ pub enum MenuResolution {
     ToggleSwitch(char),
     /// Set or clear the option with this letter.
     SetOption(char),
-    /// Run the action with this key.
-    Action(char),
+    /// Run the action with this key (a letter or a chord such as `g l`).
+    Action(String),
     /// Close the menu and return to the previous view.
     Pop,
     /// Save the current arguments as the menu's defaults.
@@ -40,9 +42,11 @@ pub enum MenuResolution {
 
 /// Resolve one key step with the menu's own two-step matcher.
 ///
-/// Menus capture every key, so an unbound one is swallowed rather than passed
-/// back to the editor. `Escape`, `ctrl+c` and `q` always close.
-pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str) -> MenuResolution {
+/// `keys` are the menu's item keys, so an action may be a single key or a
+/// multi-step chord (`g l` in the `vim` profile's dispatch menu). Menus capture
+/// every key, so an unbound one is swallowed rather than passed back to the
+/// editor. `Escape`, `ctrl+c` and `q` always close.
+pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str, keys: &[String]) -> MenuResolution {
     if matches!(key, "Escape" | "ctrl+c" | "q") {
         *prefix = MenuPrefix::None;
         return MenuResolution::Pop;
@@ -62,7 +66,7 @@ pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str) -> MenuResolution {
         _ => None,
     };
 
-    let previous = *prefix;
+    let previous = std::mem::take(prefix);
     match previous {
         MenuPrefix::None => match key {
             "-" => {
@@ -73,31 +77,56 @@ pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str) -> MenuResolution {
                 *prefix = MenuPrefix::Option;
                 MenuResolution::Pending
             }
-            _ => match single {
-                Some(c) if !c.is_control() => MenuResolution::Action(c),
-                _ => MenuResolution::Unbound {
-                    chord: key.to_string(),
-                },
+            _ => action_or_pending(prefix, key, keys, single),
+        },
+        MenuPrefix::Switch => match single {
+            Some(c) => MenuResolution::ToggleSwitch(c),
+            None => MenuResolution::Unbound {
+                chord: format!("-{key}"),
             },
         },
-        MenuPrefix::Switch => {
-            *prefix = MenuPrefix::None;
-            match single {
-                Some(c) => MenuResolution::ToggleSwitch(c),
-                None => MenuResolution::Unbound {
-                    chord: format!("-{key}"),
-                },
+        MenuPrefix::Option => match single {
+            Some(c) => MenuResolution::SetOption(c),
+            None => MenuResolution::Unbound {
+                chord: format!("={key}"),
+            },
+        },
+        MenuPrefix::Chord(prefix_keys) => {
+            let chord = format!("{prefix_keys} {key}");
+            if keys.iter().any(|candidate| candidate == &chord) {
+                MenuResolution::Action(chord)
+            } else if keys.iter().any(|candidate| candidate.starts_with(&format!("{chord} "))) {
+                *prefix = MenuPrefix::Chord(chord);
+                MenuResolution::Pending
+            } else {
+                MenuResolution::Unbound { chord }
             }
         }
-        MenuPrefix::Option => {
-            *prefix = MenuPrefix::None;
-            match single {
-                Some(c) => MenuResolution::SetOption(c),
-                None => MenuResolution::Unbound {
-                    chord: format!("={key}"),
-                },
-            }
-        }
+    }
+}
+
+/// Match a single key step against the menu's action keys.
+fn action_or_pending(
+    prefix: &mut MenuPrefix,
+    key: &str,
+    keys: &[String],
+    single: Option<char>,
+) -> MenuResolution {
+    if keys.iter().any(|candidate| candidate == key) {
+        return MenuResolution::Action(key.to_string());
+    }
+    if keys
+        .iter()
+        .any(|candidate| candidate.starts_with(&format!("{key} ")))
+    {
+        *prefix = MenuPrefix::Chord(key.to_string());
+        return MenuResolution::Pending;
+    }
+    match single {
+        Some(_) => MenuResolution::Action(key.to_string()),
+        None => MenuResolution::Unbound {
+            chord: key.to_string(),
+        },
     }
 }
 

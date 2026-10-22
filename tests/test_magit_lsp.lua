@@ -633,9 +633,10 @@ T['status buffer is read-only to native edits'] = function()
   MiniTest.expect.equality(opt('undolevels'), -1)
   MiniTest.expect.equality(opt('modified'), false)
 
-  -- `u` is mapped to unstage; the cursor sits on the header, so it is a no-op.
-  type_edit('dd')
-  type_edit('x')
+  -- Native edits that are unbound in every profile; `u` is mapped to unstage
+  -- and the cursor sits on the header, so it is a no-op.
+  type_edit('J')
+  type_edit('~')
   type_edit('ciw<Esc>')
   type_edit('u')
 
@@ -655,8 +656,10 @@ end
 
 T['refresh and mutations still work after blocked edits'] = function()
   setup_child()
-  type_edit('dd')
-  type_edit('x')
+  -- `d` now opens the diff menu (Magit's key), so use native edits that are
+  -- unbound in every profile.
+  type_edit('J')
+  type_edit('~')
 
   local path = repo .. '/f.txt'
   local lines = vim.fn.readfile(path)
@@ -1390,6 +1393,85 @@ T['menu.style split opens a bottom split'] = function()
     true,
     'Escape closed the split menu'
   )
+end
+
+
+T['planned menu actions are greyed with the menu.planned token'] = function()
+  setup_child()
+  child.type_keys(50, 'c')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+
+  local row = child.lua_get(string.format([[
+    (function()
+      local menu = require('magit-lsp.menu')
+      local view = menu.views[%q]
+      for i, line in ipairs(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)) do
+        if line:find('  c  Commit', 1, true) then return i - 1 end
+      end
+      return nil
+    end)()
+  ]], state.id))
+  MiniTest.expect.equality(type(row), 'number', 'the Commit action line')
+
+  local token = child.lua_get(string.format([[
+    (function()
+      local menu = require('magit-lsp.menu')
+      local view = menu.views[%q]
+      local ok = vim.wait(5000, function()
+        return vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, 5) ~= nil
+      end, 20)
+      if not ok then return nil end
+      local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, 5)
+      return tokens and tokens[1] and tokens[1].type or nil
+    end)()
+  ]], state.id, row, row))
+  MiniTest.expect.equality(token, 'magit.menu.planned')
+end
+
+T['a planned menu action notifies once and keeps the menu open'] = function()
+  setup_child()
+  child.type_keys(50, 'c')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+
+  child.lua([[
+    NOTIFIES = {}
+    vim.notify = function(msg, level)
+      table.insert(NOTIFIES, { msg = msg, level = level })
+    end
+  ]])
+  child.type_keys(50, 'c')
+  vim.wait(5000, function()
+    return child.lua_get('#NOTIFIES') > 0
+  end, 20)
+  MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
+  MiniTest.expect.equality(
+    child.lua_get('NOTIFIES[1].msg'),
+    'Not implemented yet: Commit (roadmap R-4.1)'
+  )
+  MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.INFO)
+  MiniTest.expect.equality(menu_closed(state.id), false, 'the menu stays open')
+end
+
+T['the dispatch menu lists the active profile keys'] = function()
+  setup_child()
+  child.type_keys(50, 'g?')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the dispatch menu opened')
+  local lines = menu_lines(state.id)
+  local function has(text)
+    for _, line in ipairs(lines) do
+      if line:find(text, 1, true) then
+        return true
+      end
+    end
+    return false
+  end
+  MiniTest.expect.equality(has('  Z  Stash'), true, 'vim binds stash to Z')
+  MiniTest.expect.equality(has('  g l  Log'), true, 'vim binds log to g l')
+  MiniTest.expect.equality(has('  c  Commit'), true, 'vim binds commit to c')
+  MiniTest.expect.equality(has('  g ?  Dispatch'), false, 'dispatch does not list itself')
 end
 
 return T

@@ -760,7 +760,7 @@
               "label": "Open the branch menu",
               "doc": "Open the branch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -775,7 +775,7 @@
               "label": "Open the log menu",
               "doc": "Open the log menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -790,7 +790,7 @@
               "label": "Open the diff menu",
               "doc": "Open the diff menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -805,7 +805,7 @@
               "label": "Open the fetch menu",
               "doc": "Open the fetch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -820,7 +820,7 @@
               "label": "Open the pull menu",
               "doc": "Open the pull menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -835,7 +835,7 @@
               "label": "Open the push menu",
               "doc": "Open the push menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -850,7 +850,7 @@
               "label": "Open the merge menu",
               "doc": "Open the merge menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -865,7 +865,7 @@
               "label": "Open the rebase menu",
               "doc": "Open the rebase menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -880,7 +880,7 @@
               "label": "Open the stash menu",
               "doc": "Open the stash menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -895,7 +895,7 @@
               "label": "Open the tag menu",
               "doc": "Open the tag menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -910,7 +910,7 @@
               "label": "Open the reset menu",
               "doc": "Open the reset menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -925,7 +925,7 @@
               "label": "Open the revert menu",
               "doc": "Open the revert menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -940,7 +940,7 @@
               "label": "Open the cherry-pick menu",
               "doc": "Open the cherry-pick menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -955,7 +955,7 @@
               "label": "Open the bisect menu",
               "doc": "Open the bisect menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -970,7 +970,7 @@
               "label": "Open the remote menu",
               "doc": "Open the remote menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -985,7 +985,7 @@
               "label": "Open the submodule menu",
               "doc": "Open the submodule menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1000,7 +1000,7 @@
               "label": "Open the worktree menu",
               "doc": "Open the worktree menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1015,7 +1015,37 @@
               "label": "Open the ignore menu",
               "doc": "Open the ignore menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "open.patch-apply",
+              "keys": [
+                "w"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the apply-patches menu",
+              "doc": "Open the apply-patches menu",
+              "group": "open",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "open.patch-create",
+              "keys": [
+                "W"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Open the format-patches menu",
+              "doc": "Open the format-patches menu",
+              "group": "open",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1044,36 +1074,6 @@
               ],
               "label": "Open the cherry view",
               "doc": "Open the cherry view",
-              "group": "open",
-              "status": "planned",
-              "scope": "status"
-            },
-            {
-              "command": "open.patch-apply",
-              "keys": [
-                "w"
-              ],
-              "modes": [
-                "normal",
-                "visual"
-              ],
-              "label": "Apply a patch",
-              "doc": "Apply a patch",
-              "group": "open",
-              "status": "planned",
-              "scope": "status"
-            },
-            {
-              "command": "open.patch-create",
-              "keys": [
-                "W"
-              ],
-              "modes": [
-                "normal",
-                "visual"
-              ],
-              "label": "Create a patch",
-              "doc": "Create a patch",
               "group": "open",
               "status": "planned",
               "scope": "status"

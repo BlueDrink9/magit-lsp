@@ -8,6 +8,7 @@
 use crate::dispatch;
 use crate::errors;
 use crate::git::GitRepo;
+use crate::keymap::Keymap;
 use crate::menu::Menu;
 use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, Selection};
@@ -16,6 +17,7 @@ use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{ViewMode, VisibilityCommand};
 use crate::Result;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 /// The registry group a command belongs to.
@@ -26,6 +28,9 @@ pub enum Scope {
     Select,
     Menu,
     CommitMessage,
+    /// A command run from inside a menu. It is bound by the menu item, not by
+    /// a profile, so it has no profile-scope keymap of its own.
+    MenuAction,
 }
 
 impl Scope {
@@ -37,17 +42,21 @@ impl Scope {
             Scope::Select => "select",
             Scope::Menu => "menu",
             Scope::CommitMessage => "commit-message",
+            Scope::MenuAction => "menu-action",
         }
     }
 
     /// Whether a command in this scope applies to a view with `view_scope`.
     ///
     /// `common` commands apply everywhere; `menu.*` commands apply to every
-    /// menu; the rest apply only to their own view-kind scope.
+    /// menu; the rest apply only to their own view-kind scope. Menu actions
+    /// apply everywhere except menus: they run against the view the menu was
+    /// opened from.
     pub fn matches(self, view_scope: &str) -> bool {
         match self {
             Scope::Common => true,
             Scope::Menu => view_scope == "menu" || view_scope.starts_with("menu."),
+            Scope::MenuAction => !view_scope.starts_with("menu"),
             other => other.as_str() == view_scope,
         }
     }
@@ -94,6 +103,8 @@ pub struct CommandOutcome {
 pub struct CommandCtx<'a> {
     pub view: &'a mut OpenView,
     pub repo_path: &'a str,
+    /// The resolved keymaps, so generated views can show the active keys.
+    pub keymaps: &'a BTreeMap<String, Keymap>,
     pub cursor: Option<Cursor>,
     pub selection: Option<Selection>,
     pub args: Option<&'a Value>,
@@ -107,6 +118,7 @@ impl<'a> CommandCtx<'a> {
     pub fn new(
         view: &'a mut OpenView,
         repo_path: &'a str,
+        keymaps: &'a BTreeMap<String, Keymap>,
         cursor: Option<Cursor>,
         selection: Option<Selection>,
         args: Option<&'a Value>,
@@ -115,6 +127,7 @@ impl<'a> CommandCtx<'a> {
         Self {
             view,
             repo_path,
+            keymaps,
             cursor,
             selection,
             args,
@@ -190,6 +203,17 @@ const fn planned(
         doc,
         status: CommandStatus::Planned { roadmap_id },
         run: planned_run,
+    }
+}
+
+/// An implemented command that opens a menu from the status view.
+const fn menu(id: &'static str, doc: &'static str, run: RunFn) -> Command {
+    Command {
+        id,
+        scope: Scope::Status,
+        doc,
+        status: CommandStatus::Implemented,
+        run,
     }
 }
 
@@ -367,33 +391,36 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: open_commit,
         },
-        planned("open.branch", Scope::Status, "Open the branch menu", "R-6.1"),
-        planned("open.log", Scope::Status, "Open the log menu", "R-5.1"),
-        planned("open.diff", Scope::Status, "Open the diff menu", "R-5.2"),
-        planned("open.fetch", Scope::Status, "Open the fetch menu", "R-6.2"),
-        planned("open.pull", Scope::Status, "Open the pull menu", "R-6.2"),
-        planned("open.push", Scope::Status, "Open the push menu", "R-6.2"),
-        planned("open.merge", Scope::Status, "Open the merge menu", "R-7.1"),
-        planned("open.rebase", Scope::Status, "Open the rebase menu", "R-7.3"),
-        planned("open.stash", Scope::Status, "Open the stash menu", "R-6.5"),
-        planned("open.tag", Scope::Status, "Open the tag menu", "R-6.3"),
-        planned("open.reset", Scope::Status, "Open the reset menu", "R-6.3"),
-        planned("open.revert", Scope::Status, "Open the revert menu", "R-7.2"),
-        planned(
+        menu("open.branch", "Open the branch menu", open_branch),
+        menu("open.log", "Open the log menu", open_log),
+        menu("open.diff", "Open the diff menu", open_diff),
+        menu("open.fetch", "Open the fetch menu", open_fetch),
+        menu("open.pull", "Open the pull menu", open_pull),
+        menu("open.push", "Open the push menu", open_push),
+        menu("open.merge", "Open the merge menu", open_merge),
+        menu("open.rebase", "Open the rebase menu", open_rebase),
+        menu("open.stash", "Open the stash menu", open_stash),
+        menu("open.tag", "Open the tag menu", open_tag),
+        menu("open.reset", "Open the reset menu", open_reset),
+        menu("open.revert", "Open the revert menu", open_revert),
+        menu(
             "open.cherry-pick",
-            Scope::Status,
             "Open the cherry-pick menu",
-            "R-7.2",
+            open_cherry_pick,
         ),
-        planned("open.bisect", Scope::Status, "Open the bisect menu", "R-8.2"),
-        planned("open.remote", Scope::Status, "Open the remote menu", "R-6.3"),
-        planned("open.submodule", Scope::Status, "Open the submodule menu", "R-8.2"),
-        planned("open.worktree", Scope::Status, "Open the worktree menu", "R-8.2"),
-        planned("open.ignore", Scope::Status, "Open the ignore menu", "R-8.2"),
+        menu("open.bisect", "Open the bisect menu", open_bisect),
+        menu("open.remote", "Open the remote menu", open_remote),
+        menu("open.submodule", "Open the submodule menu", open_submodule),
+        menu("open.worktree", "Open the worktree menu", open_worktree),
+        menu("open.ignore", "Open the ignore menu", open_ignore),
+        menu("open.patch-apply", "Open the apply-patches menu", open_patch_apply),
+        menu(
+            "open.patch-create",
+            "Open the format-patches menu",
+            open_patch_create,
+        ),
         planned("open.refs", Scope::Status, "Open the refs view", "R-5.3"),
         planned("open.cherries", Scope::Status, "Open the cherry view", "R-7.2"),
-        planned("open.patch-apply", Scope::Status, "Apply a patch", "R-8.2"),
-        planned("open.patch-create", Scope::Status, "Create a patch", "R-8.2"),
         planned("open.run", Scope::Status, "Run a Git command", "R-8.2"),
         planned("open.process-log", Scope::Status, "Open the process log", "R-3.3"),
         planned(
@@ -442,6 +469,30 @@ fn build() -> Registry {
         ),
     ]);
 
+    // Every menu action is a registry command too: the menu item carries the
+    // label and status for rendering, the registry entry is what a future
+    // implementation will run. Actions that are already registered (the
+    // `open.*` openers) are not duplicated.
+    for def in crate::menus::all() {
+        for group in &def.groups {
+            for item in &group.items {
+                let crate::menus::ItemDef::Action {
+                    command,
+                    label,
+                    roadmap,
+                    ..
+                } = item
+                else {
+                    continue;
+                };
+                if roadmap.is_empty() || commands.iter().any(|existing| existing.id == *command) {
+                    continue;
+                }
+                commands.push(planned(command, Scope::MenuAction, label, roadmap));
+            }
+        }
+    }
+
     Registry { commands }
 }
 
@@ -452,21 +503,55 @@ fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
-/// Open the commit menu; the session creates the view and pushes it.
-fn open_commit(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+/// Open a menu by name; the session creates the view and pushes it.
+fn open_menu(ctx: &mut CommandCtx<'_>, name: &str) -> Result<CommandOutcome> {
+    let menu = crate::menus::by_name(name, ctx.keymaps)
+        .ok_or_else(|| crate::Error::new(format!("The `{name}` menu is not implemented yet.")))?;
     Ok(CommandOutcome {
-        open_menu: Some(Menu::commit()),
+        open_menu: Some(menu),
         ..Default::default()
     })
 }
 
-/// Open the dispatch menu, including from inside another menu.
-fn open_dispatch(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    Ok(CommandOutcome {
-        open_menu: Some(Menu::dispatch()),
-        ..Default::default()
-    })
+/// Open the commit menu; the session creates the view and pushes it.
+fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    open_menu(ctx, "commit")
 }
+
+/// Open the dispatch menu, including from inside another menu.
+fn open_dispatch(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    open_menu(ctx, "dispatch")
+}
+
+macro_rules! menu_opener {
+    ($name:ident, $menu:literal) => {
+        /// Open the menu with this name.
+        fn $name(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+            open_menu(ctx, $menu)
+        }
+    };
+}
+
+menu_opener!(open_branch, "branch");
+menu_opener!(open_log, "log");
+menu_opener!(open_diff, "diff");
+menu_opener!(open_fetch, "fetch");
+menu_opener!(open_pull, "pull");
+menu_opener!(open_push, "push");
+menu_opener!(open_merge, "merge");
+menu_opener!(open_rebase, "rebase");
+menu_opener!(open_stash, "stash");
+menu_opener!(open_tag, "tag");
+menu_opener!(open_reset, "reset");
+menu_opener!(open_revert, "revert");
+menu_opener!(open_cherry_pick, "cherry-pick");
+menu_opener!(open_bisect, "bisect");
+menu_opener!(open_remote, "remote");
+menu_opener!(open_submodule, "submodule");
+menu_opener!(open_worktree, "worktree");
+menu_opener!(open_ignore, "ignore");
+menu_opener!(open_patch_apply, "patch-apply");
+menu_opener!(open_patch_create, "patch-create");
 
 /// Remember the current switches/options as this menu's defaults.
 ///

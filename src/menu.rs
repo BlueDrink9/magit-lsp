@@ -37,18 +37,6 @@ pub enum MenuStatus {
     Unavailable { reason: String },
 }
 
-impl MenuStatus {
-    fn implemented() -> Self {
-        Self::Implemented
-    }
-
-    fn planned(roadmap_id: &str) -> Self {
-        Self::Planned {
-            roadmap_id: roadmap_id.to_string(),
-        }
-    }
-}
-
 /// One switch, option or action of a menu.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -131,16 +119,6 @@ pub struct Group {
     pub items: Vec<Item>,
 }
 
-impl Group {
-    fn new(title: &str, items: Vec<Item>) -> Self {
-        Self {
-            title: title.to_string(),
-            columns: None,
-            items,
-        }
-    }
-}
-
 /// A saved set of switches and option values.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -163,135 +141,11 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// The representative commit menu of R-2.7.
-    pub fn commit() -> Self {
-        Self {
-            id: "commit".to_string(),
-            title: "Commit".to_string(),
-            saved_args: Args::default(),
-            groups: vec![
-                Group::new(
-                    "Arguments",
-                    vec![
-                        Item::Switch {
-                            key: "-a".to_string(),
-                            flag: "--all".to_string(),
-                            label: "Stage all modified and deleted files".to_string(),
-                            on: false,
-                            status: MenuStatus::implemented(),
-                        },
-                        Item::Switch {
-                            key: "-e".to_string(),
-                            flag: "--allow-empty".to_string(),
-                            label: "Allow empty commit".to_string(),
-                            on: false,
-                            status: MenuStatus::implemented(),
-                        },
-                        Item::Switch {
-                            key: "-n".to_string(),
-                            flag: "--no-verify".to_string(),
-                            label: "Bypass commit hooks".to_string(),
-                            on: false,
-                            status: MenuStatus::implemented(),
-                        },
-                        Item::Option {
-                            key: "=A".to_string(),
-                            flag: "--author=".to_string(),
-                            label: "Override the author".to_string(),
-                            value: None,
-                            reader: Reader::Text,
-                            status: MenuStatus::implemented(),
-                        },
-                    ],
-                ),
-                Group::new(
-                    "Create",
-                    vec![
-                        action("c", "commit.create", "Commit", "R-4.1"),
-                        action("e", "commit.extend", "Extend", "R-4.1"),
-                        action("f", "commit.fixup", "Fixup", "R-4.1"),
-                        action("s", "commit.squash", "Squash", "R-4.1"),
-                        action("i", "commit.instant-fixup", "Instant fixup", "R-4.1"),
-                        action("I", "commit.instant-squash", "Instant squash", "R-4.1"),
-                    ],
-                ),
-                Group::new(
-                    "Edit HEAD",
-                    vec![
-                        action("a", "commit.amend", "Amend", "R-4.1"),
-                        action("w", "commit.reword", "Reword", "R-4.1"),
-                        action("A", "commit.augment", "Augment", "R-4.1"),
-                        action("v", "commit.absorb", "Absorb", "R-4.1"),
-                    ],
-                ),
-                Group::new(
-                    "Rearrange",
-                    vec![
-                        action("r", "commit.reorder", "Reorder commits", "R-4.1"),
-                        action("m", "commit.move", "Move commit", "R-4.1"),
-                        action("x", "commit.drop", "Drop the selected commit", "R-4.1"),
-                    ],
-                ),
-                Group::new(
-                    "Menu",
-                    vec![
-                        Item::Action {
-                            key: "?".to_string(),
-                            command: "open.dispatch".to_string(),
-                            label: "Show the dispatch menu".to_string(),
-                            status: MenuStatus::implemented(),
-                        },
-                        action("l", "log.recent", "Show recent commits", "R-4.3"),
-                        action("d", "diff.staged", "Show staged diff", "R-4.2"),
-                        action("C", "commit.configure", "Configure commit options and arguments", "R-4.1"),
-                    ],
-                ),
-            ],
-        }
-    }
-
-    /// A small menu pushed from the commit menu, proving the menu stack.
-    pub fn dispatch() -> Self {
-        Self {
-            id: "dispatch".to_string(),
-            title: "Dispatch".to_string(),
-            saved_args: Args::default(),
-            groups: vec![
-                Group::new(
-                    "Create",
-                    vec![
-                        action("c", "open.commit", "Commit", "R-2.8"),
-                        action("b", "open.branch", "Branch", "R-2.8"),
-                        action("t", "open.tag", "Tag", "R-2.8"),
-                    ],
-                ),
-                Group::new(
-                    "Change",
-                    vec![
-                        action("f", "open.fetch", "Fetch", "R-2.8"),
-                        action("P", "open.push", "Push", "R-2.8"),
-                        action("m", "open.merge", "Merge", "R-2.8"),
-                    ],
-                ),
-            ],
-        }
-    }
-
-    /// The menu with this name, if it ships today.
-    pub fn by_name(name: &str) -> Option<Self> {
-        match name {
-            "commit" => Some(Self::commit()),
-            "dispatch" => Some(Self::dispatch()),
-            _ => None,
-        }
-    }
-
     /// The command the argument preview starts with.
     fn base_command(&self) -> String {
-        match self.id.as_str() {
-            "commit" => "git commit".to_string(),
-            other => format!("magit-lsp {other}"),
-        }
+        crate::menus::base_command(&self.id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("magit-lsp {}", self.id))
     }
 
     /// The switches and options currently set.
@@ -464,15 +318,6 @@ impl View for MenuView {
 
     fn menu_mut(&mut self) -> Option<&mut Menu> {
         Some(&mut self.menu)
-    }
-}
-
-fn action(key: &str, command: &str, label: &str, roadmap_id: &str) -> Item {
-    Item::Action {
-        key: key.to_string(),
-        command: command.to_string(),
-        label: label.to_string(),
-        status: MenuStatus::planned(roadmap_id),
     }
 }
 
