@@ -1247,7 +1247,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-2.8 **Planned-feature menus** (§3.12): create every dispatch menu
       with its full Magit action list as `Planned`; `open.dispatch` view
       generated from the registry; `cargo xtask parity`.
-- [ ] R-2.9 **Second client to prove decoupling:** a minimal VSCode extension
+- [x] R-2.9 **Second client to prove decoupling:** a minimal VSCode extension
       (static keybindings + context keys + QuickPick menu + fold-key mirroring
       command) or a ratatui TUI. Fix protocol gaps found here before Phase 3. The complexity of implementing a language server will be a factor here. It is important that clients integrations can be very thin.
 

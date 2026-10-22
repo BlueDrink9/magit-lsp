@@ -1,0 +1,1218 @@
+{
+  "name": "magit-lsp",
+  "displayName": "magit-lsp",
+  "description": "Magit-style Git views rendered by the magit-lsp language server",
+  "version": "0.1.0",
+  "publisher": "magit-lsp",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:magit.open",
+    "onCommand:magit.key",
+    "onCommand:magit.invoke",
+    "onCommand:magit.mirrorFoldShortcuts"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "gen:keybindings": "node scripts/gen-keybindings.mjs",
+    "test": "node test/test.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "magit.open",
+        "title": "Open Status",
+        "category": "Magit"
+      },
+      {
+        "command": "magit.key",
+        "title": "Press Key",
+        "category": "Magit",
+        "enablement": "magit.active"
+      },
+      {
+        "command": "magit.invoke",
+        "title": "Invoke Command",
+        "category": "Magit",
+        "enablement": "magit.active"
+      },
+      {
+        "command": "magit.mirrorFoldShortcuts",
+        "title": "Mirror my fold shortcuts",
+        "category": "Magit"
+      }
+    ],
+    "keybindings": [
+      {
+        "key": "f5",
+        "command": "magit.key",
+        "args": {
+          "key": "F5"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "g",
+        "command": "magit.key",
+        "args": {
+          "key": "g"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "tab",
+        "command": "magit.key",
+        "args": {
+          "key": "Tab"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+4",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+4"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+1",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+1"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+3",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+3"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+2",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+2"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "n",
+        "command": "magit.key",
+        "args": {
+          "key": "n"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "p",
+        "command": "magit.key",
+        "args": {
+          "key": "p"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "escape",
+        "command": "magit.key",
+        "args": {
+          "key": "Escape"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+c"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "enter",
+        "command": "magit.key",
+        "args": {
+          "key": "Enter"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "q",
+        "command": "magit.key",
+        "args": {
+          "key": "q"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "shift+tab",
+        "command": "magit.key",
+        "args": {
+          "key": "shift+Tab"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+down",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowDown"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+up",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowUp"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "alt+left",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowLeft"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'common' && magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+c"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "shift+/",
+        "command": "magit.key",
+        "args": {
+          "key": "?"
+        },
+        "when": "magit.active && magit.scope == 'common' && !magit.textMode"
+      },
+      {
+        "key": "f5",
+        "command": "magit.key",
+        "args": {
+          "key": "F5"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "g",
+        "command": "magit.key",
+        "args": {
+          "key": "g"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "tab",
+        "command": "magit.key",
+        "args": {
+          "key": "Tab"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+4",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+4"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+1",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+1"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+3",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+3"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+2",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+2"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "n",
+        "command": "magit.key",
+        "args": {
+          "key": "n"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "p",
+        "command": "magit.key",
+        "args": {
+          "key": "p"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "s",
+        "command": "magit.key",
+        "args": {
+          "key": "s"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "u",
+        "command": "magit.key",
+        "args": {
+          "key": "u"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+s",
+        "command": "magit.key",
+        "args": {
+          "key": "S"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+u",
+        "command": "magit.key",
+        "args": {
+          "key": "U"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "escape",
+        "command": "magit.key",
+        "args": {
+          "key": "Escape"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+c"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "q",
+        "command": "magit.key",
+        "args": {
+          "key": "q"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+tab",
+        "command": "magit.key",
+        "args": {
+          "key": "shift+Tab"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+down",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowDown"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+up",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowUp"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "alt+left",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowLeft"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'status' && magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+c"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "enter",
+        "command": "magit.key",
+        "args": {
+          "key": "Enter"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "delete",
+        "command": "magit.key",
+        "args": {
+          "key": "Delete"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "v",
+        "command": "magit.key",
+        "args": {
+          "key": "v"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "a",
+        "command": "magit.key",
+        "args": {
+          "key": "a"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+/",
+        "command": "magit.key",
+        "args": {
+          "key": "?"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "c",
+        "command": "magit.key",
+        "args": {
+          "key": "c"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "b",
+        "command": "magit.key",
+        "args": {
+          "key": "b"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "l",
+        "command": "magit.key",
+        "args": {
+          "key": "l"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "d",
+        "command": "magit.key",
+        "args": {
+          "key": "d"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "f",
+        "command": "magit.key",
+        "args": {
+          "key": "f"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+f",
+        "command": "magit.key",
+        "args": {
+          "key": "F"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+p",
+        "command": "magit.key",
+        "args": {
+          "key": "P"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "m",
+        "command": "magit.key",
+        "args": {
+          "key": "m"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "r",
+        "command": "magit.key",
+        "args": {
+          "key": "r"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "z",
+        "command": "magit.key",
+        "args": {
+          "key": "z"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "t",
+        "command": "magit.key",
+        "args": {
+          "key": "t"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "x",
+        "command": "magit.key",
+        "args": {
+          "key": "x"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+v",
+        "command": "magit.key",
+        "args": {
+          "key": "V"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+a",
+        "command": "magit.key",
+        "args": {
+          "key": "A"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+b",
+        "command": "magit.key",
+        "args": {
+          "key": "B"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+m",
+        "command": "magit.key",
+        "args": {
+          "key": "M"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "o",
+        "command": "magit.key",
+        "args": {
+          "key": "o"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+5",
+        "command": "magit.key",
+        "args": {
+          "key": "%"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "i",
+        "command": "magit.key",
+        "args": {
+          "key": "i"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "w",
+        "command": "magit.key",
+        "args": {
+          "key": "w"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+w",
+        "command": "magit.key",
+        "args": {
+          "key": "W"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "y",
+        "command": "magit.key",
+        "args": {
+          "key": "y"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+y",
+        "command": "magit.key",
+        "args": {
+          "key": "Y"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+1",
+        "command": "magit.key",
+        "args": {
+          "key": "!"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "shift+4",
+        "command": "magit.key",
+        "args": {
+          "key": "$"
+        },
+        "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+      },
+      {
+        "key": "f5",
+        "command": "magit.key",
+        "args": {
+          "key": "F5"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "g",
+        "command": "magit.key",
+        "args": {
+          "key": "g"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "tab",
+        "command": "magit.key",
+        "args": {
+          "key": "Tab"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+4",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+4"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+1",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+1"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+3",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+3"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+2",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+2"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "n",
+        "command": "magit.key",
+        "args": {
+          "key": "n"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "p",
+        "command": "magit.key",
+        "args": {
+          "key": "p"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "escape",
+        "command": "magit.key",
+        "args": {
+          "key": "Escape"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+c"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "enter",
+        "command": "magit.key",
+        "args": {
+          "key": "Enter"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "q",
+        "command": "magit.key",
+        "args": {
+          "key": "q"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "shift+tab",
+        "command": "magit.key",
+        "args": {
+          "key": "shift+Tab"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+down",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowDown"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+up",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowUp"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "alt+left",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowLeft"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'select' && magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+c"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "shift+/",
+        "command": "magit.key",
+        "args": {
+          "key": "?"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "space",
+        "command": "magit.key",
+        "args": {
+          "key": "Space"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "/",
+        "command": "magit.key",
+        "args": {
+          "key": "/"
+        },
+        "when": "magit.active && magit.scope == 'select' && !magit.textMode"
+      },
+      {
+        "key": "f5",
+        "command": "magit.key",
+        "args": {
+          "key": "F5"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "g",
+        "command": "magit.key",
+        "args": {
+          "key": "g"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "tab",
+        "command": "magit.key",
+        "args": {
+          "key": "Tab"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+4",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+4"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+1",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+1"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+3",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+3"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+2",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+2"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "n",
+        "command": "magit.key",
+        "args": {
+          "key": "n"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "p",
+        "command": "magit.key",
+        "args": {
+          "key": "p"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "escape",
+        "command": "magit.key",
+        "args": {
+          "key": "Escape"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+c"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "enter",
+        "command": "magit.key",
+        "args": {
+          "key": "Enter"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "q",
+        "command": "magit.key",
+        "args": {
+          "key": "q"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "shift+tab",
+        "command": "magit.key",
+        "args": {
+          "key": "shift+Tab"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+down",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowDown"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+up",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowUp"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "alt+left",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowLeft"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'menu' && magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+c"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "shift+/",
+        "command": "magit.key",
+        "args": {
+          "key": "?"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+s",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+s"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+r",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+r"
+        },
+        "when": "magit.active && magit.scope == 'menu' && !magit.textMode"
+      },
+      {
+        "key": "f5",
+        "command": "magit.key",
+        "args": {
+          "key": "F5"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "g",
+        "command": "magit.key",
+        "args": {
+          "key": "g"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "tab",
+        "command": "magit.key",
+        "args": {
+          "key": "Tab"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+4",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+4"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+1",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+1"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+3",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+3"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+2",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+2"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "n",
+        "command": "magit.key",
+        "args": {
+          "key": "n"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "p",
+        "command": "magit.key",
+        "args": {
+          "key": "p"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+x",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+x"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+enter",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+Enter"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "q",
+        "command": "magit.key",
+        "args": {
+          "key": "q"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "shift+tab",
+        "command": "magit.key",
+        "args": {
+          "key": "shift+Tab"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+left",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowLeft"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+t",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+t"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && magit.textMode"
+      },
+      {
+        "key": "ctrl+shift+c",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+shift+c"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "shift+/",
+        "command": "magit.key",
+        "args": {
+          "key": "?"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+up",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowUp"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "alt+down",
+        "command": "magit.key",
+        "args": {
+          "key": "alt+ArrowDown"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      },
+      {
+        "key": "ctrl+alt+s",
+        "command": "magit.key",
+        "args": {
+          "key": "ctrl+alt+s"
+        },
+        "when": "magit.active && magit.scope == 'commit-message' && !magit.textMode"
+      }
+    ],
+    "languages": [
+      {
+        "id": "magit",
+        "aliases": [
+          "Magit",
+          "magit"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "magit-lsp",
+      "properties": {
+        "magit-lsp.serverPath": {
+          "type": "string",
+          "default": "magit-lsp",
+          "description": "Path to the magit-lsp executable."
+        },
+        "magit-lsp.profile": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "vim"
+          ],
+          "default": "standard",
+          "description": "Keymap profile the server resolves."
+        },
+        "magit-lsp.keybindingsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to VSCode's keybindings.json for fold-shortcut mirroring."
+        }
+      }
+    }
+  }
+}
