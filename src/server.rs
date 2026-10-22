@@ -2,6 +2,7 @@ use crate::errors;
 use crate::config::{ConfigService, LoadOptions};
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
+use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
 use crate::session::{InvokeResult, Session};
 use crate::transport;
@@ -9,7 +10,7 @@ use crate::tree::Tree;
 use crate::ui::PromptUi;
 use crate::view::Viewport;
 use crate::{Error, Result};
-use lsp_server::{ErrorCode, Message, Notification, Request, Response};
+use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::request::Request as LspRequest;
 use lsp_types::{
     DocumentLinkOptions, FoldingRangeProviderCapability, OneOf, SemanticTokensFullOptions,
@@ -21,10 +22,62 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tokio::io::{AsyncWrite, BufReader};
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
 use tokio::task::JoinSet;
 
 type RepoLocks = Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>;
+
+/// FIFO tickets for one repository's mutations.
+///
+/// The async repo lock serialises mutations but does not decide which waiting
+/// handler runs first. Tickets are allocated in the reader loop, so mutations
+/// apply in the order the client sent them.
+struct MutationGate {
+    next: AtomicU64,
+    served: AtomicU64,
+    notify: Notify,
+}
+
+impl MutationGate {
+    fn new() -> Self {
+        Self {
+            next: AtomicU64::new(0),
+            served: AtomicU64::new(0),
+            notify: Notify::new(),
+        }
+    }
+}
+
+/// One request's place in its repository's mutation order.
+struct MutationTurn {
+    gate: Arc<MutationGate>,
+    ticket: u64,
+    repo_path: String,
+}
+
+impl MutationTurn {
+    /// Wait until every earlier mutation for this repository has finished.
+    async fn wait(&self) {
+        loop {
+            let notified = self.gate.notify.notified();
+            tokio::pin!(notified);
+            // Register before re-checking, so a finish cannot slip between the
+            // check and the await.
+            notified.as_mut().enable();
+            if self.gate.served.load(Ordering::SeqCst) == self.ticket {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl Drop for MutationTurn {
+    fn drop(&mut self) {
+        self.gate.served.fetch_add(1, Ordering::SeqCst);
+        self.gate.notify.notify_waiters();
+    }
+}
 
 /// Startup options parsed from the command line.
 #[derive(Debug, Clone, Default)]
@@ -71,6 +124,13 @@ struct Shared {
     prompts: Arc<Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>>,
     /// Global prompt-id counter; ids are unique across sessions.
     next_prompt: Arc<AtomicU64>,
+    /// Running mutations keyed by their progress token, so a client cancel can
+    /// kill the child on the blocking worker thread.
+    progress: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    /// Global progress-token counter.
+    next_progress: Arc<AtomicU64>,
+    /// Per-repository mutation tickets, allocated in request order.
+    mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
 }
 
 impl Shared {
@@ -90,6 +150,30 @@ impl Shared {
             sender,
             prompts: Arc::new(Mutex::new(HashMap::new())),
             next_prompt: Arc::new(AtomicU64::new(0)),
+            progress: Arc::new(Mutex::new(HashMap::new())),
+            next_progress: Arc::new(AtomicU64::new(0)),
+            mutation_gates: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Reserve the next mutation slot for `repo_path`.
+    fn reserve_mutation(&self, repo_path: String) -> MutationTurn {
+        let gate = {
+            let mut gates = self
+                .mutation_gates
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            Arc::clone(
+                gates
+                    .entry(repo_path.clone())
+                    .or_insert_with(|| Arc::new(MutationGate::new())),
+            )
+        };
+        let ticket = gate.next.fetch_add(1, Ordering::SeqCst);
+        MutationTurn {
+            gate,
+            ticket,
+            repo_path,
         }
     }
 
@@ -97,6 +181,66 @@ impl Shared {
     fn next_prompt_id(&self) -> String {
         let next = self.next_prompt.fetch_add(1, Ordering::Relaxed) + 1;
         format!("p{next}")
+    }
+
+    /// Announce a mutation with the LSP work-done handshake.
+    ///
+    /// The standard handshake is a `window/workDoneProgress/create` request for
+    /// the token, then `$/progress` with `begin`; `end` is sent when the
+    /// mutation finishes. The returned handle kills the child on cancel.
+    fn begin_progress(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        command: &str,
+    ) -> (String, CancelHandle) {
+        let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
+        let token = format!("magit-lsp/mutation/{next}");
+        let handle = CancelHandle::new();
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(token.clone(), handle.clone());
+        let _ = sender.send(Message::Request(Request::new(
+            RequestId::from(format!("workDoneProgress/{next}")),
+            "window/workDoneProgress/create".to_string(),
+            serde_json::json!({ "token": token }),
+        )));
+        let _ = sender.send(Message::Notification(Notification::new(
+            "$/progress".to_string(),
+            serde_json::json!({
+                "token": token,
+                "value": { "kind": "begin", "title": "Git", "message": command },
+            }),
+        )));
+        (token, handle)
+    }
+
+    /// Finish the progress sequence started by [`Self::begin_progress`].
+    fn end_progress(&self, sender: &mpsc::UnboundedSender<Message>, token: &str) {
+        self.progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(token);
+        let _ = sender.send(Message::Notification(Notification::new(
+            "$/progress".to_string(),
+            serde_json::json!({ "token": token, "value": { "kind": "end" } }),
+        )));
+    }
+
+    /// Cancel the mutation running under a `window/workDoneProgress/cancel`.
+    fn cancel_progress(&self, params: &Value) {
+        let Some(token) = params.get("token").and_then(progress_token) else {
+            return;
+        };
+        let handle = self
+            .progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&token)
+            .cloned();
+        if let Some(handle) = handle {
+            handle.cancel();
+        }
     }
 
     /// Send a prompt notification and block until the client answers it.
@@ -393,7 +537,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     continue;
                 }
                 tracing::debug!(method = %request.method, "request");
-                handlers.spawn(handle_request(request, shared.clone(), sender.clone()));
+                let turn = mutation_repo_path(&shared, &request.method, &request.params)
+                    .map(|repo_path| shared.reserve_mutation(repo_path));
+                handlers.spawn(handle_request(
+                    request,
+                    shared.clone(),
+                    sender.clone(),
+                    turn,
+                ));
             }
             Ok(Some(Message::Notification(notification))) => match notification.method.as_str() {
                 "exit" => break if shutdown_requested { 0 } else { 1 },
@@ -418,6 +569,10 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         refresh_view_keymaps(&shared, &sender);
                     }
                     tracing::debug!("configuration reloaded on client request");
+                }
+                // The client aborts the mutation running under this token.
+                "window/workDoneProgress/cancel" => {
+                    shared.cancel_progress(&notification.params);
                 }
                 // The server owns the document; other client notifications are
                 // not needed to keep view state in sync.
@@ -465,9 +620,15 @@ where
     Ok(())
 }
 
-async fn handle_request(request: Request, shared: Shared, sender: mpsc::UnboundedSender<Message>) {
+async fn handle_request(
+    request: Request,
+    shared: Shared,
+    sender: mpsc::UnboundedSender<Message>,
+    turn: Option<MutationTurn>,
+) {
     let id = request.id.clone();
     let method = request.method.clone();
+    let turn = turn;
 
     let (response, notifications) = if !is_request_method(&method) {
         (
@@ -478,13 +639,17 @@ async fn handle_request(request: Request, shared: Shared, sender: mpsc::Unbounde
             ),
             Vec::new(),
         )
-    } else if let Some(repo_path) = mutation_repo_path(&shared, &method, &request.params) {
-        let lock = repository_lock(&shared.repo_locks, &repo_path).await;
+    } else if let Some(active) = turn.as_ref() {
+        active.wait().await;
+        let lock = repository_lock(&shared.repo_locks, &active.repo_path).await;
         let _guard = lock.lock().await;
         maybe_test_delay().await;
-        dispatch_response(request, &shared).await
+        let (token, cancel) = shared.begin_progress(&sender, &method);
+        let outcome = dispatch_response(request, &shared, Some(cancel)).await;
+        shared.end_progress(&sender, &token);
+        outcome
     } else {
-        dispatch_response(request, &shared).await
+        dispatch_response(request, &shared, None).await
     };
 
     // The response creates or identifies the view, so it goes first; render
@@ -493,6 +658,9 @@ async fn handle_request(request: Request, shared: Shared, sender: mpsc::Unbounde
     for notification in notifications {
         let _ = sender.send(notification);
     }
+    // Release the mutation slot only after this request's messages are queued,
+    // so responses for one repository keep their request order.
+    drop(turn);
 }
 
 /// A successful request plus any notifications it produced.
@@ -518,12 +686,23 @@ impl Dispatched {
 }
 
 /// Run the synchronous Git work off the runtime, keeping the reader free.
-async fn dispatch_response(request: Request, shared: &Shared) -> (Response, Vec<Message>) {
+///
+/// `cancel` is installed on the blocking thread so the Git child can register
+/// itself with it and be killed by `window/workDoneProgress/cancel`.
+async fn dispatch_response(
+    request: Request,
+    shared: &Shared,
+    cancel: Option<CancelHandle>,
+) -> (Response, Vec<Message>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
 
-    match tokio::task::spawn_blocking(move || dispatch(&request, &shared)).await {
+    match tokio::task::spawn_blocking(move || {
+        runner::with_cancel(cancel, || dispatch(&request, &shared))
+    })
+    .await
+    {
         Ok(Ok(dispatched)) => (
             Response::new_ok(id, dispatched.result),
             dispatched.notifications,
@@ -670,6 +849,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             ))
         }
         "shutdown" => Ok(Dispatched::value(Value::Null)),
+        // A client may ask us to prepare a progress token; there is no state to
+        // create, so acknowledge it.
+        "window/workDoneProgress/create" => Ok(Dispatched::value(Value::Null)),
         ViewOpenRequest::METHOD => open_view(shared, params),
         ViewCloseRequest::METHOD => close_view(shared, params),
         ViewInvokeRequest::METHOD => invoke_view(shared, params),
@@ -1001,7 +1183,7 @@ fn show_message(kind: u8, message: String) -> Message {
 }
 
 fn capabilities() -> Result<Value> {
-    serde_json::to_value(&ServerCapabilities {
+    let mut capabilities = serde_json::to_value(ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         definition_provider: Some(OneOf::Left(true)),
         document_link_provider: Some(DocumentLinkOptions {
@@ -1019,7 +1201,17 @@ fn capabilities() -> Result<Value> {
         )),
         ..Default::default()
     })
-    .map_err(|e| Error::new(e.to_string()))
+    .map_err(|e| Error::new(e.to_string()))?;
+    // `window.workDoneProgress` is a client capability in the spec, but the
+    // server advertises the window features it drives so thin clients can
+    // enable them without a second handshake.
+    if let Some(object) = capabilities.as_object_mut() {
+        object.insert(
+            "window".to_string(),
+            serde_json::json!({ "workDoneProgress": true }),
+        );
+    }
+    Ok(capabilities)
 }
 
 fn is_request_method(method: &str) -> bool {
@@ -1039,6 +1231,7 @@ fn is_request_method(method: &str) -> bool {
             | ViewSetModeRequest::METHOD
             | ViewPromptRespondRequest::METHOD
             | ViewResyncRequest::METHOD
+            | "window/workDoneProgress/create"
     )
 }
 
@@ -1061,6 +1254,14 @@ fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<S
     }
     let view_id = params.get("viewId").and_then(Value::as_str)?;
     shared.repo_for_view(view_id)
+}
+
+/// A progress token is an integer or a string on the wire.
+fn progress_token(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.as_u64().map(|number| number.to_string()))
 }
 
 /// Read the key-delivery capabilities a client declared in `initialize`.

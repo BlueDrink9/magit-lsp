@@ -1255,7 +1255,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 
 - [x] R-3.1 `Ui` handle and `view/prompt` with the four kinds (§3.6); Neovim
       and VSCode mappings; `ScriptedUi` for tests. Menu option prompts now work.
-- [ ] R-3.2 Process runner (queue, progress, cancel, ring buffer).
+- [x] R-3.2 Process runner (queue, progress, cancel, ring buffer).
 - [ ] R-3.3 **Process log view.**
 - [ ] R-3.4 Editor bridge: helper subcommand, socket, `editDocument` effect,
       Neovim and VSCode handling, confirm/cancel/close semantics, askpass
@@ -1542,10 +1542,10 @@ on the oldest supported git version.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9 and R-3.1 (`make test` green: Rust + Neovim
-mini.test + the VSCode node tests). The VSCode client is the thin second client
-for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
-R-3.2…R-3.7 and Phases 4–9.
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1 and R-3.2 (`make test` green: Rust +
+Neovim mini.test + the VSCode node tests). The VSCode client is the thin second
+client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
+R-3.3…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1584,8 +1584,20 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   numbers); duplicates get `-1`, `-2`. Stale ids give a warn message plus a
   fresh render, never a guess.
 - **R-0.7:** the stdio loop is `tokio`, but Git still runs synchronously
-  inside `spawn_blocking` (porting the runner to `tokio::process` is R-3.2).
+  inside `spawn_blocking` (see the R-3.2 deviation below).
   A debug-only `MAGIT_LSP_TEST_DELAY_MS` hook backs the concurrency test.
+- **R-3.2 deviation:** the runner deliberately keeps `std::process` inside
+  `spawn_blocking` instead of porting `GitRepo` to `tokio::process`. The
+  behavioural goals are met: the existing `RepoLocks` queue serialises
+  mutations per repository, reads stay concurrent on other `spawn_blocking`
+  threads, `window/workDoneProgress/create` + `$/progress` report mutations and
+  accept cancellation, and every invocation is recorded in the bounded
+  `runner::ProcessLog`. A `tokio::process` rewrite would have changed the sync
+  `GitRepo` API and the whole Rust test surface for no behavioural gain.
+  `CancelHandle` is thread-local per request and kills by pid (`kill -KILL`)
+  because the standard library has no portable kill-by-pid and `libc` is not a
+  dependency. Cancellation is consumed by the child it kills, so the failed
+  mutation can still read a fresh status to report the failure.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

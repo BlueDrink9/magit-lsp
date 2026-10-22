@@ -1045,7 +1045,8 @@ impl Session {
             let keymaps = Arc::clone(&self.keymaps);
             let mut ctx = commands::CommandCtx::new(
                 view, &repo_path, &keymaps, cursor, selection, args, key, ui,
-            );
+            )
+            .with_cancel(crate::runner::current_cancel());
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
 

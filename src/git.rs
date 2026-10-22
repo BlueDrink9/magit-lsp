@@ -1,4 +1,5 @@
 use crate::patch::{self, FileLayout, Hunk, Selection, SelectionOp};
+use crate::runner;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -587,17 +588,34 @@ impl GitRepo {
         let mut child = git_command(&self.root, &args, Stdio::piped())
             .spawn()
             .map_err(|e| Error::new(format!("failed to spawn git apply: {e}")))?;
-        child
+        let cancel = runner::current_cancel();
+        if let Some(handle) = &cancel {
+            handle.register_child(&mut child);
+        }
+        let written = child
             .stdin
             .as_mut()
-            .ok_or_else(|| Error::new("failed to open stdin"))?
-            .write_all(patch_text.as_bytes())?;
+            .ok_or_else(|| Error::new("failed to open stdin"))
+            .and_then(|stdin| stdin.write_all(patch_text.as_bytes()).map_err(Error::from));
+        if let Err(error) = written {
+            // Closing stdin lets a child that never applied the patch exit.
+            drop(child.stdin.take());
+            let _ = child.wait();
+            if let Some(handle) = &cancel {
+                handle.clear_child();
+            }
+            return Err(error);
+        }
         let out = child.wait_with_output()?;
+        if let Some(handle) = &cancel {
+            handle.clear_child();
+        }
         log_finished(
             &self.root,
             &args,
             out.status,
             started.elapsed(),
+            &out.stdout,
             &out.stderr,
         );
         if !out.status.success() {
@@ -617,10 +635,28 @@ impl GitRepo {
     fn command_in(cwd: &Path, args: &[&str]) -> Result<String> {
         let started = Instant::now();
         tracing::debug!(cwd = %cwd.display(), args = ?args, "git");
-        let out = git_command(cwd, args, Stdio::null())
-            .output()
+        let mut child = git_command(cwd, args, Stdio::null())
+            .spawn()
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
-        log_finished(cwd, args, out.status, started.elapsed(), &out.stderr);
+        let pid = child.id();
+        tracing::debug!(pid, cwd = %cwd.display(), args = ?args, "git child");
+        let cancel = runner::current_cancel();
+        if let Some(handle) = &cancel {
+            handle.register_child(&mut child);
+        }
+        let out = child.wait_with_output();
+        if let Some(handle) = &cancel {
+            handle.clear_child();
+        }
+        let out = out.map_err(|e| Error::new(format!("failed to wait for git: {e}")))?;
+        log_finished(
+            cwd,
+            args,
+            out.status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
         if !out.status.success() {
             return Err(Error::git(GitFailure::from_output(
                 args,
@@ -679,18 +715,21 @@ fn log_finished(
     args: &[&str],
     status: std::process::ExitStatus,
     elapsed: std::time::Duration,
+    stdout: &[u8],
     stderr: &[u8],
 ) {
     let exit_code = status.code().unwrap_or(-1);
     let elapsed_ms = elapsed.as_millis();
+    let record_id = runner::global_log().record(cwd, args, exit_code, elapsed, stdout, stderr);
     if status.success() {
-        tracing::debug!(cwd = %cwd.display(), args = ?args, exit_code, elapsed_ms, "git ok");
+        tracing::debug!(cwd = %cwd.display(), args = ?args, exit_code, elapsed_ms, record_id, "git ok");
     } else {
         tracing::warn!(
             cwd = %cwd.display(),
             args = ?args,
             exit_code,
             elapsed_ms,
+            record_id,
             stderr = %String::from_utf8_lossy(stderr).trim_end(),
             "git failed"
         );

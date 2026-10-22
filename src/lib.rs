@@ -15,6 +15,7 @@ pub mod menus;
 pub mod parity;
 pub mod patch;
 pub mod protocol;
+pub mod runner;
 pub mod semantic_tokens;
 pub mod server;
 pub mod session;

@@ -112,6 +112,9 @@ pub struct CommandCtx<'a> {
     pub key: Option<String>,
     /// Ask the user a question; `NullUi` when no interactive client is attached.
     pub ui: &'a dyn crate::ui::PromptUi,
+    /// The request's cancellation target, installed by the server; `None` when
+    /// the command runs detached (tests, non-interactive paths).
+    pub cancel: Option<crate::runner::CancelHandle>,
     effects: Vec<Effect>,
 }
 
@@ -136,8 +139,15 @@ impl<'a> CommandCtx<'a> {
             args,
             key,
             ui,
+            cancel: None,
             effects: Vec::new(),
         }
+    }
+
+    /// Attach the request's cancellation handle.
+    pub fn with_cancel(mut self, cancel: Option<crate::runner::CancelHandle>) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     /// Queue an info-level message effect.

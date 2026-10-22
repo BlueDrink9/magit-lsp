@@ -4,9 +4,12 @@ mod common;
 
 use common::*;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -16,6 +19,7 @@ struct TestServer {
     stdin: Option<ChildStdin>,
     responses: Receiver<Result<Value, String>>,
     reader: JoinHandle<()>,
+    stderr: Arc<Mutex<String>>,
 }
 
 impl TestServer {
@@ -35,15 +39,19 @@ impl TestServer {
         let mut child = command.spawn().expect("spawn magit-lsp");
         let stdin = child.stdin.take().expect("child stdin");
         let stdout = child.stdout.take().expect("child stdout");
+        let stderr = child.stderr.take().expect("child stderr");
 
         let (tx, responses) = mpsc::channel();
         let reader = thread::spawn(move || read_loop(stdout, tx));
+        let log = Arc::new(Mutex::new(String::new()));
+        drain_stderr(stderr, Arc::clone(&log));
 
         Self {
             child,
             stdin: Some(stdin),
             responses,
             reader,
+            stderr: log,
         }
     }
 
@@ -65,7 +73,18 @@ impl TestServer {
         match self.responses.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(message)) => message,
             Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
-            Err(error) => panic!("no response from server: {error}"),
+            Err(error) => {
+                let log = self
+                    .stderr
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let tail: Vec<&str> = log.lines().rev().take(40).collect();
+                let status = self.child.try_wait();
+                panic!(
+                    "no response from server: {error}\nserver exit: {status:?}\nserver stderr:\n{}",
+                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+                )
+            }
         }
     }
 
@@ -134,6 +153,26 @@ fn frame(message: Value) -> Vec<u8> {
     let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
     bytes.extend_from_slice(&body);
     bytes
+}
+
+/// Drain the server's stderr so a full pipe can never block it, keeping the
+/// tail for failure messages.
+fn drain_stderr(mut stderr: std::process::ChildStderr, log: Arc<Mutex<String>>) {
+    thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) | Err(_) => return,
+                Ok(read) => {
+                    let mut log = log.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    log.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                    if log.len() > 200_000 {
+                        log.drain(..100_000);
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Read every frame from `stdout`, reporting stray or truncated bytes.
@@ -311,13 +350,18 @@ fn a_slow_mutation_does_not_delay_a_later_read() {
     })));
     server.send_raw(&batch);
 
-    let first = server.recv();
+    let first_response = loop {
+        let message = server.recv();
+        if message["id"] == json!(3) || message["id"] == json!(4) {
+            break message;
+        }
+    };
     assert_eq!(
-        first["id"],
+        first_response["id"],
         json!(4),
-        "the slow mutation blocked a later read: {first}"
+        "the slow mutation blocked a later read: {first_response}"
     );
-    let second = server.recv();
+    let second = server.response_with_id(3);
     assert_eq!(second["id"], json!(3));
 
     shutdown_and_exit(&mut server);
@@ -782,6 +826,212 @@ fn a_config_reload_repushes_the_view_keymap() {
             break;
         }
     }
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+/// Put a fake `git` first on the server's `PATH`; it delegates everything to
+/// the real Git except `add`, which signals its start and then sleeps.
+fn fake_git_env(marker: &Path) -> (tempfile::TempDir, Vec<(String, String)>) {
+    let output = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .expect("locate git");
+    assert!(output.status.success(), "git is not on PATH");
+    let real_git = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    let dir = tempfile::TempDir::new().expect("fake git tempdir");
+    let script = dir.path().join("git");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"add\" ]; then\n\
+               printf 'started\\n' > '{}'\n\
+               exec sleep 30\n\
+             fi\n\
+             exec '{}' \"$@\"\n",
+            marker.display(),
+            real_git
+        ),
+    )
+    .expect("write fake git");
+    let mut permissions = std::fs::metadata(&script)
+        .expect("fake git metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&script, permissions).expect("chmod fake git");
+
+    let path = format!(
+        "{}:{}",
+        dir.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    (dir, vec![("PATH".to_string(), path)])
+}
+
+fn spawn_with_env(env: &[(String, String)]) -> TestServer {
+    let refs: Vec<(&str, &str)> = env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    TestServer::spawn(&refs)
+}
+
+fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "{} never appeared",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_mutation_reports_work_done_progress() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize();
+    let view_id = open_view(&mut server, 2, &repo);
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "status.stage-all"},
+    }));
+
+    let mut phases: Vec<String> = Vec::new();
+    let mut tokens: Vec<String> = Vec::new();
+    loop {
+        let message = server.recv();
+        if message["id"] == json!(3) {
+            break;
+        }
+        match message["method"].as_str().unwrap_or_default() {
+            "window/workDoneProgress/create" => {
+                phases.push("create".to_string());
+                tokens.push(
+                    message["params"]["token"]
+                        .as_str()
+                        .expect("a create token")
+                        .to_string(),
+                );
+            }
+            "$/progress" => {
+                phases.push(
+                    message["params"]["value"]["kind"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+                tokens.push(
+                    message["params"]["token"]
+                        .as_str()
+                        .expect("a progress token")
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        phases,
+        vec!["create".to_string(), "begin".to_string(), "end".to_string()],
+        "the work-done handshake must precede the response"
+    );
+    assert!(
+        tokens.windows(2).all(|pair| pair[0] == pair[1]),
+        "create, begin and end must share a token: {tokens:?}"
+    );
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
+fn a_cancel_notification_aborts_a_slow_mutation() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let marker = tmp.path().join("fake-git-started");
+    let (_bin, env) = fake_git_env(&marker);
+    let repo = repo_param(tmp.path());
+    let mut server = spawn_with_env(&env);
+    server.initialize();
+    let view_id = open_view(&mut server, 2, &repo);
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "status.stage-all"},
+    }));
+
+    let token = loop {
+        let message = server.recv();
+        assert!(
+            message["id"] != json!(3),
+            "the mutation finished before it could be cancelled: {message}"
+        );
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("begin")
+        {
+            break message["params"]["token"]
+                .as_str()
+                .expect("a progress token")
+                .to_string();
+        }
+    };
+
+    wait_for_file(&marker);
+    let cancelled_at = Instant::now();
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "window/workDoneProgress/cancel",
+        "params": {"token": token},
+    }));
+
+    let mut saw_end = false;
+    let response = loop {
+        let message = server.recv();
+        if message["id"] == json!(3) {
+            break message;
+        }
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("end")
+        {
+            saw_end = true;
+        }
+    };
+
+    assert!(
+        cancelled_at.elapsed() < Duration::from_secs(5),
+        "the cancelled mutation took {:?}",
+        cancelled_at.elapsed()
+    );
+    assert!(saw_end, "the cancelled mutation never ended its progress");
+    let effects = response["result"]["effects"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the response is not an invoke result: {response}"));
+    assert!(
+        effects.iter().any(|effect| {
+            effect["type"] == json!("message") && effect["level"] == json!("error")
+        }),
+        "a killed Git command must report an error effect: {response}"
+    );
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
