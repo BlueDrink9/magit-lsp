@@ -9,13 +9,14 @@ use crate::commands::{self, CommandStatus, Scope};
 use crate::diff_text;
 use crate::keyhandler::{self, MenuPrefix, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
-use crate::menu::{Menu, MenuStatus, MenuView};
+use crate::menu::{Menu, MenuStatus, MenuView, Reader};
 use crate::protocol::{
-    Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewKeyParams, ViewKeymapParams,
-    ViewRender, ViewSetModeParams,
+    Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
+    ViewKeyParams, ViewKeymapParams, ViewPromptParams, ViewRender, ViewSetModeParams,
 };
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
+use crate::ui::PromptUi;
 use crate::view::{
     Ctx, Placement, View, ViewDescriptor, ViewKind, ViewMode, Viewport, VisibilityCommand,
 };
@@ -258,6 +259,11 @@ impl ViewStack {
     pub fn is_empty(&self) -> bool {
         self.views.is_empty()
     }
+
+    /// Drop every view, e.g. when `common.quit` runs.
+    pub fn clear(&mut self) {
+        self.views.clear();
+    }
 }
 
 /// One repository's open views and render versions.
@@ -265,6 +271,8 @@ pub struct Session {
     repo_path: String,
     views: ViewStack,
     keymaps: Arc<BTreeMap<String, Keymap>>,
+    /// The next prompt id handed to a prompt request.
+    next_prompt: u64,
 }
 
 /// What a `view/invoke` produced: effects plus the render that follows it.
@@ -296,6 +304,7 @@ impl Session {
             repo_path: repo_path.into(),
             views: ViewStack::new(),
             keymaps: Arc::new(BTreeMap::new()),
+            next_prompt: 0,
         }
     }
 
@@ -471,7 +480,19 @@ impl Session {
     }
 
     /// Run a registered command against a view by id.
+    ///
+    /// Kept for callers with no prompt UI (tests and non-interactive paths); it
+    /// delegates to [`Session::invoke_ui`] with a [`crate::ui::NullUi`].
     pub fn invoke(&mut self, params: &ViewInvokeParams) -> Result<InvokeResult> {
+        self.invoke_ui(params, &crate::ui::NullUi)
+    }
+
+    /// Run a registered command, asking the user through `ui` when needed.
+    pub fn invoke_ui(
+        &mut self,
+        params: &ViewInvokeParams,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
         self.run_command(
             &params.view_id,
             &params.command,
@@ -479,6 +500,7 @@ impl Session {
             params.selection,
             params.args.as_ref(),
             None,
+            ui,
         )
     }
 
@@ -490,6 +512,11 @@ impl Session {
     /// acked tree, never by a raw line index. Menus use their own two-step
     /// matcher instead of the profile keymap.
     pub fn key(&mut self, params: &ViewKeyParams) -> Result<InvokeResult> {
+        self.key_ui(params, &crate::ui::NullUi)
+    }
+
+    /// Handle one key step, asking the user through `ui` when the command does.
+    pub fn key_ui(&mut self, params: &ViewKeyParams, ui: &dyn PromptUi) -> Result<InvokeResult> {
         let mode = params.editor_mode;
         let (scope, capture, cursor_moved, is_menu) = {
             let view = self
@@ -507,7 +534,7 @@ impl Session {
         };
 
         if is_menu {
-            return self.menu_key(params, cursor_moved);
+            return self.menu_key(params, cursor_moved, ui);
         }
 
         let keymap = self.keymap_for(&scope).cloned();
@@ -532,6 +559,7 @@ impl Session {
                 params.selection,
                 None,
                 Some(chord),
+                ui,
             ),
             Resolution::PassThrough { chord } => Ok(InvokeResult {
                 effects: vec![Effect::PassThrough { key: chord }],
@@ -548,7 +576,12 @@ impl Session {
     }
 
     /// Resolve a key inside a menu with the two-step `-x`/`=x`/`x` matcher.
-    fn menu_key(&mut self, params: &ViewKeyParams, cursor_moved: bool) -> Result<InvokeResult> {
+    fn menu_key(
+        &mut self,
+        params: &ViewKeyParams,
+        cursor_moved: bool,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
         let resolution = {
             let view = self
                 .views
@@ -580,6 +613,7 @@ impl Session {
                 None,
                 None,
                 Some(params.key.clone()),
+                ui,
             ),
             MenuResolution::ResetArgs => self.run_command(
                 &params.view_id,
@@ -588,6 +622,7 @@ impl Session {
                 None,
                 None,
                 Some(params.key.clone()),
+                ui,
             ),
             MenuResolution::Unbound { chord } => Ok(unbound(&chord)),
             MenuResolution::ToggleSwitch(letter) => {
@@ -614,7 +649,14 @@ impl Session {
                     .get(&params.view_id)
                     .and_then(|view| view.menu())
                     .and_then(|menu| menu.item(&key).cloned());
-                let Some(crate::menu::Item::Option { value, .. }) = option else {
+                let Some(crate::menu::Item::Option {
+                    value,
+                    reader,
+                    label,
+                    flag,
+                    ..
+                }) = option
+                else {
                     return Ok(unbound(&key));
                 };
                 if value.is_some() {
@@ -626,22 +668,84 @@ impl Session {
                         menu.set_option(&key, None);
                     }
                     let render = self.render_view(&params.view_id, Some(params.cursor))?;
-                    Ok(InvokeResult {
+                    return Ok(InvokeResult {
                         render: Some(render),
                         ..InvokeResult::empty()
-                    })
-                } else {
-                    // Option prompts arrive with the `Ui` handle (R-3.1).
-                    Ok(InvokeResult {
-                        effects: vec![Effect::message(
-                            MessageLevel::Info,
-                            "Not implemented yet: option prompts (roadmap R-3.1)",
-                        )],
-                        ..InvokeResult::empty()
-                    })
+                    });
                 }
+
+                let request = self.option_prompt(&label, &flag, reader);
+                let answer = match reader {
+                    Reader::Choice => ui.choice(&request)?.map(|answer| match answer {
+                        PromptChoiceAnswer::Id { id } => id,
+                        PromptChoiceAnswer::Custom { custom } => custom,
+                    }),
+                    _ => ui.text(&request)?,
+                };
+                let Some(value) = answer else {
+                    // Cancelling leaves the option exactly as it was.
+                    return Ok(InvokeResult::empty());
+                };
+                if let Some(menu) = self
+                    .views
+                    .get_mut(&params.view_id)
+                    .and_then(|view| view.menu_mut())
+                {
+                    menu.set_option(&key, Some(value));
+                }
+                let render = self.render_view(&params.view_id, Some(params.cursor))?;
+                Ok(InvokeResult {
+                    render: Some(render),
+                    ..InvokeResult::empty()
+                })
             }
-            MenuResolution::Action(key) => self.menu_action(&params.view_id, &key, params),
+            MenuResolution::Action(key) => self.menu_action(&params.view_id, &key, params, ui),
+        }
+    }
+
+    /// Build the prompt a menu option asks for, choosing the kind by `reader`.
+    ///
+    /// Free-form revision readers (`Ref`, `Commit`) are text for now; picking a
+    /// revision from a select-mode view arrives with R-5.x.
+    fn option_prompt(&mut self, label: &str, flag: &str, reader: Reader) -> ViewPromptParams {
+        self.next_prompt += 1;
+        let prompt_id = format!("prompt-{}", self.next_prompt);
+        let title = format!("{label} ({flag})");
+        match reader {
+            Reader::Choice => ViewPromptParams {
+                prompt_id,
+                kind: PromptKind::Choice,
+                title,
+                detail: None,
+                yes_label: None,
+                no_label: None,
+                destructive: None,
+                default: None,
+                placeholder: None,
+                secret: None,
+                items: Some(Vec::new()),
+                allow_custom: Some(true),
+                preselected: None,
+                min: None,
+                max: None,
+            },
+            _ => ViewPromptParams {
+                prompt_id,
+                kind: PromptKind::Text,
+                title,
+                detail: None,
+                yes_label: None,
+                no_label: None,
+                destructive: None,
+                default: None,
+                placeholder: Some(flag.trim_end_matches('=').to_string()),
+                secret: None,
+                items: None,
+                allow_custom: None,
+                preselected: None,
+                min: None,
+                max: None,
+            },
         }
     }
 
@@ -652,6 +756,7 @@ impl Session {
         view_id: &str,
         key: &str,
         params: &ViewKeyParams,
+        ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
         let action = self
             .views
@@ -703,6 +808,7 @@ impl Session {
                         params.selection,
                         None,
                         Some(key.to_string()),
+                        ui,
                     );
                 }
 
@@ -746,6 +852,7 @@ impl Session {
                     None,
                     None,
                     Some(key.to_string()),
+                    ui,
                 )?;
                 effects.extend(run.effects);
                 run.effects = effects;
@@ -871,6 +978,7 @@ impl Session {
         selection: Option<Selection>,
         args: Option<&serde_json::Value>,
         key: Option<String>,
+        ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
         let Some(command) = commands::registry().get(command_id) else {
             return Err(Error::new(format!("unknown command: {command_id}")));
@@ -935,8 +1043,9 @@ impl Session {
             }
 
             let keymaps = Arc::clone(&self.keymaps);
-            let mut ctx =
-                commands::CommandCtx::new(view, &repo_path, &keymaps, cursor, selection, args, key);
+            let mut ctx = commands::CommandCtx::new(
+                view, &repo_path, &keymaps, cursor, selection, args, key, ui,
+            );
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
 
@@ -959,6 +1068,16 @@ impl Session {
                 (effects, outcome, render)
             }
         };
+
+        // `common.quit` closes every view of this session; the client gets the
+        // same effects and drops its windows.
+        if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
+            self.views.clear();
+            return Ok(InvokeResult {
+                effects,
+                ..InvokeResult::empty()
+            });
+        }
 
         let mode_changed = outcome.mode.is_some();
         if outcome.pop {
@@ -1030,6 +1149,15 @@ impl Session {
     ///
     /// Setting the mode it already has is a no-op.
     pub fn set_mode(&mut self, params: &ViewSetModeParams) -> Result<InvokeResult> {
+        self.set_mode_ui(params, &crate::ui::NullUi)
+    }
+
+    /// Switch a view to `mode`, asking the user through `ui` when needed.
+    pub fn set_mode_ui(
+        &mut self,
+        params: &ViewSetModeParams,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
         let current = self
             .views
             .get(&params.view_id)
@@ -1039,7 +1167,15 @@ impl Session {
             return Ok(InvokeResult::empty());
         }
         // There are exactly two modes, so toggling reaches the requested one.
-        self.run_command(&params.view_id, TOGGLE_TEXT_MODE, None, None, None, None)
+        self.run_command(
+            &params.view_id,
+            TOGGLE_TEXT_MODE,
+            None,
+            None,
+            None,
+            None,
+            ui,
+        )
     }
 
     /// Whether the view showing `uri` is in text mode.

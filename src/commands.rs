@@ -110,6 +110,8 @@ pub struct CommandCtx<'a> {
     pub args: Option<&'a Value>,
     /// The canonical chord that triggered the command through `view/key`.
     pub key: Option<String>,
+    /// Ask the user a question; `NullUi` when no interactive client is attached.
+    pub ui: &'a dyn crate::ui::PromptUi,
     effects: Vec<Effect>,
 }
 
@@ -123,6 +125,7 @@ impl<'a> CommandCtx<'a> {
         selection: Option<Selection>,
         args: Option<&'a Value>,
         key: Option<String>,
+        ui: &'a dyn crate::ui::PromptUi,
     ) -> Self {
         Self {
             view,
@@ -132,6 +135,7 @@ impl<'a> CommandCtx<'a> {
             selection,
             args,
             key,
+            ui,
             effects: Vec::new(),
         }
     }
@@ -625,15 +629,9 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-/// Quit closes a menu. Closing every view of a session arrives with R-3.1.
+/// Quit asks the client to close every view of the session.
 fn quit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    if ctx.view.menu().is_some() {
-        return Ok(CommandOutcome {
-            pop: true,
-            ..Default::default()
-        });
-    }
-    ctx.info("Not implemented yet: Close all views (roadmap R-3.1)");
+    ctx.extend(vec![Effect::Quit]);
     Ok(CommandOutcome::default())
 }
 

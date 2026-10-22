@@ -12,6 +12,7 @@ use magit_lsp::menus;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewKeyParams};
 use magit_lsp::semantic_tokens;
 use magit_lsp::session::{InvokeResult, Session};
+use magit_lsp::ui::ScriptedUi;
 use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, Viewport};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -65,6 +66,28 @@ fn press(session: &mut Session, view: &str, key: &str, cursor: Cursor) -> Invoke
             cursor,
             selection: None,
         })
+        .expect("view/key")
+}
+
+fn press_ui(
+    session: &mut Session,
+    ui: &ScriptedUi,
+    view: &str,
+    key: &str,
+    cursor: Cursor,
+) -> InvokeResult {
+    session
+        .key_ui(
+            &ViewKeyParams {
+                view_id: view.to_string(),
+                version: 1,
+                key: key.to_string(),
+                editor_mode: magit_lsp::keymap::EditorMode::Normal,
+                cursor,
+                selection: None,
+            },
+            ui,
+        )
         .expect("view/key")
 }
 
@@ -219,7 +242,7 @@ fn toggling_a_switch_updates_the_model_and_emits_a_preview_edit() {
 }
 
 #[test]
-fn setting_an_option_reports_the_roadmap_prompt() {
+fn setting_an_option_prompts_and_applies_the_value() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -227,14 +250,36 @@ fn setting_an_option_reports_the_roadmap_prompt() {
     open_status(&mut session);
     let (descriptor, _render) = open_commit(&mut session);
 
+    let ui = ScriptedUi::new();
+    ui.reply_text(Some("Alice".to_string()));
+
     let cursor = Cursor { line: 0, column: 0 };
-    press(&mut session, &descriptor.id, "=", cursor);
-    let outcome = press(&mut session, &descriptor.id, "A", cursor);
-    assert_eq!(
-        messages(&outcome.effects),
-        vec!["Not implemented yet: option prompts (roadmap R-3.1)"]
+    press_ui(&mut session, &ui, &descriptor.id, "=", cursor);
+    let outcome = press_ui(&mut session, &ui, &descriptor.id, "A", cursor);
+    assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
+    let render = outcome.render.expect("the option change re-renders");
+    let menu = render.menu.as_ref().expect("the structured menu");
+    match menu.item("=A") {
+        Some(magit_lsp::menu::Item::Option { value, .. }) => {
+            assert_eq!(value.as_deref(), Some("Alice"))
+        }
+        other => panic!("expected the author option, got {other:?}"),
+    }
+    assert_eq!(menu.preview(), "git commit --author=Alice");
+    assert!(
+        render
+            .edits
+            .expect("edits")
+            .iter()
+            .any(|edit| edit.lines.iter().any(|line| line.contains("--author=Alice"))),
+        "the preview and value appear in the edit"
     );
-    assert!(outcome.render.is_none(), "nothing changed to re-render");
+
+    let requests = ui.requests();
+    assert_eq!(requests.len(), 1, "one prompt was asked");
+    assert_eq!(requests[0].kind, magit_lsp::protocol::PromptKind::Text);
+    assert_eq!(requests[0].title, "Override the author (--author=)");
+    assert_eq!(requests[0].placeholder.as_deref(), Some("--author"));
 }
 
 #[test]

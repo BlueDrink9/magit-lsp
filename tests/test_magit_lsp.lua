@@ -1396,6 +1396,37 @@ T['menu.style split opens a bottom split'] = function()
 end
 
 
+T['a menu option prompt asks through vim.ui.input and lands the value'] = function()
+  setup_child()
+  child.lua([[
+    PROMPTS = {}
+    vim.ui.input = function(opts, on_confirm)
+      table.insert(PROMPTS, opts.prompt)
+      on_confirm('Alice')
+    end
+  ]])
+
+  child.type_keys(50, 'c')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+
+  child.type_keys(50, '=A')
+  local applied = vim.wait(5000, function()
+    for _, line in ipairs(menu_lines(state.id)) do
+      if line:find('--author=Alice', 1, true) then
+        return true
+      end
+    end
+    return false
+  end, 20)
+  MiniTest.expect.equality(applied, true, 'the option value and preview land')
+  MiniTest.expect.equality(child.lua_get('#PROMPTS'), 1, 'one prompt was shown')
+  MiniTest.expect.equality(
+    child.lua_get('PROMPTS[1]'),
+    'Override the author (--author=)'
+  )
+end
+
 T['planned menu actions are greyed with the menu.planned token'] = function()
   setup_child()
   child.type_keys(50, 'c')

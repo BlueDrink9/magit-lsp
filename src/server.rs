@@ -6,6 +6,7 @@ use crate::semantic_tokens;
 use crate::session::{InvokeResult, Session};
 use crate::transport;
 use crate::tree::Tree;
+use crate::ui::PromptUi;
 use crate::view::Viewport;
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, Response};
@@ -18,7 +19,7 @@ use lsp_types::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio::task::JoinSet;
@@ -64,10 +65,20 @@ struct Shared {
     client: Arc<Mutex<ClientCaps>>,
     /// Why the initial configuration load failed, if it did.
     startup_error: Option<String>,
+    /// The writer channel, so a blocking command can send `view/prompt`.
+    sender: mpsc::UnboundedSender<Message>,
+    /// Prompts waiting for an answer, keyed by prompt id.
+    prompts: Arc<Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>>,
+    /// Global prompt-id counter; ids are unique across sessions.
+    next_prompt: Arc<AtomicU64>,
 }
 
 impl Shared {
-    fn new(config: Arc<ConfigService>, startup_error: Option<String>) -> Self {
+    fn new(
+        config: Arc<ConfigService>,
+        startup_error: Option<String>,
+        sender: mpsc::UnboundedSender<Message>,
+    ) -> Self {
         Self {
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -76,7 +87,71 @@ impl Shared {
             config,
             client: Arc::new(Mutex::new(ClientCaps::default())),
             startup_error,
+            sender,
+            prompts: Arc::new(Mutex::new(HashMap::new())),
+            next_prompt: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Allocate a prompt id, unique for this server process.
+    fn next_prompt_id(&self) -> String {
+        let next = self.next_prompt.fetch_add(1, Ordering::Relaxed) + 1;
+        format!("p{next}")
+    }
+
+    /// Send a prompt notification and block until the client answers it.
+    ///
+    /// Returning `None` means the user cancelled: `view/promptRespond` drops the
+    /// sender without a value, so `recv` fails.
+    fn ask(&self, request: &ViewPromptParams) -> Option<PromptValue> {
+        let prompt_id = self.next_prompt_id();
+        let params = ViewPromptParams {
+            prompt_id: prompt_id.clone(),
+            ..request.clone()
+        };
+        let (tx, rx) = std_mpsc::channel();
+        self.prompts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(prompt_id.clone(), tx);
+
+        let sent = self
+            .sender
+            .send(Message::Notification(Notification::new(
+                VIEW_PROMPT.to_string(),
+                params,
+            )))
+            .is_ok();
+
+        let answer = if sent { rx.recv().ok() } else { None };
+
+        self.prompts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&prompt_id);
+        answer
+    }
+
+    /// Deliver a `view/promptRespond` answer to the waiting command.
+    fn respond_prompt(
+        &self,
+        prompt_id: &str,
+        cancelled: bool,
+        value: Option<PromptValue>,
+    ) -> Result<()> {
+        let sender = self
+            .prompts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(prompt_id)
+            .ok_or_else(|| Error::new(format!("unknown prompt: {prompt_id}")))?;
+        if !cancelled {
+            if let Some(value) = value {
+                let _ = sender.send(value);
+            }
+        }
+        // Dropping the sender without a value is the cancellation signal.
+        Ok(())
     }
 
     /// How the client wants keymaps delivered.
@@ -138,6 +213,67 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         sessions.values().any(|session| session.is_text_uri(uri))
+    }
+}
+
+/// The server's [`PromptUi`]: sends each question to the client and blocks the
+/// calling worker thread until the matching `view/promptRespond` arrives.
+struct ServerUi {
+    shared: Shared,
+}
+
+impl ServerUi {
+    fn new(shared: &Shared) -> Self {
+        Self {
+            shared: shared.clone(),
+        }
+    }
+
+    /// Ask one question and convert the wire value to the expected kind.
+    fn ask(&self, request: &ViewPromptParams) -> Result<Option<PromptValue>> {
+        Ok(self.shared.ask(request))
+    }
+}
+
+impl PromptUi for ServerUi {
+    fn confirm(&self, request: &ViewPromptParams) -> Result<Option<bool>> {
+        match self.ask(request)? {
+            Some(PromptValue::Bool(value)) => Ok(Some(value)),
+            Some(other) => Err(Error::new(format!(
+                "expected a bool answer, got {other:?}"
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn text(&self, request: &ViewPromptParams) -> Result<Option<String>> {
+        match self.ask(request)? {
+            Some(PromptValue::Text(value)) => Ok(Some(value)),
+            Some(other) => Err(Error::new(format!(
+                "expected a text answer, got {other:?}"
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn choice(&self, request: &ViewPromptParams) -> Result<Option<PromptChoiceAnswer>> {
+        match self.ask(request)? {
+            Some(PromptValue::Choice(value)) => Ok(Some(value)),
+            Some(other) => Err(Error::new(format!(
+                "expected a choice answer, got {other:?}"
+            ))),
+            None => Ok(None),
+        }
+    }
+
+    fn multi_choice(&self, request: &ViewPromptParams) -> Result<Option<Vec<String>>> {
+        match self.ask(request)? {
+            Some(PromptValue::Multi { ids }) => Ok(Some(ids)),
+            Some(other) => Err(Error::new(format!(
+                "expected a multiChoice answer, got {other:?}"
+            ))),
+            None => Ok(None),
+        }
     }
 }
 
@@ -211,7 +347,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
             )
         }
     };
-    let shared = Shared::new(config, startup_error);
+    let shared = Shared::new(config, startup_error, sender.clone());
 
     // Poll the loaded files for changes. A 150 ms interval doubles as the
     // debounce, so a burst of writes reloads once.
@@ -301,6 +437,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     let _ = watcher.await;
     handlers.abort_all();
     while handlers.join_next().await.is_some() {}
+    // `Shared` also holds a sender clone, so it must go before the writer
+    // channel can close.
+    drop(shared);
     drop(sender);
 
     match writer.await {
@@ -536,6 +675,11 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         ViewInvokeRequest::METHOD => invoke_view(shared, params),
         ViewKeyRequest::METHOD => key_view(shared, params),
         ViewSetModeRequest::METHOD => set_mode_view(shared, params),
+        ViewPromptRespondRequest::METHOD => {
+            let p: ViewPromptRespondParams = from_params(params)?;
+            shared.respond_prompt(&p.prompt_id, p.cancelled, p.value)?;
+            Ok(Dispatched::value(Value::Null))
+        }
         ViewResyncRequest::METHOD => {
             let p: ViewResyncParams = from_params(params)?;
             let repo = shared
@@ -706,7 +850,8 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let session = sessions
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let outcome = session.invoke(&p)?;
+    let ui = ServerUi::new(shared);
+    let outcome = session.invoke_ui(&p, &ui)?;
     drop(sessions);
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
@@ -726,7 +871,8 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     session.set_keymaps(keymaps);
-    let outcome = session.key(&p)?;
+    let ui = ServerUi::new(shared);
+    let outcome = session.key_ui(&p, &ui)?;
     drop(sessions);
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
@@ -744,7 +890,8 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let session = sessions
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let outcome = session.set_mode(&p)?;
+    let ui = ServerUi::new(shared);
+    let outcome = session.set_mode_ui(&p, &ui)?;
     drop(sessions);
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
@@ -783,6 +930,9 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
                 }
                 Effect::PopView { view_id } => {
                     view_repos.remove(view_id);
+                }
+                Effect::Quit => {
+                    view_repos.retain(|_, owner| owner != repo);
                 }
                 _ => {}
             }
@@ -887,6 +1037,7 @@ fn is_request_method(method: &str) -> bool {
             | ViewInvokeRequest::METHOD
             | ViewKeyRequest::METHOD
             | ViewSetModeRequest::METHOD
+            | ViewPromptRespondRequest::METHOD
             | ViewResyncRequest::METHOD
     )
 }

@@ -605,6 +605,135 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
 }
 
 #[test]
+fn a_menu_option_prompt_round_trips_over_stdio() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize();
+
+    let view_id = open_view(&mut server, 2, &repo);
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "open.commit"},
+    }));
+    let opened = server.response_with_id(3);
+    let menu_id = opened["result"]["effects"]
+        .as_array()
+        .expect("effects")
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .and_then(|effect| effect["descriptor"]["id"].as_str())
+        .expect("the pushed menu")
+        .to_string();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    let menu_keymap = server.recv();
+    assert_eq!(menu_keymap["method"], json!("view/keymap"), "{menu_keymap}");
+
+    // The `=` prefix waits for the option letter.
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "view/key",
+        "params": {
+            "viewId": menu_id,
+            "version": 1,
+            "key": "=",
+            "editorMode": "normal",
+            "cursor": {"line": 0, "column": 0},
+        },
+    }));
+    let prefix = server.response_with_id(4);
+    assert_eq!(prefix["result"]["effects"], json!([]), "{prefix}");
+
+    // The letter asks the question; the response is held until it is answered.
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "view/key",
+        "params": {
+            "viewId": menu_id,
+            "version": 1,
+            "key": "A",
+            "editorMode": "normal",
+            "cursor": {"line": 0, "column": 0},
+        },
+    }));
+    let prompt = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/prompt") {
+            break message;
+        }
+        assert!(
+            message["id"] != json!(5),
+            "view/key must not answer before the prompt: {message}"
+        );
+    };
+    let prompt_id = prompt["params"]["promptId"]
+        .as_str()
+        .expect("prompt id")
+        .to_string();
+    assert_eq!(prompt["params"]["kind"], json!("text"), "{prompt}");
+    assert_eq!(
+        prompt["params"]["title"],
+        json!("Override the author (--author=)"),
+        "{prompt}"
+    );
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "view/promptRespond",
+        "params": {
+            "promptId": prompt_id,
+            "cancelled": false,
+            "value": "Alice",
+        },
+    }));
+
+    let mut key_response = None;
+    let mut respond_response = None;
+    let mut option_render = None;
+    while key_response.is_none() || respond_response.is_none() || option_render.is_none() {
+        let message = server.recv();
+        match message["id"].as_i64() {
+            Some(5) => key_response = Some(message),
+            Some(6) => respond_response = Some(message),
+            _ if message["method"] == json!("view/render") => {
+                if message["params"]["viewId"] == json!(menu_id) {
+                    option_render = Some(message);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let key_response = key_response.expect("view/key response");
+    assert_eq!(key_response["result"]["effects"], json!([]), "{key_response}");
+    let respond_response = respond_response.expect("view/promptRespond response");
+    assert_eq!(respond_response["result"], Value::Null);
+
+    let option_render = option_render.expect("the option render");
+    let text = option_render["params"]["text"]
+        .as_array()
+        .expect("full text after a fresh option");
+    assert!(
+        text.iter()
+            .any(|line| line.as_str().is_some_and(|line| line.contains("--author=Alice"))),
+        "the option and its preview show the answer: {option_render}"
+    );
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
 fn a_config_reload_repushes_the_view_keymap() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

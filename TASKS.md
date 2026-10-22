@@ -1253,7 +1253,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 
 ### Phase 3 — Effects, prompts, runner, process log, editor bridge
 
-- [ ] R-3.1 `Ui` handle and `view/prompt` with the four kinds (§3.6); Neovim
+- [x] R-3.1 `Ui` handle and `view/prompt` with the four kinds (§3.6); Neovim
       and VSCode mappings; `ScriptedUi` for tests. Menu option prompts now work.
 - [ ] R-3.2 Process runner (queue, progress, cancel, ring buffer).
 - [ ] R-3.3 **Process log view.**
@@ -1542,11 +1542,10 @@ on the oldest supported git version.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1 and R-2.1…R-2.8 (all ticked above; `make test` green: Rust +
-Neovim mini.test). **Not started:** R-2.9 (second client; a first dispatch was
-interrupted by a server restart and left no files) and Phases 3–9. Note
-for R-2.9: node 20 / npm exist, `tsc` and `code` do not. Keep any second client
-very thin, and fix protocol gaps before Phase 3.
+**Done:** Phases 0, 1, R-2.1…R-2.9 and R-3.1 (`make test` green: Rust + Neovim
+mini.test + the VSCode node tests). The VSCode client is the thin second client
+for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
+R-3.2…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1622,3 +1621,17 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   edit, bisect bad, merge commit/abort, cherry-pick/revert continue…) are
   omitted; branch `u/r/p/R/P` are modelled as options. 22 menus, 355 parity
   rows, ~191 Planned actions; some Magit keys are from memory and unverified.
+- **R-3.1:** §4.2 lists `view/prompt` as a request, but a server request cannot
+  be answered from inside a `view/key`/`view/invoke` handler: Neovim would need
+  to re-enter the same client while the first request is still pending. So the
+  server sends `view/prompt` as a **notification** and the client answers with a
+  `view/promptRespond` **request**, which the server resolves and replies
+  `null`. The wait happens on the `spawn_blocking` worker (a std mpsc sender per
+  prompt id), never on a Tokio thread. `CommandCtx` keeps the sync handler shape
+  and always carries `&dyn PromptUi`; `Session::{invoke,key,set_mode}` delegate
+  to `NullUi` so the old signatures survive. `Session::set_mode_ui` is new so
+  `view/setMode` also gets a `Ui`. `common.quit` now emits `Effect::Quit` and
+  closes every view of the session instead of the roadmap message. Menu option
+  prompts are `Reader`-driven: `Text/Path/Date/Number/Ref/Commit` ask for text,
+  `Choice` asks with `allowCustom: true` and no items, and a cancelled prompt
+  changes nothing (no render).

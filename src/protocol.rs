@@ -46,6 +46,8 @@ pub enum Effect {
         #[serde(rename = "viewId")]
         view_id: String,
     },
+    /// Close every view of the session.
+    Quit,
 }
 
 impl Effect {
@@ -298,4 +300,101 @@ pub struct ViewResizeParams {
     pub view_id: String,
     pub cols: u32,
     pub rows: u32,
+}
+
+/// Method name of the server's prompt notification.
+pub const VIEW_PROMPT: &str = "view/prompt";
+/// Method name of the client's prompt answer request.
+pub const VIEW_PROMPT_RESPOND: &str = "view/promptRespond";
+
+/// The four kinds of question the server can ask (§3.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptKind {
+    Confirm,
+    Text,
+    Choice,
+    MultiChoice,
+}
+
+/// One selectable item of a `choice` or `multiChoice` prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptItem {
+    /// The id the server receives back; the client displays `label`.
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// `view/prompt`: one question the server is waiting on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewPromptParams {
+    pub prompt_id: String,
+    pub kind: PromptKind,
+    /// The question, shown prominently.
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yes_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive: Option<bool>,
+    /// Kind-dependent default: a bool, a string or an item id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<PromptItem>>,
+    #[serde(default, rename = "allowCustom", skip_serializing_if = "Option::is_none")]
+    pub allow_custom: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preselected: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<usize>,
+}
+
+/// A `choice` answer: one item id, or the text the user typed instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PromptChoiceAnswer {
+    Id { id: String },
+    Custom { custom: String },
+}
+
+/// The value of a prompt answer; its shape follows the prompt kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PromptValue {
+    Bool(bool),
+    Text(String),
+    Choice(PromptChoiceAnswer),
+    Multi { ids: Vec<String> },
+}
+
+/// `view/promptRespond`: the client's answer to a prompt notification.
+pub enum ViewPromptRespondRequest {}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewPromptRespondParams {
+    pub prompt_id: String,
+    pub cancelled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<PromptValue>,
+}
+impl lsp_types::request::Request for ViewPromptRespondRequest {
+    type Params = ViewPromptRespondParams;
+    type Result = Value;
+    const METHOD: &'static str = VIEW_PROMPT_RESPOND;
 }

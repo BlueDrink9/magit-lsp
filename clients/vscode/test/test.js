@@ -6,6 +6,7 @@ const context = require('../lib/context');
 const render = require('../lib/render');
 const menu = require('../lib/menu');
 const foldkeys = require('../lib/foldkeys');
+const prompt = require('../lib/prompt');
 
 const failures = [];
 let passed = 0;
@@ -279,6 +280,80 @@ test('fold levels become detail changes', () => {
   ]);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].args.command, 'common.less-detail');
+});
+
+// lib/prompt.js ------------------------------------------------------------
+
+test('confirm rows use the labels and put No first when destructive', () => {
+  assert.deepEqual(prompt.promptItems({ kind: 'confirm', title: 'Delete?' }), [
+    { id: 'yes', label: 'Yes' },
+    { id: 'no', label: 'No' },
+  ]);
+  assert.deepEqual(
+    prompt.promptItems({
+      kind: 'confirm',
+      title: 'Delete?',
+      destructive: true,
+      yesLabel: 'Delete',
+      noLabel: 'Keep',
+    }),
+    [
+      { id: 'no', label: 'Keep' },
+      { id: 'yes', label: 'Delete' },
+    ]
+  );
+});
+
+test('choice rows keep item metadata and add a custom row only when allowed', () => {
+  const params = {
+    kind: 'choice',
+    title: 'Style',
+    items: [{ id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' }],
+  };
+  assert.deepEqual(prompt.promptItems(params), [
+    { id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' },
+  ]);
+  assert.deepEqual(prompt.promptItems({ ...params, allowCustom: true }), [
+    { id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' },
+    { id: prompt.CUSTOM_ID, label: 'Enter custom value…' },
+  ]);
+  assert.deepEqual(prompt.promptItems(undefined), []);
+});
+
+test('answers use the shape the server expects', () => {
+  assert.deepEqual(prompt.answerFor({ kind: 'confirm' }, { id: 'yes' }), {
+    cancelled: false,
+    value: true,
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'confirm' }, { id: 'no' }), {
+    cancelled: false,
+    value: false,
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'text' }, 'Alice'), {
+    cancelled: false,
+    value: 'Alice',
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'choice' }, { id: 'rebase' }), {
+    cancelled: false,
+    value: { id: 'rebase' },
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'choice', allowCustom: true }, { id: prompt.CUSTOM_ID }), {
+    cancelled: false,
+    custom: true,
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'multiChoice' }, [{ id: 'a' }, { id: 'b' }]), {
+    cancelled: false,
+    value: { ids: ['a', 'b'] },
+  });
+  assert.deepEqual(prompt.answerFor({ kind: 'text' }, undefined), { cancelled: true });
+});
+
+test('a cancelled custom choice cancels the whole prompt', () => {
+  assert.deepEqual(prompt.customChoice('main'), {
+    cancelled: false,
+    value: { custom: 'main' },
+  });
+  assert.deepEqual(prompt.customChoice(undefined), { cancelled: true });
 });
 
 // summary ------------------------------------------------------------------

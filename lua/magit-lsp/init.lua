@@ -3,6 +3,7 @@ local M = {}
 local keys = require('magit-lsp.keys')
 local keymap = require('magit-lsp.keymap')
 local menu = require('magit-lsp.menu')
+local prompt = require('magit-lsp.prompt')
 
 --- The last text the server sent, for clients and tests that need it.
 M.lines = {}
@@ -784,6 +785,12 @@ function M.setup(opts)
     end
   end
 
+  -- Prompts arrive as notifications; the client shows the right widget and
+  -- answers with `view/promptRespond`.
+  vim.lsp.handlers['view/prompt'] = function(_, result)
+    prompt.handle(result)
+  end
+
   menu.setup(opts.menu)
 
   M.buf = fresh_buffer()
@@ -813,6 +820,8 @@ function M.setup(opts)
     vim.notify('Failed to start magit-lsp server', vim.log.levels.ERROR)
     return nil, 'failed to start client'
   end
+
+  prompt.configure({ client_id = M.client_id })
 
   menu.configure({
     client_id = M.client_id,

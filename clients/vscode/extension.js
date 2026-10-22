@@ -11,6 +11,7 @@ const contextKeys = require('./lib/context');
 const render = require('./lib/render');
 const menu = require('./lib/menu');
 const foldkeys = require('./lib/foldkeys');
+const prompt = require('./lib/prompt');
 
 const SCHEME = 'magit';
 
@@ -74,6 +75,7 @@ function activate(context) {
 
   client = createClient();
   client.onNotification('view/render', applyRender);
+  client.onNotification('view/prompt', handlePrompt);
   clientReady = client.start().catch((error) => {
     output.appendLine(`language client failed: ${message(error)}`);
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
@@ -487,6 +489,91 @@ function applyRender(params) {
       version: params.version,
     });
   }
+}
+
+/**
+ * Ask the user a server prompt and answer it with `view/promptRespond`.
+ *
+ * @param {object} params `view/prompt` params
+ */
+async function handlePrompt(params) {
+  if (!params || !params.promptId || !client) {
+    return;
+  }
+
+  let answer = { cancelled: true };
+  try {
+    answer = await promptFor(params);
+  } catch (error) {
+    output.appendLine(`view/prompt "${params.title}" failed: ${message(error)}`);
+  }
+
+  const request = { promptId: params.promptId, cancelled: answer.cancelled };
+  if (!answer.cancelled) {
+    request.value = answer.value;
+  }
+  try {
+    await clientReady;
+    await client.sendRequest('view/promptRespond', request);
+  } catch (error) {
+    output.appendLine(`view/promptRespond failed: ${message(error)}`);
+  }
+}
+
+/**
+ * Show one prompt with the matching VSCode widget.
+ *
+ * @param {object} params `view/prompt` params
+ * @returns {Promise<{cancelled: boolean, value?: unknown, custom?: boolean}>}
+ */
+async function promptFor(params) {
+  if (params.kind === 'text') {
+    const value = await vscode.window.showInputBox({
+      title: params.title,
+      prompt: params.detail,
+      placeHolder: params.placeholder,
+      value: typeof params.default === 'string' ? params.default : undefined,
+      password: Boolean(params.secret),
+      ignoreFocusOut: true,
+    });
+    return prompt.answerFor(params, value);
+  }
+
+  if (params.kind === 'confirm' || params.kind === 'choice') {
+    const picked = await vscode.window.showQuickPick(prompt.promptItems(params), {
+      title: params.title,
+      placeHolder: params.detail || params.title,
+      ignoreFocusOut: true,
+    });
+    const answer = prompt.answerFor(params, picked);
+    if (!answer.custom) {
+      return answer;
+    }
+    const text = await vscode.window.showInputBox({
+      title: params.title,
+      placeHolder: params.placeholder || 'Value',
+      ignoreFocusOut: true,
+    });
+    return prompt.customChoice(text);
+  }
+
+  if (params.kind === 'multiChoice') {
+    const preselected = new Set(params.preselected || []);
+    const items = prompt.promptItems(params).map((row) => ({
+      ...row,
+      picked: preselected.has(row.id),
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      title: params.title,
+      placeHolder: params.detail || params.title,
+      canPickMany: true,
+      ignoreFocusOut: true,
+    });
+    return prompt.answerFor(params, picked);
+  }
+
+  // An unknown kind cannot be repaired client-side; cancel it.
+  return { cancelled: true };
 }
 
 /**

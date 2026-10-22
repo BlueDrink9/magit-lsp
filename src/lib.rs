@@ -21,6 +21,7 @@ pub mod session;
 pub mod status_view;
 pub mod transport;
 pub mod tree;
+pub mod ui;
 pub mod view;
 
 use std::fmt;
