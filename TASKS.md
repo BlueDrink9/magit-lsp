@@ -1249,7 +1249,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       generated from the registry; `cargo xtask parity`.
 - [ ] R-2.9 **Second client to prove decoupling:** a minimal VSCode extension
       (static keybindings + context keys + QuickPick menu + fold-key mirroring
-      command) or a ratatui TUI. Fix protocol gaps found here before Phase 3.
+      command) or a ratatui TUI. Fix protocol gaps found here before Phase 3. The complexity of implementing a language server will be a factor here. It is important that clients integrations can be very thin.
 
 ### Phase 3 — Effects, prompts, runner, process log, editor bridge
 
@@ -1537,3 +1537,88 @@ on the oldest supported git version.
 8. **Fold keys in VSCode** for users with customised `editor.toggleFold`:
    the "mirror my shortcuts" command (proposed) vs. any better mechanism found
    during the spike.
+
+---
+
+## 10. Implementation status and deviations (written after R-2.8)
+
+**Done:** Phases 0, 1 and R-2.1…R-2.8 (all ticked above; `make test` green: Rust +
+Neovim mini.test). **Not started:** R-2.9 (second client; a first dispatch was
+interrupted by a server restart and left no files) and Phases 3–9. Note
+for R-2.9: node 20 / npm exist, `tsc` and `code` do not. Keep any second client
+very thin, and fix protocol gaps before Phase 3.
+
+**Process notes:** the worker's first two dispatches failed with "Model
+unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
+Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
+`debug = "line-tables-only"`, `incremental = false` and ran `cargo clean`
+(`target/` 4.8 GB → ~1 GB). Keep `target/` small.
+
+**Where the implementation differs from the spec (worker's reason in brackets):**
+
+- **IMM-1:** the `git rm --cached -f` fallback exists but no test reaches it
+  (`git reset -q --` already works on unborn HEAD). `unstage_hunk` emits a
+  `/dev/null` new-file header when reversing a new file (else an empty staged
+  entry stays). README records only git 2.55.0 as verified; the spec's 2.43
+  claim and the "oldest supported git" decision (§9.5) are still open.
+- **IMM-2/5:** the custom renumbering algorithm is gone; patches rely on
+  `git apply --cached --unidiff-zero --recount` (proptests pass). IMM-5 found
+  no bug: two distant stagings give two hunks, close ones one, as Git does.
+- **IMM-3:** `Effect`/`MutationResponse` were introduced for it; the latter was
+  removed again in R-1.6 (mutations now return `{effects}` + `view/render`).
+- **IMM-4:** the "Read-only view" hint shows on the first attempted `:w`, not
+  on E21 (no reliable autocmd for E21). Plain `:w` on a `nofile` buffer fails
+  with E382 *before* `BufWriteCmd`, so a `CmdlineLeave` guard swallows it too.
+  The hint wording predates text mode (R-2.6); check it still reads right.
+- **IMM-6:** only the pure `resolve` + executor exist; **discard is not
+  executed** (returns "Not implemented yet", belongs to R-3.6).
+- **IMM-8:** `:TOhtml` needs `:packadd nvim.tohtml`, `termguicolors`, folds
+  off; it ignores `hl_eol` and **skips LSP semantic-token extmarks**, so the
+  colour tests need the extmark-dump fallback (§8.4 step 5). The spike now
+  dumps semantic tokens (`make color-spike`).
+- **R-0.2:** unmerged (`u`) entries show as `U` without hunks. Copies are not
+  detected (`git diff -M`, not `-C`). `Status` gained optional `orig_path`,
+  `head`, `upstream`, `ahead`, `behind`.
+- **R-0.4:** symlink type changes, binary files and mode-only changes are
+  whole-file only; multi-section (type-change) diffs expose no hunks.
+- **R-0.5:** hunk id = first 16 hex of SHA-256 over markers+text (not `@@`
+  numbers); duplicates get `-1`, `-2`. Stale ids give a warn message plus a
+  fresh render, never a guess.
+- **R-0.7:** the stdio loop is `tokio`, but Git still runs synchronously
+  inside `spawn_blocking` (porting the runner to `tokio::process` is R-3.2).
+  A debug-only `MAGIT_LSP_TEST_DELAY_MS` hook backs the concurrency test.
+- **R-1.1/1.2:** the status text format was kept byte-identical to the old
+  Lua renderer. Position-based requests use the last *acked* tree.
+- **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,
+  filetype `magit-lsp`). Modifier links must only add attributes (they apply
+  above type groups). Added/removed use `@diff.plus`/`@diff.minus` (the old
+  `diffAdded` groups do not exist in built-in schemes).
+- **R-1.4:** `window/showDocument` is not used; `textDocument/definition` is
+  the "visit" mechanism (deleted files return empty). `vcs/targets` is gone.
+- **R-1.5:** the default visibility is fully expanded (unlike Magit, which
+  collapses). No fold indicator is rendered. Laziness is proven by a global
+  `diff_invocation_count` counter.
+- **R-1.6:** inline diffs replace `vcs/diff`/`show_diff`; the Lua public API is
+  only `setup`, `open`, `refresh`, `invoke`, `error_detail`. `src/vcs.rs` deleted.
+- **R-2.1:** handlers are plain sync `fn(&mut CommandCtx)`, not `async` with a
+  `Ui` handle (that arrives with R-3.1).
+- **R-2.2:** `common.visit` lives in the `status` scope (its `Enter` clashed
+  with `common.confirm`); vim binds `open.log` to `g l` (rule R4 forbids
+  rebinding `l`); `ctrl+shift+c`-style keys are allowed (shift + letter with
+  another modifier). Config reload is a 150 ms hash poll, not `notify`.
+- **R-2.4:** a chord maps its full `lhs`, so Neovim waits `timeoutlen` after
+  prefixes like `g`/`z`. `visit_key` (default `<CR>`) is a client-side
+  exception until `common.visit` is `Implemented`. Capture mode was first tested
+  with a synthetic keymap (menus now give a real capturing view).
+- **R-2.5:** deny-list allow entries with reasons: `ctrl+t`, `ctrl+c`, and
+  menu-scoped `ctrl+s`/`ctrl+r`. A minimal `.github/workflows/ci.yml` exists
+  (no caching yet).
+- **R-2.7:** pressing an option key answers "Not implemented yet … R-3.1"
+  (no prompts yet); only *clearing* a preset option works. Saved args are
+  in-memory per session. Menu→menu stacking is demonstrated via `?` → dispatch.
+- **R-2.8:** `cargo xtask parity` is an alias (`.cargo/config.toml`) for
+  `magit-lsp parity`, not a separate xtask crate. Reset's prefix is `X`
+  (not `x`). In-progress actions whose key clashes with another (rebase skip/
+  edit, bisect bad, merge commit/abort, cherry-pick/revert continue…) are
+  omitted; branch `u/r/p/R/P` are modelled as options. 22 menus, 355 parity
+  rows, ~191 Planned actions; some Magit keys are from memory and unverified.
