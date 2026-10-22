@@ -158,6 +158,7 @@ comes back as an error-level `Effect::Message` with a readable summary (see
   headers for stage-all/untracked/unstage-all and selections per IMM-2). The
   Lua client is thin: it opens the view, applies `view/render`, acks, resyncs on
   a lost update, and forwards keys; it holds no per-hunk/file/line logic.
+- R-2.1: `src/commands.rs` is the one command registry (`Command{id, scope, doc, status, run}` with `Implemented`/`Planned{roadmap_id}`/`Unavailable{reason}`, `Registry::get/iter/by_scope`, built once). Every id named in TASKS.md §5.1–§5.5 is registered: the 14 previously-implemented commands plus all others as `Planned`. `Session::invoke` no longer matches on command names: it looks the command up, answers `Planned`/`Unavailable`/scope mismatches with an info `Effect::Message`, and hands execution to a sync `CommandCtx` handler (async `Ui` in R-3.1). `tests/commands.rs` enumerates the registry and checks Planned commands change nothing.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
   rendering, views) + Neovim integration via mini.test (real server + temp
   repo). `make test`.

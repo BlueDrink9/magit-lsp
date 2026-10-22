@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod diff_text;
 pub mod dispatch;
 pub mod errors;

@@ -5,11 +5,8 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
+use crate::commands::{self, CommandStatus};
 use crate::diff_text;
-use crate::dispatch;
-use crate::errors;
-use crate::git::GitRepo;
-use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewRender};
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
@@ -47,6 +44,16 @@ impl OpenView {
         self.acked.as_ref()
     }
 
+    /// Apply a visibility command, resolving against the caller's tree.
+    pub(crate) fn set_visibility(
+        &mut self,
+        tree: &Tree,
+        line: Option<usize>,
+        command: VisibilityCommand,
+    ) -> bool {
+        self.view.set_visibility(tree, line, command)
+    }
+
     /// The current version, incremented on every render.
     pub fn version(&self) -> u64 {
         self.version
@@ -62,7 +69,6 @@ impl OpenView {
         self.view.on_refresh()?;
         self.render(cursor, None)
     }
-
     /// Render without touching the repository, diffing against the last tree.
     ///
     /// `forced` replaces the identity-based successor cursor; section
@@ -273,79 +279,65 @@ impl Session {
         })
     }
 
-    /// Run one of the small set of commands R-1.2 supports.
+    /// Run a registered command against a view.
     ///
-    /// The full command registry is R-2.1; this table is deliberately tiny.
+    /// The command table lives in [`crate::commands`]; this method only looks
+    /// it up, reports `Planned`/`Unavailable`/scope mismatches, and renders.
     pub fn invoke(&mut self, params: &ViewInvokeParams) -> Result<InvokeResult> {
+        let Some(command) = commands::registry().get(&params.command) else {
+            return Err(Error::new(format!("unknown command: {}", params.command)));
+        };
         let repo_path = self.repo_path.clone();
         let view = self
             .views
             .get_mut(&params.view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
 
-        let mut forced = None;
-        let selection = params.selection.map(|selection| dispatch::LineRange {
-            start: selection.start_line as u32,
-            end: selection.end_line as u32,
-        });
-        let effects = match params.command.as_str() {
-            "common.refresh" => Vec::new(),
-            "status.stage" => stage_or_unstage(
-                view,
-                &repo_path,
-                dispatch::Command::Stage,
-                params.cursor,
-                selection,
-            )?,
-            "status.unstage" => stage_or_unstage(
-                view,
-                &repo_path,
-                dispatch::Command::Unstage,
-                params.cursor,
-                selection,
-            )?,
-            "status.stage-all" => run_resolution(
-                &repo_path,
-                dispatch::Resolution::StageAllUnstaged,
-            )?,
-            "status.unstage-all" => run_resolution(
-                &repo_path,
-                dispatch::Resolution::UnstageAllStaged,
-            )?,
-            "common.next-section" => {
-                forced = section_cursor(view, params.cursor, true);
-                Vec::new()
+        match &command.status {
+            CommandStatus::Planned { roadmap_id } => {
+                return Ok(InvokeResult {
+                    effects: vec![Effect::message(
+                        MessageLevel::Info,
+                        format!(
+                            "Not implemented yet: {} (roadmap {})",
+                            command.doc, roadmap_id
+                        ),
+                    )],
+                    render: None,
+                });
             }
-            "common.prev-section" => {
-                forced = section_cursor(view, params.cursor, false);
-                Vec::new()
+            CommandStatus::Unavailable { reason } => {
+                return Ok(InvokeResult {
+                    effects: vec![Effect::message(MessageLevel::Info, *reason)],
+                    render: None,
+                });
             }
-            other => {
-                let Some(command) = visibility_command(other, recursive_arg(params)) else {
-                    return Err(Error::new(format!("unknown command: {other}")));
-                };
-                // Resolve against the acked tree, like every other action.
-                let source = view
-                    .acked_tree()
-                    .cloned()
-                    .unwrap_or_else(|| view.tree().clone());
-                view.view
-                    .set_visibility(&source, params.cursor.map(|cursor| cursor.line), command);
-                Vec::new()
-            }
-        };
+            CommandStatus::Implemented => {}
+        }
 
-        let render = if matches!(
-            params.command.as_str(),
-            "common.refresh"
-                | "status.stage"
-                | "status.unstage"
-                | "status.stage-all"
-                | "status.unstage-all"
-        ) {
+        if !command.scope.matches(view.descriptor().scope.as_str()) {
+            return Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    "Not available in this view",
+                )],
+                render: None,
+            });
+        }
+
+        let mut ctx = commands::CommandCtx::new(
+            view,
+            &repo_path,
+            params.cursor,
+            params.selection,
+            params.args.as_ref(),
+        );
+        let outcome = (command.run)(&mut ctx)?;
+        let effects = ctx.into_effects();
+        let render = if outcome.refresh {
             view.refresh_and_render(params.cursor)?
         } else {
-            view.render(params.cursor, forced)?
+            view.render(params.cursor, outcome.cursor)?
         };
         Ok(InvokeResult {
             effects,
@@ -371,225 +363,8 @@ fn create_view(repo_path: &str, kind: &ViewKind) -> Result<Box<dyn View>> {
     }
 }
 
-/// The `recursive` argument of a fold command, as sent by `zA`/`zO`/`zC`.
-fn recursive_arg(params: &ViewInvokeParams) -> bool {
-    params
-        .args
-        .as_ref()
-        .and_then(|args| args.get("recursive"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-}
-
-/// Map a `common.*` fold command id to its visibility operation.
-fn visibility_command(command: &str, recursive: bool) -> Option<VisibilityCommand> {
-    match command {
-        "common.toggle-section" => Some(VisibilityCommand::Toggle { recursive }),
-        "common.show-section" => Some(VisibilityCommand::Show { recursive }),
-        "common.hide-section" => Some(VisibilityCommand::Hide { recursive }),
-        "common.show-all" => Some(VisibilityCommand::ShowAll),
-        "common.hide-all" => Some(VisibilityCommand::HideAll),
-        "common.more-detail" => Some(VisibilityCommand::MoreDetail),
-        "common.less-detail" => Some(VisibilityCommand::LessDetail),
-        _ => None,
-    }
-}
-
-/// The cursor line of the next or previous section header.
-fn section_cursor(view: &OpenView, cursor: Option<Cursor>, forward: bool) -> Option<Cursor> {
-    let cursor = cursor?;
-    let source = view.acked_tree().unwrap_or_else(|| view.tree());
-    let sections: Vec<&Node> = source
-        .nodes
-        .iter()
-        .filter(|node| node.kind == NodeKind::Section)
-        .collect();
-    let current = source
-        .line_nodes
-        .get(cursor.line)
-        .and_then(|line| line.section.as_deref());
-    let index = current.and_then(|section| {
-        sections
-            .iter()
-            .position(|node| node.section.as_deref() == Some(section))
-    });
-    let target = match (index, forward) {
-        (Some(index), true) => sections.get(index + 1),
-        (Some(index), false) => index.checked_sub(1).and_then(|index| sections.get(index)),
-        (None, true) => sections.first(),
-        (None, false) => sections.last(),
-    }?;
-    Some(Cursor {
-        line: target.start_line,
-        column: 0,
-    })
-}
-
-fn stage_or_unstage(
-    view: &OpenView,
-    repo_path: &str,
-    command: dispatch::Command,
-    cursor: Option<Cursor>,
-    selection: Option<dispatch::LineRange>,
-) -> Result<Vec<Effect>> {
-    // Resolve against the last tree the client acknowledged; actions are
-    // addressed by the node there, never by index in whatever is current.
-    let source = view.acked_tree().unwrap_or_else(|| view.tree());
-
-    let resolution = if let Some(range) = selection {
-        // A visual selection wins over the node under the cursor (IMM-2).
-        dispatch::resolve(command, dispatch::NodeKind::Other, Some(range))
-    } else {
-        let Some(cursor) = cursor else {
-            return Ok(vec![Effect::message(
-                MessageLevel::Info,
-                "Place the cursor on a change to stage or unstage.",
-            )]);
-        };
-        let Some(node) = source
-            .line_nodes
-            .get(cursor.line)
-            .and_then(|line| source.node(&line.node))
-        else {
-            return Ok(vec![Effect::message(
-                MessageLevel::Info,
-                "No change under the cursor.",
-            )]);
-        };
-
-        let current = view.tree();
-        let node = if current.node(&node.id).is_some() {
-            node
-        } else {
-            // The node moved or disappeared. Re-resolve by identity (a hunk id
-            // is a content hash) before giving up; never use a bare line index.
-            match re_resolve(current, node) {
-                Some(node) => node,
-                None => {
-                    return Ok(vec![Effect::message(
-                        MessageLevel::Info,
-                        errors::HUNK_CHANGED,
-                    )])
-                }
-            }
-        };
-
-        // An untracked file has no index entry to remove.
-        if command == dispatch::Command::Unstage && node.section.as_deref() == Some("untracked") {
-            return Ok(vec![Effect::message(
-                MessageLevel::Info,
-                dispatch::NOTHING_TO_UNSTAGE,
-            )]);
-        }
-
-        dispatch::resolve(command, dispatch_target(node), None)
-    };
-
-    let repo = GitRepo::open(repo_path)?;
-    let layouts = match &resolution {
-        dispatch::Resolution::Selection { start, end, .. } => layouts_for_selection(
-            &repo,
-            source,
-            *start,
-            *end,
-            command == dispatch::Command::Unstage,
-        )?,
-        _ => Vec::new(),
-    };
-    dispatch::execute(&repo, &resolution, &layouts)
-}
-
-/// Run a whole-section operation against `repo_path`.
-fn run_resolution(repo_path: &str, resolution: dispatch::Resolution) -> Result<Vec<Effect>> {
-    let repo = GitRepo::open(repo_path)?;
-    dispatch::execute(&repo, &resolution, &[])
-}
-
-/// Parse the file layouts a document-line selection spans.
-///
-/// Only files in the section the command acts on are diffed, so staging a
-/// selection in the unstaged section never reads the index side.
-fn layouts_for_selection(
-    repo: &GitRepo,
-    tree: &Tree,
-    start: u32,
-    end: u32,
-    staged: bool,
-) -> Result<Vec<FileLayout>> {
-    let (start, end) = if start <= end {
-        (start, end)
-    } else {
-        (end, start)
-    };
-    let section = tree
-        .line_nodes
-        .get(start as usize)
-        .or_else(|| tree.line_nodes.get(end as usize))
-        .and_then(|line| line.section.as_deref());
-    let Some(section) = section else {
-        return Ok(Vec::new());
-    };
-    if section != if staged { "staged" } else { "unstaged" } {
-        return Ok(Vec::new());
-    }
-
-    let mut layouts = Vec::new();
-    for node in tree.nodes.iter().filter(|node| {
-        node.kind == NodeKind::File && node.section.as_deref() == Some(section)
-    }) {
-        let first = node.start_line as u32;
-        let last = node.end_line as u32;
-        if end < first || start > last {
-            continue;
-        }
-        let Some(path) = node.path.as_deref() else {
-            continue;
-        };
-        let diff = if staged {
-            repo.diff_staged(path)?
-        } else {
-            repo.diff_unstaged(path)?
-        };
-        if let Some(layout) = FileLayout::from_diff(&diff, node.start_line as u32) {
-            layouts.push(layout);
-        }
-    }
-    Ok(layouts)
-}
-
-fn dispatch_target(node: &Node) -> dispatch::NodeKind {
-    match node.kind {
-        NodeKind::Section => match node.section.as_deref() {
-            Some("unstaged") => dispatch::NodeKind::SectionUnstaged,
-            Some("staged") => dispatch::NodeKind::SectionStaged,
-            Some("untracked") => dispatch::NodeKind::SectionUntracked,
-            _ => dispatch::NodeKind::Other,
-        },
-        NodeKind::File => match &node.path {
-            Some(path) => dispatch::NodeKind::FileHeader { path: path.clone() },
-            None => dispatch::NodeKind::Other,
-        },
-        NodeKind::Hunk => match (&node.path, &node.hunk_id) {
-            (Some(path), Some(hunk_id)) => dispatch::NodeKind::HunkHeader {
-                path: path.clone(),
-                hunk_id: hunk_id.clone(),
-            },
-            _ => dispatch::NodeKind::Other,
-        },
-        NodeKind::Line => match (&node.path, &node.hunk_id) {
-            (Some(path), Some(hunk_id)) => dispatch::NodeKind::DiffLine {
-                changed: node.marker.is_some_and(|marker| marker != ' '),
-                path: path.clone(),
-                hunk_id: hunk_id.clone(),
-            },
-            _ => dispatch::NodeKind::Other,
-        },
-        _ => dispatch::NodeKind::Other,
-    }
-}
-
 /// Find the node in `new` that continues `old` by content, not position.
-fn re_resolve<'a>(new: &'a Tree, old: &Node) -> Option<&'a Node> {
+pub(crate) fn re_resolve<'a>(new: &'a Tree, old: &Node) -> Option<&'a Node> {
     if let (Some(path), Some(hunk_id)) = (&old.path, &old.hunk_id) {
         let hunk = new.nodes.iter().find(|node| {
             node.kind == NodeKind::Hunk
