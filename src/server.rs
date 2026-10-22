@@ -32,6 +32,22 @@ pub struct ServerOptions {
     pub config_path: Option<std::path::PathBuf>,
 }
 
+/// Client capabilities that affect key delivery (§3.9).
+#[derive(Debug, Clone, Copy)]
+struct ClientCaps {
+    delivery: KeymapDelivery,
+    key_modifiers: KeyModifiers,
+}
+
+impl Default for ClientCaps {
+    fn default() -> Self {
+        Self {
+            delivery: KeymapDelivery::Dynamic,
+            key_modifiers: KeyModifiers::Full,
+        }
+    }
+}
+
 /// Server state shared by concurrent request handlers.
 #[derive(Clone)]
 struct Shared {
@@ -44,6 +60,8 @@ struct Shared {
     next_view: Arc<AtomicU64>,
     /// Configuration and resolved keymaps.
     config: Arc<ConfigService>,
+    /// Key delivery settings declared by the client in `initialize`.
+    client: Arc<Mutex<ClientCaps>>,
     /// Why the initial configuration load failed, if it did.
     startup_error: Option<String>,
 }
@@ -56,8 +74,17 @@ impl Shared {
             view_repos: Arc::new(Mutex::new(HashMap::new())),
             next_view: Arc::new(AtomicU64::new(0)),
             config,
+            client: Arc::new(Mutex::new(ClientCaps::default())),
             startup_error,
         }
+    }
+
+    /// How the client wants keymaps delivered.
+    fn delivery(&self) -> KeymapDelivery {
+        self.client
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .delivery
     }
 
     /// The repository root that owns `uri`, found through its open view.
@@ -102,6 +129,34 @@ impl Shared {
         sessions
             .values()
             .find_map(|session| session.acked_tree_for_uri(uri))
+    }
+}
+
+/// Recompute and push `view/keymap` for every open view after a config reload.
+fn refresh_view_keymaps(shared: &Shared, sender: &mpsc::UnboundedSender<Message>) {
+    if shared.delivery() != KeymapDelivery::Dynamic {
+        return;
+    }
+    let keymaps = shared.config.keymaps();
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    for session in sessions.values_mut() {
+        session.set_keymaps(keymaps.clone());
+        let ids: Vec<String> = session
+            .views()
+            .iter()
+            .map(|view| view.descriptor().id.clone())
+            .collect();
+        for id in ids {
+            if let Some(keymap) = session.keymap_notice(&id) {
+                let _ = sender.send(Message::Notification(Notification::new(
+                    VIEW_KEYMAP.to_string(),
+                    keymap,
+                )));
+            }
+        }
     }
 }
 
@@ -154,6 +209,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     let watcher = {
         let config = shared.config.clone();
         let sender = sender.clone();
+        let shared = shared.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -167,6 +223,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let _ = sender.send(show_message(1, format!("magit-lsp config: {error}")));
                 }
                 if changed && !had_errors {
+                    refresh_view_keymaps(&shared, &sender);
                     tracing::debug!("configuration reloaded");
                 }
             }
@@ -205,9 +262,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let outcome = tokio::task::spawn_blocking(move || config.reload(true))
                         .await
                         .unwrap_or_default();
+                    let had_errors = !outcome.errors.is_empty();
                     for error in outcome.errors {
                         let _ =
                             sender.send(show_message(1, format!("magit-lsp config: {error}")));
+                    }
+                    if !had_errors {
+                        refresh_view_keymaps(&shared, &sender);
                     }
                     tracing::debug!("configuration reloaded on client request");
                 }
@@ -418,6 +479,16 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     match request.method.as_str() {
         "initialize" => {
             let mut notifications = Vec::new();
+            let (delivery, key_modifiers) = parse_client_capabilities(&params);
+            {
+                let mut client = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                client.delivery = delivery;
+                client.key_modifiers = key_modifiers;
+            }
+            tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
             let init = params
                 .get("initializationOptions")
                 .cloned()
@@ -441,6 +512,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         ViewOpenRequest::METHOD => open_view(shared, params),
         ViewCloseRequest::METHOD => close_view(shared, params),
         ViewInvokeRequest::METHOD => invoke_view(shared, params),
+        ViewKeyRequest::METHOD => key_view(shared, params),
         ViewResyncRequest::METHOD => {
             let p: ViewResyncParams = from_params(params)?;
             let repo = shared
@@ -517,6 +589,7 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
     let id = shared.next_view_id();
+    let keymaps = shared.config.keymaps();
     let mut sessions = shared
         .sessions
         .lock()
@@ -524,12 +597,14 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let session = sessions
         .entry(repo.clone())
         .or_insert_with(|| Session::new(&repo));
+    session.set_keymaps(keymaps);
     let (descriptor, render) = session.open(
         id.clone(),
         p.kind,
         p.placement.unwrap_or_default(),
         p.viewport,
     )?;
+    let keymap = session.keymap_notice(&id);
     drop(sessions);
     shared
         .view_repos
@@ -537,10 +612,21 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(id, repo);
 
-    let notification = Notification::new(VIEW_RENDER.to_string(), render);
+    let mut notifications = vec![Message::Notification(Notification::new(
+        VIEW_RENDER.to_string(),
+        render,
+    ))];
+    if shared.delivery() == KeymapDelivery::Dynamic {
+        if let Some(keymap) = keymap {
+            notifications.push(Message::Notification(Notification::new(
+                VIEW_KEYMAP.to_string(),
+                keymap,
+            )));
+        }
+    }
     Ok(Dispatched::with(
         serde_json::to_value(descriptor)?,
-        vec![Message::Notification(notification)],
+        notifications,
     ))
 }
 
@@ -579,6 +665,41 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     let outcome = session.invoke(&p)?;
+    drop(sessions);
+
+    let notifications = outcome
+        .render
+        .map(|render| {
+            vec![Message::Notification(Notification::new(
+                VIEW_RENDER.to_string(),
+                render,
+            ))]
+        })
+        .unwrap_or_default();
+    Ok(Dispatched::with(
+        serde_json::to_value(ViewInvokeResponse {
+            effects: outcome.effects,
+        })?,
+        notifications,
+    ))
+}
+
+/// Handle `view/key`: resolve one key step and answer like `view/invoke`.
+fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let p: ViewKeyParams = from_params(params)?;
+    let repo = shared
+        .repo_for_view(&p.view_id)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let keymaps = shared.config.keymaps();
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get_mut(&repo)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    session.set_keymaps(keymaps);
+    let outcome = session.key(&p)?;
     drop(sessions);
 
     let notifications = outcome
@@ -671,12 +792,18 @@ fn is_request_method(method: &str) -> bool {
             | ViewOpenRequest::METHOD
             | ViewCloseRequest::METHOD
             | ViewInvokeRequest::METHOD
+            | ViewKeyRequest::METHOD
             | ViewResyncRequest::METHOD
     )
 }
 
 /// The repository a mutation must lock; only the staging commands write.
 fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<String> {
+    // Keys run any command, so serialise every key press with its repo's views.
+    if method == ViewKeyRequest::METHOD {
+        let view_id = params.get("viewId").and_then(Value::as_str)?;
+        return shared.repo_for_view(view_id);
+    }
     if method != ViewInvokeRequest::METHOD {
         return None;
     }
@@ -689,6 +816,22 @@ fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<S
     }
     let view_id = params.get("viewId").and_then(Value::as_str)?;
     shared.repo_for_view(view_id)
+}
+
+/// Read the key-delivery capabilities a client declared in `initialize`.
+fn parse_client_capabilities(params: &Value) -> (KeymapDelivery, KeyModifiers) {
+    let caps = params.get("capabilities");
+    let delivery = caps
+        .and_then(|caps| caps.get("keymapDelivery"))
+        .and_then(Value::as_str)
+        .map(KeymapDelivery::parse)
+        .unwrap_or_default();
+    let modifiers = caps
+        .and_then(|caps| caps.get("keyModifiers"))
+        .and_then(Value::as_str)
+        .map(KeyModifiers::parse)
+        .unwrap_or_default();
+    (delivery, modifiers)
 }
 
 fn error_response(id: lsp_server::RequestId, err: Error) -> Response {

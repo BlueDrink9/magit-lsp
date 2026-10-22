@@ -10,11 +10,11 @@
 use crate::commands::{self, Command, CommandStatus, Scope};
 use crate::config::{BindingSpec, Config, ConfigError, Origin, Profile, ScopeKeys};
 use crate::keys::{KeyChord, KeyStep};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The editor mode a binding is active in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EditorMode {
     Normal,
@@ -41,7 +41,7 @@ impl EditorMode {
 }
 
 /// One resolved binding: a command, its keys and where it applies.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Binding {
     /// Registry command id, e.g. `status.stage`.

@@ -575,6 +575,7 @@ fn execute_selection_without_changes_reports_message() {
             assert_eq!(*level, MessageLevel::Info);
             assert_eq!(text, patch::NO_CHANGED_LINES);
         }
+        other => panic!("unexpected effect: {other:?}"),
     }
     assert!(cached_diff(tmp.path()).is_empty());
 }
@@ -612,6 +613,7 @@ fn execute_discard_file_changes_nothing() {
                 "got: {text}"
             );
         }
+        other => panic!("unexpected effect: {other:?}"),
     }
 }
 
@@ -655,6 +657,7 @@ fn execute_every_discard_variant_is_deferred() {
                     "for {variant:?} got: {text}"
                 );
             }
+            other => panic!("unexpected effect: {other:?}"),
         }
         assert_eq!(repo.status().expect("status"), before, "for {variant:?}");
     }

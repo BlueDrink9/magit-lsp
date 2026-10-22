@@ -228,7 +228,10 @@ fn unmapped_git_failure_returns_the_fallback_effect() {
     assert_eq!(effects.len(), 1);
     let Effect::Message {
         level, text, detail, ..
-    } = &effects[0];
+    } = &effects[0]
+    else {
+        panic!("expected a message effect, got {:?}", effects[0]);
+    };
     assert_eq!(*level, MessageLevel::Error);
     assert_eq!(text, "`git add` failed.");
     assert!(detail

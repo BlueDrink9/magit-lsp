@@ -84,6 +84,7 @@ fn message_texts(effects: &[Effect]) -> Vec<&str> {
         .iter()
         .map(|effect| match effect {
             Effect::Message { text, .. } => text.as_str(),
+            other => panic!("unexpected effect: {other:?}"),
         })
         .collect()
 }

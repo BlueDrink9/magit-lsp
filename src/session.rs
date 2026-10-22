@@ -7,11 +7,18 @@
 
 use crate::commands::{self, CommandStatus};
 use crate::diff_text;
-use crate::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewRender};
+use crate::keyhandler::{self, PendingChord, Resolution};
+use crate::keymap::Keymap;
+use crate::protocol::{
+    Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewKeyParams, ViewKeymapParams,
+    ViewRender,
+};
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{Ctx, Placement, View, ViewDescriptor, ViewKind, Viewport, VisibilityCommand};
 use crate::{Error, Result};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
 pub fn status_uri(repo_path: &str) -> String {
@@ -26,6 +33,10 @@ pub struct OpenView {
     version: u64,
     acked: Option<Tree>,
     acked_version: Option<u64>,
+    /// Chord steps collected for this view since the last complete match.
+    pending: PendingChord,
+    /// The cursor the pending chord started at, to cancel it on cursor moves.
+    key_cursor: Option<Cursor>,
 }
 
 impl OpenView {
@@ -156,6 +167,7 @@ impl ViewStack {
 pub struct Session {
     repo_path: String,
     views: ViewStack,
+    keymaps: Arc<BTreeMap<String, Keymap>>,
 }
 
 /// What a `view/invoke` produced: effects plus the render that follows it.
@@ -171,7 +183,27 @@ impl Session {
         Self {
             repo_path: repo_path.into(),
             views: ViewStack::new(),
+            keymaps: Arc::new(BTreeMap::new()),
         }
+    }
+
+    /// Replace the resolved keymaps, e.g. after a config hot reload.
+    pub fn set_keymaps(&mut self, keymaps: Arc<BTreeMap<String, Keymap>>) {
+        self.keymaps = keymaps;
+    }
+
+    /// The complete keymap to push for `view_id`, if the scope resolves.
+    pub fn keymap_notice(&self, view_id: &str) -> Option<ViewKeymapParams> {
+        let view = self.views.get(view_id)?;
+        let scope = view.descriptor().scope.as_str();
+        let keymap = self.keymaps.get(scope)?;
+        Some(ViewKeymapParams {
+            view_id: view_id.to_string(),
+            scope: scope.to_string(),
+            version: view.version,
+            capture: view.descriptor().capture,
+            bindings: keymap.bindings().to_vec(),
+        })
     }
 
     /// The repository this session renders.
@@ -228,6 +260,8 @@ impl Session {
             version,
             acked: None,
             acked_version: None,
+            pending: PendingChord::default(),
+            key_cursor: None,
         });
         Ok((descriptor, render))
     }
@@ -279,19 +313,100 @@ impl Session {
         })
     }
 
-    /// Run a registered command against a view.
+    /// Run a registered command against a view by id.
+    pub fn invoke(&mut self, params: &ViewInvokeParams) -> Result<InvokeResult> {
+        self.run_command(
+            &params.view_id,
+            &params.command,
+            params.cursor,
+            params.selection,
+            params.args.as_ref(),
+            None,
+        )
+    }
+
+    /// Handle one key step: resolve it through the view's keymap and either run
+    /// the matched command or answer `PassThrough`.
+    ///
+    /// Cursor and selection come from the request, so the command path is
+    /// identical to `view/invoke`; the node is resolved by identity against the
+    /// acked tree, never by a raw line index.
+    pub fn key(&mut self, params: &ViewKeyParams) -> Result<InvokeResult> {
+        let mode = params.editor_mode;
+        let (scope, capture, cursor_moved) = {
+            let view = self
+                .views
+                .get_mut(&params.view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
+            let moved = view.key_cursor.is_some() && view.key_cursor != Some(params.cursor);
+            view.key_cursor = Some(params.cursor);
+            (
+                view.descriptor().scope.as_str().to_string(),
+                view.descriptor().capture,
+                moved,
+            )
+        };
+        let keymap = self.keymaps.get(&scope).cloned();
+
+        let resolution = {
+            let view = self
+                .views
+                .get_mut(&params.view_id)
+                .expect("view checked above");
+            if cursor_moved {
+                view.pending.clear();
+            }
+            keyhandler::resolve(keymap.as_ref(), &mut view.pending, &params.key, mode, capture)?
+        };
+
+        match resolution {
+            Resolution::Pending => Ok(InvokeResult {
+                effects: Vec::new(),
+                render: None,
+            }),
+            Resolution::Run { command, chord } => self.run_command(
+                &params.view_id,
+                &command,
+                Some(params.cursor),
+                params.selection,
+                None,
+                Some(chord),
+            ),
+            Resolution::PassThrough { chord } => Ok(InvokeResult {
+                effects: vec![Effect::PassThrough { key: chord }],
+                render: None,
+            }),
+            Resolution::Swallow { chord } => Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    format!("Unbound key: {chord}"),
+                )],
+                render: None,
+            }),
+        }
+    }
+
+    /// The single execution path shared by `view/invoke` and `view/key`.
     ///
     /// The command table lives in [`crate::commands`]; this method only looks
     /// it up, reports `Planned`/`Unavailable`/scope mismatches, and renders.
-    pub fn invoke(&mut self, params: &ViewInvokeParams) -> Result<InvokeResult> {
-        let Some(command) = commands::registry().get(&params.command) else {
-            return Err(Error::new(format!("unknown command: {}", params.command)));
+    fn run_command(
+        &mut self,
+        view_id: &str,
+        command_id: &str,
+        cursor: Option<Cursor>,
+        selection: Option<Selection>,
+        args: Option<&serde_json::Value>,
+        key: Option<String>,
+    ) -> Result<InvokeResult> {
+        let Some(command) = commands::registry().get(command_id) else {
+            return Err(Error::new(format!("unknown command: {command_id}")));
         };
         let repo_path = self.repo_path.clone();
         let view = self
             .views
-            .get_mut(&params.view_id)
-            .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
+            .get_mut(view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
 
         match &command.status {
             CommandStatus::Planned { roadmap_id } => {
@@ -325,19 +440,13 @@ impl Session {
             });
         }
 
-        let mut ctx = commands::CommandCtx::new(
-            view,
-            &repo_path,
-            params.cursor,
-            params.selection,
-            params.args.as_ref(),
-        );
+        let mut ctx = commands::CommandCtx::new(view, &repo_path, cursor, selection, args, key);
         let outcome = (command.run)(&mut ctx)?;
         let effects = ctx.into_effects();
         let render = if outcome.refresh {
-            view.refresh_and_render(params.cursor)?
+            view.refresh_and_render(cursor)?
         } else {
-            view.render(params.cursor, outcome.cursor)?
+            view.render(cursor, outcome.cursor)?
         };
         Ok(InvokeResult {
             effects,

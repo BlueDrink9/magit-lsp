@@ -1234,7 +1234,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
 - [x] R-2.2 Keymap resolution, profiles `standard` and `vim` (§5), TOML config
       with `include`/`include_optional`, XDG location, `--config`,
       `MAGIT_LSP_CONFIG`, hot reload, validation messages.
-- [ ] R-2.3 `view/key`, `view/invoke`, `view/keymap`, `passThrough`, capture mode.
+- [x] R-2.3 `view/key`, `view/invoke`, `view/keymap`, `passThrough`, capture mode.
 - [ ] R-2.4 Neovim: atomic keymap apply (tracked buffer-local set), visual
       selection forwarding, capture mode, fold-key mirroring (§3.9, incl.
       scanning user mappings), default profile `vim`.

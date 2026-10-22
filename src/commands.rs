@@ -86,17 +86,20 @@ pub struct CommandCtx<'a> {
     pub cursor: Option<Cursor>,
     pub selection: Option<Selection>,
     pub args: Option<&'a Value>,
+    /// The canonical chord that triggered the command through `view/key`.
+    pub key: Option<String>,
     effects: Vec<Effect>,
 }
 
 impl<'a> CommandCtx<'a> {
-    /// Build a context for one `view/invoke`.
+    /// Build a context for one `view/invoke` or `view/key`.
     pub fn new(
         view: &'a mut OpenView,
         repo_path: &'a str,
         cursor: Option<Cursor>,
         selection: Option<Selection>,
         args: Option<&'a Value>,
+        key: Option<String>,
     ) -> Self {
         Self {
             view,
@@ -104,6 +107,7 @@ impl<'a> CommandCtx<'a> {
             cursor,
             selection,
             args,
+            key,
             effects: Vec::new(),
         }
     }
@@ -286,8 +290,14 @@ fn build() -> Registry {
     ];
 
     commands.extend([
+        Command {
+            id: "common.cancel",
+            scope: Scope::Common,
+            doc: "Cancel the current operation",
+            status: CommandStatus::Implemented,
+            run: cancel,
+        },
         planned("common.confirm", Scope::Common, "Confirm the current selection", "R-3.1"),
-        planned("common.cancel", Scope::Common, "Cancel the current operation", "R-2.3"),
         planned("common.quit", Scope::Common, "Close all views", "R-3.1"),
         planned(
             "common.cycle-visibility",
@@ -392,6 +402,16 @@ fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         refresh: true,
         cursor: None,
     })
+}
+
+/// Cancel has nothing to cancel yet, so `Escape`/`ctrl+c` fall through when
+/// the user has a visual selection; otherwise it is a quiet no-op.
+fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if ctx.selection.is_some() {
+        let key = ctx.key.clone().unwrap_or_else(|| "Escape".to_string());
+        ctx.extend(vec![Effect::PassThrough { key }]);
+    }
+    Ok(CommandOutcome::default())
 }
 
 fn apply_visibility(ctx: &mut CommandCtx<'_>, command: VisibilityCommand) -> Result<CommandOutcome> {

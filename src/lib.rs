@@ -4,6 +4,7 @@ pub mod diff_text;
 pub mod dispatch;
 pub mod errors;
 pub mod git;
+pub mod keyhandler;
 pub mod keymap;
 pub mod keys;
 pub mod logging;

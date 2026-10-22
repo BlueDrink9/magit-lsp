@@ -201,7 +201,7 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
-/// Open a status view and consume its initial render notification.
+/// Open a status view and consume its initial render and keymap pushes.
 fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     server.send(open_view_message(id, repo));
     let opened = server.response_with_id(id);
@@ -211,6 +211,8 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
         .to_string();
     let render = server.recv();
     assert_eq!(render["method"], json!("view/render"), "{render}");
+    let keymap = server.recv();
+    assert_eq!(keymap["method"], json!("view/keymap"), "{keymap}");
     view_id
 }
 
@@ -495,6 +497,162 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     );
     assert!(!render["params"]["cursor"].is_null());
     assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+/// The keys bound to `command` in a `view/keymap` notification.
+fn keymap_keys(notification: &Value, command: &str) -> Option<Vec<String>> {
+    notification["params"]["bindings"]
+        .as_array()?
+        .iter()
+        .find(|binding| binding["command"] == json!(command))?
+        .get("keys")?
+        .as_array()
+        .map(|keys| {
+            keys.iter()
+                .filter_map(|key| key.as_str().map(str::to_string))
+                .collect()
+        })
+}
+
+#[test]
+fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize();
+
+    server.send(open_view_message(2, &repo));
+    let opened = server.response_with_id(2);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+
+    let mut render = None;
+    let mut keymap = None;
+    while render.is_none() || keymap.is_none() {
+        let message = server.recv();
+        match message["method"].as_str() {
+            Some("view/render") => render = Some(message),
+            Some("view/keymap") => keymap = Some(message),
+            other => panic!("unexpected message {other:?}: {message}"),
+        }
+    }
+    let render = render.expect("initial render");
+    let keymap = keymap.expect("keymap push on view/open");
+    assert_eq!(keymap["params"]["viewId"], json!(view_id));
+    assert_eq!(keymap["params"]["scope"], json!("status"));
+    assert_eq!(keymap["params"]["capture"], json!(false));
+    assert_eq!(
+        keymap_keys(&keymap, "status.stage"),
+        Some(vec!["s".to_string()])
+    );
+
+    let line = render["params"]["text"]
+        .as_array()
+        .expect("initial full text")
+        .iter()
+        .position(|line| {
+            line.as_str()
+                .is_some_and(|line| line.trim_start().starts_with('+'))
+        })
+        .expect("a '+' line in the rendered status");
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "view/rendered",
+        "params": {"viewId": view_id, "version": 1},
+    }));
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/key",
+        "params": {
+            "viewId": view_id,
+            "version": 1,
+            "key": "s",
+            "editorMode": "normal",
+            "cursor": {"line": line, "column": 0},
+        },
+    }));
+
+    let mut response = None;
+    let mut staged_render = None;
+    while response.is_none() || staged_render.is_none() {
+        let message = server.recv();
+        if message["id"] == json!(3) {
+            response = Some(message);
+        } else if message["method"] == json!("view/render") {
+            staged_render = Some(message);
+        }
+    }
+    let response = response.expect("view/key response");
+    let staged_render = staged_render.expect("render after view/key");
+    assert_eq!(response["result"]["effects"], json!([]), "{response}");
+    assert_eq!(staged_render["params"]["version"], json!(2));
+    assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
+fn a_config_reload_repushes_the_view_keymap() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "profile = \"vim\"\n").expect("write config");
+
+    let repo = repo_param(tmp.path());
+    let config = config_path.to_string_lossy().to_string();
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    server.initialize();
+
+    server.send(open_view_message(2, &repo));
+    let _opened = server.response_with_id(2);
+
+    let mut keymap = None;
+    while keymap.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("view/keymap") {
+            keymap = Some(message);
+        }
+    }
+    let keymap = keymap.expect("initial keymap");
+    assert_eq!(
+        keymap_keys(&keymap, "status.stage"),
+        Some(vec!["s".to_string()])
+    );
+
+    std::fs::write(
+        &config_path,
+        "profile = \"vim\"\n[keys.status]\nstage = [\"q\"]\n",
+    )
+    .expect("rewrite config");
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "workspace/didChangeConfiguration",
+        "params": {"settings": {}},
+    }));
+
+    loop {
+        let message = server.recv();
+        if message["method"] == json!("view/keymap")
+            && keymap_keys(&message, "status.stage") == Some(vec!["q".to_string()])
+        {
+            break;
+        }
+    }
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));

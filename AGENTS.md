@@ -38,9 +38,11 @@ targets are read from the tree, never from parsing rendered text.
 | ------ | ------- |
 | `view/open` | Create a view; returns a `ViewDescriptor` plus an initial full `view/render` |
 | `view/close` | Drop a view from its session |
+| `view/key` | Press one canonical key step; the server resolves chords per view and runs the command |
 | `view/invoke` | Run a command (`common.refresh`, `common.*` folds, `status.stage`, `status.unstage`, `status.stage-all`, `status.unstage-all`) |
 | `view/resync` | Return the current full text after a lost update |
 | `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?, cursor?}` |
+| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings}` for the view's resolved keymap |
 | `view/rendered` (notification) | Client ack `{viewId, version}` |
 | `view/resize` (notification) | Client viewport `{viewId, cols, rows}` |
 | `textDocument/documentSymbol` | Section → file → hunk outline; the client's jump navigation |
@@ -77,6 +79,8 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - `src/view.rs` — `View` trait, `ViewDescriptor`, kinds, placement and viewport.
 - `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
   cursor succession and the tiny R-1.2 command table.
+- `src/keyhandler.rs` — per-view pending-chord state and key → command
+  resolution (`view/key`).
 - `src/keys.rs` — key notation: parse/format canonical key strings.
 - `src/keymap.rs` — resolves bindings per scope and validates the merged keymap.
 - `src/config.rs` — TOML config (includes, layers, origin tracking, hot reload).
@@ -164,6 +168,7 @@ comes back as an error-level `Effect::Message` with a readable summary (see
   a lost update, and forwards keys; it holds no per-hunk/file/line logic.
 - R-2.1: `src/commands.rs` is the one command registry (`Command{id, scope, doc, status, run}` with `Implemented`/`Planned{roadmap_id}`/`Unavailable{reason}`, `Registry::get/iter/by_scope`, built once). Every id named in TASKS.md §5.1–§5.5 is registered: the 14 previously-implemented commands plus all others as `Planned`. `Session::invoke` no longer matches on command names: it looks the command up, answers `Planned`/`Unavailable`/scope mismatches with an info `Effect::Message`, and hands execution to a sync `CommandCtx` handler (async `Ui` in R-3.1). `tests/commands.rs` enumerates the registry and checks Planned commands change nothing.
 - R-2.2: `src/keys.rs` parses/formats the `[modifier+]*key` notation with round-trip tests; `profiles/standard.toml` and `profiles/vim.toml` (shipped via `include_str!`) transcribe §5. `src/config.rs` loads TOML with `include`/`include_optional` (relative/absolute/`~`/`$VAR`), detects cycles, merges tables key-by-key with array replacement, tracks `file:line` origins and layers defaults → profile → user config → `initializationOptions` → trusted `.magit-lsp.toml`. `src/keymap.rs` resolves per-scope bindings in the §3.9 order, detects conflicts and answers prefix lookups. `src/main.rs` takes `--config`; `src/server.rs` loads at `initialize`, handles `workspace/didChangeConfiguration` and polls loaded files (150 ms) with one `window/showMessage` per failure, keeping the previous config. Deviations from §5: `common.visit` is declared in the `status` scope (not `common`) so its `Enter` does not clash with `common.confirm`; vim binds `open.log` to `g l` rather than `l` so rule R4 (`h j k l` never rebound) holds.
+- R-2.3: `view/key` and `view/keymap` plus `Effect::PassThrough` and capture mode. `src/keyhandler.rs` holds each view's pending chord and resolves one canonical key step via `Keymap::lookup` (`Prefix` keeps collecting, `Exact` runs the command, `None` clears and either passes the whole chord back or swallows it with an "Unbound key" hint when the view captures). `Session::key` shares `run_command` with `Session::invoke`, so the two entry points cannot diverge; cursor and selection come from the request and the node is resolved against the acked tree by identity, never by line index. A pending chord is discarded when the cursor moves and by `common.cancel` (now `Implemented`, which replies `PassThrough` only when a selection is present). `view/keymap` is pushed after `view/open` and re-pushed for every open view on a config hot reload, gated by the client's `capabilities.keymapDelivery` (`dynamic`/`static`/`forwardAll`); `keyModifiers` is stored for later profile warnings. `src/protocol.rs` adds the request/notification types and `KeymapDelivery`/`KeyModifiers`. Tests: `tests/keys_protocol.rs` (in process) and two real-binary stdio tests in `tests/server_async.rs`.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
   rendering, views) + Neovim integration via mini.test (real server + temp
   repo). `make test`.

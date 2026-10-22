@@ -1,3 +1,4 @@
+use crate::keymap::{Binding, EditorMode};
 use crate::view::{Placement, ViewDescriptor, ViewKind, Viewport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -26,6 +27,8 @@ pub enum Effect {
         #[serde(rename = "processLogId", skip_serializing_if = "Option::is_none")]
         process_log_id: Option<u64>,
     },
+    /// The key is not bound here; perform its normal editor behaviour.
+    PassThrough { key: String },
 }
 
 impl Effect {
@@ -151,6 +154,82 @@ impl lsp_types::request::Request for ViewInvokeRequest {
     type Params = ViewInvokeParams;
     type Result = ViewInvokeResponse;
     const METHOD: &'static str = "view/invoke";
+}
+
+/// `view/key`: press one canonical key step in a view.
+pub enum ViewKeyRequest {}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewKeyParams {
+    pub view_id: String,
+    /// The version the client's cursor and selection were taken from.
+    pub version: u64,
+    /// One canonical key step, e.g. `s`, `g`, `ctrl+c` (§3.8).
+    pub key: String,
+    pub editor_mode: EditorMode,
+    pub cursor: Cursor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection: Option<Selection>,
+}
+impl lsp_types::request::Request for ViewKeyRequest {
+    type Params = ViewKeyParams;
+    type Result = ViewInvokeResponse;
+    const METHOD: &'static str = "view/key";
+}
+
+/// How a client wants to receive keymaps (§3.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeymapDelivery {
+    /// The server pushes `view/keymap` and the client applies it atomically.
+    #[default]
+    Dynamic,
+    /// The client ships static bindings; no push is needed.
+    Static,
+    /// The client forwards every key; the server answers `PassThrough`.
+    ForwardAll,
+}
+
+impl KeymapDelivery {
+    /// Parse the `capabilities.keymapDelivery` value, defaulting to `dynamic`.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "static" => KeymapDelivery::Static,
+            "forwardAll" => KeymapDelivery::ForwardAll,
+            _ => KeymapDelivery::Dynamic,
+        }
+    }
+}
+
+/// How faithfully a client can report key modifiers (§3.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyModifiers {
+    #[default]
+    Full,
+    Basic,
+}
+
+impl KeyModifiers {
+    /// Parse the `capabilities.keyModifiers` value, defaulting to `full`.
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "basic" => KeyModifiers::Basic,
+            _ => KeyModifiers::Full,
+        }
+    }
+}
+
+/// Method name of the server's keymap notification.
+pub const VIEW_KEYMAP: &str = "view/keymap";
+
+/// `view/keymap`: the complete binding set for one view scope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewKeymapParams {
+    pub view_id: String,
+    pub scope: String,
+    pub version: u64,
+    pub capture: bool,
+    pub bindings: Vec<Binding>,
 }
 
 /// `view/resync`: return the current full text after a lost update.
