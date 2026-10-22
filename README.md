@@ -12,8 +12,9 @@ Two processes talking over LSP (JSON-RPC on stdio):
 - **`magit-lsp` server (Rust).** Owns all VCS work by shelling out to the `git`
   CLI (like Magit/Neogit), and exposes it as custom requests plus standard LSP
   features (folding).
-- **Neovim client (`lua/magit-lsp`).** Starts the server, renders the returned
-  structure into a `nofile` `vcs://status` buffer, and maps keys to requests.
+- **Neovim client (`lua/magit-lsp`).** Starts the server, opens a status view,
+  renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
+  buffer, and forwards keys as `view/invoke` commands.
 
 The server is designed to do as much as possible so that clients are thin and
 easy to build for any editor. See `AGENTS.md` for the protocol and internals.
@@ -23,9 +24,10 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
 - **Status buffer**: branch header plus `Staged changes`, `Unstaged changes`,
   and `Untracked files` sections (with counts), each file expandable into its
   hunks and diff lines. Never blank — shows `Working tree clean` when clean.
-- **Diff viewing**: open a file's unified diff in a side split.
 - **Staging**: whole file, whole hunk, or a selected range of lines — and the
-  symmetric unstage operations.
+  symmetric unstage operations — all through `view/invoke`.
+- **Visit**: open the real file at the new-side line of the item under the
+  cursor (via LSP `definition`).
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
 - **Foldable** sections and files via LSP folding.
 - **LSP-provided navigation targets** for jumping between sections, files, and
@@ -85,9 +87,10 @@ a throwaway git repository under `build/test-repos/`.
    If `target/debug/magit-lsp` exists the client spawns it directly; otherwise
    it falls back to `cargo run`.
 
-The status buffer is a `nofile` buffer named `vcs://status`, shown in a vertical
-split. It is a read-only view: native editing keys are refused and `:w`/`:write`
-is a no-op. Use `gR` to refresh it after changes in the repository.
+The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in a
+vertical split. It is a read-only view: native editing keys are refused and
+`:w`/`:write` is a no-op. Use `gR` to refresh it after changes in the
+repository.
 
 ## Logging
 
@@ -113,7 +116,7 @@ code, duration); failures are logged at `warn`. Patch contents passed to
 | `u` (v)  | Unstage the visually selected lines                      |
 | `S`      | Stage all                                                |
 | `U`      | Unstage all                                              |
-| `<CR>`   | Show the diff for the file at cursor                     |
+| `<CR>`   | Visit the file at the new-side line under the cursor    |
 | `gR`     | Refresh status                                           |
 | `]s`/`[s`| Next/previous section                                    |
 | `]f`/`[f`| Next/previous file                                       |
@@ -121,9 +124,10 @@ code, duration); failures are logged at `warn`. Patch contents passed to
 
 ## Notes
 
-- The `vcs/requestTransient` request and the `magit-lsp.executeVCSCommand`
-  `executeCommand` stub are intentionally kept for the upcoming commit-menu
-  (transient/SDUI) feature; they are not wired to real behavior yet.
+- The client is deliberately thin: it opens the view, applies `view/render`
+  text/edits, acks versions, resyncs on a lost update, and forwards keys as
+  `view/invoke` commands. All status structure, staging decisions and cursor
+  succession live in the server.
 - Like Magit and Neogit, mutations shell out to `git` (e.g. `git apply
   --cached`) rather than using a native git library, so behavior stays on
   parity with the CLI.

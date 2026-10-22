@@ -462,17 +462,18 @@ fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
     lines[34] = "line35 DIFFERENT".into();
     write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
 
-    let response = magit_lsp::server::mutation(tmp.path().to_str().expect("utf-8 path"), |repo| {
-        repo.stage_hunk("f.txt", &hunk_id).map(|_| true)
-    })
-    .expect("mutation");
+    let (status, effects) =
+        magit_lsp::server::mutation(tmp.path().to_str().expect("utf-8 path"), |repo| {
+            repo.stage_hunk("f.txt", &hunk_id).map(|_| true)
+        })
+        .expect("mutation");
 
     assert_eq!(
-        response.effects,
+        effects,
         vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]
     );
-    assert!(response.status.staged.is_empty());
-    assert_eq!(response.status.unstaged.len(), 1);
+    assert!(status.staged.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
 }
 
 #[test]

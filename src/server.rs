@@ -3,17 +3,16 @@ use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::semantic_tokens;
 use crate::session::Session;
-use crate::status_view;
 use crate::transport;
-use crate::tree::{Document, Tree};
+use crate::tree::Tree;
 use crate::view::Viewport;
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, Response};
 use lsp_types::request::Request as LspRequest;
 use lsp_types::{
-    DocumentLinkOptions, ExecuteCommandOptions, FoldingRangeProviderCapability, OneOf,
-    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities,
+    DocumentLinkOptions, FoldingRangeProviderCapability, OneOf, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensResult, SemanticTokensServerCapabilities,
+    ServerCapabilities,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,20 +22,11 @@ use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio::task::JoinSet;
 
-type Trees = Arc<Mutex<HashMap<String, Tree>>>;
-type UriRepos = Arc<Mutex<HashMap<String, String>>>;
-type Versions = Arc<Mutex<HashMap<String, u64>>>;
 type RepoLocks = Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>;
 
 /// Server state shared by concurrent request handlers.
 #[derive(Clone)]
 struct Shared {
-    /// Last rendered tree per repository root, keyed by the resolved root.
-    trees: Trees,
-    /// Buffer URI → repository root, registered by `vcs/status`.
-    uri_repos: UriRepos,
-    /// Monotonic render version per repository.
-    versions: Versions,
     repo_locks: RepoLocks,
     /// Open views per repository root.
     sessions: Arc<Mutex<HashMap<String, Session>>>,
@@ -49,9 +39,6 @@ struct Shared {
 impl Shared {
     fn new() -> Self {
         Self {
-            trees: Arc::new(Mutex::new(HashMap::new())),
-            uri_repos: Arc::new(Mutex::new(HashMap::new())),
-            versions: Arc::new(Mutex::new(HashMap::new())),
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             view_repos: Arc::new(Mutex::new(HashMap::new())),
@@ -59,46 +46,8 @@ impl Shared {
         }
     }
 
-    fn bump_version(&self, repo_path: &str) -> u64 {
-        let mut versions = self
-            .versions
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let version = versions.entry(repo_path.to_string()).or_insert(0);
-        *version += 1;
-        *version
-    }
-
-    /// Store the tree and return the document the client will render.
-    fn store_tree(&self, repo_path: &str, mut tree: Tree) -> Document {
-        tree.version = self.bump_version(repo_path);
-        let document = Document::from(&tree);
-        self.trees
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(repo_path.to_string(), tree);
-        document
-    }
-
-    /// Register the buffer URI that displays `repo_path`.
-    fn register_uri(&self, uri: &str, repo_path: &str) {
-        self.uri_repos
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(uri.to_string(), repo_path.to_string());
-    }
-
-    /// The repository root that owns `uri`, from a status request or an open view.
+    /// The repository root that owns `uri`, found through its open view.
     fn repo_for_uri(&self, uri: &str) -> Option<String> {
-        if let Some(repo) = self
-            .uri_repos
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(uri)
-            .cloned()
-        {
-            return Some(repo);
-        }
         self.sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -110,21 +59,6 @@ impl Shared {
                     .any(|view| view.descriptor().uri == uri)
             })
             .map(|(repo, _)| repo.clone())
-    }
-
-    /// The tree displayed by `uri`, if a status request registered it.
-    fn tree_for_uri(&self, uri: &str) -> Option<Tree> {
-        let repo = self
-            .uri_repos
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(uri)
-            .cloned()?;
-        self.trees
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&repo)
-            .cloned()
     }
 
     /// Allocate a view id, unique for this server process.
@@ -144,8 +78,8 @@ impl Shared {
 
     /// The last acknowledged tree of the view showing `uri`, if any.
     ///
-    /// Position-based requests use this so they cannot refer to a render the
-    /// client has not applied yet.
+    /// Positional requests resolve through the view only, so they cannot refer
+    /// to a render the client has not applied yet.
     fn view_tree_for_uri(&self, uri: &str) -> Option<Tree> {
         let sessions = self
             .sessions
@@ -297,10 +231,7 @@ impl Dispatched {
 }
 
 /// Run the synchronous Git work off the runtime, keeping the reader free.
-async fn dispatch_response(
-    request: Request,
-    shared: &Shared,
-) -> (Response, Vec<Message>) {
+async fn dispatch_response(request: Request, shared: &Shared) -> (Response, Vec<Message>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
@@ -413,100 +344,6 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             serde_json::json!({ "capabilities": capabilities()? }),
         )),
         "shutdown" => Ok(Dispatched::value(Value::Null)),
-        StatusRequest::METHOD => {
-            let p: StatusParams = from_params(params)?;
-            let status = GitRepo::open(&p.repo_path)?.status()?;
-            let document = render_status(shared, &status, p.uri.as_deref());
-            Ok(Dispatched::value(serde_json::to_value(StatusResponse {
-                status,
-                document,
-            })?))
-        }
-        DiffRequest::METHOD => {
-            let p: DiffParams = from_params(params)?;
-            let diff = if p.staged {
-                GitRepo::open(&p.repo_path)?.diff_staged(&p.path)?
-            } else {
-                GitRepo::open(&p.repo_path)?.diff_unstaged(&p.path)?
-            };
-            Ok(Dispatched::value(serde_json::to_value(DiffResponse {
-                path: p.path,
-                staged: p.staged,
-                diff,
-            })?))
-        }
-        StageHunkRequest::METHOD => {
-            let p: HunkMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.stage_hunk(&p.path, &p.hunk_id).map(|_| true),
-            )?)?))
-        }
-        UnstageHunkRequest::METHOD => {
-            let p: HunkMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.unstage_hunk(&p.path, &p.hunk_id).map(|_| true),
-            )?)?))
-        }
-        StageLinesRequest::METHOD => {
-            let p: LinesMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.stage_lines(&p.path, &p.hunk_id, p.start, p.end),
-            )?)?))
-        }
-        UnstageLinesRequest::METHOD => {
-            let p: LinesMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.unstage_lines(&p.path, &p.hunk_id, p.start, p.end),
-            )?)?))
-        }
-        StageFileRequest::METHOD => {
-            let p: FileMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.stage_file(&p.path).map(|_| true),
-            )?)?))
-        }
-        UnstageFileRequest::METHOD => {
-            let p: FileMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.unstage_file(&p.path).map(|_| true),
-            )?)?))
-        }
-        StageAllRequest::METHOD => {
-            let p: RepoMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.stage_all().map(|_| true),
-            )?)?))
-        }
-        StageUntrackedRequest::METHOD => {
-            let p: RepoMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.stage_untracked().map(|_| true),
-            )?)?))
-        }
-        UnstageAllRequest::METHOD => {
-            let p: RepoMutationParams = from_params(params)?;
-            Ok(Dispatched::value(serde_json::to_value(run_mutation(
-                shared,
-                &p.repo_path,
-                |repo| repo.unstage_all().map(|_| true),
-            )?)?))
-        }
         ViewOpenRequest::METHOD => open_view(shared, params),
         ViewCloseRequest::METHOD => close_view(shared, params),
         ViewInvokeRequest::METHOD => invoke_view(shared, params),
@@ -570,19 +407,13 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 SemanticTokensResult::Tokens(tokens),
             )?))
         }
-        TransientMenuRequest::METHOD => Ok(Dispatched::value(serde_json::to_value(
-            stub_transient_menu(),
-        )?)),
-        "workspace/executeCommand" => Ok(Dispatched::value(Value::Null)),
         other => Err(Error::new(format!("unknown method: {other}"))),
     }
 }
 
-/// The last acked tree of a view, falling back to the legacy `vcs/status` tree.
+/// The last acked tree of the view showing `uri`.
 fn tree_for_positional_request(shared: &Shared, uri: &str) -> Option<Tree> {
-    shared
-        .view_tree_for_uri(uri)
-        .or_else(|| shared.tree_for_uri(uri))
+    shared.view_tree_for_uri(uri)
 }
 
 fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
@@ -658,10 +489,12 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 
     let notifications = outcome
         .render
-        .map(|render| vec![Message::Notification(Notification::new(
-            VIEW_RENDER.to_string(),
-            render,
-        ))])
+        .map(|render| {
+            vec![Message::Notification(Notification::new(
+                VIEW_RENDER.to_string(),
+                render,
+            ))]
+        })
         .unwrap_or_default();
     Ok(Dispatched::with(
         serde_json::to_value(ViewInvokeResponse {
@@ -671,39 +504,11 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     ))
 }
 
-/// Build, version and remember the tree for `status`; register the buffer URI.
-fn render_status(shared: &Shared, status: &git::Status, uri: Option<&str>) -> Document {
-    let tree = status_view::build(status);
-    let document = shared.store_tree(&status.repo_path, tree);
-    if let Some(uri) = uri {
-        shared.register_uri(uri, &status.repo_path);
-    }
-    document
-}
-
-/// Run a mutation for `repo_path`, storing the fresh tree for later requests.
-fn run_mutation<F>(shared: &Shared, repo_path: &str, op: F) -> Result<MutationResponse>
-where
-    F: FnOnce(&GitRepo) -> Result<bool>,
-{
-    let (mut response, tree) = mutation_parts(repo_path, op)?;
-    response.document = shared.store_tree(&response.status.repo_path, tree);
-    Ok(response)
-}
-
 /// Run a mutation for `repo_path`, reporting Git failures as message effects.
 ///
-/// A failed Git command still produces a successful response with the current
+/// A failed Git command still produces a successful result with the current
 /// status; only internal faults become JSON-RPC errors.
-pub fn mutation<F>(repo_path: &str, op: F) -> Result<MutationResponse>
-where
-    F: FnOnce(&GitRepo) -> Result<bool>,
-{
-    mutation_parts(repo_path, op).map(|(response, _tree)| response)
-}
-
-/// The mutation response plus the tree it was rendered from.
-fn mutation_parts<F>(repo_path: &str, op: F) -> Result<(MutationResponse, Tree)>
+pub fn mutation<F>(repo_path: &str, op: F) -> Result<(git::Status, Vec<Effect>)>
 where
     F: FnOnce(&GitRepo) -> Result<bool>,
 {
@@ -711,52 +516,22 @@ where
         Ok(repo) => repo,
         Err(err) => {
             let effect = Effect::from_error(&err).ok_or(err)?;
-            let status = git::Status::empty(repo_path);
-            let tree = status_view::build(&status);
-            let document = Document::from(&tree);
-            return Ok((
-                MutationResponse {
-                    status,
-                    effects: vec![effect],
-                    document,
-                },
-                tree,
-            ));
+            return Ok((git::Status::empty(repo_path), vec![effect]));
         }
     };
 
     let effects = errors::effects_for_result(op(&repo))?;
-    let status = match repo.status() {
-        Ok(status) => status,
+    match repo.status() {
+        Ok(status) => Ok((status, effects)),
         Err(err) => match Effect::from_error(&err) {
             Some(effect) => {
                 let mut effects = effects;
                 effects.push(effect);
-                let status = git::Status::empty(repo_path);
-                let tree = status_view::build(&status);
-                let document = Document::from(&tree);
-                return Ok((
-                    MutationResponse {
-                        status,
-                        effects,
-                        document,
-                    },
-                    tree,
-                ));
+                Ok((git::Status::empty(repo_path), effects))
             }
-            None => return Err(err),
+            None => Err(err),
         },
-    };
-    let tree = status_view::build(&status);
-    let document = Document::from(&tree);
-    Ok((
-        MutationResponse {
-            status,
-            effects,
-            document,
-        },
-        tree,
-    ))
+    }
 }
 
 fn capabilities() -> Result<Value> {
@@ -776,14 +551,6 @@ fn capabilities() -> Result<Value> {
                 work_done_progress_options: Default::default(),
             },
         )),
-        execute_command_provider: Some(ExecuteCommandOptions {
-            commands: vec!["magit-lsp.executeVCSCommand".to_string()],
-            ..Default::default()
-        }),
-        experimental: Some(serde_json::json!({
-            "magit-lsp": true,
-            "transientMenuProvider": true
-        })),
         ..Default::default()
     })
     .map_err(|e| Error::new(e.to_string()))
@@ -799,19 +566,6 @@ fn is_request_method(method: &str) -> bool {
             | "textDocument/documentLink"
             | "textDocument/foldingRange"
             | "textDocument/semanticTokens/full"
-            | "workspace/executeCommand"
-            | StatusRequest::METHOD
-            | DiffRequest::METHOD
-            | StageHunkRequest::METHOD
-            | UnstageHunkRequest::METHOD
-            | StageLinesRequest::METHOD
-            | UnstageLinesRequest::METHOD
-            | StageFileRequest::METHOD
-            | UnstageFileRequest::METHOD
-            | StageAllRequest::METHOD
-            | StageUntrackedRequest::METHOD
-            | UnstageAllRequest::METHOD
-            | TransientMenuRequest::METHOD
             | ViewOpenRequest::METHOD
             | ViewCloseRequest::METHOD
             | ViewInvokeRequest::METHOD
@@ -819,36 +573,20 @@ fn is_request_method(method: &str) -> bool {
     )
 }
 
+/// The repository a mutation must lock; only the staging commands write.
 fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<String> {
-    if method == ViewInvokeRequest::METHOD {
-        // Only stage/unstage touch the index; refresh stays a read.
-        let command = params.get("command").and_then(Value::as_str)?;
-        if !matches!(command, "status.stage" | "status.unstage") {
-            return None;
-        }
-        let view_id = params.get("viewId").and_then(Value::as_str)?;
-        return shared.repo_for_view(view_id);
-    }
-
-    let is_mutation = matches!(
-        method,
-        StageHunkRequest::METHOD
-            | UnstageHunkRequest::METHOD
-            | StageLinesRequest::METHOD
-            | UnstageLinesRequest::METHOD
-            | StageFileRequest::METHOD
-            | UnstageFileRequest::METHOD
-            | StageAllRequest::METHOD
-            | StageUntrackedRequest::METHOD
-            | UnstageAllRequest::METHOD
-    );
-    if !is_mutation {
+    if method != ViewInvokeRequest::METHOD {
         return None;
     }
-    params
-        .get("repo_path")
-        .and_then(Value::as_str)
-        .map(str::to_string)
+    let command = params.get("command").and_then(Value::as_str)?;
+    if !matches!(
+        command,
+        "status.stage" | "status.unstage" | "status.stage-all" | "status.unstage-all"
+    ) {
+        return None;
+    }
+    let view_id = params.get("viewId").and_then(Value::as_str)?;
+    shared.repo_for_view(view_id)
 }
 
 fn error_response(id: lsp_server::RequestId, err: Error) -> Response {
@@ -864,22 +602,6 @@ fn error_response(id: lsp_server::RequestId, err: Error) -> Response {
         }
     }
     response
-}
-
-fn stub_transient_menu() -> TransientMenuResponse {
-    TransientMenuResponse {
-        title: "Commit".to_string(),
-        flags: vec![TransientFlag {
-            flag: "--amend".to_string(),
-            description: "Amend the last commit".to_string(),
-            active: false,
-        }],
-        actions: vec![TransientAction {
-            key: "c".to_string(),
-            command: "commit".to_string(),
-            description: "Create commit".to_string(),
-        }],
-    }
 }
 
 fn from_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T> {

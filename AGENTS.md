@@ -20,10 +20,11 @@ buffer. Rust server + Lua client, talking LSP over stdio.
 
 ## Architecture / internals
 
-Data flow: client request → server runs `git` / mutates the index → server
-builds a `Tree` for the status view → returns the fresh `Status` plus the
-rendered `Document` → the client replaces its buffer with the server's lines.
-Reads and mutations use the same custom request/response pattern (no
+Data flow: client opens a view (`view/open`) → server runs `git` / mutates the
+index on `view/invoke` → server re-renders the view's `Tree` and sends a
+`view/render` notification (full text or line-range edits) → the client replaces
+its buffer with the server's lines and acks with `view/rendered`. Reads and
+mutations use the same custom request/response pattern (no
 `workspace/applyEdit`).
 
 The server owns the document. `src/tree.rs` defines nodes, Node IDs, semantic
@@ -35,28 +36,24 @@ targets are read from the tree, never from parsing rendered text.
 
 | Method | Purpose |
 | ------ | ------- |
-| `vcs/status` | Structured status plus the server-rendered `document` |
-| `vcs/diff` | Unified diff for one file (staged or unstaged) |
-| `vcs/stageHunk` / `vcs/unstageHunk` | Stage/unstage a whole hunk |
-| `vcs/stageLines` / `vcs/unstageLines` | Stage/unstage a line range within a hunk |
-| `vcs/stageFile` / `vcs/unstageFile` | Stage/unstage a whole file |
-| `vcs/stageAll` / `vcs/unstageAll` | Stage/unstage everything |
-| `textDocument/documentSymbol` | Section → file → hunk outline; the client's jump navigation |
-| `textDocument/definition` | Visit the file/new-side line under the cursor |
-| `textDocument/documentLink` | File paths as `file://` links |
-| `textDocument/foldingRange` | Fold ranges from the tree (sections and files) |
-| `vcs/requestTransient` | **Stub** — commit-menu schema (reserved) |
 | `view/open` | Create a view; returns a `ViewDescriptor` plus an initial full `view/render` |
 | `view/close` | Drop a view from its session |
-| `view/invoke` | Run `common.refresh`, `status.stage` or `status.unstage` at the cursor |
+| `view/invoke` | Run a command (`common.refresh`, `common.*` folds, `status.stage`, `status.unstage`, `status.stage-all`, `status.unstage-all`) |
 | `view/resync` | Return the current full text after a lost update |
 | `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?, cursor?}` |
 | `view/rendered` (notification) | Client ack `{viewId, version}` |
 | `view/resize` (notification) | Client viewport `{viewId, cols, rows}` |
+| `textDocument/documentSymbol` | Section → file → hunk outline; the client's jump navigation |
+| `textDocument/definition` | Visit the file/new-side line under the cursor |
+| `textDocument/documentLink` | File paths as `file://` links |
+| `textDocument/foldingRange` | Fold ranges from the tree (sections and files) |
 
-Every mutation returns a `MutationResponse { status, effects, document }`, which
-the client displays. A failed `git` command is not a JSON-RPC error: it comes
-back as an error-level `Effect::Message` with a readable summary (see
+The positional requests above resolve through the view that owns the buffer URI
+(`magit://status/<repo>`), against the last tree the client acknowledged.
+
+`view/invoke` returns `{effects}`; the document itself follows as a
+`view/render` notification. A failed `git` command is not a JSON-RPC error: it
+comes back as an error-level `Effect::Message` with a readable summary (see
 `src/errors.rs`). JSON-RPC errors are reserved for protocol faults.
 
 ### Source layout
@@ -81,12 +78,14 @@ back as an error-level `Effect::Message` with a readable summary (see
 - `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
   cursor succession and the tiny R-1.2 command table.
 - `src/diff_text.rs` — common-prefix/suffix line-range edits for `view/render`.
-- `src/protocol.rs` — custom JSON-RPC types (`MutationResponse`, `Document`, …).
+- `src/protocol.rs` — custom JSON-RPC types (`Effect`, `ViewRender`, `view/*`
+  params and responses).
 - `src/transport.rs` — `Content-Length` framing over async stdio.
-- `src/server.rs` — `tokio` stdio LSP loop, per-repo tree store, request dispatch.
-- `src/vcs.rs` — vestigial gix-based backend stub; unused, to be deleted.
-- `lua/magit-lsp/init.lua` — Neovim client (display the server document,
-  semantic-token links, folding, keys, read-only buffer).
+- `src/server.rs` — `tokio` stdio LSP loop, view/session registry, request
+  dispatch.
+- `lua/magit-lsp/init.lua` — Neovim client (open the view, apply
+  `view/render`, forward keys as `view/invoke`, semantic-token links, folding,
+  read-only buffer).
 - `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
   environment (fixed identity/dates, isolated config).
 - `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
@@ -105,7 +104,7 @@ back as an error-level `Effect::Message` with a readable summary (see
   with `git apply --cached --recount` (IMM-5 audit: no diff computation outside
   `git diff` parsing).
 - Readable errors (IMM-3): Git failures become a `UserError` carried in an
-  `Effect::Message`; `MutationResponse { status, effects }` on every mutation.
+  `Effect::Message`; every staging command reports effects this way.
 - Neovim status buffer is read-only (IMM-4): `modifiable=false`,
   `readonly=true`, `undolevels=-1`, a single `set_lines` writer, `:w` blocked.
 - Node-kind dispatch for stage/unstage in `src/dispatch.rs` (IMM-6).
@@ -115,10 +114,13 @@ back as an error-level `Effect::Message` with a readable summary (see
   `build/test-output/status-<scheme>-<background>.html`, dumps the buffer's
   semantic tokens and writes `build/test-output/semantic-tokens.md` (group →
   link → resolved fg per scheme); findings in `TASKS.md` §8.4.
-- LSP server (`src/server.rs`): request dispatch, per-repo tree store, capabilities.
-- Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `vcs://status` nofile
-  buffer, server-document display, semantic-token links, LSP folding,
-  symbol-based navigation and `definition` for visit.
+- LSP server (`src/server.rs`): request dispatch, view/session registry,
+  capabilities.
+- Client (`lua/magit-lsp/init.lua`): `vim.lsp.start`, `magit://status/<repo>`
+  nofile buffer named from the server's `ViewDescriptor`, `view/render`
+  application (full text or line edits, then `view/rendered` ack, `view/resync`
+  on a lost update), semantic-token links, LSP folding, symbol-based navigation
+  and `definition` for visit.
 - Status view tree (R-1.1): `src/tree.rs` + `src/status_view.rs` produce text,
   tokens, symbols, links and a line → node map; `foldingRange` and
   `documentSymbol` come from the tree.
@@ -136,10 +138,11 @@ back as an error-level `Effect::Message` with a readable summary (see
   there is no client-side extmark highlighting any more.
 - Sessions and views (R-1.2): `src/session.rs` owns per-repo `Session`s and a
   `ViewStack`; `view/open`, `view/close`, `view/invoke` (`common.refresh`,
-  `status.stage`, `status.unstage`), `view/resync`, `view/rendered` acks and
-  `view/resize` are wired. `view/render` sends line-range edits when the client
-  holds the base version, full text otherwise, and a successor cursor by node
-  identity. Position-based requests use the last acked tree.
+  `status.stage`, `status.stage-all`, `status.unstage-all` and the fold
+  commands), `view/resync`, `view/rendered` acks and `view/resize` are wired.
+  `view/render` sends line-range edits when the client holds the base version,
+  full text otherwise, and a successor cursor by node identity. Position-based
+  requests use the last acked tree.
 - Visibility (R-1.5): `Visibility` in `src/tree.rs` stores `expanded`/
   `collapsed` per node id, so it survives refreshes. `StatusView` reads a
   porcelain listing (`GitRepo::status_listing`) and calls `file_hunks` only for
@@ -148,11 +151,16 @@ back as an error-level `Effect::Message` with a readable summary (see
   `show-all`, `hide-all`, `more-detail`/`less-detail` (levels 1–3) and
   `next-section`/`prev-section`. Folding it on a diff line acts on its file.
   `GitRepo::diff_invocation_count` backs the laziness test.
-- Stubs retained for commit menus: `vcs/requestTransient` +
-  `magit-lsp.executeVCSCommand`.
+- R-1.6: the legacy `vcs/*` methods, the `vcs/requestTransient` stub, the
+  `workspace/executeCommand` stub and the vestigial `src/vcs.rs` are deleted.
+  Every former operation is a `view/invoke` command (`status.stage`,
+  `status.unstage`, `status.stage-all`, `status.unstage-all`, plus section
+  headers for stage-all/untracked/unstage-all and selections per IMM-2). The
+  Lua client is thin: it opens the view, applies `view/render`, acks, resyncs on
+  a lost update, and forwards keys; it holds no per-hunk/file/line logic.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
-  rendering) + Neovim integration via mini.test (real server + temp repo).
-  `make test`.
+  rendering, views) + Neovim integration via mini.test (real server + temp
+  repo). `make test`.
 
 ## Roadmap
 

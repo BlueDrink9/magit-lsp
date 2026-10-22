@@ -181,24 +181,19 @@ pub fn execute(
 ) -> Result<Vec<Effect>> {
     match resolution {
         Resolution::StageAllUnstaged => {
-            repo.stage_all()?;
-            Ok(Vec::new())
+            errors::effects_for_result(repo.stage_all().map(|_| true))
         }
         Resolution::UnstageAllStaged => {
-            repo.unstage_all()?;
-            Ok(Vec::new())
+            errors::effects_for_result(repo.unstage_all().map(|_| true))
         }
         Resolution::StageAllUntracked => {
-            repo.stage_untracked()?;
-            Ok(Vec::new())
+            errors::effects_for_result(repo.stage_untracked().map(|_| true))
         }
         Resolution::StageFile { path } => {
-            repo.stage_file(path)?;
-            Ok(Vec::new())
+            errors::effects_for_result(repo.stage_file(path).map(|_| true))
         }
         Resolution::UnstageFile { path } => {
-            repo.unstage_file(path)?;
-            Ok(Vec::new())
+            errors::effects_for_result(repo.unstage_file(path).map(|_| true))
         }
         Resolution::StageHunk { path, hunk_id } => {
             errors::effects_for_result(repo.stage_hunk(path, hunk_id).map(|_| true))

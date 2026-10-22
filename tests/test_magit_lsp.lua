@@ -12,6 +12,11 @@ local function sys(cmd)
   return out
 end
 
+--- Run `git` in the fixture repository and return its stdout.
+local function git_out(args)
+  return sys(vim.list_extend({ 'git', '-C', repo }, args))
+end
+
 local function make_repo(with_changes)
   if with_changes == nil then
     with_changes = true
@@ -76,37 +81,85 @@ local function setup_child()
   child.lua(string.format("M = require('magit-lsp'); M.setup({ root_dir = %s })", vim.inspect(repo)))
   child.lua([[
     HELPERS = {
-      has_line = function(s) return vim.tbl_contains(vim.api.nvim_buf_get_lines(M.buf, 0, -1, false), s) end,
-      find_line = function(marker, text, section)
-        for i, e in ipairs(M.map) do
-          if e.kind == 'line' and e.marker == marker and e.text == text then
-            if not section or e.section == section then
-              return i
-            end
-          end
-        end
-        return nil
+      lines = function()
+        return vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)
       end,
-      find_first = function(kind, section)
-        for i, e in ipairs(M.map) do
-          if e.kind == kind and (not section or e.section == section) then
+      has_line = function(s)
+        return vim.tbl_contains(HELPERS.lines(), s)
+      end,
+      line_of = function(text)
+        for i, line in ipairs(HELPERS.lines()) do
+          if line == text then
             return i
           end
         end
         return nil
       end,
-      has_status_line = function(section, marker, text)
-        local files = M.status[section] or {}
-        for _, f in ipairs(files) do
-          for _, h in ipairs(f.hunks) do
-            for _, l in ipairs(h.lines) do
-              if l.marker == marker and l.text == text then
-                return true
-              end
-            end
+      section_range = function(section)
+        local headers = {
+          staged = 'Staged changes (',
+          unstaged = 'Unstaged changes (',
+          untracked = 'Untracked files (',
+        }
+        local wanted = headers[section]
+        local lines = HELPERS.lines()
+        local first
+        for i, line in ipairs(lines) do
+          if vim.startswith(line, wanted) then
+            first = i
+            break
           end
         end
-        return false
+        if not first then
+          return nil
+        end
+        local last = #lines
+        for i = first + 1, #lines do
+          local line = lines[i]
+          if
+            vim.startswith(line, 'Staged changes (')
+            or vim.startswith(line, 'Unstaged changes (')
+            or vim.startswith(line, 'Untracked files (')
+          then
+            last = i - 1
+            break
+          end
+        end
+        return first, last
+      end,
+      find_line = function(marker, text, section)
+        local first, last = HELPERS.section_range(section)
+        if not first then
+          return nil
+        end
+        local wanted = '    ' .. marker .. text
+        local lines = HELPERS.lines()
+        for i = first, last do
+          if lines[i] == wanted then
+            return i
+          end
+        end
+        return nil
+      end,
+      find_first = function(kind, section)
+        local first, last = HELPERS.section_range(section)
+        if not first then
+          return nil
+        end
+        if kind == 'section' then
+          return first
+        end
+        local lines = HELPERS.lines()
+        for i = first, last do
+          local line = lines[i]
+          if kind == 'hunk' and vim.startswith(line, '    @@') then
+            return i
+          end
+          if kind == 'file' and line:match('^  %S ') then
+            return i
+          end
+        end
+        return nil
       end,
       token_at = function(row, col)
         local tokens = vim.lsp.semantic_tokens.get_at_pos(M.buf, row, col)
@@ -156,6 +209,21 @@ local function setup_child()
         local group = '@lsp.type.' .. token_type .. '.magit-lsp'
         return vim.api.nvim_get_hl(0, { name = group, link = false }).fg
       end,
+      resync = function()
+        local client = vim.lsp.get_client_by_id(M.client_id)
+        local done, result
+        client:request('view/resync', { viewId = M.view_id }, function(err, value)
+          result = value
+          done = true
+        end, M.buf)
+        vim.wait(5000, function()
+          return done
+        end, 10)
+        return result
+      end,
+      cursor_to = function(line)
+        vim.api.nvim_win_set_cursor(0, { line, 0 })
+      end,
     }
   ]])
 end
@@ -168,6 +236,18 @@ end
 local function assert_no_line(needle)
   local has = child.lua_get(string.format('HELPERS.has_line(%q)', needle))
   MiniTest.expect.equality(has, false, needle)
+end
+
+--- Place the cursor on the first matching rendered line and invoke a command.
+local function invoke_at(line, command, opts)
+  local call = string.format(
+    'vim.api.nvim_win_set_cursor(0, {%d, 0}); R = M.invoke(%q%s)',
+    line,
+    command,
+    opts and (', ' .. opts) or ''
+  )
+  child.lua(call)
+  return child.lua_get('R ~= nil')
 end
 
 -- Type keys that the read-only buffer should refuse. `type_keys()` raises when
@@ -208,13 +288,13 @@ local T = MiniTest.new_set({
   },
 })
 
-T['creates virtual buffer and attaches LSP'] = function()
+T['creates a server-named virtual buffer and attaches LSP'] = function()
   setup_child()
   local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = M.buf })")
   MiniTest.expect.equality(buftype, 'nofile')
 
   local bufname = child.lua_get('vim.api.nvim_buf_get_name(M.buf)')
-  MiniTest.expect.equality(bufname, 'vcs://status')
+  MiniTest.expect.equality(bufname, 'magit://status' .. repo)
 
   local attached = child.lua_get('vim.lsp.buf_is_attached(M.buf, M.client_id)')
   MiniTest.expect.equality(attached, true)
@@ -241,100 +321,105 @@ T['renders a non-blank buffer when the tree is clean'] = function()
   assert_line('Working tree clean')
 end
 
-T['staging a hunk moves the file to staged section'] = function()
+T['staging a hunk moves the file to the staged section'] = function()
   setup_child()
-  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
-  MiniTest.expect.equality(type(hunk_id), 'string', 'hunk id')
-  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
+  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
+
   assert_line('Staged changes (1)')
   assert_line('Unstaged changes (0)')
+  MiniTest.expect.equality(git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' }):find('+NEW line', 1, true) ~= nil, true)
 end
 
 T['staging a visual line range stages only those lines'] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'line index for +NEW line in unstaged section')
-  child.lua('S = M.stage_line_range(' .. target .. ', ' .. target .. ')')
-  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
+  MiniTest.expect.equality(type(target), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { target, 0 })
+  child.type_keys(50, 'V', 's')
 
-  local staged_new = child.lua_get("HELPERS.has_status_line('staged', '+', 'NEW line')")
-  MiniTest.expect.equality(staged_new, true)
+  local staged = false
+  for _ = 1, 40 do
+    staged = child.lua_get("HELPERS.has_line('    +NEW line')")
+    if staged then
+      break
+    end
+    vim.loop.sleep(50)
+  end
+  MiniTest.expect.equality(staged, true)
 
-  local unstaged_change = child.lua_get("HELPERS.has_status_line('unstaged', '+', 'line3 CHANGED')")
-  MiniTest.expect.equality(unstaged_change, true)
-
-  local unstaged_del = child.lua_get("HELPERS.has_status_line('unstaged', '-', 'line8')")
-  MiniTest.expect.equality(unstaged_del, true)
-end
-
-T['shows unstaged diff for a file'] = function()
-  setup_child()
-  child.lua("D = M.diff('f.txt', false)")
-  local diff = child.lua_get('D.diff')
-  MiniTest.expect.equality(type(diff), 'string')
-  MiniTest.expect.equality(diff:find('-line3', 1, true) ~= nil, true)
-  MiniTest.expect.equality(diff:find('+line3 CHANGED', 1, true) ~= nil, true)
-  MiniTest.expect.equality(diff:find('+NEW line', 1, true) ~= nil, true)
+  local cached = git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' })
+  MiniTest.expect.equality(cached:find('+NEW line', 1, true) ~= nil, true, cached)
+  MiniTest.expect.equality(cached:find('line3 CHANGED', 1, true), nil, cached)
+  MiniTest.expect.equality(git_out({ 'diff', '-U3', '--', 'f.txt' }):find('line3 CHANGED', 1, true) ~= nil, true)
 end
 
 T['unstaging a hunk reverts the file to unstaged'] = function()
   setup_child()
-  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
-  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
-  local staged_id = child.lua_get('M.status.staged[1].hunks[1].id')
-  child.lua(string.format("M.unstage_hunk('f.txt', %q)", staged_id))
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  child.lua("M.invoke('status.stage-all')")
+  MiniTest.expect.equality(git_out({ 'diff', '--cached', '--', 'f.txt' }):find('NEW line', 1, true) ~= nil, true)
+
+  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'staged')")
+  MiniTest.expect.equality(type(target), 'number', 'staged change line index')
+  MiniTest.expect.equality(invoke_at(target, 'status.unstage'), true)
+
+  assert_line('Staged changes (0)')
+  assert_line('Unstaged changes (1)')
+  MiniTest.expect.equality(git_out({ 'diff', '--cached', '--', 'f.txt' }), '')
 end
 
-T['stage_at stages the hunk under the cursor'] = function()
+T['staging a file header stages the whole file'] = function()
+  setup_child()
+  local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  MiniTest.expect.equality(type(target), 'number', 'unstaged file index')
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
+  assert_line('Staged changes (1)')
+  assert_line('Unstaged changes (0)')
+
+  local staged = child.lua_get("HELPERS.find_first('file', 'staged')")
+  MiniTest.expect.equality(type(staged), 'number', 'staged file index')
+  MiniTest.expect.equality(invoke_at(staged, 'status.unstage'), true)
+  assert_line('Staged changes (0)')
+  assert_line('Unstaged changes (1)')
+  MiniTest.expect.equality(git_out({ 'diff', '--cached', '--', 'f.txt' }), '')
+end
+
+T['staging a hunk header stages the whole hunk'] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_first('hunk', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'hunk line index in unstaged section')
-  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
-  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
-end
-
-T['stage_at over a change line stages the whole hunk'] = function()
-  setup_child()
-  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
-  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
-  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1, 'staged files')
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0, 'unstaged files')
+  MiniTest.expect.equality(type(target), 'number', 'hunk header index')
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
+  assert_line('Staged changes (1)')
+  assert_line('Unstaged changes (0)')
 end
 
 T['S stages all changes'] = function()
   setup_child()
-  child.lua("S = M.stage_all()")
+  child.lua("S = M.invoke('status.stage-all')")
   MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
+  assert_line('Staged changes (1)')
+  assert_line('Unstaged changes (0)')
 end
 
 T['U unstages all changes'] = function()
   setup_child()
-  child.lua("M.stage_all()")
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  child.lua("M.unstage_all()")
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  child.lua("M.invoke('status.stage-all')")
+  assert_line('Staged changes (1)')
+  child.lua("M.invoke('status.unstage-all')")
+  assert_line('Staged changes (0)')
+  assert_line('Unstaged changes (1)')
 end
 
 T['U unstages all without a commit'] = function()
   repo = make_unborn_repo()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  child.lua("S = M.unstage_all()")
+  assert_line('Staged changes (1)')
+  child.lua("S = M.invoke('status.unstage-all')")
   MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 1)
+  assert_line('Staged changes (0)')
+  assert_line('Unstaged changes (0)')
+  assert_line('Untracked files (1)')
 end
 
 T['a failed mutation notifies once with a readable summary'] = function()
@@ -346,7 +431,7 @@ T['a failed mutation notifies once with a readable summary'] = function()
     end
   ]])
   vim.fn.writefile({}, repo .. '/.git/index.lock')
-  child.lua('R = M.stage_all()')
+  child.lua("R = M.invoke('status.stage-all')")
   vim.fn.delete(repo .. '/.git/index.lock')
 
   MiniTest.expect.equality(child.lua_get('R ~= nil'), true)
@@ -360,24 +445,6 @@ T['a failed mutation notifies once with a readable summary'] = function()
   MiniTest.expect.equality(msg:find('{', 1, true), nil)
   MiniTest.expect.equality(msg:find('<metatable>', 1, true), nil)
   MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.ERROR)
-end
-
-T['visual mode s stages the selected lines'] = function()
-  setup_child()
-  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
-  MiniTest.expect.equality(type(target), 'number', 'change line index')
-  child.api.nvim_win_set_cursor(0, { target, 0 })
-  child.type_keys(50, 'V', 's')
-
-  local staged = false
-  for _ = 1, 20 do
-    staged = child.lua_get("HELPERS.has_status_line('staged', '+', 'NEW line')")
-    if staged then
-      break
-    end
-    vim.loop.sleep(50)
-  end
-  MiniTest.expect.equality(staged, true)
 end
 
 T['semantic tokens highlight sections, files, hunks and diff lines'] = function()
@@ -440,9 +507,8 @@ T['tokens are refreshed after a mutation'] = function()
   setup_child()
   MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
 
-  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
-  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
+  child.lua("M.invoke('status.stage-all')")
+  assert_line('Staged changes (1)')
 
   local staged = child.lua_get([[
     (function()
@@ -470,7 +536,7 @@ T['enables LSP folding and serves fold ranges'] = function()
   local count = child.lua_get([[
     (function()
       local r = vim.lsp.buf_request_sync(M.buf, 'textDocument/foldingRange', {
-        textDocument = { uri = vim.uri_from_bufnr(M.buf) },
+        textDocument = { uri = M.uri },
       }, 5000)
       for _, res in pairs(r or {}) do
         return #(res.result or {})
@@ -533,10 +599,8 @@ T['refresh and mutations still work after blocked edits'] = function()
     false
   )
 
-  local hunk_id = child.lua_get('M.status.unstaged[1].hunks[1].id')
-  child.lua(string.format("M.stage_hunk('f.txt', %q)", hunk_id))
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 0)
+  local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
   assert_line('Staged changes (1)')
 end
 
@@ -583,7 +647,7 @@ T['navigation jumps follow document symbols'] = function()
   local symbols = child.lua_get([[
     (function()
       local r = vim.lsp.buf_request_sync(M.buf, 'textDocument/documentSymbol', {
-        textDocument = { uri = vim.uri_from_bufnr(M.buf) },
+        textDocument = { uri = M.uri },
       }, 5000)
       for _, res in pairs(r or {}) do
         return res.result or {}
@@ -685,39 +749,37 @@ T['renders untracked files in their own section'] = function()
     '  ? a b.txt',
     '  ? new.txt',
   })
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 2)
+  MiniTest.expect.equality(git_out({ 'status', '--porcelain', '--', 'new.txt' }):find('?? new.txt', 1, true) ~= nil, true)
 end
 
-T['stage_at on an untracked file stages it'] = function()
+T['staging an untracked file stages just that file'] = function()
   repo = make_untracked_repo()
   setup_child()
   local target = child.lua_get("HELPERS.find_first('file', 'untracked')")
   MiniTest.expect.equality(type(target), 'number', 'untracked file line index')
-  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
-  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 1)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
   assert_line('Untracked files (1)')
+  assert_line('Staged changes (1)')
   assert_line('  A a b.txt')
+  MiniTest.expect.equality(
+    git_out({ 'status', '--porcelain', '-z', '--', 'a b.txt' }):find('A  a b.txt', 1, true) ~= nil,
+    true
+  )
 end
 
-T['stage_at on the untracked section stages all untracked'] = function()
+T['staging the untracked section stages all untracked'] = function()
   repo = make_untracked_repo()
   setup_child()
   local target = child.lua_get("HELPERS.find_first('section', 'untracked')")
   MiniTest.expect.equality(type(target), 'number', 'untracked section line index')
-  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); S = M.stage_at()')
-  MiniTest.expect.equality(child.lua_get('S ~= nil'), true)
-  MiniTest.expect.equality(child.lua_get('#M.status.untracked'), 0)
-  MiniTest.expect.equality(child.lua_get('#M.status.staged'), 2)
-  MiniTest.expect.equality(child.lua_get('#M.status.unstaged'), 1)
+  MiniTest.expect.equality(invoke_at(target, 'status.stage'), true)
   assert_line('Untracked files (0)')
+  assert_line('Staged changes (2)')
   assert_line('  A new.txt')
+  MiniTest.expect.equality(git_out({ 'status', '--porcelain', '--', 'new.txt' }):find('A  new.txt', 1, true) ~= nil, true)
 end
 
-T['unstage_at on an untracked file reports nothing to unstage'] = function()
+T['unstaging an untracked file reports nothing to unstage'] = function()
   repo = make_untracked_repo()
   setup_child()
   child.lua([[
@@ -728,10 +790,39 @@ T['unstage_at on an untracked file reports nothing to unstage'] = function()
   ]])
   local target = child.lua_get("HELPERS.find_first('file', 'untracked')")
   MiniTest.expect.equality(type(target), 'number', 'untracked file line index')
-  child.lua('vim.api.nvim_win_set_cursor(0, {' .. target .. ', 0}); U = M.unstage_at()')
-  MiniTest.expect.equality(child.lua_get('U == nil'), true)
+  invoke_at(target, 'status.unstage')
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
   MiniTest.expect.equality(child.lua_get('NOTIFIES[1].msg'), 'Nothing to unstage here')
+end
+
+T['rapid successive invokes keep the buffer consistent with the server'] = function()
+  setup_child()
+  child.lua([[
+    for _ = 1, 3 do
+      M.invoke('status.stage-all')
+      M.invoke('status.unstage-all')
+    end
+    M.invoke('status.stage-all')
+  ]])
+
+  local buffer = child.lua_get('HELPERS.lines()')
+  local resync = child.lua_get('HELPERS.resync()')
+  MiniTest.expect.equality(buffer, resync.text)
+  MiniTest.expect.equality(child.lua_get('M.version'), resync.version)
+  assert_line('Staged changes (1)')
+end
+
+T['a lost update triggers a full resync'] = function()
+  setup_child()
+  -- Pretend the client missed a render: the next edits no longer match.
+  child.lua('M.version = M.version - 1')
+  child.lua("M.invoke('status.stage-all')")
+
+  local buffer = child.lua_get('HELPERS.lines()')
+  local resync = child.lua_get('HELPERS.resync()')
+  MiniTest.expect.equality(buffer, resync.text)
+  MiniTest.expect.equality(child.lua_get('M.version'), resync.version)
+  assert_line('Staged changes (1)')
 end
 
 return T

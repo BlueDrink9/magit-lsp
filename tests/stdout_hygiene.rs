@@ -5,129 +5,173 @@ mod common;
 use common::*;
 use serde_json::{json, Value};
 use std::ffi::OsStr;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
-/// Run the real server against `repo`, returning its captured streams.
-fn run_server(repo: &Path, log_file: Option<&Path>) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env(magit_lsp::logging::LEVEL_ENV, "trace")
-        .env_remove(magit_lsp::logging::FILE_ENV);
-    if let Some(path) = log_file {
-        command.env(magit_lsp::logging::FILE_ENV, path);
-    }
+/// A running server whose stdout is parsed frame by frame.
+///
+/// Any stray byte between frames makes the parser fail, which is exactly the
+/// hygiene property this suite protects.
+struct Server {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+    messages: Vec<Value>,
+}
 
-    let mut child = command.spawn().expect("spawn magit-lsp");
-    {
-        let stdin = child.stdin.as_mut().expect("child stdin");
-        for message in session(repo) {
-            stdin.write_all(&frame(message)).expect("write request");
+impl Server {
+    /// Spawn the real server, logging to stderr or `log_file`.
+    fn spawn(log_file: Option<&Path>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env(magit_lsp::logging::LEVEL_ENV, "trace")
+            .env_remove(magit_lsp::logging::FILE_ENV);
+        if let Some(path) = log_file {
+            command.env(magit_lsp::logging::FILE_ENV, path);
+        }
+
+        let mut child = command.spawn().expect("spawn magit-lsp");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        Self {
+            child,
+            stdin: Some(stdin),
+            stdout,
+            messages: Vec::new(),
         }
     }
-    drop(child.stdin.take());
-    child.wait_with_output().expect("wait for magit-lsp")
-}
 
-/// A minimal LSP session ending in a failing Git operation.
-fn session(repo: &Path) -> Vec<Value> {
-    vec![
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "processId": null,
-                "rootUri": null,
-                "capabilities": {},
-            },
-        }),
-        json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
-        json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "vcs/stageFile",
-            "params": {
-                "repo_path": repo.to_string_lossy(),
-                "path": "missing.txt",
-            },
-        }),
-        json!({"jsonrpc": "2.0", "id": 3, "method": "shutdown", "params": null}),
-        json!({"jsonrpc": "2.0", "method": "exit", "params": null}),
-    ]
-}
-
-/// Wrap `message` in an LSP `Content-Length` frame.
-fn frame(message: Value) -> Vec<u8> {
-    let body = serde_json::to_vec(&message).expect("serialise message");
-    let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    bytes.extend_from_slice(&body);
-    bytes
-}
-
-/// Parse `bytes` as a stream of LSP frames, panicking on any stray text.
-fn parse_frames(mut bytes: &[u8]) -> Vec<Value> {
-    let mut messages = Vec::new();
-    while !bytes.is_empty() {
-        let header_end = find(bytes, b"\r\n\r\n").expect("stray bytes before a frame header");
-        let header = std::str::from_utf8(&bytes[..header_end]).expect("utf8 frame header");
-        let length = header
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.trim()
-                    .eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse::<usize>().ok())
-                    .flatten()
-            })
-            .expect("Content-Length header");
-
-        let body_start = header_end + 4;
-        let body_end = body_start + length;
-        assert!(body_end <= bytes.len(), "truncated frame body");
-        let message: Value =
-            serde_json::from_slice(&bytes[body_start..body_end]).expect("well-formed JSON-RPC");
-        messages.push(message);
-        bytes = &bytes[body_end..];
+    fn send(&mut self, message: Value) {
+        let stdin = self.stdin.as_mut().expect("server stdin open");
+        let body = serde_json::to_vec(&message).expect("serialise message");
+        write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write header");
+        stdin.write_all(&body).expect("write body");
+        stdin.flush().expect("flush");
     }
-    messages
+
+    /// Read one frame, panicking on stray bytes, and remember it.
+    fn recv(&mut self) -> Option<Value> {
+        let mut content_length = None;
+        let mut saw_header = false;
+        loop {
+            let mut line = String::new();
+            let read = self.stdout.read_line(&mut line).expect("read header");
+            if read == 0 {
+                assert!(!saw_header, "EOF in the middle of a frame header");
+                return None;
+            }
+            saw_header = true;
+            let line = line.trim_end_matches(['\r', '\n']);
+            if line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                if name.trim().eq_ignore_ascii_case("content-length") {
+                    content_length =
+                        Some(value.trim().parse::<usize>().expect("Content-Length"));
+                }
+            }
+        }
+
+        let length = content_length.expect("frame has no Content-Length header");
+        let mut body = vec![0; length];
+        self.stdout.read_exact(&mut body).expect("read frame body");
+        let message: Value =
+            serde_json::from_slice(&body).expect("frame body is well-formed JSON-RPC");
+        self.messages.push(message.clone());
+        Some(message)
+    }
+
+    /// Read until the response carrying `id`.
+    fn response_with_id(&mut self, id: i64) -> Value {
+        loop {
+            let message = self.recv().expect("server closed stdout early");
+            if message["id"] == json!(id) {
+                return message;
+            }
+        }
+    }
+
+    /// Close stdin, drain stdout to EOF, and return the exit status and stderr.
+    fn finish(mut self) -> (ExitStatus, String) {
+        self.stdin.take();
+        while self.recv().is_some() {}
+        let mut stderr = String::new();
+        if let Some(mut pipe) = self.child.stderr.take() {
+            pipe.read_to_string(&mut stderr).expect("read stderr");
+        }
+        let status = self.child.wait().expect("wait for magit-lsp");
+        (status, stderr)
+    }
 }
 
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
+/// The protocol prefix every session shares.
+fn initialize(server: &mut Server) {
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "processId": null,
+            "rootUri": null,
+            "capabilities": {},
+        },
+    }));
+    server.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
 }
 
-/// The response carrying `id`, which must have been answered.
-fn response_with_id(messages: &[Value], id: i64) -> &Value {
-    messages
-        .iter()
-        .find(|message| message["id"] == id)
-        .unwrap_or_else(|| panic!("no response with id {id} in {messages:?}"))
+fn open_status(server: &mut Server, id: i64, repo: &Path) {
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": repo.to_string_lossy()},
+            "viewport": {"cols": 80, "rows": 24},
+        },
+    }));
+}
+
+/// Send `shutdown` then `exit`, and drain the responses.
+fn shutdown_and_exit(server: &mut Server, id: i64) {
+    server.send(json!({"jsonrpc": "2.0", "id": id, "method": "shutdown", "params": null}));
+    server.response_with_id(id);
+    server.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
 }
 
 #[test]
 fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
     let (tmp, _repo) = init_repo();
-    let out = run_server(tmp.path(), None);
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+    // A stale index lock makes the staging mutation fail without writing.
+    write(&tmp.path().join(".git/index.lock"), "");
 
-    assert!(out.status.success(), "server exited: {stderr}");
-    let messages = parse_frames(&out.stdout);
-    assert_eq!(
-        response_with_id(&messages, 1)["result"]["capabilities"]["foldingRangeProvider"],
-        json!(true)
-    );
+    let mut server = Server::spawn(None);
+    initialize(&mut server);
+    open_status(&mut server, 2, tmp.path());
+    server.response_with_id(2);
 
-    let stage = response_with_id(&messages, 2);
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": "v1", "command": "status.stage-all"},
+    }));
+    let stage = server.response_with_id(3);
     let effects = stage["result"]["effects"]
         .as_array()
         .expect("mutation effects");
     assert_eq!(effects[0]["level"], "error", "failing git op: {stage}");
 
+    shutdown_and_exit(&mut server, 4);
+    let (status, stderr) = server.finish();
+
+    assert!(status.success(), "server exited: {stderr}");
     // The failure is logged, but only on stderr.
     assert!(stderr.contains("git failed"), "stderr: {stderr}");
 }
@@ -135,19 +179,32 @@ fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
 #[test]
 fn log_file_receives_logs_and_stdout_stays_clean() {
     let (tmp, _repo) = init_repo();
+    write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+    write(&tmp.path().join(".git/index.lock"), "");
     let logs = tempfile::TempDir::new().expect("log tempdir");
     let log_file = logs.path().join("magit-lsp.log");
 
-    let out = run_server(tmp.path(), Some(&log_file));
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let mut server = Server::spawn(Some(&log_file));
+    initialize(&mut server);
+    open_status(&mut server, 2, tmp.path());
+    server.response_with_id(2);
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": "v1", "command": "status.stage-all"},
+    }));
+    server.response_with_id(3);
 
-    assert!(out.status.success(), "server exited: {stderr}");
-    parse_frames(&out.stdout);
+    shutdown_and_exit(&mut server, 4);
+    let (status, stderr) = server.finish();
+
+    assert!(status.success(), "server exited: {stderr}");
     assert!(stderr.trim().is_empty(), "logs leaked to stderr: {stderr}");
 
     let written = std::fs::read_to_string(&log_file).expect("read log file");
     assert!(written.contains("git failed"), "log file: {written}");
-    assert!(written.contains("missing.txt"), "log file: {written}");
+    assert!(written.contains("index.lock"), "log file: {written}");
 }
 
 #[test]

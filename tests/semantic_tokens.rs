@@ -256,7 +256,6 @@ fn capabilities_advertise_the_legend_and_full_tokens() {
 #[test]
 fn semantic_tokens_decode_back_to_the_tree_tokens() {
     let (tmp, repo) = unicode_fixture();
-    let uri = format!("file://{}/status", tmp.path().display());
     let mut server = TestServer::spawn();
     let initialize = server.initialize();
     let legend = &initialize["result"]["capabilities"]["semanticTokensProvider"]["legend"];
@@ -266,11 +265,18 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 2,
-        "method": "vcs/status",
-        "params": {"repo_path": tmp.path().to_string_lossy(), "uri": uri},
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": tmp.path().to_string_lossy()},
+            "viewport": {"cols": 80, "rows": 24},
+        },
     }));
-    let status = server.response_with_id(2);
-    assert!(status["result"]["document"]["text"].is_array(), "{status}");
+    let opened = server.response_with_id(2);
+    let uri = opened["result"]["uri"]
+        .as_str()
+        .expect("view uri")
+        .to_string();
 
     server.send(json!({
         "jsonrpc": "2.0",

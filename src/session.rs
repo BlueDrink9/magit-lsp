@@ -9,6 +9,7 @@ use crate::diff_text;
 use crate::dispatch;
 use crate::errors;
 use crate::git::GitRepo;
+use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewRender};
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
@@ -283,14 +284,34 @@ impl Session {
             .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
 
         let mut forced = None;
+        let selection = params.selection.map(|selection| dispatch::LineRange {
+            start: selection.start_line as u32,
+            end: selection.end_line as u32,
+        });
         let effects = match params.command.as_str() {
             "common.refresh" => Vec::new(),
-            "status.stage" => {
-                stage_or_unstage(view, &repo_path, dispatch::Command::Stage, params.cursor)?
-            }
-            "status.unstage" => {
-                stage_or_unstage(view, &repo_path, dispatch::Command::Unstage, params.cursor)?
-            }
+            "status.stage" => stage_or_unstage(
+                view,
+                &repo_path,
+                dispatch::Command::Stage,
+                params.cursor,
+                selection,
+            )?,
+            "status.unstage" => stage_or_unstage(
+                view,
+                &repo_path,
+                dispatch::Command::Unstage,
+                params.cursor,
+                selection,
+            )?,
+            "status.stage-all" => run_resolution(
+                &repo_path,
+                dispatch::Resolution::StageAllUnstaged,
+            )?,
+            "status.unstage-all" => run_resolution(
+                &repo_path,
+                dispatch::Resolution::UnstageAllStaged,
+            )?,
             "common.next-section" => {
                 forced = section_cursor(view, params.cursor, true);
                 Vec::new()
@@ -316,7 +337,11 @@ impl Session {
 
         let render = if matches!(
             params.command.as_str(),
-            "common.refresh" | "status.stage" | "status.unstage"
+            "common.refresh"
+                | "status.stage"
+                | "status.unstage"
+                | "status.stage-all"
+                | "status.unstage-all"
         ) {
             view.refresh_and_render(params.cursor)?
         } else {
@@ -405,48 +430,131 @@ fn stage_or_unstage(
     repo_path: &str,
     command: dispatch::Command,
     cursor: Option<Cursor>,
+    selection: Option<dispatch::LineRange>,
 ) -> Result<Vec<Effect>> {
-    let Some(cursor) = cursor else {
-        return Ok(vec![Effect::message(
-            MessageLevel::Info,
-            "Place the cursor on a change to stage or unstage.",
-        )]);
-    };
-
     // Resolve against the last tree the client acknowledged; actions are
     // addressed by the node there, never by index in whatever is current.
     let source = view.acked_tree().unwrap_or_else(|| view.tree());
-    let Some(node) = source
-        .line_nodes
-        .get(cursor.line)
-        .and_then(|line| source.node(&line.node))
-    else {
-        return Ok(vec![Effect::message(
-            MessageLevel::Info,
-            "No change under the cursor.",
-        )]);
-    };
 
-    let current = view.tree();
-    let node = if current.node(&node.id).is_some() {
-        node
+    let resolution = if let Some(range) = selection {
+        // A visual selection wins over the node under the cursor (IMM-2).
+        dispatch::resolve(command, dispatch::NodeKind::Other, Some(range))
     } else {
-        // The node moved or disappeared. Re-resolve by identity (a hunk id is
-        // a content hash) before giving up; never use a bare line index.
-        match re_resolve(current, node) {
-            Some(node) => node,
-            None => {
-                return Ok(vec![Effect::message(
-                    MessageLevel::Info,
-                    errors::HUNK_CHANGED,
-                )])
+        let Some(cursor) = cursor else {
+            return Ok(vec![Effect::message(
+                MessageLevel::Info,
+                "Place the cursor on a change to stage or unstage.",
+            )]);
+        };
+        let Some(node) = source
+            .line_nodes
+            .get(cursor.line)
+            .and_then(|line| source.node(&line.node))
+        else {
+            return Ok(vec![Effect::message(
+                MessageLevel::Info,
+                "No change under the cursor.",
+            )]);
+        };
+
+        let current = view.tree();
+        let node = if current.node(&node.id).is_some() {
+            node
+        } else {
+            // The node moved or disappeared. Re-resolve by identity (a hunk id
+            // is a content hash) before giving up; never use a bare line index.
+            match re_resolve(current, node) {
+                Some(node) => node,
+                None => {
+                    return Ok(vec![Effect::message(
+                        MessageLevel::Info,
+                        errors::HUNK_CHANGED,
+                    )])
+                }
             }
+        };
+
+        // An untracked file has no index entry to remove.
+        if command == dispatch::Command::Unstage && node.section.as_deref() == Some("untracked") {
+            return Ok(vec![Effect::message(
+                MessageLevel::Info,
+                dispatch::NOTHING_TO_UNSTAGE,
+            )]);
         }
+
+        dispatch::resolve(command, dispatch_target(node), None)
     };
 
-    let resolution = dispatch::resolve(command, dispatch_target(node), None);
+    let repo = GitRepo::open(repo_path)?;
+    let layouts = match &resolution {
+        dispatch::Resolution::Selection { start, end, .. } => layouts_for_selection(
+            &repo,
+            source,
+            *start,
+            *end,
+            command == dispatch::Command::Unstage,
+        )?,
+        _ => Vec::new(),
+    };
+    dispatch::execute(&repo, &resolution, &layouts)
+}
+
+/// Run a whole-section operation against `repo_path`.
+fn run_resolution(repo_path: &str, resolution: dispatch::Resolution) -> Result<Vec<Effect>> {
     let repo = GitRepo::open(repo_path)?;
     dispatch::execute(&repo, &resolution, &[])
+}
+
+/// Parse the file layouts a document-line selection spans.
+///
+/// Only files in the section the command acts on are diffed, so staging a
+/// selection in the unstaged section never reads the index side.
+fn layouts_for_selection(
+    repo: &GitRepo,
+    tree: &Tree,
+    start: u32,
+    end: u32,
+    staged: bool,
+) -> Result<Vec<FileLayout>> {
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let section = tree
+        .line_nodes
+        .get(start as usize)
+        .or_else(|| tree.line_nodes.get(end as usize))
+        .and_then(|line| line.section.as_deref());
+    let Some(section) = section else {
+        return Ok(Vec::new());
+    };
+    if section != if staged { "staged" } else { "unstaged" } {
+        return Ok(Vec::new());
+    }
+
+    let mut layouts = Vec::new();
+    for node in tree.nodes.iter().filter(|node| {
+        node.kind == NodeKind::File && node.section.as_deref() == Some(section)
+    }) {
+        let first = node.start_line as u32;
+        let last = node.end_line as u32;
+        if end < first || start > last {
+            continue;
+        }
+        let Some(path) = node.path.as_deref() else {
+            continue;
+        };
+        let diff = if staged {
+            repo.diff_staged(path)?
+        } else {
+            repo.diff_unstaged(path)?
+        };
+        if let Some(layout) = FileLayout::from_diff(&diff, node.start_line as u32) {
+            layouts.push(layout);
+        }
+    }
+    Ok(layouts)
 }
 
 fn dispatch_target(node: &Node) -> dispatch::NodeKind {

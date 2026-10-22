@@ -201,6 +201,33 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+/// Open a status view and consume its initial render notification.
+fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
+    server.send(open_view_message(id, repo));
+    let opened = server.response_with_id(id);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    let render = server.recv();
+    assert_eq!(render["method"], json!("view/render"), "{render}");
+    view_id
+}
+
+/// A `view/open` request for a status view of `repo`.
+fn open_view_message(id: i64, repo: &Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": repo},
+            "viewport": {"cols": 80, "rows": 24},
+        },
+    })
+}
+
 fn shutdown_and_exit(server: &mut TestServer) {
     server.send(json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null}));
     let response = server.response_with_id(99);
@@ -228,12 +255,7 @@ fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
     batch.extend(frame(
         json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
     ));
-    batch.extend(frame(json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "vcs/status",
-        "params": {"repo_path": repo},
-    })));
+    batch.extend(frame(open_view_message(2, &repo)));
     server.send_raw(&batch);
 
     let initialize = server.response_with_id(1);
@@ -241,23 +263,18 @@ fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
         initialize["result"]["capabilities"]["foldingRangeProvider"],
         json!(true)
     );
-    let status = server.response_with_id(2);
-    assert_eq!(status["result"]["branch"], json!("main"));
+    let opened = server.response_with_id(2);
+    assert_eq!(opened["result"]["kind"], json!("status"));
 
     // One request split across two writes.
-    let split = frame(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "vcs/status",
-        "params": {"repo_path": repo},
-    }));
+    let split = frame(open_view_message(3, &repo));
     let midpoint = split.len() / 2;
     server.send_raw(&split[..midpoint]);
     thread::sleep(Duration::from_millis(50));
     server.send_raw(&split[midpoint..]);
 
-    let status = server.response_with_id(3);
-    assert_eq!(status["result"]["branch"], json!("main"));
+    let opened = server.response_with_id(3);
+    assert_eq!(opened["result"]["kind"], json!("status"));
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
@@ -275,29 +292,31 @@ fn a_slow_mutation_does_not_delay_a_later_read() {
     let mut server = TestServer::spawn(&[("MAGIT_LSP_TEST_DELAY_MS", "500")]);
     server.initialize();
 
+    let view_id = open_view(&mut server, 2, &repo);
+
     let mut batch = Vec::new();
     batch.extend(frame(json!({
         "jsonrpc": "2.0",
-        "id": 2,
-        "method": "vcs/stageFile",
-        "params": {"repo_path": repo, "path": "f.txt"},
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "status.stage-all"},
     })));
     batch.extend(frame(json!({
         "jsonrpc": "2.0",
-        "id": 3,
-        "method": "vcs/status",
-        "params": {"repo_path": repo},
+        "id": 4,
+        "method": "view/resync",
+        "params": {"viewId": view_id},
     })));
     server.send_raw(&batch);
 
     let first = server.recv();
     assert_eq!(
         first["id"],
-        json!(3),
+        json!(4),
         "the slow mutation blocked a later read: {first}"
     );
     let second = server.recv();
-    assert_eq!(second["id"], json!(2));
+    assert_eq!(second["id"], json!(3));
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
@@ -313,40 +332,29 @@ fn mutations_for_one_repository_apply_in_request_order() {
     let mut server = TestServer::spawn(&[]);
     server.initialize();
 
+    let view_id = open_view(&mut server, 2, &repo);
+
     let mut batch = Vec::new();
     batch.extend(frame(json!({
         "jsonrpc": "2.0",
-        "id": 2,
-        "method": "vcs/stageFile",
-        "params": {"repo_path": repo, "path": "f.txt"},
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "status.stage-all"},
     })));
     batch.extend(frame(json!({
         "jsonrpc": "2.0",
-        "id": 3,
-        "method": "vcs/unstageFile",
-        "params": {"repo_path": repo, "path": "f.txt"},
+        "id": 4,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "status.unstage-all"},
     })));
     server.send_raw(&batch);
 
-    let staged = server.response_with_id(2);
-    assert!(
-        staged["result"]["status"]["staged"]
-            .as_array()
-            .expect("staged list")
-            .iter()
-            .any(|entry| entry["path"] == json!("f.txt")),
-        "stageFile did not stage the file: {staged}"
-    );
-    let unstaged = server.response_with_id(3);
-    assert!(
-        unstaged["result"]["status"]["unstaged"]
-            .as_array()
-            .expect("unstaged list")
-            .iter()
-            .any(|entry| entry["path"] == json!("f.txt")),
-        "unstageFile did not run after stageFile: {unstaged}"
-    );
+    let staged = server.response_with_id(3);
+    assert_eq!(staged["result"]["effects"], json!([]), "{staged}");
+    let unstaged = server.response_with_id(4);
+    assert_eq!(unstaged["result"]["effects"], json!([]), "{unstaged}");
 
+    // The unstage ran after the stage, so the index is empty again.
     assert_eq!(cached_diff(tmp.path()), "");
     assert!(read(&tmp.path().join("f.txt")).contains("CHANGED"));
 
@@ -385,7 +393,7 @@ fn unknown_requests_reply_method_not_found() {
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 7,
-        "method": "vcs/nope",
+        "method": "magit/nope",
         "params": {},
     }));
     let response = server.response_with_id(7);

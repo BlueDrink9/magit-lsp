@@ -176,13 +176,13 @@ fn index_lock_failure_returns_a_message_effect_and_status() {
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
     write(&tmp.path().join(".git/index.lock"), "");
 
-    let response = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
+    let (status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
         repo.stage_file("f.txt").map(|_| true)
     })
     .expect("mutation response");
 
     assert_eq!(
-        response.effects,
+        effects,
         vec![message(
             MessageLevel::Error,
             "Another Git process is running in this repository.",
@@ -192,7 +192,7 @@ fn index_lock_failure_returns_a_message_effect_and_status() {
             None
         )]
     );
-    assert_eq!(response.status.repo_path, tmp.path().to_string_lossy());
+    assert_eq!(status.repo_path, tmp.path().to_string_lossy());
 }
 
 #[test]
@@ -200,10 +200,10 @@ fn not_a_repository_returns_a_message_effect() {
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().to_str().expect("utf8 path");
 
-    let response = server::mutation(path, |_| Ok(true)).expect("mutation response");
+    let (status, effects) = server::mutation(path, |_| Ok(true)).expect("mutation response");
 
     assert_eq!(
-        response.effects,
+        effects,
         vec![message(
             MessageLevel::Error,
             "This folder is not inside a Git repository.",
@@ -211,24 +211,24 @@ fn not_a_repository_returns_a_message_effect() {
             None
         )]
     );
-    assert_eq!(response.status.repo_path, path);
-    assert!(response.status.staged.is_empty());
-    assert!(response.status.unstaged.is_empty());
+    assert_eq!(status.repo_path, path);
+    assert!(status.staged.is_empty());
+    assert!(status.unstaged.is_empty());
 }
 
 #[test]
 fn unmapped_git_failure_returns_the_fallback_effect() {
     let (tmp, _repo) = init_repo();
 
-    let response = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
+    let (_status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
         repo.stage_file("missing.txt").map(|_| true)
     })
     .expect("mutation response");
 
-    assert_eq!(response.effects.len(), 1);
+    assert_eq!(effects.len(), 1);
     let Effect::Message {
         level, text, detail, ..
-    } = &response.effects[0];
+    } = &effects[0];
     assert_eq!(*level, MessageLevel::Error);
     assert_eq!(text, "`git add` failed.");
     assert!(detail
@@ -246,13 +246,13 @@ fn no_op_selection_returns_an_info_effect() {
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id
         .clone();
-    let response = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
+    let (_status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
         repo.stage_lines("f.txt", &hunk_id, 0, 0)
     })
     .expect("mutation response");
 
     assert_eq!(
-        response.effects,
+        effects,
         vec![message(
             MessageLevel::Info,
             magit_lsp::patch::NO_CHANGED_LINES,

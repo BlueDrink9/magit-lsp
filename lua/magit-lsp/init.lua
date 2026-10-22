@@ -1,6 +1,6 @@
 local M = {}
 
-M.map = {}
+--- The last text the server sent, for clients and tests that need it.
 M.lines = {}
 
 --- The status buffer's filetype; LSP groups are `@lsp.type.<type>.<filetype>`.
@@ -149,135 +149,223 @@ local function refresh_tokens()
   vim.lsp.semantic_tokens.force_refresh(M.buf)
 end
 
---- Replace every line in the status buffer.
---- The view is read-only, so this is the only place allowed to write to it.
+--- The document URI of the view; positional requests must use it verbatim.
+local function document_uri()
+  return M.uri or vim.uri_from_bufnr(M.buf)
+end
+
+--- The only writer of the status buffer: replace `start`..`finish` lines.
+--- The view is read-only, so every update goes through here.
 ---@param buf integer
+---@param start integer 0-based first line
+---@param finish integer 0-based end line, exclusive; -1 means the last line
 ---@param lines string[]
-local function set_lines(buf, lines)
+local function set_lines(buf, start, finish, lines)
   vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(buf, start, finish, false, lines)
   vim.bo[buf].modified = false
   vim.bo[buf].modifiable = false
 end
 
---- Show a server-rendered document in the status buffer.
---- The server owns the text and the per-line node map; the client only
---- replaces lines and asks for the matching semantic tokens.
----@param status table structured status (kept for callers and tests)
----@param document table|nil { text = string[], nodes = table[], version = integer }
-local function render(status, document)
-  if type(document) ~= 'table' or type(document.text) ~= 'table' then
-    return nil, 'server response has no document'
+--- Apply line-range edits bottom-up so earlier offsets stay valid.
+---@param edits table[]
+local function apply_edits(edits)
+  table.sort(edits, function(a, b)
+    return a.startLine > b.startLine
+  end)
+  for _, edit in ipairs(edits) do
+    set_lines(M.buf, edit.startLine, edit.endLine, edit.lines)
   end
-  local lines = document.text
-  set_lines(M.buf, lines)
-  M.lines = lines
-  M.map = document.nodes or {}
-  M.status = status
-  M.version = document.version
+end
 
+local function status_window()
+  local win = vim.fn.bufwinid(M.buf)
+  if win == -1 then
+    return nil
+  end
+  return win
+end
+
+--- Move the cursor to the server's successor position (0-based).
+---@param cursor table { line = integer, column = integer }
+local function set_cursor(cursor)
+  local win = status_window()
+  if not win then
+    return
+  end
+  local line = math.min(cursor.line, vim.api.nvim_buf_line_count(M.buf) - 1)
+  local text = vim.api.nvim_buf_get_lines(M.buf, line, line + 1, false)[1] or ''
+  local column = math.min(cursor.column, #text)
+  vim.api.nvim_win_set_cursor(win, { line + 1, column })
+end
+
+local function ack(version)
+  local client = vim.lsp.get_client_by_id(M.client_id)
+  if client and M.view_id then
+    client:notify('view/rendered', { viewId = M.view_id, version = version })
+  end
+end
+
+local function request_resync()
+  local client = vim.lsp.get_client_by_id(M.client_id)
+  if not client or not M.view_id then
+    return
+  end
+  client:request('view/resync', { viewId = M.view_id }, function(err, result)
+    if err or type(result) ~= 'table' then
+      return
+    end
+    M.apply_render(result)
+  end, M.buf)
+end
+
+--- Apply a `view/render` payload, then acknowledge the version.
+---
+--- A client that does not hold the edit's base version has lost an update and
+--- asks for a full resync instead of applying edits to stale text.
+---@param params table
+function M.apply_render(params)
+  if not params or params.viewId ~= M.view_id then
+    return
+  end
+
+  if params.text then
+    set_lines(M.buf, 0, -1, params.text)
+  elseif params.edits then
+    if params.baseVersion ~= M.version then
+      request_resync()
+      return
+    end
+    apply_edits(params.edits)
+  end
+
+  M.lines = vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)
+  M.version = params.version
+  if params.cursor then
+    set_cursor(params.cursor)
+  end
+  -- Ack before asking for tokens: positional requests resolve against the
+  -- acknowledged tree, so the new version must be recorded first.
+  ack(params.version)
   refresh_tokens()
-  return status
 end
 
---- Fetch the current status and replace the buffer with the server's view.
----@return table|nil status
-function M.refresh()
-  local status, err = request_sync('vcs/status', {
-    repo_path = M.root,
-    uri = vim.uri_from_bufnr(M.buf),
-  })
-  if not status then
-    M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
-    vim.notify('magit-lsp refresh failed: ' .. error_message(err), vim.log.levels.WARN)
-    return nil, err
+--- The cursor of the status window, 0-based.
+local function current_cursor()
+  local win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(win) ~= M.buf then
+    win = status_window()
   end
-  render(status, status.document)
-  return status
+  if not win then
+    return { line = 0, column = 0 }
+  end
+  local position = vim.api.nvim_win_get_cursor(win)
+  return { line = position[1] - 1, column = position[2] }
 end
 
-local function apply_mutation(method, params)
-  local resp, err = request_sync(method, params)
+--- The current visual selection, 0-based and inclusive.
+local function visual_selection()
+  local first, last = vim.fn.line('v'), vim.fn.line('.')
+  if first == 0 or last == 0 then
+    return nil
+  end
+  return {
+    startLine = math.min(first, last) - 1,
+    endLine = math.max(first, last) - 1,
+  }
+end
+
+--- Run a command against the open view.
+---@param command string
+---@param opts table|nil { cursor?: table, selection?: boolean|table }
+---@return table|nil response
+function M.invoke(command, opts)
+  opts = opts or {}
+  if not M.view_id then
+    return nil, 'no view is open'
+  end
+
+  local cursor = opts.cursor or current_cursor()
+  local selection = opts.selection
+  if selection == true then
+    selection = visual_selection()
+  end
+
+  local before = M.version
+  local resp, err = request_sync('view/invoke', {
+    viewId = M.view_id,
+    command = command,
+    cursor = cursor,
+    selection = selection,
+  })
   if not resp then
     M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
-    vim.notify('magit-lsp ' .. method .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
+    vim.notify('magit-lsp ' .. command .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
     return nil, err
   end
-  render(resp.status, resp.document)
+
   apply_effects(resp.effects)
-  return resp.status
-end
-
---- Stage a whole hunk of a file.
-function M.stage_hunk(path, hunk_id)
-  return apply_mutation('vcs/stageHunk', { repo_path = M.root, path = path, hunk_id = hunk_id })
-end
-
---- Unstage a whole hunk of a file.
-function M.unstage_hunk(path, hunk_id)
-  return apply_mutation('vcs/unstageHunk', { repo_path = M.root, path = path, hunk_id = hunk_id })
-end
-
---- Stage lines `start..finish` (0-based, within the hunk) of a file.
-function M.stage_lines(path, hunk_id, start, finish)
-  return apply_mutation('vcs/stageLines', {
-    repo_path = M.root,
-    path = path,
-    hunk_id = hunk_id,
-    start = start,
-    ['end'] = finish,
-  })
-end
-
---- Unstage lines `start..finish` (0-based, within the hunk) of a file.
-function M.unstage_lines(path, hunk_id, start, finish)
-  return apply_mutation('vcs/unstageLines', {
-    repo_path = M.root,
-    path = path,
-    hunk_id = hunk_id,
-    start = start,
-    ['end'] = finish,
-  })
-end
-
---- Stage an entire file (including untracked files).
-function M.stage_file(path)
-  return apply_mutation('vcs/stageFile', { repo_path = M.root, path = path })
-end
-
---- Unstage an entire file.
-function M.unstage_file(path)
-  return apply_mutation('vcs/unstageFile', { repo_path = M.root, path = path })
-end
-
---- Stage all tracked changes.
-function M.stage_all()
-  return apply_mutation('vcs/stageAll', { repo_path = M.root })
-end
-
---- Stage all untracked files, leaving tracked changes unstaged.
-function M.stage_untracked()
-  return apply_mutation('vcs/stageUntracked', { repo_path = M.root })
-end
-
---- Unstage everything.
-function M.unstage_all()
-  return apply_mutation('vcs/unstageAll', { repo_path = M.root })
-end
-
---- Fetch the unified diff for a file (staged or unstaged).
-function M.diff(path, staged)
-  local resp, err = request_sync('vcs/diff', {
-    repo_path = M.root,
-    path = path,
-    staged = staged or false,
-  })
-  if not resp then
-    M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
-    vim.notify('magit-lsp diff failed: ' .. error_message(err), vim.log.levels.WARN)
-    return nil, err
+  if M.version == before then
+    vim.wait(5000, function()
+      return M.version ~= before
+    end, 10)
   end
   return resp
+end
+
+--- Open the status view in the current buffer.
+---@return table|nil descriptor
+function M.open()
+  local descriptor, err = request_sync('view/open', {
+    kind = 'status',
+    args = { repo_path = M.root },
+    viewport = {
+      cols = vim.o.columns,
+      rows = vim.o.lines,
+    },
+  })
+  if not descriptor then
+    vim.notify('magit-lsp open failed: ' .. error_message(err), vim.log.levels.ERROR)
+    return nil, err
+  end
+
+  local existing = vim.fn.bufnr(descriptor.uri)
+  if existing ~= -1 and existing ~= M.buf then
+    vim.api.nvim_buf_delete(existing, { force = true })
+  end
+
+  M.view_id = descriptor.id
+  M.uri = descriptor.uri
+  M.version = nil
+  vim.api.nvim_buf_set_name(M.buf, descriptor.uri)
+
+  -- The initial render follows the response as a notification.
+  if not vim.wait(5000, function()
+    return M.version ~= nil
+  end, 10) then
+    vim.notify('magit-lsp did not render the view', vim.log.levels.ERROR)
+    return nil, 'no initial render'
+  end
+  return descriptor
+end
+
+--- Ask the server to re-read the repository and re-render.
+function M.refresh()
+  return M.invoke('common.refresh')
+end
+
+--- Send the current viewport to the server.
+function M.resize()
+  local win = status_window()
+  local client = M.client_id and vim.lsp.get_client_by_id(M.client_id)
+  if not win or not client or not M.view_id then
+    return
+  end
+  client:notify('view/resize', {
+    viewId = M.view_id,
+    cols = vim.api.nvim_win_get_width(win),
+    rows = vim.api.nvim_win_get_height(win),
+  })
 end
 
 --- LSP `SymbolKind` values for the server's section/file/hunk outline.
@@ -286,7 +374,7 @@ local SYMBOL_KINDS = { section = 3, file = 1, hunk = 6 }
 --- Fetch the document's hierarchical symbol tree (section → file → hunk).
 function M.symbols()
   local symbols, err = request_sync('textDocument/documentSymbol', {
-    textDocument = { uri = vim.uri_from_bufnr(M.buf) },
+    textDocument = { uri = document_uri() },
   })
   if not symbols then
     return nil, err
@@ -336,18 +424,10 @@ function M.jump(kind, dir)
   return nil, 'no ' .. kind .. ' symbol'
 end
 
-local function cursor_entry()
-  return M.map[vim.fn.line('.')]
-end
-
 --- Visit the file (and new-side line) under the cursor.
 --- Opens it in the window the status view was split from, so the status
 --- buffer stays visible.
 function M.visit()
-  local e = cursor_entry()
-  if not e or not e.path then
-    return nil, 'no file under cursor'
-  end
   local win = vim.api.nvim_get_current_win()
   vim.lsp.buf.definition({
     on_list = function(options)
@@ -362,120 +442,6 @@ function M.visit()
       vim.api.nvim_win_set_cursor(0, { item.lnum, math.max((item.col or 1) - 1, 0) })
     end,
   })
-  return e.path
-end
-
---- Stage the file or hunk under the cursor (lines only via visual mode).
-function M.stage_at()
-  local e = cursor_entry()
-  if not e then
-    return nil, 'nothing under cursor'
-  end
-  if e.section ~= 'unstaged' and e.section ~= 'untracked' then
-    return nil, 'no unstaged item under cursor'
-  end
-  if e.kind == 'section' and e.section == 'untracked' then
-    return M.stage_untracked()
-  end
-  if e.kind == 'file' then
-    return M.stage_file(e.path)
-  end
-  if e.kind == 'hunk' or e.kind == 'line' then
-    return M.stage_hunk(e.path, e.hunk_id)
-  end
-  return nil, 'nothing to stage here'
-end
-
---- Unstage the file or hunk under the cursor.
-function M.unstage_at()
-  local e = cursor_entry()
-  if e and e.section == 'untracked' then
-    vim.notify('Nothing to unstage here', vim.log.levels.INFO)
-    return nil, 'nothing to unstage here'
-  end
-  if not e or e.section ~= 'staged' then
-    return nil, 'no staged item under cursor'
-  end
-  if e.kind == 'file' then
-    return M.unstage_file(e.path)
-  end
-  if e.kind == 'hunk' or e.kind == 'line' then
-    return M.unstage_hunk(e.path, e.hunk_id)
-  end
-  return nil, 'nothing to unstage here'
-end
-
---- Stage the lines between buffer lines `from` and `to` (inclusive).
-function M.stage_line_range(from, to)
-  local a = M.map[from]
-  local b = M.map[to]
-  if not a or not b or a.kind ~= 'line' or b.kind ~= 'line' then
-    return nil, 'selection must be on change lines'
-  end
-  if a.path ~= b.path or a.hunk_id ~= b.hunk_id then
-    return nil, 'selection spans multiple hunks'
-  end
-  if a.section ~= 'unstaged' then
-    return nil, 'not in unstaged section'
-  end
-  local lo = math.min(a.line_index, b.line_index)
-  local hi = math.max(a.line_index, b.line_index)
-  return M.stage_lines(a.path, a.hunk_id, lo, hi)
-end
-
---- Unstage the lines between buffer lines `from` and `to` (inclusive).
-function M.unstage_line_range(from, to)
-  local a = M.map[from]
-  local b = M.map[to]
-  if not a or not b or a.kind ~= 'line' or b.kind ~= 'line' then
-    return nil, 'selection must be on change lines'
-  end
-  if a.section ~= 'staged' then
-    return nil, 'not in staged section'
-  end
-  local lo = math.min(a.line_index, b.line_index)
-  local hi = math.max(a.line_index, b.line_index)
-  return M.unstage_lines(a.path, a.hunk_id, lo, hi)
-end
-
---- Stage the current visual selection (visual-mode mapping target).
-function M.stage_visual()
-  local a, b = vim.fn.line('v'), vim.fn.line('.')
-  return M.stage_line_range(math.min(a, b), math.max(a, b))
-end
-
---- Unstage the current visual selection (visual-mode mapping target).
-function M.unstage_visual()
-  local a, b = vim.fn.line('v'), vim.fn.line('.')
-  return M.unstage_line_range(math.min(a, b), math.max(a, b))
-end
-
---- Open a file's diff in a side split.
-function M.show_diff(path, staged)
-  local resp, err = M.diff(path, staged)
-  if not resp then
-    return nil, err
-  end
-  local dbuf = vim.api.nvim_create_buf(false, true)
-  vim.bo[dbuf].buftype = 'nofile'
-  vim.bo[dbuf].bufhidden = 'hide'
-  vim.bo[dbuf].swapfile = false
-  vim.api.nvim_buf_set_name(dbuf, 'magit-lsp://diff/' .. path)
-  local dlines = vim.split(resp.diff, '\n', { plain = true })
-  vim.api.nvim_buf_set_lines(dbuf, 0, -1, false, dlines)
-  vim.cmd('botright vsplit')
-  vim.api.nvim_win_set_buf(0, dbuf)
-  M.diff_buf = dbuf
-  return resp
-end
-
---- Open the diff for the file under the cursor.
-function M.diff_at()
-  local e = cursor_entry()
-  if not e or not e.path then
-    return nil, 'no file under cursor'
-  end
-  return M.show_diff(e.path, e.section == 'staged')
 end
 
 --- Open the detail of the last error in a scratch split.
@@ -495,16 +461,31 @@ function M.error_detail()
   vim.api.nvim_win_set_buf(0, buf)
 end
 
+local function invoke(command, opts)
+  return M.invoke(command, opts)
+end
+
 local function keymaps()
   local opts = { buffer = M.buf, nowait = true, noremap = true, silent = true }
-  vim.keymap.set('n', 's', M.stage_at, vim.tbl_extend('force', opts, { desc = 'Stage file/hunk' }))
-  vim.keymap.set('n', 'u', M.unstage_at, vim.tbl_extend('force', opts, { desc = 'Unstage file/hunk' }))
-  vim.keymap.set('x', 's', M.stage_visual, vim.tbl_extend('force', opts, { desc = 'Stage selected lines' }))
-  vim.keymap.set('x', 'u', M.unstage_visual, vim.tbl_extend('force', opts, { desc = 'Unstage selected lines' }))
-  vim.keymap.set('n', 'S', M.stage_all, vim.tbl_extend('force', opts, { desc = 'Stage all' }))
-  vim.keymap.set('n', 'U', M.unstage_all, vim.tbl_extend('force', opts, { desc = 'Unstage all' }))
+  vim.keymap.set('n', 's', function()
+    invoke('status.stage')
+  end, vim.tbl_extend('force', opts, { desc = 'Stage at cursor' }))
+  vim.keymap.set('n', 'u', function()
+    invoke('status.unstage')
+  end, vim.tbl_extend('force', opts, { desc = 'Unstage at cursor' }))
+  vim.keymap.set('x', 's', function()
+    invoke('status.stage', { selection = true })
+  end, vim.tbl_extend('force', opts, { desc = 'Stage selection' }))
+  vim.keymap.set('x', 'u', function()
+    invoke('status.unstage', { selection = true })
+  end, vim.tbl_extend('force', opts, { desc = 'Unstage selection' }))
+  vim.keymap.set('n', 'S', function()
+    invoke('status.stage-all')
+  end, vim.tbl_extend('force', opts, { desc = 'Stage all' }))
+  vim.keymap.set('n', 'U', function()
+    invoke('status.unstage-all')
+  end, vim.tbl_extend('force', opts, { desc = 'Unstage all' }))
   vim.keymap.set('n', '<CR>', M.visit, vim.tbl_extend('force', opts, { desc = 'Visit file at line' }))
-  vim.keymap.set('n', 'D', M.diff_at, vim.tbl_extend('force', opts, { desc = 'Show diff' }))
   vim.keymap.set('n', 'gR', M.refresh, vim.tbl_extend('force', opts, { desc = 'Refresh status' }))
   vim.keymap.set('n', ']s', function()
     M.jump('section', 1)
@@ -584,10 +565,6 @@ local function configure_read_only(buf)
 end
 
 local function fresh_buffer()
-  local existing = vim.fn.bufnr('vcs://status')
-  if existing ~= -1 then
-    vim.api.nvim_buf_delete(existing, { force = true })
-  end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = 'nofile'
   vim.bo[buf].bufhidden = 'hide'
@@ -597,16 +574,15 @@ local function fresh_buffer()
   -- The view is server-owned and refresh replaces it wholesale.
   vim.bo[buf].undolevels = -1
   vim.bo[buf].modified = false
-  vim.api.nvim_buf_set_name(buf, 'vcs://status')
   -- A dedicated filetype keeps the `@lsp.type.*.<filetype>` group names stable.
   vim.bo[buf].filetype = M.filetype
   configure_read_only(buf)
   return buf
 end
 
---- Start the server and open the status buffer.
+--- Start the server and open the status view.
 ---@param opts table|nil { root_dir?: string, cmd?: string[] }
----@return table|nil status
+---@return table|nil descriptor
 function M.setup(opts)
   opts = opts or {}
   M.root = opts.root_dir or vim.fn.getcwd()
@@ -625,7 +601,21 @@ function M.setup(opts)
     force = true,
   })
 
+  -- The server sends render updates as notifications.
+  vim.lsp.handlers['view/render'] = function(_, result)
+    M.apply_render(result)
+  end
+
   M.buf = fresh_buffer()
+  M.lines = {}
+  M.version = nil
+  M.view_id = nil
+  M.uri = nil
+
+  vim.cmd('vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, M.buf)
+  enable_folding(win)
 
   M.client_id = vim.lsp.start({
     name = 'magit-lsp',
@@ -640,6 +630,11 @@ function M.setup(opts)
 
   keymaps()
 
+  vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+    group = vim.api.nvim_create_augroup('magit_lsp_resize', { clear = true }),
+    callback = M.resize,
+  })
+
   vim.api.nvim_create_autocmd('VimLeavePre', {
     callback = function()
       local client = M.client_id and vim.lsp.get_client_by_id(M.client_id)
@@ -649,12 +644,7 @@ function M.setup(opts)
     end,
   })
 
-  vim.cmd('vsplit')
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, M.buf)
-  enable_folding(win)
-
-  return M.refresh()
+  return M.open()
 end
 
 return M

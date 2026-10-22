@@ -1,5 +1,3 @@
-use crate::git;
-use crate::tree::Document;
 use crate::view::{Placement, ViewDescriptor, ViewKind, Viewport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,107 +40,6 @@ impl Effect {
         }
     }
 }
-
-/// The result of a mutation: fresh status, rendered view and user effects.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MutationResponse {
-    pub status: git::Status,
-    pub effects: Vec<Effect>,
-    pub document: Document,
-}
-
-/// `vcs/status`: fetch the structured repository status and rendered view.
-pub enum StatusRequest {}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct StatusParams {
-    pub repo_path: String,
-    /// Buffer URI; registering it lets later positional requests find the tree.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub uri: Option<String>,
-}
-/// Status fields stay at the top level; the rendered view rides along.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct StatusResponse {
-    #[serde(flatten)]
-    pub status: git::Status,
-    pub document: Document,
-}
-impl lsp_types::request::Request for StatusRequest {
-    type Params = StatusParams;
-    type Result = StatusResponse;
-    const METHOD: &'static str = "vcs/status";
-}
-
-/// `vcs/diff`: unified diff for a single file.
-pub enum DiffRequest {}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct DiffParams {
-    pub repo_path: String,
-    pub path: String,
-    pub staged: bool,
-}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct DiffResponse {
-    pub path: String,
-    pub staged: bool,
-    pub diff: String,
-}
-impl lsp_types::request::Request for DiffRequest {
-    type Params = DiffParams;
-    type Result = DiffResponse;
-    const METHOD: &'static str = "vcs/diff";
-}
-
-macro_rules! mutation_request {
-    ($name:ident, $method:literal, $params:ty) => {
-        pub enum $name {}
-        impl lsp_types::request::Request for $name {
-            type Params = $params;
-            type Result = MutationResponse;
-            const METHOD: &'static str = $method;
-        }
-    };
-}
-
-/// Parameters for a whole-hunk stage/unstage.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct HunkMutationParams {
-    pub repo_path: String,
-    pub path: String,
-    pub hunk_id: String,
-}
-mutation_request!(StageHunkRequest, "vcs/stageHunk", HunkMutationParams);
-mutation_request!(UnstageHunkRequest, "vcs/unstageHunk", HunkMutationParams);
-
-/// Parameters for a line-range stage/unstage within a hunk.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct LinesMutationParams {
-    pub repo_path: String,
-    pub path: String,
-    pub hunk_id: String,
-    pub start: usize,
-    pub end: usize,
-}
-mutation_request!(StageLinesRequest, "vcs/stageLines", LinesMutationParams);
-mutation_request!(UnstageLinesRequest, "vcs/unstageLines", LinesMutationParams);
-
-/// Parameters for a whole-file stage/unstage.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct FileMutationParams {
-    pub repo_path: String,
-    pub path: String,
-}
-mutation_request!(StageFileRequest, "vcs/stageFile", FileMutationParams);
-mutation_request!(UnstageFileRequest, "vcs/unstageFile", FileMutationParams);
-
-/// Parameters for a repo-wide stage/unstage.
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct RepoMutationParams {
-    pub repo_path: String,
-}
-mutation_request!(StageAllRequest, "vcs/stageAll", RepoMutationParams);
-mutation_request!(UnstageAllRequest, "vcs/unstageAll", RepoMutationParams);
-mutation_request!(StageUntrackedRequest, "vcs/stageUntracked", RepoMutationParams);
 
 /// A cursor position in the rendered view, 0-based.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,36 +181,4 @@ pub struct ViewResizeParams {
     pub view_id: String,
     pub cols: u32,
     pub rows: u32,
-}
-
-/// `vcs/requestTransient`: reserved SDUI schema for commit-style menus (stub).
-pub enum TransientMenuRequest {}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TransientMenuParams {
-    pub trigger_key: String,
-    pub document_uri: String,
-    pub cursor_line: u32,
-}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TransientMenuResponse {
-    pub title: String,
-    pub flags: Vec<TransientFlag>,
-    pub actions: Vec<TransientAction>,
-}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TransientFlag {
-    pub flag: String,
-    pub description: String,
-    pub active: bool,
-}
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TransientAction {
-    pub key: String,
-    pub command: String,
-    pub description: String,
-}
-impl lsp_types::request::Request for TransientMenuRequest {
-    type Params = TransientMenuParams;
-    type Result = TransientMenuResponse;
-    const METHOD: &'static str = "vcs/requestTransient";
 }

@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use magit_lsp::diff_text;
 use magit_lsp::errors;
-use magit_lsp::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewRender};
+use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewRender};
 use magit_lsp::session::Session;
 use magit_lsp::tree::{Node, NodeKind, Tree};
 use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, Viewport};
@@ -59,13 +59,22 @@ fn invoke(
     command: &str,
     cursor: Option<Cursor>,
 ) -> magit_lsp::session::InvokeResult {
+    invoke_selection(session, command, cursor, None)
+}
+
+fn invoke_selection(
+    session: &mut Session,
+    command: &str,
+    cursor: Option<Cursor>,
+    selection: Option<Selection>,
+) -> magit_lsp::session::InvokeResult {
     session
         .invoke(&ViewInvokeParams {
             view_id: "v1".to_string(),
             command: command.to_string(),
             args: None,
             cursor,
-            selection: None,
+            selection,
         })
         .expect("invoke")
 }
@@ -228,4 +237,61 @@ fn a_stale_hunk_action_reports_a_message_and_changes_no_repo_state() {
         Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)
     );
     assert_eq!(cached_diff(tmp.path()), "", "nothing may be staged");
+}
+
+#[test]
+fn a_visual_selection_stages_only_the_lines_it_covers() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut session = Session::new(tmp.path().to_string_lossy());
+    let (_descriptor, initial) = open_status(&mut session);
+    session.ack("v1", initial.version).expect("ack");
+
+    let before = acked_tree(&session);
+    let line = before
+        .line_nodes
+        .iter()
+        .position(|line| {
+            line.kind == NodeKind::Line
+                && line.path.as_deref() == Some("f.txt")
+                && line.marker == Some('+')
+                && line.text.as_deref() == Some("NEW line")
+        })
+        .expect("the +NEW line");
+
+    let outcome = invoke_selection(
+        &mut session,
+        "status.stage",
+        Some(Cursor { line, column: 0 }),
+        Some(Selection {
+            start_line: line,
+            end_line: line,
+        }),
+    );
+    assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
+
+    let cached = cached_diff(tmp.path());
+    assert!(cached.contains("+NEW line"), "got: {cached}");
+    assert!(!cached.contains("line3 CHANGED"), "got: {cached}");
+}
+
+#[test]
+fn stage_all_and_unstage_all_run_through_the_view() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut session = Session::new(tmp.path().to_string_lossy());
+    let (_descriptor, initial) = open_status(&mut session);
+    session.ack("v1", initial.version).expect("ack");
+
+    let staged = invoke(&mut session, "status.stage-all", None);
+    assert!(staged.effects.is_empty(), "{:?}", staged.effects);
+    assert_eq!(hunk_count(&cached_diff(tmp.path())), 1);
+
+    let unstaged = invoke(&mut session, "status.unstage-all", None);
+    assert!(unstaged.effects.is_empty(), "{:?}", unstaged.effects);
+    assert_eq!(cached_diff(tmp.path()), "");
 }
