@@ -7,8 +7,9 @@
 
 use crate::commands::{self, CommandStatus};
 use crate::diff_text;
-use crate::keyhandler::{self, PendingChord, Resolution};
+use crate::keyhandler::{self, MenuPrefix, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
+use crate::menu::{Menu, MenuStatus, MenuView};
 use crate::protocol::{
     Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewKeyParams, ViewKeymapParams,
     ViewRender, ViewSetModeParams,
@@ -19,6 +20,7 @@ use crate::view::{
     Ctx, Placement, View, ViewDescriptor, ViewKind, ViewMode, Viewport, VisibilityCommand,
 };
 use crate::{Error, Result};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -40,6 +42,8 @@ pub struct OpenView {
     acked_version: Option<u64>,
     /// Chord steps collected for this view since the last complete match.
     pending: PendingChord,
+    /// A menu's pending `-`/`=` prefix.
+    menu_pending: MenuPrefix,
     /// The cursor the pending chord started at, to cancel it on cursor moves.
     key_cursor: Option<Cursor>,
     /// The current mode; text mode is plain editing with no server keys.
@@ -62,6 +66,26 @@ impl OpenView {
     /// The mode this view is currently in.
     pub fn mode(&self) -> ViewMode {
         self.mode
+    }
+
+    /// The kind of this view.
+    pub fn kind(&self) -> &ViewKind {
+        &self.descriptor.kind
+    }
+
+    /// The structured menu model, when this is a menu view.
+    pub fn menu(&self) -> Option<Menu> {
+        self.view.menu()
+    }
+
+    /// The menu model for server-side key handling.
+    pub fn menu_mut(&mut self) -> Option<&mut Menu> {
+        self.view.menu_mut()
+    }
+
+    /// Whether this view is a menu.
+    pub fn is_menu(&self) -> bool {
+        matches!(self.descriptor.kind, ViewKind::Menu(_))
     }
 
     /// Record a refresh for later: it is applied when text mode ends.
@@ -152,6 +176,7 @@ impl OpenView {
             edits,
             cursor: successor,
             mode: self.mode,
+            menu: self.view.menu(),
         })
     }
 
@@ -174,6 +199,7 @@ impl OpenView {
             edits: None,
             cursor: successor,
             mode: self.mode,
+            menu: self.view.menu(),
         })
     }
 }
@@ -219,6 +245,15 @@ impl ViewStack {
         self.views.iter()
     }
 
+    /// The view immediately below `id` in the stack.
+    pub fn previous_of(&self, id: &str) -> Option<&OpenView> {
+        let index = self
+            .views
+            .iter()
+            .position(|view| view.descriptor.id == id)?;
+        self.views.get(index.checked_sub(1)?)
+    }
+
     /// Whether no views are open.
     pub fn is_empty(&self) -> bool {
         self.views.is_empty()
@@ -239,6 +274,19 @@ pub struct InvokeResult {
     pub render: Option<ViewRender>,
     /// A fresh keymap to push when the view entered or left text mode.
     pub keymap: Option<ViewKeymapParams>,
+    /// Initial renders and keymaps for views the effects pushed or opened.
+    pub opened: Vec<(ViewRender, Option<ViewKeymapParams>)>,
+}
+
+impl InvokeResult {
+    fn empty() -> Self {
+        Self {
+            effects: Vec::new(),
+            render: None,
+            keymap: None,
+            opened: Vec::new(),
+        }
+    }
 }
 
 impl Session {
@@ -263,7 +311,7 @@ impl Session {
     pub fn keymap_notice(&self, view_id: &str) -> Option<ViewKeymapParams> {
         let view = self.views.get(view_id)?;
         let scope = view.descriptor().scope.as_str();
-        let keymap = self.keymaps.get(scope)?;
+        let keymap = self.keymap_for(scope)?;
         let text = view.mode() == ViewMode::Text;
         let bindings = if text {
             keymap.only(TOGGLE_TEXT_MODE)
@@ -277,6 +325,17 @@ impl Session {
             capture: view.descriptor().capture && !text,
             bindings,
             mode: view.mode(),
+        })
+    }
+
+    /// The keymap for a view scope. Every `menu.*` scope shares `menu`.
+    fn keymap_for(&self, scope: &str) -> Option<&Keymap> {
+        self.keymaps.get(scope).or_else(|| {
+            if scope.starts_with("menu.") {
+                self.keymaps.get("menu")
+            } else {
+                None
+            }
         })
     }
 
@@ -298,12 +357,24 @@ impl Session {
         placement: Placement,
         viewport: Viewport,
     ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_with_args(id, kind, placement, viewport, None)
+    }
+
+    /// Open a view with kind-specific arguments (e.g. preset menu arguments).
+    pub fn open_with_args(
+        &mut self,
+        id: impl Into<String>,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         let id = id.into();
         if self.views.get(&id).is_some() {
             return Err(Error::new(format!("view already open: {id}")));
         }
 
-        let mut view = create_view(&self.repo_path, &kind)?;
+        let mut view = create_view(&self.repo_path, &kind, args)?;
         let mut tree = view.render(&Ctx { viewport });
         let version = 1;
         tree.version = version;
@@ -311,7 +382,7 @@ impl Session {
         let descriptor = ViewDescriptor {
             id: id.clone(),
             kind: view.kind(),
-            uri: status_uri(&self.repo_path),
+            uri: view_uri(&self.repo_path, &kind, &id),
             title: view.title(),
             placement,
             mode: view.mode(),
@@ -327,6 +398,7 @@ impl Session {
             edits: None,
             cursor: None,
             mode: descriptor.mode,
+            menu: view.menu(),
         };
         self.views.push(OpenView {
             descriptor: descriptor.clone(),
@@ -336,6 +408,7 @@ impl Session {
             acked: None,
             acked_version: None,
             pending: PendingChord::default(),
+            menu_pending: MenuPrefix::None,
             key_cursor: None,
             mode: descriptor.mode,
             dirty: false,
@@ -343,12 +416,10 @@ impl Session {
         Ok((descriptor, render))
     }
 
-    /// Close a view.
+    /// Close a view; closing one the client already closed is a no-op.
     pub fn close(&mut self, view_id: &str) -> Result<()> {
-        self.views
-            .remove(view_id)
-            .map(|_| ())
-            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))
+        self.views.remove(view_id);
+        Ok(())
     }
 
     /// Record the client's ack of `version`.
@@ -365,13 +436,20 @@ impl Session {
     }
 
     /// Record a new viewport size from the client.
-    pub fn resize(&mut self, view_id: &str, viewport: Viewport) -> Result<()> {
+    ///
+    /// Menus re-lay out their columns immediately; other views keep their
+    /// current render until the next refresh.
+    pub fn resize(&mut self, view_id: &str, viewport: Viewport) -> Result<Option<ViewRender>> {
         let view = self
             .views
             .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
         view.descriptor.viewport = viewport;
-        Ok(())
+        if view.is_menu() {
+            Ok(Some(view.render(None, None)?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// The current full text, for a client that lost an update.
@@ -388,6 +466,7 @@ impl Session {
             edits: None,
             cursor: None,
             mode: view.mode,
+            menu: view.menu(),
         })
     }
 
@@ -408,10 +487,11 @@ impl Session {
     ///
     /// Cursor and selection come from the request, so the command path is
     /// identical to `view/invoke`; the node is resolved by identity against the
-    /// acked tree, never by a raw line index.
+    /// acked tree, never by a raw line index. Menus use their own two-step
+    /// matcher instead of the profile keymap.
     pub fn key(&mut self, params: &ViewKeyParams) -> Result<InvokeResult> {
         let mode = params.editor_mode;
-        let (scope, capture, cursor_moved) = {
+        let (scope, capture, cursor_moved, is_menu) = {
             let view = self
                 .views
                 .get_mut(&params.view_id)
@@ -422,9 +502,15 @@ impl Session {
                 view.descriptor().scope.as_str().to_string(),
                 view.descriptor().capture,
                 moved,
+                view.is_menu(),
             )
         };
-        let keymap = self.keymaps.get(&scope).cloned();
+
+        if is_menu {
+            return self.menu_key(params, cursor_moved);
+        }
+
+        let keymap = self.keymap_for(&scope).cloned();
 
         let resolution = {
             let view = self
@@ -438,11 +524,7 @@ impl Session {
         };
 
         match resolution {
-            Resolution::Pending => Ok(InvokeResult {
-                effects: Vec::new(),
-                render: None,
-                keymap: None,
-            }),
+            Resolution::Pending => Ok(InvokeResult::empty()),
             Resolution::Run { command, chord } => self.run_command(
                 &params.view_id,
                 &command,
@@ -453,18 +535,285 @@ impl Session {
             ),
             Resolution::PassThrough { chord } => Ok(InvokeResult {
                 effects: vec![Effect::PassThrough { key: chord }],
-                render: None,
-                keymap: None,
+                ..InvokeResult::empty()
             }),
             Resolution::Swallow { chord } => Ok(InvokeResult {
                 effects: vec![Effect::message(
                     MessageLevel::Info,
                     format!("Unbound key: {chord}"),
                 )],
-                render: None,
-                keymap: None,
+                ..InvokeResult::empty()
             }),
         }
+    }
+
+    /// Resolve a key inside a menu with the two-step `-x`/`=x`/`x` matcher.
+    fn menu_key(&mut self, params: &ViewKeyParams, cursor_moved: bool) -> Result<InvokeResult> {
+        let resolution = {
+            let view = self
+                .views
+                .get_mut(&params.view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
+            if cursor_moved {
+                view.menu_pending = MenuPrefix::None;
+            }
+            keyhandler::resolve_menu(&mut view.menu_pending, &params.key)
+        };
+
+        match resolution {
+            MenuResolution::Pending => Ok(InvokeResult::empty()),
+            MenuResolution::Pop => self.pop_view(&params.view_id),
+            MenuResolution::SaveArgs => self.run_command(
+                &params.view_id,
+                "menu.save-args",
+                Some(params.cursor),
+                None,
+                None,
+                Some(params.key.clone()),
+            ),
+            MenuResolution::ResetArgs => self.run_command(
+                &params.view_id,
+                "menu.reset-args",
+                Some(params.cursor),
+                None,
+                None,
+                Some(params.key.clone()),
+            ),
+            MenuResolution::Unbound { chord } => Ok(unbound(&chord)),
+            MenuResolution::ToggleSwitch(letter) => {
+                let key = format!("-{letter}");
+                let toggled = self
+                    .views
+                    .get_mut(&params.view_id)
+                    .and_then(|view| view.menu_mut())
+                    .map(|menu| menu.toggle_switch(&key))
+                    .unwrap_or(false);
+                if !toggled {
+                    return Ok(unbound(&key));
+                }
+                let render = self.render_view(&params.view_id, Some(params.cursor))?;
+                Ok(InvokeResult {
+                    render: Some(render),
+                    ..InvokeResult::empty()
+                })
+            }
+            MenuResolution::SetOption(letter) => {
+                let key = format!("={letter}");
+                let option = self
+                    .views
+                    .get(&params.view_id)
+                    .and_then(|view| view.menu())
+                    .and_then(|menu| menu.item(&key).cloned());
+                let Some(crate::menu::Item::Option { value, .. }) = option else {
+                    return Ok(unbound(&key));
+                };
+                if value.is_some() {
+                    if let Some(menu) = self
+                        .views
+                        .get_mut(&params.view_id)
+                        .and_then(|view| view.menu_mut())
+                    {
+                        menu.set_option(&key, None);
+                    }
+                    let render = self.render_view(&params.view_id, Some(params.cursor))?;
+                    Ok(InvokeResult {
+                        render: Some(render),
+                        ..InvokeResult::empty()
+                    })
+                } else {
+                    // Option prompts arrive with the `Ui` handle (R-3.1).
+                    Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            "Not implemented yet: option prompts (roadmap R-3.1)",
+                        )],
+                        ..InvokeResult::empty()
+                    })
+                }
+            }
+            MenuResolution::Action(letter) => {
+                self.menu_action(&params.view_id, letter, params)
+            }
+        }
+    }
+
+    /// Run a menu action, reporting Planned/Unavailable items and routing
+    /// Implemented commands through the registry.
+    fn menu_action(
+        &mut self,
+        view_id: &str,
+        letter: char,
+        params: &ViewKeyParams,
+    ) -> Result<InvokeResult> {
+        let key = letter.to_string();
+        let action = self
+            .views
+            .get(view_id)
+            .and_then(|view| view.menu())
+            .and_then(|menu| menu.item(&key).cloned());
+        let Some(crate::menu::Item::Action {
+            command,
+            label,
+            status,
+            ..
+        }) = action
+        else {
+            return Ok(unbound(&key));
+        };
+
+        match status {
+            MenuStatus::Planned { roadmap_id } => Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    format!("Not implemented yet: {label} (roadmap {roadmap_id})"),
+                )],
+                ..InvokeResult::empty()
+            }),
+            MenuStatus::Unavailable { reason } => Ok(InvokeResult {
+                effects: vec![Effect::message(MessageLevel::Info, reason)],
+                ..InvokeResult::empty()
+            }),
+            MenuStatus::Implemented => {
+                let Some(registered) = commands::registry().get(&command) else {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            format!("Not implemented yet: {label} (roadmap R-2.8)"),
+                        )],
+                        ..InvokeResult::empty()
+                    });
+                };
+                let scope = self
+                    .views
+                    .get(view_id)
+                    .map(|view| view.descriptor().scope.as_str().to_string())
+                    .unwrap_or_default();
+                if registered.scope.matches(&scope) {
+                    return self.run_command(
+                        view_id,
+                        registered.id,
+                        Some(params.cursor),
+                        params.selection,
+                        None,
+                        Some(key),
+                    );
+                }
+
+                // The action belongs to the previous view: close this menu and
+                // run it there, so e.g. an action that refreshes the status
+                // buffer never runs against the menu.
+                let previous = self
+                    .views
+                    .previous_of(view_id)
+                    .map(|view| view.descriptor().id.clone());
+                let Some(previous) = previous else {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            "Not available in this view",
+                        )],
+                        ..InvokeResult::empty()
+                    });
+                };
+                let pop = self.pop_view(view_id)?;
+                let mut run =
+                    self.run_command(&previous, registered.id, None, None, None, Some(key))?;
+                let mut effects = pop.effects;
+                effects.extend(run.effects);
+                run.effects = effects;
+                if run.keymap.is_none() {
+                    run.keymap = pop.keymap;
+                }
+                Ok(run)
+            }
+        }
+    }
+
+    /// Remove a view and return focus to the one below it.
+    fn pop_view(&mut self, view_id: &str) -> Result<InvokeResult> {
+        self.views.remove(view_id);
+        let mut effects = vec![Effect::PopView {
+            view_id: view_id.to_string(),
+        }];
+        let keymap = match self.views.iter().last() {
+            Some(previous) => {
+                let id = previous.descriptor().id.clone();
+                effects.push(Effect::FocusView { view_id: id.clone() });
+                self.keymap_notice(&id)
+            }
+            None => None,
+        };
+        Ok(InvokeResult {
+            effects,
+            render: None,
+            keymap,
+            opened: Vec::new(),
+        })
+    }
+
+    /// Render a view without touching the repository.
+    fn render_view(&mut self, view_id: &str, cursor: Option<Cursor>) -> Result<ViewRender> {
+        self.views
+            .get_mut(view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?
+            .render(cursor, None)
+    }
+
+    /// Push a menu above `parent_id` and return its descriptor and first render.
+    fn push_menu(&mut self, parent_id: &str, menu: Menu) -> Result<(ViewDescriptor, ViewRender)> {
+        let viewport = self
+            .views
+            .get(parent_id)
+            .map(|view| view.descriptor().viewport)
+            .unwrap_or_default();
+        let kind = ViewKind::Menu(format!("menu.{}", menu.id));
+        let base = format!("{parent_id}:{}", kind.as_str());
+        let mut id = base.clone();
+        let mut suffix = 2;
+        while self.views.get(&id).is_some() {
+            id = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+
+        let mut view = MenuView::new(menu);
+        let mut tree = view.render(&Ctx { viewport });
+        let version = 1;
+        tree.version = version;
+        let descriptor = ViewDescriptor {
+            id: id.clone(),
+            kind: view.kind(),
+            uri: view_uri(&self.repo_path, &kind, &id),
+            title: view.title(),
+            placement: Placement::Bottom,
+            mode: view.mode(),
+            scope: view.scope(),
+            capture: view.capture(),
+            viewport,
+        };
+        let render = ViewRender {
+            view_id: id.clone(),
+            version,
+            base_version: None,
+            text: Some(tree.lines.clone()),
+            edits: None,
+            cursor: None,
+            mode: descriptor.mode,
+            menu: view.menu(),
+        };
+        self.views.push(OpenView {
+            descriptor: descriptor.clone(),
+            view: Box::new(view),
+            tree,
+            version,
+            acked: None,
+            acked_version: None,
+            pending: PendingChord::default(),
+            menu_pending: MenuPrefix::None,
+            key_cursor: None,
+            mode: descriptor.mode,
+            dirty: false,
+        });
+        Ok((descriptor, render))
     }
 
     /// The single execution path shared by `view/invoke` and `view/key`.
@@ -502,69 +851,96 @@ impl Session {
             let hint = self.text_mode_hint(view_id);
             return Ok(InvokeResult {
                 effects: vec![Effect::message(MessageLevel::Info, hint)],
-                render: None,
-                keymap: None,
+                ..InvokeResult::empty()
             });
         }
 
-        let view = self
-            .views
-            .get_mut(view_id)
-            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        let (effects, outcome, render) = {
+            let view = self
+                .views
+                .get_mut(view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
 
-        match &command.status {
-            CommandStatus::Planned { roadmap_id } => {
+            match &command.status {
+                CommandStatus::Planned { roadmap_id } => {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(
+                            MessageLevel::Info,
+                            format!(
+                                "Not implemented yet: {} (roadmap {})",
+                                command.doc, roadmap_id
+                            ),
+                        )],
+                        ..InvokeResult::empty()
+                    });
+                }
+                CommandStatus::Unavailable { reason } => {
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::message(MessageLevel::Info, *reason)],
+                        ..InvokeResult::empty()
+                    });
+                }
+                CommandStatus::Implemented => {}
+            }
+
+            if !command.scope.matches(view.descriptor().scope.as_str()) {
                 return Ok(InvokeResult {
                     effects: vec![Effect::message(
                         MessageLevel::Info,
-                        format!(
-                            "Not implemented yet: {} (roadmap {})",
-                            command.doc, roadmap_id
-                        ),
+                        "Not available in this view",
                     )],
-                    render: None,
-                    keymap: None,
+                    ..InvokeResult::empty()
                 });
             }
-            CommandStatus::Unavailable { reason } => {
-                return Ok(InvokeResult {
-                    effects: vec![Effect::message(MessageLevel::Info, *reason)],
-                    render: None,
-                    keymap: None,
-                });
+
+            let mut ctx =
+                commands::CommandCtx::new(view, &repo_path, cursor, selection, args, key);
+            let outcome = (command.run)(&mut ctx)?;
+            let effects = ctx.into_effects();
+
+            if outcome.pop || outcome.open_menu.is_some() {
+                (effects, outcome, None)
+            } else {
+                let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
+                let render = match mode_change {
+                    Some(ViewMode::Text) => {
+                        view.enter_text_mode();
+                        None
+                    }
+                    Some(ViewMode::Interactive) => Some(view.leave_text_mode(cursor)?),
+                    None => Some(if outcome.refresh {
+                        view.refresh_and_render(cursor)?
+                    } else {
+                        view.render(cursor, outcome.cursor)?
+                    }),
+                };
+                (effects, outcome, render)
             }
-            CommandStatus::Implemented => {}
+        };
+
+        let mode_changed = outcome.mode.is_some();
+        if outcome.pop {
+            let mut result = self.pop_view(view_id)?;
+            let mut all = effects;
+            all.extend(result.effects);
+            result.effects = all;
+            return Ok(result);
         }
 
-        if !command.scope.matches(view.descriptor().scope.as_str()) {
+        if let Some(menu) = outcome.open_menu {
+            let (descriptor, render) = self.push_menu(view_id, menu)?;
+            let mut all = effects;
+            all.push(Effect::PushView { descriptor });
+            let keymap = self.keymap_notice(&render.view_id);
             return Ok(InvokeResult {
-                effects: vec![Effect::message(
-                    MessageLevel::Info,
-                    "Not available in this view",
-                )],
+                effects: all,
                 render: None,
                 keymap: None,
+                opened: vec![(render, keymap)],
             });
         }
 
-        let mut ctx = commands::CommandCtx::new(view, &repo_path, cursor, selection, args, key);
-        let outcome = (command.run)(&mut ctx)?;
-        let effects = ctx.into_effects();
-
-        let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
-        let render = match mode_change {
-            Some(ViewMode::Text) => {
-                view.enter_text_mode();
-                None
-            }
-            Some(ViewMode::Interactive) => Some(view.leave_text_mode(cursor)?),
-            None => Some(if outcome.refresh {
-                view.refresh_and_render(cursor)?
-            } else {
-                view.render(cursor, outcome.cursor)?
-            }),
-        };
-        let keymap = if mode_change.is_some() {
+        let keymap = if mode_changed {
             self.keymap_notice(view_id)
         } else {
             None
@@ -573,6 +949,7 @@ impl Session {
             effects,
             render,
             keymap,
+            opened: Vec::new(),
         })
     }
 
@@ -581,7 +958,7 @@ impl Session {
         let key = self
             .views
             .get(view_id)
-            .and_then(|view| self.keymaps.get(view.descriptor().scope.as_str()))
+            .and_then(|view| self.keymap_for(view.descriptor().scope.as_str()))
             .and_then(|keymap| keymap.command(TOGGLE_TEXT_MODE))
             .and_then(|binding| binding.keys.first().cloned());
         match key {
@@ -617,11 +994,7 @@ impl Session {
             .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?
             .mode();
         if current == params.mode {
-            return Ok(InvokeResult {
-                effects: Vec::new(),
-                render: None,
-                keymap: None,
-            });
+            return Ok(InvokeResult::empty());
         }
         // There are exactly two modes, so toggling reaches the requested one.
         self.run_command(&params.view_id, TOGGLE_TEXT_MODE, None, None, None, None)
@@ -650,12 +1023,43 @@ impl Session {
     }
 }
 
-fn create_view(repo_path: &str, kind: &ViewKind) -> Result<Box<dyn View>> {
+fn create_view(repo_path: &str, kind: &ViewKind, args: Option<&Value>) -> Result<Box<dyn View>> {
     match kind {
         ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
+        ViewKind::Menu(name) => {
+            let name = name.trim_start_matches("menu.");
+            let mut menu = Menu::by_name(name)
+                .ok_or_else(|| Error::new(format!("The `{name}` menu is not implemented yet.")))?;
+            if let Some(saved) = args.and_then(|args| args.get("saved_args")) {
+                if let Ok(saved) = serde_json::from_value::<crate::menu::Args>(saved.clone()) {
+                    menu.saved_args = saved.clone();
+                    menu.apply_args(&saved);
+                }
+            }
+            Ok(Box::new(MenuView::new(menu)))
+        }
         ViewKind::Other(name) => Err(Error::new(format!(
             "The `{name}` view is not implemented yet."
         ))),
+    }
+}
+
+/// A URI unique to one view, so positional requests resolve the right tree.
+fn view_uri(repo_path: &str, kind: &ViewKind, id: &str) -> String {
+    match kind {
+        ViewKind::Status => status_uri(repo_path),
+        other => format!("magit://{}/{}", other.as_str(), id),
+    }
+}
+
+/// A one-line hint for an unbound key inside a capture view.
+fn unbound(chord: &str) -> InvokeResult {
+    InvokeResult {
+        effects: vec![Effect::message(
+            MessageLevel::Info,
+            format!("Unbound key: {chord}"),
+        )],
+        ..InvokeResult::empty()
     }
 }
 

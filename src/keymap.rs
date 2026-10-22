@@ -7,7 +7,7 @@
 //! shares with a broader one; two commands claiming the same key at the same
 //! level are a conflict.
 
-use crate::commands::{self, Command, CommandStatus, Scope};
+use crate::commands::{self, Command, CommandStatus};
 use crate::config::{BindingSpec, Config, ConfigError, Origin, Profile, ScopeKeys};
 use crate::keys::{KeyChord, KeyStep};
 use serde::{Deserialize, Serialize};
@@ -103,9 +103,7 @@ impl Keymap {
 
         let candidates: Vec<&Command> = registry
             .iter()
-            .filter(|command| {
-                command.scope == Scope::Common || command.scope.as_str() == scope
-            })
+            .filter(|command| command.scope.matches(scope))
             .collect();
 
         // Choose the highest-precedence declaration per command.

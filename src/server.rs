@@ -263,7 +263,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 "exit" => break if shutdown_requested { 0 } else { 1 },
                 // Acks and resizes update session state; they never answer.
                 "view/rendered" | "view/resize" => {
-                    handle_view_notification(&shared, &notification)
+                    for message in handle_view_notification(&shared, &notification) {
+                        let _ = sender.send(message);
+                    }
                 }
                 // The client's settings changed; reload and report failures.
                 "workspace/didChangeConfiguration" => {
@@ -403,17 +405,17 @@ async fn dispatch_response(request: Request, shared: &Shared) -> (Response, Vec<
 }
 
 /// Apply a client notification that changes session state.
-fn handle_view_notification(shared: &Shared, notification: &Notification) {
+fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec<Message> {
     match notification.method.as_str() {
         VIEW_RENDERED => {
             let Ok(params) =
                 serde_json::from_value::<ViewRenderedParams>(notification.params.clone())
             else {
                 tracing::warn!("ignoring malformed view/rendered");
-                return;
+                return Vec::new();
             };
             let Some(repo) = shared.repo_for_view(&params.view_id) else {
-                return;
+                return Vec::new();
             };
             let mut sessions = shared
                 .sessions
@@ -424,32 +426,43 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) {
                     tracing::warn!(%error, "failed to record view ack");
                 }
             }
+            Vec::new()
         }
         VIEW_RESIZE => {
             let Ok(params) =
                 serde_json::from_value::<ViewResizeParams>(notification.params.clone())
             else {
                 tracing::warn!("ignoring malformed view/resize");
-                return;
+                return Vec::new();
             };
             let Some(repo) = shared.repo_for_view(&params.view_id) else {
-                return;
+                return Vec::new();
             };
             let mut sessions = shared
                 .sessions
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(session) = sessions.get_mut(&repo) {
-                let viewport = Viewport {
-                    cols: params.cols,
-                    rows: params.rows,
-                };
-                if let Err(error) = session.resize(&params.view_id, viewport) {
+            let Some(session) = sessions.get_mut(&repo) else {
+                return Vec::new();
+            };
+            let viewport = Viewport {
+                cols: params.cols,
+                rows: params.rows,
+            };
+            match session.resize(&params.view_id, viewport) {
+                // A menu re-flows its columns for the new width.
+                Ok(Some(render)) => vec![Message::Notification(Notification::new(
+                    VIEW_RENDER.to_string(),
+                    render,
+                ))],
+                Ok(None) => Vec::new(),
+                Err(error) => {
                     tracing::warn!(%error, "failed to resize view");
+                    Vec::new()
                 }
             }
         }
-        _ => {}
+        _ => Vec::new(),
     }
 }
 
@@ -626,11 +639,12 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .entry(repo.clone())
         .or_insert_with(|| Session::new(&repo));
     session.set_keymaps(keymaps);
-    let (descriptor, render) = session.open(
+    let (descriptor, render) = session.open_with_args(
         id.clone(),
         p.kind,
         p.placement.unwrap_or_default(),
         p.viewport,
+        p.args.as_ref(),
     )?;
     let keymap = session.keymap_notice(&id);
     drop(sessions);
@@ -660,17 +674,17 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 
 fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let p: ViewCloseParams = from_params(params)?;
-    let repo = shared
-        .repo_for_view(&p.view_id)
-        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let Some(repo) = shared.repo_for_view(&p.view_id) else {
+        // The client may have closed the view before its own close landed.
+        return Ok(Dispatched::value(Value::Null));
+    };
     let mut sessions = shared
         .sessions
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let session = sessions
-        .get_mut(&repo)
-        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    session.close(&p.view_id)?;
+    if let Some(session) = sessions.get_mut(&repo) {
+        session.close(&p.view_id)?;
+    }
     drop(sessions);
     shared
         .view_repos
@@ -694,7 +708,7 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     let outcome = session.invoke(&p)?;
     drop(sessions);
-    Ok(dispatched_outcome(shared, outcome)?)
+    Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
 /// Handle `view/key`: resolve one key step and answer like `view/invoke`.
@@ -714,7 +728,7 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     session.set_keymaps(keymaps);
     let outcome = session.key(&p)?;
     drop(sessions);
-    Ok(dispatched_outcome(shared, outcome)?)
+    Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
 /// Handle `view/setMode`: switch between interactive and text mode.
@@ -732,11 +746,11 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     let outcome = session.set_mode(&p)?;
     drop(sessions);
-    Ok(dispatched_outcome(shared, outcome)?)
+    Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
 /// Turn a command outcome into its response plus render/keymap notifications.
-fn dispatched_outcome(shared: &Shared, outcome: InvokeResult) -> Result<Dispatched> {
+fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
     let mut notifications = Vec::new();
     if let Some(render) = outcome.render {
         notifications.push(Message::Notification(Notification::new(
@@ -754,6 +768,42 @@ fn dispatched_outcome(shared: &Shared, outcome: InvokeResult) -> Result<Dispatch
             )));
         }
     }
+
+    // Views pushed or popped by an effect must be routable before the client
+    // can send a key for them.
+    {
+        let mut view_repos = shared
+            .view_repos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for effect in &outcome.effects {
+            match effect {
+                Effect::OpenView { descriptor } | Effect::PushView { descriptor } => {
+                    view_repos.insert(descriptor.id.clone(), repo.to_string());
+                }
+                Effect::PopView { view_id } => {
+                    view_repos.remove(view_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for (render, keymap) in outcome.opened {
+        notifications.push(Message::Notification(Notification::new(
+            VIEW_RENDER.to_string(),
+            render,
+        )));
+        if shared.delivery() == KeymapDelivery::Dynamic {
+            if let Some(keymap) = keymap {
+                notifications.push(Message::Notification(Notification::new(
+                    VIEW_KEYMAP.to_string(),
+                    keymap,
+                )));
+            }
+        }
+    }
+
     Ok(Dispatched::with(
         serde_json::to_value(ViewInvokeResponse {
             effects: outcome.effects,

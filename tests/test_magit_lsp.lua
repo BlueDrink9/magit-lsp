@@ -1263,4 +1263,133 @@ T['y y copies the value at point to the clipboard'] = function()
   MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), 'f.txt')
 end
 
+--- Wait for the most recently opened menu and return its window state.
+local function wait_menu()
+  local state = false
+  local ok = vim.wait(5000, function()
+    state = child.lua_get([[(function()
+      local menu = require('magit-lsp.menu')
+      local id = menu.last_id
+      if not id then return false end
+      local view = menu.views[id]
+      if not view or not view.win or not vim.api.nvim_win_is_valid(view.win) then
+        return false
+      end
+      local lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
+      return {
+        id = id,
+        win = view.win,
+        buf = view.buf,
+        config = vim.api.nvim_win_get_config(view.win),
+        width = vim.api.nvim_win_get_width(view.win),
+        height = vim.api.nvim_win_get_height(view.win),
+        lines = lines,
+        current = vim.api.nvim_get_current_win(),
+        cap = math.max(1, math.floor(vim.o.lines * 0.4)),
+        screen_lines = vim.o.lines,
+        cmdheight = vim.o.cmdheight,
+      }
+    end)()]])
+    return type(state) == 'table'
+  end, 20)
+  return ok and state or nil
+end
+
+--- The current lines of menu `id`, or an empty list when it closed.
+local function menu_lines(id)
+  return child.lua_get(string.format([[(function()
+    local menu = require('magit-lsp.menu')
+    local view = menu.views[%q]
+    if not view then return {} end
+    return vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
+  end)()]], id))
+end
+
+local function menu_closed(id)
+  return child.lua_get(string.format(
+    "(function() local m=require('magit-lsp.menu'); return m.views[%q] == nil end)()",
+    id
+  ))
+end
+
+local function has_prefix(lines, prefix)
+  for _, line in ipairs(lines) do
+    if vim.startswith(line, prefix) then
+      return true
+    end
+  end
+  return false
+end
+
+T['pressing c opens the commit menu in a bottom float'] = function()
+  setup_child()
+  child.type_keys(50, 'c')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+
+  local height = math.min(#state.lines, state.cap)
+  MiniTest.expect.equality(state.config.relative, 'editor')
+  MiniTest.expect.equality(state.config.row, state.screen_lines - height - state.cmdheight - 1)
+  MiniTest.expect.equality(state.config.col, 0)
+  MiniTest.expect.equality(state.config.width, child.lua_get('vim.o.columns'))
+  MiniTest.expect.equality(state.config.height, height)
+  MiniTest.expect.equality(state.current, state.win, 'the menu is entered')
+
+  MiniTest.expect.equality(state.lines[1], ' Commit')
+  MiniTest.expect.equality(vim.tbl_contains(state.lines, ' Arguments'), true, 'the arguments group')
+  MiniTest.expect.equality(vim.tbl_contains(state.lines, ' git commit'), true, 'the preview line')
+  MiniTest.expect.equality(has_prefix(state.lines, '  c  Commit'), true, 'the Commit action')
+
+  child.type_keys(50, '-a')
+  local toggled = vim.wait(5000, function()
+    for _, line in ipairs(menu_lines(state.id)) do
+      if line:find('%-%-all', 1) and line:find('%[x%]', 1) then
+        return true
+      end
+    end
+    return false
+  end, 20)
+  MiniTest.expect.equality(toggled, true, 'the --all switch shows [x] on screen')
+
+  child.type_keys(50, '<Esc>')
+  MiniTest.expect.equality(
+    vim.wait(5000, function()
+      return menu_closed(state.id)
+    end, 20),
+    true,
+    'Escape closed the menu'
+  )
+  MiniTest.expect.equality(
+    child.lua_get('vim.api.nvim_get_current_win()'),
+    child.lua_get('vim.fn.bufwinid(M.buf)'),
+    'focus returns to the status window'
+  )
+end
+
+T['menu.style split opens a bottom split'] = function()
+  setup_child({ menu = { style = 'split' } })
+  child.type_keys(50, 'c')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+
+  local height = math.min(#state.lines, state.cap)
+  MiniTest.expect.equality(state.config.relative, '')
+  MiniTest.expect.equality(state.height, height)
+  local bottom = child.lua_get(string.format(
+    'vim.fn.win_screenpos(%d)[1] + vim.fn.winheight(%d) - 1',
+    state.win,
+    state.win
+  ))
+  MiniTest.expect.equality(bottom, state.screen_lines - state.cmdheight - 1)
+
+  child.type_keys(50, '<Esc>')
+  MiniTest.expect.equality(
+    vim.wait(5000, function()
+      return menu_closed(state.id)
+    end, 20),
+    true,
+    'Escape closed the split menu'
+  )
+end
+
 return T

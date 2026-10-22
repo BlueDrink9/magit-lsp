@@ -2,6 +2,7 @@ local M = {}
 
 local keys = require('magit-lsp.keys')
 local keymap = require('magit-lsp.keymap')
+local menu = require('magit-lsp.menu')
 
 --- The last text the server sent, for clients and tests that need it.
 M.lines = {}
@@ -94,15 +95,9 @@ local function notify_effect(effect)
   vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
 end
 
---- Show one notification per message effect, at the requested level.
+--- Apply effects from an invoke: messages, clipboard, and view pushes/pops.
 local function apply_effects(effects)
-  for _, effect in ipairs(effects or {}) do
-    if effect.type == 'message' then
-      notify_effect(effect)
-    elseif effect.type == 'clipboard' then
-      copy_to_clipboard(effect.text or '')
-    end
-  end
+  menu.apply_effects(effects)
 end
 
 --- Replay a server `passThrough` key natively, without re-triggering our maps.
@@ -118,15 +113,7 @@ end
 
 --- Apply the effects of a `view/key`: messages, clipboard and native replay.
 local function apply_key_effects(effects)
-  for _, effect in ipairs(effects or {}) do
-    if effect.type == 'message' then
-      notify_effect(effect)
-    elseif effect.type == 'clipboard' then
-      copy_to_clipboard(effect.text or '')
-    elseif effect.type == 'passThrough' then
-      replay(effect.key)
-    end
-  end
+  menu.apply_effects(effects)
 end
 
 --- Standard theme groups for every token type of TASKS.md §3.15.
@@ -465,7 +452,13 @@ function M.invoke(command, opts)
   end
 
   apply_effects(resp.effects)
-  if M.version == before then
+  local opened = false
+  for _, effect in ipairs(resp.effects or {}) do
+    if effect.type == 'pushView' or effect.type == 'openView' then
+      opened = true
+    end
+  end
+  if not opened and M.version == before then
     vim.wait(5000, function()
       return M.version ~= before
     end, 10)
@@ -774,13 +767,24 @@ function M.setup(opts)
     force = true,
   })
 
-  -- The server sends render and keymap updates as notifications.
+  -- The server sends render and keymap updates as notifications. A menu
+  -- render carries the structured model, and menu keymaps use `menu.*`.
   vim.lsp.handlers['view/render'] = function(_, result)
-    M.apply_render(result)
+    if result and result.menu ~= nil then
+      menu.apply_render(result)
+    else
+      M.apply_render(result)
+    end
   end
   vim.lsp.handlers['view/keymap'] = function(_, result)
-    M.apply_keymap(result)
+    if result and (menu.owns(result.viewId) or (result.scope or ''):match('^menu%.')) then
+      menu.apply_keymap(result)
+    else
+      M.apply_keymap(result)
+    end
   end
+
+  menu.setup(opts.menu)
 
   M.buf = fresh_buffer()
   M.lines = {}
@@ -810,6 +814,21 @@ function M.setup(opts)
     return nil, 'failed to start client'
   end
 
+  menu.configure({
+    client_id = M.client_id,
+    filetype = M.filetype,
+    notify = notify_effect,
+    clipboard = copy_to_clipboard,
+    replay = replay,
+    status_win = function()
+      local win = vim.fn.bufwinid(M.buf)
+      if win == -1 then
+        return nil
+      end
+      return win
+    end,
+  })
+
   -- A user can add fold mappings while the server is running; re-scan them
   -- whenever the view regains focus.
   vim.api.nvim_create_autocmd('BufEnter', {
@@ -828,6 +847,7 @@ function M.setup(opts)
 
   vim.api.nvim_create_autocmd('VimLeavePre', {
     callback = function()
+      menu.close_all()
       local client = M.client_id and vim.lsp.get_client_by_id(M.client_id)
       if client then
         client:stop(true)

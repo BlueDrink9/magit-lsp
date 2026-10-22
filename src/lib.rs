@@ -10,6 +10,7 @@ pub mod keymap;
 pub mod keys;
 pub mod logging;
 pub mod manifest;
+pub mod menu;
 pub mod patch;
 pub mod protocol;
 pub mod semantic_tokens;

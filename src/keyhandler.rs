@@ -8,6 +8,99 @@ use crate::keymap::{EditorMode, Keymap, Match};
 use crate::keys::{KeyChord, KeyStep};
 use crate::Result;
 
+/// Which two-step prefix a menu is waiting for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MenuPrefix {
+    #[default]
+    None,
+    Switch,
+    Option,
+}
+
+/// What one key press means inside a menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuResolution {
+    /// A prefix (`-` or `=`) was consumed; keep collecting.
+    Pending,
+    /// Toggle the switch with this letter.
+    ToggleSwitch(char),
+    /// Set or clear the option with this letter.
+    SetOption(char),
+    /// Run the action with this key.
+    Action(char),
+    /// Close the menu and return to the previous view.
+    Pop,
+    /// Save the current arguments as the menu's defaults.
+    SaveArgs,
+    /// Restore the menu's saved arguments.
+    ResetArgs,
+    /// Unbound in a capture view; swallow it with a one-line hint.
+    Unbound { chord: String },
+}
+
+/// Resolve one key step with the menu's own two-step matcher.
+///
+/// Menus capture every key, so an unbound one is swallowed rather than passed
+/// back to the editor. `Escape`, `ctrl+c` and `q` always close.
+pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str) -> MenuResolution {
+    if matches!(key, "Escape" | "ctrl+c" | "q") {
+        *prefix = MenuPrefix::None;
+        return MenuResolution::Pop;
+    }
+    if key == "ctrl+s" {
+        *prefix = MenuPrefix::None;
+        return MenuResolution::SaveArgs;
+    }
+    if key == "ctrl+r" {
+        *prefix = MenuPrefix::None;
+        return MenuResolution::ResetArgs;
+    }
+
+    let mut chars = key.chars();
+    let single = match (chars.next(), chars.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    };
+
+    let previous = *prefix;
+    match previous {
+        MenuPrefix::None => match key {
+            "-" => {
+                *prefix = MenuPrefix::Switch;
+                MenuResolution::Pending
+            }
+            "=" => {
+                *prefix = MenuPrefix::Option;
+                MenuResolution::Pending
+            }
+            _ => match single {
+                Some(c) if !c.is_control() => MenuResolution::Action(c),
+                _ => MenuResolution::Unbound {
+                    chord: key.to_string(),
+                },
+            },
+        },
+        MenuPrefix::Switch => {
+            *prefix = MenuPrefix::None;
+            match single {
+                Some(c) => MenuResolution::ToggleSwitch(c),
+                None => MenuResolution::Unbound {
+                    chord: format!("-{key}"),
+                },
+            }
+        }
+        MenuPrefix::Option => {
+            *prefix = MenuPrefix::None;
+            match single {
+                Some(c) => MenuResolution::SetOption(c),
+                None => MenuResolution::Unbound {
+                    chord: format!("={key}"),
+                },
+            }
+        }
+    }
+}
+
 /// What one key press resolved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {

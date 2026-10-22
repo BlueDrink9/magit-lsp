@@ -1,4 +1,5 @@
 use crate::keymap::{Binding, EditorMode};
+use crate::menu::Menu;
 use crate::view::{Placement, ViewDescriptor, ViewKind, ViewMode, Viewport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,6 +32,20 @@ pub enum Effect {
     PassThrough { key: String },
     /// Put `text` on the system clipboard.
     Clipboard { text: String },
+    /// Create a window/buffer/panel and show it.
+    OpenView { descriptor: ViewDescriptor },
+    /// As `OpenView`, remembering the previous view so `PopView` returns.
+    PushView { descriptor: ViewDescriptor },
+    /// Close that view and focus the previous one.
+    PopView {
+        #[serde(rename = "viewId")]
+        view_id: String,
+    },
+    /// Focus an existing view.
+    FocusView {
+        #[serde(rename = "viewId")]
+        view_id: String,
+    },
 }
 
 impl Effect {
@@ -86,6 +101,9 @@ pub struct ViewRender {
     pub cursor: Option<Cursor>,
     /// The view mode this render belongs to, so the client can show it.
     pub mode: ViewMode,
+    /// The structured menu model, for menu views only (§3.11).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub menu: Option<Menu>,
 }
 
 /// Method name of the server's render notification.

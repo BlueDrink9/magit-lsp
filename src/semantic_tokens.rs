@@ -20,6 +20,18 @@ pub const TOKEN_TYPES: &[&str] = &[
     "magit.hunk.header",
     "magit.diff.added",
     "magit.diff.removed",
+    "magit.menu.title",
+    "magit.menu.group",
+    "magit.menu.key",
+    "magit.menu.label",
+    "magit.menu.flag",
+    "magit.menu.switch.on",
+    "magit.menu.switch.off",
+    "magit.menu.option",
+    "magit.menu.value",
+    "magit.menu.planned",
+    "magit.menu.disabled",
+    "magit.menu.preview",
 ];
 
 /// Token modifiers, in legend bit order.

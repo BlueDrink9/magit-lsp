@@ -36,6 +36,12 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   entering text mode.
 - **Visit**: open the real file at the new-side line of the item under the
   cursor (via LSP `definition`).
+- **Menus (transients)**: `open.commit` (`c` in the status view) pushes a
+  server-rendered commit menu in a bottom window. Switches (`-a`), options
+  (`=A`) and actions (`c`) are handled by the server; the argument preview
+  (`git commit --all`) updates as switches change. Every not-yet-built action is
+  listed as `Planned` and reports its roadmap item. `Escape`, `ctrl+c` or `q`
+  closes the menu; `ctrl+s`/`ctrl+r` save/reset the current arguments.
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
 - **Foldable** sections and files: the server owns visibility, and the client
   mirrors Neovim's fold keys to server commands.
@@ -119,6 +125,7 @@ text (`undolevels` goes back to `-1` first, so undo cannot reach stale edits).
 | `profile` | `"vim"` | Shipped keymap profile, forwarded as `initializationOptions.profile` |
 | `visit_key` | `"<CR>"` | Client-side visit key (see below) |
 | `fold_keys` | `{}` | Extra fold mirrors, e.g. `{ ['<Tab>'] = 'common.toggle-section' }` |
+| `menu` | `{ style = "float" }` | Menu placement: a bottom float (default) or `style = "split"` for `botright {height}split` |
 
 The client declares `keymapDelivery = "dynamic"` and `keyModifiers = "basic"`
 in terminals (`"full"` in a GUI), then applies every `view/keymap` the server
@@ -139,6 +146,15 @@ Lua-function mappings, which cannot be inspected.
 temporary client-side exception: while the server's binding is not
 `implemented`, the client maps `visit_key` (normal mode) to its own `visit`.
 It disappears as soon as the server implements `common.visit`.
+
+Menus are separate `magit://menu.*` buffers created from the server's
+`pushView`/`openView` effects. The default placement is a bottom floating
+window (`relative="editor"`, full width, height = rendered lines capped at 40%
+of the screen); `setup({ menu = { style = "split" } })` uses
+`botright {height}split` instead. The client only applies `view/render`,
+forwards keys and resizes the window; all menu layout and key matching happens
+on the server. Closing the menu window by hand sends `view/close` and returns
+focus to the previous view.
 
 ## Logging
 

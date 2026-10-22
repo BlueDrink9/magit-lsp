@@ -8,6 +8,7 @@
 use crate::dispatch;
 use crate::errors;
 use crate::git::GitRepo;
+use crate::menu::Menu;
 use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, Selection};
 use crate::session::{re_resolve, OpenView};
@@ -41,10 +42,14 @@ impl Scope {
 
     /// Whether a command in this scope applies to a view with `view_scope`.
     ///
-    /// `common` commands apply everywhere; the rest apply only to their own
-    /// view-kind scope.
+    /// `common` commands apply everywhere; `menu.*` commands apply to every
+    /// menu; the rest apply only to their own view-kind scope.
     pub fn matches(self, view_scope: &str) -> bool {
-        self == Scope::Common || self.as_str() == view_scope
+        match self {
+            Scope::Common => true,
+            Scope::Menu => view_scope == "menu" || view_scope.starts_with("menu."),
+            other => other.as_str() == view_scope,
+        }
     }
 }
 
@@ -71,7 +76,7 @@ pub struct Command {
 }
 
 /// What a handler asks the session to do after it runs.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CommandOutcome {
     /// Re-read the backing state before rendering.
     pub refresh: bool,
@@ -79,6 +84,10 @@ pub struct CommandOutcome {
     pub cursor: Option<Cursor>,
     /// A mode change the session must apply (and push a keymap for).
     pub mode: Option<ViewMode>,
+    /// Push a new menu view and return to the current one on `popView`.
+    pub open_menu: Option<Menu>,
+    /// Close the current view and return to the previous one.
+    pub pop: bool,
 }
 
 /// Everything a command handler may touch, plus the effects it collected.
@@ -300,7 +309,13 @@ fn build() -> Registry {
             run: cancel,
         },
         planned("common.confirm", Scope::Common, "Confirm the current selection", "R-3.1"),
-        planned("common.quit", Scope::Common, "Close all views", "R-3.1"),
+        Command {
+            id: "common.quit",
+            scope: Scope::Common,
+            doc: "Close all views",
+            status: CommandStatus::Implemented,
+            run: quit,
+        },
         planned(
             "common.cycle-visibility",
             Scope::Common,
@@ -338,8 +353,20 @@ fn build() -> Registry {
         planned("status.discard", Scope::Status, "Discard the change at point", "R-3.6"),
         planned("status.reverse", Scope::Status, "Reverse-apply the change at point", "R-3.6"),
         planned("status.apply", Scope::Status, "Apply the change at point", "R-8.2"),
-        planned("open.dispatch", Scope::Common, "Show the dispatch menu", "R-2.8"),
-        planned("open.commit", Scope::Status, "Open the commit menu", "R-4.1"),
+        Command {
+            id: "open.dispatch",
+            scope: Scope::Common,
+            doc: "Show the dispatch menu",
+            status: CommandStatus::Implemented,
+            run: open_dispatch,
+        },
+        Command {
+            id: "open.commit",
+            scope: Scope::Status,
+            doc: "Open the commit menu",
+            status: CommandStatus::Implemented,
+            run: open_commit,
+        },
         planned("open.branch", Scope::Status, "Open the branch menu", "R-6.1"),
         planned("open.log", Scope::Status, "Open the log menu", "R-5.1"),
         planned("open.diff", Scope::Status, "Open the diff menu", "R-5.2"),
@@ -381,8 +408,20 @@ fn build() -> Registry {
             "Enter a revision by hand",
             "R-5.1",
         ),
-        planned("menu.save-args", Scope::Menu, "Save the menu arguments", "R-2.7"),
-        planned("menu.reset-args", Scope::Menu, "Reset the menu arguments", "R-2.7"),
+        Command {
+            id: "menu.save-args",
+            scope: Scope::Menu,
+            doc: "Save the menu arguments",
+            status: CommandStatus::Implemented,
+            run: save_menu_args,
+        },
+        Command {
+            id: "menu.reset-args",
+            scope: Scope::Menu,
+            doc: "Reset the menu arguments",
+            status: CommandStatus::Implemented,
+            run: reset_menu_args,
+        },
         planned(
             "commit-message.history-prev",
             Scope::CommitMessage,
@@ -409,9 +448,51 @@ fn build() -> Registry {
 fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: true,
-        cursor: None,
-        mode: None,
+        ..Default::default()
     })
+}
+
+/// Open the commit menu; the session creates the view and pushes it.
+fn open_commit(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        open_menu: Some(Menu::commit()),
+        ..Default::default()
+    })
+}
+
+/// Open the dispatch menu, including from inside another menu.
+fn open_dispatch(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        open_menu: Some(Menu::dispatch()),
+        ..Default::default()
+    })
+}
+
+/// Remember the current switches/options as this menu's defaults.
+///
+/// Storage is in memory for now; persisted global/per-repo storage arrives
+/// with the menu configuration work (§3.11, §3.18).
+fn save_menu_args(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    match ctx.view.menu_mut() {
+        Some(menu) => {
+            menu.save_args();
+            ctx.info("Saved menu arguments");
+        }
+        None => ctx.info("No menu is open"),
+    }
+    Ok(CommandOutcome::default())
+}
+
+/// Restore the menu's saved switches/options.
+fn reset_menu_args(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    match ctx.view.menu_mut() {
+        Some(menu) => {
+            menu.reset_args();
+            ctx.info("Reset menu arguments");
+        }
+        None => ctx.info("No menu is open"),
+    }
+    Ok(CommandOutcome::default())
 }
 
 /// Flip the view between interactive and text mode; the session applies it.
@@ -421,9 +502,8 @@ fn toggle_text_mode(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         ViewMode::Interactive => ViewMode::Text,
     };
     Ok(CommandOutcome {
-        refresh: false,
-        cursor: None,
         mode: Some(mode),
+        ..Default::default()
     })
 }
 
@@ -444,13 +524,31 @@ fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-/// Cancel has nothing to cancel yet, so `Escape`/`ctrl+c` fall through when
-/// the user has a visual selection; otherwise it is a quiet no-op.
+/// Cancel closes a menu; elsewhere it falls through when the user has a visual
+/// selection and is a quiet no-op otherwise.
 fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if ctx.view.menu().is_some() {
+        return Ok(CommandOutcome {
+            pop: true,
+            ..Default::default()
+        });
+    }
     if ctx.selection.is_some() {
         let key = ctx.key.clone().unwrap_or_else(|| "Escape".to_string());
         ctx.extend(vec![Effect::PassThrough { key }]);
     }
+    Ok(CommandOutcome::default())
+}
+
+/// Quit closes a menu. Closing every view of a session arrives with R-3.1.
+fn quit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if ctx.view.menu().is_some() {
+        return Ok(CommandOutcome {
+            pop: true,
+            ..Default::default()
+        });
+    }
+    ctx.info("Not implemented yet: Close all views (roadmap R-3.1)");
     Ok(CommandOutcome::default())
 }
 
@@ -499,17 +597,15 @@ fn less_detail(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 fn next_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
-        refresh: false,
         cursor: section_cursor(ctx.view, ctx.cursor, true),
-        mode: None,
+        ..Default::default()
     })
 }
 
 fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
-        refresh: false,
         cursor: section_cursor(ctx.view, ctx.cursor, false),
-        mode: None,
+        ..Default::default()
     })
 }
 
@@ -530,8 +626,7 @@ fn stage_or_unstage(ctx: &mut CommandCtx<'_>, command: dispatch::Command) -> Res
     ctx.extend(effects);
     Ok(CommandOutcome {
         refresh: true,
-        cursor: None,
-        mode: None,
+        ..Default::default()
     })
 }
 
@@ -540,8 +635,7 @@ fn stage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     ctx.extend(effects);
     Ok(CommandOutcome {
         refresh: true,
-        cursor: None,
-        mode: None,
+        ..Default::default()
     })
 }
 
@@ -550,8 +644,7 @@ fn unstage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     ctx.extend(effects);
     Ok(CommandOutcome {
         refresh: true,
-        cursor: None,
-        mode: None,
+        ..Default::default()
     })
 }
 

@@ -200,7 +200,7 @@
               "label": "Close all views",
               "doc": "Close all views",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "common"
             },
             {
@@ -305,7 +305,7 @@
               "label": "Show the dispatch menu",
               "doc": "Show the dispatch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "common"
             }
           ]
@@ -565,7 +565,7 @@
               "label": "Close all views",
               "doc": "Close all views",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -730,7 +730,7 @@
               "label": "Show the dispatch menu",
               "doc": "Show the dispatch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -745,7 +745,7 @@
               "label": "Open the commit menu",
               "doc": "Open the commit menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1307,7 +1307,7 @@
               "label": "Close all views",
               "doc": "Close all views",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "select"
             },
             {
@@ -1412,7 +1412,7 @@
               "label": "Show the dispatch menu",
               "doc": "Show the dispatch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "select"
             },
             {
@@ -1644,7 +1644,7 @@
               "label": "Close all views",
               "doc": "Close all views",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -1749,7 +1749,7 @@
               "label": "Show the dispatch menu",
               "doc": "Show the dispatch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -1764,7 +1764,7 @@
               "label": "Save the menu arguments",
               "doc": "Save the menu arguments",
               "group": "menu",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -1779,7 +1779,7 @@
               "label": "Reset the menu arguments",
               "doc": "Reset the menu arguments",
               "group": "menu",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             }
           ]
@@ -1981,7 +1981,7 @@
               "label": "Close all views",
               "doc": "Close all views",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "commit-message"
             },
             {
@@ -2086,7 +2086,7 @@
               "label": "Show the dispatch menu",
               "doc": "Show the dispatch menu",
               "group": "open",
-              "status": "planned",
+              "status": "implemented",
               "scope": "commit-message"
             },
             {

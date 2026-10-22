@@ -16,14 +16,14 @@
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
 | `common.confirm` | `Enter` | planned | Confirm the current selection |
-| `common.quit` | `q` | planned | Close all views |
+| `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
 | `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
 | `common.parent-section` | `g u` | planned | Move to the parent section |
 | `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
 | `common.copy-value` | `y y` | implemented | Copy the value at point |
-| `open.dispatch` | `g ?` | planned | Show the dispatch menu |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
 
 ## status
 
@@ -45,7 +45,7 @@
 | `status.unstage-all` | `U` | implemented | Unstage all staged changes |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
 | `common.confirm` | (unbound) | planned | Confirm the current selection |
-| `common.quit` | `q` | planned | Close all views |
+| `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
 | `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
@@ -56,8 +56,8 @@
 | `status.discard` | `x` | planned | Discard the change at point |
 | `status.reverse` | `R` | planned | Reverse-apply the change at point |
 | `status.apply` | `a` | planned | Apply the change at point |
-| `open.dispatch` | `g ?` | planned | Show the dispatch menu |
-| `open.commit` | `c` | planned | Open the commit menu |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
+| `open.commit` | `c` | implemented | Open the commit menu |
 | `open.branch` | `b` | planned | Open the branch menu |
 | `open.log` | `g l` | planned | Open the log menu |
 | `open.diff` | `d` | planned | Open the diff menu |
@@ -99,14 +99,14 @@
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
 | `common.confirm` | `Enter` | planned | Confirm the current selection |
-| `common.quit` | `q` | planned | Close all views |
+| `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
 | `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
 | `common.parent-section` | `g u` | planned | Move to the parent section |
 | `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
 | `common.copy-value` | `y y` | implemented | Copy the value at point |
-| `open.dispatch` | `g ?` | planned | Show the dispatch menu |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
 | `select.toggle-mark` | `Space` | planned | Toggle the mark on the thing at point |
 | `select.enter-rev` | `i` | planned | Enter a revision by hand |
 
@@ -126,16 +126,16 @@
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
 | `common.confirm` | `Enter` | planned | Confirm the current selection |
-| `common.quit` | `q` | planned | Close all views |
+| `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
 | `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
 | `common.parent-section` | `g u` | planned | Move to the parent section |
 | `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
 | `common.copy-value` | `y y` | implemented | Copy the value at point |
-| `open.dispatch` | `g ?` | planned | Show the dispatch menu |
-| `menu.save-args` | `ctrl+s` | planned | Save the menu arguments |
-| `menu.reset-args` | `ctrl+r` | planned | Reset the menu arguments |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
+| `menu.save-args` | `ctrl+s` | implemented | Save the menu arguments |
+| `menu.reset-args` | `ctrl+r` | implemented | Reset the menu arguments |
 
 ## commit-message
 
@@ -153,14 +153,14 @@
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Z Q` | implemented | Cancel the current operation |
 | `common.confirm` | `Z Z`, `ctrl+Enter` | planned | Confirm the current selection |
-| `common.quit` | `q` | planned | Close all views |
+| `common.quit` | `q` | implemented | Close all views |
 | `common.cycle-visibility` | `shift+Tab` | planned | Cycle the visibility of every section |
 | `common.next-sibling` | `g j` | planned | Move to the next sibling |
 | `common.prev-sibling` | `g k` | planned | Move to the previous sibling |
 | `common.parent-section` | `g u` | planned | Move to the parent section |
 | `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
 | `common.copy-value` | `y y` | implemented | Copy the value at point |
-| `open.dispatch` | `g ?` | planned | Show the dispatch menu |
+| `open.dispatch` | `g ?` | implemented | Show the dispatch menu |
 | `commit-message.history-prev` | `[ m` | planned | Recall the previous commit message |
 | `commit-message.history-next` | `] m` | planned | Recall the next commit message |
 | `commit-message.add-signoff` | `g s` | planned | Add a Signed-off-by trailer |

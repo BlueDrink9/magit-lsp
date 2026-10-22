@@ -4,15 +4,18 @@
 //! session owns instances; the protocol sends a [`ViewDescriptor`] so a client
 //! can create the matching buffer.
 
+use crate::menu::Menu;
 use crate::tree::Tree;
 use crate::Result;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-/// The type of a view, e.g. `status` or `log`.
+/// The type of a view, e.g. `status`, `log` or `menu.commit`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ViewKind {
     Status,
+    /// A menu (Magit transient), stored by its wire name, e.g. `menu.commit`.
+    Menu(String),
     /// A known-but-unimplemented or future kind, kept verbatim on the wire.
     Other(String),
 }
@@ -22,20 +25,34 @@ impl ViewKind {
     pub fn as_str(&self) -> &str {
         match self {
             ViewKind::Status => "status",
+            ViewKind::Menu(name) => name,
             ViewKind::Other(name) => name,
+        }
+    }
+
+    /// The full wire name, e.g. `menu.commit`.
+    pub fn wire_name(&self) -> String {
+        self.as_str().to_string()
+    }
+
+    /// The bare menu id, for `ViewKind::Menu`.
+    pub fn menu_name(&self) -> Option<&str> {
+        match self {
+            ViewKind::Menu(name) => Some(name.trim_start_matches("menu.")),
+            _ => None,
         }
     }
 }
 
 impl fmt::Display for ViewKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(&self.wire_name())
     }
 }
 
 impl Serialize for ViewKind {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
+        serializer.serialize_str(&self.wire_name())
     }
 }
 
@@ -44,6 +61,7 @@ impl<'de> Deserialize<'de> for ViewKind {
         let name = String::deserialize(deserializer)?;
         Ok(match name.as_str() {
             "status" => ViewKind::Status,
+            other if other.starts_with("menu.") => ViewKind::Menu(other.to_string()),
             _ => ViewKind::Other(name),
         })
     }
@@ -179,6 +197,16 @@ pub trait View: Send {
 
     /// Render the current state. Must not touch the repository; refresh first.
     fn render(&mut self, ctx: &Ctx) -> Tree;
+
+    /// The structured menu model, for clients that prefer native widgets.
+    fn menu(&self) -> Option<Menu> {
+        None
+    }
+
+    /// The menu model for server-side key handling and argument changes.
+    fn menu_mut(&mut self) -> Option<&mut Menu> {
+        None
+    }
 
     /// Apply a visibility command to the node at `line` of `tree`.
     ///
