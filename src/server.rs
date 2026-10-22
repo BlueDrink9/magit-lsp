@@ -3,7 +3,7 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::semantic_tokens;
-use crate::session::Session;
+use crate::session::{InvokeResult, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::view::Viewport;
@@ -129,6 +129,15 @@ impl Shared {
         sessions
             .values()
             .find_map(|session| session.acked_tree_for_uri(uri))
+    }
+
+    /// Whether the view showing `uri` is in text mode.
+    fn is_text_uri(&self, uri: &str) -> bool {
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.values().any(|session| session.is_text_uri(uri))
     }
 }
 
@@ -513,6 +522,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         ViewCloseRequest::METHOD => close_view(shared, params),
         ViewInvokeRequest::METHOD => invoke_view(shared, params),
         ViewKeyRequest::METHOD => key_view(shared, params),
+        ViewSetModeRequest::METHOD => set_mode_view(shared, params),
         ViewResyncRequest::METHOD => {
             let p: ViewResyncParams = from_params(params)?;
             let repo = shared
@@ -531,7 +541,11 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         }
         "textDocument/documentSymbol" => {
             let p: lsp_types::DocumentSymbolParams = from_params(params)?;
-            let symbols = tree_for_positional_request(shared, p.text_document.uri.as_str())
+            let uri = p.text_document.uri.as_str();
+            if shared.is_text_uri(uri) {
+                return Ok(Dispatched::value(Value::Null));
+            }
+            let symbols = tree_for_positional_request(shared, uri)
                 .map(|tree| tree.document_symbols())
                 .unwrap_or_default();
             Ok(Dispatched::value(serde_json::to_value(symbols)?))
@@ -540,6 +554,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             let p: lsp_types::GotoDefinitionParams = from_params(params)?;
             let position = p.text_document_position_params;
             let uri = position.text_document.uri.as_str();
+            if shared.is_text_uri(uri) {
+                return Ok(Dispatched::value(Value::Null));
+            }
             let location = tree_for_positional_request(shared, uri).and_then(|tree| {
                 let repo = shared.repo_for_uri(uri)?;
                 tree.definition(&repo, position.position)
@@ -549,24 +566,35 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         "textDocument/documentLink" => {
             let p: lsp_types::DocumentLinkParams = from_params(params)?;
             let uri = p.text_document.uri.as_str();
-            let links = tree_for_positional_request(shared, uri)
-                .and_then(|tree| {
-                    let repo = shared.repo_for_uri(uri)?;
-                    Some(tree.document_links(&repo))
-                })
-                .unwrap_or_default();
-            Ok(Dispatched::value(serde_json::to_value(links)?))
+            if shared.is_text_uri(uri) {
+                return Ok(Dispatched::value(Value::Null));
+            }
+            let links = tree_for_positional_request(shared, uri).and_then(|tree| {
+                let repo = shared.repo_for_uri(uri)?;
+                Some(tree.document_links(&repo))
+            });
+            Ok(Dispatched::value(serde_json::to_value(
+                links.unwrap_or_default(),
+            )?))
         }
         "textDocument/foldingRange" => {
             let p: lsp_types::FoldingRangeParams = from_params(params)?;
-            let ranges = tree_for_positional_request(shared, p.text_document.uri.as_str())
+            let uri = p.text_document.uri.as_str();
+            if shared.is_text_uri(uri) {
+                return Ok(Dispatched::value(Value::Null));
+            }
+            let ranges = tree_for_positional_request(shared, uri)
                 .map(|tree| tree.folding_ranges())
                 .unwrap_or_default();
             Ok(Dispatched::value(serde_json::to_value(ranges)?))
         }
         "textDocument/semanticTokens/full" => {
             let p: lsp_types::SemanticTokensParams = from_params(params)?;
-            let tokens = tree_for_positional_request(shared, p.text_document.uri.as_str())
+            let uri = p.text_document.uri.as_str();
+            if shared.is_text_uri(uri) {
+                return Ok(Dispatched::value(Value::Null));
+            }
+            let tokens = tree_for_positional_request(shared, uri)
                 .map(|tree| semantic_tokens::encode(&tree))
                 .unwrap_or_default();
             Ok(Dispatched::value(serde_json::to_value(
@@ -666,22 +694,7 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     let outcome = session.invoke(&p)?;
     drop(sessions);
-
-    let notifications = outcome
-        .render
-        .map(|render| {
-            vec![Message::Notification(Notification::new(
-                VIEW_RENDER.to_string(),
-                render,
-            ))]
-        })
-        .unwrap_or_default();
-    Ok(Dispatched::with(
-        serde_json::to_value(ViewInvokeResponse {
-            effects: outcome.effects,
-        })?,
-        notifications,
-    ))
+    Ok(dispatched_outcome(shared, outcome)?)
 }
 
 /// Handle `view/key`: resolve one key step and answer like `view/invoke`.
@@ -701,16 +714,46 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     session.set_keymaps(keymaps);
     let outcome = session.key(&p)?;
     drop(sessions);
+    Ok(dispatched_outcome(shared, outcome)?)
+}
 
-    let notifications = outcome
-        .render
-        .map(|render| {
-            vec![Message::Notification(Notification::new(
-                VIEW_RENDER.to_string(),
-                render,
-            ))]
-        })
-        .unwrap_or_default();
+/// Handle `view/setMode`: switch between interactive and text mode.
+fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
+    let p: ViewSetModeParams = from_params(params)?;
+    let repo = shared
+        .repo_for_view(&p.view_id)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let mut sessions = shared
+        .sessions
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let session = sessions
+        .get_mut(&repo)
+        .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    let outcome = session.set_mode(&p)?;
+    drop(sessions);
+    Ok(dispatched_outcome(shared, outcome)?)
+}
+
+/// Turn a command outcome into its response plus render/keymap notifications.
+fn dispatched_outcome(shared: &Shared, outcome: InvokeResult) -> Result<Dispatched> {
+    let mut notifications = Vec::new();
+    if let Some(render) = outcome.render {
+        notifications.push(Message::Notification(Notification::new(
+            VIEW_RENDER.to_string(),
+            render,
+        )));
+    }
+    // A mode change replaces the binding set, so the client must see it even
+    // when the scope's ordinary keymap would not change.
+    if shared.delivery() == KeymapDelivery::Dynamic {
+        if let Some(keymap) = outcome.keymap {
+            notifications.push(Message::Notification(Notification::new(
+                VIEW_KEYMAP.to_string(),
+                keymap,
+            )));
+        }
+    }
     Ok(Dispatched::with(
         serde_json::to_value(ViewInvokeResponse {
             effects: outcome.effects,
@@ -793,6 +836,7 @@ fn is_request_method(method: &str) -> bool {
             | ViewCloseRequest::METHOD
             | ViewInvokeRequest::METHOD
             | ViewKeyRequest::METHOD
+            | ViewSetModeRequest::METHOD
             | ViewResyncRequest::METHOD
     )
 }

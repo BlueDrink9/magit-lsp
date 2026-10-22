@@ -11,14 +11,19 @@ use crate::keyhandler::{self, PendingChord, Resolution};
 use crate::keymap::Keymap;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewKeyParams, ViewKeymapParams,
-    ViewRender,
+    ViewRender, ViewSetModeParams,
 };
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
-use crate::view::{Ctx, Placement, View, ViewDescriptor, ViewKind, Viewport, VisibilityCommand};
+use crate::view::{
+    Ctx, Placement, View, ViewDescriptor, ViewKind, ViewMode, Viewport, VisibilityCommand,
+};
 use crate::{Error, Result};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// The command that leaves or enters text mode in every scope.
+const TOGGLE_TEXT_MODE: &str = "common.toggle-text-mode";
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
 pub fn status_uri(repo_path: &str) -> String {
@@ -37,6 +42,10 @@ pub struct OpenView {
     pending: PendingChord,
     /// The cursor the pending chord started at, to cancel it on cursor moves.
     key_cursor: Option<Cursor>,
+    /// The current mode; text mode is plain editing with no server keys.
+    mode: ViewMode,
+    /// A refresh arrived while in text mode; it is applied on exit.
+    dirty: bool,
 }
 
 impl OpenView {
@@ -48,6 +57,36 @@ impl OpenView {
     /// The most recently rendered tree.
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// The mode this view is currently in.
+    pub fn mode(&self) -> ViewMode {
+        self.mode
+    }
+
+    /// Record a refresh for later: it is applied when text mode ends.
+    fn queue_refresh(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Enter text mode: plain editing, no server keys except the toggle.
+    fn enter_text_mode(&mut self) {
+        self.mode = ViewMode::Text;
+        self.descriptor.mode = ViewMode::Text;
+        self.pending.clear();
+    }
+
+    /// Leave text mode: apply a queued refresh and replace the whole document.
+    ///
+    /// A full replace is required because the client's text diverged while the
+    /// user edited; there is no common base to diff against.
+    fn leave_text_mode(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
+        self.mode = ViewMode::Interactive;
+        self.descriptor.mode = ViewMode::Interactive;
+        if std::mem::take(&mut self.dirty) {
+            self.view.on_refresh()?;
+        }
+        self.render_full(cursor)
     }
 
     /// The tree of the last acknowledged version, if any.
@@ -112,6 +151,29 @@ impl OpenView {
             text,
             edits,
             cursor: successor,
+            mode: self.mode,
+        })
+    }
+
+    /// Render the current tree as a full text replace.
+    fn render_full(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
+        let old = self.tree.clone();
+        let mut tree = self.view.render(&Ctx {
+            viewport: self.descriptor.viewport,
+        });
+        let version = self.version + 1;
+        tree.version = version;
+        let successor = cursor.map(|cursor| successor_cursor(&old, &tree, cursor));
+        self.tree = tree;
+        self.version = version;
+        Ok(ViewRender {
+            view_id: self.descriptor.id.clone(),
+            version,
+            base_version: None,
+            text: Some(self.tree.lines.clone()),
+            edits: None,
+            cursor: successor,
+            mode: self.mode,
         })
     }
 }
@@ -175,6 +237,8 @@ pub struct Session {
 pub struct InvokeResult {
     pub effects: Vec<Effect>,
     pub render: Option<ViewRender>,
+    /// A fresh keymap to push when the view entered or left text mode.
+    pub keymap: Option<ViewKeymapParams>,
 }
 
 impl Session {
@@ -193,16 +257,26 @@ impl Session {
     }
 
     /// The complete keymap to push for `view_id`, if the scope resolves.
+    ///
+    /// In text mode only the toggle remains bound: every other key is plain
+    /// editing, and capture is off.
     pub fn keymap_notice(&self, view_id: &str) -> Option<ViewKeymapParams> {
         let view = self.views.get(view_id)?;
         let scope = view.descriptor().scope.as_str();
         let keymap = self.keymaps.get(scope)?;
+        let text = view.mode() == ViewMode::Text;
+        let bindings = if text {
+            keymap.only(TOGGLE_TEXT_MODE)
+        } else {
+            keymap.bindings().to_vec()
+        };
         Some(ViewKeymapParams {
             view_id: view_id.to_string(),
             scope: scope.to_string(),
             version: view.version,
-            capture: view.descriptor().capture,
-            bindings: keymap.bindings().to_vec(),
+            capture: view.descriptor().capture && !text,
+            bindings,
+            mode: view.mode(),
         })
     }
 
@@ -252,6 +326,7 @@ impl Session {
             text: Some(tree.lines.clone()),
             edits: None,
             cursor: None,
+            mode: descriptor.mode,
         };
         self.views.push(OpenView {
             descriptor: descriptor.clone(),
@@ -262,6 +337,8 @@ impl Session {
             acked_version: None,
             pending: PendingChord::default(),
             key_cursor: None,
+            mode: descriptor.mode,
+            dirty: false,
         });
         Ok((descriptor, render))
     }
@@ -310,6 +387,7 @@ impl Session {
             text: Some(view.tree.lines.clone()),
             edits: None,
             cursor: None,
+            mode: view.mode,
         })
     }
 
@@ -363,6 +441,7 @@ impl Session {
             Resolution::Pending => Ok(InvokeResult {
                 effects: Vec::new(),
                 render: None,
+                keymap: None,
             }),
             Resolution::Run { command, chord } => self.run_command(
                 &params.view_id,
@@ -375,6 +454,7 @@ impl Session {
             Resolution::PassThrough { chord } => Ok(InvokeResult {
                 effects: vec![Effect::PassThrough { key: chord }],
                 render: None,
+                keymap: None,
             }),
             Resolution::Swallow { chord } => Ok(InvokeResult {
                 effects: vec![Effect::message(
@@ -382,6 +462,7 @@ impl Session {
                     format!("Unbound key: {chord}"),
                 )],
                 render: None,
+                keymap: None,
             }),
         }
     }
@@ -390,6 +471,8 @@ impl Session {
     ///
     /// The command table lives in [`crate::commands`]; this method only looks
     /// it up, reports `Planned`/`Unavailable`/scope mismatches, and renders.
+    /// In text mode every command but the toggle is refused, so a key press or
+    /// invoke can never reach Git while the user edits plain text.
     fn run_command(
         &mut self,
         view_id: &str,
@@ -403,6 +486,27 @@ impl Session {
             return Err(Error::new(format!("unknown command: {command_id}")));
         };
         let repo_path = self.repo_path.clone();
+
+        let text_mode = self
+            .views
+            .get(view_id)
+            .map(|view| view.mode() == ViewMode::Text)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        if text_mode && command_id != TOGGLE_TEXT_MODE {
+            // A requested refresh is remembered, not run: it applies on exit.
+            if command_id == "common.refresh" {
+                if let Some(view) = self.views.get_mut(view_id) {
+                    view.queue_refresh();
+                }
+            }
+            let hint = self.text_mode_hint(view_id);
+            return Ok(InvokeResult {
+                effects: vec![Effect::message(MessageLevel::Info, hint)],
+                render: None,
+                keymap: None,
+            });
+        }
+
         let view = self
             .views
             .get_mut(view_id)
@@ -419,12 +523,14 @@ impl Session {
                         ),
                     )],
                     render: None,
+                    keymap: None,
                 });
             }
             CommandStatus::Unavailable { reason } => {
                 return Ok(InvokeResult {
                     effects: vec![Effect::message(MessageLevel::Info, *reason)],
                     render: None,
+                    keymap: None,
                 });
             }
             CommandStatus::Implemented => {}
@@ -437,29 +543,110 @@ impl Session {
                     "Not available in this view",
                 )],
                 render: None,
+                keymap: None,
             });
         }
 
         let mut ctx = commands::CommandCtx::new(view, &repo_path, cursor, selection, args, key);
         let outcome = (command.run)(&mut ctx)?;
         let effects = ctx.into_effects();
-        let render = if outcome.refresh {
-            view.refresh_and_render(cursor)?
+
+        let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
+        let render = match mode_change {
+            Some(ViewMode::Text) => {
+                view.enter_text_mode();
+                None
+            }
+            Some(ViewMode::Interactive) => Some(view.leave_text_mode(cursor)?),
+            None => Some(if outcome.refresh {
+                view.refresh_and_render(cursor)?
+            } else {
+                view.render(cursor, outcome.cursor)?
+            }),
+        };
+        let keymap = if mode_change.is_some() {
+            self.keymap_notice(view_id)
         } else {
-            view.render(cursor, outcome.cursor)?
+            None
         };
         Ok(InvokeResult {
             effects,
-            render: Some(render),
+            render,
+            keymap,
         })
     }
 
-    /// The last acknowledged tree for the view showing `uri`.
-    pub fn acked_tree_for_uri(&self, uri: &str) -> Option<Tree> {
+    /// The command that leaves text mode, naming its key when one is bound.
+    fn text_mode_hint(&self, view_id: &str) -> String {
+        let key = self
+            .views
+            .get(view_id)
+            .and_then(|view| self.keymaps.get(view.descriptor().scope.as_str()))
+            .and_then(|keymap| keymap.command(TOGGLE_TEXT_MODE))
+            .and_then(|binding| binding.keys.first().cloned());
+        match key {
+            Some(key) => format!("Text mode: press {key} to return"),
+            None => "Text mode: press the text-mode key to return".to_string(),
+        }
+    }
+
+    /// Re-read the backing state and render, unless the view is in text mode.
+    ///
+    /// Text mode queues the refresh instead: returning `None` keeps the client's
+    /// edited text in place. The file watcher (R-3.5) and `common.refresh` both
+    /// route through here.
+    pub fn refresh(&mut self, view_id: &str) -> Result<Option<ViewRender>> {
+        let view = self
+            .views
+            .get_mut(view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        if view.mode() == ViewMode::Text {
+            view.queue_refresh();
+            return Ok(None);
+        }
+        Ok(Some(view.refresh_and_render(None)?))
+    }
+
+    /// Switch a view to `mode` through the same path as the toggle.
+    ///
+    /// Setting the mode it already has is a no-op.
+    pub fn set_mode(&mut self, params: &ViewSetModeParams) -> Result<InvokeResult> {
+        let current = self
+            .views
+            .get(&params.view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?
+            .mode();
+        if current == params.mode {
+            return Ok(InvokeResult {
+                effects: Vec::new(),
+                render: None,
+                keymap: None,
+            });
+        }
+        // There are exactly two modes, so toggling reaches the requested one.
+        self.run_command(&params.view_id, TOGGLE_TEXT_MODE, None, None, None, None)
+    }
+
+    /// Whether the view showing `uri` is in text mode.
+    pub fn is_text_uri(&self, uri: &str) -> bool {
         self.views
             .iter()
-            .find(|view| view.descriptor.uri == uri)
-            .map(|view| view.acked.clone().unwrap_or_else(|| view.tree.clone()))
+            .any(|view| view.descriptor.uri == uri && view.mode() == ViewMode::Text)
+    }
+
+    /// The last acknowledged tree for the view showing `uri`.
+    ///
+    /// Returns `None` while that view is in text mode: §3.4 gives positional
+    /// requests no meaning when the client's text may differ from the server's.
+    pub fn acked_tree_for_uri(&self, uri: &str) -> Option<Tree> {
+        let view = self
+            .views
+            .iter()
+            .find(|view| view.descriptor.uri == uri)?;
+        if view.mode() == ViewMode::Text {
+            return None;
+        }
+        Some(view.acked.clone().unwrap_or_else(|| view.tree.clone()))
     }
 }
 

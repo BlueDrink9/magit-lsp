@@ -12,7 +12,7 @@ use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, Selection};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
-use crate::view::VisibilityCommand;
+use crate::view::{ViewMode, VisibilityCommand};
 use crate::Result;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -77,6 +77,8 @@ pub struct CommandOutcome {
     pub refresh: bool,
     /// A cursor to move to that the old node cannot describe.
     pub cursor: Option<Cursor>,
+    /// A mode change the session must apply (and push a keymap for).
+    pub mode: Option<ViewMode>,
 }
 
 /// Everything a command handler may touch, plus the effects it collected.
@@ -318,13 +320,20 @@ fn build() -> Registry {
             "Move to the parent section",
             "R-2.3",
         ),
-        planned(
-            "common.toggle-text-mode",
-            Scope::Common,
-            "Toggle text mode",
-            "R-2.6",
-        ),
-        planned("common.copy-value", Scope::Common, "Copy the value at point", "R-2.6"),
+        Command {
+            id: "common.toggle-text-mode",
+            scope: Scope::Common,
+            doc: "Toggle text mode",
+            status: CommandStatus::Implemented,
+            run: toggle_text_mode,
+        },
+        Command {
+            id: "common.copy-value",
+            scope: Scope::Common,
+            doc: "Copy the value at point",
+            status: CommandStatus::Implemented,
+            run: copy_value,
+        },
         planned("common.visit", Scope::Common, "Visit the thing at point", "R-2.3"),
         planned("status.discard", Scope::Status, "Discard the change at point", "R-3.6"),
         planned("status.reverse", Scope::Status, "Reverse-apply the change at point", "R-3.6"),
@@ -401,7 +410,38 @@ fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: true,
         cursor: None,
+        mode: None,
     })
+}
+
+/// Flip the view between interactive and text mode; the session applies it.
+fn toggle_text_mode(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let mode = match ctx.view.mode() {
+        ViewMode::Text => ViewMode::Interactive,
+        ViewMode::Interactive => ViewMode::Text,
+    };
+    Ok(CommandOutcome {
+        refresh: false,
+        cursor: None,
+        mode: Some(mode),
+    })
+}
+
+/// Copy the value at point as a clipboard effect, from the acked tree.
+fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let source = ctx
+        .view
+        .acked_tree()
+        .cloned()
+        .unwrap_or_else(|| ctx.view.tree().clone());
+    let selection = ctx
+        .selection
+        .map(|selection| (selection.start_line, selection.end_line));
+    match source.copy_value(ctx.cursor.map(|cursor| cursor.line), selection) {
+        Some(text) => ctx.effects.push(Effect::Clipboard { text }),
+        None => ctx.info("Nothing to copy here"),
+    }
+    Ok(CommandOutcome::default())
 }
 
 /// Cancel has nothing to cancel yet, so `Escape`/`ctrl+c` fall through when
@@ -461,6 +501,7 @@ fn next_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: false,
         cursor: section_cursor(ctx.view, ctx.cursor, true),
+        mode: None,
     })
 }
 
@@ -468,6 +509,7 @@ fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: false,
         cursor: section_cursor(ctx.view, ctx.cursor, false),
+        mode: None,
     })
 }
 
@@ -489,6 +531,7 @@ fn stage_or_unstage(ctx: &mut CommandCtx<'_>, command: dispatch::Command) -> Res
     Ok(CommandOutcome {
         refresh: true,
         cursor: None,
+        mode: None,
     })
 }
 
@@ -498,6 +541,7 @@ fn stage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: true,
         cursor: None,
+        mode: None,
     })
 }
 
@@ -507,6 +551,7 @@ fn unstage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         refresh: true,
         cursor: None,
+        mode: None,
     })
 }
 

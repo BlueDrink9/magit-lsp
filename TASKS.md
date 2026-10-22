@@ -1240,7 +1240,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       scanning user mappings), default profile `vim`.
 - [x] R-2.5 `magit-lsp keymap --format json|vscode|neovim|markdown --check`;
       CI snapshot; workbench deny-list test.
-- [ ] R-2.6 Text mode end to end (§3.14); `common.copy-value`.
+- [x] R-2.6 Text mode end to end (§3.14); `common.copy-value`.
 - [ ] R-2.7 **Menu framework** (§3.11): model, text rendering with columns from
       `viewport`, switches/options/actions, argument preview, structured model
       in `view/render`, `bottom` placement in Neovim (float and split).

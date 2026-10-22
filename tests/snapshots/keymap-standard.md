@@ -21,8 +21,8 @@
 | `common.next-sibling` | `alt+ArrowDown` | planned | Move to the next sibling |
 | `common.prev-sibling` | `alt+ArrowUp` | planned | Move to the previous sibling |
 | `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
-| `common.toggle-text-mode` | `ctrl+t` | planned | Toggle text mode |
-| `common.copy-value` | `ctrl+shift+c` | planned | Copy the value at point |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
 | `open.dispatch` | `?` | planned | Show the dispatch menu |
 
 ## status
@@ -50,8 +50,8 @@
 | `common.next-sibling` | `alt+ArrowDown` | planned | Move to the next sibling |
 | `common.prev-sibling` | `alt+ArrowUp` | planned | Move to the previous sibling |
 | `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
-| `common.toggle-text-mode` | `ctrl+t` | planned | Toggle text mode |
-| `common.copy-value` | `ctrl+shift+c` | planned | Copy the value at point |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
 | `common.visit` | `Enter` | planned | Visit the thing at point |
 | `status.discard` | `Delete` | planned | Discard the change at point |
 | `status.reverse` | `v` | planned | Reverse-apply the change at point |
@@ -104,8 +104,8 @@
 | `common.next-sibling` | `alt+ArrowDown` | planned | Move to the next sibling |
 | `common.prev-sibling` | `alt+ArrowUp` | planned | Move to the previous sibling |
 | `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
-| `common.toggle-text-mode` | `ctrl+t` | planned | Toggle text mode |
-| `common.copy-value` | `ctrl+shift+c` | planned | Copy the value at point |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
 | `open.dispatch` | `?` | planned | Show the dispatch menu |
 | `select.toggle-mark` | `Space` | planned | Toggle the mark on the thing at point |
 | `select.enter-rev` | `/` | planned | Enter a revision by hand |
@@ -131,8 +131,8 @@
 | `common.next-sibling` | `alt+ArrowDown` | planned | Move to the next sibling |
 | `common.prev-sibling` | `alt+ArrowUp` | planned | Move to the previous sibling |
 | `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
-| `common.toggle-text-mode` | `ctrl+t` | planned | Toggle text mode |
-| `common.copy-value` | `ctrl+shift+c` | planned | Copy the value at point |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
 | `open.dispatch` | `?` | planned | Show the dispatch menu |
 | `menu.save-args` | `ctrl+s` | planned | Save the menu arguments |
 | `menu.reset-args` | `ctrl+r` | planned | Reset the menu arguments |
@@ -158,8 +158,8 @@
 | `common.next-sibling` | (unbound) | planned | Move to the next sibling |
 | `common.prev-sibling` | (unbound) | planned | Move to the previous sibling |
 | `common.parent-section` | `alt+ArrowLeft` | planned | Move to the parent section |
-| `common.toggle-text-mode` | `ctrl+t` | planned | Toggle text mode |
-| `common.copy-value` | `ctrl+shift+c` | planned | Copy the value at point |
+| `common.toggle-text-mode` | `ctrl+t` | implemented | Toggle text mode |
+| `common.copy-value` | `ctrl+shift+c` | implemented | Copy the value at point |
 | `open.dispatch` | `?` | planned | Show the dispatch menu |
 | `commit-message.history-prev` | `alt+ArrowUp` | planned | Recall the previous commit message |
 | `commit-message.history-next` | `alt+ArrowDown` | planned | Recall the next commit message |

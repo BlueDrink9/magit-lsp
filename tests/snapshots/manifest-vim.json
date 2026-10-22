@@ -275,7 +275,7 @@
               "label": "Toggle text mode",
               "doc": "Toggle text mode",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "common"
             },
             {
@@ -290,7 +290,7 @@
               "label": "Copy the value at point",
               "doc": "Copy the value at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "common"
             },
             {
@@ -640,7 +640,7 @@
               "label": "Toggle text mode",
               "doc": "Toggle text mode",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -655,7 +655,7 @@
               "label": "Copy the value at point",
               "doc": "Copy the value at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {
@@ -1382,7 +1382,7 @@
               "label": "Toggle text mode",
               "doc": "Toggle text mode",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "select"
             },
             {
@@ -1397,7 +1397,7 @@
               "label": "Copy the value at point",
               "doc": "Copy the value at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "select"
             },
             {
@@ -1719,7 +1719,7 @@
               "label": "Toggle text mode",
               "doc": "Toggle text mode",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -1734,7 +1734,7 @@
               "label": "Copy the value at point",
               "doc": "Copy the value at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "menu"
             },
             {
@@ -2056,7 +2056,7 @@
               "label": "Toggle text mode",
               "doc": "Toggle text mode",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "commit-message"
             },
             {
@@ -2071,7 +2071,7 @@
               "label": "Copy the value at point",
               "doc": "Copy the value at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "commit-message"
             },
             {

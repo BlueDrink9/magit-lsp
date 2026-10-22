@@ -1,5 +1,5 @@
 use crate::keymap::{Binding, EditorMode};
-use crate::view::{Placement, ViewDescriptor, ViewKind, Viewport};
+use crate::view::{Placement, ViewDescriptor, ViewKind, ViewMode, Viewport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -29,6 +29,8 @@ pub enum Effect {
     },
     /// The key is not bound here; perform its normal editor behaviour.
     PassThrough { key: String },
+    /// Put `text` on the system clipboard.
+    Clipboard { text: String },
 }
 
 impl Effect {
@@ -82,6 +84,8 @@ pub struct ViewRender {
     pub edits: Option<Vec<LineEdit>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<Cursor>,
+    /// The view mode this render belongs to, so the client can show it.
+    pub mode: ViewMode,
 }
 
 /// Method name of the server's render notification.
@@ -230,6 +234,22 @@ pub struct ViewKeymapParams {
     pub version: u64,
     pub capture: bool,
     pub bindings: Vec<Binding>,
+    /// The view mode these bindings belong to (`text` has only the toggle).
+    pub mode: ViewMode,
+}
+
+/// `view/setMode`: switch a view between interactive and text mode.
+pub enum ViewSetModeRequest {}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewSetModeParams {
+    pub view_id: String,
+    pub mode: ViewMode,
+}
+impl lsp_types::request::Request for ViewSetModeRequest {
+    type Params = ViewSetModeParams;
+    type Result = ViewInvokeResponse;
+    const METHOD: &'static str = "view/setMode";
 }
 
 /// `view/resync`: return the current full text after a lost update.

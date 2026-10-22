@@ -235,6 +235,17 @@ impl Keymap {
     pub fn command(&self, command: &str) -> Option<&Binding> {
         self.bindings.iter().find(|binding| binding.command == command)
     }
+
+    /// The complete keymap for a view that only keeps `command` bound.
+    ///
+    /// Text mode uses this: plain editing leaves just the toggle reachable.
+    pub fn only(&self, command: &str) -> Vec<Binding> {
+        self.bindings
+            .iter()
+            .filter(|binding| binding.command == command)
+            .cloned()
+            .collect()
+    }
 }
 
 #[derive(Clone)]

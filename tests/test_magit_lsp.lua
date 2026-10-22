@@ -248,6 +248,7 @@ local function setup_child(opts)
         mode = mode or 'n'
         local keys = require('magit-lsp.keys')
         local want = mode == 'n' and 'normal' or 'visual'
+        local text_mode = notice.mode == 'text'
         local out = {}
         local visit_implemented = false
         for _, binding in ipairs(notice.bindings or {}) do
@@ -261,11 +262,11 @@ local function setup_child(opts)
             end
           end
         end
-        local visit = not visit_implemented and notice.scope == 'status'
+        local visit = not text_mode and not visit_implemented and notice.scope == 'status'
         if visit then
           out[HELPERS.normalize_lhs('<CR>', mode)] = (mode == 'n') or nil
         end
-        if mode == 'n' then
+        if mode == 'n' and not text_mode then
           for _, native in ipairs({ 'za', 'zA', 'zo', 'zO', 'zc', 'zC', 'zR', 'zM', 'zr', 'zm', 'zj', 'zk' }) do
             out[HELPERS.normalize_lhs(native, mode)] = true
           end
@@ -1152,6 +1153,114 @@ T['visit_key overrides the planned common.visit binding'] = function()
   end
   MiniTest.expect.equality(opened, true, 'the configured visit key opened the file')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
+end
+
+T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = function()
+  setup_child()
+  local before = child.lua_get('M.lines')
+  local undo = child.lua_get('M.undolevels')
+  MiniTest.expect.equality(undo ~= -1, true, 'the user undo setting was captured')
+
+  local function opt(name)
+    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = M.buf })", name))
+  end
+  local function mode_is(wanted)
+    return vim.wait(5000, function()
+      return child.lua_get('M.mode') == wanted
+    end, 20)
+  end
+
+  child.type_keys(50, '<C-t>')
+  MiniTest.expect.equality(mode_is('text'), true, 'ctrl+t entered text mode')
+  MiniTest.expect.equality(opt('modifiable'), true)
+  MiniTest.expect.equality(opt('readonly'), false)
+  MiniTest.expect.equality(opt('undolevels'), undo)
+  MiniTest.expect.equality(
+    child.lua_get("#vim.api.nvim_buf_get_keymap(M.buf, 'n')"),
+    1,
+    'only the toggle stays mapped in text mode'
+  )
+  MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['s'] == nil"), true)
+
+  child.type_keys(50, 'dd')
+  child.type_keys(50, 'ihello<Esc>')
+  vim.loop.sleep(50)
+  MiniTest.expect.equality(
+    child.lua_get('vim.deep_equal(HELPERS.lines(), M.lines)'),
+    false,
+    'the buffer is editable'
+  )
+
+  child.type_keys(50, '<C-t>')
+  MiniTest.expect.equality(mode_is('interactive'), true, 'ctrl+t left text mode')
+  vim.wait(5000, function()
+    return child.lua_get('M.lines') ~= nil
+  end, 20)
+  MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before, 'the server text is back')
+  MiniTest.expect.equality(opt('modifiable'), false)
+  MiniTest.expect.equality(opt('readonly'), true)
+  MiniTest.expect.equality(opt('undolevels'), -1)
+  MiniTest.expect.equality(opt('modified'), false)
+
+  child.lua('pcall(vim.cmd, "silent! undo")')
+  MiniTest.expect.equality(
+    child.lua_get('HELPERS.lines()'),
+    before,
+    'undo cannot restore the stale text-mode edits'
+  )
+end
+
+T['y y copies the value at point to the clipboard'] = function()
+  -- A provider keeps `+` deterministic in headless runs.
+  child.lua([[
+    CLIP = nil
+    vim.g.clipboard = {
+      name = 'test',
+      copy = {
+        ['+'] = function(lines) CLIP = lines end,
+        ['*'] = function(lines) CLIP = lines end,
+      },
+      paste = {
+        ['+'] = function() return CLIP or { '' } end,
+        ['*'] = function() return CLIP or { '' } end,
+      },
+    }
+  ]])
+  setup_child()
+
+  local function clear()
+    child.lua([[vim.fn.setreg('+', ''); vim.fn.setreg('"', '')]])
+  end
+  local function copied()
+    return vim.wait(5000, function()
+      return child.lua_get([[vim.fn.getreg('+')]]) ~= ''
+    end, 20)
+  end
+
+  clear()
+  local added = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
+  MiniTest.expect.equality(type(added), 'number', 'change line index')
+  child.api.nvim_win_set_cursor(0, { added, 0 })
+  child.type_keys(50, 'yy')
+  MiniTest.expect.equality(copied(), true, 'the line was copied')
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), 'NEW line')
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('"')]]), 'NEW line')
+
+  clear()
+  local hunk = child.lua_get("HELPERS.find_first('hunk', 'unstaged')")
+  child.api.nvim_win_set_cursor(0, { hunk, 0 })
+  child.type_keys(50, 'yy')
+  MiniTest.expect.equality(copied(), true, 'the hunk was copied')
+  local hunk_text = child.lua_get([[vim.fn.getreg('+')]])
+  MiniTest.expect.equality(hunk_text:find('@@ -1,10 +1,10 @@', 1, true), 1, hunk_text)
+  MiniTest.expect.equality(hunk_text:find('\n+NEW line', 1, true) ~= nil, true, hunk_text)
+
+  clear()
+  local file = child.lua_get("HELPERS.find_first('file', 'unstaged')")
+  child.api.nvim_win_set_cursor(0, { file, 0 })
+  child.type_keys(50, 'yy')
+  MiniTest.expect.equality(copied(), true, 'the path was copied')
+  MiniTest.expect.equality(child.lua_get([[vim.fn.getreg('+')]]), 'f.txt')
 end
 
 return T

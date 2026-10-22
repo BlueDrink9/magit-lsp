@@ -113,6 +113,9 @@ pub struct Node {
     /// Line in the new (worktree) file this node visits, 1-based.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_line: Option<u32>,
+    /// Exact text `common.copy-value` yields for this node, if it is copyable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copy: Option<String>,
     /// Ids of the child nodes, in document order.
     pub children: Vec<NodeId>,
 }
@@ -337,9 +340,56 @@ impl Tree {
         ranges
     }
 
+    /// The text `common.copy-value` yields for a line or selection.
+    ///
+    /// Resolution uses the node behind each line and the copy text recorded
+    /// when the tree was built; rendered line shapes are never parsed.
+    pub fn copy_value(
+        &self,
+        line: Option<usize>,
+        selection: Option<(usize, usize)>,
+    ) -> Option<String> {
+        if let Some((a, b)) = selection {
+            let (start, end) = if a <= b { (a, b) } else { (b, a) };
+            if start != end {
+                let parts: Vec<String> = (start..=end)
+                    .filter_map(|line| self.selected_line(line))
+                    .collect();
+                if !parts.is_empty() {
+                    return Some(parts.join("\n"));
+                }
+            }
+        }
+        self.copy_node(line?)
+    }
+
+    /// The copy text of the node owning `line`.
+    fn copy_node(&self, line: usize) -> Option<String> {
+        let node = self.node(self.line_nodes.get(line)?.node.as_str())?;
+        match node.kind {
+            NodeKind::File => node.path.clone(),
+            NodeKind::Hunk => node.copy.clone(),
+            NodeKind::Line => Some(node.label.clone()),
+            NodeKind::Section => Some(node.label.clone()),
+            // Commit nodes (R-5.1) will copy their hash from here.
+            _ => None,
+        }
+    }
+
+    /// One line of a visual selection, keeping diff markers.
+    fn selected_line(&self, line: usize) -> Option<String> {
+        let node = self.node(self.line_nodes.get(line)?.node.as_str())?;
+        match node.kind {
+            NodeKind::Line => Some(format!("{}{}", node.marker.unwrap_or(' '), node.label)),
+            NodeKind::Hunk => node.copy.clone(),
+            NodeKind::File => node.path.clone(),
+            NodeKind::Section => Some(node.label.clone()),
+            _ => None,
+        }
+    }
+
     /// A full-line LSP range from the first to the last line of a symbol.
-    fn line_range(&self, start_line: usize, end_line: usize) -> Range {
-        let last = self.lines.len().saturating_sub(1);
+    fn line_range(&self, start_line: usize, end_line: usize) -> Range {        let last = self.lines.len().saturating_sub(1);
         let end = end_line.min(last);
         let start = start_line.min(end);
         Range::new(

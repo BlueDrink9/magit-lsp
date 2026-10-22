@@ -468,6 +468,10 @@ where
             "    @@ -{},{} +{},{} @@",
             hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
         );
+        let raw_header = format!(
+            "@@ -{},{} +{},{} @@",
+            hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
+        );
         self.tree.lines.push(header.clone());
 
         let mut entry = line_node(&hunk_id, NodeKind::Hunk);
@@ -483,6 +487,7 @@ where
         hunk_node.path = Some(file.path.clone());
         hunk_node.hunk_id = Some(hunk.id.clone());
         hunk_node.new_line = Some(hunk.new_start);
+        hunk_node.copy = Some(hunk_diff_text(&raw_header, hunk));
         self.tree.nodes.push(hunk_node);
 
         let staged = section == "staged";
@@ -696,6 +701,17 @@ fn line_node(id: &str, kind: NodeKind) -> LineNode {
     }
 }
 
+/// A hunk as it appears in a patch: the header plus every marked line.
+fn hunk_diff_text(header: &str, hunk: &Hunk) -> String {
+    let mut text = String::from(header);
+    for line in &hunk.lines {
+        text.push('\n');
+        text.push(line.marker);
+        text.push_str(&line.text);
+    }
+    text
+}
+
 fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -> Node {
     Node {
         id: id.to_string(),
@@ -710,6 +726,7 @@ fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -
         marker: None,
         line_index: None,
         new_line: None,
+        copy: None,
         children: Vec::new(),
     }
 }

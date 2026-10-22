@@ -108,6 +108,9 @@ function M.apply(bufnr, notice, handlers, opts)
     end
   end
 
+  -- Text mode is plain editing: only the server's toggle stays bound.
+  local text_mode = notice.mode == 'text'
+
   -- Every binding the server sent, in each mode it applies to.
   for _, binding in ipairs(notice.bindings or {}) do
     for _, chord in ipairs(binding.keys or {}) do
@@ -126,24 +129,26 @@ function M.apply(bufnr, notice, handlers, opts)
   end
 
   -- Visit is a documented client-side exception until `common.visit` lands.
-  if opts.visit then
+  if opts.visit and not text_mode then
     drop_lhs(opts.visit.lhs)
     add('n', opts.visit.lhs, opts.visit.fn, 'Visit file at line')
   end
 
   -- Mirror the native fold keys; a server binding for the same lhs wins.
-  for _, native in ipairs(FOLD_ORDER) do
-    add('n', native, command_fn(FOLDS[native]), 'Fold')
-  end
-  for lhs, target in pairs(user_folds(bufnr)) do
-    add('n', lhs, command_fn(target), 'Fold')
-  end
-  for lhs, command in pairs(opts.fold_keys or {}) do
-    add('n', lhs, command_fn({ command = command }), 'Fold')
+  if not text_mode then
+    for _, native in ipairs(FOLD_ORDER) do
+      add('n', native, command_fn(FOLDS[native]), 'Fold')
+    end
+    for lhs, target in pairs(user_folds(bufnr)) do
+      add('n', lhs, command_fn(target), 'Fold')
+    end
+    for lhs, command in pairs(opts.fold_keys or {}) do
+      add('n', lhs, command_fn({ command = command }), 'Fold')
+    end
   end
 
   -- Capture mode forwards every other printable ASCII key to the server.
-  if notice.capture then
+  if notice.capture and not text_mode then
     for code = 32, 126 do
       local char = string.char(code)
       local canonical = char

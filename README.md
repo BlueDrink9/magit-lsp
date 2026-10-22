@@ -26,6 +26,14 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   hunks and diff lines. Never blank — shows `Working tree clean` when clean.
 - **Staging**: whole file, whole hunk, or a selected range of lines — and the
   symmetric unstage operations — all through `view/invoke`.
+- **Text mode**: `common.toggle-text-mode` (`ctrl+t`) turns the view into plain
+  editable text. Keys stop being forwarded, refreshes are queued, and leaving
+  text mode restores the server's text in one full render. Edits are never sent
+  to or parsed by the server.
+- **Copy value**: `common.copy-value` (`ctrl+shift+c` in `standard`, `y y` in
+  `vim`) copies the file path, hunk patch text, diff line or section title at
+  point through a `clipboard` effect, so the system clipboard works without
+  entering text mode.
 - **Visit**: open the real file at the new-side line of the item under the
   cursor (via LSP `definition`).
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
@@ -92,6 +100,13 @@ The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in a
 vertical split. It is a read-only view: native editing keys are refused and
 `:w`/`:write` is a no-op. Use `g r` to refresh it after changes in the
 repository.
+
+Press the text-mode key (`ctrl+t` in both shipped profiles) to turn it into
+plain editable text. The buffer becomes modifiable, the user's `undolevels` is
+restored and every binding but the toggle is removed. While text mode is on,
+the server queues refreshes and answers position-based LSP requests with
+`null`. Pressing the key again replaces the buffer with the server's current
+text (`undolevels` goes back to `-1` first, so undo cannot reach stale edits).
 
 ## Client configuration
 

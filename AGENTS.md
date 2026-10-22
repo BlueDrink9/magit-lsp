@@ -41,6 +41,7 @@ targets are read from the tree, never from parsing rendered text.
 | `view/key` | Press one canonical key step; the server resolves chords per view and runs the command |
 | `view/invoke` | Run a command (`common.refresh`, `common.*` folds, `status.stage`, `status.unstage`, `status.stage-all`, `status.unstage-all`) |
 | `view/resync` | Return the current full text after a lost update |
+| `view/setMode` | Switch a view between `interactive` and `text` mode |
 | `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?, cursor?}` |
 | `view/keymap` (notification) | `{viewId, scope, version, capture, bindings}` for the view's resolved keymap |
 | `view/rendered` (notification) | Client ack `{viewId, version}` |
@@ -58,6 +59,14 @@ The positional requests above resolve through the view that owns the buffer URI
 comes back as an error-level `Effect::Message` with a readable summary (see
 `src/errors.rs`). JSON-RPC errors are reserved for protocol faults.
 
+Text mode (§3.14) is a view mode, not a client mode. `common.toggle-text-mode`
+and `view/setMode` share the command path: entering text mode narrows the
+pushed `view/keymap` to the toggle, refuses every other command with an info
+message, queues refreshes (`Session::refresh` keeps a dirty flag) and makes
+positional requests return `null`. Leaving it applies the queued refresh and
+sends one full-text `view/render`, then the full keymap. Client edits are never
+sent to the server.
+
 ### Source layout
 
 - `src/lib.rs` — crate root; `Error` (message + optional structured Git failure).
@@ -71,14 +80,16 @@ comes back as an error-level `Effect::Message` with a readable summary (see
   executes stage/unstage (discard execution and wiring deferred).
 - `src/tree.rs` — view tree: `Node`, `NodeId`, `NodeKind`, tokens, symbols,
   links and the line → node map. Node IDs derive from identity, never position.
-  Also converts symbols to `DocumentSymbol`s and resolves `definition`/links.
+  Also converts symbols to `DocumentSymbol`s, resolves `definition`/links and
+  answers `common.copy-value` from each node's recorded copy text.
 - `src/status_view.rs` — renders `Status` into a `Tree` (text and structure);
   `StatusView` implements the `View` trait.
 - `src/semantic_tokens.rs` — the tree's tokens as LSP semantic tokens: the
   legend, byte → UTF-16 conversion and delta encoding.
 - `src/view.rs` — `View` trait, `ViewDescriptor`, kinds, placement and viewport.
 - `src/session.rs` — one `Session` per repository: `ViewStack`, versions, acks,
-  cursor succession and the tiny R-1.2 command table.
+  cursor succession, text mode (queued refreshes, full-text exit), and the
+  tiny R-1.2 command table.
 - `src/keyhandler.rs` — per-view pending-chord state and key → command
   resolution (`view/key`).
 - `src/keys.rs` — key notation: parse/format canonical key strings, plus the
@@ -180,6 +191,7 @@ comes back as an error-level `Effect::Message` with a readable summary (see
 - R-2.3: `view/key` and `view/keymap` plus `Effect::PassThrough` and capture mode. `src/keyhandler.rs` holds each view's pending chord and resolves one canonical key step via `Keymap::lookup` (`Prefix` keeps collecting, `Exact` runs the command, `None` clears and either passes the whole chord back or swallows it with an "Unbound key" hint when the view captures). `Session::key` shares `run_command` with `Session::invoke`, so the two entry points cannot diverge; cursor and selection come from the request and the node is resolved against the acked tree by identity, never by line index. A pending chord is discarded when the cursor moves and by `common.cancel` (now `Implemented`, which replies `PassThrough` only when a selection is present). `view/keymap` is pushed after `view/open` and re-pushed for every open view on a config hot reload, gated by the client's `capabilities.keymapDelivery` (`dynamic`/`static`/`forwardAll`); `keyModifiers` is stored for later profile warnings. `src/protocol.rs` adds the request/notification types and `KeymapDelivery`/`KeyModifiers`. Tests: `tests/keys_protocol.rs` (in process) and two real-binary stdio tests in `tests/server_async.rs`.
 - R-2.4: the Neovim client is fully server-driven. `lua/magit-lsp/keys.lua` translates every §3.8 row both ways (`s`, `S`, `?`, `Enter`↔`<CR>`, `Escape`↔`<Esc>`, `Tab`/`shift+Tab`, `Delete`/`Backspace`, arrows, `ctrl+c`, `alt+ArrowDown`, `ctrl+Enter`, chords, `Space`, `Plus`, F-keys, `ctrl+shift+c`); `lua/magit-lsp/keymap.lua` keeps `applied[bufnr]` and applies each `view/keymap` in one synchronous function (delete exactly the old set, set the new one). Every mapped key sends `view/key` with the canonical step, the mode at press time, the 0-based cursor and the visual selection; a chord maps its full `lhs` and sends its steps in order. `passThrough` is replayed with `nvim_feedkeys(..., 'n', ...)` so the client's own map is not re-triggered. Capture mode adds every printable ASCII key. The hard-coded `keymaps()` set is gone. Folding is `foldmethod=manual`/`nofoldenable`; native fold keys and user mappings whose `rhs` mirrors a fold command are re-mapped to `common.*` (server bindings win), with `fold_keys` for Lua-function mappings. `setup{ profile }` is forwarded as `initializationOptions.profile` and the client declares `keymapDelivery = "dynamic"` + `keyModifiers`. `common.visit` is still `Planned`, so `visit_key` (default `<CR>`) is a documented temporary client-side exception that disappears once the server binding reports `implemented`. Tests: `tests/test_keymap.lua` (translator unit tests) and the keymap/keys/capture/fold cases in `tests/test_magit_lsp.lua`.
 - R-2.5: `magit-lsp keymap --format json|vscode|neovim|markdown [--profile standard|vim] [--config <path>] [--check]` emits the static manifest from `src/manifest.rs`; without `--profile` it emits both shipped profiles. `--check` validates conflicts, unknown commands, unparsable keys and R5 coverage, then gates `--format` output. `src/keys.rs` gained `KeyStep`/`KeyChord` translators for VSCode (`S`→`shift+s`, `?`→`shift+/`, `alt+ArrowDown`→`alt+down`, chords space-separated) and Neovim (`Enter`→`<CR>`, `ctrl+Enter`→`<C-CR>`, `g r`→`gr`). `src/cli.rs` is the single stdout writer; the default no-arg path still runs the stdio server. `tests/manifest.rs` snapshots all four formats for both profiles under `tests/snapshots/` (`UPDATE_SNAPSHOTS=1` rewrites), checks the VSCode workbench deny-list for every profile and proves an injected `ctrl+p` is caught. Allow entries with reasons: `ctrl+t` (text-mode toggle), `ctrl+c` (cancel passthrough/copy), `ctrl+s` and `ctrl+r` (menu-scoped). `.github/workflows/ci.yml` runs `make test` plus the manifest snapshot test.
+- R-2.6: text mode and `common.copy-value`. `OpenView` carries `mode` and a `dirty` flag; `common.toggle-text-mode` and `view/setMode` both run through `Session::run_command`. Entering text mode narrows `view/keymap` to the toggle (via `Keymap::only`), clears the pending chord and refuses every other command with "Text mode: press <key> to return" before any handler runs; `common.refresh` also sets `dirty`. `Session::refresh` returns `None` (queued) in text mode. Leaving text mode applies the queued refresh and sends one full-text `view/render` (no edits) with the identity successor cursor, then the full keymap. `ViewRender` and `ViewKeymapParams` carry `mode`; `ViewDescriptor.mode` follows the current mode. Positional requests return `null` in text mode (`Shared::is_text_uri`), while an unknown URI keeps its old empty result. `common.copy-value` returns `Effect::Clipboard{text}` built from the acked tree: file → path, hunk → patch hunk text (stored on the node when rendered), diff line → text without marker, selection → marked diff lines joined by `\n`, section → title; commit hashes are a documented R-5.1 hook. The Neovim client makes the buffer modifiable and restores the user's `undolevels` in text mode, drops undo history before replacing text on exit, skips visit/fold mirrors in text-mode keymaps, and handles `clipboard` with `setreg('+')`/`setreg('"')`. Tests: `tests/text_mode.rs` (in process + real stdio for positional null) and the ctrl+t / `y y` cases in `tests/test_magit_lsp.lua`; manifest snapshots were regenerated for the two `implemented` statuses.
 - Tests: Rust unit (patch) + integration (git backend, dispatch, errors, status
   rendering, views) + Neovim integration via mini.test (real server + temp
   repo). `make test`.

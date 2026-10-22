@@ -6,6 +6,9 @@ local keymap = require('magit-lsp.keymap')
 --- The last text the server sent, for clients and tests that need it.
 M.lines = {}
 
+--- The view mode the server last reported: `interactive` or `text`.
+M.mode = 'interactive'
+
 --- The status buffer's filetype; LSP groups are `@lsp.type.<type>.<filetype>`.
 M.filetype = 'magit-lsp'
 
@@ -62,6 +65,25 @@ local function error_message(err)
   return tostring(err)
 end
 
+--- Put `text` on the clipboard and the unnamed register.
+---
+--- `+` has no provider in headless or remote setups, so a failure degrades to
+--- the unnamed register and a warning instead of an error.
+---@param text string
+local function copy_to_clipboard(text)
+  local ok = pcall(vim.fn.setreg, '+', text)
+  pcall(vim.fn.setreg, '"', text)
+  local preview = text:gsub('\n', ' ⏎ ')
+  if #preview > 60 then
+    preview = preview:sub(1, 57) .. '...'
+  end
+  if ok then
+    vim.notify('Copied: ' .. preview, vim.log.levels.INFO)
+  else
+    vim.notify('Copied: ' .. preview .. ' (clipboard unavailable)', vim.log.levels.WARN)
+  end
+end
+
 --- Show one message effect as a notification at its level.
 local function notify_effect(effect)
   M.last_error_detail = effect.detail
@@ -77,6 +99,8 @@ local function apply_effects(effects)
   for _, effect in ipairs(effects or {}) do
     if effect.type == 'message' then
       notify_effect(effect)
+    elseif effect.type == 'clipboard' then
+      copy_to_clipboard(effect.text or '')
     end
   end
 end
@@ -92,11 +116,13 @@ local function replay(key)
   vim.api.nvim_feedkeys(keys.termcodes(lhs), 'n', false)
 end
 
---- Apply the effects of a `view/key`: messages, and native replay of passes.
+--- Apply the effects of a `view/key`: messages, clipboard and native replay.
 local function apply_key_effects(effects)
   for _, effect in ipairs(effects or {}) do
     if effect.type == 'message' then
       notify_effect(effect)
+    elseif effect.type == 'clipboard' then
+      copy_to_clipboard(effect.text or '')
     elseif effect.type == 'passThrough' then
       replay(effect.key)
     end
@@ -208,6 +234,27 @@ local function document_uri()
   return M.uri or vim.uri_from_bufnr(M.buf)
 end
 
+--- Enter text mode: the buffer becomes plain editable text.
+local function enter_text_mode()
+  M.mode = 'text'
+  vim.bo[M.buf].modifiable = true
+  vim.bo[M.buf].readonly = false
+  -- Restore the user's undo setting captured when the buffer was created.
+  vim.bo[M.buf].undolevels = M.undolevels
+end
+
+--- Leave text mode: drop the undo history and hand the buffer back.
+---
+--- `undolevels=-1` is set before the server's text replaces the buffer, so `u`
+--- cannot restore what the user typed while in text mode.
+local function exit_text_mode()
+  M.mode = 'interactive'
+  vim.bo[M.buf].undolevels = -1
+  vim.bo[M.buf].modifiable = false
+  vim.bo[M.buf].readonly = true
+  vim.bo[M.buf].modified = false
+end
+
 --- The only writer of the status buffer: replace `start`..`finish` lines.
 --- The view is read-only, so every update goes through here.
 ---@param buf integer
@@ -218,7 +265,9 @@ local function set_lines(buf, start, finish, lines)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, start, finish, false, lines)
   vim.bo[buf].modified = false
-  vim.bo[buf].modifiable = false
+  -- Renders normally arrive in interactive mode; a stray one in text mode
+  -- must not take the buffer back from the user.
+  vim.bo[buf].modifiable = M.mode == 'text'
 end
 
 --- Apply line-range edits bottom-up so earlier offsets stay valid.
@@ -283,6 +332,12 @@ function M.apply_render(params)
     return
   end
 
+  -- Leaving text mode: drop undo history before replacing the text, so the
+  -- server's version cannot be undone back into the user's edits.
+  if params.mode == 'interactive' and M.mode == 'text' then
+    exit_text_mode()
+  end
+
   if params.text then
     set_lines(M.buf, 0, -1, params.text)
   elseif params.edits then
@@ -291,6 +346,10 @@ function M.apply_render(params)
       return
     end
     apply_edits(params.edits)
+  end
+
+  if params.mode then
+    M.mode = params.mode
   end
 
   M.lines = vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)
@@ -429,8 +488,14 @@ function M.apply_keymap(notice)
     return
   end
 
+  if notice.mode == 'text' then
+    enter_text_mode()
+  elseif M.mode == 'text' then
+    exit_text_mode()
+  end
+
   local visit
-  if notice.scope == 'status' then
+  if notice.scope == 'status' and notice.mode ~= 'text' then
     local binding
     for _, candidate in ipairs(notice.bindings or {}) do
       if candidate.command == 'common.visit' then
@@ -615,8 +680,9 @@ local function enable_folding(win)
   vim.wo[win].foldenable = false
 end
 
--- Text mode will replace this wording once it exists.
-local READ_ONLY_HINT = 'Read-only view. Text mode (to edit/copy as text) is not available yet.'
+-- Text mode makes the buffer editable, so this hint only covers interactive mode.
+local READ_ONLY_HINT =
+  'Read-only view. Press the text-mode key (ctrl+t) to edit or copy as plain text.'
 
 local WRITE_COMMANDS = { w = true, wr = true, wri = true, writ = true, write = true }
 
@@ -651,7 +717,7 @@ local function configure_read_only(buf)
   -- cancels it; pcall because that only works while cmdline mode is active.
   --
   -- Native E21 edit failures have no autocmd to observe, so the hint is shown
-  -- on the first attempted write for now; text mode will hook real detection.
+  -- on the first attempted write; text mode also never writes to disk.
   vim.api.nvim_create_autocmd('CmdlineLeave', {
     buffer = buf,
     callback = function()
@@ -672,7 +738,9 @@ local function fresh_buffer()
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly = true
-  -- The view is server-owned and refresh replaces it wholesale.
+  -- Text mode restores the user's undo setting; the interactive view disables
+  -- undo because a refresh replaces the text wholesale.
+  M.undolevels = vim.o.undolevels
   vim.bo[buf].undolevels = -1
   vim.bo[buf].modified = false
   -- A dedicated filetype keeps the `@lsp.type.*.<filetype>` group names stable.
@@ -716,6 +784,7 @@ function M.setup(opts)
 
   M.buf = fresh_buffer()
   M.lines = {}
+  M.mode = 'interactive'
   M.version = nil
   M.view_id = nil
   M.uri = nil
