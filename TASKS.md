@@ -1189,6 +1189,29 @@ because it is copy in non-modal editors.
 Checkboxes are for tracking. IDs (`R-n.m`) are used in `Planned` messages.
 Each task ends with **Done when**. Each phase leaves `make test` green.
 
+### Task ticket template and UI rule
+
+Every implementation task is dispatched as a TASK TICKET with these fields:
+
+- **Target Files** — the only files the worker may create or modify.
+- **Reference Files** — what to read first.
+- **Architectural Constraints** — invariants the change must not break.
+- **Acceptance Criteria** — observable, checkable outcomes.
+- **Verification Command** — the exact command that must exit 0.
+
+For any task that changes what the user sees (`ui-test-plan.md` U2.1):
+
+- **Acceptance Criteria** must contain a visible outcome: "after pressing X
+  the screen shows …".
+- **Verification Command** must include `make ui-test`.
+- The report lists the scenario files, their results and the saved `.screen`
+  paths.
+- A task is not done until a `.scn` scenario has driven the real UI
+  (`scripts/ui`, §8.8).
+
+Every task that opens a new view (log, revision, refs, commit message) also
+adds a scenario for it.
+
 ### Phase 0 — Groundwork
 
 - [x] R-0.1 IMM-1…IMM-9 complete.
@@ -1262,11 +1285,94 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       `git commit` with the fake client answering the `editDocument` effect and
       the commit has the typed message. Neovim/VSCode document handling and
       askpass remain a follow-up; `--askpass` is a usage error for now.
-* [ ] IMM-3A @ui-test-plan.md
+
+### Phase 3U — Real-UI harness and UI bug fixes (do before R-3.5)
+
+The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
+`ui-test-plan.md`.
+
+- [x] R-UI-1 **Real-UI harness** (U0.1–U0.9): tmux driver `scripts/ui`
+      (`start`, `keys`, `wait`, `screen`, `state`, `trace`, `stop`, `run`),
+      `lua/magit-lsp/debug.lua` (`snapshot()`, `idle()`, `MAGIT_LSP_TRACE`),
+      ANSI decoder, deterministic fixtures, scenario runner (`scripts/ui_lib/`)
+      and the Make targets `ui-test`, `ui-tour`, `ui-unit`. Fixed the
+      render-before-open race (the client buffers `view/render`/`view/keymap`
+      per `viewId` until the view exists).
+      *Results:* 3 PASS / 7 XFAIL over the ten bug scenarios (bug 3 passes and
+      is a plain regression). Bug 5 did not reproduce: the measured `?` path is
+      11–16 ms end to end, so `latency-menu-open` is a plain passing regression
+      guard. The `commit-failure-clears-progress` scenario is not written yet;
+      it belongs to R-UI-5.
+      Scenarios: `tests/ui/smoke.scn`, `tests/ui/tour.scn`, every file in
+      `tests/ui/scenarios/`.
+      *Done when:* `make ui-test` runs both profiles at 100x30 and 80x24 and
+      reports PASS / FAIL / XFAIL; the bug scenarios stay `xfail` until
+      R-UI-2…R-UI-5 remove their tags; `make test`, `make ui-unit` and
+      `make ui-test` green.
+- [ ] R-UI-2 **Help and menu stack** (bugs 1, 2, 3; U1.1–U1.3): `?` and `h`
+      open the dispatch from status, `?` inside a menu does not stack a second
+      menu, a top-level menu replaces the current one, and `q`/`Escape` close a
+      menu and leave status focused.
+      Scenarios: `help-from-status`, `menu-then-help`, `menu-close-keys`.
+      *Done when:* remove the `xfail` tag from the listed scenario(s); `make
+      test` and `make ui-test` green.
+- [ ] R-UI-3 **Read-only warning** (bug 4; U1.4–U1.6): drop `readonly` (keep
+      `modifiable=false`, `buftype=nofile`, `undolevels=-1`); no W10 on entry
+      or on any key; text mode still restores modifiability.
+      Scenarios: `no-readonly-warning` plus the text-mode entry/exit scenario
+      from U1.6.
+      *Done when:* remove the `xfail` tag from the listed scenario(s); `make
+      test` and `make ui-test` green.
+- [ ] R-UI-4 **Menu rendering: actions, flag colours, pending chords** (bugs 6,
+      7, 8, 10; U1.7–U1.9): every menu shows all its action keys at width 80
+      and 120, floats fit or scroll, `magitMenuFlagOn`/`FlagOff` colour the
+      `(--flag)` text, and the server carries the `pending` chord so
+      non-matching items dim and `Backspace` pops a step.
+      Scenarios: `commit-menu-shows-actions`, `flag-colours`, `chord-prefix`,
+      plus the generated all-menus test.
+      *Done when:* remove the `xfail` tag from the listed scenario(s); `make
+      test` and `make ui-test` green.
+- [ ] R-UI-5 **Commit feedback and latency** (bugs 9, 5; U1.10–U1.11):
+      pre-flight `commit.create` (clean tree → `Nothing to commit (working
+      tree clean)` with an `--allow-empty` hint; unstaged-only → stage-all
+      confirm), always end progress in a `finally`, and keep the measured
+      latency budgets with `latency-menu-open` as a regression guard.
+      Scenarios: `commit-clean-tree`, `commit-failure-clears-progress` (new; a
+      failing hook shows an error and no `Committing`), `latency-menu-open`.
+      *Done when:* remove the `xfail` tag from the listed scenario(s); `make
+      test` and `make ui-test` green.
+- [ ] R-UI-6 **Tour and CI** (U2.2, U2.3): extend `tests/ui/tour.scn` to cover
+      status, `?`, each menu, a toggled switch, a pending chord, a clean-tree
+      commit and an error; it writes `build/ui/tour.md`. Add the CI job that
+      runs `make ui-test` with tmux and Neovim installed and uploads
+      `build/ui/` on failure.
+      Scenarios: `tests/ui/tour.scn`, `tests/ui/smoke.scn` and all of
+      `tests/ui/scenarios/`.
+      *Done when:* the tour renders every listed screen and the CI job is
+      green; remove the `xfail` tag from the listed scenario(s) (the tour and
+      smoke scenarios are plain, so none should be tagged); `make test` and
+      `make ui-test` green.
+- [ ] R-3.4b **Editor bridge clients and askpass** (U2.4): handle
+      `editDocument` in Neovim and VSCode, implement `--askpass`, and add the
+      `commit-message-editor` scenario (`c c` with a staged change → bottom
+      split with a `gitcommit` buffer → type and confirm → clean tree and the
+      commit in the log). Runs after R-UI-5, which provides the
+      `commit.create` pre-flight.
+      Scenarios: `commit-message-editor`.
+      *Done when:* remove the `xfail` tag from the listed scenario(s); `make
+      test` and `make ui-test` green.
+
+### Phase 3 (continued) — file watcher, discard, error mapping
+
 - [ ] R-3.5 File watcher auto-refresh; `index.lock` handling.
+      *UI:* add scenario `auto-refresh`: modify a tracked file outside Neovim,
+      wait, and the status screen shows the new change without
+      `common.refresh`.
 - [ ] R-3.6 Discard (`status.discard`) for files, hunks, selections, with
       `confirm` prompt (`destructive: true`); consider saving discarded content
       under a private ref for undo.
+      *UI:* add scenario `discard-confirm`: `x` on a hunk shows the destructive
+      confirm prompt; `n` leaves the change, `y` removes it from the screen.
 - [ ] R-3.7 `UserError` mapping table for all remaining Git failures as they
       are met.
 
@@ -1276,17 +1382,35 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       instant fixup/squash, alter; switches `--all`, `--allow-empty`,
       `--verbose`, `--no-verify`, `--signoff`, `--gpg-sign`, `--reset-author`,
       option `--author=`. Items flip from `Planned` to `Implemented`.
+      *UI:* extend `commit-menu-shows-actions` with switch toggling (`-a` flips
+      the `--all` flag) and the `c c` flow; after pressing `c` the screen lists
+      `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
 - [ ] R-4.2 Commit-message view over the editor bridge: staged-diff companion
       view, history ring, trailers, lint diagnostics, confirm/cancel/close.
+      *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
+      split shows the `gitcommit` buffer and the staged diff; confirm closes
+      it and the status screen shows a clean tree.
 - [ ] R-4.3 Status "Recent commits" section.
+      *UI:* add scenario `recent-commits`: the status screen shows a "Recent
+      commits" section with a commit subject; `Enter` visits the revision.
 
 ### Phase 5 — Read views
 
 - [ ] R-5.1 Log (graph, decorations, filters, lazy load) and select mode (§3.7).
+      *UI:* add scenario `log-view`: `l l` opens the log, the screen shows the
+      commit subject, `q` returns to status.
 - [ ] R-5.2 Revision view; Diff view (ranges, args).
+      *UI:* add scenario `revision-view`: from the log, `d` on a commit shows
+      its diff and `q` returns to the log.
 - [ ] R-5.3 Refs view; file-at-revision virtual docs; log variants.
+      *UI:* add scenario `refs-view`: `y` opens refs, the screen lists branch
+      and tag names, `q` returns to status.
 - [ ] R-5.4 `documentLink` and `hover` for hashes/refs.
+      *UI:* extend `log-view`: hashes and refs are styled, and the link/hover
+      targets resolve (assert the style in the `.screen` dump).
 - [ ] R-5.5 Diff-argument menus applied across views.
+      *UI:* add scenario `diff-args`: toggling `-w` in the diff menu re-renders
+      the status diff without whitespace-only hunks.
 
 ### Phase 6 — Branches, remotes, stash
 
@@ -1518,7 +1642,38 @@ opens the commit-message buffer in the same instance; bottom menu placement.
 
 `cargo test` on Linux/macOS/Windows; Neovim tests on stable and nightly;
 manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
-on the oldest supported git version.
+on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
+`make ui-test` and uploads `build/ui/` on failure (R-UI-6).
+
+### 8.8 Real-UI tests (L3)
+
+L3 drives a real Neovim inside tmux and asserts on the captured screen. It
+catches what the other layers cannot: timing, chord timeouts, key encoding,
+the command line and real colours.
+
+| Layer | Tool | Use it for |
+| --- | --- | --- |
+| L1 | Rust `TestSession` | Menu content, pending-chord state, view-stack depth, messages, token attributes |
+| L2 | mini.test child Neovim | Window counts, floats, keymaps applied, buffer options, `:messages` |
+| L3 | Real Neovim in tmux | What the user sees: timing, chord timeouts, key encoding, the command line, real colours |
+
+- `scripts/ui start <fixture>` builds a deterministic repo (§8.2 environment)
+  and opens the client in a dedicated tmux server; `keys`, `wait`, `screen`,
+  `state`, `trace` and `stop` form the "inspect, act, inspect" loop described
+  in `AGENTS.md`.
+- `lua/magit-lsp/debug.lua` exposes `snapshot()` (windows, view stack, pending
+  chord, render versions, keymap, messages) and `idle()`; `MAGIT_LSP_TRACE=<path>`
+  records per-hop timings for `ui trace`.
+- Scenarios are `.scn` files in `tests/ui/` using the DSL in
+  `ui-test-plan.md` §A.5. Artefacts land in `build/ui/<scenario>/` as
+  `.screen` and `.ansi`.
+- **Never sleep:** poll `idle()` with `ui wait`.
+- A known bug is an `xfail: <bug id>` scenario. The runner reports XFAIL, and a
+  passing `xfail` fails the run until the tag is removed.
+- `make ui-test` runs every scenario; `make ui-tour` writes
+  `build/ui/tour.md`; `make ui-unit` runs the harness's own Python tests.
+- Every menu scenario runs under both profiles (`standard`, `vim`) at 100x30
+  and 80x24; `size-only`/`profile-only` opt out for latency and the tour.
 
 ---
 
@@ -1544,10 +1699,12 @@ on the oldest supported git version.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core) (`make test` green: Rust +
-Neovim mini.test + the VSCode node tests). The VSCode client is the thin second
-client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. **Not started:**
-R-3.5…R-3.7 and Phases 4–9.
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1 (`make test`
+green: Rust + Neovim mini.test + the VSCode node tests; `make ui-test` green
+with 3 PASS / 7 XFAIL). The VSCode client is the thin second client for R-2.9;
+node 20 / npm exist, `tsc` and `code` do not. R-3.4 is the server core only:
+the Neovim/VSCode `editDocument` handling and `--askpass` are R-3.4b.
+**Not started:** R-UI-2…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1618,6 +1775,14 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   and extend stay R-4.1; Neovim/VSCode handling of `editDocument` is a
   follow-up, so the Rust test is the client. Other kinds (`rebase-todo`,
   `merge-message`, `tag-message`) are not emitted yet.
+- **R-UI-1:** the driver applies a `FileChangedRO` workaround that clears
+  `readonly` and echoes the real W10 text into `:messages`, so bug 4 stays
+  observable while the client still sets `readonly`; remove the workaround when
+  R-UI-3 lands. `pending` and the live key set are not yet carried by the
+  server protocol, so `snapshot()` reports `pending=""`; R-UI-4 adds them. Bug
+  5 did not reproduce (11–16 ms end to end), so `latency-menu-open` is a plain
+  passing regression guard. `commit-failure-clears-progress` is not written yet
+  and moves to R-UI-5.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

@@ -52,7 +52,12 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
 - [x] **U0.8 Docs:** add to `AGENTS.md` the workflow "inspect, act, inspect": `ui start`, `ui keys`, `ui wait`, `ui screen`, `ui state`, `ui stop`.
 - [x] **U0.9 Bug scenarios:** one scenario per bug in Phase U1, each marked `xfail`.
 
-**Done when:** `make ui-test` runs, reports the ten bug scenarios as XFAIL (bug 3 passes and is a plain regression), and a smoke scenario (`open status, expect "Unstaged changes", stop`) passes under both profiles and both sizes.
+- [x] **Done when:** `make ui-test` runs and reports the ten bug scenarios as
+  3 PASS / 7 XFAIL (bug 3 passes and is a plain regression); the smoke scenario
+  (`open status, expect "Unstaged changes", stop`) passes under both profiles
+  and both sizes. Bug 5 did not reproduce (11–16 ms end to end), so
+  `latency-menu-open` is a plain passing regression guard;
+  `commit-failure-clears-progress` is not written yet and moves to R-UI-5.
 
 ---
 
@@ -122,7 +127,7 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 ## Phase U2 — Keeping it from regressing
 
-- [ ] **U2.1 Ticket template** in `TASKS.md`: add to the TASK TICKET format: *Acceptance Criteria must include a visible outcome ("after pressing X the screen shows …") for any task that changes what the user sees; Verification Command must include `make ui-test`; the report lists the saved screens.*
+- [x] **U2.1 Ticket template** in `TASKS.md`: add to the TASK TICKET format: *Acceptance Criteria must include a visible outcome ("after pressing X the screen shows …") for any task that changes what the user sees; Verification Command must include `make ui-test`; the report lists the saved screens.* (Done: §7 "Task ticket template and UI rule".)
 - [ ] **U2.2 Tour:** `scripts/ui run tests/ui/tour.scn` opens status, `?`, each menu, a toggled switch, a pending chord, a clean-tree commit, an error. It writes `build/ui/tour.md` with every screen. Run it at the end of each phase and read it.
 - [ ] **U2.3 CI:** a separate job `make ui-test` with tmux and Neovim installed; upload `build/ui/` as an artefact on failure.
 - [ ] **U2.4 R-3.4 clients (next ticket):** add scenario `commit-message-editor`: with a staged change, `c c`; expect a bottom split with a `gitcommit` buffer; type a message; confirm; expect a clean tree and the commit in the log. Add the same style of scenario for every later task that opens a new view (log, revision, refs).
