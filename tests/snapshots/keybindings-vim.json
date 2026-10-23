@@ -416,6 +416,14 @@
     "when": "magit.active && magit.scope == 'status' && !magit.textMode"
   },
   {
+    "key": "shift+/",
+    "command": "magit.key",
+    "args": {
+      "key": "?"
+    },
+    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+  },
+  {
     "key": "g shift+/",
     "command": "magit.key",
     "args": {

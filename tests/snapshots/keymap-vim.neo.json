@@ -450,6 +450,15 @@
     "scope": "status"
   },
   {
+    "lhs": "?",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
     "lhs": "g?",
     "command": "open.dispatch",
     "modes": [

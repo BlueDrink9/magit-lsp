@@ -1,6 +1,6 @@
-# Bug 2: `?` inside a menu must not stack a second menu.
+# Bug 2: `?` inside a menu replaces it with the dispatch instead of stacking a
+# second menu.
 fixture: modified-two-files
-xfail: bug-2
 ---
 keys: m
 wait
@@ -8,8 +8,12 @@ expect windows.floating == 1
 keys: ?
 wait
 expect windows.floating == 1
+expect view_stack.menus == 1
 expect screen contains "Transient and dwim commands"
+snapshot: menu-help
 keys: q
 wait
 expect windows.floating == 0
+expect view_stack.menus == 0
 expect screen contains "Unstaged changes"
+snapshot: closed

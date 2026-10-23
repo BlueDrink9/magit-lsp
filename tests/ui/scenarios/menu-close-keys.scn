@@ -8,6 +8,7 @@ keys: q
 wait
 expect windows.floating == 0
 expect screen contains "Unstaged changes"
+snapshot: q-closed
 keys: m
 wait
 expect windows.floating == 1
@@ -15,3 +16,4 @@ keys: Escape
 wait
 expect windows.floating == 0
 expect screen contains "Unstaged changes"
+snapshot: escape-closed

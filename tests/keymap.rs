@@ -145,6 +145,43 @@ fn resolution_order_is_scope_user_scope_profile_common_user_common_profile() {
 }
 
 #[test]
+fn dispatch_is_reachable_from_status_under_both_profiles() {
+    for (profile, expected) in [
+        (Profile::Standard, vec!["?", "h"]),
+        (Profile::Vim, vec!["?", "g ?"]),
+    ] {
+        let config = Config {
+            profile,
+            ..Default::default()
+        };
+        let map = Keymap::resolve("status", profile, &config).unwrap();
+        let binding = map
+            .command("open.dispatch")
+            .unwrap_or_else(|| panic!("{}: open.dispatch is bound in status", profile.as_str()));
+        assert_eq!(binding.keys, expected, "{}: status dispatch keys", profile.as_str());
+
+        for key in expected {
+            let steps = KeyChord::parse(key).unwrap().steps().to_vec();
+            assert_eq!(
+                map.lookup(&steps, EditorMode::Normal),
+                Match::Exact("open.dispatch".to_string()),
+                "{}: `{key}` opens the dispatch",
+                profile.as_str()
+            );
+        }
+    }
+
+    // The vim profile keeps `h` a motion (R4).
+    let config = Config {
+        profile: Profile::Vim,
+        ..Default::default()
+    };
+    let map = Keymap::resolve("status", Profile::Vim, &config).unwrap();
+    let h = vec![KeyStep::plain(Key::Char('h'))];
+    assert_eq!(map.lookup(&h, EditorMode::Normal), Match::None);
+}
+
+#[test]
 fn chord_prefix_matching_prefers_longer_chords() {
     let config = Config {
         profile: Profile::Vim,

@@ -380,7 +380,7 @@ fn an_unbound_menu_key_is_swallowed_with_a_hint() {
 }
 
 #[test]
-fn menus_push_and_pop_in_stack_order() {
+fn menu_help_replaces_the_current_menu() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
@@ -388,13 +388,13 @@ fn menus_push_and_pop_in_stack_order() {
     open_status(&mut session);
     let (commit, _render) = open_commit(&mut session);
 
-    let pushed = press(
+    let replaced = press(
         &mut session,
         &commit.id,
         "?",
         Cursor { line: 0, column: 0 },
     );
-    let dispatch = pushed
+    let dispatch = replaced
         .effects
         .iter()
         .find_map(|effect| match effect {
@@ -406,35 +406,84 @@ fn menus_push_and_pop_in_stack_order() {
         dispatch.kind,
         ViewKind::Menu("menu.dispatch".to_string())
     );
+    assert!(
+        replaced
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &commit.id)),
+        "the old menu is popped: {:?}",
+        replaced.effects
+    );
+    assert!(
+        replaced
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")),
+        "focus returns to status before the dispatch opens"
+    );
     assert_eq!(
         view_ids(&session),
-        vec![
-            "v1".to_string(),
-            commit.id.clone(),
-            dispatch.id.clone()
-        ]
+        vec!["v1".to_string(), dispatch.id.clone()]
     );
+    assert!(session.views().get(&commit.id).is_none());
 
     let popped = press(
         &mut session,
         &dispatch.id,
-        "Escape",
+        "q",
         Cursor { line: 0, column: 0 },
     );
     assert!(popped.effects.iter().any(
         |effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)
     ));
-    assert_eq!(view_ids(&session), vec!["v1".to_string(), commit.id.clone()]);
-    assert_eq!(popped.keymap.expect("keymap").view_id, commit.id);
+    assert_eq!(view_ids(&session), vec!["v1".to_string()]);
+    assert_eq!(popped.keymap.expect("keymap").view_id, "v1");
+}
 
-    let back = press(
+#[test]
+fn opening_a_top_level_menu_from_a_menu_replaces_it() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut session = session(tmp.path());
+    open_status(&mut session);
+
+    let outcome = invoke(&mut session, "v1", "open.dispatch");
+    let dispatch = outcome
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::PushView { descriptor } => Some(descriptor.clone()),
+            _ => None,
+        })
+        .expect("a pushed dispatch menu");
+    let (render, _keymap) = outcome.opened.into_iter().next().expect("dispatch render");
+    session.ack(&dispatch.id, render.version).expect("ack");
+
+    // `c` on the dispatch is `open.commit`, which belongs to the status view:
+    // the dispatch is popped and the commit menu takes its place.
+    let replaced = press(
         &mut session,
-        &commit.id,
-        "Escape",
+        &dispatch.id,
+        "c",
         Cursor { line: 0, column: 0 },
     );
-    assert_eq!(view_ids(&session), vec!["v1".to_string()]);
-    assert_eq!(back.keymap.expect("keymap").view_id, "v1");
+    let commit = replaced
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::PushView { descriptor } => Some(descriptor.clone()),
+            _ => None,
+        })
+        .expect("the commit menu is pushed");
+    assert_eq!(commit.kind, ViewKind::Menu("menu.commit".to_string()));
+    assert!(replaced.effects.iter().any(
+        |effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)
+    ));
+    assert_eq!(
+        view_ids(&session),
+        vec!["v1".to_string(), commit.id.clone()]
+    );
 }
 
 #[test]

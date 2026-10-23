@@ -1,12 +1,12 @@
-# Bug 1: `?` and `h` must open the dispatch from a fresh status view.
+# Bug 1: `?` must open the dispatch from a fresh status view under both
+# profiles. The `h` alias is standard-only (`help-from-status-h.scn`) because
+# `h` stays a motion in the vim profile (rule R4).
 fixture: modified-two-files
-xfail: bug-1
 ---
 keys: ?
 wait
 expect screen contains "Transient and dwim commands"
+snapshot: dispatch
 keys: Escape
 wait
-keys: h
-wait
-expect screen contains "Transient and dwim commands"
+expect screen contains "Unstaged changes"

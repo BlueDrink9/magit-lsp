@@ -34,6 +34,7 @@ copy-value = ["ctrl+shift+c"]
 
 [keys.status]
 visit = ["Enter"]
+"open.dispatch" = ["?", "h"]
 stage = ["s"]
 unstage = ["u"]
 stage-all = ["S"]

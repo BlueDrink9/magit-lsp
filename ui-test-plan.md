@@ -69,13 +69,13 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 **Suspected cause:** `open.dispatch` is bound only in menu scopes, or bound as `g ?` in `vim` with no `h`; menu-from-menu is a push, and the client leaves the old float open.
 
-- [ ] **U1.1 (bug 1)** Keymap test: `?` and `h` resolve to `open.dispatch` in the `status` scope under both profiles. Fix the profiles; update the keymap manifest snapshots.
-  - [ ] Scenario `help-from-status`: fresh status, `?`, screen contains `Transient and dwim commands`; repeat with `h`.
-- [ ] **U1.2 (bug 2)** Define behaviour: inside a menu, `?` toggles that menu's help (or, if the menu has none, closes it and opens the dispatch). Opening a top-level menu from another menu **replaces** it unless the action is a deliberate sub-menu (for example "Configure…").
-  - [ ] L1 test: after `m` then `?`, the view stack contains one menu above status.
-  - [ ] Client closes the previous menu window on replace and pop (no leaked floats).
-  - [ ] Scenario `menu-then-help`: `m ?`, expect `windows.floating == 1`, `q`, expect `windows.floating == 0` and status visible.
-- [ ] **U1.3 (bug 3)** Regression scenarios: `q` and `Escape` each close an open menu (floating count 0, status focused).
+- [x] **U1.1 (bug 1)** Keymap test: `?` and `h` resolve to `open.dispatch` in the `status` scope under both profiles. Fix the profiles; update the keymap manifest snapshots.
+  - [x] Scenario `help-from-status`: fresh status, `?`, screen contains `Transient and dwim commands`; repeat with `h` (`help-from-status-h`, standard-only because `h` is a motion in vim).
+- [x] **U1.2 (bug 2)** Define behaviour: inside a menu, `?` toggles that menu's help (or, if the menu has none, closes it and opens the dispatch). Opening a top-level menu from another menu **replaces** it unless the action is a deliberate sub-menu (for example "Configure…").
+  - [x] L1 test: after `m` then `?`, the view stack contains one menu above status.
+  - [x] Client closes the previous menu window on replace and pop (no leaked floats).
+  - [x] Scenario `menu-then-help`: `m ?`, expect `windows.floating == 1`, `q`, expect `windows.floating == 0` and status visible.
+- [x] **U1.3 (bug 3)** Regression scenarios: `q` and `Escape` each close an open menu (floating count 0, status focused).
 
 ### R-UI-3 — Read-only buffer warning (bug 4)
 

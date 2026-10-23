@@ -56,7 +56,7 @@
 | `status.discard` | `Delete` | planned | Discard the change at point |
 | `status.reverse` | `v` | planned | Reverse-apply the change at point |
 | `status.apply` | `a` | planned | Apply the change at point |
-| `open.dispatch` | `?` | implemented | Show the dispatch menu |
+| `open.dispatch` | `?`, `h` | implemented | Show the dispatch menu |
 | `open.commit` | `c` | implemented | Open the commit menu |
 | `open.branch` | `b` | implemented | Open the branch menu |
 | `open.log` | `l` | implemented | Open the log menu |

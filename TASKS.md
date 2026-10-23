@@ -1309,13 +1309,16 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       reports PASS / FAIL / XFAIL; the bug scenarios stay `xfail` until
       R-UI-2…R-UI-5 remove their tags; `make test`, `make ui-unit` and
       `make ui-test` green.
-- [ ] R-UI-2 **Help and menu stack** (bugs 1, 2, 3; U1.1–U1.3): `?` and `h`
+- [x] R-UI-2 **Help and menu stack** (bugs 1, 2, 3; U1.1–U1.3): `?` and `h`
       open the dispatch from status, `?` inside a menu does not stack a second
       menu, a top-level menu replaces the current one, and `q`/`Escape` close a
       menu and leave status focused.
-      Scenarios: `help-from-status`, `menu-then-help`, `menu-close-keys`.
+      Scenarios: `help-from-status` (both profiles, `?`), `help-from-status-h`
+      (standard-only, `h`), `menu-then-help`, `menu-close-keys`.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
-      test` and `make ui-test` green.
+      test` and `make ui-test` green. *Results:* 6 PASS / 5 XFAIL / 0 FAIL
+      (`make ui-test`); the two `xfail` tags are gone and the five remaining
+      XFAILs belong to R-UI-3…R-UI-5.
 - [ ] R-UI-3 **Read-only warning** (bug 4; U1.4–U1.6): drop `readonly` (keep
       `modifiable=false`, `buftype=nofile`, `undolevels=-1`); no W10 on entry
       or on any key; text mode still restores modifiability.
@@ -1699,12 +1702,13 @@ the command line and real colours.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1 (`make test`
-green: Rust + Neovim mini.test + the VSCode node tests; `make ui-test` green
-with 3 PASS / 7 XFAIL). The VSCode client is the thin second client for R-2.9;
-node 20 / npm exist, `tsc` and `code` do not. R-3.4 is the server core only:
-the Neovim/VSCode `editDocument` handling and `--askpass` are R-3.4b.
-**Not started:** R-UI-2…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1 and R-UI-2
+(`make test` green: Rust + Neovim mini.test + the VSCode node tests;
+`make ui-test` green with 6 PASS / 5 XFAIL). The VSCode client is the thin
+second client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. R-3.4 is
+the server core only: the Neovim/VSCode `editDocument` handling and `--askpass`
+are R-3.4b.
+**Not started:** R-UI-3…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.

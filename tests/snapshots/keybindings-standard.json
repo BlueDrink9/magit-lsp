@@ -392,6 +392,14 @@
     "when": "magit.active && magit.scope == 'status' && !magit.textMode"
   },
   {
+    "key": "h",
+    "command": "magit.key",
+    "args": {
+      "key": "h"
+    },
+    "when": "magit.active && magit.scope == 'status' && !magit.textMode"
+  },
+  {
     "key": "c",
     "command": "magit.key",
     "args": {

@@ -35,6 +35,8 @@ copy-value = ["y y"]
 
 [keys.status]
 visit = ["Enter"]
+# `h` stays a motion (R4); `g ?` keeps the common binding reachable here.
+"open.dispatch" = ["?", "g ?"]
 stage = ["s"]
 unstage = ["u"]
 stage-all = ["S"]

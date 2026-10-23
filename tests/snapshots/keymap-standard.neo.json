@@ -423,6 +423,15 @@
     "scope": "status"
   },
   {
+    "lhs": "h",
+    "command": "open.dispatch",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
     "lhs": "c",
     "command": "open.commit",
     "modes": [

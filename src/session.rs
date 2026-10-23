@@ -1125,8 +1125,24 @@ impl Session {
         }
 
         if let Some(menu) = outcome.open_menu {
-            let (descriptor, render) = self.push_menu(view_id, menu)?;
             let mut all = effects;
+            let mut parent_id = view_id.to_string();
+            // A menu opened from a menu replaces it: a top-level menu is a
+            // sibling of the current one, not a child. Deliberate sub-menus
+            // (none yet) will need an explicit nesting flag.
+            if self
+                .views
+                .get(view_id)
+                .map(|view| view.is_menu())
+                .unwrap_or(false)
+            {
+                let popped = self.pop_view(view_id)?;
+                all.extend(popped.effects);
+                if let Some(previous) = self.views.iter().last() {
+                    parent_id = previous.descriptor().id.clone();
+                }
+            }
+            let (descriptor, render) = self.push_menu(&parent_id, menu)?;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
             return Ok(InvokeResult {

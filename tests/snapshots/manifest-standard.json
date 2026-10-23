@@ -713,7 +713,8 @@
             {
               "command": "open.dispatch",
               "keys": [
-                "?"
+                "?",
+                "h"
               ],
               "modes": [
                 "normal",

@@ -1,0 +1,9 @@
+# Bug 1: the standard profile also opens the dispatch with `h`.
+fixture: modified-two-files
+profile: standard
+profile-only: true
+---
+keys: h
+wait
+expect screen contains "Transient and dwim commands"
+snapshot: dispatch

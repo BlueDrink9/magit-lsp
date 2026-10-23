@@ -1506,6 +1506,64 @@ T['the dispatch menu lists the active profile keys'] = function()
   MiniTest.expect.equality(has('  g ?  Dispatch'), false, 'dispatch does not list itself')
 end
 
+T['? from a menu replaces it and leaves one float'] = function()
+  setup_child()
+  child.type_keys(50, 'c')
+  local commit = wait_menu()
+  MiniTest.expect.equality(type(commit), 'table', 'the commit menu opened')
+
+  child.type_keys(50, '?')
+  local state
+  local replaced = vim.wait(5000, function()
+    state = child.lua_get(string.format([[(function()
+      local menu = require('magit-lsp.menu')
+      local debug_api = require('magit-lsp.debug')
+      local snapshot = debug_api.snapshot()
+      local floats = 0
+      for _, window in ipairs(snapshot.windows) do
+        if window.float then floats = floats + 1 end
+      end
+      return {
+        floats = floats,
+        last = menu.last_id,
+        old_closed = menu.views[%q] == nil,
+        current = vim.api.nvim_get_current_win(),
+      }
+    end)()]], commit.id))
+    return type(state) == 'table'
+      and state.floats == 1
+      and state.old_closed
+      and state.last ~= commit.id
+  end, 20)
+  MiniTest.expect.equality(replaced, true, 'the commit menu was replaced by one menu')
+  MiniTest.expect.equality(
+    state.last:find('menu.dispatch', 1, true) ~= nil,
+    true,
+    'the dispatch menu took its place'
+  )
+
+  child.type_keys(50, 'q')
+  local closed = vim.wait(5000, function()
+    local snapshot = child.lua_get([[(function()
+      local menu = require('magit-lsp.menu')
+      local debug_api = require('magit-lsp.debug')
+      local state = debug_api.snapshot()
+      local floats = 0
+      for _, window in ipairs(state.windows) do
+        if window.float then floats = floats + 1 end
+      end
+      return { floats = floats, open = #menu.order }
+    end)()]])
+    return type(snapshot) == 'table' and snapshot.floats == 0 and snapshot.open == 0
+  end, 20)
+  MiniTest.expect.equality(closed, true, 'q closes the only menu')
+  MiniTest.expect.equality(
+    child.lua_get('vim.api.nvim_get_current_win()'),
+    child.lua_get('vim.fn.bufwinid(M.buf)'),
+    'focus returns to the status window'
+  )
+end
+
 T['debug.snapshot reports the status view state'] = function()
   setup_child()
   local encoded = child.lua_get([[
