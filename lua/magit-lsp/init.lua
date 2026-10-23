@@ -239,7 +239,6 @@ end
 local function enter_text_mode()
   M.mode = 'text'
   vim.bo[M.buf].modifiable = true
-  vim.bo[M.buf].readonly = false
   -- Restore the user's undo setting captured when the buffer was created.
   vim.bo[M.buf].undolevels = M.undolevels
 end
@@ -252,7 +251,6 @@ local function exit_text_mode()
   M.mode = 'interactive'
   vim.bo[M.buf].undolevels = -1
   vim.bo[M.buf].modifiable = false
-  vim.bo[M.buf].readonly = true
   vim.bo[M.buf].modified = false
 end
 
@@ -788,7 +786,9 @@ local function fresh_buffer()
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
-  vim.bo[buf].readonly = true
+  -- `readonly` is deliberately unset: Vim warns W10 on every programmatic
+  -- write to a readonly buffer. `modifiable=false` and `buftype=nofile`
+  -- already reject edits and writes.
   -- Text mode restores the user's undo setting; the interactive view disables
   -- undo because a refresh replaces the text wholesale.
   M.undolevels = vim.o.undolevels

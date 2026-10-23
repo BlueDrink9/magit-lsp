@@ -629,7 +629,9 @@ T['status buffer is read-only to native edits'] = function()
   MiniTest.expect.equality(opt('bufhidden'), 'hide')
   MiniTest.expect.equality(opt('swapfile'), false)
   MiniTest.expect.equality(opt('modifiable'), false)
-  MiniTest.expect.equality(opt('readonly'), true)
+  -- `readonly` must stay unset: a readonly buffer warns W10 on every
+  -- programmatic render (bug 4).
+  MiniTest.expect.equality(opt('readonly'), false)
   MiniTest.expect.equality(opt('undolevels'), -1)
   MiniTest.expect.equality(opt('modified'), false)
 
@@ -1176,7 +1178,6 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
   child.type_keys(50, '<C-t>')
   MiniTest.expect.equality(mode_is('text'), true, 'ctrl+t entered text mode')
   MiniTest.expect.equality(opt('modifiable'), true)
-  MiniTest.expect.equality(opt('readonly'), false)
   MiniTest.expect.equality(opt('undolevels'), undo)
   MiniTest.expect.equality(
     child.lua_get("#vim.api.nvim_buf_get_keymap(M.buf, 'n')"),
@@ -1201,7 +1202,7 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
   end, 20)
   MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before, 'the server text is back')
   MiniTest.expect.equality(opt('modifiable'), false)
-  MiniTest.expect.equality(opt('readonly'), true)
+  MiniTest.expect.equality(opt('readonly'), false)
   MiniTest.expect.equality(opt('undolevels'), -1)
   MiniTest.expect.equality(opt('modified'), false)
 

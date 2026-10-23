@@ -81,9 +81,9 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 **Suspected cause:** `readonly=true` plus a write on every render triggers Vim's W10 ("Changing a readonly file").
 
-- [ ] **U1.4** Scenario `no-readonly-warning`: start, press `j j k`, `?`, `q`; expect no message matching `/W10|readonly/`.
-- [ ] **U1.5** Fix: drop `readonly` (keep `modifiable=false`, `buftype=nofile`, `undolevels=-1`). Re-run the IMM-4 L2 tests (`dd`, `x`, `ciw`, `u`, `:s/a/b/` leave the lines unchanged).
-- [ ] **U1.6** Text mode (R-2.6) still toggles modifiability correctly; add a scenario that enters text mode, types a character, leaves, and sees the buffer restored.
+- [x] **U1.4** Scenario `no-readonly-warning`: start, press `j j k`, `?`, `q`; expect no message matching `/W10|readonly/`.
+- [x] **U1.5** Fix: drop `readonly` (keep `modifiable=false`, `buftype=nofile`, `undolevels=-1`). Re-run the IMM-4 L2 tests (`dd`, `x`, `ciw`, `u`, `:s/a/b/` leave the lines unchanged).
+- [x] **U1.6** Text mode (R-2.6) still toggles modifiability correctly; add a scenario that enters text mode, types a character, leaves, and sees the buffer restored.
 
 ### R-UI-4 — Menu rendering: actions, flag colours, pending chords (bugs 6, 7, 8, 10)
 

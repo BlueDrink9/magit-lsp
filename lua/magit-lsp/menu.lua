@@ -89,7 +89,6 @@ local function new_buffer(descriptor)
   vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
-  vim.bo[buf].readonly = true
   vim.bo[buf].undolevels = -1
   vim.bo[buf].modified = false
   vim.bo[buf].filetype = M.host.filetype or 'magit-lsp'

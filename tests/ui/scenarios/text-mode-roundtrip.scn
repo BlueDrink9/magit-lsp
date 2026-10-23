@@ -1,0 +1,16 @@
+# U1.6: text mode edits are discarded when the view becomes server-owned
+# again, and no readonly warning appears.
+fixture: modified-two-files
+---
+wait
+keys: C-t
+wait
+keys: ihello Escape
+wait
+expect screen contains "hello"
+keys: C-t
+wait
+expect screen contains "Unstaged changes"
+expect screen not-contains "hello"
+expect no_message /W10|readonly/
+snapshot: restored

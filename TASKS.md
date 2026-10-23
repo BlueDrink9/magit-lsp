@@ -1319,13 +1319,17 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       test` and `make ui-test` green. *Results:* 6 PASS / 5 XFAIL / 0 FAIL
       (`make ui-test`); the two `xfail` tags are gone and the five remaining
       XFAILs belong to R-UI-3…R-UI-5.
-- [ ] R-UI-3 **Read-only warning** (bug 4; U1.4–U1.6): drop `readonly` (keep
+- [x] R-UI-3 **Read-only warning** (bug 4; U1.4–U1.6): drop `readonly` (keep
       `modifiable=false`, `buftype=nofile`, `undolevels=-1`); no W10 on entry
       or on any key; text mode still restores modifiability.
       Scenarios: `no-readonly-warning` plus the text-mode entry/exit scenario
       from U1.6.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
-      test` and `make ui-test` green.
+      test` and `make ui-test` green. *Results:* the `xfail` tag is gone;
+      `no-readonly-warning` and `text-mode-roundtrip` PASS under both profiles
+      at 100x30 and 80x24; `make ui-test` reports 8 PASS / 4 XFAIL / 0 FAIL
+      (the remaining XFAILs belong to R-UI-4/R-UI-5). The driver's
+      `FileChangedRO` workaround is removed.
 - [ ] R-UI-4 **Menu rendering: actions, flag colours, pending chords** (bugs 6,
       7, 8, 10; U1.7–U1.9): every menu shows all its action keys at width 80
       and 120, floats fit or scroll, `magitMenuFlagOn`/`FlagOff` colour the
@@ -1702,13 +1706,13 @@ the command line and real colours.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1 and R-UI-2
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1…R-UI-3
 (`make test` green: Rust + Neovim mini.test + the VSCode node tests;
-`make ui-test` green with 6 PASS / 5 XFAIL). The VSCode client is the thin
+`make ui-test` green with 8 PASS / 4 XFAIL). The VSCode client is the thin
 second client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. R-3.4 is
 the server core only: the Neovim/VSCode `editDocument` handling and `--askpass`
 are R-3.4b.
-**Not started:** R-UI-3…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
+**Not started:** R-UI-4…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.
@@ -1779,14 +1783,14 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   and extend stay R-4.1; Neovim/VSCode handling of `editDocument` is a
   follow-up, so the Rust test is the client. Other kinds (`rebase-todo`,
   `merge-message`, `tag-message`) are not emitted yet.
-- **R-UI-1:** the driver applies a `FileChangedRO` workaround that clears
-  `readonly` and echoes the real W10 text into `:messages`, so bug 4 stays
-  observable while the client still sets `readonly`; remove the workaround when
-  R-UI-3 lands. `pending` and the live key set are not yet carried by the
-  server protocol, so `snapshot()` reports `pending=""`; R-UI-4 adds them. Bug
-  5 did not reproduce (11–16 ms end to end), so `latency-menu-open` is a plain
-  passing regression guard. `commit-failure-clears-progress` is not written yet
-  and moves to R-UI-5.
+- **R-UI-3:** the `FileChangedRO` workaround is gone from the driver; the
+  client no longer sets `readonly` (Vim warns W10 on every programmatic write
+  to a readonly buffer), so the harness runs Neovim untouched.
+  `pending` and the live key set are not yet carried by the server protocol,
+  so `snapshot()` reports `pending=""`; R-UI-4 adds them. Bug 5 did not
+  reproduce (11–16 ms end to end), so `latency-menu-open` is a plain passing
+  regression guard. `commit-failure-clears-progress` is not written yet and
+  moves to R-UI-5.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

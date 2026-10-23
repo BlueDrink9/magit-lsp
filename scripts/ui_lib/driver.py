@@ -328,22 +328,6 @@ def _cleanup(run: Run) -> None:
 
 def _nvim_command(run: Run, env: dict[str, str]) -> str:
     nvim = shutil.which("nvim") or "nvim"
-    # Work around the known readonly warning (R-UI-3, bug 4) just enough that
-    # the first render cannot block startup with W10. The client fix drops
-    # `readonly`; until then the harness cannot open a view without this.
-    #
-    # The warning itself is still recorded: `no-readonly-warning` must see the
-    # W10 the workaround prevents from blocking. Without the echo, clearing
-    # `readonly` before Vim writes would hide the very bug the scenario tests.
-    ignore_readonly = (
-        "lua vim.api.nvim_create_autocmd('FileChangedRO', {"
-        " callback = function()"
-        " if vim.bo.filetype == 'magit-lsp' then"
-        " vim.api.nvim_echo({{'W10: Warning: Changing a readonly file', 'WarningMsg'}}, true, {})"
-        " vim.bo.readonly = false"
-        " end"
-        " end })"
-    )
     args = [
         "env",
         "-i",
@@ -358,8 +342,6 @@ def _nvim_command(run: Run, env: dict[str, str]) -> str:
         "-n",
         "--cmd",
         "set ttimeoutlen=0",
-        "--cmd",
-        ignore_readonly,
     ]
     return shlex.join(args)
 
