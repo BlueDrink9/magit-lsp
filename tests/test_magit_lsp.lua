@@ -1289,7 +1289,8 @@ local function wait_menu()
         height = vim.api.nvim_win_get_height(view.win),
         lines = lines,
         current = vim.api.nvim_get_current_win(),
-        cap = math.max(1, math.floor(vim.o.lines * 0.4)),
+        cap = math.max(1, vim.o.lines - vim.o.cmdheight - 1),
+        split_cap = math.max(1, vim.o.lines - vim.o.cmdheight - 3),
         screen_lines = vim.o.lines,
         cmdheight = vim.o.cmdheight,
       }
@@ -1370,13 +1371,56 @@ T['pressing c opens the commit menu in a bottom float'] = function()
   )
 end
 
+T['the longest menu fills the editor and scrolls when it is taller'] = function()
+  setup_child()
+  child.lua('vim.o.columns = 80; vim.o.lines = 24')
+  -- The log menu is the longest at 80 columns; `g l` opens it in the vim profile.
+  child.type_keys(50, 'g', 'l')
+  local state = wait_menu()
+  MiniTest.expect.equality(type(state), 'table', 'the log menu opened')
+  MiniTest.expect.equality(state.width, 80)
+  MiniTest.expect.equality(state.screen_lines, 24)
+
+  local available = state.screen_lines - state.cmdheight - 1
+  MiniTest.expect.equality(state.height, math.min(#state.lines, available))
+  MiniTest.expect.equality(
+    #state.lines > state.height,
+    true,
+    'the log menu is taller than the float'
+  )
+
+  -- C-e is not a captured menu key, so the float scrolls natively.
+  child.type_keys(50, '<C-e>')
+  local top = child.lua_get(string.format(
+    '(function() return vim.api.nvim_win_call(%d, function() return vim.fn.line("w0") end) end)()',
+    state.win
+  ))
+  MiniTest.expect.equality(top > 1, true, 'C-e scrolls the menu float')
+
+  child.api.nvim_win_set_cursor(state.win, { #state.lines, 0 })
+  local reached = child.lua_get(string.format(
+    '(function() return vim.api.nvim_win_call(%d, function() return vim.fn.line(".") == vim.fn.line("$") end) end)()',
+    state.win
+  ))
+  MiniTest.expect.equality(reached, true, 'the cursor reaches the last line')
+
+  child.type_keys(50, '<Esc>')
+  MiniTest.expect.equality(
+    vim.wait(5000, function()
+      return menu_closed(state.id)
+    end, 20),
+    true,
+    'Escape closed the log menu'
+  )
+end
+
 T['menu.style split opens a bottom split'] = function()
   setup_child({ menu = { style = 'split' } })
   child.type_keys(50, 'c')
   local state = wait_menu()
   MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
 
-  local height = math.min(#state.lines, state.cap)
+  local height = math.min(#state.lines, state.split_cap)
   MiniTest.expect.equality(state.config.relative, '')
   MiniTest.expect.equality(state.height, height)
   local bottom = child.lua_get(string.format(

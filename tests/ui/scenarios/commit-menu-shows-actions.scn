@@ -1,6 +1,5 @@
 # Bug 10: the commit menu must show its actions, not only its arguments.
 fixture: modified-two-files
-xfail: bug-10
 ---
 keys: c
 wait

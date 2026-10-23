@@ -7,7 +7,7 @@ use common::*;
 use expect_test::expect_file;
 use magit_lsp::config::{Config, Profile};
 use magit_lsp::keymap::{self, Keymap};
-use magit_lsp::menu::MenuStatus;
+use magit_lsp::menu::{Menu, MenuStatus};
 use magit_lsp::menus;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewKeyParams};
 use magit_lsp::semantic_tokens;
@@ -531,6 +531,7 @@ fn menu_tokens_decode_to_the_documented_types() {
         "magit.menu.key",
         "magit.menu.label",
         "magit.menu.flag",
+        "magit.menu.flag.off",
         "magit.menu.switch.off",
         "magit.menu.option",
         "magit.menu.preview",
@@ -542,8 +543,25 @@ fn menu_tokens_decode_to_the_documented_types() {
         );
     }
 
-    // The switch marker changes type when the switch is on.
+    // The switch marker and the flag text change type when the switch is on.
     let mut menu = menus::named("commit").expect("commit menu");
+    let flag_token = |menu: &Menu| {
+        let tree = menu.render(Viewport { cols: 100, rows: 30 });
+        let line = tree
+            .lines
+            .iter()
+            .position(|line| line.contains("(--all)"))
+            .expect("the --all flag line");
+        let start = tree.lines[line].find("--all").expect("the --all text");
+        tree.tokens
+            .iter()
+            .find(|token| token.line == line && token.start == start && token.length == 5)
+            .expect("a token on the flag text")
+            .token_type
+            .clone()
+    };
+    assert_eq!(flag_token(&menu), "magit.menu.flag.off");
+
     menu.toggle_switch("-a");
     let tree = menu.render(Viewport { cols: 100, rows: 30 });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
@@ -552,6 +570,8 @@ fn menu_tokens_decode_to_the_documented_types() {
         .map(|token| types[token.token_type as usize])
         .collect();
     assert!(seen.contains(&"magit.menu.switch.on"), "{seen:?}");
+    assert!(seen.contains(&"magit.menu.flag.on"), "{seen:?}");
+    assert_eq!(flag_token(&menu), "magit.menu.flag.on");
 }
 
 #[test]

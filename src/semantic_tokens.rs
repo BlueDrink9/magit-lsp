@@ -25,6 +25,8 @@ pub const TOKEN_TYPES: &[&str] = &[
     "magit.menu.key",
     "magit.menu.label",
     "magit.menu.flag",
+    "magit.menu.flag.on",
+    "magit.menu.flag.off",
     "magit.menu.switch.on",
     "magit.menu.switch.off",
     "magit.menu.option",

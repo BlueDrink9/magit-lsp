@@ -153,6 +153,8 @@ local TOKEN_LINKS = {
   ['magit.menu.key'] = 'Keyword',
   ['magit.menu.label'] = 'Normal',
   ['magit.menu.flag'] = 'Special',
+  ['magit.menu.flag.off'] = 'MagitMenuFlagOff',
+  ['magit.menu.flag.on'] = 'Special',
   ['magit.menu.switch.on'] = 'String',
   ['magit.menu.switch.off'] = 'Comment',
   ['magit.menu.option'] = 'String',
@@ -176,6 +178,14 @@ local MODIFIER_LINKS = {
 --- `default = true` keeps a user's own definition; `:colorscheme` clears the
 --- groups, so this runs again on `ColorScheme`.
 local function define_highlights()
+  -- A link cannot add attributes, so the off flag's dim is carried by an
+  -- intermediate group; its colour still comes from the colourscheme.
+  local comment = vim.api.nvim_get_hl(0, { name = 'Comment' })
+  vim.api.nvim_set_hl(0, 'MagitMenuFlagOff', {
+    fg = comment.fg,
+    bg = comment.bg,
+    dim = true,
+  })
   for token_type, link in pairs(TOKEN_LINKS) do
     local group = string.format('@lsp.type.%s.%s', token_type, M.filetype)
     vim.api.nvim_set_hl(0, group, { link = link, default = true })

@@ -481,6 +481,50 @@ fn menu_item_keys_are_unique_and_every_menu_reaches_dispatch() {
 }
 
 #[test]
+fn every_menu_renders_all_of_its_action_keys() {
+    let mut all: Vec<(String, Menu)> = magit_lsp::menus::all()
+        .iter()
+        .map(|def| (def.id.to_string(), magit_lsp::menus::build(def)))
+        .collect();
+    for (name, profile) in [
+        ("dispatch (vim)", Profile::Vim),
+        ("dispatch (standard)", Profile::Standard),
+    ] {
+        all.push((
+            name.to_string(),
+            magit_lsp::menus::by_name("dispatch", &keymaps(profile)).expect("dispatch"),
+        ));
+    }
+
+    let mut missing = Vec::new();
+    for (name, menu) in all {
+        for cols in [80u32, 120] {
+            let tree = menu.render(Viewport { cols, rows: 30 });
+            for group in &menu.groups {
+                for item in &group.items {
+                    if !item.is_action() {
+                        continue;
+                    }
+                    let needle = format!("  {}  {}", item.key(), item.label());
+                    if !tree.lines.iter().any(|line| line.contains(&needle)) {
+                        missing.push(format!(
+                            "{name} at {cols}: `{}` ({})",
+                            item.key(),
+                            item.label()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "action keys missing from the rendered menus:\n{}",
+        missing.join("\n")
+    );
+}
+
+#[test]
 fn the_largest_menus_reflow_and_grey_every_planned_action() {
     for (name, cols) in [
         ("rebase", 60u32),

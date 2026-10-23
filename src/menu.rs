@@ -407,7 +407,12 @@ impl<'a> Builder<'a> {
         if let Item::Switch { flag, on, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            self.token(line, flag_start, flag.len(), "magit.menu.flag");
+            let flag_type = if *on {
+                "magit.menu.flag.on"
+            } else {
+                "magit.menu.flag.off"
+            };
+            self.token(line, flag_start, flag.len(), flag_type);
             text.push_str("  ");
             let marker = if *on { "[x]" } else { "[ ]" };
             let marker_start = text.len();

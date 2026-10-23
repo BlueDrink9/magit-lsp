@@ -1,10 +1,11 @@
 # Bug 6: flag text is dim when off and coloured when on.
 fixture: modified-two-files
-xfail: bug-6
 ---
 keys: c
 wait
 expect style "(--all)" dim
+snapshot: flag-off
 keys: - a
 wait
 expect style "(--all)" coloured
+snapshot: flag-on

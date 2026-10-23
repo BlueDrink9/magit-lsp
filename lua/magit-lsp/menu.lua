@@ -69,7 +69,11 @@ local function client()
 end
 
 local function cap()
-  return math.max(1, math.floor(vim.o.lines * 0.4))
+  -- Use the whole editor above the command line: a menu taller than this
+  -- scrolls in its window instead of hiding its actions below the float.
+  -- A split also needs room for both windows' status lines.
+  local reserved = M.style == 'split' and 3 or 1
+  return math.max(1, vim.o.lines - vim.o.cmdheight - reserved)
 end
 
 local function height_for(lines)

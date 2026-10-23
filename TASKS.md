@@ -1338,7 +1338,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       Scenarios: `commit-menu-shows-actions`, `flag-colours`, `chord-prefix`,
       plus the generated all-menus test.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
-      test` and `make ui-test` green.
+      test` and `make ui-test` green. *Note:* bugs 10 and 6 done; 7/8 remain.
 - [ ] R-UI-5 **Commit feedback and latency** (bugs 9, 5; U1.10–U1.11):
       pre-flight `commit.create` (clean tree → `Nothing to commit (working
       tree clean)` with an `--allow-empty` hint; unstaged-only → stage-all

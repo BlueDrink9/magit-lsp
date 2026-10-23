@@ -89,12 +89,12 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 **Suspected cause:** action groups missing or clipped; flag text unstyled; no pending-chord state.
 
-- [ ] **U1.7 (bug 10)** For every menu in the registry: render at width 80 and 120 and assert that every action key in the menu model appears in the text. *Done when:* a generated test covers all menus; the failing ones are listed in the ticket report.
-  - [ ] Client float height is at least the number of rendered lines, or the float scrolls. L2 test at 80x24 with the longest menu.
-  - [ ] Scenario `commit-menu-shows-actions`: `c`, expect lines containing `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
-- [ ] **U1.8 (bug 6)** Tokens `magitMenuFlagOn` and `magitMenuFlagOff` for the `(--flag)` text, plus the existing on/off switch markers.
-  - [ ] L1 token test: toggling a switch changes the token on the flag text.
-  - [ ] Scenario: `style "(--all)" dim` before toggling; `style "(--all)" coloured` after (coloured = foreground differs from the default and not dim).
+- [x] **U1.7 (bug 10)** For every menu in the registry: render at width 80 and 120 and assert that every action key in the menu model appears in the text. *Done when:* a generated test covers all menus; the failing ones are listed in the ticket report.
+  - [x] Client float height is at least the number of rendered lines, or the float scrolls. L2 test at 80x24 with the longest menu.
+  - [x] Scenario `commit-menu-shows-actions`: `c`, expect lines containing `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
+- [x] **U1.8 (bug 6)** Tokens `magitMenuFlagOn` and `magitMenuFlagOff` for the `(--flag)` text, plus the existing on/off switch markers.
+  - [x] L1 token test: toggling a switch changes the token on the flag text.
+  - [x] Scenario: `style "(--all)" dim` before toggling; `style "(--all)" coloured` after (coloured = foreground differs from the default and not dim).
 - [ ] **U1.9 (bugs 7, 8)** Pending-chord state on the menu view (generic `pending: Vec<Key>`):
   - [ ] `-` or `=` pushes onto `pending`. Items whose key does not start with the prefix render dim (`magitMenuDisabled`); the pending prefix renders highlighted; only matching items accept the next key.
   - [ ] A key that completes an item toggles or prompts and clears `pending`. A key that matches nothing is swallowed with a one-line hint and `pending` is kept.
