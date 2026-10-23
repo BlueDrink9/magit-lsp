@@ -2073,7 +2073,7 @@ date; re-find by function name if lines moved.
   - **Done when:** reverting the server's cancel to behave like confirm makes the test fail; `cargo test --test editor_bridge` passes.
   - **Approval:** the user authorizes server changes to add the documented `editDocument` metadata and correct §3.10's unsupported virtual-mode claim.
 
-- [ ] **[P1] Make the IMM-2 proptests apply selections and check the index** (`tests/git_backend.rs:754-949`)
+- [x] **[P1] Make the IMM-2 proptests apply selections and check the index** (`tests/git_backend.rs:754-949`)
   - **Problem:** both proptests only run `git apply --check` on each op patch against the unchanged index. They never apply ops in order (IMM-2 step 4), never compare the resulting index, and never test "stage then unstage is identity" (§8.3). `apply_check` and `apply_check_reverse` are near-identical copies.
   - **Why it matters:** correctness/coverage; a second-op offset failure after the first op is applied is invisible. Also DRY.
   - **Change:** in each property call `repo.apply_selection(&[layout], start, end, reverse)`. Build the expected index text with a small pure model in the test (original lines with the selected `+`/`-` lines applied), assert `git show :f.txt` equals it, then call the reverse selection on the fresh staged layout and assert the index equals the original. Assert `applied == false` exactly when the range contains no `+`/`-` line. Delete `apply_check_reverse` (parameterise `apply_check(dir, patch, reverse)` if one `--check` property is kept) and build the repo via `RepoFixture` (no hand-rolled `git init`).

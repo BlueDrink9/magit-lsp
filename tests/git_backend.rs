@@ -2,12 +2,10 @@ mod common;
 
 use common::*;
 use magit_lsp::git::GitRepo;
-use magit_lsp::patch::{self, FileLayout, Selection, SelectionOp};
+use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::ErrorKind;
 use proptest::prelude::*;
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 #[test]
@@ -584,36 +582,6 @@ fn status_hunks_match_git_when_staged_together() {
     }
 }
 
-fn apply_check(dir: &Path, patch_text: &str) -> Result<(), String> {
-    let mut child = Command::new("git")
-        .args([
-            "apply",
-            "--cached",
-            "--unidiff-zero",
-            "--recount",
-            "--check",
-            "-",
-        ])
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("no stdin")?
-        .write_all(patch_text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).into_owned())
-    }
-}
-
 #[test]
 fn selection_context_only_is_noop() {
     let (tmp, repo) = init_repo();
@@ -769,29 +737,92 @@ fn random_content(edits: &[u8]) -> (String, String) {
     (original, modified)
 }
 
+fn model_selection(
+    current: &str,
+    layout: &FileLayout,
+    start: u32,
+    end: u32,
+    reverse: bool,
+) -> String {
+    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let mut source: Vec<String> = current.lines().map(str::to_owned).collect();
+    let mut result = Vec::new();
+    let mut cursor = 0usize;
+
+    for hunk in &layout.hunks {
+        let whole_file = start <= layout.header_line && layout.header_line <= end;
+        let whole_hunk = start <= hunk.header_line && hunk.header_line <= end;
+        let source_start = if reverse {
+            hunk.hunk.new_start
+        } else {
+            hunk.hunk.old_start
+        } as usize;
+        let before = source_start.saturating_sub(1);
+        result.extend(source[cursor..before].iter().cloned());
+        cursor = before;
+
+        for (index, line) in hunk.hunk.lines.iter().enumerate() {
+            let document_line = hunk.first_line + index as u32;
+            let selected = whole_file || whole_hunk || (document_line >= start && document_line <= end);
+            let source_line = if reverse { line.new_no } else { line.old_no };
+            let is_source = if reverse { line.marker == '+' } else { line.marker == '-' };
+            let is_target = if reverse { line.marker == '-' } else { line.marker == '+' };
+
+            if line.marker == ' ' {
+                if let Some(number) = source_line {
+                    let position = number as usize - 1;
+                    result.extend(source[cursor..position].iter().cloned());
+                    result.push(source[position].clone());
+                    cursor = position + 1;
+                }
+            } else if is_source {
+                if let Some(number) = source_line {
+                    let position = number as usize - 1;
+                    result.extend(source[cursor..position].iter().cloned());
+                    if !selected {
+                        result.push(source[position].clone());
+                    }
+                    cursor = position + 1;
+                }
+            } else if is_target && selected {
+                result.push(line.text.clone());
+            }
+        }
+    }
+    result.extend(source.drain(cursor..));
+    if !result.is_empty() {
+        result.join("\n") + "\n"
+    } else {
+        result.join("\n")
+    }
+}
+
+fn index_content(repo: &RepoFixture) -> String {
+    repo.git(&["show", ":f.txt"])
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    fn random_selections_always_build_applicable_patches(
+    fn random_selections_apply_expected_content_and_reverse_back(
         edits in prop::collection::vec(0u8..4, 1..25),
         a in 0usize..60,
         b in 0usize..60,
+        reverse in any::<bool>(),
     ) {
         let (original, modified) = random_content(&edits);
         prop_assume!(original != modified);
 
-        let tmp = TempDir::new().expect("tempdir");
-        git(tmp.path(), &["init", "-q", "-b", "main"]);
-        git(tmp.path(), &["config", "user.email", "t@example.com"]);
-        git(tmp.path(), &["config", "user.name", "t"]);
-        write(&tmp.path().join("f.txt"), &original);
-        git(tmp.path(), &["add", "."]);
-        git(tmp.path(), &["commit", "-q", "-m", "init"]);
-        write(&tmp.path().join("f.txt"), &modified);
-
-        let repo = GitRepo::open(tmp.path()).expect("open repo");
-        let diff = repo.diff_unstaged("f.txt").expect("diff");
+        let (tmp, repo) = RepoFixture::new()
+            .commit("init", [("f.txt", original.clone())])
+            .modify("f.txt", modified.clone())
+            .build();
+        if reverse {
+            tmp.git(&["add", "f.txt"]);
+        }
+        let initial = if reverse { &modified } else { &original };
+        let diff = if reverse { repo.diff_staged("f.txt") } else { repo.diff_unstaged("f.txt") }.expect("diff");
         prop_assume!(!diff.is_empty());
         let layout = FileLayout::from_diff(&diff, 0).expect("layout");
         let max_line = layout
@@ -803,24 +834,31 @@ proptest! {
         let b = (b as u32).min(max_line);
         let (start, end) = if a <= b { (a, b) } else { (b, a) };
 
-        match patch::normalise_selection(&[layout.clone()], start, end) {
-            Selection::NoChanges => {}
-            Selection::Ops(ops) => {
-                for op in ops {
-                    let text = match op {
-                        SelectionOp::WholeFile { .. } => layout.whole_file_patch(),
-                        SelectionOp::WholeHunk { hunk_id, .. } => {
-                            layout.whole_hunk_patch(&hunk_id).expect("hunk patch")
-                        }
-                        SelectionOp::Lines { hunk_id, lines, .. } => {
-                            layout.lines_patch(&hunk_id, &lines, false).expect("lines patch")
-                        }
-                    };
-                    if let Err(e) = apply_check(tmp.path(), &text) {
-                        prop_assert!(false, "patch failed: {e}\n{text}");
-                    }
-                }
-            }
+        let expected = model_selection(initial, &layout, start, end, reverse);
+        let has_changes = layout.header_line >= start && layout.header_line <= end || layout.hunks.iter().any(|hunk| {
+            let whole_hunk = hunk.header_line >= start && hunk.header_line <= end;
+            hunk.hunk.lines.iter().enumerate().any(|(i, line)| {
+                (line.marker == '+' || line.marker == '-') && (whole_hunk || (hunk.first_line + i as u32 >= start && hunk.first_line + i as u32 <= end))
+            })
+        });
+        let applied = repo.apply_selection(&[layout], start, end, reverse).expect("apply selection");
+        prop_assert_eq!(applied, has_changes, "selection {}..={}", start, end);
+        prop_assert_eq!(index_content(&tmp), expected);
+
+        let staged = if reverse { repo.diff_unstaged("f.txt") } else { repo.diff_staged("f.txt") }.expect("inverse diff");
+        if staged.is_empty() {
+            prop_assert_eq!(index_content(&tmp), initial.as_str());
+        } else {
+            let staged_layout = FileLayout::from_diff(&staged, 0).expect("staged layout");
+            let changed: Vec<u32> = staged_layout.hunks.iter().flat_map(|hunk| {
+                hunk.hunk.lines.iter().enumerate().filter_map(move |(i, line)| {
+                    (line.marker == '+' || line.marker == '-').then_some(hunk.first_line + i as u32)
+                })
+            }).collect();
+            let (reverse_start, reverse_end) = (*changed.first().unwrap(), *changed.last().unwrap());
+            let applied = repo.apply_selection(&[staged_layout], reverse_start, reverse_end, !reverse).expect("inverse selection");
+            prop_assert!(applied);
+            prop_assert_eq!(index_content(&tmp), initial.as_str());
         }
     }
 }
@@ -859,92 +897,4 @@ fn unstage_selection_context_only_is_noop() {
 
     assert!(!applied, "context-only selection must not apply anything");
     assert!(cached_diff(tmp.path()).contains("line3 CHANGED"));
-}
-
-fn apply_check_reverse(dir: &Path, patch_text: &str) -> Result<(), String> {
-    let mut child = Command::new("git")
-        .args([
-            "apply",
-            "--cached",
-            "--unidiff-zero",
-            "--recount",
-            "-R",
-            "--check",
-            "-",
-        ])
-        .current_dir(dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("no stdin")?
-        .write_all(patch_text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).into_owned())
-    }
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
-
-    #[test]
-    fn random_reverse_selections_always_build_applicable_patches(
-        edits in prop::collection::vec(0u8..4, 1..25),
-        a in 0usize..60,
-        b in 0usize..60,
-    ) {
-        let (original, modified) = random_content(&edits);
-        prop_assume!(original != modified);
-
-        let tmp = TempDir::new().expect("tempdir");
-        git(tmp.path(), &["init", "-q", "-b", "main"]);
-        git(tmp.path(), &["config", "user.email", "t@example.com"]);
-        git(tmp.path(), &["config", "user.name", "t"]);
-        write(&tmp.path().join("f.txt"), &original);
-        git(tmp.path(), &["add", "."]);
-        git(tmp.path(), &["commit", "-q", "-m", "init"]);
-        write(&tmp.path().join("f.txt"), &modified);
-        git(tmp.path(), &["add", "f.txt"]);
-
-        let repo = GitRepo::open(tmp.path()).expect("open repo");
-        let diff = repo.diff_staged("f.txt").expect("diff");
-        prop_assume!(!diff.is_empty());
-        let layout = FileLayout::from_diff(&diff, 0).expect("layout");
-        let max_line = layout
-            .hunks
-            .last()
-            .map(|h| h.first_line + h.hunk.lines.len() as u32 - 1)
-            .unwrap_or(0);
-        let a = (a as u32).min(max_line);
-        let b = (b as u32).min(max_line);
-        let (start, end) = if a <= b { (a, b) } else { (b, a) };
-
-        match patch::normalise_selection(&[layout.clone()], start, end) {
-            Selection::NoChanges => {}
-            Selection::Ops(ops) => {
-                for op in ops {
-                    let text = match op {
-                        SelectionOp::WholeFile { .. } => layout.whole_file_patch(),
-                        SelectionOp::WholeHunk { hunk_id, .. } => {
-                            layout.whole_hunk_patch(&hunk_id).expect("hunk patch")
-                        }
-                        SelectionOp::Lines { hunk_id, lines, .. } => {
-                            layout.lines_patch(&hunk_id, &lines, true).expect("lines patch")
-                        }
-                    };
-                    if let Err(e) = apply_check_reverse(tmp.path(), &text) {
-                        prop_assert!(false, "patch failed: {e}\n{text}");
-                    }
-                }
-            }
-        }
-    }
 }
