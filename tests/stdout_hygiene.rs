@@ -3,111 +3,11 @@
 mod common;
 
 use common::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::ffi::OsStr;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 
-/// A running server whose stdout is parsed frame by frame.
-///
-/// Any stray byte between frames makes the parser fail, which is exactly the
-/// hygiene property this suite protects.
-struct Server {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    stdout: BufReader<ChildStdout>,
-    messages: Vec<Value>,
-}
-
-impl Server {
-    /// Spawn the real server, logging to stderr or `log_file`.
-    fn spawn(log_file: Option<&Path>) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env(magit_lsp::logging::LEVEL_ENV, "trace")
-            .env_remove(magit_lsp::logging::FILE_ENV);
-        if let Some(path) = log_file {
-            command.env(magit_lsp::logging::FILE_ENV, path);
-        }
-
-        let mut child = command.spawn().expect("spawn magit-lsp");
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
-        Self {
-            child,
-            stdin: Some(stdin),
-            stdout,
-            messages: Vec::new(),
-        }
-    }
-
-    fn send(&mut self, message: Value) {
-        let stdin = self.stdin.as_mut().expect("server stdin open");
-        let body = serde_json::to_vec(&message).expect("serialise message");
-        write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write header");
-        stdin.write_all(&body).expect("write body");
-        stdin.flush().expect("flush");
-    }
-
-    /// Read one frame, panicking on stray bytes, and remember it.
-    fn recv(&mut self) -> Option<Value> {
-        let mut content_length = None;
-        let mut saw_header = false;
-        loop {
-            let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).expect("read header");
-            if read == 0 {
-                assert!(!saw_header, "EOF in the middle of a frame header");
-                return None;
-            }
-            saw_header = true;
-            let line = line.trim_end_matches(['\r', '\n']);
-            if line.is_empty() {
-                break;
-            }
-            if let Some((name, value)) = line.split_once(':') {
-                if name.trim().eq_ignore_ascii_case("content-length") {
-                    content_length =
-                        Some(value.trim().parse::<usize>().expect("Content-Length"));
-                }
-            }
-        }
-
-        let length = content_length.expect("frame has no Content-Length header");
-        let mut body = vec![0; length];
-        self.stdout.read_exact(&mut body).expect("read frame body");
-        let message: Value =
-            serde_json::from_slice(&body).expect("frame body is well-formed JSON-RPC");
-        self.messages.push(message.clone());
-        Some(message)
-    }
-
-    /// Read until the response carrying `id`.
-    fn response_with_id(&mut self, id: i64) -> Value {
-        loop {
-            let message = self.recv().expect("server closed stdout early");
-            if message["id"] == json!(id) {
-                return message;
-            }
-        }
-    }
-
-    /// Close stdin, drain stdout to EOF, and return the exit status and stderr.
-    fn finish(mut self) -> (ExitStatus, String) {
-        self.stdin.take();
-        while self.recv().is_some() {}
-        let mut stderr = String::new();
-        if let Some(mut pipe) = self.child.stderr.take() {
-            pipe.read_to_string(&mut stderr).expect("read stderr");
-        }
-        let status = self.child.wait().expect("wait for magit-lsp");
-        (status, stderr)
-    }
-}
+type Server = common::stdio::TestServer;
 
 /// The protocol prefix every session shares.
 fn initialize(server: &mut Server) {
@@ -151,7 +51,7 @@ fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
     // A stale index lock makes the staging mutation fail without writing.
     write(&tmp.path().join(".git/index.lock"), "");
 
-    let mut server = Server::spawn(None);
+    let mut server = Server::spawn(&[]);
     initialize(&mut server);
     open_status(&mut server, 2, tmp.path());
     server.response_with_id(2);
@@ -169,7 +69,7 @@ fn stdout_carries_only_framed_json_rpc_when_logging_to_stderr() {
     assert_eq!(effects[0]["level"], "error", "failing git op: {stage}");
 
     shutdown_and_exit(&mut server, 4);
-    let (status, stderr) = server.finish();
+    let (status, stderr) = server.finish_with_stderr(std::time::Duration::from_secs(10));
 
     assert!(status.success(), "server exited: {stderr}");
     // The failure is logged, but only on stderr.
@@ -184,7 +84,10 @@ fn log_file_receives_logs_and_stdout_stays_clean() {
     let logs = tempfile::TempDir::new().expect("log tempdir");
     let log_file = logs.path().join("magit-lsp.log");
 
-    let mut server = Server::spawn(Some(&log_file));
+    let mut server = Server::spawn(&[(
+        magit_lsp::logging::FILE_ENV,
+        log_file.to_str().expect("log path"),
+    )]);
     initialize(&mut server);
     open_status(&mut server, 2, tmp.path());
     server.response_with_id(2);
@@ -197,7 +100,7 @@ fn log_file_receives_logs_and_stdout_stays_clean() {
     server.response_with_id(3);
 
     shutdown_and_exit(&mut server, 4);
-    let (status, stderr) = server.finish();
+    let (status, stderr) = server.finish_with_stderr(std::time::Duration::from_secs(10));
 
     assert!(status.success(), "server exited: {stderr}");
     assert!(stderr.trim().is_empty(), "logs leaked to stderr: {stderr}");

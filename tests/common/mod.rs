@@ -293,3 +293,6 @@ pub fn init_repo_40() -> (RepoFixture, GitRepo) {
         .commit("forty", [("f.txt", numbered_lines(40))])
         .build()
 }
+
+/// Real-server stdio transport shared by integration suites.
+pub mod stdio;

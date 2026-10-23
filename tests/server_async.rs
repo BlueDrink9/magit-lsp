@@ -2,239 +2,14 @@
 
 mod common;
 
+use common::stdio::*;
 use common::*;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::process::Command;
+use std::thread;
 use std::time::{Duration, Instant};
-
-/// A running server plus its framed stdout stream.
-struct TestServer {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    responses: Receiver<Result<Value, String>>,
-    reader: JoinHandle<()>,
-    stderr: Arc<Mutex<String>>,
-}
-
-impl TestServer {
-    /// Spawn the real binary with logging on stderr and optional extra env vars.
-    fn spawn(extra_env: &[(&str, &str)]) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env(magit_lsp::logging::LEVEL_ENV, "trace")
-            .env_remove(magit_lsp::logging::FILE_ENV);
-        for (key, value) in extra_env {
-            command.env(key, value);
-        }
-
-        let mut child = command.spawn().expect("spawn magit-lsp");
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = child.stdout.take().expect("child stdout");
-        let stderr = child.stderr.take().expect("child stderr");
-
-        let (tx, responses) = mpsc::channel();
-        let reader = thread::spawn(move || read_loop(stdout, tx));
-        let log = Arc::new(Mutex::new(String::new()));
-        drain_stderr(stderr, Arc::clone(&log));
-
-        Self {
-            child,
-            stdin: Some(stdin),
-            responses,
-            reader,
-            stderr: log,
-        }
-    }
-
-    fn pid(&self) -> u32 {
-        self.child.id()
-    }
-
-    fn send(&mut self, message: Value) {
-        self.send_raw(&frame(message));
-    }
-
-    fn send_raw(&mut self, bytes: &[u8]) {
-        let stdin = self.stdin.as_mut().expect("server stdin open");
-        stdin.write_all(bytes).expect("write to server");
-        stdin.flush().expect("flush server stdin");
-    }
-
-    fn recv(&mut self) -> Value {
-        match self.responses.recv_timeout(Duration::from_secs(10)) {
-            Ok(Ok(message)) => message,
-            Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
-            Err(error) => {
-                let log = self
-                    .stderr
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let tail: Vec<&str> = log.lines().rev().take(40).collect();
-                let status = self.child.try_wait();
-                panic!(
-                    "no response from server: {error}\nserver exit: {status:?}\nserver stderr:\n{}",
-                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
-                )
-            }
-        }
-    }
-
-    /// Read until the response carrying `id`, failing if the stream ends.
-    fn response_with_id(&mut self, id: i64) -> Value {
-        loop {
-            let message = self.recv();
-            if message["id"] == json!(id) {
-                return message;
-            }
-        }
-    }
-
-    fn initialize(&mut self) {
-        self.send(initialize_message());
-        self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
-        let response = self.response_with_id(1);
-        assert_eq!(
-            response["result"]["capabilities"]["foldingRangeProvider"],
-            json!(true),
-            "initialize response: {response}"
-        );
-    }
-
-    fn close_stdin(&mut self) {
-        self.stdin.take();
-    }
-
-    fn wait_timeout(&mut self, timeout: Duration) -> ExitStatus {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(status) = self.child.try_wait().expect("poll server") {
-                return status;
-            }
-            if Instant::now() >= deadline {
-                let _ = self.child.kill();
-                panic!("server did not exit within {timeout:?}");
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    fn finish(mut self, timeout: Duration) -> ExitStatus {
-        self.close_stdin();
-        let status = self.wait_timeout(timeout);
-        self.reader.join().expect("reader thread");
-        status
-    }
-}
-
-fn initialize_message() -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "processId": null,
-            "rootUri": null,
-            "capabilities": {},
-        },
-    })
-}
-
-fn frame(message: Value) -> Vec<u8> {
-    let body = serde_json::to_vec(&message).expect("serialise message");
-    let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    bytes.extend_from_slice(&body);
-    bytes
-}
-
-/// Drain the server's stderr so a full pipe can never block it, keeping the
-/// tail for failure messages.
-fn drain_stderr(mut stderr: std::process::ChildStderr, log: Arc<Mutex<String>>) {
-    thread::spawn(move || {
-        let mut buffer = [0u8; 4096];
-        loop {
-            match stderr.read(&mut buffer) {
-                Ok(0) | Err(_) => return,
-                Ok(read) => {
-                    let mut log = log.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    log.push_str(&String::from_utf8_lossy(&buffer[..read]));
-                    if log.len() > 200_000 {
-                        log.drain(..100_000);
-                    }
-                }
-            }
-        }
-    });
-}
-
-/// Read every frame from `stdout`, reporting stray or truncated bytes.
-fn read_loop(stdout: ChildStdout, tx: mpsc::Sender<Result<Value, String>>) {
-    let mut reader = BufReader::new(stdout);
-    loop {
-        match read_frame(&mut reader) {
-            Ok(Some(message)) => {
-                if tx.send(Ok(message)).is_err() {
-                    return;
-                }
-            }
-            Ok(None) => return,
-            Err(error) => {
-                let _ = tx.send(Err(error));
-                return;
-            }
-        }
-    }
-}
-
-fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
-    let mut content_length = None;
-    let mut saw_header = false;
-    loop {
-        let mut line = String::new();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|error| format!("read header: {error}"))?;
-        if read == 0 {
-            return if saw_header {
-                Err("EOF in the middle of a frame header".to_string())
-            } else {
-                Ok(None)
-            };
-        }
-        saw_header = true;
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|error| format!("bad Content-Length: {error}"))?,
-                );
-            }
-        }
-    }
-
-    let length = content_length.ok_or("frame has no Content-Length header")?;
-    let mut body = vec![0; length];
-    reader
-        .read_exact(&mut body)
-        .map_err(|error| format!("read frame body: {error}"))?;
-    serde_json::from_slice(&body)
-        .map(Some)
-        .map_err(|error| format!("frame body is not JSON: {error}"))
-}
 
 fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
@@ -331,7 +106,12 @@ fn a_slow_mutation_does_not_delay_a_later_read() {
 
     // The delay hook is compiled only into debug builds; see `server::maybe_test_delay`.
     let mut server = TestServer::spawn(&[("MAGIT_LSP_TEST_DELAY_MS", "500")]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     let view_id = open_view(&mut server, 2, &repo);
 
@@ -376,7 +156,12 @@ fn mutations_for_one_repository_apply_in_request_order() {
     let repo = repo_param(tmp.path());
 
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     let view_id = open_view(&mut server, 2, &repo);
 
@@ -412,7 +197,12 @@ fn mutations_for_one_repository_apply_in_request_order() {
 #[test]
 fn shutdown_then_exit_terminates_zero_without_an_orphan() {
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
     let pid = server.pid();
 
     shutdown_and_exit(&mut server);
@@ -424,7 +214,12 @@ fn shutdown_then_exit_terminates_zero_without_an_orphan() {
 #[test]
 fn exit_without_shutdown_terminates_with_code_one() {
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     server.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
     let status = server.finish(Duration::from_secs(10));
@@ -434,7 +229,12 @@ fn exit_without_shutdown_terminates_with_code_one() {
 #[test]
 fn unknown_requests_reply_method_not_found() {
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -458,7 +258,12 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -533,12 +338,10 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     assert_eq!(render["params"]["version"], json!(2));
     assert_eq!(render["params"]["baseVersion"], json!(1));
     assert!(render["params"]["text"].is_null());
-    assert!(
-        !render["params"]["edits"]
-            .as_array()
-            .expect("edits")
-            .is_empty()
-    );
+    assert!(!render["params"]["edits"]
+        .as_array()
+        .expect("edits")
+        .is_empty());
     assert!(!render["params"]["cursor"].is_null());
     assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
 
@@ -570,7 +373,12 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     server.send(open_view_message(2, &repo));
     let opened = server.response_with_id(2);
@@ -655,7 +463,12 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     let view_id = open_view(&mut server, 2, &repo);
 
@@ -758,7 +571,11 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
     }
 
     let key_response = key_response.expect("view/key response");
-    assert_eq!(key_response["result"]["effects"], json!([]), "{key_response}");
+    assert_eq!(
+        key_response["result"]["effects"],
+        json!([]),
+        "{key_response}"
+    );
     let respond_response = respond_response.expect("view/promptRespond response");
     assert_eq!(respond_response["result"], Value::Null);
 
@@ -767,8 +584,9 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
         .as_array()
         .expect("full text after a fresh option");
     assert!(
-        text.iter()
-            .any(|line| line.as_str().is_some_and(|line| line.contains("--author=Alice"))),
+        text.iter().any(|line| line
+            .as_str()
+            .is_some_and(|line| line.contains("--author=Alice"))),
         "the option and its preview show the answer: {option_render}"
     );
 
@@ -789,7 +607,12 @@ fn a_config_reload_repushes_the_view_keymap() {
     let repo = repo_param(tmp.path());
     let config = config_path.to_string_lossy().to_string();
     let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
 
     server.send(open_view_message(2, &repo));
     let _opened = server.response_with_id(2);
@@ -900,7 +723,12 @@ fn a_mutation_reports_work_done_progress() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
     let view_id = open_view(&mut server, 2, &repo);
 
     server.send(json!({
@@ -970,7 +798,12 @@ fn a_cancel_notification_aborts_a_slow_mutation() {
     let (_bin, env) = fake_git_env(&marker);
     let repo = repo_param(tmp.path());
     let mut server = spawn_with_env(&env);
-    server.initialize();
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
     let view_id = open_view(&mut server, 2, &repo);
 
     server.send(json!({

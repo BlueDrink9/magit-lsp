@@ -3,6 +3,7 @@
 
 mod common;
 
+use common::stdio::*;
 use common::*;
 use magit_lsp::config::{Config, Profile};
 use magit_lsp::keymap::{self, Keymap};
@@ -12,13 +13,9 @@ use magit_lsp::protocol::{
 use magit_lsp::session::Session;
 use magit_lsp::tree::NodeKind;
 use magit_lsp::view::{Placement, ViewKind, Viewport};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 fn keymaps(config: &Config) -> Arc<BTreeMap<String, Keymap>> {
@@ -102,7 +99,10 @@ fn text_mode_narrows_the_keymap_and_refuses_every_other_command() {
 
     let entered = invoke(&mut session, "common.toggle-text-mode");
     assert!(entered.effects.is_empty(), "{:?}", entered.effects);
-    assert!(entered.render.is_none(), "entering text mode renders nothing");
+    assert!(
+        entered.render.is_none(),
+        "entering text mode renders nothing"
+    );
     let keymap = entered.keymap.expect("a keymap notice");
     assert_eq!(keymap.mode, magit_lsp::view::ViewMode::Text);
     assert_eq!(keymap.bindings.len(), 1, "only the toggle stays bound");
@@ -151,7 +151,10 @@ fn a_refresh_in_text_mode_is_queued_and_applied_on_exit() {
     assert!(queued.is_none(), "text mode queues refreshes");
     let current = session.views().get("v1").expect("view").tree();
     assert!(
-        current.lines.iter().any(|line| line == "Unstaged changes (1)"),
+        current
+            .lines
+            .iter()
+            .any(|line| line == "Unstaged changes (1)"),
         "the queued refresh must not render yet: {:?}",
         current.lines
     );
@@ -206,7 +209,10 @@ fn copy_value_returns_the_right_text_per_node_kind() {
     let hunk_text = copy_at(&mut session, hunk, None);
     assert!(hunk_text.starts_with("@@ -1,10 +1,10 @@"), "{hunk_text:?}");
     assert!(hunk_text.contains("\n+NEW line"), "{hunk_text:?}");
-    assert!(!hunk_text.contains("    @@"), "the patch header is not indented");
+    assert!(
+        !hunk_text.contains("    @@"),
+        "the patch header is not indented"
+    );
 
     // A diff line copies its content without the marker.
     let added = tree
@@ -243,7 +249,10 @@ fn copy_invoke(
             command: "common.copy-value".to_string(),
             args: None,
             cursor: line.map(|line| Cursor { line, column: 0 }),
-            selection: selection.map(|(start_line, end_line)| Selection { start_line, end_line }),
+            selection: selection.map(|(start_line, end_line)| Selection {
+                start_line,
+                end_line,
+            }),
         })
         .expect("invoke copy-value")
 }
@@ -258,131 +267,14 @@ fn copy_at(session: &mut Session, line: usize, selection: Option<(usize, usize)>
 
 // --- The real server proves positional requests go quiet in text mode. ---
 
-struct TestServer {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    responses: Receiver<Value>,
-    reader: JoinHandle<()>,
-    notifications: Vec<Value>,
-}
-
-impl TestServer {
-    fn spawn() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .env(magit_lsp::logging::LEVEL_ENV, "warn")
-            .env_remove(magit_lsp::logging::FILE_ENV)
-            .spawn()
-            .expect("spawn magit-lsp");
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = child.stdout.take().expect("child stdout");
-        let (tx, responses) = mpsc::channel();
-        let reader = thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            while let Some(message) = read_frame(&mut reader) {
-                if tx.send(message).is_err() {
-                    return;
-                }
-            }
-        });
-        Self {
-            child,
-            stdin: Some(stdin),
-            responses,
-            reader,
-            notifications: Vec::new(),
-        }
-    }
-
-    fn send(&mut self, message: Value) {
-        let body = serde_json::to_vec(&message).expect("serialise message");
-        let stdin = self.stdin.as_mut().expect("server stdin open");
-        write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write header");
-        stdin.write_all(&body).expect("write body");
-        stdin.flush().expect("flush");
-    }
-
-    fn response_with_id(&mut self, id: i64) -> Value {
-        loop {
-            let message = self
-                .responses
-                .recv_timeout(Duration::from_secs(10))
-                .expect("no response from server");
-            if message["id"] == json!(id) {
-                return message;
-            }
-            self.notifications.push(message);
-        }
-    }
-
-    /// Collect notifications that arrive in a short quiet window.
-    fn drain_notifications(&mut self) -> Vec<Value> {
-        let mut out = Vec::new();
-        while let Ok(message) = self.responses.recv_timeout(Duration::from_millis(400)) {
-            self.notifications.push(message.clone());
-            out.push(message);
-        }
-        out
-    }
-
-    fn initialize(&mut self) -> Value {
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "processId": null,
-                "rootUri": null,
-                "capabilities": {"keymapDelivery": "dynamic"},
-            },
-        }));
-        self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
-        self.response_with_id(1)
-    }
-
-    fn finish(mut self) {
-        self.send(json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null}));
-        self.response_with_id(99);
-        self.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
-        self.stdin.take();
-        let status = self.child.wait().expect("server exit");
-        assert!(status.success(), "server exited: {status:?}");
-        self.reader.join().expect("reader thread");
-    }
-}
-
-fn read_frame(reader: &mut impl BufRead) -> Option<Value> {
-    let mut length = None;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).ok()? == 0 {
-            return None;
-        }
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                length = Some(value.trim().parse::<usize>().expect("Content-Length"));
-            }
-        }
-    }
-    let mut body = vec![0; length.expect("Content-Length header")];
-    reader.read_exact(&mut body).ok()?;
-    serde_json::from_slice(&body).ok()
-}
-
 #[test]
 fn positional_requests_return_null_in_text_mode() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
+    server.initialize(json!({"keymapDelivery": "dynamic"}));
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -395,7 +287,10 @@ fn positional_requests_return_null_in_text_mode() {
         },
     }));
     let opened = server.response_with_id(2);
-    let view_id = opened["result"]["id"].as_str().expect("view id").to_string();
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
     let uri = opened["result"]["uri"].as_str().expect("uri").to_string();
 
     server.send(json!({
@@ -435,10 +330,26 @@ fn positional_requests_return_null_in_text_mode() {
 
     // Every positional request must answer null while the buffer is editable.
     let requests = [
-        (5, "textDocument/documentSymbol", json!({"textDocument": {"uri": uri}})),
-        (6, "textDocument/foldingRange", json!({"textDocument": {"uri": uri}})),
-        (7, "textDocument/semanticTokens/full", json!({"textDocument": {"uri": uri}})),
-        (8, "textDocument/documentLink", json!({"textDocument": {"uri": uri}})),
+        (
+            5,
+            "textDocument/documentSymbol",
+            json!({"textDocument": {"uri": uri}}),
+        ),
+        (
+            6,
+            "textDocument/foldingRange",
+            json!({"textDocument": {"uri": uri}}),
+        ),
+        (
+            7,
+            "textDocument/semanticTokens/full",
+            json!({"textDocument": {"uri": uri}}),
+        ),
+        (
+            8,
+            "textDocument/documentLink",
+            json!({"textDocument": {"uri": uri}}),
+        ),
         (
             9,
             "textDocument/definition",
@@ -506,7 +417,16 @@ fn positional_requests_return_null_in_text_mode() {
         .find(|n| n["method"] == "view/keymap")
         .expect("the full keymap");
     assert_eq!(keymap["params"]["mode"], "interactive");
-    assert!(keymap["params"]["bindings"].as_array().expect("bindings").len() > 1);
+    assert!(
+        keymap["params"]["bindings"]
+            .as_array()
+            .expect("bindings")
+            .len()
+            > 1
+    );
 
-    server.finish();
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
+    server.response_with_id(99);
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
 }

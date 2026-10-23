@@ -3,141 +3,20 @@
 
 mod common;
 
+use common::stdio::*;
 use common::*;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
-/// A running server plus its framed stdout stream.
-struct TestServer {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    responses: Receiver<Result<Value, String>>,
-    reader: JoinHandle<()>,
-    stderr: Arc<Mutex<String>>,
-}
-
 impl TestServer {
-    fn spawn() -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env(magit_lsp::logging::LEVEL_ENV, "trace")
-            .env_remove(magit_lsp::logging::FILE_ENV);
-
-        let mut child = command.spawn().expect("spawn magit-lsp");
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = child.stdout.take().expect("child stdout");
-        let stderr = child.stderr.take().expect("child stderr");
-
-        let (tx, responses) = mpsc::channel();
-        let reader = thread::spawn(move || read_loop(stdout, tx));
-        let log = Arc::new(Mutex::new(String::new()));
-        drain_stderr(stderr, Arc::clone(&log));
-
-        Self {
-            child,
-            stdin: Some(stdin),
-            responses,
-            reader,
-            stderr: log,
-        }
-    }
-
-    fn send(&mut self, message: Value) {
-        let stdin = self.stdin.as_mut().expect("server stdin open");
-        stdin
-            .write_all(&frame(message))
-            .expect("write to server");
-        stdin.flush().expect("flush server stdin");
-    }
-
-    fn recv(&mut self) -> Value {
-        match self.responses.recv_timeout(Duration::from_secs(20)) {
-            Ok(Ok(message)) => message,
-            Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
-            Err(error) => {
-                let log = self
-                    .stderr
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let tail: Vec<&str> = log.lines().rev().take(40).collect();
-                let status = self.child.try_wait();
-                panic!(
-                    "no response from server: {error}\nserver exit: {status:?}\nserver stderr:\n{}",
-                    tail.into_iter().rev().collect::<Vec<_>>().join("\n")
-                )
-            }
-        }
-    }
-
-    fn response_with_id(&mut self, id: i64) -> Value {
-        loop {
-            let message = self.recv();
-            if message["id"] == json!(id) {
-                return message;
-            }
-        }
-    }
-
-    fn initialize(&mut self) {
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "processId": null,
-                "rootUri": null,
-                "capabilities": {},
-            },
-        }));
-        self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
-        let response = self.response_with_id(1);
-        assert!(
-            response["result"]["capabilities"].is_object(),
-            "initialize response: {response}"
-        );
-    }
-
-    fn shutdown_and_exit(&mut self) {
-        self.send(json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null}));
-        let response = self.response_with_id(99);
-        assert_eq!(response["result"], Value::Null);
-        self.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
-    }
-
-    fn finish(mut self, timeout: Duration) -> ExitStatus {
-        self.stdin.take();
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(status) = self.child.try_wait().expect("poll server") {
-                self.reader.join().expect("reader thread");
-                return status;
-            }
-            if Instant::now() >= deadline {
-                let _ = self.child.kill();
-                panic!("server did not exit within {timeout:?}");
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
     /// The bridge socket path, from the server's startup log.
     fn socket_path(&mut self) -> PathBuf {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            let log = self
-                .stderr
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone();
+            let log = self.stderr_text();
             if let Some(path) = log.lines().find_map(|line| {
                 line.split_once("editor bridge listening socket=")
                     .map(|(_, path)| path.trim())
@@ -183,92 +62,6 @@ impl TestServer {
     }
 }
 
-fn frame(message: Value) -> Vec<u8> {
-    let body = serde_json::to_vec(&message).expect("serialise message");
-    let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    bytes.extend_from_slice(&body);
-    bytes
-}
-
-fn drain_stderr(mut stderr: std::process::ChildStderr, log: Arc<Mutex<String>>) {
-    thread::spawn(move || {
-        let mut buffer = [0u8; 4096];
-        loop {
-            match stderr.read(&mut buffer) {
-                Ok(0) | Err(_) => return,
-                Ok(read) => {
-                    let mut log = log.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    log.push_str(&String::from_utf8_lossy(&buffer[..read]));
-                    if log.len() > 200_000 {
-                        log.drain(..100_000);
-                    }
-                }
-            }
-        }
-    });
-}
-
-fn read_loop(stdout: ChildStdout, tx: mpsc::Sender<Result<Value, String>>) {
-    let mut reader = BufReader::new(stdout);
-    loop {
-        match read_frame(&mut reader) {
-            Ok(Some(message)) => {
-                if tx.send(Ok(message)).is_err() {
-                    return;
-                }
-            }
-            Ok(None) => return,
-            Err(error) => {
-                let _ = tx.send(Err(error));
-                return;
-            }
-        }
-    }
-}
-
-fn read_frame(reader: &mut impl BufRead) -> Result<Option<Value>, String> {
-    let mut content_length = None;
-    let mut saw_header = false;
-    loop {
-        let mut line = String::new();
-        let read = reader
-            .read_line(&mut line)
-            .map_err(|error| format!("read header: {error}"))?;
-        if read == 0 {
-            return if saw_header {
-                Err("EOF in the middle of a frame header".to_string())
-            } else {
-                Ok(None)
-            };
-        }
-        saw_header = true;
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|error| format!("bad Content-Length: {error}"))?,
-                );
-            }
-        }
-    }
-
-    let length = content_length.ok_or("frame has no Content-Length header")?;
-    let mut body = vec![0; length];
-    reader
-        .read_exact(&mut body)
-        .map_err(|error| format!("read frame body: {error}"))?;
-    serde_json::from_slice(&body)
-        .map(Some)
-        .map_err(|error| format!("frame body is not JSON: {error}"))
-}
-
-/// Open the status view and consume its initial render and keymap.
 fn open_status(server: &mut TestServer, id: i64, repo: &Value) -> String {
     server.send(json!({
         "jsonrpc": "2.0",
@@ -364,10 +157,18 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
 #[test]
 fn a_commit_is_created_from_the_typed_message() {
     let (tmp, _repo) = staged_repo();
-    assert!(hunk_count(&cached_diff(tmp.path())) >= 1, "something staged");
+    assert!(
+        hunk_count(&cached_diff(tmp.path())) >= 1,
+        "something staged"
+    );
     let repo = json!(tmp.path().to_string_lossy());
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
 
     let status = open_status(&mut server, 2, &repo);
     // The commit menu is where a user starts, even though this test invokes
@@ -414,8 +215,13 @@ fn a_cancel_creates_no_commit() {
     let (tmp, _repo) = staged_repo();
     let before = tmp.git(&["status", "--porcelain"]);
     let repo = json!(tmp.path().to_string_lossy());
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
 
     let status = open_status(&mut server, 2, &repo);
     let _menu = invoke(&mut server, 3, &status, "open.commit", json!(null));
@@ -489,8 +295,13 @@ fn a_cancel_creates_no_commit() {
 /// environment, so the helper finds the bridge the same way Git would.
 #[test]
 fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
     let socket = server.socket_path();
 
     let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
@@ -532,8 +343,13 @@ fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
 
 #[test]
 fn a_cancelled_askpass_prompt_makes_the_helper_fail() {
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
     let socket = server.socket_path();
 
     let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))

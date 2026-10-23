@@ -3,121 +3,12 @@
 
 mod common;
 
+use common::stdio::*;
 use common::*;
 use magit_lsp::status_view;
 use magit_lsp::tree::Tree;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::thread::{self, JoinHandle};
 use std::time::Duration;
-
-/// A running server plus its framed stdout stream.
-struct TestServer {
-    child: Child,
-    stdin: Option<ChildStdin>,
-    responses: Receiver<Value>,
-    reader: JoinHandle<()>,
-}
-
-impl TestServer {
-    fn spawn() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .env(magit_lsp::logging::LEVEL_ENV, "warn")
-            .env_remove(magit_lsp::logging::FILE_ENV)
-            .spawn()
-            .expect("spawn magit-lsp");
-        let stdin = child.stdin.take().expect("child stdin");
-        let stdout = child.stdout.take().expect("child stdout");
-        let (tx, responses) = mpsc::channel();
-        let reader = thread::spawn(move || read_loop(stdout, tx));
-        Self {
-            child,
-            stdin: Some(stdin),
-            responses,
-            reader,
-        }
-    }
-
-    fn send(&mut self, message: Value) {
-        let body = serde_json::to_vec(&message).expect("serialise message");
-        let stdin = self.stdin.as_mut().expect("server stdin open");
-        write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write header");
-        stdin.write_all(&body).expect("write body");
-        stdin.flush().expect("flush");
-    }
-
-    fn response_with_id(&mut self, id: i64) -> Value {
-        loop {
-            let message = self
-                .responses
-                .recv_timeout(Duration::from_secs(10))
-                .expect("no response from server");
-            if message["id"] == json!(id) {
-                return message;
-            }
-        }
-    }
-
-    fn initialize(&mut self) -> Value {
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {"processId": null, "rootUri": null, "capabilities": {}},
-        }));
-        self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
-        self.response_with_id(1)
-    }
-
-    fn finish(mut self) {
-        self.send(json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null}));
-        self.response_with_id(99);
-        self.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
-        self.stdin.take();
-        let status = self.child.wait().expect("server exit");
-        assert!(status.success(), "server exited: {status:?}");
-        self.reader.join().expect("reader thread");
-    }
-}
-
-fn read_loop(stdout: ChildStdout, tx: mpsc::Sender<Value>) {
-    let mut reader = BufReader::new(stdout);
-    loop {
-        let Some(message) = read_frame(&mut reader) else {
-            return;
-        };
-        if tx.send(message).is_err() {
-            return;
-        }
-    }
-}
-
-fn read_frame(reader: &mut impl BufRead) -> Option<Value> {
-    let mut length = None;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).ok()? == 0 {
-            return None;
-        }
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                length = Some(value.trim().parse::<usize>().expect("Content-Length"));
-            }
-        }
-    }
-    let mut body = vec![0; length.expect("Content-Length header")];
-    reader.read_exact(&mut body).ok()?;
-    serde_json::from_slice(&body).ok()
-}
 
 /// One decoded semantic token, in absolute positions.
 #[derive(Debug, PartialEq, Eq)]
@@ -223,8 +114,8 @@ fn unicode_fixture() -> (RepoFixture, magit_lsp::git::GitRepo) {
 
 #[test]
 fn capabilities_advertise_the_legend_and_full_tokens() {
-    let mut server = TestServer::spawn();
-    let initialize = server.initialize();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
+    let initialize = server.initialize(json!({}));
     let provider = &initialize["result"]["capabilities"]["semanticTokensProvider"];
     assert_eq!(provider["full"], json!(true), "{provider}");
     let token_types = strings(&provider["legend"], "tokenTypes");
@@ -250,14 +141,17 @@ fn capabilities_advertise_the_legend_and_full_tokens() {
             "bold".to_string()
         ]
     );
-    server.finish();
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
+    server.response_with_id(99);
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
 fn semantic_tokens_decode_back_to_the_tree_tokens() {
     let (tmp, repo) = unicode_fixture();
-    let mut server = TestServer::spawn();
-    let initialize = server.initialize();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
+    let initialize = server.initialize(json!({}));
     let legend = &initialize["result"]["capabilities"]["semanticTokensProvider"]["legend"];
     let token_types = strings(legend, "tokenTypes");
     let token_modifiers = strings(legend, "tokenModifiers");
@@ -328,13 +222,16 @@ fn semantic_tokens_decode_back_to_the_tree_tokens() {
         );
     }
 
-    server.finish();
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
+    server.response_with_id(99);
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
 fn an_unknown_uri_returns_no_tokens() {
-    let mut server = TestServer::spawn();
-    server.initialize();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
+    server.initialize(json!({}));
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -343,5 +240,8 @@ fn an_unknown_uri_returns_no_tokens() {
     }));
     let response = server.response_with_id(2);
     assert_eq!(response["result"]["data"], json!([]), "{response}");
-    server.finish();
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
+    server.response_with_id(99);
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
 }

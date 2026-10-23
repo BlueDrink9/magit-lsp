@@ -2093,7 +2093,7 @@ date; re-find by function name if lines moved.
   - **Done when:** the two proptests become one parameterised property (or share one body) that fails if `lines_patch` drops or mis-numbers a line; `cargo test --test git_backend` passes.
   - **Constraints:** keep `ProptestConfig::with_cases(64)` or lower; do not change `patch.rs`.
 
-- [ ] **[P1] Extract one shared stdio test client** (`tests/server_async.rs:17-240`, `tests/semantic_tokens.rs:17-120`, `tests/text_mode.rs:261-380`, `tests/editor_bridge.rs:17-270`, `tests/stdout_hygiene.rs:16-110`)
+- [x] **[P1] Extract one shared stdio test client** (`tests/server_async.rs:17-240`, `tests/semantic_tokens.rs:17-120`, `tests/text_mode.rs:261-380`, `tests/editor_bridge.rs:17-270`, `tests/stdout_hygiene.rs:16-110`)
   - **Problem:** five files each re-implement spawn, `Content-Length` framing, `read_frame`, `response_with_id`, `initialize`, shutdown and stderr draining.
   - **Why it matters:** DRY; every protocol test change must be made five times.
   - **Change:** add `tests/common/stdio.rs` (declared in `tests/common/mod.rs` as `pub mod stdio;`) exposing `TestServer { spawn(extra_env: &[(&str,&str)]), send, send_raw, recv, response_with_id, initialize, notifications/drain_notifications, stderr_text, finish(timeout) }`, plus `frame()` and `initialize_message()`. Port the five files to it one at a time and delete their copies. Keep per-file helpers that are truly specific (`view/prompt` helpers in `editor_bridge.rs`, token decoding in `semantic_tokens.rs`).
