@@ -6,6 +6,8 @@
 --- `vim.ui`/`vim.fn` helpers and forwards the answer. It holds no Git or
 --- layout logic.
 
+local debug_api = require('magit-lsp.debug')
+
 local M = {}
 
 --- The LSP client id, set by `M.configure`.
@@ -31,6 +33,7 @@ end
 function M.respond(prompt_id, cancelled, value)
   local c = client()
   if not c then
+    debug_api.prompt_finished()
     return
   end
   c:request('view/promptRespond', {
@@ -38,6 +41,7 @@ function M.respond(prompt_id, cancelled, value)
     cancelled = cancelled,
     value = value,
   }, function() end)
+  debug_api.prompt_finished()
 end
 
 local function finish(params, cancelled, value)
@@ -168,6 +172,7 @@ function M.handle(params)
   if type(params) ~= 'table' or not params.promptId then
     return
   end
+  debug_api.prompt_started()
   local kind = params.kind
   if kind == 'confirm' then
     ask_confirm(params)

@@ -5,6 +5,7 @@
 --- server's renders/keymaps, and forwards keys through `view/key`.
 
 local keymap = require('magit-lsp.keymap')
+local debug_api = require('magit-lsp.debug')
 
 local M = {}
 
@@ -16,7 +17,8 @@ M.views = {}
 ---@type string[]
 M.order = {}
 
---- Renders/keymaps that arrived before their descriptor's effect.
+--- Renders/keymaps that arrived before their descriptor's effect, by view id
+--- and in arrival order.
 M.pending_render = {}
 M.pending_keymap = {}
 
@@ -223,8 +225,9 @@ function M.open(descriptor)
   M.last_id = descriptor.id
 
   local pending = M.pending_render[descriptor.id]
-  if pending and pending.text then
-    view.lines = pending.text
+  local last = pending and pending[#pending]
+  if last and last.text then
+    view.lines = last.text
   end
   local height = height_for(view.lines)
 
@@ -260,14 +263,18 @@ function M.open(descriptor)
     end,
   })
 
-  local render = M.pending_render[descriptor.id]
+  debug_api.view_open(descriptor.id, descriptor.kind, buf)
+
+  -- Notifications can beat the descriptor's effect; apply them in order now
+  -- that the window and buffer exist.
+  local renders = M.pending_render[descriptor.id]
   M.pending_render[descriptor.id] = nil
-  if render then
+  for _, render in ipairs(renders or {}) do
     M.apply_render(render)
   end
-  local notice = M.pending_keymap[descriptor.id]
+  local notices = M.pending_keymap[descriptor.id]
   M.pending_keymap[descriptor.id] = nil
-  if notice then
+  for _, notice in ipairs(notices or {}) do
     M.apply_keymap(notice)
   end
 
@@ -286,6 +293,7 @@ function M.close(id, focus_previous_window)
   M.closing = M.closing or {}
   M.closing[id] = true
   forget(id)
+  debug_api.view_close(id)
   if view.win and vim.api.nvim_win_is_valid(view.win) then
     pcall(vim.api.nvim_win_close, view.win, true)
   end
@@ -320,7 +328,9 @@ local function resync(id)
   if not view or not c then
     return
   end
+  debug_api.request_started()
   c:request('view/resync', { viewId = id }, function(err, result)
+    debug_api.request_finished()
     if err or type(result) ~= 'table' then
       return
     end
@@ -334,9 +344,12 @@ function M.apply_render(params)
   if not params or not params.viewId then
     return
   end
+  debug_api.render_received(params.viewId, params.version)
   local view = M.views[params.viewId]
   if not view then
-    M.pending_render[params.viewId] = params
+    local queue = M.pending_render[params.viewId] or {}
+    queue[#queue + 1] = params
+    M.pending_render[params.viewId] = queue
     return
   end
 
@@ -352,10 +365,12 @@ function M.apply_render(params)
 
   view.lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
   view.version = params.version
+  debug_api.render_applied(params.viewId, params.version)
   M.fit(params.viewId)
   local c = client()
   if c then
     c:notify('view/rendered', { viewId = params.viewId, version = params.version })
+    debug_api.render_acked(params.viewId, params.version)
   end
   vim.lsp.semantic_tokens.force_refresh(view.buf)
 end
@@ -368,7 +383,9 @@ function M.apply_keymap(notice)
   end
   local view = M.views[notice.viewId]
   if not view then
-    M.pending_keymap[notice.viewId] = notice
+    local queue = M.pending_keymap[notice.viewId] or {}
+    queue[#queue + 1] = notice
+    M.pending_keymap[notice.viewId] = queue
     return
   end
   view.notice = notice
@@ -380,6 +397,7 @@ function M.apply_keymap(notice)
       M.invoke(notice.viewId, command, args)
     end,
   }, { fold_keys = {} })
+  debug_api.keymap_received(notice.viewId, notice)
 end
 
 --- Send one key chord to a menu and apply the answer.
@@ -398,14 +416,18 @@ function M.press(id, steps)
   end
 
   local effects = {}
+  debug_api.key_pressed(steps)
   for _, step in ipairs(steps) do
-    local responses = vim.lsp.buf_request_sync(view.buf, 'view/key', {
-      viewId = id,
-      version = view.version or 0,
-      key = step,
-      editorMode = 'normal',
-      cursor = cursor,
-    }, 5000)
+    debug_api.key_sent(step, id)
+    local responses = debug_api.track_request(function()
+      return vim.lsp.buf_request_sync(view.buf, 'view/key', {
+        viewId = id,
+        version = view.version or 0,
+        key = step,
+        editorMode = 'normal',
+        cursor = cursor,
+      }, 5000)
+    end)
     if not responses then
       vim.notify('magit-lsp menu key ' .. step .. ' timed out', vim.log.levels.WARN)
       return
@@ -439,12 +461,14 @@ function M.invoke(id, command, args)
     local position = vim.api.nvim_win_get_cursor(view.win)
     cursor = { line = position[1] - 1, column = position[2] }
   end
-  local responses = vim.lsp.buf_request_sync(view.buf, 'view/invoke', {
-    viewId = id,
-    command = command,
-    cursor = cursor,
-    args = args,
-  }, 5000)
+  local responses = debug_api.track_request(function()
+    return vim.lsp.buf_request_sync(view.buf, 'view/invoke', {
+      viewId = id,
+      command = command,
+      cursor = cursor,
+      args = args,
+    }, 5000)
+  end)
   if not responses then
     return
   end

@@ -1506,4 +1506,165 @@ T['the dispatch menu lists the active profile keys'] = function()
   MiniTest.expect.equality(has('  g ?  Dispatch'), false, 'dispatch does not list itself')
 end
 
+T['debug.snapshot reports the status view state'] = function()
+  setup_child()
+  local encoded = child.lua_get([[
+    (function()
+      local debug_api = require('magit-lsp.debug')
+      vim.wait(5000, function()
+        return debug_api.idle()
+      end, 10)
+      return vim.json.encode(debug_api.snapshot())
+    end)()
+  ]])
+  local snapshot = vim.json.decode(encoded)
+
+  MiniTest.expect.equality(snapshot.mode, 'n')
+  MiniTest.expect.equality(type(snapshot.cursor.row), 'number')
+  MiniTest.expect.equality(type(snapshot.cursor.col), 'number')
+  MiniTest.expect.equality(snapshot.idle, true)
+  MiniTest.expect.equality(snapshot.pending, '')
+
+  MiniTest.expect.equality(#snapshot.view_stack, 1)
+  MiniTest.expect.equality(snapshot.view_stack[1].id, child.lua_get('M.view_id'))
+  MiniTest.expect.equality(snapshot.view_stack[1].kind, 'status')
+
+  MiniTest.expect.equality(snapshot.render.version, snapshot.render.acked)
+  MiniTest.expect.equality(snapshot.render.version > 0, true, 'a version was rendered and acked')
+
+  MiniTest.expect.equality(snapshot.keymap.scope, 'status')
+  MiniTest.expect.equality(snapshot.keymap.capture, false)
+  local refresh_key = child.lua_get([[
+    (function()
+      for _, binding in ipairs(M.last_keymap.bindings or {}) do
+        if binding.command == 'common.refresh' and binding.keys[1] then
+          return binding.keys[1]
+        end
+      end
+      return nil
+    end)()
+  ]])
+  MiniTest.expect.equality(vim.tbl_contains(snapshot.keymap.keys, refresh_key), true)
+
+  local status_buf = child.lua_get('M.buf')
+  local status_window
+  for _, window in ipairs(snapshot.windows) do
+    if window.buffer == status_buf then
+      status_window = window
+    end
+  end
+  MiniTest.expect.equality(type(status_window), 'table', 'the status window is reported')
+  MiniTest.expect.equality(status_window.float, false)
+  MiniTest.expect.equality(status_window.filetype, 'magit-lsp')
+  MiniTest.expect.equality(status_window.width > 0, true)
+  MiniTest.expect.equality(status_window.height > 0, true)
+
+  MiniTest.expect.equality(type(snapshot.messages), 'table')
+  MiniTest.expect.equality(type(snapshot.notifications), 'table')
+end
+
+T['buffers renders that beat the view/open response'] = function()
+  child.lua([[
+    DELAYED_OPEN = false
+    RENDER_BEFORE_RESPONSE = false
+    local original = vim.lsp.buf_request
+    vim.lsp.buf_request = function(bufnr, method, params, handler)
+      if method == 'view/open' and type(handler) == 'function' then
+        DELAYED_OPEN = true
+        return original(bufnr, method, params, function(...)
+          local args = { n = select('#', ...), ... }
+          vim.defer_fn(function()
+            -- Proves the race: the render was received (and buffered) before
+            -- the response handler ran.
+            RENDER_BEFORE_RESPONSE = next(M.pending_render) ~= nil
+            handler(unpack(args, 1, args.n))
+          end, 300)
+        end)
+      end
+      return original(bufnr, method, params, handler)
+    end
+  ]])
+  setup_child()
+  MiniTest.expect.equality(child.lua_get('DELAYED_OPEN'), true, 'the open response was delayed')
+  MiniTest.expect.equality(
+    child.lua_get('RENDER_BEFORE_RESPONSE'),
+    true,
+    'the render beat the view/open response'
+  )
+
+  assert_line('Head: main')
+  assert_line('Unstaged changes (1)')
+  assert_line('  M f.txt')
+  assert_line('    +NEW line')
+
+  local diff = child.lua_get('HELPERS.keymap_diff()')
+  MiniTest.expect.equality(diff.missing, {}, 'the early keymap was applied')
+  MiniTest.expect.equality(diff.extra, {}, 'the early keymap was applied')
+
+  local state = child.lua_get([[
+    (function()
+      local snapshot = require('magit-lsp.debug').snapshot()
+      return {
+        version = snapshot.render.version,
+        acked = snapshot.render.acked,
+        scope = snapshot.keymap.scope,
+      }
+    end)()
+  ]])
+  MiniTest.expect.equality(state.version, state.acked)
+  MiniTest.expect.equality(state.version > 0, true, 'the buffered render was applied')
+  MiniTest.expect.equality(state.scope, 'status')
+end
+
+T['debug.trace writes one JSON line per event'] = function()
+  local trace_path = project .. '/build/test-output/trace-lua.jsonl'
+  vim.fn.mkdir(project .. '/build/test-output', 'p')
+  vim.fn.delete(trace_path)
+  child.restart({
+    '-u',
+    'scripts/minimal_init.lua',
+    '--cmd',
+    string.format('let $MAGIT_LSP_TRACE="%s"', trace_path),
+  })
+  setup_child()
+
+  child.lua([[
+    local debug_api = require('magit-lsp.debug')
+    local before = M.version
+    M.press({ 'g', 'r' })
+    vim.wait(5000, function()
+      return M.version ~= before and debug_api.idle()
+    end, 10)
+    debug_api.idle()
+  ]])
+
+  local lines = vim.fn.readfile(trace_path)
+  MiniTest.expect.equality(#lines > 0, true, 'the trace file has events')
+  local seen = {}
+  local times = {}
+  for _, line in ipairs(lines) do
+    local ok, decoded = pcall(vim.json.decode, line)
+    MiniTest.expect.equality(ok, true, 'a trace line is JSON: ' .. line)
+    MiniTest.expect.equality(type(decoded.t_ms), 'number', 't_ms is a number')
+    MiniTest.expect.equality(type(decoded.id), 'number', 'id is a number')
+    MiniTest.expect.equality(type(decoded.event), 'string', 'event is a string')
+    MiniTest.expect.equality(decoded.detail ~= nil, true, 'detail is present')
+    seen[decoded.event] = true
+    times[#times + 1] = decoded.t_ms
+  end
+  for _, name in ipairs({
+    'key_pressed',
+    'key_sent',
+    'render_received',
+    'render_applied',
+    'window_opened',
+    'idle',
+  }) do
+    MiniTest.expect.equality(seen[name], true, name .. ' was traced')
+  end
+  for index = 2, #times do
+    MiniTest.expect.equality(times[index] >= times[index - 1], true, 'the clock is monotonic')
+  end
+end
+
 return T

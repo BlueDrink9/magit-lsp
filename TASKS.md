@@ -1262,6 +1262,7 @@ Each task ends with **Done when**. Each phase leaves `make test` green.
       `git commit` with the fake client answering the `editDocument` effect and
       the commit has the typed message. Neovim/VSCode document handling and
       askpass remain a follow-up; `--askpass` is a usage error for now.
+* [ ] IMM-3A @ui-test-plan.md
 - [ ] R-3.5 File watcher auto-refresh; `index.lock` handling.
 - [ ] R-3.6 Discard (`status.discard`) for files, hunks, selections, with
       `confirm` prompt (`destructive: true`); consider saving discarded content

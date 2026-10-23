@@ -4,9 +4,15 @@ local keys = require('magit-lsp.keys')
 local keymap = require('magit-lsp.keymap')
 local menu = require('magit-lsp.menu')
 local prompt = require('magit-lsp.prompt')
+local debug_api = require('magit-lsp.debug')
 
 --- The last text the server sent, for clients and tests that need it.
 M.lines = {}
+
+--- Notifications that arrived before their `view/open` response named the
+--- view, keyed by view id and kept in arrival order.
+M.pending_render = {}
+M.pending_keymap = {}
 
 --- The view mode the server last reported: `interactive` or `text`.
 M.mode = 'interactive'
@@ -192,29 +198,36 @@ end
 
 local function request_sync(method, params)
   wait_ready()
-  for _ = 1, 20 do
-    local resp = vim.lsp.buf_request_sync(M.buf, method, params, 5000)
-    if resp then
-      for _, r in pairs(resp) do
-        if r.result ~= nil then
-          return r.result, nil
+  return debug_api.track_request(function()
+    for _ = 1, 20 do
+      local resp = vim.lsp.buf_request_sync(M.buf, method, params, 5000)
+      if resp then
+        for _, r in pairs(resp) do
+          if r.result ~= nil then
+            return r.result, nil
+          end
+          if r.err then
+            return nil, r.err
+          end
         end
-        if r.err then
-          return nil, r.err
-        end
+        return nil, 'empty response for ' .. method
       end
-      return nil, 'empty response for ' .. method
+      vim.wait(100)
     end
-    vim.wait(100)
-  end
-  return nil, 'timed out waiting for ' .. method
+    return nil, 'timed out waiting for ' .. method
+  end)
 end
 
 --- Ask Neovim to re-request semantic tokens for the buffer.
 --- The server owns highlighting, but it only sends tokens on request, so a
---- re-render has to trigger one.
+--- re-render has to trigger one. The request is scheduled so the client's
+--- outstanding work is visible to `idle` (§A.3).
 local function refresh_tokens()
-  vim.lsp.semantic_tokens.force_refresh(M.buf)
+  debug_api.schedule(function()
+    if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
+      vim.lsp.semantic_tokens.force_refresh(M.buf)
+    end
+  end)
 end
 
 --- The document URI of the view; positional requests must use it verbatim.
@@ -294,6 +307,7 @@ local function ack(version)
   local client = vim.lsp.get_client_by_id(M.client_id)
   if client and M.view_id then
     client:notify('view/rendered', { viewId = M.view_id, version = version })
+    debug_api.render_acked(M.view_id, version)
   end
 end
 
@@ -302,7 +316,9 @@ local function request_resync()
   if not client or not M.view_id then
     return
   end
+  debug_api.request_started()
   client:request('view/resync', { viewId = M.view_id }, function(err, result)
+    debug_api.request_finished()
     if err or type(result) ~= 'table' then
       return
     end
@@ -313,10 +329,23 @@ end
 --- Apply a `view/render` payload, then acknowledge the version.
 ---
 --- A client that does not hold the edit's base version has lost an update and
---- asks for a full resync instead of applying edits to stale text.
+--- asks for a full resync instead of applying edits to stale text. A render
+--- that arrives before the `view/open` response is buffered, never dropped.
 ---@param params table
 function M.apply_render(params)
-  if not params or params.viewId ~= M.view_id then
+  if not params or not params.viewId then
+    return
+  end
+  debug_api.render_received(params.viewId, params.version)
+
+  if params.viewId ~= M.view_id then
+    -- The notification can beat the response that names the view; keep it
+    -- until `open` applies the queue. Renders for any other view are stale.
+    if M.view_id == nil then
+      local queue = M.pending_render[params.viewId] or {}
+      queue[#queue + 1] = params
+      M.pending_render[params.viewId] = queue
+    end
     return
   end
 
@@ -342,6 +371,7 @@ function M.apply_render(params)
 
   M.lines = vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)
   M.version = params.version
+  debug_api.render_applied(params.viewId, params.version)
   if params.cursor then
     set_cursor(params.cursor)
   end
@@ -395,11 +425,13 @@ function M.press(steps)
   if not M.view_id then
     return
   end
+  debug_api.key_pressed(steps)
   local mode = editor_mode()
   local selection = mode == 'visual' and visual_selection() or nil
   local cursor = current_cursor()
   local effects = {}
   for _, step in ipairs(steps) do
+    debug_api.key_sent(step, M.view_id)
     local resp, err = request_sync('view/key', {
       viewId = M.view_id,
       version = M.version or 0,
@@ -471,16 +503,25 @@ end
 ---
 --- The map set is the server's bindings translated to Neovim keys plus the
 --- client-side fold mirrors and, for the status scope, the temporary visit
---- exception until `common.visit` is implemented.
+--- exception until `common.visit` is implemented. A keymap that arrives before
+--- the `view/open` response is buffered and applied when the view exists.
 ---@param notice table `view/keymap` params
 function M.apply_keymap(notice)
-  if type(notice) ~= 'table' or not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+  if type(notice) ~= 'table' or not notice.viewId then
+    return
+  end
+  if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
+    return
+  end
+  if notice.viewId ~= M.view_id then
+    if M.view_id == nil then
+      local queue = M.pending_keymap[notice.viewId] or {}
+      queue[#queue + 1] = notice
+      M.pending_keymap[notice.viewId] = queue
+    end
     return
   end
   M.last_keymap = notice
-  if M.view_id and notice.viewId ~= M.view_id then
-    return
-  end
 
   if notice.mode == 'text' then
     enter_text_mode()
@@ -508,6 +549,7 @@ function M.apply_keymap(notice)
     visit = visit,
     fold_keys = M.fold_keys,
   })
+  debug_api.keymap_received(notice.viewId, notice)
   M.capture = notice.capture == true
   M.keymap_ready = true
 end
@@ -539,6 +581,21 @@ function M.open()
   M.uri = descriptor.uri
   M.version = nil
   vim.api.nvim_buf_set_name(M.buf, descriptor.uri)
+  debug_api.view_open(M.view_id, 'status', M.buf)
+
+  -- Notifications can beat the `view/open` response. Apply what was buffered,
+  -- in arrival order, now that the view has a name; without this the first
+  -- render would be lost and the buffer would stay empty.
+  local renders = M.pending_render[M.view_id]
+  M.pending_render[M.view_id] = nil
+  for _, render in ipairs(renders or {}) do
+    M.apply_render(render)
+  end
+  local keymaps = M.pending_keymap[M.view_id]
+  M.pending_keymap[M.view_id] = nil
+  for _, notice in ipairs(keymaps or {}) do
+    M.apply_keymap(notice)
+  end
 
   -- The initial render follows the response as a notification.
   if not vim.wait(5000, function()
@@ -755,6 +812,7 @@ function M.setup(opts)
   M.keyModifiers = detect_key_modifiers()
   local cmd = opts.cmd or default_cmd()
 
+  debug_api.configure()
   define_highlights()
 
   -- `:colorscheme` runs `hi clear`, so re-apply the links afterwards.
@@ -795,6 +853,8 @@ function M.setup(opts)
 
   M.buf = fresh_buffer()
   M.lines = {}
+  M.pending_render = {}
+  M.pending_keymap = {}
   M.mode = 'interactive'
   M.version = nil
   M.view_id = nil
