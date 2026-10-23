@@ -1,9 +1,18 @@
 # magit-lsp — Roadmap
 
-Standalone roadmap (split out of `AGENTS.md`). Agent-facing. Written so that a
-less capable model can implement each item without guessing: every term is
-defined in the glossary (§1), every protocol shape is spelled out (§3), and
-every task states what "done" means.
+Canonical agent-facing reference for the roadmap, design, protocol, decisions,
+implementation status and backlog. Written so that a less capable model can
+implement each item without guessing: every term is defined in the glossary
+(§1), every protocol shape is spelled out in §3, and every task states what
+"done" means. Read selectively: use [AGENTS.md](./AGENTS.md) as the concise
+entry point and consult only the relevant sections here. `README.md` owns
+user-facing documentation; do not duplicate detailed design/history in
+`AGENTS.md`.
+
+**Status note:** design sections describe intended behaviour; §10 records
+implementation status and deviations at its stated point in time. Verify
+current behaviour in source/tests rather than treating historical notes as
+current facts.
 
 **Project status:** early stage. **Backward compatibility is not a goal.**
 Rename, delete, and reshape protocol methods, config keys and Lua APIs freely.
@@ -28,6 +37,10 @@ Delete the old thing; do not leave shims.
 ---
 
 ## 0. Decisions already made
+
+These decisions are canonical unless superseded by an explicit later decision
+here. General agent working conventions and verification guidance live in
+`AGENTS.md`.
 
 | Topic | Decision |
 | --- | --- |
