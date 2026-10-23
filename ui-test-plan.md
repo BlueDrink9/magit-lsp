@@ -128,8 +128,8 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 ## Phase U2 — Keeping it from regressing
 
 - [x] **U2.1 Ticket template** in `TASKS.md`: add to the TASK TICKET format: *Acceptance Criteria must include a visible outcome ("after pressing X the screen shows …") for any task that changes what the user sees; Verification Command must include `make ui-test`; the report lists the saved screens.* (Done: §7 "Task ticket template and UI rule".)
-- [ ] **U2.2 Tour:** `scripts/ui run tests/ui/tour.scn` opens status, `?`, each menu, a toggled switch, a pending chord, a clean-tree commit, an error. It writes `build/ui/tour.md` with every screen. Run it at the end of each phase and read it.
-- [ ] **U2.3 CI:** a separate job `make ui-test` with tmux and Neovim installed; upload `build/ui/` as an artefact on failure.
+- [x] **U2.2 Tour:** `scripts/ui run tests/ui/tour.scn` opens status, `?`, each menu, a toggled switch, a pending chord, a clean-tree commit, an error. It writes `build/ui/tour.md` with every screen. Run it at the end of each phase and read it. (Done: `tests/ui/tour.scn` plus `tour-clean.scn`/`tour-error.scn`, merged by `make ui-tour`.)
+- [x] **U2.3 CI:** a separate job `make ui-test` with tmux and Neovim installed; upload `build/ui/` as an artefact on failure. (Done: the `ui-test` job in `.github/workflows/ci.yml`.)
 - [ ] **U2.4 R-3.4 clients (next ticket):** add scenario `commit-message-editor`: with a staged change, `c c`; expect a bottom split with a `gitcommit` buffer; type a message; confirm; expect a clean tree and the commit in the log. Add the same style of scenario for every later task that opens a new view (log, revision, refs).
 
 ---

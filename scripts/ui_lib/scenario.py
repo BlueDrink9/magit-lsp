@@ -768,9 +768,12 @@ def _print_table(rows: list[Row]) -> None:
 
 def _write_markdown(path: Path, snapshots: list[tuple[str, str, str, str, str]]) -> None:
     lines = ["# UI tour", ""]
+    group: tuple[str, str, str] | None = None
     for scenario, profile, size, name, screen in snapshots:
-        lines.append(f"## {scenario} — {profile} {size}")
-        lines.append("")
+        if (scenario, profile, size) != group:
+            group = (scenario, profile, size)
+            lines.append(f"## {scenario} — {profile} {size}")
+            lines.append("")
         lines.append(f"### {name}")
         lines.append("")
         lines.append("~~~")

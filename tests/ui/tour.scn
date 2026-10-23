@@ -1,17 +1,191 @@
-# Placeholder tour: status, help, close. Extended in U2.2.
+# UI tour: the screens a user meets on the way through the status view (U2.2).
 #
-# `standard` is used because `?` opens the dispatch there; the `vim` profile
-# binds it as `g ?` (and bug 1 keeps it unbound from the status view).
+# One profile and size on purpose: menu keys differ between `standard` and
+# `vim` (log is `l` vs `g l`, stash is `z` vs `Z`), so a single key sequence
+# cannot drive both. `make ui-tour` merges this file with `tour-clean.scn` and
+# `tour-error.scn` into `build/ui/tour.md`.
 fixture: modified-two-files
 size: 100x30
 profile: standard
 size-only: true
 profile-only: true
 ---
+wait
 snapshot: status
+
+# The dispatch, then every menu it can reach. `?` inside a menu replaces it
+# with the dispatch again, so the tour never stacks windows.
 keys: ?
 wait
+expect screen contains "Transient and dwim commands"
 snapshot: dispatch
+
+keys: c
+wait
+expect screen contains " Commit"
+snapshot: menu-commit
+
+# A pending chord (`-`) and the switch it toggles (`- a`).
+keys: -
+wait
+expect pending == "-"
+snapshot: pending-chord
+keys: a
+wait
+expect pending == ""
+expect style "(--all)" coloured
+snapshot: switch-toggled
+
+keys: ?
+wait
+keys: b
+wait
+expect screen contains " Branch"
+snapshot: menu-branch
+
+keys: ?
+wait
+keys: l
+wait
+expect screen contains " Log"
+snapshot: menu-log
+
+keys: ?
+wait
+keys: d
+wait
+expect screen contains " Diff"
+snapshot: menu-diff
+
+keys: ?
+wait
+keys: f
+wait
+expect screen contains " Fetch"
+snapshot: menu-fetch
+
+keys: ?
+wait
+keys: F
+wait
+expect screen contains " Pull"
+snapshot: menu-pull
+
+keys: ?
+wait
+keys: P
+wait
+expect screen contains " Push"
+snapshot: menu-push
+
+keys: ?
+wait
+keys: m
+wait
+expect screen contains " Merge"
+snapshot: menu-merge
+
+keys: ?
+wait
+keys: r
+wait
+expect screen contains " Rebase"
+snapshot: menu-rebase
+
+keys: ?
+wait
+keys: z
+wait
+expect screen contains " Stash"
+snapshot: menu-stash
+
+keys: ?
+wait
+keys: t
+wait
+expect screen contains " Tag"
+snapshot: menu-tag
+
+keys: ?
+wait
+keys: x
+wait
+expect screen contains " Reset"
+snapshot: menu-reset
+
+keys: ?
+wait
+keys: A
+wait
+expect screen contains " Cherry-Pick"
+snapshot: menu-cherry-pick
+
+keys: ?
+wait
+keys: V
+wait
+expect screen contains " Revert"
+snapshot: menu-revert
+
+keys: ?
+wait
+keys: B
+wait
+expect screen contains " Bisect"
+snapshot: menu-bisect
+
+keys: ?
+wait
+keys: M
+wait
+expect screen contains " Remote"
+snapshot: menu-remote
+
+keys: ?
+wait
+keys: o
+wait
+expect screen contains " Submodule"
+snapshot: menu-submodule
+
+keys: ?
+wait
+keys: %
+wait
+expect screen contains " Worktree"
+snapshot: menu-worktree
+
+keys: ?
+wait
+keys: i
+wait
+expect screen contains " Ignore"
+snapshot: menu-ignore
+
+keys: ?
+wait
+keys: w
+wait
+expect screen contains " Apply Patches"
+snapshot: menu-patch-apply
+
+keys: ?
+wait
+keys: W
+wait
+expect screen contains " Format Patches"
+snapshot: menu-patch-create
+
+# A command that is deliberately not implemented yet: the server reports it
+# without closing the dispatch.
+keys: ?
+wait
+keys: y
+wait
+expect screen contains "Not implemented yet"
+snapshot: unavailable-command
+
 keys: q
 wait
+expect screen contains "Unstaged changes"
 snapshot: closed

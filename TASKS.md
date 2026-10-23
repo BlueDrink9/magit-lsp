@@ -1366,17 +1366,25 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       end. Screens: `build/ui/commit-clean-tree/{standard,vim}-{100x30,80x24}/clean-commit.screen`,
       `build/ui/commit-failure-clears-progress/*/hook-failure.screen`,
       `build/ui/latency-menu-open/*/{dispatch,commit-menu,toggled,staged}.screen`.
-- [ ] R-UI-6 **Tour and CI** (U2.2, U2.3): extend `tests/ui/tour.scn` to cover
+- [x] R-UI-6 **Tour and CI** (U2.2, U2.3): extend `tests/ui/tour.scn` to cover
       status, `?`, each menu, a toggled switch, a pending chord, a clean-tree
       commit and an error; it writes `build/ui/tour.md`. Add the CI job that
       runs `make ui-test` with tmux and Neovim installed and uploads
       `build/ui/` on failure.
-      Scenarios: `tests/ui/tour.scn`, `tests/ui/smoke.scn` and all of
+      Scenarios: `tests/ui/tour.scn`, `tests/ui/tour-clean.scn`,
+      `tests/ui/tour-error.scn`, `tests/ui/smoke.scn` and all of
       `tests/ui/scenarios/`.
       *Done when:* the tour renders every listed screen and the CI job is
       green; remove the `xfail` tag from the listed scenario(s) (the tour and
       smoke scenarios are plain, so none should be tagged); `make test` and
       `make ui-test` green.
+      *Results:* `make ui-tour` runs the three tour files into
+      `build/ui/tour.md`: status, the dispatch, all 21 implemented menus, a
+      pending chord, a toggled switch, an unavailable-command message, a
+      clean-tree commit and a failing-hook error. `make ui-test` reports
+      13 PASS / 0 XFAIL / 0 FAIL. The new `ui-test` CI job installs tmux and
+      Neovim, builds the server, runs `make ui-unit ui-test` with `CI=1` and
+      uploads `build/ui/` on failure.
 - [ ] R-3.4b **Editor bridge clients and askpass** (U2.4): handle
       `editDocument` in Neovim and VSCode, implement `--askpass`, and add the
       `commit-message-editor` scenario (`c c` with a staged change → bottom
@@ -1724,13 +1732,13 @@ the command line and real colours.
 
 ## 10. Implementation status and deviations (written after R-2.8)
 
-**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1…R-UI-3
+**Done:** Phases 0, 1, R-2.1…R-2.9, R-3.1…R-3.4 (core), R-UI-1…R-UI-6
 (`make test` green: Rust + Neovim mini.test + the VSCode node tests;
-`make ui-test` green with 8 PASS / 4 XFAIL). The VSCode client is the thin
-second client for R-2.9; node 20 / npm exist, `tsc` and `code` do not. R-3.4 is
-the server core only: the Neovim/VSCode `editDocument` handling and `--askpass`
-are R-3.4b.
-**Not started:** R-UI-4…R-UI-6, R-3.4b, R-3.5…R-3.7 and Phases 4–9.
+`make ui-test` green with 13 PASS / 0 XFAIL; `make ui-tour` writes
+`build/ui/tour.md`). The VSCode client is the thin second client for R-2.9;
+node 20 / npm exist, `tsc` and `code` do not. R-3.4 is the server core only:
+the Neovim/VSCode `editDocument` handling and `--askpass` are R-3.4b.
+**Not started:** R-3.4b, R-3.5…R-3.7 and Phases 4–9.
 
 **Process notes:** the worker's first two dispatches failed with "Model
 unavailable (deepseek-flash-latest)" and succeeded once the model was fixed.

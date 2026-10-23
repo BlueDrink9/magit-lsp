@@ -21,7 +21,7 @@ ui-test:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/scenarios/*.scn tests/ui/smoke.scn
 
 ui-tour:
-	PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/tour.scn --markdown build/ui/tour.md
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md
 
 color-spike: build
 	nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua

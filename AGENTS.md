@@ -161,7 +161,9 @@ driven the real UI and its screen output has been checked. The loop is:
 6. `scripts/ui stop` — always stop the run.
 
 Scripted scenarios live in `tests/ui/` and run with `make ui-test`; `make
-ui-tour` writes `build/ui/tour.md`. The DSL and the result rules are in
+ui-tour` writes `build/ui/tour.md`. Run the tour at the end of every phase and
+read it: it walks status, the dispatch, every menu, a switch, a pending chord,
+a clean-tree commit and an error. The DSL and the result rules are in
 `ui-test-plan.md` §A.5.
 
 ## Progress (done)

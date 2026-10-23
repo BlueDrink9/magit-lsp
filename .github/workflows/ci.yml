@@ -25,3 +25,35 @@ jobs:
       # stale manifest is reported as its own failure.
       - name: manifest snapshots
         run: cargo test --test manifest
+
+  ui-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      # Build first: the client starts the binary, and compiling inside the
+      # harness's 15 s socket wait would time out.
+      - name: make build
+        run: make build
+
+      - name: make ui-unit ui-test
+        run: make ui-unit ui-test
+        env:
+          CI: "1"
+
+      - name: upload UI artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-artefacts
+          path: build/ui/

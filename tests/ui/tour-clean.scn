@@ -1,0 +1,23 @@
+# Tour step: committing on a clean tree (U2.2).
+#
+# The tour cannot switch fixtures mid-file, so this is a separate scenario
+# merged into the same `build/ui/tour.md`.
+fixture: clean
+size: 100x30
+profile: standard
+size-only: true
+profile-only: true
+---
+wait
+snapshot: clean-status
+
+keys: c
+wait
+expect screen contains " Commit"
+snapshot: clean-commit-menu
+
+keys: c
+wait
+expect screen contains "Nothing to commit"
+expect screen not-contains "Committing"
+snapshot: clean-commit

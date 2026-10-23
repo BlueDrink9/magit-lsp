@@ -1,0 +1,21 @@
+# Tour step: a failing commit, shown as a readable error (U2.2).
+#
+# The fixture's pre-commit hook rejects every commit. Git fails before it
+# opens an editor, so the error arrives without an `editDocument` effect; the
+# tour checks that the message reaches the user and no progress stays behind.
+fixture: staged-failing-hook
+size: 100x30
+profile: standard
+size-only: true
+profile-only: true
+---
+wait
+snapshot: staged-status
+
+keys: c
+wait
+keys: c
+wait
+expect screen contains "git commit"
+expect screen not-contains "Committing"
+snapshot: hook-error
