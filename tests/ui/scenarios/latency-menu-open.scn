@@ -1,13 +1,33 @@
-# Bug 5: opening the dispatch must stay within the end-to-end budget.
+# Bug 5: the dispatch and menu path stays within the end-to-end budgets.
 #
-# `standard` binds `?` directly; `vim` uses the `g ?` chord (bug 1 keeps `?`
-# unbound from status), so this scenario measures the server path once.
+# Budgets are key-to-idle and scale with `UI_BUDGET_SCALE` on slow CI:
+#   open a menu or the dispatch  <= 100ms
+#   toggle a switch              <=  80ms
+#   stage a hunk                 <= 400ms
 fixture: modified-two-files
-profile: standard
-profile-only: true
 ---
 keys: ?
 wait
 expect screen contains "Transient and dwim commands"
 expect latency("?") <= 100ms
 snapshot: dispatch
+keys: c
+wait
+expect screen contains "Commit"
+expect latency("c") <= 100ms
+snapshot: commit-menu
+keys: - a
+wait
+expect latency("a") <= 80ms
+snapshot: toggled
+keys: q
+wait
+# Ten lines down from `Head: main` lands on `+line3 CHANGED` in f.txt;
+# four right steps put the cursor on the diff text itself.
+keys: j j j j j j j j j j Right Right Right Right
+wait
+expect cursor on "+line3 CHANGED"
+keys: s
+wait
+expect latency("s") <= 400ms
+snapshot: staged

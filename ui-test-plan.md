@@ -57,7 +57,7 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
   (`open status, expect "Unstaged changes", stop`) passes under both profiles
   and both sizes. Bug 5 did not reproduce (11–16 ms end to end), so
   `latency-menu-open` is a plain passing regression guard;
-  `commit-failure-clears-progress` is not written yet and moves to R-UI-5.
+  `commit-failure-clears-progress` was added in R-UI-5.
 
 ---
 
@@ -106,22 +106,22 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 **Suspected cause (9):** nothing ends the "Committing…" progress when git exits without opening the editor. **(5):** unknown; measure first.
 
-- [ ] **U1.10 (bug 9)** Pre-flight in `commit.create`:
-  - [ ] Clean tree: info message `Nothing to commit (working tree clean)` with a hint about `--allow-empty`; no progress shown.
-  - [ ] Unstaged changes only: `confirm` prompt "Nothing staged. Stage all changes and commit?".
-  - [ ] Progress is always ended in a `finally`, including when git exits without editing.
-  - [ ] Scenario `commit-clean-tree`: `c c` on `clean`; expect screen contains `Nothing to commit`, expect screen does not contain `Committing`.
-  - [ ] Scenario `commit-failure-clears-progress`: force git to fail (for example a failing hook); expect an error message and no `Committing`.
-- [ ] **U1.11 (bug 5)** Measure first. Run `ui trace` for `?` from status on `modified-two-files` and paste the per-hop timings into the ticket report.
-  - [ ] Fix the slowest hop. Typical suspects: a git call inside `open.dispatch`; waiting on a per-repo lock; the client acking before sending the next key; a chord `timeoutlen` wait.
-  - [ ] Budgets (initial; tune once measured, scale with `UI_BUDGET_SCALE` on slow CI):
+- [x] **U1.10 (bug 9)** Pre-flight in `commit.create`:
+  - [x] Clean tree: info message `Nothing to commit (working tree clean)` with a hint about `--allow-empty`; no progress shown.
+  - [x] Unstaged changes only: `confirm` prompt "Nothing staged. Stage all changes and commit?".
+  - [x] Progress is always ended in a `finally`, including when git exits without editing.
+  - [x] Scenario `commit-clean-tree`: `c c` on `clean`; expect screen contains `Nothing to commit`, expect screen does not contain `Committing`.
+  - [x] Scenario `commit-failure-clears-progress`: force git to fail (for example a failing hook); expect an error message and no `Committing`.
+- [x] **U1.11 (bug 5)** Measure first. Run `ui trace` for `?` from status on `modified-two-files` and paste the per-hop timings into the ticket report.
+  - [x] Fix the slowest hop. Typical suspects: a git call inside `open.dispatch`; waiting on a per-repo lock; the client acking before sending the next key; a chord `timeoutlen` wait.
+  - [x] Budgets (initial; tune once measured, scale with `UI_BUDGET_SCALE` on slow CI):
 
     | Action | Server time | End to end (key to idle) |
     | --- | --- | --- |
     | Open a menu or the dispatch (no git) | ≤ 50 ms | ≤ 100 ms |
     | Toggle a switch | ≤ 30 ms | ≤ 80 ms |
     | Stage a hunk on the fixture | ≤ 300 ms | ≤ 400 ms |
-  - [ ] Scenario `latency-menu-open` asserts the first row.
+  - [x] Scenario `latency-menu-open` asserts the first row.
 
 ---
 

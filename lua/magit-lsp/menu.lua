@@ -469,6 +469,7 @@ function M.press(id, steps)
         key = step,
         editorMode = 'normal',
         cursor = cursor,
+        traceId = debug_api.trace_id(),
       }, 5000)
     end)
     if not responses then
@@ -512,6 +513,7 @@ function M.invoke(id, command, args)
       command = command,
       cursor = cursor,
       args = args,
+      traceId = debug_api.trace_id(),
     }, 5000)
   end)
   if not responses then

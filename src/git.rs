@@ -744,6 +744,14 @@ fn log_finished(
     let exit_code = status.code().unwrap_or(-1);
     let elapsed_ms = elapsed.as_millis();
     let record_id = runner::global_log().record(cwd, args, exit_code, elapsed, stdout, stderr);
+    runner::trace_current(
+        "git_call",
+        serde_json::json!({
+            "cmd": format!("git {}", args.join(" ")),
+            "duration_ms": u64::try_from(elapsed_ms).unwrap_or(u64::MAX),
+            "exit_code": exit_code,
+        }),
+    );
     if status.success() {
         tracing::debug!(cwd = %cwd.display(), args = ?args, exit_code, elapsed_ms, record_id, "git ok");
     } else {

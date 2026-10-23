@@ -456,16 +456,31 @@ def stop(run: Run) -> None:
     _forget_last_run(run.id)
 
 
-def read_trace(run: Run) -> list[dict]:
-    """Read the client trace file, ignoring a partially written last line."""
+def _read_events(path: Path) -> list[dict]:
+    """Read one JSON-lines trace file, ignoring a partial last line."""
     events: list[dict] = []
-    if not run.trace_path.is_file():
+    if not path.is_file():
         return events
-    for line in run.trace_path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         try:
             events.append(json.loads(line))
         except ValueError:
             continue
+    return events
+
+
+def read_trace(run: Run) -> list[dict]:
+    """Read and merge the client and server trace files (§A.4).
+
+    The two processes each keep their own monotonic clock, so the merge uses
+    the wall-clock `t_unix_ms` both now emit. Files without it (older fixtures)
+    are concatenated in read order.
+    """
+    client = _read_events(run.trace_path)
+    server = _read_events(Path(f"{run.trace_path}.server"))
+    events = client + server
+    if events and all("t_unix_ms" in event for event in events):
+        events.sort(key=lambda event: event["t_unix_ms"])
     return events
 
 
@@ -484,12 +499,14 @@ def format_trace(events: list[dict], count: int | None = None) -> str:
     for group in groups:
         previous: float | None = None
         for event in group:
-            when = float(event.get("t_ms", 0.0))
+            when = float(event.get("t_unix_ms", event.get("t_ms", 0.0)))
             delta = 0.0 if previous is None else when - previous
             previous = when
             detail = event.get("detail")
             suffix = "" if detail in (None, {}) else " " + json.dumps(detail)
+            source = event.get("source")
+            origin = f" [{source}]" if source else ""
             lines.append(
-                f"#{event.get('id')} +{delta:8.3f}ms {event.get('event')}{suffix}"
+                f"#{event.get('id')} +{delta:8.3f}ms {event.get('event')}{origin}{suffix}"
             )
     return "\n".join(lines)

@@ -6,13 +6,15 @@
 //! invocation and a handle that can kill the one child a request is running.
 
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
+use serde_json::Value;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How many finished invocations the global log keeps.
 pub const DEFAULT_CAPACITY: usize = 256;
@@ -143,6 +145,90 @@ fn truncate(bytes: &[u8], cap: usize) -> String {
         end -= 1;
     }
     text.get(..end).unwrap_or_default().to_string()
+}
+
+/// Environment variable naming the client trace file (ui-test-plan §A.4).
+pub const TRACE_ENV: &str = "MAGIT_LSP_TRACE";
+
+thread_local! {
+    /// The client key trace this thread's Git calls belong to; `0` when none.
+    static TRACE_ID: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The server's trace file, next to the client's, or `None` when untraced.
+///
+/// The two processes append to separate files: each has its own monotonic
+/// clock, so merging happens in `scripts/ui` by the wall-clock field instead.
+fn trace_file() -> Option<&'static Path> {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PATH.get_or_init(|| {
+        std::env::var_os(TRACE_ENV)
+            .filter(|value| !value.is_empty())
+            .map(|value| PathBuf::from(format!("{}.server", PathBuf::from(value).display())))
+    })
+    .as_deref()
+}
+
+fn trace_start() -> &'static Instant {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now)
+}
+
+/// Append one server trace event for key trace `id` (§A.4).
+///
+/// A missing trace file or an unwritable one is ignored: tracing must never
+/// change what the server does.
+pub fn trace(id: u64, event: &str, detail: Value) {
+    let Some(path) = trace_file() else {
+        return;
+    };
+    let t_ms = trace_start().elapsed().as_secs_f64() * 1000.0;
+    let t_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0);
+    let line = serde_json::json!({
+        "t_ms": t_ms,
+        "t_unix_ms": t_unix_ms,
+        "id": id,
+        "event": event,
+        "detail": detail,
+        "source": "server",
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+/// Run `f` with `id` as the trace id its Git calls report.
+pub fn with_trace_id<T>(id: u64, f: impl FnOnce() -> T) -> T {
+    struct Restore(u64);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TRACE_ID.with(|slot| slot.set(self.0));
+        }
+    }
+
+    let previous = TRACE_ID.with(|slot| slot.replace(id));
+    let _restore = Restore(previous);
+    f()
+}
+
+/// The trace id installed on this thread, or `0`.
+pub fn current_trace_id() -> u64 {
+    TRACE_ID.with(Cell::get)
+}
+
+/// Trace an event on the current thread, when a key trace is being followed.
+pub fn trace_current(event: &str, detail: Value) {
+    let id = current_trace_id();
+    if id > 0 {
+        trace(id, event, detail);
+    }
 }
 
 #[derive(Debug, Default)]

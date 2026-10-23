@@ -18,7 +18,8 @@ USAGE = """Usage:
   scripts/ui run <scenario>... [--markdown <path>]
 
 Fixtures: clean, modified-two-files, staged-one-file, staged-and-unstaged,
-          untracked, unborn, in-progress-rebase, in-progress-cherry-pick.
+          staged-failing-hook, untracked, unborn, in-progress-rebase,
+          in-progress-cherry-pick.
 Without --run the most recent run is used."""
 
 

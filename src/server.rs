@@ -642,6 +642,14 @@ async fn handle_request(
 ) {
     let id = request.id.clone();
     let method = request.method.clone();
+    let trace_id = trace_id_of(&request.params);
+    if trace_id > 0 {
+        runner::trace(
+            trace_id,
+            "server_received",
+            serde_json::json!({ "method": method }),
+        );
+    }
     let turn = turn;
 
     let (response, notifications) = if !is_request_method(&method) {
@@ -658,18 +666,63 @@ async fn handle_request(
         let lock = repository_lock(&shared.repo_locks, &active.repo_path).await;
         let _guard = lock.lock().await;
         maybe_test_delay().await;
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "handler_start",
+                serde_json::json!({ "method": method }),
+            );
+        }
         let (token, cancel) = shared.begin_progress(&sender, &method);
-        let outcome = dispatch_response(request, &shared, Some(cancel)).await;
+        let outcome = dispatch_response(request, &shared, Some(cancel), trace_id).await;
         shared.end_progress(&sender, &token);
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "handler_end",
+                serde_json::json!({ "method": method }),
+            );
+        }
         outcome
     } else {
-        dispatch_response(request, &shared, None).await
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "handler_start",
+                serde_json::json!({ "method": method }),
+            );
+        }
+        let outcome = dispatch_response(request, &shared, None, trace_id).await;
+        if trace_id > 0 {
+            runner::trace(
+                trace_id,
+                "handler_end",
+                serde_json::json!({ "method": method }),
+            );
+        }
+        outcome
     };
 
     // The response creates or identifies the view, so it goes first; render
     // notifications then refer to something the client already knows.
     let _ = sender.send(Message::Response(response));
     for notification in notifications {
+        if trace_id > 0 {
+            if let Message::Notification(notification) = &notification {
+                if notification.method == VIEW_RENDER {
+                    let view = notification
+                        .params
+                        .get("viewId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    runner::trace(
+                        trace_id,
+                        "render_sent",
+                        serde_json::json!({ "view": view }),
+                    );
+                }
+            }
+        }
         let _ = sender.send(notification);
     }
     // Release the mutation slot only after this request's messages are queued,
@@ -707,13 +760,16 @@ async fn dispatch_response(
     request: Request,
     shared: &Shared,
     cancel: Option<CancelHandle>,
+    trace_id: u64,
 ) -> (Response, Vec<Message>) {
     let id = request.id.clone();
     let method = request.method.clone();
     let shared = shared.clone();
 
     match tokio::task::spawn_blocking(move || {
-        runner::with_cancel(cancel, || dispatch(&request, &shared))
+        runner::with_cancel(cancel, || {
+            runner::with_trace_id(trace_id, || dispatch(&request, &shared))
+        })
     })
     .await
     {
@@ -1163,6 +1219,21 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
     ))
 }
 
+/// Ends the commit progress token however the worker finishes.
+///
+/// This is the `finally` of the commit: an error, a failed hook, an editor
+/// cancel or a Git process that never opens an editor all drop the guard.
+struct ProgressEnd {
+    shared: Shared,
+    token: String,
+}
+
+impl Drop for ProgressEnd {
+    fn drop(&mut self) {
+        self.shared.end_progress(&self.shared.sender, &self.token);
+    }
+}
+
 /// Run `git commit` on a detached worker and refresh the views afterwards.
 ///
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
@@ -1170,9 +1241,17 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
 /// the session lock again, briefly.
 fn spawn_commit(shared: Shared, repo: String) {
     let sender = shared.sender.clone();
+    // The begin is sent before the invoke response, so the client is not idle
+    // until the editor (or the failure) has been answered.
+    let (token, _cancel) = shared.begin_progress(&sender, "commit");
+    let progress = ProgressEnd {
+        shared: shared.clone(),
+        token,
+    };
     let worker = std::thread::Builder::new()
         .name("magit-lsp-commit".to_string())
         .spawn(move || {
+            let _progress = progress;
             let edit_id = editor::registry().create(&repo);
             let result = match editor::socket_path() {
                 Some(socket) => editor::commit(&repo, &edit_id, socket),
@@ -1182,7 +1261,7 @@ fn spawn_commit(shared: Shared, repo: String) {
 
             let mut messages = Vec::new();
             match result {
-                Ok(_message) => {
+                Ok(message) => {
                     let renders: Vec<ViewRender> = {
                         let mut sessions = shared
                             .sessions
@@ -1203,6 +1282,19 @@ fn spawn_commit(shared: Shared, repo: String) {
                     messages.extend(renders.into_iter().map(|render| {
                         Message::Notification(Notification::new(VIEW_RENDER.to_string(), render))
                     }));
+                    // Replace the "Committing…" feedback with the outcome.
+                    let subject = message.lines().next().unwrap_or("").trim().to_string();
+                    let text = if subject.is_empty() {
+                        "Committed".to_string()
+                    } else {
+                        format!("Committed: {subject}")
+                    };
+                    messages.push(Message::Notification(Notification::new(
+                        VIEW_EFFECTS.to_string(),
+                        ViewEffectsParams {
+                            effects: vec![Effect::message(MessageLevel::Info, text)],
+                        },
+                    )));
                 }
                 Err(error) => {
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
@@ -1333,6 +1425,11 @@ fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<S
     }
     let view_id = params.get("viewId").and_then(Value::as_str)?;
     shared.repo_for_view(view_id)
+}
+
+/// The optional key trace id a client attaches to a request (§A.4).
+fn trace_id_of(params: &Value) -> u64 {
+    params.get("traceId").and_then(Value::as_u64).unwrap_or(0)
 }
 
 /// A progress token is an integer or a string on the wire.

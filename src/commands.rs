@@ -12,7 +12,7 @@ use crate::git::GitRepo;
 use crate::keymap::Keymap;
 use crate::menu::Menu;
 use crate::patch::FileLayout;
-use crate::protocol::{Cursor, Effect, MessageLevel, Selection};
+use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, Selection, ViewPromptParams};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{Placement, ViewKind, ViewMode, VisibilityCommand};
@@ -574,8 +574,62 @@ fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Commit asks the server to launch `git commit` on a detached worker.
 ///
-/// Minimally complete: menu switches and amend/extend land with R-4.1.
+/// The pre-flight runs before any progress is shown: a clean tree never starts
+/// Git (so no "Committing" feedback can be left behind), and an unstaged-only
+/// tree asks before staging everything. Menu switches and amend/extend land
+/// with R-4.1.
 fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    let status = repo.status_listing()?;
+    if status.staged.is_empty() {
+        if status.unstaged.is_empty() && status.untracked.is_empty() {
+            ctx.effects.push(Effect::Message {
+                level: MessageLevel::Info,
+                text: "Nothing to commit (working tree clean)".to_string(),
+                hint: Some("Use `git commit --allow-empty` to record an empty commit.".to_string()),
+                detail: None,
+                process_log_id: None,
+            });
+            return Ok(CommandOutcome::default());
+        }
+        let prompt = ViewPromptParams {
+            prompt_id: String::new(),
+            kind: PromptKind::Confirm,
+            title: "Nothing staged. Stage all changes and commit?".to_string(),
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: None,
+            default: None,
+            placeholder: None,
+            secret: None,
+            items: None,
+            allow_custom: None,
+            preselected: None,
+            min: None,
+            max: None,
+        };
+        match ctx.ui.confirm(&prompt) {
+            Ok(Some(true)) => {
+                let effects =
+                    run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUnstaged)?;
+                ctx.extend(effects);
+                if !status.untracked.is_empty() {
+                    let effects =
+                        run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUntracked)?;
+                    ctx.extend(effects);
+                }
+            }
+            // "No" and a dismissed prompt both cancel quietly.
+            Ok(_) => return Ok(CommandOutcome::default()),
+            // A non-interactive caller cannot answer; say why instead of
+            // starting a commit with nothing staged.
+            Err(error) => {
+                ctx.info(error.to_string());
+                return Ok(CommandOutcome::default());
+            }
+        }
+    }
     ctx.info("Committing…");
     Ok(CommandOutcome {
         commit: true,

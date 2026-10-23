@@ -55,6 +55,7 @@ FIXTURES = (
     "modified-two-files",
     "staged-one-file",
     "staged-and-unstaged",
+    "staged-failing-hook",
     "untracked",
     "unborn",
     "in-progress-rebase",
@@ -163,6 +164,20 @@ def _staged_and_unstaged(repo: Path, env: dict[str, str]) -> None:
     write(repo / "g.txt", SECOND_FILE_CHANGES)
 
 
+def _staged_failing_hook(repo: Path, env: dict[str, str]) -> None:
+    """A staged change whose `pre-commit` hook always rejects the commit.
+
+    Git runs the hook before it opens the editor, so the commit fails without
+    an `editDocument` effect: the client must still get an error message.
+    """
+    commit(repo, env, "initial", {"f.txt": TEN_LINES})
+    write(repo / "f.txt", STANDARD_CHANGES)
+    git(repo, env, "add", "f.txt")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    write(hook, "#!/bin/sh\necho 'pre-commit hook failed: commit blocked' >&2\nexit 1\n")
+    hook.chmod(0o755)
+
+
 def _untracked(repo: Path, env: dict[str, str]) -> None:
     commit(repo, env, "initial", {"f.txt": TEN_LINES})
     write(repo / "new.txt", "brand new\n")
@@ -205,6 +220,7 @@ _BUILDERS = {
     "modified-two-files": _modified_two_files,
     "staged-one-file": _staged_one_file,
     "staged-and-unstaged": _staged_and_unstaged,
+    "staged-failing-hook": _staged_failing_hook,
     "untracked": _untracked,
     "unborn": _unborn,
     "in-progress-rebase": _in_progress_rebase,

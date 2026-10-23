@@ -1305,8 +1305,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       *Results:* 3 PASS / 7 XFAIL over the ten bug scenarios (bug 3 passes and
       is a plain regression). Bug 5 did not reproduce: the measured `?` path is
       11–16 ms end to end, so `latency-menu-open` is a plain passing regression
-      guard. The `commit-failure-clears-progress` scenario is not written yet;
-      it belongs to R-UI-5.
+      guard. The `commit-failure-clears-progress` scenario arrived with R-UI-5.
       Scenarios: `tests/ui/smoke.scn`, `tests/ui/tour.scn`, every file in
       `tests/ui/scenarios/`.
       *Done when:* `make ui-test` runs both profiles at 100x30 and 80x24 and
@@ -1349,7 +1348,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       generic step list; `view/render` carries `pending` and `view/keymap`
       carries `pending` + `liveKeys`, so the client holds no chord logic.
       Screens: `build/ui/chord-prefix/{standard,vim}-{100x30,80x24}/{prefix,popped,toggled}.screen`.
-- [ ] R-UI-5 **Commit feedback and latency** (bugs 9, 5; U1.10–U1.11):
+- [x] R-UI-5 **Commit feedback and latency** (bugs 9, 5; U1.10–U1.11):
       pre-flight `commit.create` (clean tree → `Nothing to commit (working
       tree clean)` with an `--allow-empty` hint; unstaged-only → stage-all
       confirm), always end progress in a `finally`, and keep the measured
@@ -1357,7 +1356,16 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       Scenarios: `commit-clean-tree`, `commit-failure-clears-progress` (new; a
       failing hook shows an error and no `Committing`), `latency-menu-open`.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
-      test` and `make ui-test` green.
+      test` and `make ui-test` green. *Results:* all three scenarios PASS under
+      both profiles at 100x30 and 80x24; `make ui-test` reports 13 PASS / 0
+      XFAIL / 0 FAIL. The commit worker owns a `$/progress` token ended by a
+      drop guard, the client registers `view/effects` so detached results reach
+      the user, and the trace merges client/server events on `t_unix_ms`. `?`
+      from status on `modified-two-files`: key → server 0.33 ms, handler 1.34 ms,
+      server → first menu window 5.0 ms, three renders 6.6 ms, ~13.3 ms end to
+      end. Screens: `build/ui/commit-clean-tree/{standard,vim}-{100x30,80x24}/clean-commit.screen`,
+      `build/ui/commit-failure-clears-progress/*/hook-failure.screen`,
+      `build/ui/latency-menu-open/*/{dispatch,commit-menu,toggled,staged}.screen`.
 - [ ] R-UI-6 **Tour and CI** (U2.2, U2.3): extend `tests/ui/tour.scn` to cover
       status, `?`, each menu, a toggled switch, a pending chord, a clean-tree
       commit and an error; it writes `build/ui/tour.md`. Add the CI job that
@@ -1800,8 +1808,7 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   before R-UI-4; it now sends `pending` on `view/render` and `pending` +
   `liveKeys` on `view/keymap`, so `snapshot()` reports the real chord. Bug 5 did not
   reproduce (11–16 ms end to end), so `latency-menu-open` is a plain passing
-  regression guard. `commit-failure-clears-progress` is not written yet and
-  moves to R-UI-5.
+  regression guard. `commit-failure-clears-progress` was added in R-UI-5.
 - **R-1.1/1.2:** the status text format was kept byte-identical to the old
   Lua renderer. Position-based requests use the last *acked* tree.
 - **R-1.3:** dotted token types work as-is (`@lsp.type.magit.diff.added.magit-lsp`,

@@ -22,6 +22,8 @@ M.state = {
   requests = 0,
   prompts = 0,
   scheduled = 0,
+  --- Progress tokens the server has begun and not ended, by token.
+  progress = {},
 }
 
 --- Registered views by id.
@@ -40,6 +42,13 @@ local was_idle = false
 local trace_path = vim.env.MAGIT_LSP_TRACE
 local trace_file
 local trace_started = uv.hrtime()
+--- The wall-clock time of `trace_started`, so server events can be merged.
+local trace_epoch
+do
+  local seconds, microseconds = uv.gettimeofday()
+  -- Wall clock at `trace_started`; the server merges by this absolute field.
+  trace_epoch = seconds * 1000 + microseconds / 1000
+end
 --- The id of the key press the following events belong to.
 local trace_press = 0
 
@@ -57,6 +66,7 @@ function M.trace(event, detail)
   local elapsed_ms = (uv.hrtime() - trace_started) / 1e6
   local ok, line = pcall(vim.json.encode, {
     t_ms = tonumber(string.format('%.3f', elapsed_ms)),
+    t_unix_ms = tonumber(string.format('%.3f', trace_epoch + elapsed_ms)),
     id = trace_press,
     event = event,
     detail = detail or vim.NIL,
@@ -85,6 +95,22 @@ function M.configure(opts)
     return
   end
   M.notify_wrapped = true
+  -- A server progress token keeps `idle` false until its `end` arrives, so a
+  -- detached commit cannot be observed half-finished.
+  vim.api.nvim_create_autocmd('LspProgress', {
+    callback = function(args)
+      local params = args.data and args.data.params
+      local value = params and params.value
+      if type(value) ~= 'table' then
+        return
+      end
+      if value.kind == 'begin' then
+        M.progress_started(params.token)
+      elseif value.kind == 'end' then
+        M.progress_finished(params.token)
+      end
+    end,
+  })
   local original = vim.notify
   vim.notify = function(msg, level, notify_opts)
     M.record_notification(msg)
@@ -205,6 +231,24 @@ function M.key_pressed(steps)
   M.trace('key_pressed', { steps = steps })
 end
 
+--- The id of the key press being traced, sent with `view/key` (§A.4).
+---@return integer
+function M.trace_id()
+  return trace_press
+end
+
+--- Record a server progress token starting; `idle` waits for it to end.
+---@param token string|integer
+function M.progress_started(token)
+  M.state.progress[tostring(token)] = true
+end
+
+--- Record a server progress token ending.
+---@param token string|integer
+function M.progress_finished(token)
+  M.state.progress[tostring(token)] = nil
+end
+
 --- Record one canonical key step being sent to the server.
 ---@param step string
 ---@param id string|nil
@@ -261,7 +305,10 @@ end
 --- True when no client work is outstanding and every view is acknowledged.
 ---@return boolean
 function M.idle()
-  local busy = M.state.requests > 0 or M.state.prompts > 0 or M.state.scheduled > 0
+  local busy = M.state.requests > 0
+    or M.state.prompts > 0
+    or M.state.scheduled > 0
+    or next(M.state.progress) ~= nil
   if not busy then
     for _, id in ipairs(M.order) do
       local view = M.views[id]

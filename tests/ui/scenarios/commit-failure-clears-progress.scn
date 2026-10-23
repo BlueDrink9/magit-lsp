@@ -1,0 +1,14 @@
+# Bug 9: a failed commit must show an error and leave no "Committing…" behind.
+#
+# The fixture's pre-commit hook rejects every commit. Git fails before it opens
+# an editor, so the error arrives without an `editDocument` effect; the commit
+# progress must still be ended before the client reports idle.
+fixture: staged-failing-hook
+---
+keys: c
+wait
+keys: c
+wait
+expect screen contains "git commit"
+expect screen not-contains "Committing"
+snapshot: hook-failure

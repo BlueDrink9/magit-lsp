@@ -1,6 +1,8 @@
 # Bug 9: `c c` on a clean tree must not leave "Committing…" on screen.
+#
+# The pre-flight runs before Git, so a clean tree reports "Nothing to commit"
+# and never starts a commit worker (and therefore never shows progress).
 fixture: clean
-xfail: bug-9
 ---
 keys: c
 wait

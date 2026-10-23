@@ -93,11 +93,21 @@ local function copy_to_clipboard(text)
 end
 
 --- Show one message effect as a notification at its level.
+---
+--- Everything is flattened onto one line: a multi-line notification opens
+--- Neovim's hit-enter prompt, which blocks the RPC loop until a key arrives.
 local function notify_effect(effect)
   M.last_error_detail = effect.detail
   local text = effect.text or ''
   if effect.hint then
-    text = text .. '\n' .. effect.hint
+    text = text .. ' - ' .. effect.hint
+  end
+  text = text:gsub('%s*\n%s*', ' ')
+  -- A notification wider than the screen wraps and opens the hit-enter prompt,
+  -- so keep a margin below `columns`.
+  local limit = math.max(24, vim.o.columns - 12)
+  if #text > limit then
+    text = text:sub(1, limit - 3) .. '...'
   end
   vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
 end
@@ -463,6 +473,7 @@ function M.press(steps)
       editorMode = mode,
       cursor = cursor,
       selection = selection,
+      traceId = debug_api.trace_id(),
     })
     if not resp then
       vim.notify('magit-lsp key ' .. step .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
@@ -501,6 +512,7 @@ function M.invoke(command, opts)
     cursor = cursor,
     selection = selection,
     args = opts.args,
+    traceId = debug_api.trace_id(),
   })
   if not resp then
     M.last_error_detail = type(err) == 'table' and err.data and err.data.detail or nil
@@ -873,6 +885,14 @@ function M.setup(opts)
   -- answers with `view/promptRespond`.
   vim.lsp.handlers['view/prompt'] = function(_, result)
     prompt.handle(result)
+  end
+
+  -- Effects produced after a request already answered (detached Git work such
+  -- as a commit) still have to reach the user.
+  vim.lsp.handlers['view/effects'] = function(_, result)
+    if result then
+      apply_effects(result.effects)
+    end
   end
 
   menu.setup(opts.menu)
