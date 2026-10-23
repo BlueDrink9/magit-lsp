@@ -38,17 +38,17 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
   - [x] `idle()` is true only when: no request in flight, last rendered version equals acked version, no prompt pending, no scheduled callback outstanding.
   - [x] `trace` support behind `MAGIT_LSP_TRACE=<path>` (§A.4).
   - [x] L2 test asserts `snapshot()` fields on a freshly opened status view.
-- [ ] **U0.2 Driver** `scripts/ui` with the subcommands in §A.1. Uses a dedicated tmux server (`-L magit-ui`), `escape-time 0`, `status off`.
-  - [ ] `start`, `keys`, `wait`, `screen`, `state`, `trace`, `stop`.
-  - [ ] `stop` always removes the session, socket and temp repo, even after a failure (use a trap).
-  - [ ] Two starts in parallel do not collide (unique socket per run id).
-- [ ] **U0.3 Fixtures** `clean`, `modified-two-files`, `staged-one-file`, `staged-and-unstaged`, `untracked`, `unborn`, `in-progress-rebase`, `in-progress-cherry-pick`. Each built by a script using the deterministic environment.
-- [ ] **U0.4 ANSI decoder:** converts `tmux capture-pane -p -e` output into runs `{row, col, text, fg, bg, bold, dim, reverse}`. Unit tests with hand-written escape strings covering 16-colour, 256-colour and truecolor sequences.
+- [x] **U0.2 Driver** `scripts/ui` with the subcommands in §A.1. Uses a dedicated tmux server (`-L magit-ui`), `escape-time 0`, `status off`.
+  - [x] `start`, `keys`, `wait`, `screen`, `state`, `trace`, `stop`.
+  - [x] `stop` always removes the session, socket and temp repo, even after a failure (use a trap).
+  - [x] Two starts in parallel do not collide (unique socket per run id).
+- [x] **U0.3 Fixtures** `clean`, `modified-two-files`, `staged-one-file`, `staged-and-unstaged`, `untracked`, `unborn`, `in-progress-rebase`, `in-progress-cherry-pick`. Each built by a script using the deterministic environment.
+- [x] **U0.4 ANSI decoder:** converts `tmux capture-pane -p -e` output into runs `{row, col, text, fg, bg, bold, dim, reverse}`. Unit tests with hand-written escape strings covering 16-colour, 256-colour and truecolor sequences.
 - [ ] **U0.5 Scenario runner** `scripts/ui run <file>…` implementing the DSL in §A.5, writing artefacts to `build/ui/<scenario>/`. Unit tests for the predicate evaluator.
 - [ ] **U0.6 Make target** `make ui-test` (runs all scenarios under both profiles and both sizes) and `make ui-tour` (§U2.2).
 - [x] **U0.7 Fix the render-before-open race** the R-3.2 worker reported: the Neovim client buffers `view/render` by `viewId` until the view exists. *Done when:* an L2 test that delays the `view/open` response still ends with the correct buffer text, and 50 consecutive `ui start` runs show no missing first render.
   - [x] `view/render` and `view/keymap` are buffered per `viewId` and applied in order once the view/buffer exists (L2 test `buffers renders that beat the view/open response`).
-  - [ ] 50 consecutive `ui start` runs show no missing first render — needs the `scripts/ui` driver from U0.2, so it stays open for that ticket.
+  - [x] 50 consecutive `ui start` runs show no missing first render (driver U0.2).
 - [ ] **U0.8 Docs:** add to `AGENTS.md` the workflow "inspect, act, inspect": `ui start`, `ui keys`, `ui wait`, `ui screen`, `ui state`, `ui stop`.
 - [ ] **U0.9 Bug scenarios:** one scenario per bug in Phase U1, each marked `xfail`.
 

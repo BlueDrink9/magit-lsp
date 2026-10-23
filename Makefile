@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file color-spike
+.PHONY: build test test-rust test-lua test-file ui-unit color-spike
 
 build:
 	cargo build
@@ -13,6 +13,9 @@ test-lua: build
 
 test-file: build
 	nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')"
+
+ui-unit:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py' -v
 
 color-spike: build
 	nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua

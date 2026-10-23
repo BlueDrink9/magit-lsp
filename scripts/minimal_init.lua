@@ -23,3 +23,15 @@ add_path(mini_path)
 if #vim.api.nvim_list_uis() == 0 then
   require('mini.test').setup()
 end
+
+-- The UI harness (`scripts/ui`) starts Neovim with these variables. Tests that
+-- set up the client themselves leave them unset. `MAGIT_LSP_TRACE` is read by
+-- the debug module directly.
+local ui_root = vim.env.MAGIT_LSP_UI_ROOT
+if ui_root and ui_root ~= '' then
+  local profile = vim.env.MAGIT_LSP_PROFILE
+  require('magit-lsp').setup({
+    root_dir = ui_root,
+    profile = profile ~= '' and profile or nil,
+  })
+end
