@@ -1233,6 +1233,8 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Review (highest priority; grouped by stated priority)
 
+- **P0 (immediate review queue for this request):** R-VS-2, R-VS-3 and R-VS-4
+  below. These three tasks are the immediate review queue for this request.
 - **P1:** Test editor-bridge cancellation; strengthen IMM-2 property tests;
   extract shared stdio client; build `TestSession`; verify askpass secrets are
   not logged; add missing real-UI scenarios; test resize reflow.
@@ -2069,6 +2071,69 @@ activation against the real server). → R-VS-1.
 ---
 
 ## Review
+
+### VSCode extension review (immediate queue for this request)
+
+The following three unchecked P0 tasks record the user's VSCode findings and
+are the immediate review queue for this request. They specify investigation,
+fixes and verification only; no fixes are implemented by this review entry.
+Keep the VSCode extension a thin client: display server-owned text and
+structure, and forward generic commands rather than adding a command per
+server action.
+
+- [ ] **[P0] R-VS-2 — Fix virtual status opening blank or as a temporary file**
+  - **Finding:** opening status first displays a blank editor; opening it a
+    second time shows only a temporary filename instead of the status view.
+  - **Change:** trace the initial open/render/virtual-document lifecycle in the
+    VSCode extension and fix it so a server-owned, read-only status document is
+    rendered on the first open and remains correctly associated with its view.
+    Do not require creating a corresponding file on disk; preserve the server's
+    text and structure verbatim.
+  - **Regression tests:** cover opening status from a fresh VSCode window and
+    assert the first render is displayed, then reopening/refreshing status and
+    asserting the rendered status remains visible rather than a temporary
+    filename or blank document. Tests must not create a backing status file.
+  - **VSCode UI verification:** launch the extension in an actual Extension
+    Development Host, open status in a repository, and verify the first screen
+    contains the server-rendered status; open it again and verify status text
+    still appears with no temporary filename-only editor.
+  - **Done when:** regression tests pass and the described behavior is verified
+    in the actual VSCode UI without any status document on disk.
+- [ ] **[P0] R-VS-3 — Expose generic server commands and restore defaults**
+  - **Finding:** `magit.toggle-fold` and `magit.refresh` commands and their
+    shortcuts are missing from the VSCode extension.
+  - **Change:** provide one generic, argument-taking VSCode dispatcher for
+    arbitrary server command IDs (rather than proliferating one VSCode command
+    per server action), and provide working default shortcuts for server fold
+    toggling and refresh. Dispatch through the existing server command
+    mechanism and retain server-owned folding/state.
+  - **Regression tests:** test that the generic dispatcher forwards an
+    arbitrary command ID and its arguments to the server; verify the default
+    fold and refresh shortcuts are contributed and invoke the corresponding
+    server commands in an active status view.
+  - **VSCode UI verification:** in an actual Extension Development Host, use
+    the default fold shortcut to toggle a status section and the refresh
+    shortcut to update status; invoke a different server command through the
+    generic dispatcher and verify it reaches the server. Confirm no
+    per-action VSCode command registrations are required.
+  - **Done when:** regression tests pass and all three interactions are
+    verified in the actual VSCode UI.
+- [ ] **[P0] R-VS-4 — Restore semantic highlighting and theme integration**
+  - **Finding:** VSCode status views have no colours or formatting.
+  - **Change:** restore the LSP semantic-token path and VSCode theme
+    integration for server-provided token types, using contributed semantic
+    token types/scopes or the appropriate VSCode-supported mappings. Keep
+    token ranges and meaning server-owned; do not parse or reformat rendered
+    text in the extension.
+  - **Regression tests:** assert semantic tokens are requested/applied for a
+    rendered view and that the extension contributes mappings for the status
+    token types, including section headings and added/removed diff lines.
+  - **VSCode UI verification:** run the extension in an actual Extension
+    Development Host with a theme, open a status view containing section
+    headings and added/removed lines, and verify the corresponding text is
+    visibly styled and follows the active theme.
+  - **Done when:** regression tests pass and the actual VSCode UI confirms
+    semantic highlighting and theme integration.
 
 ### Test-suite review (static read; tests were not run)
 
