@@ -31,7 +31,7 @@ impl View for ProcessLogView {
         Scope::new("process-log")
     }
 
-    fn render(&mut self, _ctx: &Ctx) -> Tree {
+    fn render(&mut self, _ctx: &Ctx<'_>) -> Tree {
         build(runner::global_log().iter())
     }
 }

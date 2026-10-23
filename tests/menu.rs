@@ -213,12 +213,17 @@ fn toggling_a_switch_updates_the_model_and_emits_a_preview_edit() {
 
     let cursor = Cursor { line: 0, column: 0 };
     let prefix = press(&mut session, &descriptor.id, "-", cursor);
-    assert!(prefix.render.is_none(), "the prefix waits for a letter");
     assert!(prefix.effects.is_empty());
+    let prefix_render = prefix.render.expect("the pending prefix re-renders");
+    assert_eq!(prefix_render.pending, "-");
+    session
+        .ack(&descriptor.id, prefix_render.version)
+        .expect("ack the prefix render");
 
     let toggled = press(&mut session, &descriptor.id, "a", cursor);
     assert!(toggled.effects.is_empty(), "{:?}", toggled.effects);
     let render = toggled.render.expect("a re-render");
+    assert_eq!(render.pending, "", "completing the switch clears pending");
     assert!(
         render.edits.as_ref().is_some_and(|edits| !edits.is_empty()),
         "the preview line is sent as a line edit"
@@ -254,7 +259,12 @@ fn setting_an_option_prompts_and_applies_the_value() {
     ui.reply_text(Some("Alice".to_string()));
 
     let cursor = Cursor { line: 0, column: 0 };
-    press_ui(&mut session, &ui, &descriptor.id, "=", cursor);
+    let prefix = press_ui(&mut session, &ui, &descriptor.id, "=", cursor);
+    let prefix_render = prefix.render.expect("the pending prefix re-renders");
+    assert_eq!(prefix_render.pending, "=");
+    session
+        .ack(&descriptor.id, prefix_render.version)
+        .expect("ack the prefix render");
     let outcome = press_ui(&mut session, &ui, &descriptor.id, "A", cursor);
     assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
     let render = outcome.render.expect("the option change re-renders");
@@ -572,6 +582,135 @@ fn menu_tokens_decode_to_the_documented_types() {
     assert!(seen.contains(&"magit.menu.switch.on"), "{seen:?}");
     assert!(seen.contains(&"magit.menu.flag.on"), "{seen:?}");
     assert_eq!(flag_token(&menu), "magit.menu.flag.on");
+}
+
+/// The token type covering `offset` bytes into the first line containing `text`.
+fn token_at(tree: &magit_lsp::tree::Tree, text: &str, offset: usize) -> Option<String> {
+    let line = tree.lines.iter().position(|line| line.contains(text))?;
+    let start = tree.lines[line].find(text)? + offset;
+    tree.tokens
+        .iter()
+        .find(|token| token.line == line && token.start == start)
+        .map(|token| token.token_type.clone())
+}
+
+#[test]
+fn a_pending_prefix_dims_items_that_cannot_complete_it() {
+    let menu = menus::named("commit").expect("commit menu");
+    let tree = menu.render_with_pending(Viewport { cols: 100, rows: 30 }, &["-".to_string()]);
+
+    // An option cannot follow `-`, so its whole key is disabled.
+    assert_eq!(token_at(&tree, "=A", 0).as_deref(), Some("magit.menu.disabled"));
+    // A switch can: its `-` is the pending prefix and `a` is the ordinary key.
+    assert_eq!(token_at(&tree, "-a", 0).as_deref(), Some("magit.menu.pending"));
+    assert_eq!(token_at(&tree, "-a", 1).as_deref(), Some("magit.menu.key"));
+    // An action cannot follow `-` either.
+    assert_eq!(token_at(&tree, "  c  Commit", 2).as_deref(), Some("magit.menu.disabled"));
+
+    // With no pending steps every item is normal again.
+    let normal = menu.render(Viewport { cols: 100, rows: 30 });
+    assert_eq!(token_at(&normal, "=A", 0).as_deref(), Some("magit.menu.option"));
+}
+
+#[test]
+fn a_non_matching_key_keeps_pending_and_hints() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut session = session(tmp.path());
+    open_status(&mut session);
+    let (descriptor, _render) = open_commit(&mut session);
+    let cursor = Cursor { line: 0, column: 0 };
+
+    press(&mut session, &descriptor.id, "-", cursor);
+    let before = tmp.git(&["status", "--porcelain"]);
+
+    // `c` is an action, but with `-` pending only switches are live.
+    let outcome = press(&mut session, &descriptor.id, "c", cursor);
+    assert_eq!(messages(&outcome.effects), vec!["Unbound key: -c"]);
+    assert!(outcome.render.is_none(), "the pending state is unchanged");
+    assert_eq!(tmp.git(&["status", "--porcelain"]), before);
+    let notice = session
+        .keymap_notice(&descriptor.id)
+        .expect("the menu keymap");
+    assert_eq!(notice.pending, "-", "a non-matching key keeps the prefix");
+    assert!(session.views().get(&descriptor.id).is_some());
+}
+
+#[test]
+fn backspace_pops_one_pending_step() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut session = session(tmp.path());
+    open_status(&mut session);
+    let (descriptor, _render) = open_commit(&mut session);
+    let cursor = Cursor { line: 0, column: 0 };
+
+    press(&mut session, &descriptor.id, "-", cursor);
+    let popped = press(&mut session, &descriptor.id, "Backspace", cursor);
+    assert!(popped.effects.is_empty(), "{:?}", popped.effects);
+    let render = popped.render.expect("popping a step re-renders");
+    assert_eq!(render.pending, "");
+    assert!(session.views().get(&descriptor.id).is_some(), "the menu stays open");
+    let tree = session.views().get(&descriptor.id).expect("view").tree();
+    assert_eq!(
+        token_at(tree, "=A", 0).as_deref(),
+        Some("magit.menu.option"),
+        "items are normal again"
+    );
+}
+
+#[test]
+fn backspace_with_empty_pending_does_nothing() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut session = session(tmp.path());
+    open_status(&mut session);
+    let (descriptor, _render) = open_commit(&mut session);
+    let cursor = Cursor { line: 0, column: 0 };
+
+    let outcome = press(&mut session, &descriptor.id, "Backspace", cursor);
+    assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
+    assert!(outcome.render.is_none(), "nothing changed");
+    assert!(session.views().get(&descriptor.id).is_some(), "the menu stays open");
+    assert_eq!(
+        session
+            .keymap_notice(&descriptor.id)
+            .expect("the menu keymap")
+            .pending,
+        ""
+    );
+}
+
+#[test]
+fn the_keymap_reports_pending_and_live_keys() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut session = session(tmp.path());
+    open_status(&mut session);
+    let (descriptor, _render) = open_commit(&mut session);
+    let cursor = Cursor { line: 0, column: 0 };
+
+    let notice = session
+        .keymap_notice(&descriptor.id)
+        .expect("the menu keymap");
+    assert_eq!(notice.pending, "");
+    assert!(notice.live_keys.contains(&"c".to_string()));
+    assert!(notice.live_keys.contains(&"-a".to_string()));
+    assert!(!notice.live_keys.contains(&"Backspace".to_string()));
+
+    press(&mut session, &descriptor.id, "-", cursor);
+    let notice = session
+        .keymap_notice(&descriptor.id)
+        .expect("the menu keymap");
+    assert_eq!(notice.pending, "-");
+    assert!(notice.live_keys.contains(&"-a".to_string()));
+    assert!(!notice.live_keys.contains(&"c".to_string()));
+    assert!(notice.live_keys.contains(&"Backspace".to_string()));
 }
 
 #[test]

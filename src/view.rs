@@ -154,9 +154,11 @@ pub struct ViewDescriptor {
 }
 
 /// Render context passed to a view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ctx {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ctx<'a> {
     pub viewport: Viewport,
+    /// The menu steps typed so far; empty for every other view.
+    pub pending: &'a [String],
 }
 
 /// A visibility change requested by one of the `common.*` fold commands.
@@ -200,7 +202,7 @@ pub trait View: Send {
     }
 
     /// Render the current state. Must not touch the repository; refresh first.
-    fn render(&mut self, ctx: &Ctx) -> Tree;
+    fn render(&mut self, ctx: &Ctx<'_>) -> Tree;
 
     /// The structured menu model, for clients that prefer native widgets.
     fn menu(&self) -> Option<Menu> {

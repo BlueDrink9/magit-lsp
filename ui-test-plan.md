@@ -95,12 +95,12 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 - [x] **U1.8 (bug 6)** Tokens `magitMenuFlagOn` and `magitMenuFlagOff` for the `(--flag)` text, plus the existing on/off switch markers.
   - [x] L1 token test: toggling a switch changes the token on the flag text.
   - [x] Scenario: `style "(--all)" dim` before toggling; `style "(--all)" coloured` after (coloured = foreground differs from the default and not dim).
-- [ ] **U1.9 (bugs 7, 8)** Pending-chord state on the menu view (generic `pending: Vec<Key>`):
-  - [ ] `-` or `=` pushes onto `pending`. Items whose key does not start with the prefix render dim (`magitMenuDisabled`); the pending prefix renders highlighted; only matching items accept the next key.
-  - [ ] A key that completes an item toggles or prompts and clears `pending`. A key that matches nothing is swallowed with a one-line hint and `pending` is kept.
-  - [ ] `Backspace` pops one key. With empty `pending` it does nothing (it must not close the menu).
-  - [ ] L1 tests for each rule; `view/keymap` exposes the currently live keys so clients need no logic.
-  - [ ] Scenario `chord-prefix`: `c`, `-`, expect `pending == "-"` and non-switch items dim; `BSpace`, expect `pending == ""` and items normal; `-a`, expect the `--all` flag coloured.
+- [x] **U1.9 (bugs 7, 8)** Pending-chord state on the menu view (generic `pending: Vec<Key>`):
+  - [x] `-` or `=` pushes onto `pending`. Items whose key does not start with the prefix render dim (`magitMenuDisabled`); the pending prefix renders highlighted; only matching items accept the next key.
+  - [x] A key that completes an item toggles or prompts and clears `pending`. A key that matches nothing is swallowed with a one-line hint and `pending` is kept.
+  - [x] `Backspace` pops one key. With empty `pending` it does nothing (it must not close the menu).
+  - [x] L1 tests for each rule; `view/keymap` exposes the currently live keys so clients need no logic.
+  - [x] Scenario `chord-prefix`: `c`, `-`, expect `pending == "-"` and non-switch items dim; `BSpace`, expect `pending == ""` and items normal; `-a`, expect the `--all` flag coloured.
 
 ### R-UI-5 — Commit feedback and latency (bugs 5, 9)
 

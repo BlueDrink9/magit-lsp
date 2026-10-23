@@ -240,7 +240,7 @@ impl View for StatusView {
         Scope::new("status")
     }
 
-    fn render(&mut self, _ctx: &Ctx) -> Tree {
+    fn render(&mut self, _ctx: &Ctx<'_>) -> Tree {
         self.render_tree()
     }
 

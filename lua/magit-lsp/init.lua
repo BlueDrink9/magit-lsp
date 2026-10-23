@@ -160,7 +160,8 @@ local TOKEN_LINKS = {
   ['magit.menu.option'] = 'String',
   ['magit.menu.value'] = 'String',
   ['magit.menu.planned'] = 'Comment',
-  ['magit.menu.disabled'] = 'Comment',
+  ['magit.menu.disabled'] = 'MagitMenuDisabled',
+  ['magit.menu.pending'] = 'MagitMenuPending',
   ['magit.menu.preview'] = 'Comment',
 }
 
@@ -185,6 +186,20 @@ local function define_highlights()
     fg = comment.fg,
     bg = comment.bg,
     dim = true,
+  })
+  -- A menu item that cannot complete the pending prefix, and the prefix of one
+  -- that can. Both need an intermediate group because a link cannot add the
+  -- dim/bold attributes.
+  vim.api.nvim_set_hl(0, 'MagitMenuDisabled', {
+    fg = comment.fg,
+    bg = comment.bg,
+    dim = true,
+  })
+  local keyword = vim.api.nvim_get_hl(0, { name = 'Keyword' })
+  vim.api.nvim_set_hl(0, 'MagitMenuPending', {
+    fg = keyword.fg,
+    bg = keyword.bg,
+    bold = true,
   })
   for token_type, link in pairs(TOKEN_LINKS) do
     local group = string.format('@lsp.type.%s.%s', token_type, M.filetype)
@@ -345,6 +360,7 @@ function M.apply_render(params)
     return
   end
   debug_api.render_received(params.viewId, params.version)
+  debug_api.set_pending(params.viewId, params.pending)
 
   if params.viewId ~= M.view_id then
     -- The notification can beat the response that names the view; keep it

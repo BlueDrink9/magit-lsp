@@ -33,6 +33,7 @@ pub const TOKEN_TYPES: &[&str] = &[
     "magit.menu.value",
     "magit.menu.planned",
     "magit.menu.disabled",
+    "magit.menu.pending",
     "magit.menu.preview",
 ];
 

@@ -734,12 +734,16 @@ the server its size on open and on resize (`view/resize`).
 **Highlighting:** semantic tokens (§3.15). Token types used: `menu.title`,
 `menu.group`, `menu.key`, `menu.label`, `menu.flag`, `menu.switch.on`,
 `menu.switch.off`, `menu.option`, `menu.value`, `menu.planned`,
-`menu.disabled`, `menu.preview`. Each maps to a standard theme group (§3.15).
+`menu.disabled`, `menu.pending`, `menu.preview`. Each maps to a standard theme
+group (§3.15).
 
 **Keys inside a menu:** the view has `capture: true`. The client forwards every
-key; the server does the two-step matching (`-` then letter) and answers
-`passThrough`-free (unbound keys are swallowed with a one-line hint). `Escape`,
-`ctrl+c` and `q` close the menu.
+key; the server keeps the typed steps as `pending` (`-`, `=`, or a chord prefix),
+dims items that cannot complete them, and answers `passThrough`-free (unbound
+keys are swallowed with a one-line hint while `pending` is kept). `Backspace`
+pops one step. `Escape`, `ctrl+c` and `q` close the menu. `view/render` and
+`view/keymap` carry `pending`; `view/keymap` also carries `liveKeys`, so the
+client needs no chord logic.
 
 **Can LSP hover/floating UI be used? Can it sit at the bottom?** No. LSP hover
 is anchored to a document position, delivers Markdown only, and the server
@@ -991,8 +995,8 @@ replacements land.
 
 | Method | Params |
 | --- | --- |
-| `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?: [{startLine, endLine, lines}], cursor?: {line, column}, menu?: Menu}` |
-| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, doc, group, status}]}` |
+| `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?: [{startLine, endLine, lines}], cursor?: {line, column}, mode, pending?, menu?: Menu}` |
+| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, doc, group, status}], mode, pending?, liveKeys?: [string]}` |
 | `view/effects` (notification) | `{effects: [...]}` for asynchronous effects |
 | `view/prompt` (request) | See §3.6; returns `{cancelled, value?}` |
 | standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
@@ -1330,7 +1334,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       at 100x30 and 80x24; `make ui-test` reports 8 PASS / 4 XFAIL / 0 FAIL
       (the remaining XFAILs belong to R-UI-4/R-UI-5). The driver's
       `FileChangedRO` workaround is removed.
-- [ ] R-UI-4 **Menu rendering: actions, flag colours, pending chords** (bugs 6,
+- [x] R-UI-4 **Menu rendering: actions, flag colours, pending chords** (bugs 6,
       7, 8, 10; U1.7–U1.9): every menu shows all its action keys at width 80
       and 120, floats fit or scroll, `magitMenuFlagOn`/`FlagOff` colour the
       `(--flag)` text, and the server carries the `pending` chord so
@@ -1338,7 +1342,13 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       Scenarios: `commit-menu-shows-actions`, `flag-colours`, `chord-prefix`,
       plus the generated all-menus test.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
-      test` and `make ui-test` green. *Note:* bugs 10 and 6 done; 7/8 remain.
+      test` and `make ui-test` green. *Results:* the `xfail` tag is gone;
+      `chord-prefix` passes under both profiles at 100x30 and 80x24, and
+      `make ui-test` reports 11 PASS / 1 XFAIL / 0 FAIL (only
+      `commit-clean-tree`, owned by R-UI-5). The menu keeps `pending` as a
+      generic step list; `view/render` carries `pending` and `view/keymap`
+      carries `pending` + `liveKeys`, so the client holds no chord logic.
+      Screens: `build/ui/chord-prefix/{standard,vim}-{100x30,80x24}/{prefix,popped,toggled}.screen`.
 - [ ] R-UI-5 **Commit feedback and latency** (bugs 9, 5; U1.10–U1.11):
       pre-flight `commit.create` (clean tree → `Nothing to commit (working
       tree clean)` with an `--allow-empty` hint; unstaged-only → stage-all
@@ -1786,8 +1796,9 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
 - **R-UI-3:** the `FileChangedRO` workaround is gone from the driver; the
   client no longer sets `readonly` (Vim warns W10 on every programmatic write
   to a readonly buffer), so the harness runs Neovim untouched.
-  `pending` and the live key set are not yet carried by the server protocol,
-  so `snapshot()` reports `pending=""`; R-UI-4 adds them. Bug 5 did not
+  `pending` and the live key set were not yet carried by the server protocol
+  before R-UI-4; it now sends `pending` on `view/render` and `pending` +
+  `liveKeys` on `view/keymap`, so `snapshot()` reports the real chord. Bug 5 did not
   reproduce (11–16 ms end to end), so `latency-menu-open` is a plain passing
   regression guard. `commit-failure-clears-progress` is not written yet and
   moves to R-UI-5.

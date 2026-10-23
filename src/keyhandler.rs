@@ -8,28 +8,15 @@ use crate::keymap::{EditorMode, Keymap, Match};
 use crate::keys::{KeyChord, KeyStep};
 use crate::Result;
 
-/// Which prefix a menu is waiting for.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum MenuPrefix {
-    #[default]
-    None,
-    Switch,
-    Option,
-    /// Keys collected for a multi-step binding such as `g l`.
-    Chord(String),
-}
-
 /// What one key press means inside a menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuResolution {
-    /// A prefix (`-` or `=`) was consumed; keep collecting.
+    /// The pending steps changed; re-render and push the live key set.
     Pending,
-    /// Toggle the switch with this letter.
-    ToggleSwitch(char),
-    /// Set or clear the option with this letter.
-    SetOption(char),
-    /// Run the action with this key (a letter or a chord such as `g l`).
-    Action(String),
+    /// Nothing happened, e.g. `Backspace` with no pending step.
+    Ignored,
+    /// A complete item key was typed; run that item.
+    Complete(String),
     /// Close the menu and return to the previous view.
     Pop,
     /// Save the current arguments as the menu's defaults.
@@ -40,93 +27,82 @@ pub enum MenuResolution {
     Unbound { chord: String },
 }
 
-/// Resolve one key step with the menu's own two-step matcher.
+/// Resolve one key step against the menu's own item keys.
 ///
-/// `keys` are the menu's item keys, so an action may be a single key or a
-/// multi-step chord (`g l` in the `vim` profile's dispatch menu). Menus capture
-/// every key, so an unbound one is swallowed rather than passed back to the
-/// editor. `Escape`, `ctrl+c` and `q` always close.
-pub fn resolve_menu(prefix: &mut MenuPrefix, key: &str, keys: &[String]) -> MenuResolution {
+/// `pending` holds the canonical key steps typed so far (`-`, `=` or a chord
+/// prefix such as `g`). `keys` are the menu's item keys, so an item may be a
+/// single key (`c`), a two-step flag (`-a`) or a chord (`g l` in the `vim`
+/// profile's dispatch menu). Menus capture every key, so an unbound one is
+/// swallowed rather than passed back to the editor. A non-matching key keeps
+/// `pending`, so the user can correct it with `Backspace` instead of starting
+/// over. `Escape`, `ctrl+c` and `q` always close.
+pub fn resolve_menu(pending: &mut Vec<String>, key: &str, keys: &[String]) -> MenuResolution {
     if matches!(key, "Escape" | "ctrl+c" | "q") {
-        *prefix = MenuPrefix::None;
+        pending.clear();
         return MenuResolution::Pop;
     }
     if key == "ctrl+s" {
-        *prefix = MenuPrefix::None;
+        pending.clear();
         return MenuResolution::SaveArgs;
     }
     if key == "ctrl+r" {
-        *prefix = MenuPrefix::None;
+        pending.clear();
         return MenuResolution::ResetArgs;
     }
+    if key == "Backspace" {
+        return if pending.pop().is_some() {
+            MenuResolution::Pending
+        } else {
+            MenuResolution::Ignored
+        };
+    }
 
-    let mut chars = key.chars();
-    let single = match (chars.next(), chars.next()) {
-        (Some(c), None) => Some(c),
-        _ => None,
+    if pending.is_empty() {
+        return match key {
+            "-" | "=" => {
+                pending.push(key.to_string());
+                MenuResolution::Pending
+            }
+            _ => action_or_pending(pending, key, keys),
+        };
+    }
+
+    // `-` and `=` are literal key characters, so their step concatenates
+    // (`-` + `a` = `-a`); any other step starts a space-separated chord.
+    let combined = if pending.len() == 1 && matches!(pending[0].as_str(), "-" | "=") {
+        format!("{}{key}", pending[0])
+    } else {
+        format!("{} {key}", pending.join(" "))
     };
 
-    let previous = std::mem::take(prefix);
-    match previous {
-        MenuPrefix::None => match key {
-            "-" => {
-                *prefix = MenuPrefix::Switch;
-                MenuResolution::Pending
-            }
-            "=" => {
-                *prefix = MenuPrefix::Option;
-                MenuResolution::Pending
-            }
-            _ => action_or_pending(prefix, key, keys, single),
-        },
-        MenuPrefix::Switch => match single {
-            Some(c) => MenuResolution::ToggleSwitch(c),
-            None => MenuResolution::Unbound {
-                chord: format!("-{key}"),
-            },
-        },
-        MenuPrefix::Option => match single {
-            Some(c) => MenuResolution::SetOption(c),
-            None => MenuResolution::Unbound {
-                chord: format!("={key}"),
-            },
-        },
-        MenuPrefix::Chord(prefix_keys) => {
-            let chord = format!("{prefix_keys} {key}");
-            if keys.iter().any(|candidate| candidate == &chord) {
-                MenuResolution::Action(chord)
-            } else if keys.iter().any(|candidate| candidate.starts_with(&format!("{chord} "))) {
-                *prefix = MenuPrefix::Chord(chord);
-                MenuResolution::Pending
-            } else {
-                MenuResolution::Unbound { chord }
-            }
-        }
+    if keys.iter().any(|candidate| candidate == &combined) {
+        pending.clear();
+        return MenuResolution::Complete(combined);
     }
+    if keys
+        .iter()
+        .any(|candidate| candidate.starts_with(&format!("{combined} ")))
+    {
+        pending.push(key.to_string());
+        return MenuResolution::Pending;
+    }
+    MenuResolution::Unbound { chord: combined }
 }
 
-/// Match a single key step against the menu's action keys.
-fn action_or_pending(
-    prefix: &mut MenuPrefix,
-    key: &str,
-    keys: &[String],
-    single: Option<char>,
-) -> MenuResolution {
+/// Match one key step against the menu's item keys.
+fn action_or_pending(pending: &mut Vec<String>, key: &str, keys: &[String]) -> MenuResolution {
     if keys.iter().any(|candidate| candidate == key) {
-        return MenuResolution::Action(key.to_string());
+        return MenuResolution::Complete(key.to_string());
     }
     if keys
         .iter()
         .any(|candidate| candidate.starts_with(&format!("{key} ")))
     {
-        *prefix = MenuPrefix::Chord(key.to_string());
+        pending.push(key.to_string());
         return MenuResolution::Pending;
     }
-    match single {
-        Some(_) => MenuResolution::Action(key.to_string()),
-        None => MenuResolution::Unbound {
-            chord: key.to_string(),
-        },
+    MenuResolution::Unbound {
+        chord: key.to_string(),
     }
 }
 

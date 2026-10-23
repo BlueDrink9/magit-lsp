@@ -7,7 +7,7 @@
 
 use crate::commands::{self, CommandStatus, Scope};
 use crate::diff_text;
-use crate::keyhandler::{self, MenuPrefix, MenuResolution, PendingChord, Resolution};
+use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
 use crate::process_log::ProcessLogView;
@@ -44,8 +44,8 @@ pub struct OpenView {
     acked_version: Option<u64>,
     /// Chord steps collected for this view since the last complete match.
     pending: PendingChord,
-    /// A menu's pending `-`/`=` prefix.
-    menu_pending: MenuPrefix,
+    /// A menu's pending key steps (`-`, `=` or a chord prefix).
+    menu_pending: Vec<String>,
     /// The cursor the pending chord started at, to cancel it on cursor moves.
     key_cursor: Option<Cursor>,
     /// The current mode; text mode is plain editing with no server keys.
@@ -88,6 +88,11 @@ impl OpenView {
     /// Whether this view is a menu.
     pub fn is_menu(&self) -> bool {
         matches!(self.descriptor.kind, ViewKind::Menu(_))
+    }
+
+    /// The menu steps typed so far, in canonical notation (`-`, `g`, …).
+    pub fn pending(&self) -> String {
+        self.menu_pending.join(" ")
     }
 
     /// Record a refresh for later: it is applied when text mode ends.
@@ -152,8 +157,10 @@ impl OpenView {
     fn render(&mut self, cursor: Option<Cursor>, forced: Option<Cursor>) -> Result<ViewRender> {
         let old = self.tree.clone();
         let old_version = self.version;
+        let pending = self.menu_pending.clone();
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
+            pending: &pending,
         });
         let version = old_version + 1;
         tree.version = version;
@@ -178,6 +185,7 @@ impl OpenView {
             edits,
             cursor: successor,
             mode: self.mode,
+            pending: self.pending(),
             menu: self.view.menu(),
         })
     }
@@ -185,8 +193,10 @@ impl OpenView {
     /// Render the current tree as a full text replace.
     fn render_full(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
         let old = self.tree.clone();
+        let pending = self.menu_pending.clone();
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
+            pending: &pending,
         });
         let version = self.version + 1;
         tree.version = version;
@@ -201,6 +211,7 @@ impl OpenView {
             edits: None,
             cursor: successor,
             mode: self.mode,
+            pending: self.pending(),
             menu: self.view.menu(),
         })
     }
@@ -338,6 +349,12 @@ impl Session {
             capture: view.descriptor().capture && !text,
             bindings,
             mode: view.mode(),
+            pending: if text { String::new() } else { view.pending() },
+            live_keys: if text || !view.is_menu() {
+                Vec::new()
+            } else {
+                menu_live_keys(view)
+            },
         })
     }
 
@@ -388,7 +405,10 @@ impl Session {
         }
 
         let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
-        let mut tree = view.render(&Ctx { viewport });
+        let mut tree = view.render(&Ctx {
+            viewport,
+            pending: &[],
+        });
         let version = 1;
         tree.version = version;
 
@@ -411,6 +431,7 @@ impl Session {
             edits: None,
             cursor: None,
             mode: descriptor.mode,
+            pending: String::new(),
             menu: view.menu(),
         };
         self.views.push(OpenView {
@@ -421,7 +442,7 @@ impl Session {
             acked: None,
             acked_version: None,
             pending: PendingChord::default(),
-            menu_pending: MenuPrefix::None,
+            menu_pending: Vec::new(),
             key_cursor: None,
             mode: descriptor.mode,
             dirty: false,
@@ -479,6 +500,7 @@ impl Session {
             edits: None,
             cursor: None,
             mode: view.mode,
+            pending: view.pending(),
             menu: view.menu(),
         })
     }
@@ -579,7 +601,7 @@ impl Session {
         }
     }
 
-    /// Resolve a key inside a menu with the two-step `-x`/`=x`/`x` matcher.
+    /// Resolve a key inside a menu against its item keys and pending steps.
     fn menu_key(
         &mut self,
         params: &ViewKeyParams,
@@ -592,7 +614,7 @@ impl Session {
                 .get_mut(&params.view_id)
                 .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
             if cursor_moved {
-                view.menu_pending = MenuPrefix::None;
+                view.menu_pending.clear();
             }
             let keys: Vec<String> = view
                 .menu()
@@ -608,74 +630,99 @@ impl Session {
         };
 
         match resolution {
-            MenuResolution::Pending => Ok(InvokeResult::empty()),
+            MenuResolution::Pending => self.menu_rerender(&params.view_id, params.cursor),
+            MenuResolution::Ignored => Ok(InvokeResult::empty()),
             MenuResolution::Pop => self.pop_view(&params.view_id),
-            MenuResolution::SaveArgs => self.run_command(
-                &params.view_id,
-                "menu.save-args",
-                Some(params.cursor),
-                None,
-                None,
-                Some(params.key.clone()),
-                ui,
-            ),
-            MenuResolution::ResetArgs => self.run_command(
-                &params.view_id,
-                "menu.reset-args",
-                Some(params.cursor),
-                None,
-                None,
-                Some(params.key.clone()),
-                ui,
-            ),
+            MenuResolution::SaveArgs => {
+                let mut result = self.run_command(
+                    &params.view_id,
+                    "menu.save-args",
+                    Some(params.cursor),
+                    None,
+                    None,
+                    Some(params.key.clone()),
+                    ui,
+                )?;
+                if result.keymap.is_none() {
+                    result.keymap = self.keymap_notice(&params.view_id);
+                }
+                Ok(result)
+            }
+            MenuResolution::ResetArgs => {
+                let mut result = self.run_command(
+                    &params.view_id,
+                    "menu.reset-args",
+                    Some(params.cursor),
+                    None,
+                    None,
+                    Some(params.key.clone()),
+                    ui,
+                )?;
+                if result.keymap.is_none() {
+                    result.keymap = self.keymap_notice(&params.view_id);
+                }
+                Ok(result)
+            }
             MenuResolution::Unbound { chord } => Ok(unbound(&chord)),
-            MenuResolution::ToggleSwitch(letter) => {
-                let key = format!("-{letter}");
+            MenuResolution::Complete(key) => {
+                self.menu_complete(&params.view_id, &key, params, ui)
+            }
+        }
+    }
+
+    /// Re-render a menu after its pending steps changed and push the live keys.
+    fn menu_rerender(&mut self, view_id: &str, cursor: Cursor) -> Result<InvokeResult> {
+        let render = self.render_view(view_id, Some(cursor))?;
+        let keymap = self.keymap_notice(view_id);
+        Ok(InvokeResult {
+            render: Some(render),
+            keymap,
+            ..InvokeResult::empty()
+        })
+    }
+
+    /// Run the item whose complete key was typed, then clear the pending state.
+    fn menu_complete(
+        &mut self,
+        view_id: &str,
+        key: &str,
+        params: &ViewKeyParams,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
+        let item = self
+            .views
+            .get(view_id)
+            .and_then(|view| view.menu())
+            .and_then(|menu| menu.item(key).cloned());
+        match item {
+            Some(crate::menu::Item::Switch { .. }) => {
                 let toggled = self
                     .views
-                    .get_mut(&params.view_id)
+                    .get_mut(view_id)
                     .and_then(|view| view.menu_mut())
-                    .map(|menu| menu.toggle_switch(&key))
+                    .map(|menu| menu.toggle_switch(key))
                     .unwrap_or(false);
                 if !toggled {
-                    return Ok(unbound(&key));
+                    return Ok(unbound(key));
                 }
-                let render = self.render_view(&params.view_id, Some(params.cursor))?;
-                Ok(InvokeResult {
-                    render: Some(render),
-                    ..InvokeResult::empty()
-                })
+                self.menu_rerender(view_id, params.cursor)
             }
-            MenuResolution::SetOption(letter) => {
-                let key = format!("={letter}");
-                let option = self
-                    .views
-                    .get(&params.view_id)
-                    .and_then(|view| view.menu())
-                    .and_then(|menu| menu.item(&key).cloned());
-                let Some(crate::menu::Item::Option {
-                    value,
-                    reader,
-                    label,
-                    flag,
-                    ..
-                }) = option
-                else {
-                    return Ok(unbound(&key));
-                };
+            Some(crate::menu::Item::Option {
+                value,
+                reader,
+                label,
+                flag,
+                ..
+            }) => {
                 if value.is_some() {
                     if let Some(menu) = self
                         .views
-                        .get_mut(&params.view_id)
+                        .get_mut(view_id)
                         .and_then(|view| view.menu_mut())
                     {
-                        menu.set_option(&key, None);
+                        menu.set_option(key, None);
                     }
-                    let render = self.render_view(&params.view_id, Some(params.cursor))?;
-                    return Ok(InvokeResult {
-                        render: Some(render),
-                        ..InvokeResult::empty()
-                    });
+                    return self.menu_rerender(view_id, params.cursor);
                 }
 
                 let request = self.option_prompt(&label, &flag, reader);
@@ -687,23 +734,30 @@ impl Session {
                     _ => ui.text(&request)?,
                 };
                 let Some(value) = answer else {
-                    // Cancelling leaves the option exactly as it was.
-                    return Ok(InvokeResult::empty());
+                    // Cancelling leaves the option as it was, but the pending
+                    // steps were already consumed.
+                    return Ok(InvokeResult {
+                        keymap: self.keymap_notice(view_id),
+                        ..InvokeResult::empty()
+                    });
                 };
                 if let Some(menu) = self
                     .views
-                    .get_mut(&params.view_id)
+                    .get_mut(view_id)
                     .and_then(|view| view.menu_mut())
                 {
-                    menu.set_option(&key, Some(value));
+                    menu.set_option(key, Some(value));
                 }
-                let render = self.render_view(&params.view_id, Some(params.cursor))?;
-                Ok(InvokeResult {
-                    render: Some(render),
-                    ..InvokeResult::empty()
-                })
+                self.menu_rerender(view_id, params.cursor)
             }
-            MenuResolution::Action(key) => self.menu_action(&params.view_id, &key, params, ui),
+            Some(crate::menu::Item::Action { .. }) => {
+                let mut result = self.menu_action(view_id, key, params, ui)?;
+                if result.keymap.is_none() {
+                    result.keymap = self.keymap_notice(view_id);
+                }
+                Ok(result)
+            }
+            None => Ok(unbound(key)),
         }
     }
 
@@ -955,7 +1009,10 @@ impl Session {
             suffix += 1;
         }
 
-        let mut tree = view.render(&Ctx { viewport });
+        let mut tree = view.render(&Ctx {
+            viewport,
+            pending: &[],
+        });
         let version = 1;
         tree.version = version;
         let descriptor = ViewDescriptor {
@@ -977,6 +1034,7 @@ impl Session {
             edits: None,
             cursor: None,
             mode: descriptor.mode,
+            pending: String::new(),
             menu: view.menu(),
         };
         self.views.push(OpenView {
@@ -987,7 +1045,7 @@ impl Session {
             acked: None,
             acked_version: None,
             pending: PendingChord::default(),
-            menu_pending: MenuPrefix::None,
+            menu_pending: Vec::new(),
             key_cursor: None,
             mode: descriptor.mode,
             dirty: false,
@@ -1302,6 +1360,29 @@ fn view_uri(repo_path: &str, kind: &ViewKind, id: &str) -> String {
         ViewKind::Status => status_uri(repo_path),
         other => format!("magit://{}/{}", other.as_str(), id),
     }
+}
+
+/// The menu keys that do something in the current pending state.
+fn menu_live_keys(view: &OpenView) -> Vec<String> {
+    let Some(menu) = view.menu() else {
+        return Vec::new();
+    };
+    let pending = &view.menu_pending;
+    let mut keys = Vec::new();
+    for group in &menu.groups {
+        for item in &group.items {
+            if crate::menu::key_matches_pending(item.key(), pending) {
+                keys.push(item.key().to_string());
+            }
+        }
+    }
+    if !pending.is_empty() {
+        keys.push("Backspace".to_string());
+    }
+    for control in ["Escape", "ctrl+c", "q", "ctrl+s", "ctrl+r"] {
+        keys.push(control.to_string());
+    }
+    keys
 }
 
 /// A one-line hint for an unbound key inside a capture view.

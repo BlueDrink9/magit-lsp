@@ -22,6 +22,9 @@ M.order = {}
 M.pending_render = {}
 M.pending_keymap = {}
 
+--- Renders that arrived while a key request was waiting, in arrival order.
+M.deferred_render = {}
+
 --- `float` (default) or `split`.
 M.style = 'float'
 
@@ -97,6 +100,11 @@ local function new_buffer(descriptor)
   vim.bo[buf].modified = false
   vim.bo[buf].filetype = M.host.filetype or 'magit-lsp'
   pcall(vim.api.nvim_buf_set_name, buf, descriptor.uri)
+  -- Backspace pops one server-side pending step. It is not printable, so the
+  -- capture keymap does not carry it; the menu owns this mapping.
+  vim.keymap.set({ 'n', 'x' }, '<BS>', function()
+    M.press(descriptor.id, { 'Backspace' })
+  end, { buffer = buf, nowait = true, silent = true, desc = 'Pop a pending step' })
   return buf
 end
 
@@ -133,6 +141,7 @@ local function forget(id)
   M.views[id] = nil
   M.pending_render[id] = nil
   M.pending_keymap[id] = nil
+  M.deferred_render[id] = nil
   for index, value in ipairs(M.order) do
     if value == id then
       table.remove(M.order, index)
@@ -325,6 +334,8 @@ local function apply_edits(buf, edits)
   end
 end
 
+local flush_deferred
+
 local function resync(id)
   local view = M.views[id]
   local c = client()
@@ -338,6 +349,7 @@ local function resync(id)
       return
     end
     M.apply_render(result)
+    flush_deferred(id)
   end, view.buf)
 end
 
@@ -348,11 +360,23 @@ function M.apply_render(params)
     return
   end
   debug_api.render_received(params.viewId, params.version)
+  debug_api.set_pending(params.viewId, params.pending)
   local view = M.views[params.viewId]
   if not view then
     local queue = M.pending_render[params.viewId] or {}
     queue[#queue + 1] = params
     M.pending_render[params.viewId] = queue
+    return
+  end
+
+  -- A key request blocks the client in `buf_request_sync`. A render that
+  -- arrives while it waits must not be acked from inside that wait: the
+  -- server's reader loop is blocked on the session mutex and would never see
+  -- a prompt response. Apply it once the request returns.
+  if debug_api.state.requests > 0 then
+    local queue = M.deferred_render[params.viewId] or {}
+    queue[#queue + 1] = params
+    M.deferred_render[params.viewId] = queue
     return
   end
 
@@ -376,6 +400,22 @@ function M.apply_render(params)
     debug_api.render_acked(params.viewId, params.version)
   end
   vim.lsp.semantic_tokens.force_refresh(view.buf)
+end
+
+--- Apply renders held back while a key request was outstanding.
+---@param id string
+function flush_deferred(id)
+  if debug_api.state.requests > 0 then
+    return
+  end
+  local queue = M.deferred_render[id]
+  if not queue or #queue == 0 then
+    return
+  end
+  M.deferred_render[id] = nil
+  for _, params in ipairs(queue) do
+    M.apply_render(params)
+  end
 end
 
 --- Apply a `view/keymap` for a menu.
@@ -433,6 +473,7 @@ function M.press(id, steps)
     end)
     if not responses then
       vim.notify('magit-lsp menu key ' .. step .. ' timed out', vim.log.levels.WARN)
+      flush_deferred(id)
       return
     end
     for _, response in pairs(responses) do
@@ -447,6 +488,7 @@ function M.press(id, steps)
     end
   end
   M.apply_effects(effects)
+  flush_deferred(id)
 end
 
 --- Run a command against a menu and apply the answer.
@@ -487,6 +529,7 @@ function M.invoke(id, command, args)
     end
   end
   M.apply_effects(effects)
+  flush_deferred(id)
 end
 
 --- Apply effects produced by a menu key or command.

@@ -164,20 +164,38 @@ function M.keymap_received(id, notice)
   end
   local keys = {}
   local seen = {}
-  for _, binding in ipairs(notice.bindings or {}) do
-    for _, chord in ipairs(binding.keys or {}) do
+  local live = notice.liveKeys
+  if type(live) == 'table' and #live > 0 then
+    for _, chord in ipairs(live) do
       if not seen[chord] then
         seen[chord] = true
         keys[#keys + 1] = chord
+      end
+    end
+  else
+    for _, binding in ipairs(notice.bindings or {}) do
+      for _, chord in ipairs(binding.keys or {}) do
+        if not seen[chord] then
+          seen[chord] = true
+          keys[#keys + 1] = chord
+        end
       end
     end
   end
   view.scope = notice.scope or ''
   view.capture = notice.capture == true
   view.keys = keys
-  -- `view/keymap` does not carry a pending chord yet; report nothing rather
-  -- than inventing protocol state.
-  view.pending = notice.pending
+  view.pending = notice.pending or ''
+end
+
+--- Record the server's pending menu steps for a view.
+---@param id string
+---@param pending string|nil
+function M.set_pending(id, pending)
+  local view = M.views[id]
+  if view then
+    view.pending = pending or ''
+  end
 end
 
 --- Start a new trace id for one key press.

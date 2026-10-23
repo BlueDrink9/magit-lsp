@@ -6,7 +6,7 @@ use common::*;
 use magit_lsp::commands::registry;
 use magit_lsp::config::{BindingSpec, Config, Profile};
 use magit_lsp::errors;
-use magit_lsp::keyhandler::{self, PendingChord, Resolution};
+use magit_lsp::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use magit_lsp::keymap::{self, EditorMode, Keymap};
 use magit_lsp::keys::KeyChord;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection, ViewInvokeParams, ViewKeyParams};
@@ -172,6 +172,56 @@ fn unbound_key_in_a_non_capture_view_passes_through() {
         vec![Effect::PassThrough { key: "Q".to_string() }]
     );
     assert!(outcome.render.is_none());
+}
+
+#[test]
+fn menu_pending_steps_survive_non_matches_and_pop_on_backspace() {
+    let keys = vec![
+        "c".to_string(),
+        "-a".to_string(),
+        "=A".to_string(),
+        "g l".to_string(),
+    ];
+    let mut pending = Vec::new();
+
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "-", &keys),
+        MenuResolution::Pending
+    );
+    assert_eq!(pending, vec!["-".to_string()]);
+
+    // A key that cannot follow `-` is swallowed and leaves the prefix alone.
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "c", &keys),
+        MenuResolution::Unbound {
+            chord: "-c".to_string()
+        }
+    );
+    assert_eq!(pending, vec!["-".to_string()]);
+
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "a", &keys),
+        MenuResolution::Complete("-a".to_string())
+    );
+    assert!(pending.is_empty());
+
+    // Backspace with nothing pending is a no-op, not a close.
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "Backspace", &keys),
+        MenuResolution::Ignored
+    );
+
+    // A chord prefix collects, then completes.
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "g", &keys),
+        MenuResolution::Pending
+    );
+    assert_eq!(pending, vec!["g".to_string()]);
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "l", &keys),
+        MenuResolution::Complete("g l".to_string())
+    );
+    assert!(pending.is_empty());
 }
 
 #[test]

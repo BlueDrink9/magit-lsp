@@ -1,6 +1,5 @@
 # Bugs 7 and 8: `-` exposes a pending chord and Backspace undoes a step.
 fixture: modified-two-files
-xfail: bug-7
 ---
 keys: c
 wait
@@ -8,9 +7,16 @@ keys: -
 wait
 expect pending == "-"
 expect style "=A" dim
+expect screen contains "Commit"
+snapshot: prefix
 keys: BSpace
 wait
 expect pending == ""
+expect style "=A" coloured
+expect screen contains "Commit"
+snapshot: popped
 keys: - a
 wait
+expect pending == ""
 expect style "(--all)" coloured
+snapshot: toggled

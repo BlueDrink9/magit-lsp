@@ -112,6 +112,9 @@ pub struct ViewRender {
     pub cursor: Option<Cursor>,
     /// The view mode this render belongs to, so the client can show it.
     pub mode: ViewMode,
+    /// The menu steps typed so far, e.g. `-` or `g`; empty otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pending: String,
     /// The structured menu model, for menu views only (§3.11).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub menu: Option<Menu>,
@@ -275,6 +278,12 @@ pub struct ViewKeymapParams {
     pub bindings: Vec<Binding>,
     /// The view mode these bindings belong to (`text` has only the toggle).
     pub mode: ViewMode,
+    /// The menu steps typed so far, e.g. `-`; empty for other views.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pending: String,
+    /// The keys that do something right now, so clients need no chord logic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub live_keys: Vec<String>,
 }
 
 /// `view/setMode`: switch a view between interactive and text mode.

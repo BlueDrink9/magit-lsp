@@ -270,13 +270,31 @@ impl Menu {
 
     /// Render the menu as a tree laid out for `viewport`.
     pub fn render(&self, viewport: Viewport) -> Tree {
-        let mut builder = Builder::new(self);
+        self.render_with_pending(viewport, &[])
+    }
+
+    /// Render with the menu's pending key steps, dimming items that cannot
+    /// complete them and highlighting the prefix of the ones that can.
+    pub fn render_with_pending(&self, viewport: Viewport, pending: &[String]) -> Tree {
+        let mut builder = Builder::new(self, pending);
         builder.title();
         builder.arguments();
         builder.preview();
         builder.actions(viewport.cols as usize);
         builder.finish()
     }
+}
+
+/// Whether `key` can still complete after the pending menu steps.
+pub fn key_matches_pending(key: &str, pending: &[String]) -> bool {
+    if pending.is_empty() {
+        return true;
+    }
+    if pending.len() == 1 && matches!(pending[0].as_str(), "-" | "=") {
+        return key.starts_with(&pending[0]);
+    }
+    let prefix = pending.join(" ");
+    key == prefix || key.starts_with(&format!("{prefix} "))
 }
 
 /// A menu view: a [`Menu`] rendered through the ordinary view pipeline.
@@ -308,8 +326,9 @@ impl View for MenuView {
         true
     }
 
-    fn render(&mut self, ctx: &Ctx) -> Tree {
-        self.menu.render(ctx.viewport)
+    fn render(&mut self, ctx: &Ctx<'_>) -> Tree {
+        self.menu
+            .render_with_pending(ctx.viewport, ctx.pending)
     }
 
     fn menu(&self) -> Option<Menu> {
@@ -325,13 +344,15 @@ impl View for MenuView {
 /// column reflow on `view/resize` a pure function of the viewport.
 struct Builder<'a> {
     menu: &'a Menu,
+    pending: &'a [String],
     tree: Tree,
 }
 
 impl<'a> Builder<'a> {
-    fn new(menu: &'a Menu) -> Self {
+    fn new(menu: &'a Menu, pending: &'a [String]) -> Self {
         Self {
             menu,
+            pending,
             tree: Tree {
                 version: 0,
                 lines: Vec::new(),
@@ -395,53 +416,99 @@ impl<'a> Builder<'a> {
         let id = format!("menu:{}/item:{key}", self.menu.id);
         let line = self.tree.lines.len();
         let mut text = format!("  {key}  {label}");
-        let key_type = if item.is_option() {
-            "magit.menu.option"
-        } else {
-            "magit.menu.key"
-        };
-        self.token(line, 2, key.len(), key_type);
+        let live = self.item_live(key);
         let label_start = 2 + key.len() + 2;
-        self.token(line, label_start, label.len(), "magit.menu.label");
+        let mut tokens = self.item_tokens(0, item);
 
         if let Item::Switch { flag, on, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            let flag_type = if *on {
+            let flag_type = if !live {
+                "magit.menu.disabled"
+            } else if *on {
                 "magit.menu.flag.on"
             } else {
                 "magit.menu.flag.off"
             };
-            self.token(line, flag_start, flag.len(), flag_type);
+            tokens.push((flag_start, flag.len(), flag_type));
             text.push_str("  ");
             let marker = if *on { "[x]" } else { "[ ]" };
             let marker_start = text.len();
             text.push_str(marker);
-            self.token(
-                line,
-                marker_start,
-                3,
-                if *on {
-                    "magit.menu.switch.on"
-                } else {
-                    "magit.menu.switch.off"
-                },
-            );
+            let marker_type = if !live {
+                "magit.menu.disabled"
+            } else if *on {
+                "magit.menu.switch.on"
+            } else {
+                "magit.menu.switch.off"
+            };
+            tokens.push((marker_start, 3, marker_type));
         } else if let Item::Option { flag, value, .. } = item {
             text.push_str(&format!(" ({flag})"));
             let flag_start = label_start + label.len() + 2;
-            self.token(line, flag_start, flag.len(), "magit.menu.flag");
+            tokens.push((
+                flag_start,
+                flag.len(),
+                if live {
+                    "magit.menu.flag"
+                } else {
+                    "magit.menu.disabled"
+                },
+            ));
             if let Some(value) = value {
                 text.push_str("  ");
                 let value_start = text.len();
                 text.push_str(value);
-                self.token(line, value_start, value.len(), "magit.menu.value");
+                tokens.push((
+                    value_start,
+                    value.len(),
+                    if live {
+                        "magit.menu.value"
+                    } else {
+                        "magit.menu.disabled"
+                    },
+                ));
             }
         }
 
         self.tree.lines.push(text);
+        for (start, length, token_type) in tokens {
+            self.token(line, start, length, token_type);
+        }
         self.item_nodes(&id, item, line);
         id
+    }
+
+    /// Whether an item can still complete the pending steps.
+    fn item_live(&self, key: &str) -> bool {
+        key_matches_pending(key, self.pending)
+    }
+
+    /// Key and label tokens for an item whose key starts at `base + 2`.
+    fn item_tokens(&self, base: usize, item: &Item) -> Vec<(usize, usize, &'static str)> {
+        let key = item.key();
+        let label = item.label();
+        let key_start = base + 2;
+        let label_start = key_start + key.len() + 2;
+        let mut tokens = Vec::new();
+        if !self.item_live(key) {
+            tokens.push((key_start, key.len(), "magit.menu.disabled"));
+            tokens.push((label_start, label.len(), "magit.menu.disabled"));
+            return tokens;
+        }
+        let pending = self.pending.join(" ");
+        if !pending.is_empty() && key.starts_with(&pending) {
+            tokens.push((key_start, pending.len(), "magit.menu.pending"));
+            tokens.push((
+                key_start + pending.len(),
+                key.len() - pending.len(),
+                key_token(item),
+            ));
+        } else {
+            tokens.push((key_start, key.len(), key_token(item)));
+        }
+        tokens.push((label_start, label.len(), label_token(item)));
+        tokens
     }
 
     /// The preview line follows the arguments it describes.
@@ -521,11 +588,8 @@ impl<'a> Builder<'a> {
                             );
                         } else {
                             let item = &block.group.items[line_offset - 1];
-                            let key = item.key();
-                            let label = item.label();
-                            tokens.push((base + 2, key.len(), key_token(item)));
-                            tokens.push((base + 2 + key.len() + 2, label.len(), label_token(item)));
-                            owner = Some((key, item));
+                            tokens.extend(self.item_tokens(base, item));
+                            owner = Some((item.key(), item));
                         }
                         text.push_str(&content);
                     }
