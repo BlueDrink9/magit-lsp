@@ -1,0 +1,11 @@
+# Bug 9: `c c` on a clean tree must not leave "Committing…" on screen.
+fixture: clean
+xfail: bug-9
+---
+keys: c
+wait
+keys: c
+wait
+expect screen contains "Nothing to commit"
+expect screen not-contains "Committing"
+snapshot: clean-commit

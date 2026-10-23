@@ -1,0 +1,12 @@
+# Bug 1: `?` and `h` must open the dispatch from a fresh status view.
+fixture: modified-two-files
+xfail: bug-1
+---
+keys: ?
+wait
+expect screen contains "Transient and dwim commands"
+keys: Escape
+wait
+keys: h
+wait
+expect screen contains "Transient and dwim commands"

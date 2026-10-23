@@ -1,0 +1,11 @@
+# Bug 4: the read-only buffer must not warn W10 on entry or on a key.
+fixture: modified-two-files
+xfail: bug-4
+---
+keys: j j k
+wait
+keys: ?
+wait
+keys: q
+wait
+expect no_message /W10|readonly/

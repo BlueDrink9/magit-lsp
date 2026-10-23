@@ -1,0 +1,15 @@
+# Bug 2: `?` inside a menu must not stack a second menu.
+fixture: modified-two-files
+xfail: bug-2
+---
+keys: m
+wait
+expect windows.floating == 1
+keys: ?
+wait
+expect windows.floating == 1
+expect screen contains "Transient and dwim commands"
+keys: q
+wait
+expect windows.floating == 0
+expect screen contains "Unstaged changes"

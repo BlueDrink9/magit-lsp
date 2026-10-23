@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from . import driver
+from . import driver, scenario
 
 USAGE = """Usage:
   scripts/ui start <fixture> [--size WxH] [--profile standard|vim] [--ansi|--truecolor]
@@ -15,6 +15,7 @@ USAGE = """Usage:
   scripts/ui state [--run <id>]
   scripts/ui trace [N] [--run <id>]
   scripts/ui stop [--run <id>]
+  scripts/ui run <scenario>... [--markdown <path>]
 
 Fixtures: clean, modified-two-files, staged-one-file, staged-and-unstaged,
           untracked, unborn, in-progress-rebase, in-progress-cherry-pick.
@@ -168,6 +169,16 @@ def _stop(args: list[str]) -> int:
     return 0
 
 
+def _run(args: list[str]) -> int:
+    markdown, args = _take_value(args, "--markdown")
+    if not args:
+        raise driver.DriverError("`run` needs at least one scenario file")
+    for arg in args:
+        if arg.startswith("-"):
+            raise driver.DriverError(f"unknown option `{arg}`")
+    return scenario.run(args, markdown=markdown)
+
+
 _COMMANDS = {
     "start": _start,
     "keys": _keys,
@@ -176,6 +187,7 @@ _COMMANDS = {
     "state": _state,
     "trace": _trace,
     "stop": _stop,
+    "run": _run,
 }
 
 

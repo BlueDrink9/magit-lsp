@@ -44,13 +44,13 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
   - [x] Two starts in parallel do not collide (unique socket per run id).
 - [x] **U0.3 Fixtures** `clean`, `modified-two-files`, `staged-one-file`, `staged-and-unstaged`, `untracked`, `unborn`, `in-progress-rebase`, `in-progress-cherry-pick`. Each built by a script using the deterministic environment.
 - [x] **U0.4 ANSI decoder:** converts `tmux capture-pane -p -e` output into runs `{row, col, text, fg, bg, bold, dim, reverse}`. Unit tests with hand-written escape strings covering 16-colour, 256-colour and truecolor sequences.
-- [ ] **U0.5 Scenario runner** `scripts/ui run <file>…` implementing the DSL in §A.5, writing artefacts to `build/ui/<scenario>/`. Unit tests for the predicate evaluator.
-- [ ] **U0.6 Make target** `make ui-test` (runs all scenarios under both profiles and both sizes) and `make ui-tour` (§U2.2).
+- [x] **U0.5 Scenario runner** `scripts/ui run <file>…` implementing the DSL in §A.5, writing artefacts to `build/ui/<scenario>/`. Unit tests for the predicate evaluator.
+- [x] **U0.6 Make target** `make ui-test` (runs all scenarios under both profiles and both sizes) and `make ui-tour` (§U2.2).
 - [x] **U0.7 Fix the render-before-open race** the R-3.2 worker reported: the Neovim client buffers `view/render` by `viewId` until the view exists. *Done when:* an L2 test that delays the `view/open` response still ends with the correct buffer text, and 50 consecutive `ui start` runs show no missing first render.
   - [x] `view/render` and `view/keymap` are buffered per `viewId` and applied in order once the view/buffer exists (L2 test `buffers renders that beat the view/open response`).
   - [x] 50 consecutive `ui start` runs show no missing first render (driver U0.2).
-- [ ] **U0.8 Docs:** add to `AGENTS.md` the workflow "inspect, act, inspect": `ui start`, `ui keys`, `ui wait`, `ui screen`, `ui state`, `ui stop`.
-- [ ] **U0.9 Bug scenarios:** one scenario per bug in Phase U1, each marked `xfail`.
+- [x] **U0.8 Docs:** add to `AGENTS.md` the workflow "inspect, act, inspect": `ui start`, `ui keys`, `ui wait`, `ui screen`, `ui state`, `ui stop`.
+- [x] **U0.9 Bug scenarios:** one scenario per bug in Phase U1, each marked `xfail`.
 
 **Done when:** `make ui-test` runs, reports the ten bug scenarios as XFAIL (bug 3 passes and is a plain regression), and a smoke scenario (`open status, expect "Unstaged changes", stop`) passes under both profiles and both sizes.
 

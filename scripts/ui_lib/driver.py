@@ -212,6 +212,15 @@ def idle(run: Run) -> bool:
     return output in ("true", "1")
 
 
+def clear_message_line(run: Run) -> None:
+    """Clear the command-line message display without touching `:messages`.
+
+    `:mode` redraws the command line; a scenario still sees the recorded
+    warning through `snapshot()["messages"]`.
+    """
+    _expr(run, 'execute("mode")')
+
+
 def wait_idle(run: Run, timeout_ms: int = 2000, settle_ms: int = 50) -> bool:
     """Wait for idle, allowing `settle_ms` for queued input to be consumed.
 
@@ -322,10 +331,17 @@ def _nvim_command(run: Run, env: dict[str, str]) -> str:
     # Work around the known readonly warning (R-UI-3, bug 4) just enough that
     # the first render cannot block startup with W10. The client fix drops
     # `readonly`; until then the harness cannot open a view without this.
+    #
+    # The warning itself is still recorded: `no-readonly-warning` must see the
+    # W10 the workaround prevents from blocking. Without the echo, clearing
+    # `readonly` before Vim writes would hide the very bug the scenario tests.
     ignore_readonly = (
         "lua vim.api.nvim_create_autocmd('FileChangedRO', {"
         " callback = function()"
-        " if vim.bo.filetype == 'magit-lsp' then vim.bo.readonly = false end"
+        " if vim.bo.filetype == 'magit-lsp' then"
+        " vim.api.nvim_echo({{'W10: Warning: Changing a readonly file', 'WarningMsg'}}, true, {})"
+        " vim.bo.readonly = false"
+        " end"
         " end })"
     )
     args = [

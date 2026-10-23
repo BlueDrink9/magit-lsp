@@ -1,0 +1,13 @@
+# Bug 5: opening the dispatch must stay within the end-to-end budget.
+#
+# `standard` binds `?` directly; `vim` uses the `g ?` chord (bug 1 keeps `?`
+# unbound from status), so this scenario measures the server path once.
+fixture: modified-two-files
+profile: standard
+profile-only: true
+---
+keys: ?
+wait
+expect screen contains "Transient and dwim commands"
+expect latency("?") <= 100ms
+snapshot: dispatch

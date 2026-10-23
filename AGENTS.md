@@ -125,6 +125,14 @@ sent to the server.
   `applied[bufnr]`), fold-key mirroring and capture-key listing.
 - `lua/magit-lsp/menu.lua` — per-menu scratch buffers and bottom float/split
   windows, render/keymap application, key forwarding and view effects.
+- `lua/magit-lsp/debug.lua` — debug API for the real-UI harness: `snapshot()`,
+  `idle()` and the `MAGIT_LSP_TRACE` event stream.
+- `scripts/ui` — real-UI driver (`start`, `keys`, `wait`, `screen`, `state`,
+  `trace`, `stop`, `run`) over tmux and a real Neovim.
+- `scripts/ui_lib/` — driver, ANSI decoder, deterministic fixtures and the
+  §A.5 scenario parser/predicate evaluator/runner.
+- `tests/ui/` — Python unit tests for the harness and the `.scn` scenarios
+  (`smoke.scn`, `tour.scn`, `scenarios/*.scn`).
 - `tests/common/mod.rs` — `RepoFixture` and git helpers with a deterministic
   environment (fixed identity/dates, isolated config).
 - `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/errors.rs` — Rust
@@ -137,6 +145,24 @@ sent to the server.
   the generated README block.
 - `scripts/color_spike.lua` — `:TOhtml` colour-verification spike
   (`make color-spike`).
+
+## UI testing: inspect, act, inspect
+
+A task that changes what the user sees is not done until a scripted test has
+driven the real UI and its screen output has been checked. The loop is:
+
+1. `scripts/ui start <fixture>` — build a deterministic repo and open the real
+   client in tmux; it prints the run id.
+2. `scripts/ui screen` / `scripts/ui state` — inspect the rendered screen and
+   `debug.snapshot()`.
+3. `scripts/ui keys <key>…` — act.
+4. `scripts/ui wait` — poll `idle()` (never sleep).
+5. `scripts/ui screen` / `scripts/ui state` — inspect again.
+6. `scripts/ui stop` — always stop the run.
+
+Scripted scenarios live in `tests/ui/` and run with `make ui-test`; `make
+ui-tour` writes `build/ui/tour.md`. The DSL and the result rules are in
+`ui-test-plan.md` §A.5.
 
 ## Progress (done)
 

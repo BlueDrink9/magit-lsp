@@ -1,0 +1,13 @@
+# Bug 10: the commit menu must show its actions, not only its arguments.
+fixture: modified-two-files
+xfail: bug-10
+---
+keys: c
+wait
+expect screen contains "Commit"
+expect screen contains "Extend"
+expect screen contains "Amend"
+expect screen contains "Reword"
+expect screen contains "Fixup"
+expect screen contains "Squash"
+snapshot: commit-menu

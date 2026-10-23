@@ -1,0 +1,17 @@
+# Placeholder tour: status, help, close. Extended in U2.2.
+#
+# `standard` is used because `?` opens the dispatch there; the `vim` profile
+# binds it as `g ?` (and bug 1 keeps it unbound from the status view).
+fixture: modified-two-files
+size: 100x30
+profile: standard
+size-only: true
+profile-only: true
+---
+snapshot: status
+keys: ?
+wait
+snapshot: dispatch
+keys: q
+wait
+snapshot: closed
