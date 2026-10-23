@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run a shell command inside this repository's flake dev shell. OpenCode's
+# `shell` setting points here, so the shell tool sees the flake's tools.
+set -euo pipefail
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+eval "$(nix --extra-experimental-features 'nix-command flakes' print-dev-env "$repo")" >/dev/null
+exec bash "$@"

@@ -11,7 +11,7 @@
 //! helper) and the confirm/cancel command handlers (send the reply).
 
 use crate::git::GitRepo;
-use crate::protocol::Effect;
+use crate::protocol::{EditDocumentMode, Effect};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -36,11 +36,27 @@ struct EditHello {
     kind: String,
 }
 
+/// Git's askpass hello: one JSON line carrying the prompt to show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct AskpassHello {
+    prompt: String,
+}
+
+/// The first line a helper sends: either an edit or an askpass request.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+enum BridgeHello {
+    Edit(EditHello),
+    Askpass(AskpassHello),
+}
+
 /// The answer the helper waits for; `ok: false` (or `abort: true`) aborts Git.
 #[derive(Debug, Deserialize)]
 struct HelperReply {
     #[serde(default)]
     ok: bool,
+    #[serde(default)]
+    secret: Option<String>,
 }
 
 /// How a pending edit was resolved.
@@ -130,12 +146,15 @@ pub fn registry() -> &'static EditRegistry {
 /// How the listener hands an effect to the server's writer.
 pub type EffectEmitter = Arc<dyn Fn(Vec<Effect>) + Send + Sync>;
 
+/// How the listener asks the client for an askpass answer; `None` cancels.
+pub type AskpassPrompt = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 static SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Bind the bridge socket and start accepting helpers, once per process.
-pub fn start_listener(emitter: EffectEmitter) -> Option<&'static Path> {
+pub fn start_listener(emitter: EffectEmitter, askpass: AskpassPrompt) -> Option<&'static Path> {
     SOCKET
-        .get_or_init(|| match bind_listener(emitter) {
+        .get_or_init(|| match bind_listener(emitter, askpass) {
             Ok(path) => Some(path),
             Err(error) => {
                 tracing::warn!(%error, "editor bridge unavailable");
@@ -184,14 +203,57 @@ pub fn run_helper(file: &str) -> Result<bool> {
     }
 }
 
+/// The askpass helper: forward Git's prompt and return the secret, if any.
+///
+/// The secret travels only over stdout; callers must never log it.
+pub fn run_askpass(prompt: &str) -> Result<Option<String>> {
+    #[cfg(unix)]
+    {
+        unix_askpass(prompt)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = prompt;
+        Err(Error::new(
+            "the askpass bridge needs a Unix socket; this build has none",
+        ))
+    }
+}
+
 /// Our own executable followed by the helper subcommand, quoted for `sh`.
 fn helper_invocation() -> Result<String> {
+    invocation("--editor-helper")
+}
+
+/// Our own executable followed by `--askpass`, quoted for `sh`.
+pub fn askpass_command() -> Result<String> {
+    invocation("--askpass")
+}
+
+fn invocation(subcommand: &str) -> Result<String> {
     let exe = std::env::current_exe()
         .map_err(|error| Error::new(format!("cannot locate magit-lsp: {error}")))?;
     Ok(format!(
-        "{} --editor-helper",
+        "{} {subcommand}",
         shell_quote(&exe.to_string_lossy())
     ))
+}
+
+/// The askpass command every spawned Git process should use.
+static ASKPASS: OnceLock<String> = OnceLock::new();
+
+/// Remember how a spawned Git process should ask for a password.
+///
+/// Only the server process knows its own path, so only the server sets this.
+/// A process that never runs the server (a test binary) leaves it unset and Git
+/// keeps its normal behaviour.
+pub fn set_askpass_invocation(invocation: String) {
+    let _ = ASKPASS.set(invocation);
+}
+
+/// The askpass command for spawned Git processes, when the server runs.
+pub fn askpass_invocation() -> Option<&'static str> {
+    ASKPASS.get().map(String::as_str)
 }
 
 fn shell_quote(value: &str) -> String {
@@ -234,6 +296,40 @@ fn unix_helper(file: &str) -> Result<bool> {
     Ok(reply.ok)
 }
 
+#[cfg(unix)]
+fn unix_askpass(prompt: &str) -> Result<Option<String>> {
+    use std::os::unix::net::UnixStream;
+
+    let socket = std::env::var_os(SOCKET_ENV)
+        .ok_or_else(|| Error::new(format!("{SOCKET_ENV} is not set")))?;
+    let mut stream = UnixStream::connect(Path::new(&socket)).map_err(|error| {
+        Error::new(format!("cannot connect to the askpass bridge: {error}"))
+    })?;
+    let hello = AskpassHello {
+        prompt: prompt.to_string(),
+    };
+    let mut line = serde_json::to_string(&hello)
+        .map_err(|error| Error::new(format!("cannot encode the askpass hello: {error}")))?;
+    line.push('\n');
+    stream.write_all(line.as_bytes())?;
+    stream.flush()?;
+
+    let mut reply = String::new();
+    BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|error| Error::new(format!("cannot read the askpass reply: {error}")))?,
+    )
+    .read_line(&mut reply)?;
+    let reply: HelperReply = serde_json::from_str(reply.trim())
+        .map_err(|error| Error::new(format!("bad askpass reply: {error}")))?;
+    if reply.ok {
+        Ok(reply.secret)
+    } else {
+        Ok(None)
+    }
+}
+
 /// Make Git's relative edit path absolute, so the client can open it.
 #[cfg(unix)]
 fn absolute(file: &str) -> Result<PathBuf> {
@@ -249,7 +345,7 @@ fn absolute(file: &str) -> Result<PathBuf> {
 }
 
 #[cfg(unix)]
-fn bind_listener(emitter: EffectEmitter) -> Result<PathBuf> {
+fn bind_listener(emitter: EffectEmitter, askpass: AskpassPrompt) -> Result<PathBuf> {
     use std::os::unix::net::UnixListener;
 
     let dir = std::env::temp_dir().join(format!("magit-lsp-{}", std::process::id()));
@@ -262,29 +358,34 @@ fn bind_listener(emitter: EffectEmitter) -> Result<PathBuf> {
         .map_err(|error| Error::new(format!("cannot bind the editor bridge: {error}")))?;
     std::thread::Builder::new()
         .name("magit-lsp-editor".to_string())
-        .spawn(move || accept_loop(listener, emitter))
+        .spawn(move || accept_loop(listener, emitter, askpass))
         .map_err(|error| Error::new(format!("cannot start the editor bridge: {error}")))?;
     Ok(path)
 }
 
 #[cfg(not(unix))]
-fn bind_listener(_emitter: EffectEmitter) -> Result<PathBuf> {
+fn bind_listener(_emitter: EffectEmitter, _askpass: AskpassPrompt) -> Result<PathBuf> {
     Err(Error::new(
         "the editor bridge needs a Unix socket; this build has none",
     ))
 }
 
 #[cfg(unix)]
-fn accept_loop(listener: std::os::unix::net::UnixListener, emitter: EffectEmitter) {
+fn accept_loop(
+    listener: std::os::unix::net::UnixListener,
+    emitter: EffectEmitter,
+    askpass: AskpassPrompt,
+) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
             continue;
         };
         let emitter = Arc::clone(&emitter);
+        let askpass = Arc::clone(&askpass);
         let _ = std::thread::Builder::new()
             .name("magit-lsp-editor-edit".to_string())
             .spawn(move || {
-                if let Err(error) = handle_connection(stream, emitter) {
+                if let Err(error) = handle_connection(stream, emitter, askpass) {
                     tracing::debug!(%error, "editor bridge connection failed");
                 }
             });
@@ -295,39 +396,135 @@ fn accept_loop(listener: std::os::unix::net::UnixListener, emitter: EffectEmitte
 fn handle_connection(
     mut stream: std::os::unix::net::UnixStream,
     emitter: EffectEmitter,
+    askpass: AskpassPrompt,
 ) -> Result<()> {
     let mut reader = BufReader::new(
         stream
             .try_clone()
-            .map_err(|error| Error::new(format!("cannot read the edit hello: {error}")))?,
+            .map_err(|error| Error::new(format!("cannot read the bridge hello: {error}")))?,
     );
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    let hello: EditHello = serde_json::from_str(line.trim())
-        .map_err(|error| Error::new(format!("bad edit hello: {error}")))?;
+    let hello: BridgeHello = serde_json::from_str(line.trim())
+        .map_err(|error| Error::new(format!("bad bridge hello: {error}")))?;
 
+    match hello {
+        BridgeHello::Edit(hello) => handle_edit(&mut stream, emitter, hello),
+        BridgeHello::Askpass(hello) => {
+            tracing::debug!("editor bridge: askpass");
+            match askpass(&hello.prompt) {
+                Some(secret) => write_reply(&mut stream, true, Some(&secret)),
+                None => write_reply(&mut stream, false, None),
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn handle_edit(
+    stream: &mut std::os::unix::net::UnixStream,
+    emitter: EffectEmitter,
+    hello: EditHello,
+) -> Result<()> {
     let Some((repo_path, replies)) = registry().take_waiter(&hello.edit_id) else {
         // An edit nobody started (a stale helper, or a restarted server) must
         // fail fast instead of blocking Git forever.
-        return write_reply(&mut stream, false);
+        return write_reply(stream, false, None);
     };
     tracing::debug!(edit_id = %hello.edit_id, repo = %repo_path, "editor bridge: edit");
+    let metadata = edit_document_metadata(&hello.kind);
     emitter(vec![Effect::EditDocument {
         edit_id: hello.edit_id.clone(),
         path: hello.path,
         kind: hello.kind,
+        title: metadata.title.to_string(),
+        mode: EditDocumentMode::RealFile,
+        scope: metadata.scope.to_string(),
     }]);
 
     let reply = replies.recv().unwrap_or(Reply::Abort);
     registry().remove(&hello.edit_id);
-    write_reply(&mut stream, reply == Reply::Ok)
+    write_reply(stream, reply == Reply::Ok, None)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EditDocumentMetadata {
+    title: &'static str,
+    scope: &'static str,
+}
+
+/// Metadata for a Git-owned real file, including its command/keymap scope.
+fn edit_document_metadata(kind: &str) -> EditDocumentMetadata {
+    match kind {
+        COMMIT_MESSAGE_KIND => EditDocumentMetadata {
+            title: "Commit message",
+            scope: "commit-message",
+        },
+        "merge-message" => EditDocumentMetadata {
+            title: "Merge message",
+            scope: "commit-message",
+        },
+        "tag-message" => EditDocumentMetadata {
+            title: "Tag message",
+            scope: "commit-message",
+        },
+        _ => EditDocumentMetadata {
+            title: "Edit Git file",
+            scope: "common",
+        },
+    }
 }
 
 #[cfg(unix)]
-fn write_reply(stream: &mut std::os::unix::net::UnixStream, ok: bool) -> Result<()> {
-    let mut line = serde_json::json!({ "ok": ok }).to_string();
+fn write_reply(
+    stream: &mut std::os::unix::net::UnixStream,
+    ok: bool,
+    secret: Option<&str>,
+) -> Result<()> {
+    let mut value = serde_json::json!({ "ok": ok });
+    if let Some(secret) = secret {
+        value["secret"] = serde_json::Value::String(secret.to_string());
+    }
+    let mut line = value.to_string();
     line.push('\n');
     stream.write_all(line.as_bytes())?;
     stream.flush()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_document_metadata_uses_the_matching_message_scope() {
+        for (kind, title) in [
+            (COMMIT_MESSAGE_KIND, "Commit message"),
+            ("merge-message", "Merge message"),
+            ("tag-message", "Tag message"),
+        ] {
+            assert_eq!(
+                edit_document_metadata(kind),
+                EditDocumentMetadata {
+                    title,
+                    scope: "commit-message",
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_edit_kinds_use_the_shared_scope_and_real_file_title() {
+        assert_eq!(
+            edit_document_metadata("other"),
+            EditDocumentMetadata {
+                title: "Edit Git file",
+                scope: "common",
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(EditDocumentMode::RealFile).expect("serialize real-file mode"),
+            serde_json::json!("realFile")
+        );
+    }
 }

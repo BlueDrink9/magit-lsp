@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "shell": "/home/william/src/magit-lsp/scripts/dev-shell",
+  "plugins": [
+    {
+      "package": "/home/william/src/opencode-v2-lsp-support",
+      "options": { "debug": true, "diagnostics": true }
+    }
+  ],
+  "lsp": {
+    "rust": {
+      "command": ["/home/william/src/magit-lsp/scripts/nix-exec", "rust-analyzer"]
+    },
+    "lua-ls": {
+      "command": ["/home/william/src/magit-lsp/scripts/nix-exec", "lua-language-server"]
+    },
+    "typescript": {
+      "disabled": true
+    },
+    "typescript-node": {
+      "command": ["/home/william/src/magit-lsp/scripts/nix-exec", "typescript-language-server", "--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]
+    }
+  }
+}

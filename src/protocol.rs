@@ -50,13 +50,28 @@ pub enum Effect {
     Quit,
     /// Open a Git-owned file in the client's own editor and keep the operation
     /// that spawned Git waiting until `common.confirm`/`common.cancel` answers
-    /// with the same `edit_id`.
+    /// with the same `edit_id`. The metadata is selected by the server: `scope`
+    /// is the keymap/command scope for the edit, and the current bridge edits
+    /// real files only.
     EditDocument {
         #[serde(rename = "editId")]
         edit_id: String,
         path: String,
         kind: String,
+        title: String,
+        mode: EditDocumentMode,
+        scope: String,
     },
+}
+
+/// How an editor-bridge document is edited.
+///
+/// The bridge currently supports Git-owned real files; virtual edit documents
+/// require a separate implementation before adding another mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EditDocumentMode {
+    RealFile,
 }
 
 impl Effect {

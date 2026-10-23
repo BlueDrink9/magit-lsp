@@ -26,6 +26,9 @@
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  },
   "contributes": {
     "commands": [
       {

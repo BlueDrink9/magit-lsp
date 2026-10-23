@@ -74,10 +74,14 @@ end
 --- runs a server command (used by the fold mirrors). `opts.visit` overrides one
 --- normal-mode `lhs` with a client-side function, and `opts.fold_keys` adds
 --- explicit fold mirrors for Lua-function user mappings.
+---
+--- `opts.commands` maps a command id to a client-side function (an edit's
+--- confirm/cancel), and `opts.only_commands` drops every binding without one
+--- so a real file keeps its ordinary editor keys.
 ---@param bufnr integer
 ---@param notice table `view/keymap` params
 ---@param handlers table { press: fun(steps: string[]), command: fun(command: string, args: table|nil) }
----@param opts table|nil { visit?: table, fold_keys?: table<string, string> }
+---@param opts table|nil { visit?: table, fold_keys?: table<string, string>, folds?: boolean, commands?: table<string, function>, only_commands?: boolean }
 ---@return table[] applied entries
 function M.apply(bufnr, notice, handlers, opts)
   opts = opts or {}
@@ -113,16 +117,19 @@ function M.apply(bufnr, notice, handlers, opts)
 
   -- Every binding the server sent, in each mode it applies to.
   for _, binding in ipairs(notice.bindings or {}) do
-    for _, chord in ipairs(binding.keys or {}) do
-      local lhs = keys.to_lhs(chord)
-      local steps = keys.steps(chord)
-      if lhs and steps then
-        for _, mode in ipairs(binding.modes or { 'normal', 'visual' }) do
-          local nvim_mode = mode == 'visual' and 'x' or 'n'
-          local captured = steps
-          add(nvim_mode, lhs, function()
-            handlers.press(captured)
-          end, binding.label or binding.command)
+    local local_fn = opts.commands and opts.commands[binding.command]
+    if local_fn or not opts.only_commands then
+      for _, chord in ipairs(binding.keys or {}) do
+        local lhs = keys.to_lhs(chord)
+        local steps = keys.steps(chord)
+        if lhs and steps then
+          for _, mode in ipairs(binding.modes or { 'normal', 'visual' }) do
+            local nvim_mode = mode == 'visual' and 'x' or 'n'
+            local captured = steps
+            add(nvim_mode, lhs, local_fn or function()
+              handlers.press(captured)
+            end, binding.label or binding.command)
+          end
         end
       end
     end
@@ -135,7 +142,7 @@ function M.apply(bufnr, notice, handlers, opts)
   end
 
   -- Mirror the native fold keys; a server binding for the same lhs wins.
-  if not text_mode then
+  if not text_mode and opts.folds ~= false then
     for _, native in ipairs(FOLD_ORDER) do
       add('n', native, command_fn(FOLDS[native]), 'Fold')
     end
@@ -148,7 +155,7 @@ function M.apply(bufnr, notice, handlers, opts)
   end
 
   -- Capture mode forwards every other printable ASCII key to the server.
-  if notice.capture and not text_mode then
+  if notice.capture and not text_mode and not opts.only_commands then
     for code = 32, 126 do
       local char = string.char(code)
       local canonical = char

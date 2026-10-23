@@ -22,12 +22,14 @@ Usage: magit-lsp [--config <path>]
        magit-lsp keymap [--format json|vscode|neovim|markdown] [--profile standard|vim] [--config <path>] [--check]
        magit-lsp parity [--format markdown|json]
        magit-lsp --editor-helper <path>
+       magit-lsp --askpass <prompt>
        magit-lsp --version | --help
 
 With no subcommand, run the LSP server on stdio. The keymap and parity
 subcommands print generated tables and never speak LSP. `--editor-helper` is
 Git's editor: it forwards the file to the running server and blocks until the
-client confirms or cancels.
+client confirms or cancels. `--askpass` is Git's credential prompt: it asks the
+running server for a secret and prints it on stdout.
 ";
 
 const PARITY_USAGE: &str = "\
@@ -62,10 +64,7 @@ fn dispatch(args: Vec<String>, out: &mut impl Write, err: &mut impl Write) -> Ou
         Some("keymap") => run_keymap(&args[1..], out, err),
         Some("parity") => run_parity(&args[1..], out, err),
         Some("--editor-helper") => run_editor_helper(&args[1..], err),
-        Some("--askpass") => {
-            let _ = writeln!(err, "`--askpass` is not implemented yet\n\n{USAGE}");
-            Outcome::Done(2)
-        }
+        Some("--askpass") => run_askpass(&args[1..], out, err),
         Some("--version") | Some("-V") => {
             let _ = writeln!(out, "magit-lsp {}", env!("CARGO_PKG_VERSION"));
             Outcome::Done(0)
@@ -212,6 +211,30 @@ fn run_editor_helper(args: &[String], err: &mut impl Write) -> Outcome {
         Ok(true) => Outcome::Done(0),
         // `false` lets Git abort the operation, which is what cancel means.
         Ok(false) => Outcome::Done(1),
+        Err(error) => {
+            let _ = writeln!(err, "{error}");
+            Outcome::Done(1)
+        }
+    }
+}
+
+/// Git's askpass: ask the running server for a secret and print it.
+fn run_askpass(args: &[String], out: &mut impl Write, err: &mut impl Write) -> Outcome {
+    let prompt = match args {
+        [prompt] => prompt,
+        _ => {
+            let _ = writeln!(err, "`--askpass` needs exactly one prompt\n\n{USAGE}");
+            return Outcome::Done(2);
+        }
+    };
+    match crate::editor::run_askpass(prompt) {
+        Ok(Some(secret)) => {
+            // The secret is the helper's whole output; never log it.
+            let _ = writeln!(out, "{secret}");
+            Outcome::Done(0)
+        }
+        // A cancelled prompt must make Git abort instead of retrying forever.
+        Ok(None) => Outcome::Done(1),
         Err(error) => {
             let _ = writeln!(err, "{error}");
             Outcome::Done(1)

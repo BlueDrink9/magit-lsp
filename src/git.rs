@@ -726,6 +726,16 @@ fn git_command(cwd: &Path, args: &[&str], stdin: Stdio, env: &[(&str, &str)]) ->
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("GIT_TERMINAL_PROMPT", "0");
+    // Git may need a password or passphrase; route it through the editor
+    // bridge so the client can show a masked prompt. Without a running server
+    // (unit tests, a bare `git` backend) leave the normal Git behaviour.
+    if let Some(socket) = crate::editor::socket_path() {
+        command.env(crate::editor::SOCKET_ENV, socket);
+        if let Some(askpass) = crate::editor::askpass_invocation() {
+            command.env("GIT_ASKPASS", askpass);
+            command.env("SSH_ASKPASS", askpass);
+        }
+    }
     for (key, value) in env {
         command.env(key, value);
     }

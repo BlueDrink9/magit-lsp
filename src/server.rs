@@ -9,7 +9,7 @@ use crate::session::{InvokeResult, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
-use crate::view::Viewport;
+use crate::view::{ViewMode, Viewport};
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::request::Request as LspRequest;
@@ -121,10 +121,8 @@ struct Shared {
     startup_error: Option<String>,
     /// The writer channel, so a blocking command can send `view/prompt`.
     sender: mpsc::UnboundedSender<Message>,
-    /// Prompts waiting for an answer, keyed by prompt id.
-    prompts: Arc<Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>>,
-    /// Global prompt-id counter; ids are unique across sessions.
-    next_prompt: Arc<AtomicU64>,
+    /// The prompt transport, shared with the editor bridge.
+    prompts: Arc<PromptBridge>,
     /// Running mutations keyed by their progress token, so a client cancel can
     /// kill the child on the blocking worker thread.
     progress: Arc<Mutex<HashMap<String, CancelHandle>>>,
@@ -148,9 +146,8 @@ impl Shared {
             config,
             client: Arc::new(Mutex::new(ClientCaps::default())),
             startup_error,
-            sender,
-            prompts: Arc::new(Mutex::new(HashMap::new())),
-            next_prompt: Arc::new(AtomicU64::new(0)),
+            sender: sender.clone(),
+            prompts: Arc::new(PromptBridge::new(&sender)),
             progress: Arc::new(Mutex::new(HashMap::new())),
             next_progress: Arc::new(AtomicU64::new(0)),
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
@@ -176,12 +173,6 @@ impl Shared {
             ticket,
             repo_path,
         }
-    }
-
-    /// Allocate a prompt id, unique for this server process.
-    fn next_prompt_id(&self) -> String {
-        let next = self.next_prompt.fetch_add(1, Ordering::Relaxed) + 1;
-        format!("p{next}")
     }
 
     /// Announce a mutation with the LSP work-done handshake.
@@ -244,39 +235,6 @@ impl Shared {
         }
     }
 
-    /// Send a prompt notification and block until the client answers it.
-    ///
-    /// Returning `None` means the user cancelled: `view/promptRespond` drops the
-    /// sender without a value, so `recv` fails.
-    fn ask(&self, request: &ViewPromptParams) -> Option<PromptValue> {
-        let prompt_id = self.next_prompt_id();
-        let params = ViewPromptParams {
-            prompt_id: prompt_id.clone(),
-            ..request.clone()
-        };
-        let (tx, rx) = std_mpsc::channel();
-        self.prompts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(prompt_id.clone(), tx);
-
-        let sent = self
-            .sender
-            .send(Message::Notification(Notification::new(
-                VIEW_PROMPT.to_string(),
-                params,
-            )))
-            .is_ok();
-
-        let answer = if sent { rx.recv().ok() } else { None };
-
-        self.prompts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&prompt_id);
-        answer
-    }
-
     /// Deliver a `view/promptRespond` answer to the waiting command.
     fn respond_prompt(
         &self,
@@ -284,19 +242,7 @@ impl Shared {
         cancelled: bool,
         value: Option<PromptValue>,
     ) -> Result<()> {
-        let sender = self
-            .prompts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(prompt_id)
-            .ok_or_else(|| Error::new(format!("unknown prompt: {prompt_id}")))?;
-        if !cancelled {
-            if let Some(value) = value {
-                let _ = sender.send(value);
-            }
-        }
-        // Dropping the sender without a value is the cancellation signal.
-        Ok(())
+        self.prompts.respond(prompt_id, cancelled, value)
     }
 
     /// How the client wants keymaps delivered.
@@ -361,22 +307,110 @@ impl Shared {
     }
 }
 
+/// Whether the client wants the server to push every view's keymap.
+fn dynamic_delivery(client: &Arc<Mutex<ClientCaps>>) -> bool {
+    client
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .delivery
+        == KeymapDelivery::Dynamic
+}
+
+/// The prompt transport: a `view/prompt` notification and its answer.
+///
+/// The editor bridge's askpass prompt runs on a thread that outlives the
+/// server, so the bridge holds a *weak* sender: it must never keep the writer
+/// channel (and with it the server process) alive.
+struct PromptBridge {
+    sender: mpsc::WeakUnboundedSender<Message>,
+    /// Questions waiting for an answer, keyed by prompt id.
+    pending: Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>,
+    /// Prompt-id counter; ids are unique across this server process.
+    next_id: AtomicU64,
+}
+
+impl PromptBridge {
+    fn new(sender: &mpsc::UnboundedSender<Message>) -> Self {
+        Self {
+            sender: sender.downgrade(),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+        }
+    }
+
+    /// Send one question and block until the client answers it.
+    ///
+    /// `None` means the user cancelled: `view/promptRespond` drops the sender
+    /// without a value, so `recv` fails. A prompt that cannot be delivered (the
+    /// writer is gone) is cancelled as well.
+    fn ask(&self, request: &ViewPromptParams) -> Option<PromptValue> {
+        let prompt_id = format!("p{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
+        let params = ViewPromptParams {
+            prompt_id: prompt_id.clone(),
+            ..request.clone()
+        };
+        let (tx, rx) = std_mpsc::channel();
+        self.lock().insert(prompt_id.clone(), tx);
+
+        let sent = match self.sender.upgrade() {
+            Some(sender) => sender
+                .send(Message::Notification(Notification::new(
+                    VIEW_PROMPT.to_string(),
+                    params,
+                )))
+                .is_ok(),
+            None => false,
+        };
+
+        let answer = if sent { rx.recv().ok() } else { None };
+
+        self.lock().remove(&prompt_id);
+        answer
+    }
+
+    /// Deliver an answer to the waiting question.
+    fn respond(
+        &self,
+        prompt_id: &str,
+        cancelled: bool,
+        value: Option<PromptValue>,
+    ) -> Result<()> {
+        let sender = self
+            .lock()
+            .remove(prompt_id)
+            .ok_or_else(|| Error::new(format!("unknown prompt: {prompt_id}")))?;
+        if !cancelled {
+            if let Some(value) = value {
+                let _ = sender.send(value);
+            }
+        }
+        // Dropping the sender without a value is the cancellation signal.
+        Ok(())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, std_mpsc::Sender<PromptValue>>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 /// The server's [`PromptUi`]: sends each question to the client and blocks the
 /// calling worker thread until the matching `view/promptRespond` arrives.
 struct ServerUi {
-    shared: Shared,
+    prompts: Arc<PromptBridge>,
 }
 
 impl ServerUi {
     fn new(shared: &Shared) -> Self {
         Self {
-            shared: shared.clone(),
+            prompts: shared.prompts.clone(),
         }
     }
 
     /// Ask one question and convert the wire value to the expected kind.
     fn ask(&self, request: &ViewPromptParams) -> Result<Option<PromptValue>> {
-        Ok(self.shared.ask(request))
+        Ok(self.prompts.ask(request))
     }
 }
 
@@ -493,18 +527,84 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         }
     };
     let shared = Shared::new(config, startup_error, sender.clone());
-    if let Some(path) = editor::start_listener({
-        let sender = sender.downgrade();
-        Arc::new(move |effects: Vec<Effect>| {
-            if let Some(sender) = sender.upgrade() {
+    if let Some(path) = editor::start_listener(
+        {
+            let sender = sender.downgrade();
+            // The bridge's thread outlives the server, so it must not hold a
+            // `Shared` (that would keep the writer channel alive for ever).
+            let client = shared.client.clone();
+            let config = shared.config.clone();
+            Arc::new(move |effects: Vec<Effect>| {
+                let Some(sender) = sender.upgrade() else {
+                    return;
+                };
                 let _ = sender.send(Message::Notification(Notification::new(
                     VIEW_EFFECTS.to_string(),
-                    ViewEffectsParams { effects },
+                    ViewEffectsParams {
+                        effects: effects.clone(),
+                    },
                 )));
-            }
-        })
-    }) {
+                // A dynamic client gets the edit's keymap as a normal
+                // `view/keymap`, keyed by the edit id. Static clients use
+                // their own bindings and ignore it.
+                if dynamic_delivery(&client) {
+                    for effect in &effects {
+                        if let Effect::EditDocument { edit_id, kind, .. } = effect {
+                            if let Some(keymap) = edit_keymap(&config, edit_id, kind) {
+                                let _ = sender.send(Message::Notification(Notification::new(
+                                    VIEW_KEYMAP.to_string(),
+                                    keymap,
+                                )));
+                            }
+                        }
+                    }
+                }
+            })
+        },
+        {
+            // The askpass prompt runs on the bridge's thread and outlives the
+            // server, so it holds the prompt bridge (a weak sender), never the
+            // whole `Shared`.
+            let prompts = shared.prompts.clone();
+            Arc::new(move |prompt: &str| {
+                let ui = ServerUi {
+                    prompts: prompts.clone(),
+                };
+                let request = ViewPromptParams {
+                    prompt_id: String::new(),
+                    kind: PromptKind::Text,
+                    title: prompt.to_string(),
+                    detail: None,
+                    yes_label: None,
+                    no_label: None,
+                    destructive: None,
+                    default: None,
+                    placeholder: None,
+                    secret: Some(true),
+                    items: None,
+                    allow_custom: None,
+                    preselected: None,
+                    min: None,
+                    max: None,
+                };
+                match ui.text(&request) {
+                    Ok(secret) => secret,
+                    Err(error) => {
+                        tracing::debug!(%error, "askpass prompt failed");
+                        None
+                    }
+                }
+            })
+        },
+    ) {
         tracing::debug!(socket = %path.display(), "editor bridge listening");
+    }
+
+    // Git asks for passwords through the same bridge: the askpass helper is
+    // this very executable, so every spawned Git process inherits the command.
+    match editor::askpass_command() {
+        Ok(command) => editor::set_askpass_invocation(command),
+        Err(error) => tracing::warn!(%error, "cannot locate the askpass helper"),
     }
 
     // Poll the loaded files for changes. A 150 ms interval doubles as the
@@ -1217,6 +1317,32 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
         })?,
         notifications,
     ))
+}
+
+/// The keymap a dynamic client applies to an edit buffer.
+///
+/// Only kinds with a registry scope get one; the server still owns the keys,
+/// so a client never hard-codes confirm/cancel.
+fn edit_keymap(
+    config: &ConfigService,
+    edit_id: &str,
+    kind: &str,
+) -> Option<ViewKeymapParams> {
+    let scope = match kind {
+        editor::COMMIT_MESSAGE_KIND | "merge-message" | "tag-message" => "commit-message",
+        _ => return None,
+    };
+    let keymap = config.keymap(scope)?;
+    Some(ViewKeymapParams {
+        view_id: edit_id.to_string(),
+        scope: scope.to_string(),
+        version: 0,
+        capture: false,
+        bindings: keymap.bindings().to_vec(),
+        mode: ViewMode::Interactive,
+        pending: String::new(),
+        live_keys: Vec::new(),
+    })
 }
 
 /// Ends the commit progress token however the worker finishes.

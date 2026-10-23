@@ -3,6 +3,7 @@ local M = {}
 local keys = require('magit-lsp.keys')
 local keymap = require('magit-lsp.keymap')
 local menu = require('magit-lsp.menu')
+local edit = require('magit-lsp.edit')
 local prompt = require('magit-lsp.prompt')
 local debug_api = require('magit-lsp.debug')
 
@@ -112,9 +113,11 @@ local function notify_effect(effect)
   vim.notify(text, LEVELS[effect.level] or vim.log.levels.INFO)
 end
 
---- Apply effects from an invoke: messages, clipboard, and view pushes/pops.
+--- Apply effects from an invoke: messages, clipboard, view pushes/pops and
+--- Git-owned edit documents.
 local function apply_effects(effects)
   menu.apply_effects(effects)
+  edit.apply_effects(effects)
 end
 
 --- Replay a server `passThrough` key natively, without re-triggering our maps.
@@ -131,6 +134,7 @@ end
 --- Apply the effects of a `view/key`: messages, clipboard and native replay.
 local function apply_key_effects(effects)
   menu.apply_effects(effects)
+  edit.apply_effects(effects)
 end
 
 --- Standard theme groups for every token type of TASKS.md §3.15.
@@ -874,7 +878,9 @@ function M.setup(opts)
     end
   end
   vim.lsp.handlers['view/keymap'] = function(_, result)
-    if result and (menu.owns(result.viewId) or (result.scope or ''):match('^menu%.')) then
+    if result and edit.owns(result.viewId) then
+      edit.apply_keymap(result)
+    elseif result and (menu.owns(result.viewId) or (result.scope or ''):match('^menu%.')) then
       menu.apply_keymap(result)
     else
       M.apply_keymap(result)
@@ -929,6 +935,19 @@ function M.setup(opts)
 
   prompt.configure({ client_id = M.client_id })
 
+  edit.configure({
+    client_id = M.client_id,
+    invoke = function(command, args)
+      return M.invoke(command, { args = args })
+    end,
+    focus_status = function()
+      local win = status_window()
+      if win and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_current_win(win)
+      end
+    end,
+  })
+
   menu.configure({
     client_id = M.client_id,
     filetype = M.filetype,
@@ -962,6 +981,7 @@ function M.setup(opts)
 
   vim.api.nvim_create_autocmd('VimLeavePre', {
     callback = function()
+      edit.close_all()
       menu.close_all()
       local client = M.client_id and vim.lsp.get_client_by_id(M.client_id)
       if client then

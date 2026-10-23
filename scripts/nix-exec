@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Exec a command with this repository's flake dev-shell environment. Used by
+# the LSP plugin so language servers resolve from the flake, not the service
+# PATH. `print-dev-env` is captured so the server's stdout stays clean.
+set -euo pipefail
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+eval "$(nix --extra-experimental-features 'nix-command flakes' print-dev-env "$repo")" >/dev/null
+exec "$@"

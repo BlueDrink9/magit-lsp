@@ -21,6 +21,9 @@ Delete the old thing; do not leave shims.
 7. Phased roadmap
 8. Testing strategy
 9. Open questions
+10. Implementation status and deviations
+11. Client reviews
+12. Unchecked backlog by category and priority
 
 ---
 
@@ -40,6 +43,10 @@ Delete the old thing; do not leave shims.
 | Diff/patch | Git computes diffs; we parse its output and build patches for `git apply` (this is what Magit does, §3.13) |
 | Rendering | Server re-renders fully (as Magit does) and sends line-range edits, so clients stay stable (§3.3) |
 | Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few (§8) |
+| Detail visibility | Four levels: section (staged/unstaged) → files → hunks → individually visible hunks; profile bindings and tests must match (§5.1) |
+| Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
+| Magit parity keys | Verify keys against the Magit manual, not memory |
+| Minimum Git version | Git 2.19 is a candidate minimum pending CI validation, not a settled supported minimum |
 
 ---
 
@@ -660,12 +667,18 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
    the socket, sends `{editId, path, kind}` and **blocks** waiting for a
    reply (`ok` → exit 0, `abort` → exit 1; Git aborts the operation on 1).
 3. The server maps the edit to the session that spawned Git and sends an
-   `editDocument` effect to that session's client:
+   `editDocument` effect to that session's client. `title`, `mode` and `scope`
+   are server-owned metadata; `scope` names the command/keymap scope used by
+   the edit:
 
    ```
    { type: "editDocument", editId, path, kind: "commit-message"|"rebase-todo"|"merge-message"|"tag-message"|"other",
-     title, mode: "realFile"|"virtual", scope }
+     title: string, mode: "realFile", scope: string }
    ```
+   The current helper emits `commit-message` only (`title: "Commit message"`,
+   `scope: "commit-message"`). The bridge opens the Git-owned path as a real
+   file. `merge-message` and `tag-message`, when emitted, use the same
+   `commit-message` scope; other kinds use the shared `common` scope.
 4. **The client opens it in its own editor, in the same window/instance**:
    - Neovim: open the file in a window per client config (split, tab, or float;
      default: bottom split), set `filetype` (`gitcommit`, `gitrebase`), attach
@@ -678,12 +691,13 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
    file (if `realFile`) and sends `view/invoke common.confirm`; the server
    replies `ok` to the helper; Git continues. **Cancel** (`common.cancel`):
    server replies `abort`. **Closing the buffer/tab without confirming = cancel.**
-   If the message is non-empty and modified, cancel first asks a `confirm` prompt
-   ("Discard commit message?") unless disabled in config.
-6. `mode: "realFile"` (commit/merge/tag message): the real file is edited; saving
-   writes it. `mode: "virtual"` (rebase todo): the server parses the todo file
-   into a structured view (move up/down, change action, show commit) and writes
-   the file itself on confirm.
+   Cancel currently aborts immediately; a discard-confirm prompt for a non-empty
+   message is not implemented.
+6. The implemented bridge edits real Git-owned files (`mode: "realFile"`). It
+   currently emits only commit messages. Merge/tag messages and `rebase-todo`
+   are not emitted yet; in particular, virtual documents and a structured
+   rebase-todo editor are not implemented. Do not send `mode: "virtual"` until
+   that editor and its write-back path exist.
 7. A client disconnecting, or the helper's socket closing, aborts the edit so
    Git never hangs.
 
@@ -714,9 +728,10 @@ reader = text | choice | path | ref | commit | date | number
 - **Action** = runs a command using the current switch/option values. Single key.
 - An **argument preview line** shows the resulting command, e.g.
   `git commit --amend --no-verify`.
-- Saved arguments: `menu.save-args` stores the current switches/options as the
-  default for that menu (global or per-repo, per config); `menu.reset-args`
-  restores defaults.
+ - Saved arguments: `menu.save-args` stores the current switches/options as the
+   default for that menu; persistence scope is deferred until semantics are
+   understood. Remove/defer `menus.save_scope` meanwhile. `menu.reset-args`
+   restores defaults.
 
 **Text rendering (what the server sends)**
 ```
@@ -954,8 +969,9 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
   confirm = ["Space"]             # overrides common.confirm only in log
   ```
 - Other settings (non-exhaustive): `[diff] context, whitespace`, `[sections]
-  order, default_visibility`, `[log] default_args, margin`, `[menus]
-  save_scope = "global"|"repo"`, `[ui] confirm_discard = true`.
+  order, default_visibility`, `[log] default_args, margin`, `[ui]
+  confirm_discard = true`. Menu argument persistence semantics must be reviewed
+  before adding any persistence setting.
 - Hot reload on file change or `workspace/didChangeConfiguration`; invalid
   config keeps the previous one and shows a `Message` with file and line.
 
@@ -1062,9 +1078,10 @@ meant to be committed as the first version; edit freely.
 | `common.visit` | `Enter` | `Enter` |
 | `open.dispatch` (help / menu of menus) | `?` | `g ?` |
 
-Visibility level note: levels 1–4 (titles only → sections → files → hunks).
-`standard` binds `alt+1` … `alt+4` to set level N; `vim` uses `z m`/`z r` to
-step the level down/up.
+Visibility has four levels: section (staged/unstaged) → files → hunks →
+individually visible hunks. `standard` binds `alt+1` … `alt+4` to set level N;
+`vim` uses `z m`/`z r` to step the level down/up. §5.1, profile bindings and
+tests must agree with this hierarchy.
 
 ### 5.2 `status` scope (also used by diff-like views for staging)
 
@@ -1130,7 +1147,7 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 | `menu.reset-args` | `ctrl+r` | `ctrl+r` |
 | `open.dispatch` (toggle help) | `?` | `?` |
 
-### 5.5 Editable scopes (`commit-message`, merge/tag message, `rebase-todo` text part)
+### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |
 | --- | --- | --- |
@@ -1141,6 +1158,8 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 
 Closing the buffer is always cancel (§3.10). `ctrl+c` is **not** cancel here
 because it is copy in non-modal editors.
+The current bridge emits this scope for commit messages; merge/tag message
+support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 
 ### 5.6 Rebase todo (structured view)
 
@@ -1168,7 +1187,7 @@ because it is copy in non-modal editors.
 | **Refs** | `magit-show-refs` | Local branches, remotes, tags with ahead/behind vs a base; also select mode | checkout, create, delete, rename, reset, merge, rebase onto, log | 5 |
 | **Cherry** | `magit-cherry` | `git cherry` between two refs | cherry-pick, show | 7 |
 | **Stash list / show** | `magit-stash-list` | Stashes; show = diff view of a stash | apply, pop, drop, branch | 6 |
-| **Rebase todo** | `git-rebase-mode` | Structured interactive todo: pick/reword/edit/squash/fixup/drop/exec/label/merge lines with commit summaries; reorder | move up/down, set action, show commit, confirm, abort (editor bridge, `mode: virtual`) | 7 |
+| **Rebase todo** | `git-rebase-mode` | Planned structured interactive todo: pick/reword/edit/squash/fixup/drop/exec/label/merge lines with commit summaries; reorder | move up/down, set action, show commit, confirm, abort | 7 |
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | 7 |
 | **Merge / conflicts** | `magit-merge` + unmerged | Unmerged section; per-conflict actions | take ours/theirs, mark resolved, open merge tool (client effect `openMergeTool`), continue, abort | 7 |
 | **Sequencer** | `A`, `V` | In-progress cherry-pick/revert | continue, skip, abort | 7 |
@@ -1192,6 +1211,39 @@ because it is copy in non-modal editors.
 
 Checkboxes are for tracking. IDs (`R-n.m`) are used in `Planned` messages.
 Each task ends with **Done when**. Each phase leaves `make test` green.
+
+### Global unchecked backlog — priority order
+
+The task specifications and checkboxes remain in §§7 and 11; this index makes
+the categories and ordering global. Complete all Review items before Feature
+work. Bugfix work is a distinct category, not a scenario-behavior task.
+
+#### Review (highest priority; grouped by stated priority)
+
+- **P1:** Test editor-bridge cancellation; strengthen IMM-2 property tests;
+  extract shared stdio client; build `TestSession`; verify askpass secrets are
+  not logged; add missing real-UI scenarios; test resize reflow.
+- **P2:** Fix keymap rule checks; resolve detail-level mismatch; authoritative
+  parity keys; test unavailable/scope mismatch; acked versions; keymap delivery;
+  cross-scope conflicts; config gaps; minimum Git version; editor disconnect;
+  Neovim prompts; option clearing/saved args; VSCode keybinding drift; remove
+  Lua sleeps; strengthen read-only assertions; mutation ordering; prune duplicate
+  tests; reduce snapshots; remove magic counts; tighten assertions; remove
+  global environment mutation; remaining coverage gaps.
+- **P3:** UI latency assertions; rendered-text parsing in tests; housekeeping.
+- Client review follow-ups: R-NV-1…R-NV-4 and R-VS-1.
+- R-UI-7 status placement (from the Neovim client review).
+
+#### Bugfix
+
+- **P1:** Diagnose Neovim harness startup/socket creation and
+  connection independently of scenario behavior (§11.3).
+
+#### Feature
+
+- R-3.4b editor bridge clients/askpass; R-3.5…R-3.7;
+  R-4.1…R-4.3; R-5.1…R-5.5; R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
+  R-9.1…R-9.5. Their full acceptance criteria remain in the phase entries.
 
 ### Task ticket template and UI rule
 
@@ -1385,6 +1437,39 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       13 PASS / 0 XFAIL / 0 FAIL. The new `ui-test` CI job installs tmux and
       Neovim, builds the server, runs `make ui-unit ui-test` with `CI=1` and
       uploads `build/ui/` on failure.
+- [ ] R-UI-7 **Status fills the window by default**: `setup()` must no longer
+      `vsplit`. The status view replaces the current window's buffer (the
+      full screen); the client option `status = { placement = "replace" |
+      "vsplit" | "split" | "tab" }` (default `"replace"`) restores a split or
+      a tab. The server's `ViewDescriptor` placement stays advisory; the
+      option lives in the client only. `visit` (file under cursor) must keep
+      working when there is no other window (open the file in the same
+      window; `q` or the buffer-list returns to status, or open a split when
+      `placement` is a split). Document the option in the README.
+      *UI:* scenarios `status-fills-screen` (`windows` shows exactly one
+      non-floating window whose width equals the terminal columns; screen
+      contains `Unstaged changes`) and `status-placement-vsplit` (set via an
+      env/`MAGIT_LSP_PLACEMENT` hook in `scripts/minimal_init.lua`; two
+      windows). Every existing scenario must still pass at 100x30 and 80x24.
+      *Done when:* both scenarios PASS under both profiles and sizes;
+      `make test` and `make ui-test` green.
+- [ ] R-VS-1 **VSCode extension: build, test and document** (see §11.2): a
+      `clients/vscode/README.md` that explains how to run it (Extension
+      Development Host, F5 launch config in `.vscode/launch.json`), how to
+      point it at the server binary, how to package (`vsce package` or
+      `npx @vscode/vsce`), how to run the tests, and the keybinding manifest
+      workflow (`magit-lsp keymap --format vscode`). Add a test layer that
+      works without VSCode: a fake `vscode` module so `extension.js` can be
+      activated in node against the real `magit-lsp` binary over stdio
+      (open status, render text, key press → render, menu QuickPick via a
+      scripted fake, prompt answer). Add `make vscode-test` (node unit tests
+      plus this integration test) and a CI step. Add an optional
+      `@vscode/test-electron` suite under `clients/vscode/test/e2e/` that is
+      skipped when `code`/Electron is unavailable. Split `extension.js` (about
+      1200 lines) into modules under `clients/vscode/lib/` as part of this.
+      *Done when:* `make vscode-test` passes locally, README steps are
+      verified by running the commands listed in it, and CI runs
+      `make vscode-test`.
 - [ ] R-3.4b **Editor bridge clients and askpass** (U2.4): handle
       `editDocument` in Neovim and VSCode, implement `--askpass`, and add the
       `commit-message-editor` scenario (`c c` with a staged change → bottom
@@ -1394,6 +1479,51 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       Scenarios: `commit-message-editor`.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
       test` and `make ui-test` green.
+
+### Phase 3N — Neovim client debt (findings in §11.1; do before R-3.5)
+
+- [ ] R-NV-1 **Async request layer** (§11.1 finding 1): replace
+      `buf_request_sync`/`vim.wait` on every key, invoke and open with
+      asynchronous `client:request` plus a small per-client request queue, so
+      a slow Git command, a prompt or the editor bridge never freezes Neovim.
+      Keep ordering: keys are sent in order; a key pressed while one is in
+      flight is queued. `idle()` (debug API) must stay correct.
+      *UI:* scenario `ui-stays-responsive`: a fixture with a slow `pre-commit`
+      hook (or a sleeping fake git wrapper); press `c c`, then while it runs
+      `?`/`j` still move the cursor (assert `cursor` changes before idle).
+      *Done when:* no `vim.wait` remains outside tests and `debug.lua`;
+      `make test` and `make ui-test` green.
+- [ ] R-NV-2 **One view manager** (§11.1 finding 2): replace the three parallel
+      implementations (`init.lua` status, `menu.lua`, `edit.lua`) of
+      render/keymap/press/invoke/resync/pending-queue with one `view.lua`
+      keyed by `viewId`, driven only by the `ViewDescriptor` (placement
+      `main`/`side`/`bottom`/`float`, `capture`, `mode`) and the server's
+      `view/render`/`view/keymap`. Kind-specific code shrinks to a placement
+      function and an effect handler. A new view kind (log, revision, refs,
+      process log) must need no new Lua beyond a highlight link table entry.
+      Remove the module-level singleton state (`M.buf`, `M.view_id`) so two
+      repos or tabs work.
+      *Done when:* `init.lua` is under ~400 lines, `menu.lua` and `edit.lua`
+      contain only placement and effects; all L2 cases and `make ui-test`
+      green; line counts recorded in §11.1.
+- [ ] R-NV-3 **Isolate debug instrumentation** (§11.1 finding 3): product code
+      calls `debug_api.*` about 35 times. Route them through one thin hook
+      table (`require('magit-lsp.hooks')` with no-op defaults) that
+      `debug.lua` fills only when `MAGIT_LSP_TRACE` or the test harness is
+      active; `debug.lua` must not be required on a normal start.
+      *Done when:* a normal `setup()` never loads `debug.lua`
+      (L2 assert on `package.loaded`); `make ui-test` green.
+- [ ] R-NV-4 **Structure and defaults** (§11.1 findings 4–7): split `init.lua`
+      (highlights, buffer/read-only, setup/config); find the server binary in
+      this order: `setup{cmd}`, `$MAGIT_LSP_BIN`, `target/release`,
+      `target/debug`, `magit-lsp` on `$PATH`, and report a clear error instead
+      of falling back to `cargo run`; drop the visit-key exception by
+      implementing `common.visit` on the server (the Lua `visit` and
+      `visit_key` option are then deleted); let the server ship the
+      suggested highlight group per token type in the legend so new token
+      types need no client edit (the Lua table keeps only an override).
+      *Done when:* each item is done or recorded as rejected with a reason in
+      §11.1; `make test` and `make ui-test` green.
 
 ### Phase 3 (continued) — file watcher, discard, error mapping
 
@@ -1866,3 +1996,312 @@ Disk was ~99% full; the R-2.4 worker set `[profile.dev]`/`[profile.test]`
   prompts are `Reader`-driven: `Text/Path/Date/Number/Ref/Commit` ask for text,
   `Choice` asks with `allowCustom: true` and no items, and a cancelled prompt
   changes nothing (no render).
+
+---
+
+## 11. Client reviews (orchestrator, written before R-3.4b landed)
+
+### 11.1 Neovim client (`lua/magit-lsp/`)
+
+Sizes at review time: `init.lua` 996 lines, `menu.lua` 564, `debug.lua` 423,
+`keys.lua` 326, `edit.lua` 224 (in progress), `prompt.lua` 193, `keymap.lua`
+194. The client is thin in the sense that matters (no Git, tree or hunk logic;
+keys, folds and clipboard are server-driven), but it has grown in structure and
+in blocking behaviour. Findings, most important first; fixes are tasks
+R-NV-1…R-NV-4 (Phase 3N):
+
+1. **Every key, invoke and open blocks Neovim.** `M.press`, `M.invoke` and
+   `M.open` use `buf_request_sync` plus `vim.wait` (up to 5 s, and a 5 s wait
+   for the render after each invoke). While Git runs (stage, commit, fetch,
+   push) the whole editor freezes; a prompt or editor-bridge request that
+   arrives during the wait is handled re-entrantly inside the wait loop. This
+   is the biggest user-experience risk and gets worse as Phase 4+ adds slow
+   commands. → R-NV-1.
+2. **Three copies of the same view plumbing.** `init.lua` (status), `menu.lua`
+   and `edit.lua` each implement render application, edits, resync, the
+   pending-notification queue, keymap application, press/invoke and effect
+   handling. Phases 4–5 add log, revision, refs and commit-message views;
+   copying the pattern each time would roughly triple the client. The status
+   view also owns module-level singletons (`M.buf`, `M.view_id`, `M.version`),
+   so there can only ever be one repo/status view. → R-NV-2.
+3. **Test instrumentation lives in product code.** About 35 `debug_api.*` calls
+   (15 in `init.lua`, 17 in `menu.lua`) and a 423-line `debug.lua` are loaded on
+   every start. → R-NV-3.
+4. **`init.lua` is a grab bag** (highlight links, read-only guards, text mode,
+   symbols/jump, visit, error-detail buffer, setup). → R-NV-4 (split).
+5. **Server binary discovery falls back to `cargo run`.** A normal install has
+   no cargo project; the user sees a hang or a build. → R-NV-4.
+6. **Client-side exceptions that should disappear:** the `visit_key`
+   (`<CR>`) mapping and `M.visit()` (with its `wincmd p` assumption of a second
+   window) exist only because `common.visit` is still `Planned`; fold-key
+   mirroring is intentional (§3.9) and stays. → R-NV-4 and R-UI-7.
+7. **Highlight table is duplicated by hand.** `TOKEN_LINKS` must match the
+   server legend; every new token type needs a Lua edit in every client.
+   Letting the server suggest a group per token type keeps clients thinner.
+   → R-NV-4.
+8. **Startup blocks:** `open()` polls with `vim.wait` for the first render and
+   keymap (5 s each), and `setup()` always `vsplit`s (→ R-UI-7).
+
+Things reviewed and judged fine: `keys.lua` (pure translator with unit tests),
+`keymap.lua` (one atomic apply), `prompt.lua`, the read-only guards, and the
+absence of any Git/tree parsing in Lua.
+
+### 11.2 VSCode extension (`clients/vscode/`)
+
+`extension.js` is 1197 lines in a single file next to a few small `lib/`
+modules, and there is no README: `NOTES.md` only. There is no documented way to
+build, launch, package or test it, and its tests cover pure helpers only (no
+activation against the real server). → R-VS-1.
+
+---
+
+## Review
+
+### Test-suite review (static read; tests were not run)
+
+Scope: `tests/*.rs`, `tests/*.lua`, `tests/ui/**`, `tests/snapshots/*`,
+`tests/common/mod.rs`, in-source `#[cfg(test)]` modules, `Makefile`, CI. Before
+starting, run `make test && make ui-unit && make ui-test` and
+`pgrep -af magit-lsp` to get a baseline. Order: do the "Do first" tasks before
+the migration tasks that depend on them. File:line references are from the review
+date; re-find by function name if lines moved.
+
+- [x] **[P1] Make the editor-bridge cancel test able to fail** (`tests/editor_bridge.rs:409-477`)
+  - **Problem:** `a_cancel_creates_no_commit` writes no message, then sends `common.cancel`. Git aborts on an empty message anyway, so confirm-with-empty gives identical results (no commit, index intact, error message).
+  - **Why it matters:** correctness of the test (R-3.4 / §3.10 step 5: cancel replies `abort`). It currently proves nothing about cancel.
+  - **Change:** write `"Should not land\n"` to `edit["path"]` before sending `common.cancel`. Assert HEAD message is still `init`, `git status --porcelain` is unchanged, and the aborted-commit `message` effect arrives. In `a_commit_is_created_from_the_typed_message` also assert `title`, `mode` and `scope` values on the `editDocument` effect (§3.10 step 3).
+  - **Done when:** reverting the server's cancel to behave like confirm makes the test fail; `cargo test --test editor_bridge` passes.
+  - **Approval:** the user authorizes server changes to add the documented `editDocument` metadata and correct §3.10's unsupported virtual-mode claim.
+
+- [ ] **[P1] Make the IMM-2 proptests apply selections and check the index** (`tests/git_backend.rs:754-949`)
+  - **Problem:** both proptests only run `git apply --check` on each op patch against the unchanged index. They never apply ops in order (IMM-2 step 4), never compare the resulting index, and never test "stage then unstage is identity" (§8.3). `apply_check` and `apply_check_reverse` are near-identical copies.
+  - **Why it matters:** correctness/coverage; a second-op offset failure after the first op is applied is invisible. Also DRY.
+  - **Change:** in each property call `repo.apply_selection(&[layout], start, end, reverse)`. Build the expected index text with a small pure model in the test (original lines with the selected `+`/`-` lines applied), assert `git show :f.txt` equals it, then call the reverse selection on the fresh staged layout and assert the index equals the original. Assert `applied == false` exactly when the range contains no `+`/`-` line. Delete `apply_check_reverse` (parameterise `apply_check(dir, patch, reverse)` if one `--check` property is kept) and build the repo via `RepoFixture` (no hand-rolled `git init`).
+  - **Done when:** the two proptests become one parameterised property (or share one body) that fails if `lines_patch` drops or mis-numbers a line; `cargo test --test git_backend` passes.
+  - **Constraints:** keep `ProptestConfig::with_cases(64)` or lower; do not change `patch.rs`.
+
+- [ ] **[P1] Extract one shared stdio test client** (`tests/server_async.rs:17-240`, `tests/semantic_tokens.rs:17-120`, `tests/text_mode.rs:261-380`, `tests/editor_bridge.rs:17-270`, `tests/stdout_hygiene.rs:16-110`)
+  - **Problem:** five files each re-implement spawn, `Content-Length` framing, `read_frame`, `response_with_id`, `initialize`, shutdown and stderr draining.
+  - **Why it matters:** DRY; every protocol test change must be made five times.
+  - **Change:** add `tests/common/stdio.rs` (declared in `tests/common/mod.rs` as `pub mod stdio;`) exposing `TestServer { spawn(extra_env: &[(&str,&str)]), send, send_raw, recv, response_with_id, initialize, notifications/drain_notifications, stderr_text, finish(timeout) }`, plus `frame()` and `initialize_message()`. Port the five files to it one at a time and delete their copies. Keep per-file helpers that are truly specific (`view/prompt` helpers in `editor_bridge.rs`, token decoding in `semantic_tokens.rs`).
+  - **Done when:** `grep -n "fn read_frame" tests/` finds exactly one definition; all stdio tests pass unchanged in behaviour.
+  - **Constraints:** do not weaken any assertion while porting; do after the P1 cancel-test task so that file is only edited once.
+
+- [ ] **[P1] Build the §8.1 in-process `TestSession` and migrate the session tests** (`tests/views.rs:14`, `visibility.rs:14`, `keys_protocol.rs:33`, `text_mode.rs:28`, `menu.rs:34`, `menus.rs:33`, `commands.rs:117`, `prompts.rs:35`, `process_log.rs:38`, `commit_preflight.rs:29`)
+  - **Problem:** `open_status`, `keymaps()`/`session_with()`, `line_with_marker`, `node_at`, and `press`/`invoke` wrappers (with a hard-coded `version: 1`) are copied in about ten files.
+  - **Why it matters:** DRY and cohesion; §8.1 specifies `TestSession` but it was never built.
+  - **Change:** add `tests/common/session.rs` with `TestSession::open_status(&RepoFixture, Profile)`, `press(key)`, `press_visual(start,end,key)`, `invoke(cmd)`, `invoke_args(cmd,args)`, `ack()`, `goto_marker(path, marker)`, `goto_text(path, text)`, `text()`, `tree()`, `focused_node()`, and a `version` field that tracks the last render so keys send the real version. Migrate the listed files one per commit; delete their local copies.
+  - **Done when:** `grep -c "fn open_status" tests/*.rs` is 0 for in-process files; no test sends a literal `version: 1`.
+  - **Constraints:** keep behaviour of each test; use tree nodes (`line_nodes`, `marker`), never rendered text, to find cursor lines.
+
+- [ ] **[P1] Test that the askpass secret is never logged** (`tests/editor_bridge.rs:484-525`)
+  - **Problem:** §3.6/§3.10 say the secret must not be written to any log; the askpass test sends `s3cret` but never inspects the server's stderr or log file.
+  - **Why it matters:** security regression guard.
+  - **Change:** with the shared `TestServer` (after the stdio-client task) spawn with trace logging to stderr and a second run with `MAGIT_LSP_LOG_FILE`; after the round trip assert neither contains `s3cret`.
+  - **Done when:** the test fails if the answer is passed to `tracing::debug!`.
+  - **Constraints:** do not print the secret in assertion messages.
+
+- [ ] **[P1] Add missing real-UI scenarios** (`tests/ui/scenarios/`)
+  - **Problem:** §7's rule "every task that opens a new view adds a scenario" and "UI-affecting tasks are not done until a `.scn` drove the UI" is unmet for: R-3.3 process log view; R-3.1 menu option prompt; staging/unstage/fold/visual/refused-edit basics (R-1.x/R-2.4); the R-UI-5 unstaged-only confirm ("Nothing staged. Stage all changes and commit?"). `no-readonly-warning.scn` only checks no W10 and never proves an edit is refused.
+  - **Why it matters:** coverage; these are user-visible behaviours only tested in Lua/Rust.
+  - **Change:** add `process-log.scn` (stage a hunk, open the process log with `$`/`g $`, expect `git apply` on screen, `q` returns to status), `option-prompt.scn` (`c`, `=A`, answer the prompt, expect `--author=` on screen), `status-basics.scn` (stage `s`, unstage `u`, `Tab` fold, visual `V s`, then a native edit like `J` leaves the screen unchanged), `commit-confirm.scn` (`c c` with unstaged only, answer `n` then `y`). Under both profiles and sizes unless an opt-out is justified in a header comment.
+  - **Done when:** `make ui-test` passes with the four new scenarios and writes their `.screen` files.
+  - **Constraints:** no `sleep`; use `wait`. Do not add wall-clock assertions.
+
+- [ ] **[P1] Test `view/resize` reflow** (no test exists; `src/session.rs`, `src/menu.rs`)
+  - **Problem:** R-2.7 says menu layout is "re-flowed on `view/resize`"; `grep resize tests/` is empty.
+  - **Why it matters:** coverage of a named acceptance criterion.
+  - **Change:** in `tests/menu.rs` (or the new `TestSession`) open the commit menu at 140 cols, send the resize through the real session/server entry point to 60, and assert the resulting render's text (after applying edits) equals `menus::named("commit").render(Viewport{cols:60,..})`. Add one stdio check that the `view/resize` notification yields a `view/render` with `baseVersion`.
+  - **Done when:** removing the resize handler fails the test.
+  - **Constraints:** reuse the existing snapshots, add none.
+
+- [ ] **[P2] Fix the vacuous R4 check and add rule tests** (`tests/keymap.rs:113-127`)
+  - **Problem:** the forbidden set contains `"gg"` but canonical chords are space-separated (`"g g"`), so it never matches. Only whole chords are compared, so a `g g` or `ctrl+d <x>` chord is not caught. Rules R2, R3, R6 have no test.
+  - **Why it matters:** the test does not enforce the rule it names.
+  - **Change:** use `"g g"`; also compare `chord.steps()[0]` for single-key motions; extract the check into a function and add an injected-key negative test (like `tests/manifest.rs:216`). Add small tests: standard `common.confirm=Enter`, `common.cancel` contains `Escape`; `ctrl+c` is cancel in every non-editable scope (R6).
+  - **Done when:** adding `g g` to the vim profile (temporarily) fails the suite.
+  - **Constraints:** do not edit the shipped profiles.
+
+- [ ] **[P2] Resolve the spec/impl mismatch on detail levels** (`tests/visibility.rs:232-331`, §5.1)
+  - **Problem:** §5.1 defines levels 1-4 and `alt+1..4`; implementation and test have three levels (AGENTS says 1-3).
+  - **Why it matters:** the test pins the implementation, not the spec.
+   - **Decision:** retain four levels: section (staged/unstaged) → files → hunks → individually visible hunks. Align §5.1, shipped profile bindings and tests with this model.
+  - **Done when:** spec text, profile bindings and test agree.
+  - **Constraints:** no change to unrelated visibility behaviour.
+
+- [ ] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs:166-301`)
+  - **Problem:** the list was written alongside the menus and "corrected here" to match them (TASKS §10: keys partly from memory). It covers about 120 of 355 rows.
+  - **Why it matters:** §3.12's "every parity-list key exists in some menu" only proves self-consistency.
+   - **Change:** move the list to `tests/data/magit-keys.txt` with a header naming the Magit manual version and sections; verify each key against the Magit manual. The test must fail when a menu action key is missing from the file and when a file entry has no action. Keep documented deviations (reset `X`, rebase `s`/`e`, bisect `B`) in a separate `EXCEPTIONS` table with reasons.
+  - **Done when:** the data file is the single source and both directions are checked.
+  - **Constraints:** do not change menu data except to fix keys proven wrong by the manual.
+
+- [ ] **[P2] Add tests for `Unavailable` and scope-mismatch replies** (`src/session.rs:1115-1131`)
+  - **Problem:** neither the `Unavailable` branch nor `"Not available in this view"` has a test.
+  - **Why it matters:** R-2.1 / §3.12 acceptance paths with no coverage.
+  - **Change:** in `tests/commands.rs` invoke `status.stage` against a menu view and assert the info message and no repo change. For `Unavailable`, add a test-only registry seam or a unit test of the branch with a fake command.
+  - **Done when:** deleting either branch fails a test.
+  - **Constraints:** no production-only test hooks beyond a `#[cfg(test)]` seam.
+
+- [ ] **[P2] Test the acked-version rule and send real key versions** (`tests/views.rs`, `tests/navigation.rs`)
+  - **Problem:** §3.1 says positional requests resolve against the last acked tree; every test queries a fresh tree, and `view/key` is always sent with `version: 1`.
+  - **Why it matters:** coverage of the core consistency rule.
+  - **Change:** render v2 without ack, call the definition/documentSymbol resolution and assert it uses v1; send `view/key` with a stale version and assert identity-based resolution or a message (depends on the `TestSession` task).
+  - **Done when:** making positional requests use the latest tree fails the test.
+  - **Constraints:** none beyond using tree nodes.
+
+- [ ] **[P2] Test `keymapDelivery` `static`/`forwardAll` and `keyModifiers`** (`src/server.rs:316,461,1157,1267,1304`)
+  - **Problem:** only `"dynamic"` is exercised (`tests/text_mode.rs:338`).
+  - **Why it matters:** R-2.3 acceptance; VSCode (`static`) depends on it.
+  - **Change:** stdio tests: with `static`, no `view/keymap` is pushed on `view/open` or config reload; with `forwardAll`, an unbound key replies `passThrough`. For `keyModifiers: "basic"`, test the consumer or delete the stored field.
+  - **Done when:** changing the gating condition fails a test.
+  - **Constraints:** use the shared `TestServer`.
+
+- [ ] **[P2] Cover cross-scope key conflicts** (`tests/keymap.rs:206-216`)
+  - **Problem:** only two commands on the same key within one scope are tested; §3.9 says "same scope chain".
+  - **Why it matters:** the rule is broader than the test.
+  - **Change:** add `status.stage=["Enter"]` against `common.confirm=["Enter"]` (conflict) and a scope override of a common command (not a conflict).
+  - **Done when:** both cases are asserted.
+  - **Constraints:** none.
+
+- [ ] **[P2] Fill the config test gaps** (`tests/config.rs`)
+  - **Problem:** untested: the `initializationOptions` layer order; `default_config_path()` under `XDG_CONFIG_HOME`; the `$VAR` form; nested includes resolving against the including file's directory; `.magit-lsp.toml` limited to keys/display; parse errors naming a line (`config.rs:143-149` checks only the file). `set_var("HOME", …)` at lines 91-92 races other tests.
+  - **Why it matters:** R-2.2 / §3.18 acceptance; global env mutation is racy.
+  - **Change:** add one test per gap. Replace the `set_var` calls by running the case through `ConfigService`/CLI with an explicit env, or by a `serial_test` guard.
+  - **Done when:** each listed behaviour has a test; no `std::env::set_var` remains in `tests/config.rs`.
+  - **Constraints:** do not change config semantics.
+
+- [ ] **[P2] Decide the minimum git version and test it** (`README.md:56`, `.github/workflows/ci.yml`)
+  - **Problem:** IMM-1 requires the unborn-HEAD tests to pass on the oldest supported git; README records only 2.55.0 and CI uses one git. TASKS §10: the `git rm --cached -f` fallback is never reached.
+  - **Why it matters:** an explicit acceptance criterion with no mechanism.
+   - **Decision:** Git 2.19 is a candidate minimum, pending CI validation; it is not yet the settled supported minimum. Add a CI job on that git (container) running `git_backend`, `status`, `patch_cases`. Either add a test that reaches the `git rm` fallback or delete the fallback.
+  - **Done when:** README states the minimum and CI enforces it.
+  - **Constraints:** none.
+
+- [ ] **[P2] Test that a client disconnect aborts Git** (`tests/editor_bridge.rs`)
+  - **Problem:** §3.10 step 7 and §8.3 name this case; no test.
+  - **Why it matters:** hang risk.
+  - **Change:** start a commit, receive `editDocument`, close the client's stdin/exit, and assert the Git child ends and no `git commit` is left.
+  - **Done when:** the test passes and fails if the abort is removed.
+  - **Constraints:** bounded wait, no fixed sleep.
+
+- [ ] **[P2] Test the Neovim prompt mapping for every kind** (`lua/magit-lsp/prompt.lua`, `tests/test_magit_lsp.lua:1444`)
+  - **Problem:** only `text` via `vim.ui.input` is covered; `confirm`, `choice` (±`allowCustom`), `multiChoice`, `secret` are not (§8.6).
+  - **Why it matters:** R-3.1 acceptance.
+  - **Change:** one table-driven L2 case that stubs `vim.ui.select`/`vim.ui.input`/`vim.fn.inputsecret`, sends one `view/prompt` per kind and checks the `view/promptRespond` payload shape and `cancelled`.
+  - **Done when:** each kind's response shape is asserted in one case.
+  - **Constraints:** do not add more Lua cases than this one.
+
+- [ ] **[P2] Cover option clearing and saved args** (`tests/menu.rs`)
+  - **Problem:** "pressing a set option again clears it" (§3.11) and `view/open` `args.saved_args` have no test; `menus.save_scope` is parsed but untested.
+  - **Why it matters:** acceptance behaviour without coverage.
+   - **Change:** set `=A`, press `=A` again with a `ScriptedUi` that has no reply queued, assert value `None` and no prompt. Add a `saved_args` open test. Defer `menus.save_scope` persistence and remove/defer the setting until its semantics are understood.
+  - **Done when:** each case is asserted.
+  - **Constraints:** none.
+
+- [ ] **[P2] Guard VSCode keybinding drift and run node tests in `make test`** (`clients/vscode/package.json`, `Makefile`, CI)
+  - **Problem:** nothing compares `package.json#contributes.keybindings` to `magit-lsp keymap --format vscode`; node tests are outside `make test`/CI (§8.7).
+  - **Why it matters:** R-2.5/R-2.9 acceptance.
+  - **Change:** add a check (the existing `gen-keybindings` script with `--check`, or a Rust test reading `package.json`) and a `make vscode-test` target run in CI. Overlaps R-VS-1; coordinate.
+  - **Done when:** editing a profile without regenerating fails CI.
+  - **Constraints:** do not hand-edit generated keybindings.
+
+- [ ] **[P2] Replace Lua sleeps with an idle wait** (`tests/test_magit_lsp.lua:329,419,695,706,794,966,989,1008,1046,1065,1085,1142,1157,1191`; poll loops at `413-420`, `960-967`, `984-990`, `1002-1009`, `1040-1047`, `1059-1066`, `1079-1086`)
+  - **Problem:** `vim.loop.sleep` and copy-pasted `for _ = 1, 40 do … sleep(50)` loops contradict "never sleep, poll `idle()`"; `type_edit` reads `v:errmsg` after a fixed sleep.
+  - **Why it matters:** flakiness and DRY.
+  - **Change:** add `HELPERS.wait_idle()` (poll `require('magit-lsp.debug').idle()` with `vim.wait`) and `HELPERS.wait_for(fn)`; replace every sleep/loop.
+  - **Done when:** `grep -n "loop.sleep" tests/test_magit_lsp.lua` is empty; `make test-lua` passes 5 consecutive runs.
+  - **Constraints:** do not change assertions.
+
+- [ ] **[P2] Make `type_edit` assert what IMM-4 says** (`tests/test_magit_lsp.lua:324-341`, `621-657`)
+  - **Problem:** it passes both when the key succeeds and when it fails with E21, so a key that silently edits nothing passes. `dd`/`x` from IMM-4 are skipped because they are bound.
+  - **Why it matters:** weak assertion.
+  - **Change:** assert the buffer is unchanged, `modified=false`, and for keys unbound in the active profile that E21 occurred. Note the `dd`/`x` deviation in the test header.
+  - **Done when:** making the buffer modifiable fails the test.
+  - **Constraints:** no new Lua cases.
+
+- [ ] **[P2] Force overlap in the mutation-ordering test** (`tests/server_async.rs:373-410`, `325-370`)
+  - **Problem:** `mutations_for_one_repository_apply_in_request_order` passes even without serialisation because both mutations are fast. `a_slow_mutation_does_not_delay_a_later_read` exists only under `cfg(debug_assertions)` via `MAGIT_LSP_TEST_DELAY_MS`.
+  - **Why it matters:** R-3.2 "serialises mutations per repository" is not truly tested.
+  - **Change:** reuse the fake-git `add` hook (shared fixture, see C9 task) so the first mutation blocks until released; send the second; assert the second's `$/progress` `begin` follows the first's `end`. Switch the read-concurrency test to the same hook so it also runs in `--release`.
+  - **Done when:** removing the repo lock fails the ordering test.
+  - **Constraints:** bounded waits only.
+
+- [ ] **[P2] Prune cross-layer duplicate tests** (see list)
+  - **Problem:** the same behaviour is asserted in several layers: ~12 Lua staging/untracked cases (`tests/test_magit_lsp.lua:395-500, 800-872`) duplicate `views.rs`/`git_backend.rs`/`status.rs`; the 23-line status table in Lua `800-829` duplicates `status_render.rs:102`; `tests/keys.rs` duplicates `src/keys.rs:392-420`; `tests/manifest.rs:86-127` duplicates `src/keys.rs:423-485`; `src/runner.rs:392-420` duplicates `tests/runner.rs:131-169`; `unbind_removes_a_profile_binding` exists in `config.rs:172` and `keymap.rs:219`; Planned-action checks exist in `commands.rs:203`, `menu.rs:296`, `menus.rs:110`.
+  - **Why it matters:** §0/§8 target ~80/15/5 split; duplicates raise churn.
+  - **Change:** keep one Lua stage round trip (`pressing s…`, `visual line range`), the Lua notify case for planned actions, and delete the rest of the listed duplicates. Delete `tests/keys.rs`, the two `*_keys_follow_the_section_3_8_table` tests and one of each duplicated pair above. For Rust/Lua translator drift, share one `tests/data/keys.json` read by `src/keys.rs` tests and `test_keymap.lua`.
+  - **Done when:** each behaviour has one primary owner; `make test` passes; Lua case count drops by at least 12.
+  - **Constraints:** do not remove the only test of any behaviour; do after the `TestSession` task.
+
+- [ ] **[P2] Reduce snapshot sprawl and use one snapshot mechanism** (`tests/manifest.rs:22-43`, `tests/parity.rs:119-164`, `tests/menu.rs:146-158`, `tests/menus.rs:527-556`, `tests/snapshots/`)
+  - **Problem:** three snapshot mechanisms (`expect_file!`, a custom `UPDATE_SNAPSHOTS` helper twice). `parity` is snapshotted three times (README block, `parity.md` with 355 rows, CLI output). 12 menu layout snapshots pin incidental spacing. Manifest snapshots in four formats pin docs/statuses that change every phase.
+  - **Why it matters:** brittle, noisy diffs on every Planned→Implemented change.
+  - **Change:** use `expect_file!` everywhere and delete both custom helpers. Delete `tests/snapshots/parity.md` and its test; keep the README-block check. Keep layout snapshots for the commit menu at 60 and 140 only; for rebase/push/diff assert width invariants (no line wider than `cols`, fewer columns at smaller widths, every Planned action has a `magit.menu.planned` token). Keep `manifest-*.json` and `keybindings-*.json` (R-2.5 requires a CI snapshot); drop the markdown and `.neo.json` snapshots.
+  - **Done when:** `tests/snapshots/` has ≤ 6 files and one update command (`UPDATE_EXPECT=1`); documented in `README.md`/`AGENTS.md`.
+  - **Constraints:** keep the R-2.5 manifest snapshot.
+
+- [ ] **[P2] Replace magic counts and interim-state asserts** (`tests/commands.rs:199`, `tests/menus.rs:162`, `tests/parity.rs:82`, `tests/menu.rs:716-742`, `tests/dispatch.rs:583-664`)
+  - **Problem:** `== 32`, `> 100`, `> 150` thresholds; asserts that commit keys `e`/`f`/`a` are `Planned R-4.1` (breaks when R-4.1 lands); five `execute_discard_*` tests pin "Not implemented yet" for R-3.6; `needs_confirm: true` appears in every discard row with no `false` case.
+  - **Why it matters:** brittle and tests the temporary state, not the spec.
+  - **Change:** use relational checks (`planned + implemented == total`, "at least one planned action exists"); keep a single discard-deferred test marked `// remove with R-3.6`; drop `needs_confirm` or add a row where it is false.
+  - **Done when:** landing R-4.1 or R-3.6 breaks at most one clearly marked test.
+  - **Constraints:** none.
+
+- [ ] **[P2] Tighten loose or tautological assertions** (`tests/git_backend.rs:55-73,162-212,633-716`, `src/patch.rs:714-721`, `tests/manifest.rs:198-213`, `tests/keys_protocol.rs:416`, `tests/text_mode.rs:226`, `tests/parity.rs:16-83`, `tests/commit_preflight.rs:74`)
+  - **Problem:** `contains` checks where the exact diff is known (and `stage_hunk_stages_entire_file` is misnamed, the fixture has one hunk); `full_hunk_reconstruction_is_valid` checks three substrings; `allow_entries_are_scoped_with_reasons` asserts constants against themselves; stray final asserts that repeat earlier ones; `every_menu_item_has_a_parity_row` uses `ends_with(" {key}")` so `a` matches `g a`, and `every_action_row_matches_the_registry…` never reads rows; `_tmp` is used.
+  - **Why it matters:** weak or vacuous asserts.
+  - **Change:** `assert_eq!` against the full expected `git diff --cached -U3`; rename `stage_hunk_stages_entire_file` to `stage_hunk_stages_the_hunk`; check the reconstructed hunk via `apply_check`; replace the allow-list test with "every `WORKBENCH_ALLOW` key is in the deny list and has a non-empty reason"; delete the stray asserts; compare exact `(menu, key)` tuples in parity; rename the registry-row test.
+  - **Done when:** each listed assert is exact or removed.
+  - **Constraints:** do not delete the behaviour coverage.
+
+- [ ] **[P2] Remove process-global env mutation from tests** (`tests/config.rs:91-92`, `tests/runner.rs:37-82`, `tests/process_log.rs:22`)
+  - **Problem:** `set_var("HOME"/…)` and `set_var("PATH", …)` in a multithreaded test binary race with other tests; the process log is global.
+  - **Why it matters:** flakiness.
+  - **Change:** run those cases through the CLI/stdio server with an explicit env, or guard with `serial_test`. For the process log, filter by a unique `cwd` (as `runner.rs` does) and drop the lock.
+  - **Done when:** `grep -rn "set_var" tests/` only matches `tests/common/mod.rs`'s once-guarded init.
+  - **Constraints:** none.
+
+- [ ] **[P3] Make UI latency budgets informational and avoid blind key counts** (`tests/ui/scenarios/latency-menu-open.scn:12-32`)
+  - **Problem:** hard wall-clock budgets (`<= 100ms/80ms/400ms`) fail on slow CI; `j ×10 Right ×4` finds a diff line by count.
+  - **Why it matters:** flakiness; fragile to fixture changes.
+  - **Change:** report latency without failing unless `UI_STRICT_LATENCY=1`; add a `goto "+line3 CHANGED"` DSL step (or use a search key) instead of counted motions.
+  - **Done when:** `make ui-test` passes on a loaded machine; the scenario still reports numbers.
+  - **Constraints:** keep `ui-unit` tests for the DSL green.
+
+- [ ] **[P3] Stop deriving cursor lines from rendered text in protocol/Lua tests** (`tests/server_async.rs:495-501,602-610`, `tests/test_magit_lsp.lua:150-169`)
+  - **Problem:** `trim_start().starts_with('+')` and `line:match('^  %S ')`/`startswith('    @@')` parse rendered text (AGENTS convention).
+  - **Why it matters:** convention; the helpers break on any format change.
+  - **Change:** request `textDocument/documentSymbol` and use the hunk/file symbol `selectionRange`, or `M.jump`.
+  - **Done when:** no helper pattern-matches line shapes.
+  - **Constraints:** keep helper names so call sites do not change.
+
+- [ ] **[P3] Housekeeping** (`tests/stdout_hygiene.rs:210-257`, `.github/workflows/ci.yml:26-27`, `tests/runner.rs:29-93` + `tests/server_async.rs:835-881`, `tests/common/mod.rs:252-295`)
+  - **Problem:** (a) a hand-rolled source scanner for `println!`; (b) the manifest test runs twice in CI; (c) fake-git fixture duplicated; (d) five repo constructors (`init_repo`, `init_long_repo`, `init_two_file_repo`, `init_40_line_repo`, `init_repo_40`) and doubled helper names (`make_standard_changes`/`standard_changes`, `make_two_hunks`/`two_hunk_changes`) beside `RepoFixture`, plus hand-rolled `git init` in `errors.rs:133-139,270-282,297-310` and `git_backend.rs:324-329`; `(1..=40).map(|i| format!("line{i}"))` inlined about eight times.
+  - **Why it matters:** DRY/cleanliness.
+  - **Change:** (a) add `#![deny(clippy::print_stdout)]` and delete the scanner test (keep the two stdio tests); (b) delete the extra CI step; (c) move one `FakeGit` to `tests/common/fake_git.rs`; (d) keep `RepoFixture` + `init_repo()`, add `lines(n).with(idx, text)`, convert the hand-rolled setups to the builder, delete the wrappers.
+  - **Done when:** each sub-item is done; `make test` passes.
+  - **Constraints:** do after the `TestSession` and stdio-client tasks.
+
+- [ ] **[P3] Remaining small coverage gaps**
+  - **Problem:** (a) IMM-3: exit code is 128 in every row of `errors.rs:52-119`; no real `non-fast-forward` via a local bare remote; no `processLogId`; (b) §3.13 `diff.context` parsed but no test that `-U<n>` reaches both diffs; (c) §8.4 colour checks beyond links (section ≠ file ≠ hunk header ≠ hash; `menu.planned` dimmer than `menu.label`) are absent; (d) R-UI-5 progress ending on a failed commit is only asserted at L3; (e) `.cargo/config.toml` alias `cargo xtask parity` is untested; (f) `make test` omits `ui-unit` and the node tests (document it).
+  - **Why it matters:** acceptance details without tests.
+  - **Change:** add one test per item (reuse existing fixtures; (c) goes into the existing colour-scheme Lua case, (d) into `server_async.rs` with a failing `pre-commit` hook).
+  - **Done when:** each item has a test or a recorded decision to skip.
+  - **Constraints:** do not add Lua cases beyond (c).
+
+### Test-review summary (for the human)
+
+Counts: 7 review P1, 20 review P2, 4 review P3 tasks above (plus one separate
+P1 harness bugfix). Decisions recorded: four detail levels (§5.1); Git 2.19 is
+a candidate minimum pending CI; parity keys must be verified against the Magit
+manual; defer `menus.save_scope` persistence and revisit its semantics before
+adding a persistence setting.
+
+### 11.3 UI harness review and bugfix
+
+- [ ] **[P1] Diagnose Neovim harness startup/socket failure** (`scripts/ui`, `scripts/ui_lib/`)
+  - **Problem:** Neovim does not open the expected `build/ui/runs/.../nvim.sock` socket.
+  - **Why it matters:** the real-UI harness cannot reliably start or connect to its child Neovim.
+  - **Change:** diagnose process startup, socket path creation, permissions and connection ordering. Keep harness startup/socket diagnosis separate from scenario behavior: a scenario assertion failure is not evidence of socket failure, and a socket failure is not a scenario behavior regression.
+  - **Done when:** the harness reports a clear startup/socket outcome and can connect to the expected socket; scenario behavior is independently tested by `make ui-test`.

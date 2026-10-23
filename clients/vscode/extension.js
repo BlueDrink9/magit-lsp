@@ -12,6 +12,7 @@ const render = require('./lib/render');
 const menu = require('./lib/menu');
 const foldkeys = require('./lib/foldkeys');
 const prompt = require('./lib/prompt');
+const edit = require('./lib/edit');
 
 const SCHEME = 'magit';
 
@@ -33,6 +34,9 @@ let activeViewId;
 /** @type {string|undefined} */
 let quickPickViewId;
 
+/** @type {string|undefined} */
+let activeEditId;
+
 /** All views the server opened in this window, keyed by view id. */
 const views = new Map();
 
@@ -41,6 +45,12 @@ const uriToView = new Map();
 
 /** Renders that arrived before their descriptor's effect. */
 const pendingRenders = new Map();
+
+/** Git-owned edit documents, keyed by edit id. */
+const edits = new Map();
+
+/** URI string -> edit id, so a closed document can cancel its edit. */
+const editUris = new Map();
 
 /**
  * Activate the extension.
@@ -68,6 +78,8 @@ function activate(context) {
     vscode.commands.registerCommand('magit.open', openStatus),
     vscode.commands.registerCommand('magit.key', pressCommand),
     vscode.commands.registerCommand('magit.invoke', invokeCommand),
+    vscode.commands.registerCommand('magit.confirmEdit', confirmEditCommand),
+    vscode.commands.registerCommand('magit.cancelEdit', cancelEditCommand),
     vscode.commands.registerCommand('magit.mirrorFoldShortcuts', mirrorFoldShortcuts),
     vscode.workspace.onDidCloseTextDocument(onDocumentClosed),
     vscode.window.onDidChangeActiveTextEditor(onActiveEditorChanged)
@@ -76,6 +88,9 @@ function activate(context) {
   client = createClient();
   client.onNotification('view/render', applyRender);
   client.onNotification('view/prompt', handlePrompt);
+  client.onNotification('view/effects', (params) => {
+    void applyEffects(params && params.effects);
+  });
   clientReady = client.start().catch((error) => {
     output.appendLine(`language client failed: ${message(error)}`);
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
@@ -716,6 +731,9 @@ async function applyEffects(effects) {
       case 'focusView':
         await focusView(effect.viewId);
         break;
+      case 'editDocument':
+        await openEdit(effect);
+        break;
       default:
         output.appendLine(`unknown effect: ${effect.type}`);
     }
@@ -738,6 +756,155 @@ function showMessage(effect) {
     vscode.window.showWarningMessage(text);
   } else {
     vscode.window.showInformationMessage(text);
+  }
+}
+
+/**
+ * Open a Git-owned file for an `editDocument` effect.
+ *
+ * @param {object} effect
+ */
+async function openEdit(effect) {
+  if (!edit.isEditEffect(effect)) {
+    return;
+  }
+  const uri = vscode.Uri.file(effect.path);
+  const document = await vscode.workspace.openTextDocument(uri);
+  try {
+    await vscode.languages.setTextDocumentLanguage(
+      document,
+      edit.languageForKind(effect.kind)
+    );
+  } catch (error) {
+    output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
+  }
+  await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+
+  const state = { effect, uri, document, closing: false };
+  edits.set(effect.editId, state);
+  editUris.set(uri.toString(), effect.editId);
+  activeEditId = effect.editId;
+  await setContext(edit.editingContext(effect));
+}
+
+/**
+ * The edit owning the active editor, or the most recent one.
+ *
+ * @returns {object|undefined}
+ */
+function currentEdit() {
+  const editor = vscode.window.activeTextEditor;
+  if (editor) {
+    const id = editUris.get(editor.document.uri.toString());
+    if (id && edits.has(id)) {
+      return edits.get(id);
+    }
+  }
+  if (activeEditId && edits.has(activeEditId)) {
+    return edits.get(activeEditId);
+  }
+  return undefined;
+}
+
+/**
+ * The id of the status view that owns the session, used to answer an edit.
+ *
+ * @returns {string|undefined}
+ */
+function statusViewId() {
+  for (const state of views.values()) {
+    if (!isMenuKind(state.descriptor.kind) && state.descriptor.scope === 'status') {
+      return state.id;
+    }
+  }
+  return activeViewId;
+}
+
+/**
+ * Send `common.confirm` or `common.cancel` for an edit.
+ *
+ * @param {string} command
+ * @param {string} editId
+ */
+async function answerEdit(command, editId) {
+  const viewId = statusViewId();
+  if (!viewId) {
+    output.appendLine(`cannot answer edit ${editId}: no status view`);
+    return;
+  }
+  await invoke(viewId, command, { args: edit.answerArgs(editId) }, {
+    cursor: { line: 0, column: 0 },
+  });
+}
+
+/**
+ * Save the edit and let Git continue.
+ */
+async function confirmEditCommand() {
+  const state = currentEdit();
+  if (!state) {
+    return;
+  }
+  try {
+    await state.document.save();
+  } catch (error) {
+    output.appendLine(`saving the edit failed: ${message(error)}`);
+    vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);
+    return;
+  }
+  await answerEdit('common.confirm', state.effect.editId);
+  await closeEdit(state);
+}
+
+/**
+ * Abort the edit, leaving Git's operation undone.
+ */
+async function cancelEditCommand() {
+  const state = currentEdit();
+  if (!state) {
+    return;
+  }
+  await answerEdit('common.cancel', state.effect.editId);
+  await closeEdit(state);
+}
+
+/**
+ * Forget an edit and close its document.
+ *
+ * @param {object} state
+ */
+async function closeEdit(state) {
+  if (state.closing) {
+    return;
+  }
+  state.closing = true;
+  edits.delete(state.effect.editId);
+  editUris.delete(state.uri.toString());
+  if (activeEditId === state.effect.editId) {
+    activeEditId = undefined;
+  }
+  await setContext(edit.inactiveContext());
+  const tab = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .find((candidate) => candidate.input && candidate.input.uri
+      && candidate.input.uri.toString() === state.uri.toString());
+  if (tab) {
+    await vscode.window.tabGroups.close(tab);
+  }
+  const active = activeState();
+  if (active) {
+    activateView(active);
+  }
+}
+
+/**
+ * Set several context keys in one call.
+ *
+ * @param {Record<string, unknown>} values
+ */
+async function setContext(values) {
+  for (const [key, value] of Object.entries(values)) {
+    await vscode.commands.executeCommand('setContext', key, value);
   }
 }
 
@@ -802,6 +969,17 @@ function editorInfo() {
  * @param {vscode.TextDocument} document
  */
 async function onDocumentClosed(document) {
+  const editId = editUris.get(document.uri.toString());
+  if (editId) {
+    const editState = edits.get(editId);
+    if (editState && !editState.closing) {
+      // Closing the tab without confirming is a cancel (§3.10).
+      await answerEdit('common.cancel', editId);
+      await closeEdit(editState);
+    }
+    return;
+  }
+
   const state = stateForUri(document.uri);
   if (!state) {
     return;
@@ -877,12 +1055,26 @@ function viewport() {
  * @param {{key?: string}|undefined} args
  */
 async function pressCommand(args) {
-  const state = activeState();
-  if (!state) {
-    return;
-  }
   const key = args && args.key;
   if (!key) {
+    return;
+  }
+
+  // An edit buffer is a real file, so it has no magit view id. The server's
+  // generated commit-message bindings still call `magit.key`; answer the two
+  // commands locally.
+  if (currentEdit()) {
+    const command = edit.commandForKey(key);
+    if (command === 'confirm') {
+      await confirmEditCommand();
+    } else if (command === 'cancel') {
+      await cancelEditCommand();
+    }
+    return;
+  }
+
+  const state = activeState();
+  if (!state) {
     return;
   }
 
