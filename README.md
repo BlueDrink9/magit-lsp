@@ -78,6 +78,69 @@ make test-file FILE=tests/test_magit_lsp.lua
 Neovim integration tests start the real `target/debug/magit-lsp` binary against
 a throwaway git repository under `build/test-repos/`.
 
+### VSCode client tests
+
+The VSCode extension requires VSCode 1.85 or newer. Running its Node tests also
+requires Node.js and npm; exercising the extension against Git requires `git`
+and a built Rust server (`cargo`). Install the extension's locked dependencies
+and run its automated tests from the repository root:
+
+```sh
+npm --prefix clients/vscode ci
+npm --prefix clients/vscode test
+```
+
+These are Node unit tests for the extension's context, rendering, menu,
+fold-shortcut and prompt helpers. They do not launch VSCode or the language
+server. `make test` runs only Rust and Neovim tests; it does **not** run the
+VSCode tests.
+
+To test the extension in an Extension Development Host, build the server and
+install the extension dependencies first. Then create a disposable repository
+with a commit and a few changes, configure the development workspace to use the
+built server, and launch VSCode with the extension development path:
+
+```sh
+cargo build
+npm --prefix clients/vscode ci
+
+server="$(pwd)/target/debug/magit-lsp"
+extension="$(pwd)/clients/vscode"
+repo="$(mktemp -d)"
+git -C "$repo" init
+printf 'original\n' > "$repo/tracked.txt"
+git -C "$repo" add tracked.txt
+git -C "$repo" -c user.name='Magit Test' -c user.email='magit-test@example.invalid' commit -m initial
+printf 'edited\n' >> "$repo/tracked.txt"
+printf 'untracked\n' > "$repo/new.txt"
+mkdir -p "$repo/.vscode"
+cat > "$repo/.vscode/settings.json" <<EOF
+{
+  "magit-lsp.serverPath": "$server",
+  "magit-lsp.profile": "standard"
+}
+EOF
+code --new-window --extensionDevelopmentPath="$extension" "$repo"
+```
+
+In the Extension Development Host window, open the Command Palette and run
+**Magit: Open Status**. The extension starts the configured `magit-lsp` binary
+with no arguments; `magit-lsp.serverPath` defaults to `magit-lsp` on `PATH`,
+and `magit-lsp.profile` defaults to `standard` (`standard` or `vim`). No
+`.vscode/launch.json` or F5 launch setup is provided; the `code` command above
+starts the host directly. Delete the temporary repository when finished.
+
+Manual smoke checklist:
+
+- Confirm the status view shows the modified tracked file and untracked file;
+  expand a file/hunk and check that the diff renders.
+- Stage and unstage a change, then refresh and confirm the Git status updates.
+- Open the commit menu (`c`), toggle an option and close it with Escape.
+- Toggle text mode with `ctrl+t` and back. VSCode's virtual status document is
+  read-only, so text mode displays server-rendered text but does not allow
+  editing; arbitrary pass-through chords are also not replayed by this static
+  client.
+
 ## Manual testing
 
 1. Build the server:
