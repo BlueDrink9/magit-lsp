@@ -5,6 +5,16 @@ on:
   pull_request:
 
 jobs:
+  recommended-git:
+    runs-on: ubuntu-latest
+    container: rust:bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated-container build dependencies
+        run: apt-get update && apt-get install -y build-essential curl xz-utils zlib1g-dev
+      - name: Build and test recommended Git 2.30.8
+        run: scripts/test_recommended_git.sh
+
   test:
     runs-on: ubuntu-latest
     steps:

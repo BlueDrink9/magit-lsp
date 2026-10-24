@@ -208,7 +208,8 @@ impl RepoFixture {
     pub fn build(self) -> (RepoFixture, GitRepo) {
         apply_determinism_env();
         let path = self.dir.path().to_path_buf();
-        git(&path, &["init", "-q", "-b", "main"]);
+        git(&path, &["init", "-q"]);
+        git(&path, &["symbolic-ref", "HEAD", "refs/heads/main"]);
         git(&path, &["config", "user.email", FIXED_EMAIL]);
         git(&path, &["config", "user.name", FIXED_NAME]);
         for (message, files) in &self.commits {

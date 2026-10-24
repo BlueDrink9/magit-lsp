@@ -9,6 +9,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
+const RECOMMENDED_GIT_VERSION: &str = include_str!("../RECOMMENDED_GIT_VERSION");
+
 /// A single changed file: its display status char and its diff hunks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -340,13 +342,7 @@ impl GitRepo {
 
     /// Stage the lines in `start..=end` of the unstaged hunk with `hunk_id`.
     /// Returns `false` when the range contains no changed lines.
-    pub fn stage_lines(
-        &self,
-        path: &str,
-        hunk_id: &str,
-        start: usize,
-        end: usize,
-    ) -> Result<bool> {
+    pub fn stage_lines(&self, path: &str, hunk_id: &str, start: usize, end: usize) -> Result<bool> {
         self.apply_hunk_lines(path, hunk_id, start, end, false)
     }
 
@@ -408,9 +404,7 @@ impl GitRepo {
                             .ok_or_else(|| Error::hunk_not_found(&file.path))?;
                         body.push_str(&patch::full_hunk_patch(&hunk.hunk));
                     }
-                    SelectionOp::Lines {
-                        hunk_id, lines, ..
-                    } => {
+                    SelectionOp::Lines { hunk_id, lines, .. } => {
                         let hunk = file
                             .hunks
                             .iter()
@@ -534,18 +528,11 @@ impl GitRepo {
         self.unstage_paths(&["."])
     }
 
-    /// Unstage `paths`, leaving the working tree untouched. Falls back to
-    /// `git rm --cached` because `git reset` needs a resolvable HEAD.
+    /// Unstage `paths`, leaving the working tree untouched, even without HEAD.
     fn unstage_paths(&self, paths: &[&str]) -> Result<()> {
         let mut reset = vec!["reset", "-q", "--"];
         reset.extend_from_slice(paths);
-        if self.run(&reset).is_ok() {
-            return Ok(());
-        }
-
-        let mut rm = vec!["rm", "--cached", "-q", "-f", "--ignore-unmatch", "--"];
-        rm.extend_from_slice(paths);
-        self.run(&rm).map(|_| ())
+        self.run(&reset).map(|_| ())
     }
 
     fn file_layout(&self, path: &str, staged: bool) -> Result<FileLayout> {
@@ -597,19 +584,13 @@ impl GitRepo {
             .as_mut()
             .ok_or_else(|| Error::new("failed to open stdin"))
             .and_then(|stdin| stdin.write_all(patch_text.as_bytes()).map_err(Error::from));
-        if let Err(error) = written {
-            // Closing stdin lets a child that never applied the patch exit.
-            drop(child.stdin.take());
-            let _ = child.wait();
-            if let Some(handle) = &cancel {
-                handle.clear_child();
-            }
-            return Err(error);
-        }
-        let out = child.wait_with_output()?;
+        // Even if Git closes stdin early, preserve its original exit/stderr.
+        drop(child.stdin.take());
+        let out = child.wait_with_output();
         if let Some(handle) = &cancel {
             handle.clear_child();
         }
+        let out = out?;
         log_finished(
             &self.root,
             &args,
@@ -619,12 +600,14 @@ impl GitRepo {
             &out.stderr,
         );
         if !out.status.success() {
+            warn_if_git_is_below_recommendation(&self.root, &[], &out.status);
             return Err(Error::git(GitFailure::from_output(
                 &args,
                 out.status,
                 &out.stderr,
             )));
         }
+        written?;
         Ok(())
     }
 
@@ -678,6 +661,7 @@ impl GitRepo {
             &out.stderr,
         );
         if !out.status.success() {
+            warn_if_git_is_below_recommendation(cwd, env, &out.status);
             return Err(Error::git(GitFailure::from_output(
                 args,
                 out.status,
@@ -686,6 +670,98 @@ impl GitRepo {
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
+}
+
+/// Best-effort warning for a completed Git failure on an older-than-recommended Git.
+/// This separate `--version` probe cannot alter the original invocation result.
+fn warn_if_git_is_below_recommendation(
+    cwd: &Path,
+    env: &[(&str, &str)],
+    status: &std::process::ExitStatus,
+) {
+    // Do not register the diagnostic as the operation's cancellation target.
+    // Cap both output and elapsed time, including inherited pipe handles.
+    let deadline = Instant::now() + std::time::Duration::from_millis(500);
+    let Ok(mut child) = git_command(cwd, &["--version"], Stdio::null(), env)
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        let result = stdout.take(1024).read_to_end(&mut bytes);
+        let _ = tx.send(result.map(|_| bytes));
+    });
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
+    let Ok(Ok(bytes)) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else {
+        return;
+    };
+    let installed = String::from_utf8_lossy(&bytes);
+    let Some(version) = installed.trim().strip_prefix("git version ") else {
+        return;
+    };
+    let Some(installed_version) = parse_git_version(version) else {
+        return;
+    };
+    let Some(recommended_version) = parse_git_version(RECOMMENDED_GIT_VERSION) else {
+        return;
+    };
+    if compare_versions(&installed_version, &recommended_version).is_lt() {
+        tracing::warn!(
+            installed = %installed.trim(),
+            recommended = RECOMMENDED_GIT_VERSION.trim(),
+            exit_code = status.code().unwrap_or(-1),
+            "Git command failed with an older-than-recommended Git; upgrade Git or report compatibility issues"
+        );
+    }
+}
+
+fn parse_git_version(text: &str) -> Option<Vec<u64>> {
+    let digits = text
+        .trim()
+        .split(|ch: char| !ch.is_ascii_digit() && ch != '.')
+        .next()?;
+    let components = digits
+        .trim_end_matches('.')
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .ok()?;
+    (!components.is_empty()).then_some(components)
+}
+
+fn compare_versions(left: &[u64], right: &[u64]) -> std::cmp::Ordering {
+    let count = left.len().max(right.len());
+    (0..count)
+        .map(|index| {
+            left.get(index)
+                .copied()
+                .unwrap_or(0)
+                .cmp(&right.get(index).copied().unwrap_or(0))
+        })
+        .find(|ordering| !ordering.is_eq())
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// Per-file `git diff` counters, used by tests to prove lazy bodies.
@@ -780,6 +856,28 @@ fn log_finished(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_components_are_numeric_and_allow_vendor_suffixes() {
+        let recommended = parse_git_version(RECOMMENDED_GIT_VERSION).unwrap();
+        assert_eq!(recommended, vec![2, 30, 8]);
+        for version in ["2.9.99", "2.19.6 (vendor)", "2.30.7.windows.1"] {
+            assert!(compare_versions(&parse_git_version(version).unwrap(), &recommended).is_lt());
+        }
+        for version in ["2.30.8", "2.30.8.windows.1", "2.30.8.0"] {
+            assert!(compare_versions(&parse_git_version(version).unwrap(), &recommended).is_eq());
+        }
+        assert!(compare_versions(&parse_git_version("2.100.0").unwrap(), &recommended).is_gt());
+        for invalid in [
+            "",
+            "garbage",
+            "git version garbage",
+            "2..30",
+            "99999999999999999999999",
+        ] {
+            assert!(parse_git_version(invalid).is_none());
+        }
+    }
 
     /// A repo whose root is never touched: these cases need no diffs.
     fn header_repo() -> GitRepo {

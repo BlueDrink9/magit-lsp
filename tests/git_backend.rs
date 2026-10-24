@@ -320,7 +320,8 @@ fn unstage_all_resets_the_index() {
 #[test]
 fn unstage_all_works_without_commits() {
     let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
+    git(tmp.path(), &["init", "-q"]);
+    git(tmp.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
     git(tmp.path(), &["config", "user.email", "t@example.com"]);
     git(tmp.path(), &["config", "user.name", "t"]);
     write(&tmp.path().join("f.txt"), "hello\n");

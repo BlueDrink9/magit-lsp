@@ -55,7 +55,7 @@ here. General agent working conventions and verification guidance live in
 | Detail visibility | Four levels: section (staged/unstaged) → files → hunks → individually visible hunks; profile bindings and tests must match (§5.1) |
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
-| Minimum Git version | Git 2.19 is a candidate minimum pending CI validation, not a settled supported minimum |
+| Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
 
 ---
 
@@ -1872,10 +1872,13 @@ Completed P1 review work (historical tracking, not new verification):
   - **Constraints:** do not change config semantics.
   - **Verified (2026-10-25):** `cargo test --test config && env -i HOME="$HOME" PATH="$PATH" make test` passed (19 config tests, full Rust suite, 64 Neovim cases). Child-process env covers HOME/XDG and independent `$VAR`/`${VAR}` expansion without parent env mutation; nested relative includes and exact parse-error file/line are asserted. Initialization overrides user profile/trust/keys; trusted repo keys override initialization keys, repo diff/sections override user display settings, and repo profile/trust overrides are ignored. Removed the unsupported menu-persistence restriction assertion; production semantics are unchanged.
 
-- [ ] **[P2] Decide the minimum git version and test it** (`README.md:56`, `.github/workflows/ci.yml`)
-  - **Problem:** IMM-1 requires the unborn-HEAD tests to pass on the oldest supported git; README records only 2.55.0 and CI uses one git. TASKS §10: the `git rm --cached -f` fallback is never reached.
-   - **Decision:** Git 2.19 is a candidate minimum, pending CI validation; it is not yet the settled supported minimum. Add a CI job on that git (container) running `git_backend`, `status`, `patch_cases`. Either add a test that reaches the `git rm` fallback or delete the fallback.
-  - **Done when:** README states the minimum and CI enforces it.
+- [x] **[P2] Choose and test the recommended Git version** (`README.md`, `.github/workflows/ci.yml`)
+  - **Policy:** Git 2.30.8 is recommended, not a runtime minimum. Older Git is not blocked, but compatibility is not guaranteed. The runtime only emits a tracing warning after a completed failure when its actual Git is below this recommendation; it never blocks startup or successful operations. The best-effort probe is capped at 500 ms, kills/reaps its own timed-out child, and does not register with operation cancellation.
+  - **Validation:** `RECOMMENDED_GIT_VERSION` is consumed by the runtime and pinned-source test script. The CI container builds exact 2.30.8 from the kernel.org archive after checking SHA-256, asserts both executable and helper paths, then runs `git_backend`, `status`, and `patch_cases`, including the rename-with-modifications hunk regression. The current-Git full suite is a separate CI job.
+  - **Historical limitation:** A prior exact Git 2.19.6 run passed all 38 `git_backend` tests but failed `patch_cases::rename_with_modifications_stages_hunks_and_unstages` with `g.txt: already exists in index`. This is retained as a known failure, not a compatibility claim.
+  - **Local verification (2026-10-25):** `scripts/test_recommended_git.sh && cargo test --test git_version --test git_backend --test errors && env -i HOME="$HOME" PATH="$PATH" make test` exited 0. Unmodified Git 2.30.8 source archive SHA-256: `62e95f694f28ba4f35bae1d0d19328093ac4783dc5b9c84e2e3d5eca0ab064e9`. The selected executable was `/tmp/opencode/git230/install/bin/git`, helpers `/tmp/opencode/git230/install/libexec/git-core`; backend 38, status 15, patch cases 7 (including renamed-file hunks) passed. Current Git 2.56.0 passed the full Rust suite and all 64 Neovim cases. Hosted CI was not run here.
+  - **Build environment/evidence:** Exported `RECOMMENDED_GIT_CFLAGS='-I/nix/store/a76rmqrp6l3w6h9pppfwzb3s6dzi0y4g-zlib-1.3.2-dev/include'` and `RECOMMENDED_GIT_LDFLAGS='-L/nix/store/fkcbg2c1w29jr5yp9awai9w3v1wvxdk9-zlib-1.3.2/lib -Wl,-rpath,/nix/store/fkcbg2c1w29jr5yp9awai9w3v1wvxdk9-zlib-1.3.2/lib'` before that command. Full successful output: `/tmp/opencode/git230/verification-final.log`. Initial attempts exposed test assertions expecting original stderr in the RPC summary instead of its readable error detail, then quoted display-field logging; their exact outputs remain in `verification.log` and `verification-retry.log`. These assertions were corrected before the passing gate.
+  - **Verified locally (2026-10-25):** Pending the required baseline and diagnostic verification command below; hosted CI has not been run.
 
 - [ ] **[P2] Test that a client disconnect aborts Git** (`tests/editor_bridge.rs`)
   - **Problem:** §3.10 step 7 and §8.3 name this case; no test.
