@@ -462,6 +462,25 @@ impl TestSession {
         result
     }
 
+    /// Press a key using an explicitly observed render version.
+    pub fn press_at_version(&mut self, key: &str, version: u64) -> InvokeResult {
+        let view = self.view.clone();
+        self.key_version = version;
+        let result = self
+            .session
+            .key(&ViewKeyParams {
+                view_id: view,
+                version,
+                key: key.to_string(),
+                editor_mode: EditorMode::Normal,
+                cursor: self.cursor,
+                selection: None,
+            })
+            .expect("view/key");
+        self.track_result(&result);
+        result
+    }
+
     /// Press `key` over the inclusive line range `start..=end` in visual mode.
     pub fn press_visual(&mut self, start: usize, end: usize, key: &str) -> InvokeResult {
         self.press_full(

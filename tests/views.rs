@@ -189,6 +189,31 @@ fn a_stale_hunk_action_reports_a_message_and_changes_no_repo_state() {
 }
 
 #[test]
+fn a_stale_key_cannot_stage_the_new_node_at_the_old_row() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let old_row = test.goto_marker("f.txt", '+');
+    let old_identity = test.tree().line_nodes[old_row].clone();
+
+    write(&tmp.path().join("f.txt"), TEN_LINES);
+    write(&tmp.path().join("g.txt"), "a new occupant\n");
+    test.refresh().expect("refresh after repository change");
+    assert_ne!(test.version(), initial.version);
+
+    let outcome = test.press_at_version("s", initial.version);
+    assert_eq!(message_texts(&outcome.effects), vec![errors::HUNK_CHANGED]);
+    assert_eq!(test.last_key_version(), initial.version);
+    assert_eq!(old_identity.path.as_deref(), Some("f.txt"));
+    assert_eq!(cached_diff(tmp.path()), "");
+    assert_eq!(tmp.git(&["diff", "--cached", "--name-only"]), "");
+    assert!(tmp.git(&["status", "--short"]).contains("?? g.txt"));
+}
+
+#[test]
 fn a_visual_selection_stages_only_the_lines_it_covers() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

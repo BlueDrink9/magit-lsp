@@ -1,7 +1,8 @@
 //! Configuration loading: includes, layering, validation and hot reload.
 
 use magit_lsp::config::{
-    load_config, resolve_config_path_from, ConfigError, ConfigService, LoadOptions, Profile,
+    default_config_path, load_config, resolve_config_path_from, ConfigError, ConfigService,
+    LoadOptions, Profile,
 };
 use magit_lsp::keymap::Keymap;
 use std::ffi::OsStr;
@@ -75,37 +76,96 @@ fn tables_merge_and_arrays_replace() {
 
 #[test]
 fn relative_absolute_tilde_and_env_includes_resolve() {
+    const CHILD: &str = "MAGIT_LSP_CONFIG_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let env_dir = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+        write(
+            &env_dir.path().join("env.toml"),
+            "[keys.status]\nunstage = [\"b\"]\n",
+        );
+        write(&home.path().join("inc.toml"), "[keys.status]\nstage-all = [\"t\"]\n");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "relative_absolute_tilde_and_env_includes_resolve"])
+            .env(CHILD, "1")
+            .env("HOME", home.path())
+            .env("MAGIT_LSP_TEST_INCLUDE", env_dir.path().join("env.toml"))
+            .env_remove("XDG_CONFIG_HOME")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+
     let dir = TempDir::new().unwrap();
     let abs = TempDir::new().unwrap();
     write(&abs.path().join("abs.toml"), "[keys.status]\nstage = [\"a\"]\n");
-
-    let env_dir = TempDir::new().unwrap();
-    write(
-        &env_dir.path().join("env.toml"),
-        "[keys.status]\nunstage = [\"b\"]\n",
-    );
-
-    let home = TempDir::new().unwrap();
-    write(&home.path().join("inc.toml"), "[keys.status]\nstage-all = [\"t\"]\n");
-
-    std::env::set_var("MAGIT_LSP_TEST_INCLUDE", env_dir.path().join("env.toml"));
-    std::env::set_var("HOME", home.path());
 
     let main = dir.path().join("main.toml");
     write(
         &main,
         &format!(
-            "include = [\"rel.toml\", {:?}, \"${{MAGIT_LSP_TEST_INCLUDE}}\", \"~/inc.toml\"]\n[keys.status]\nstage = [\"c\"]\n",
+            "include = [\"rel.toml\", {:?}, \"$MAGIT_LSP_TEST_INCLUDE\", \"${{MAGIT_LSP_TEST_INCLUDE}}\", \"~/inc.toml\"]\n[keys.status]\nstage = [\"c\"]\n",
             abs.path().join("abs.toml").to_string_lossy(),
         ),
     );
     write(&dir.path().join("rel.toml"), "[keys.status]\nunstage-all = [\"d\"]\n");
+    let env_path = std::env::var("MAGIT_LSP_TEST_INCLUDE").unwrap();
+    write(Path::new(&env_path), "[keys.status]\nunstage = [\"b\"]\n");
+
+    // Exercise each expansion independently so one cannot mask the other.
+    for include in ["$MAGIT_LSP_TEST_INCLUDE", "${MAGIT_LSP_TEST_INCLUDE}"] {
+        let only_env = dir.path().join("only-env.toml");
+        write(&only_env, &format!("include = [{include:?}]\n"));
+        assert_eq!(status_keymap(&load(&only_env).unwrap(), "status.unstage"), vec!["b"]);
+    }
 
     let config = load(&main).unwrap();
     assert_eq!(status_keymap(&config, "status.stage"), vec!["c"]);
     assert_eq!(status_keymap(&config, "status.unstage"), vec!["b"]);
     assert_eq!(status_keymap(&config, "status.stage-all"), vec!["t"]);
     assert_eq!(status_keymap(&config, "status.unstage-all"), vec!["d"]);
+}
+
+#[test]
+fn xdg_config_home_sets_the_default_config_path() {
+    const CHILD: &str = "MAGIT_LSP_XDG_CONFIG_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let config_home = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "xdg_config_home_sets_the_default_config_path"])
+            .env(CHILD, "1")
+            .env("XDG_CONFIG_HOME", config_home.path())
+            .env("HOME", home.path())
+            .env_remove("MAGIT_LSP_CONFIG")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    let expected = Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap())
+        .join("magit-lsp/config.toml");
+    assert_eq!(default_config_path(), Some(expected.clone()));
+    write(&expected, "[diff]\ncontext = 9\n");
+    assert_eq!(load_config(&LoadOptions::default()).unwrap().diff.context, 9);
+}
+
+#[test]
+fn nested_relative_includes_use_the_including_files_directory() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("main.toml");
+    write(&main, "include = [\"nested/first.toml\"]\n");
+    write(
+        &dir.path().join("nested/first.toml"),
+        "include = [\"../shared/second.toml\"]\n",
+    );
+    write(
+        &dir.path().join("shared/second.toml"),
+        "[keys.status]\nstage = [\"n\"]\n",
+    );
+    let config = load(&main).unwrap();
+    assert_eq!(status_keymap(&config, "status.stage"), vec!["n"]);
 }
 
 #[test]
@@ -143,9 +203,11 @@ fn include_cycles_report_the_chain() {
 fn parse_errors_name_file_and_line() {
     let dir = TempDir::new().unwrap();
     let main = dir.path().join("main.toml");
-    write(&main, "[keys.common\nconfirm = [\"Enter\"]\n");
-    let error = load(&main).unwrap_err().to_string();
-    assert!(error.contains("main.toml:"), "{error}");
+    write(&main, "\n[keys.common]\nconfirm = [\"Enter\"\n");
+    let error = load(&main).unwrap_err();
+    assert_eq!(error.file.as_deref(), Some(main.as_path()));
+    assert_eq!(error.line, Some(3), "{error}");
+    assert!(error.to_string().contains("main.toml:3:"), "{error}");
 }
 
 #[test]
@@ -195,6 +257,26 @@ fn config_flag_wins_over_environment() {
 }
 
 #[test]
+fn initialization_options_override_user_config() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("config.toml");
+    write(&main, "profile = \"vim\"\ntrust_repo_config = true\n[keys.status]\nstage = [\"u\"]\n");
+    let config = load_config(&LoadOptions {
+        config_path: Some(main),
+        initialization: Some(serde_json::json!({
+            "profile": "standard",
+            "trust_repo_config": false,
+            "keys": {"status": {"stage": ["i"]}}
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(config.profile, Profile::Standard);
+    assert!(!config.trust_repo_config);
+    assert_eq!(status_keymap(&config, "status.stage"), vec!["i"]);
+}
+
+#[test]
 fn per_repo_config_is_ignored_without_trust() {
     let dir = TempDir::new().unwrap();
     let repo = TempDir::new().unwrap();
@@ -222,6 +304,37 @@ fn per_repo_config_is_ignored_without_trust() {
     })
     .unwrap();
     assert_eq!(status_keymap(&config, "status.stage"), vec!["z"]);
+}
+
+#[test]
+fn trusted_repo_config_applies_keys_and_display_but_not_profile_or_trust() {
+    let dir = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let global = dir.path().join("global.toml");
+    write(
+        &global,
+        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"u\"]\n[diff]\ncontext = 7\n[sections]\ndefault_visibility = \"hunks\"\n",
+    );
+    write(
+        &repo.path().join(".magit-lsp.toml"),
+        "profile = \"vim\"\ntrust_repo_config = false\n[keys.status]\nstage = [\"z\"]\n[sections]\ndefault_visibility = \"files\"\n[diff]\ncontext = 11\n",
+    );
+    let config = load_config(&LoadOptions {
+        config_path: Some(global),
+        repo_path: Some(repo.path().to_path_buf()),
+        initialization: Some(serde_json::json!({
+            "profile": "standard",
+            "trust_repo_config": true,
+            "keys": {"status": {"stage": ["i"]}}
+        })),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(config.profile, Profile::Standard);
+    assert!(config.trust_repo_config);
+    assert_eq!(status_keymap(&config, "status.stage"), vec!["z"]);
+    assert_eq!(config.sections.default_visibility.as_deref(), Some("files"));
+    assert_eq!(config.diff.context, 11);
 }
 
 #[test]

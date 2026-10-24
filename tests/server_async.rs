@@ -464,6 +464,133 @@ fn keymap_keys(notification: &Value, command: &str) -> Option<Vec<String>> {
 }
 
 #[test]
+fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "profile = \"vim\"\n").expect("write config");
+    let config = config_path.to_string_lossy().to_string();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    server.initialize(json!({"keymapDelivery": "static"}));
+
+    server.send(open_view_message(2, &repo));
+    let opened = server.response_with_id(2);
+    assert!(opened["result"]["id"].is_string());
+
+    // The shutdown response is an ordered barrier: the preceding configuration
+    // notification has been handled before the request stream can terminate.
+    std::fs::write(
+        &config_path,
+        "profile = \"vim\"\n[keys.status]\nstage = [\"q\"]\n",
+    )
+    .expect("rewrite config");
+    server.send(json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{}}}));
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
+    let shutdown = server.response_with_id(99);
+    assert_eq!(shutdown["result"], Value::Null);
+    let observed = server.notifications.clone();
+    assert!(
+        observed
+            .iter()
+            .any(|message| message["method"] == json!("view/render")),
+        "open should still deliver its render: {observed:?}"
+    );
+    assert!(
+        observed
+            .iter()
+            .all(|message| message["method"] != json!("view/keymap")),
+        "static clients must not receive keymap pushes on open or reload: {observed:?}"
+    );
+    assert!(
+        server
+            .stderr_text()
+            .contains("configuration reloaded on client request"),
+        "reload completion barrier was not observed"
+    );
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
+fn forward_all_passes_through_unbound_keys_and_dispatches_bound_keys() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({"keymapDelivery": "forwardAll"}));
+    server.send(open_view_message(2, &repo));
+    let opened = server.response_with_id(2);
+    let view_id = opened["result"]["id"]
+        .as_str()
+        .expect("view id")
+        .to_string();
+    let render = server.recv();
+    assert_eq!(render["method"], json!("view/render"));
+    let version = render["params"]["version"]
+        .as_u64()
+        .expect("render version");
+    let text = render["params"]["text"].as_array().expect("render text");
+    let line = text
+        .iter()
+        .position(|line| {
+            line.as_str()
+                .is_some_and(|line| line.trim_start().starts_with('+'))
+        })
+        .expect("added line cursor target");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/key","params":{"viewId":view_id,"version":version,"key":"~","editorMode":"normal","cursor":{"line":line,"column":0}}}));
+    let passthrough = server.response_with_id(3);
+    assert_eq!(
+        passthrough["result"]["effects"],
+        json!([{"type":"passThrough","key":"~"}])
+    );
+    let before_diff = git(tmp.path(), &["diff", "--", "f.txt"]);
+    assert!(
+        !before_diff.is_empty(),
+        "fixture starts with an unstaged change"
+    );
+    assert_eq!(
+        git(tmp.path(), &["diff", "--", "f.txt"]),
+        before_diff,
+        "unbound key must not mutate the repository"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key","params":{"viewId":view_id,"version":version,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
+    let mut bound_response = None;
+    let mut staged_render = None;
+    while bound_response.is_none() || staged_render.is_none() {
+        let message = server.recv();
+        if message["id"] == json!(4) {
+            bound_response = Some(message);
+        } else if message["method"] == json!("view/render") {
+            staged_render = Some(message);
+        }
+    }
+    assert_eq!(
+        bound_response.expect("bound response")["result"]["effects"],
+        json!([])
+    );
+    assert_eq!(
+        staged_render.expect("staged render")["params"]["version"],
+        json!(version + 1)
+    );
+    assert_eq!(
+        hunk_count(&cached_diff(tmp.path())),
+        1,
+        "bound stage key stages the repository change"
+    );
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
 fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

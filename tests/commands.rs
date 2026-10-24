@@ -259,3 +259,52 @@ fn an_unknown_command_is_a_protocol_error() {
         .expect_err("unknown command is a JSON-RPC error");
     assert!(error.message.contains("unknown command"), "{error}");
 }
+
+#[test]
+fn status_command_in_menu_reports_scope_mismatch_without_changing_anything() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let head_before = tmp.git(&["rev-parse", "HEAD"]);
+    let index_before = tmp.git(&["write-tree"]);
+    let status_before = tmp.git(&["status", "--porcelain=v2", "-z"]);
+    let worktree_before = std::fs::read(tmp.path().join("f.txt")).unwrap();
+
+    let (menu_descriptor, menu_render) = test.open_via_command("open.commit");
+    test.focus(menu_descriptor.id.clone());
+    test.ack();
+    let menu_before = test.text_of(&menu_descriptor.id);
+    let menu_model_before = test.menu(&menu_descriptor.id).expect("commit menu");
+    let views_before = test.view_ids();
+
+    let result = test.invoke("status.stage");
+    assert_eq!(
+        result.effects,
+        vec![Effect::message(
+            MessageLevel::Info,
+            "Not available in this view"
+        )]
+    );
+    assert!(result.render.is_none());
+    assert!(result.opened.is_empty());
+    assert_eq!(test.view_id(), menu_descriptor.id);
+    assert_eq!(test.view_ids(), views_before);
+    assert_eq!(test.text_of(&menu_descriptor.id), menu_before);
+    assert_eq!(
+        test.menu(&menu_descriptor.id).as_ref(),
+        Some(&menu_model_before)
+    );
+    assert_eq!(test.version_of(&menu_descriptor.id), menu_render.version);
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head_before);
+    assert_eq!(tmp.git(&["write-tree"]), index_before);
+    assert_eq!(tmp.git(&["status", "--porcelain=v2", "-z"]), status_before);
+    assert_eq!(
+        std::fs::read(tmp.path().join("f.txt")).unwrap(),
+        worktree_before
+    );
+}

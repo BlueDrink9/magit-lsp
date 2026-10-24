@@ -5,7 +5,7 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, CommandStatus, Scope};
+use crate::commands::{self, Command, CommandStatus, Scope};
 use crate::diff_text;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
@@ -1072,6 +1072,20 @@ impl Session {
         let Some(command) = commands::registry().get(command_id) else {
             return Err(Error::new(format!("unknown command: {command_id}")));
         };
+        self.run_command_with(view_id, command, cursor, selection, args, key, ui)
+    }
+
+    /// Dispatch a resolved command; private injection supports focused branch tests.
+    fn run_command_with(
+        &mut self,
+        view_id: &str,
+        command: &Command,
+        cursor: Option<Cursor>,
+        selection: Option<Selection>,
+        args: Option<&serde_json::Value>,
+        key: Option<String>,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
         let repo_path = self.repo_path.clone();
 
         let text_mode = self
@@ -1079,9 +1093,9 @@ impl Session {
             .get(view_id)
             .map(|view| view.mode() == ViewMode::Text)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
-        if text_mode && command_id != TOGGLE_TEXT_MODE {
+        if text_mode && command.id != TOGGLE_TEXT_MODE {
             // A requested refresh is remembered, not run: it applies on exit.
-            if command_id == "common.refresh" {
+            if command.id == "common.refresh" {
                 if let Some(view) = self.views.get_mut(view_id) {
                     view.queue_refresh();
                 }
@@ -1327,6 +1341,102 @@ impl Session {
             return None;
         }
         Some(view.acked.clone().unwrap_or_else(|| view.tree.clone()))
+    }
+}
+
+#[cfg(test)]
+mod unavailable_dispatch_tests {
+    use super::*;
+    use crate::commands::{CommandCtx, CommandOutcome};
+    use std::process::Command as ProcessCommand;
+
+    fn must_not_run(_: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+        panic!("an unavailable command handler must not run")
+    }
+
+    fn git(path: &std::path::Path, args: &[&str]) -> String {
+        let output = ProcessCommand::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn unavailable_dispatch_returns_reason_without_running_or_producing_other_results() {
+        let repo = tempfile::tempdir().expect("temporary repository");
+        git(repo.path(), &["init", "-q"]);
+        git(repo.path(), &["config", "user.name", "Test User"]);
+        git(repo.path(), &["config", "user.email", "test@example.com"]);
+        std::fs::write(repo.path().join("file.txt"), "original\n").expect("write fixture");
+        git(repo.path(), &["add", "file.txt"]);
+        git(repo.path(), &["commit", "-qm", "initial"]);
+        let head_before = git(repo.path(), &["rev-parse", "HEAD"]);
+        let index_before = git(repo.path(), &["write-tree"]);
+        let status_before = git(repo.path(), &["status", "--porcelain=v2", "-z"]);
+        let contents_before = std::fs::read(repo.path().join("file.txt")).unwrap();
+
+        let mut session = Session::new(repo.path().to_string_lossy());
+        let (descriptor, _) = session
+            .open(
+                "status",
+                ViewKind::Status,
+                Placement::Main,
+                Viewport::default(),
+            )
+            .expect("open status view");
+        let tree_before = session.views().get("status").unwrap().tree().clone();
+        let command = Command {
+            id: "test.unavailable",
+            scope: Scope::Status,
+            doc: "Fake unavailable command",
+            status: CommandStatus::Unavailable {
+                reason: "Backend does not support this operation",
+            },
+            run: must_not_run,
+        };
+
+        // Exercise the actual command-dispatch body with a private fake command;
+        // the panic handler proves the Unavailable guard prevents execution.
+        let result = session
+            .run_command_with(
+                &descriptor.id,
+                &command,
+                None,
+                None,
+                None,
+                None,
+                &crate::ui::NullUi,
+            )
+            .expect("unavailable command is a successful info response");
+        assert_eq!(
+            result.effects,
+            vec![Effect::message(
+                MessageLevel::Info,
+                "Backend does not support this operation"
+            )]
+        );
+        assert!(result.render.is_none());
+        assert!(result.keymap.is_none());
+        assert!(result.opened.is_empty());
+        assert!(result.commit.is_none());
+        assert_eq!(session.views().get("status").unwrap().tree(), &tree_before);
+        assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(git(repo.path(), &["write-tree"]), index_before);
+        assert_eq!(
+            git(repo.path(), &["status", "--porcelain=v2", "-z"]),
+            status_before
+        );
+        assert_eq!(
+            std::fs::read(repo.path().join("file.txt")).unwrap(),
+            contents_before
+        );
     }
 }
 

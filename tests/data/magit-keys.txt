@@ -1,32 +1,195 @@
-# Independent Magit key reference for the static menu action inventory.
-# Source release: Magit v4.7.1 (2026-09-01), immutable commit
-# 659f89955cf60fe3d4326d881c412df06c69680d (annotated tag object
-# bb79175d7c2ddc309b89f33b499c8f27d7965503). Manual and transient source
-# provenance, including section/line links, is recorded in magit-key-audit.md.
-# Format: menu-id<TAB>suffix-key(s), one row per action; keys are after the
-# menu prefix. Multi-key suffixes are space-separated. Arguments, menu-opening
-# `?`, profile dispatch, and generated/dynamic commands are not static actions.
-# This is evidence data only; tests/menus.rs does not read this draft yet.
-
-commit	c e a w d f s A n W F S R x X
-branch	d B b l o r c s w n S W C m x k h H
-fetch	p u e a o r m C
-pull	p u e U f F
-push	p u e o r m T t n C
-merge	m e n a p s d
-rebase	p u e i s m w k f t r a
-stash	z i w x P Z I W r a p k l v b B f
-tag	t r k p
-reset	b f m s h k i w
-cherry-pick	A a h m d n s
-revert	V v
-bisect	B s g m k r
-remote	a r k C p P z "d u"
-submodule	a r p u s d k l f
-worktree	b c m k g
-ignore	t s p g w W u U
-log	l o h u L b a R B T m r O H i w s
-diff	d r p u s w c t
-patch-apply	m w a
-patch-create	c w a s r
-blame	b r f e n N p P c
+# Magit v4.7.1 (2026-09-01), commit 659f89955cf60fe3d4326d881c412df06c69680d; see magit-key-audit.md.
+# One static action per TSV row: menu-id<TAB>literal key<TAB>Magit command<TAB>local command.
+# Multi-step keys are literal (`d u`); switches, options, generated dispatch and common ? are excluded.
+commit	c	magit-commit-create	commit.create
+commit	e	magit-commit-extend	commit.extend
+commit	a	magit-commit-amend	commit.amend
+commit	w	magit-commit-reword	commit.reword
+commit	d	magit-commit-reshelve	commit.reshelve
+commit	f	magit-commit-fixup	commit.fixup
+commit	s	magit-commit-squash	commit.squash
+commit	A	magit-commit-alter	commit.alter
+commit	n	magit-commit-augment	commit.augment
+commit	W	magit-commit-revise	commit.revise
+commit	F	magit-commit-instant-fixup	commit.instant-fixup
+commit	S	magit-commit-instant-squash	commit.instant-squash
+commit	R	magit-rebase-reword-commit	commit.reword-past
+commit	x	magit-commit-autofixup	commit.autofixup
+commit	X	magit-commit-absorb-modules	commit.absorb-modules
+branch	d	magit-branch.<branch>.description	branch.configure-description
+branch	B	magit-update-default-branch	branch.update-default
+branch	b	magit-checkout	branch.checkout
+branch	l	magit-branch-checkout	branch.checkout-local
+branch	o	magit-branch-orphan	branch.orphan
+branch	r	magit-checkout-remote-ref	branch.checkout-remote
+branch	c	magit-branch-and-checkout	branch.create-and-checkout
+branch	s	magit-branch-spinoff	branch.spinoff
+branch	w	magit-worktree-checkout	branch.worktree-checkout
+branch	n	magit-branch-create	branch.create
+branch	S	magit-branch-spinout	branch.spinout
+branch	W	magit-worktree-branch	branch.worktree-create
+branch	C	magit-branch-configure	branch.configure
+branch	m	magit-branch-rename	branch.rename
+branch	x	magit-branch-reset	branch.reset
+branch	k	magit-branch-delete	branch.delete
+branch	h	magit-branch-shelve	branch.shelve
+branch	H	magit-branch-unshelve	branch.unshelve
+fetch	p	magit-fetch-from-pushremote	fetch.from-pushremote
+fetch	u	magit-fetch-from-upstream	fetch.from-upstream
+fetch	e	magit-fetch-other	fetch.other
+fetch	a	magit-fetch-all	fetch.all
+fetch	o	magit-fetch-branch	fetch.branch
+fetch	r	magit-fetch-refspec	fetch.refspec
+fetch	m	magit-fetch-modules	fetch.modules
+fetch	C	magit-branch-configure	fetch.configure
+pull	p	magit-pull-from-pushremote	pull.from-pushremote
+pull	u	magit-pull-from-upstream	pull.from-upstream
+pull	e	magit-pull-branch	pull.other
+pull	U	magit-pull-into-upstream	pull.into-upstream
+pull	f	magit-fetch-all-no-prune	pull.fetch-remotes
+pull	F	magit-fetch-all-prune	pull.fetch-remotes-prune
+push	p	magit-push-current-to-pushremote	push.to-pushremote
+push	u	magit-push-current-to-upstream	push.to-upstream
+push	e	magit-push-current	push.current
+push	o	magit-push-other	push.other
+push	r	magit-push-refspecs	push.refspecs
+push	m	magit-push-matching	push.matching
+push	T	magit-push-tag	push.tag
+push	t	magit-push-tags	push.tags
+push	n	magit-push-notes-ref	push.notes-ref
+push	C	magit-branch-configure	push.configure
+merge	m	magit-merge-plain	merge.plain
+merge	e	magit-merge-editmsg	merge.editmsg
+merge	n	magit-merge-nocommit	merge.nocommit
+merge	a	magit-merge-absorb	merge.absorb
+merge	p	magit-merge-preview	merge.preview
+merge	s	magit-merge-squash	merge.squash
+merge	d	magit-merge-dissolve	merge.dissolve
+rebase	p	magit-rebase-onto-pushremote	rebase.onto-pushremote
+rebase	u	magit-rebase-onto-upstream	rebase.onto-upstream
+rebase	e	magit-rebase-branch	rebase.elsewhere
+rebase	i	magit-rebase-interactive	rebase.interactive
+rebase	s	magit-rebase-subset	rebase.subset
+rebase	m	magit-rebase-edit-commit	rebase.edit-commit
+rebase	w	magit-rebase-reword-commit	rebase.reword-commit
+rebase	k	magit-rebase-remove-commit	rebase.remove-commit
+rebase	f	magit-rebase-autosquash	rebase.autosquash
+rebase	t	magit-reshelve-since	rebase.change-dates
+rebase	r	magit-rebase-continue	rebase.continue
+rebase	a	magit-rebase-abort	rebase.abort
+stash	z	magit-stash-both	stash.both
+stash	i	magit-stash-index	stash.index
+stash	w	magit-stash-worktree	stash.worktree
+stash	x	magit-stash-keep-index	stash.keep-index
+stash	P	magit-stash-push	stash.push
+stash	Z	magit-snapshot-both	stash.snapshot-both
+stash	I	magit-snapshot-index	stash.snapshot-index
+stash	W	magit-snapshot-worktree	stash.snapshot-worktree
+stash	r	magit-wip-commit	stash.wip-commit
+stash	a	magit-stash-apply	stash.apply
+stash	p	magit-stash-pop	stash.pop
+stash	k	magit-stash-drop	stash.drop
+stash	l	magit-stash-list	stash.list
+stash	v	magit-stash-show	stash.show
+stash	b	magit-stash-branch	stash.branch
+stash	B	magit-stash-branch-here	stash.branch-here
+stash	f	magit-stash-format-patch	stash.format-patch
+tag	t	magit-tag-create	tag.create
+tag	r	magit-tag-release	tag.release
+tag	k	magit-tag-delete	tag.delete
+tag	p	magit-tag-prune	tag.prune
+reset	b	magit-branch-reset	reset.branch
+reset	f	magit-file-checkout	reset.file
+reset	m	magit-reset-mixed	reset.mixed
+reset	s	magit-reset-soft	reset.soft
+reset	h	magit-reset-hard	reset.hard
+reset	k	magit-reset-keep	reset.keep
+reset	i	magit-reset-index	reset.index
+reset	w	magit-reset-worktree	reset.worktree
+cherry-pick	A	magit-cherry-copy	cherry-pick.pick
+cherry-pick	a	magit-cherry-apply	cherry-pick.apply
+cherry-pick	h	magit-cherry-harvest	cherry-pick.harvest
+cherry-pick	m	magit-merge-squash	cherry-pick.squash
+cherry-pick	d	magit-cherry-donate	cherry-pick.donate
+cherry-pick	n	magit-cherry-spinout	cherry-pick.spinout
+cherry-pick	s	magit-cherry-spinoff	cherry-pick.spinoff
+revert	V	magit-revert-and-commit	revert.commit
+revert	v	magit-revert-no-commit	revert.changes
+bisect	B	magit-bisect-start	bisect.start
+bisect	s	magit-bisect-run	bisect.run
+bisect	g	magit-bisect-good	bisect.good
+bisect	m	magit-bisect-mark	bisect.mark
+bisect	k	magit-bisect-skip	bisect.skip
+bisect	r	magit-bisect-reset	bisect.reset
+remote	a	magit-remote-add	remote.add
+remote	r	magit-remote-rename	remote.rename
+remote	k	magit-remote-remove	remote.remove
+remote	C	magit-remote-configure	remote.configure
+remote	p	magit-remote-prune	remote.prune
+remote	P	magit-remote-prune-refspecs	remote.prune-refspecs
+remote	z	magit-remote-unshallow	remote.unshallow
+remote	d u	magit-update-default-branch	remote.update-default
+submodule	a	magit-submodule-add	submodule.add
+submodule	r	magit-submodule-register	submodule.register
+submodule	p	magit-submodule-populate	submodule.populate
+submodule	u	magit-submodule-update	submodule.update
+submodule	s	magit-submodule-synchronize	submodule.synchronize
+submodule	d	magit-submodule-unpopulate	submodule.unpopulate
+submodule	k	magit-submodule-remove	submodule.remove
+submodule	l	magit-list-submodules	submodule.list
+submodule	f	magit-fetch-modules	submodule.fetch
+worktree	b	magit-worktree-checkout	worktree.checkout
+worktree	c	magit-worktree-branch	worktree.create
+worktree	m	magit-worktree-move	worktree.move
+worktree	k	magit-worktree-delete	worktree.delete
+worktree	g	magit-worktree-status	worktree.visit
+ignore	t	magit-gitignore-in-topdir	ignore.topdir
+ignore	s	magit-gitignore-in-subdir	ignore.subdir
+ignore	p	magit-gitignore-in-gitdir	ignore.gitdir
+ignore	g	magit-gitignore-on-system	ignore.system
+ignore	w	magit-skip-worktree	ignore.skip-worktree
+ignore	W	magit-no-skip-worktree	ignore.no-skip-worktree
+ignore	u	magit-assume-unchanged	ignore.assume-unchanged
+ignore	U	magit-no-assume-unchanged	ignore.no-assume-unchanged
+log	l	magit-log-current	log.current
+log	o	magit-log-other	log.other
+log	h	magit-log-head	log.head
+log	u	magit-log-related	log.related
+log	L	magit-log-branches	log.local-branches
+log	b	magit-log-all-branches	log.all-branches
+log	a	magit-log-all	log.all-references
+log	R	magit-log-reflog	log.reflog-objects
+log	B	magit-log-matching-branches	log.matching-branches
+log	T	magit-log-matching-tags	log.matching-tags
+log	m	magit-log-merged	log.merged
+log	r	magit-reflog-current	log.reflog-current
+log	O	magit-reflog-other	log.reflog-other
+log	H	magit-reflog-head	log.reflog-head
+log	i	magit-wip-log-index	log.wiplog-index
+log	w	magit-wip-log-worktree	log.wiplog-worktree
+log	s	magit-shortlog	log.shortlog
+diff	d	magit-diff-dwim	diff.dwim
+diff	r	magit-diff-range	diff.range
+diff	p	magit-diff-paths	diff.paths
+diff	u	magit-diff-unstaged	diff.unstaged
+diff	s	magit-diff-staged	diff.staged
+diff	w	magit-diff-working-tree	diff.worktree
+diff	c	magit-show-commit	diff.show-commit
+diff	t	magit-stash-show	diff.show-stash
+patch-apply	m	magit-am-apply-maildir	patch.apply-maildir
+patch-apply	w	magit-am-apply-patches	patch.apply-patches
+patch-apply	a	magit-patch-apply	patch.apply-plain
+patch-create	c	magit-patch-create	patch.create
+patch-create	w	magit-am	open.patch-apply
+patch-create	a	magit-patch-apply	patch.apply-plain
+patch-create	s	magit-patch-save	patch.save
+patch-create	r	magit-request-pull	patch.request-pull
+blame	b	magit-blame	blame.start
+blame	r	magit-blame-removal	blame.removal
+blame	f	magit-blame-reverse	blame.reverse
+blame	e	magit-blame-echo	blame.echo
+blame	n	magit-blame-next-chunk	blame.next-chunk
+blame	N	magit-blame-next-chunk-same-commit	blame.next-chunk-same-commit
+blame	p	magit-blame-previous-chunk	blame.previous-chunk
+blame	P	magit-blame-previous-chunk-same-commit	blame.previous-chunk-same-commit
+blame	c	magit-blame-cycle-style	blame.cycle-style

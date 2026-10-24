@@ -108,141 +108,107 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
     );
 }
 
-/// A hand-maintained list of Magit's well-known key → menu pairs. The key is
-/// the part after the menu's prefix (`c c` is listed as `("commit", "c")`).
-/// Keys that contradict the Magit manual are corrected here: reset is `X`
-/// (not `x`), rebase's in-progress skip/edit reuse `s`/`e` and are therefore
-/// not separate items, and bisect's in-progress Bad reuses `B`.
-const PARITY_KEYS: &[(&str, &str)] = &[
-    ("commit", "c"),
-    ("commit", "a"),
-    ("commit", "e"),
-    ("commit", "w"),
-    ("commit", "f"),
-    ("commit", "s"),
-    ("branch", "b"),
-    ("branch", "c"),
-    ("branch", "n"),
-    ("branch", "s"),
-    ("branch", "m"),
-    ("branch", "x"),
-    ("branch", "k"),
-    ("branch", "d"),
-    ("fetch", "p"),
-    ("fetch", "u"),
-    ("fetch", "e"),
-    ("fetch", "a"),
-    ("pull", "p"),
-    ("pull", "u"),
-    ("pull", "e"),
-    ("push", "p"),
-    ("push", "u"),
-    ("push", "e"),
-    ("push", "t"),
-    ("push", "T"),
-    ("merge", "m"),
-    ("merge", "e"),
-    ("merge", "n"),
-    ("merge", "a"),
-    ("merge", "p"),
-    ("merge", "s"),
-    ("merge", "d"),
-    ("rebase", "p"),
-    ("rebase", "u"),
-    ("rebase", "e"),
-    ("rebase", "i"),
-    ("rebase", "s"),
-    ("rebase", "m"),
-    ("rebase", "f"),
-    ("rebase", "w"),
-    ("rebase", "k"),
-    ("rebase", "r"),
-    ("rebase", "a"),
-    ("stash", "z"),
-    ("stash", "i"),
-    ("stash", "w"),
-    ("stash", "x"),
-    ("stash", "a"),
-    ("stash", "p"),
-    ("stash", "k"),
-    ("stash", "b"),
-    ("tag", "t"),
-    ("tag", "r"),
-    ("tag", "k"),
-    ("tag", "p"),
-    ("reset", "m"),
-    ("reset", "s"),
-    ("reset", "h"),
-    ("reset", "k"),
-    ("reset", "i"),
-    ("reset", "w"),
-    ("reset", "f"),
-    ("cherry-pick", "A"),
-    ("cherry-pick", "a"),
-    ("cherry-pick", "h"),
-    ("cherry-pick", "s"),
-    ("cherry-pick", "d"),
-    ("revert", "V"),
-    ("revert", "v"),
-    ("bisect", "B"),
-    ("bisect", "s"),
-    ("bisect", "g"),
-    ("bisect", "r"),
-    ("bisect", "k"),
-    ("bisect", "m"),
-    ("log", "l"),
-    ("log", "o"),
-    ("log", "h"),
-    ("log", "u"),
-    ("log", "a"),
-    ("log", "L"),
-    ("log", "b"),
-    ("diff", "d"),
-    ("diff", "r"),
-    ("diff", "p"),
-    ("diff", "u"),
-    ("diff", "s"),
-    ("diff", "c"),
-    ("diff", "t"),
-    ("diff", "w"),
-    ("ignore", "t"),
-    ("ignore", "g"),
-    ("ignore", "p"),
-    ("remote", "a"),
-    ("remote", "r"),
-    ("remote", "k"),
-    ("remote", "p"),
-    ("remote", "P"),
-    ("worktree", "b"),
-    ("worktree", "c"),
-    ("worktree", "m"),
-    ("worktree", "k"),
-    ("worktree", "g"),
-    ("submodule", "a"),
-    ("submodule", "r"),
-    ("submodule", "p"),
-    ("submodule", "u"),
-    ("submodule", "f"),
-    ("submodule", "d"),
-    ("submodule", "s"),
-    ("submodule", "l"),
-    ("patch-apply", "a"),
-    ("patch-apply", "m"),
-    ("patch-create", "c"),
-    ("patch-create", "s"),
-    ("patch-create", "r"),
-];
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct AuditAction {
+    menu: String,
+    key: String,
+    magit_command: String,
+    local_command: String,
+}
+
+fn parse_audit(text: &str) -> Result<Vec<AuditAction>, String> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty() && !line.starts_with('#'))
+        .map(|(line_no, line)| {
+            let fields: Vec<_> = line.split('\t').collect();
+            if fields.len() != 4 || fields.iter().any(|field| field.is_empty()) {
+                return Err(format!("line {}: expected four nonempty TSV fields", line_no + 1));
+            }
+            Ok(AuditAction {
+                menu: fields[0].to_string(),
+                key: fields[1].to_string(),
+                magit_command: fields[2].to_string(),
+                local_command: fields[3].to_string(),
+            })
+        })
+        .collect()
+}
+
+fn validate_audit(expected: &[AuditAction], reference: &[AuditAction]) -> Result<(), String> {
+    let mut expected_set = std::collections::HashSet::new();
+    for action in expected {
+        if !expected_set.insert(action) {
+            return Err(format!("duplicate static action: {}/{}", action.menu, action.key));
+        }
+    }
+    let mut reference_set = std::collections::HashSet::new();
+    for row in reference {
+        if !reference_set.insert(row) {
+            return Err(format!("duplicate reference row: {}/{}", row.menu, row.key));
+        }
+    }
+    for action in expected {
+        if !reference_set.contains(action) {
+            return Err(format!("missing reference row: {}/{} ({})", action.menu, action.key, action.local_command));
+        }
+    }
+    for row in reference {
+        if !expected_set.contains(row) {
+            return Err(format!("orphan or mismatched reference row: {}/{} ({})", row.menu, row.key, row.local_command));
+        }
+    }
+    Ok(())
+}
+
+fn definition_actions() -> Vec<AuditAction> {
+    use magit_lsp::menus::ItemDef;
+    magit_lsp::menus::all()
+        .into_iter()
+        .flat_map(|def| {
+            let menu = def.id.to_string();
+            def.groups.into_iter().flat_map(move |group| {
+                let menu = menu.clone();
+                group.items.into_iter().filter_map(move |item| match item {
+                    ItemDef::Action { key, command, magit, .. } => Some(AuditAction {
+                        menu: menu.clone(), key: key.to_string(),
+                        magit_command: magit.to_string(), local_command: command.to_string(),
+                    }),
+                    _ => None,
+                })
+            })
+        })
+        .collect()
+}
 
 #[test]
-fn the_hand_maintained_parity_keys_exist_in_their_menus() {
-    for (menu_name, key) in PARITY_KEYS {
-        let menu =
-            magit_lsp::menus::named(menu_name).unwrap_or_else(|| panic!("menu {menu_name} exists"));
-        assert!(
-            menu.item(key).is_some(),
-            "{menu_name} has no item for key `{key}`"
-        );
+fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
+    let reference = parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
+    let expected = definition_actions();
+    validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(expected.len(), 192, "all static action occurrences covered");
+    let aliases = [
+        ("rebase", "s", "in-progress rebase: Skip", "magit-rebase-skip"),
+        ("rebase", "e", "in-progress rebase: Edit", "magit-rebase-edit"),
+        ("bisect", "B", "active bisect: mark Bad", "magit-bisect-mark"),
+    ];
+    for (menu, key, state, command) in aliases {
+        let action = reference.iter().find(|row| row.menu == menu && row.key == key)
+            .unwrap_or_else(|| panic!("state alias {menu}/{key} has no static reference action"));
+        assert!(!state.is_empty(), "state alias requires a reason");
+        assert!(!command.is_empty(), "state alias requires Magit command identity");
+        assert!(!action.magit_command.is_empty());
+        assert!(!action.local_command.is_empty());
     }
+}
+
+#[test]
+fn key_audit_validator_rejects_missing_orphan_and_duplicate_rows() {
+    let action = AuditAction { menu: "remote".into(), key: "d u".into(), magit_command: "magit-update-default-branch".into(), local_command: "remote.update-default".into() };
+    assert!(validate_audit(&[action.clone()], &[]).unwrap_err().contains("missing"));
+    let orphan = AuditAction { key: "x".into(), ..action.clone() };
+    assert!(validate_audit(&[], &[orphan]).unwrap_err().contains("orphan"));
+    assert!(validate_audit(&[action.clone()], &[action.clone(), action]).unwrap_err().contains("duplicate"));
 }
 
 #[test]

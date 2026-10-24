@@ -91,14 +91,12 @@ pub struct ServerOptions {
 #[derive(Debug, Clone, Copy)]
 struct ClientCaps {
     delivery: KeymapDelivery,
-    key_modifiers: KeyModifiers,
 }
 
 impl Default for ClientCaps {
     fn default() -> Self {
         Self {
             delivery: KeymapDelivery::Dynamic,
-            key_modifiers: KeyModifiers::Full,
         }
     }
 }
@@ -996,7 +994,6 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
-                client.key_modifiers = key_modifiers;
             }
             tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
             let init = params
@@ -1224,8 +1221,16 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     session.set_keymaps(keymaps);
     let ui = ServerUi::new(shared);
-    let outcome = session.key_ui(&p, &ui)?;
+    let mut outcome = session.key_ui(&p, &ui)?;
     drop(sessions);
+    if shared.delivery() == KeymapDelivery::ForwardAll
+        && matches!(
+            outcome.effects.as_slice(),
+            [Effect::Message { text, .. }] if text.starts_with("Unbound key: ")
+        )
+    {
+        outcome.effects = vec![Effect::PassThrough { key: p.key }];
+    }
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 

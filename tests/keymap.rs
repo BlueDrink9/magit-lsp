@@ -210,6 +210,78 @@ fn standard_resolved_common_confirm_and_cancel_use_direct_keys() {
 }
 
 #[test]
+fn specific_status_binding_shadows_inherited_confirm_only_in_status() {
+    let config = config_with(Profile::Standard, &[("status", &[("stage", &["Enter"])])]);
+    let status = Keymap::resolve("status", Profile::Standard, &config).unwrap();
+    let select = Keymap::resolve("select", Profile::Standard, &config).unwrap();
+    let common = Keymap::resolve("common", Profile::Standard, &config).unwrap();
+    let enter = KeyChord::parse("Enter").unwrap().steps().to_vec();
+
+    assert_eq!(status.command("status.stage").unwrap().keys, vec!["Enter"]);
+    assert_eq!(
+        status.lookup(&enter, EditorMode::Normal),
+        Match::Exact("status.stage".into())
+    );
+    assert_eq!(
+        select.lookup(&enter, EditorMode::Normal),
+        Match::Exact("common.confirm".into())
+    );
+    assert_eq!(
+        common.lookup(&enter, EditorMode::Normal),
+        Match::Exact("common.confirm".into())
+    );
+}
+
+#[test]
+fn scoped_common_rebinding_does_not_leak_to_other_scopes() {
+    let config = config_with(Profile::Standard, &[("status", &[("confirm", &["x"])])]);
+    let status = Keymap::resolve("status", Profile::Standard, &config).unwrap();
+    let select = Keymap::resolve("select", Profile::Standard, &config).unwrap();
+    let x = KeyChord::parse("x").unwrap().steps().to_vec();
+    let enter = KeyChord::parse("Enter").unwrap().steps().to_vec();
+
+    assert_eq!(status.command("common.confirm").unwrap().keys, vec!["x"]);
+    assert_eq!(
+        status.lookup(&x, EditorMode::Normal),
+        Match::Exact("common.confirm".into())
+    );
+    assert_eq!(
+        status.lookup(&enter, EditorMode::Normal),
+        Match::Exact("common.visit".into())
+    );
+    assert_eq!(
+        select.command("common.confirm").unwrap().keys,
+        vec!["Enter"]
+    );
+    assert_eq!(
+        select.lookup(&enter, EditorMode::Normal),
+        Match::Exact("common.confirm".into())
+    );
+    assert_eq!(select.lookup(&x, EditorMode::Normal), Match::None);
+}
+
+#[test]
+fn shipped_enter_binding_is_visit_in_status_and_confirm_in_selectors() {
+    let enter = KeyChord::parse("Enter").unwrap().steps().to_vec();
+    for profile in [Profile::Standard, Profile::Vim] {
+        let config = Config {
+            profile,
+            ..Default::default()
+        };
+        let status = Keymap::resolve("status", profile, &config).unwrap();
+        let select = Keymap::resolve("select", profile, &config).unwrap();
+        assert_eq!(
+            status.lookup(&enter, EditorMode::Normal),
+            Match::Exact("common.visit".into())
+        );
+        assert_eq!(
+            select.lookup(&enter, EditorMode::Normal),
+            Match::Exact("common.confirm".into())
+        );
+    }
+}
+
+#[test]
 fn detail_level_keys_are_absolute_in_standard_and_stepwise_in_vim() {
     let standard = Keymap::resolve(
         "common",
@@ -369,6 +441,35 @@ fn conflicts_at_the_same_level_are_reported() {
     assert!(
         error.to_string().contains("bound to both"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn distinct_commands_at_the_same_scope_precedence_still_conflict() {
+    let config = config_with(
+        Profile::Standard,
+        &[(
+            "status",
+            &[("stage", &["Enter"]), ("common.confirm", &["Enter"])],
+        )],
+    );
+    let error = Keymap::resolve("status", Profile::Standard, &config).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("bound to both"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("status.stage"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("common.confirm"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("scope `status`"),
+        "unexpected error: {message}"
     );
 }
 

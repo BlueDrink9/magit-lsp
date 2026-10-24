@@ -486,8 +486,11 @@ keys keep them). Implementation per client:
      targeting `magit.invoke` with `when: magit.active`.
 
 **Server-side hard rules**
-- The server validates the merged keymap and reports conflicts (same key bound
-  to two commands in one scope chain) as a `Message` and in
+- The server validates the merged keymap and reports conflicts when distinct
+  commands bind the same key at the same precedence in one scope chain. A more
+  specific scope declaration intentionally shadows a broader declaration for
+  that scope (including when the commands differ); equal-precedence ambiguity
+  remains an error. Conflicts are reported as a `Message` and in
   `magit-lsp keymap --check`.
 - `magit-lsp keymap --format json|vscode|neovim|markdown [--profile P]`
   emits the full static manifest (all scopes × bindings). CI snapshots it.
@@ -1823,40 +1826,51 @@ Completed P1 review work (historical tracking, not new verification):
   - **Constraints:** no change to unrelated visibility behaviour.
   - **Verified (2026-10-24):** focused visibility/keymap tests, clean-environment `make test` (64 Neovim cases), `make ui-test` (19 PASS, 0 FAIL), and VSCode generated bindings check (164 bindings) passed. The detail-level scenario sends real `M-3`/`M-4` keys for standard and `z m`/`z r` for Vim. Inspected `build/ui/detail-levels/{standard,vim}-{80x24,100x30}/hunk-{headers,bodies}.screen`: headers retain `@@` without bodies; expanded screens show `+line3 CHANGED`. Full verification output: `/tmp/opencode/detail-levels-verification.log`.
 
-- [x] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs:166-301`)
-  - **Problem:** the list was written alongside the menus and "corrected here" to match them (TASKS §10: keys partly from memory). It covers about 120 of 355 rows.
-   - **Change:** move the list to `tests/data/magit-keys.txt` with a header naming the Magit manual version and sections; verify each key against the Magit manual. The test must fail when a menu action key is missing from the file and when a file entry has no action. Keep documented deviations (reset `X`, rebase `s`/`e`, bisect `B`) in a separate `EXCEPTIONS` table with reasons.
-  - **Done when:** the data file is the single source and both directions are checked.
-  - **Constraints:** do not change menu data except to fix keys proven wrong by the manual.
+- [x] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs`)
+  - **Problem:** the in-test list was not a complete/independent audit. A prior draft checked this item prematurely while the tests still used `PARITY_KEYS`.
+  - **Change:** TSV now records each static action's literal key, upstream Magit command and local command; tests validate every static action to data and data back to action, including blame mode-map evidence. Negative tests inject missing, orphan and duplicate rows. Narrow documented state aliases cover rebase `s`/`e` and bisect `B`; reset `X` is corrected as a top-level prefix, not a menu suffix.
+  - **Done when:** all 192 occurrences in 22 menus are audited and the requested focused/full tests pass.
+  - **Constraints:** no production menu changes; provenance is pinned to Magit v4.7.1 commit `659f89955cf60fe3d4326d881c412df06c69680d`.
+  - **Verified (2026-10-24):** `cargo test --test menus` passed (8/8), including bidirectional validation over 192 rows and injected missing/orphan/duplicate cases. `env -i HOME="$HOME" PATH="$PATH" make test` passed: full Rust suite and Neovim integration suite (64 cases). The initial focused run found the draft's count of 194 was inaccurate; runtime definitions and TSV both contain 192, corrected here and in the audit. No production menu changes.
 
-- [ ] **[P2] Add tests for `Unavailable` and scope-mismatch replies** (`src/session.rs:1115-1131`)
+- [x] **[P2] Add tests for `Unavailable` and scope-mismatch replies** (`src/session.rs:1115-1131`)
   - **Problem:** neither the `Unavailable` branch nor `"Not available in this view"` has a test.
   - **Change:** in `tests/commands.rs` invoke `status.stage` against a menu view and assert the info message and no repo change. For `Unavailable`, add a test-only registry seam or a unit test of the branch with a fake command.
-  - **Done when:** deleting either branch fails a test.
+  - **Verified (2026-10-24):** the real status-stage invocation against the real commit menu asserts the exact Info effect and preserves menu/view state, HEAD, index tree, worktree status and file bytes. A private dispatcher test injects an Unavailable command with a panic handler and checks the exact reason/level, no render/open/commit, and unchanged view/repository state. Temporarily bypassing each guard made its focused test fail as expected; guards were restored. `cargo test --test commands`, `cargo test --lib` and `env -i HOME="$HOME" PATH="$PATH" make test` passed.
   - **Constraints:** no production-only test hooks beyond a `#[cfg(test)]` seam.
 
-- [ ] **[P2] Test the acked-version rule and send real key versions** (`tests/views.rs`, `tests/navigation.rs`)
+- [x] **[P2] Test the acked-version rule and send real key versions** (`tests/views.rs`, `tests/navigation.rs`)
   - **Problem:** §3.1 says positional requests resolve against the last acked tree; every test queries a fresh tree, and `view/key` is always sent with `version: 1`.
-  - **Change:** render v2 without ack, call the definition/documentSymbol resolution and assert it uses v1; send `view/key` with a stale version and assert identity-based resolution or a message (depends on the `TestSession` task).
+  - **Change:** a real stdio protocol test renders structurally distinct v1/v2 trees, checks actual `definition`/`documentSymbol` handlers still return v1 while v2 is unacked, then verifies both switch after the v2 ack. In-process stale-key coverage sends an observed old version at its old cursor row after that row's node disappears; it asserts the readable refusal and independently verifies the new occupant remains unstaged. Navigation helpers locate targets from tree metadata, and ordinary TestSession key helpers retain observed render versions.
   - **Done when:** making positional requests use the latest tree fails the test.
-  - **Constraints:** none beyond using tree nodes.
+  - **Constraints:** use tree nodes; do not parse rendered text or hard-code request versions.
+  - **Verified (2026-10-24):** `cargo test --test views --test navigation` and `env -i HOME="$HOME" PATH="$PATH" make test` passed. Coverage includes actual stdio positional handlers before/after ack and stale-key repository-state assertions.
 
-- [ ] **[P2] Test `keymapDelivery` `static`/`forwardAll` and `keyModifiers`** (`src/server.rs:316,461,1157,1267,1304`)
+- [x] **[P2] Test `keymapDelivery` `static`/`forwardAll` and `keyModifiers`** (`src/server.rs:316,461,1157,1267,1304`)
   - **Problem:** only `"dynamic"` is exercised (`tests/text_mode.rs:338`).
   - **Change:** stdio tests: with `static`, no `view/keymap` is pushed on `view/open` or config reload; with `forwardAll`, an unbound key replies `passThrough`. For `keyModifiers: "basic"`, test the consumer or delete the stored field.
   - **Done when:** changing the gating condition fails a test.
   - **Constraints:** use the shared `TestServer`.
+  - **Verified (2026-10-25):** shared-TestServer stdio coverage proves static delivery suppresses open/reload keymaps behind an ordered reload barrier, dynamic delivery receives the changed keymap, and `forwardAll` passes through an unbound key while a bound key still stages. Removed the unused stored `ClientCaps.key_modifiers` field; the accepted capability parser and debug logging remain, but there was no consumer. `cargo test --test server_async && env -i HOME="$HOME" PATH="$PATH" make test` passed.
 
-- [ ] **[P2] Cover cross-scope key conflicts** (`tests/keymap.rs:206-216`)
-  - **Problem:** only two commands on the same key within one scope are tested; §3.9 says "same scope chain".
-  - **Change:** add `status.stage=["Enter"]` against `common.confirm=["Enter"]` (conflict) and a scope override of a common command (not a conflict).
-  - **Done when:** both cases are asserted.
+- [x] **[P2] Cover cross-scope key precedence** (`tests/keymap.rs`)
+  - **Decision:** a specific view binding may shadow an inherited common binding,
+    even when it names a different command. The former blanket conflict claim
+    for `status.stage=Enter` versus inherited `common.confirm=Enter` was stale;
+    conflicts are only for distinct commands at equal precedence. This preserves
+    the shipped status `Enter` visit and selector `Enter` confirm behavior.
+  - **Change:** assert actual lookup ownership for the different-command shadow,
+    a view-scoped rebind of `common.confirm` with no leakage, the shipped Enter
+    behavior in both profiles, and readable equal-precedence conflict diagnostics.
+  - **Done when:** those resolution cases are asserted.
+  - **Verified (2026-10-25):** `cargo test --test keymap && env -i HOME="$HOME" PATH="$PATH" make test` passed. Tests assert actual lookup ownership for scoped shadowing, non-leaking `common.confirm` rebinding, shipped visit/confirm Enter behavior in both profiles, and equal-precedence conflict diagnostics.
 
-- [ ] **[P2] Fill the config test gaps** (`tests/config.rs`)
+- [x] **[P2] Fill the config test gaps** (`tests/config.rs`)
   - **Problem:** untested: the `initializationOptions` layer order; `default_config_path()` under `XDG_CONFIG_HOME`; the `$VAR` form; nested includes resolving against the including file's directory; `.magit-lsp.toml` limited to keys/display; parse errors naming a line (`config.rs:143-149` checks only the file). `set_var("HOME", …)` at lines 91-92 races other tests.
   - **Change:** add one test per gap. Replace the `set_var` calls by running the case through `ConfigService`/CLI with an explicit env, or by a `serial_test` guard.
   - **Done when:** each listed behaviour has a test; no `std::env::set_var` remains in `tests/config.rs`.
   - **Constraints:** do not change config semantics.
+  - **Verified (2026-10-25):** `cargo test --test config && env -i HOME="$HOME" PATH="$PATH" make test` passed (19 config tests, full Rust suite, 64 Neovim cases). Child-process env covers HOME/XDG and independent `$VAR`/`${VAR}` expansion without parent env mutation; nested relative includes and exact parse-error file/line are asserted. Initialization overrides user profile/trust/keys; trusted repo keys override initialization keys, repo diff/sections override user display settings, and repo profile/trust overrides are ignored. Removed the unsupported menu-persistence restriction assertion; production semantics are unchanged.
 
 - [ ] **[P2] Decide the minimum git version and test it** (`README.md:56`, `.github/workflows/ci.yml`)
   - **Problem:** IMM-1 requires the unborn-HEAD tests to pass on the oldest supported git; README records only 2.55.0 and CI uses one git. TASKS §10: the `git rm --cached -f` fallback is never reached.
