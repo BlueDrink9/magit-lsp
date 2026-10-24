@@ -2074,6 +2074,29 @@ activation against the real server). → R-VS-1.
 
 ### VSCode extension review (immediate queue for this request)
 
+- [ ] **[P0] R-VS-5 — Keep Magit editor bindings out of foreign widgets**
+  - **Report:** status now looks better and no longer duplicates, but global
+    Magit bindings swallow Enter in Ctrl+P, the command palette and unrelated
+    menus as visit-at-point.
+  - **Scope:** require editor text focus in canonical generated bindings and
+    mirrored fold bindings; preserve Magit-owned QuickPick handling and generic
+    programmatic invocation. Verify foreign widget keyboard input and restored
+    status Enter/fold/refresh in actual VSCode/VSCodium.
+  - **Verification (2026-10-24):** remains unchecked. The required command
+    passed `cargo build`, generated-binding check, npm tests and `make test`,
+    then failed `make ui-test`: `failed: command too long`,
+    `Summary: 0 PASS, 0 XFAIL, 13 FAIL`,
+    `make: *** [Makefile:21: ui-test] Error 1` (exit 2). The inherited
+    environment exceeded tmux's command limit; no harness changes were made.
+    Isolated `node clients/vscode/scripts/test-integration.mjs` also exited 1,
+    printing only `VSCode evidence: /tmp/opencode/vscode-review-NMpi7k`;
+    no evidence.json, failure.txt or editor logs were produced. Actual keyboard
+    behavior is therefore not verified. Stopped after these two failed
+    verification attempts; no completion mark or commit. Existing changes and
+    user-owned editor/server processes were left untouched. A subsequent
+    attempt needs a sanitized environment for the prescribed command and a
+    working isolated editor launch before claiming completion.
+
 The following three unchecked P0 tasks record the user's VSCode findings and
 are the immediate review queue for this request. They specify investigation,
 fixes and verification only; no fixes are implemented by this review entry.
@@ -2099,9 +2122,21 @@ server action.
     still appears with no temporary filename-only editor.
   - **Done when:** regression tests pass and the described behavior is verified
     in the actual VSCode UI without any status document on disk.
+  - **Verification attempt (2026-10-24):** `npm --prefix clients/vscode test`
+    and `make test` passed (the chained command proceeded to `make ui-test`).
+    `make ui-test` failed before starting Neovim: `failed: command too long`;
+    summary: `0 PASS, 0 XFAIL, 13 FAIL`. No actual VSCode Extension
+    Development Host evidence was obtained, so this task remains incomplete.
 - [ ] **[P0] R-VS-3 — Expose generic server commands and restore defaults**
-  - **Finding:** `magit.toggle-fold` and `magit.refresh` commands and their
-    shortcuts are missing from the VSCode extension.
+  - **User follow-up (2026-10-24):** confirmed Ctrl+P then Enter now works;
+    continues to report command-not-found for `magit.refresh` /
+    `magit.toggle-fold`. The user reports no old mappings; the earlier claim
+    that these must be obsolete user mappings was unsupported and is withdrawn.
+    The read-only audit below distinguishes readable files from loaded state.
+  - **Finding:** repository bindings use `magit.invoke` with canonical server
+    IDs; neither reported VSCode command ID originates in current generated
+    bindings. See `clients/vscode/NOTES.md` for exact external binding evidence
+    and limitations; no user configuration was changed.
   - **Change:** provide one generic, argument-taking VSCode dispatcher for
     arbitrary server command IDs (rather than proliferating one VSCode command
     per server action), and provide working default shortcuts for server fold
@@ -2118,6 +2153,65 @@ server action.
     per-action VSCode command registrations are required.
   - **Done when:** regression tests pass and all three interactions are
     verified in the actual VSCode UI.
+  - **Verification (2026-10-24, follow-up):** the exact verification chain
+    `cargo build && node clients/vscode/scripts/gen-keybindings.mjs --check && npm --prefix clients/vscode test && make test && make ui-test`
+    passed with a sanitized inherited environment (13 UI scenarios passed).
+    Registered-command regression tests assert the actual `view/invoke`
+    envelope with/without arguments and opaque nested argument data; all 164
+    generated bindings now target the registered generic dispatcher.
+    Real VSCode integration was attempted twice and halted after two failures:
+    `/tmp/opencode/vscode-review-h4DKig/failure.txt` and
+    `/tmp/opencode/vscode-review-s9KhoW/failure.txt` report
+    `Error: Timed out waiting for render/tokens` at `integration.js:32:42`,
+    then `run` at `integration.js:59:5` / `integration.js:61:5` respectively
+    (waiting for native Ctrl+P file opening, before R-VS-3 UI assertions).
+    The launcher exited 1 before its host finished; both isolated hosts then
+    exited, with no remaining magit-lsp processes. No successful VSCode UI
+    evidence is claimed; R-VS-3 remains unchecked pending that evidence.
+  - **Exhaustive binding audit (2026-10-24):** searched every non-dependency
+    file under `clients/` (extension, all `lib/`, scripts, tests, package and
+    lockfile, notes and ignore file), `lua/`, `scripts/`, `.github/`, README,
+    both profile manifests and all keymap snapshots under `tests/snapshots/`,
+    `src/manifest.rs`, `src/commands.rs`, `src/protocol.rs` and the session
+    dispatch boundary. There is no repository-owned action alias to restore.
+    All six contributed client commands are registered; generated payloads
+    now each traverse the registered dispatcher in the Node regression test,
+    and Rust checks every package payload against the actual command registry
+    in addition to both profile snapshots. Refresh/fold get explicit checks.
+    The generator previously preferred an existing debug/release executable
+    without checking freshness; it now uses `cargo run` by default, retaining
+    only the explicit `MAGIT_LSP_BIN` override. This removes a reproducible
+    stale-generation risk, not proof of the reported runtime's source.
+  - **Runtime audit:** readable Code/VSCodium keybinding paths are symlinks to
+    `/home/william/env/editors/vscode/keybindings.json`; lines 256, 367, 371
+    name the reported IDs (g r, Tab, Backspace). Installed edamagit manifests
+    contribute g/Tab to the same IDs. Exact paths/versions and resolution
+    conditions are recorded in NOTES. No installed `magit-lsp` copy or VSIX,
+    client-directory symlink or packaging copy step was found in the searched
+    locations. Readable VSCodium logs are historical, not current activation
+    evidence; the user's loaded manifest and winning keybinding cannot be
+    inferred from those files. Do not attribute the user's report conclusively
+    to them without the affected window's keybinding troubleshooting output.
+  - **Current real-client blocker:** two isolated attempts exited 1; exact
+    errors and paths are in NOTES. The second loaded the repository extension
+    version 0.1.0 and captured `view/invoke` for show-all and physical Tab twice,
+    but none for physical F5. The original missing IDs have concrete external
+    sources on disk; their live precedence and the isolated F5 interception
+    are not proven. No per-action aliases were added. R-VS-3 stays unchecked.
+    The mandatory chain initially exited 2 at `make ui-test`:
+    `tmux respawn-pane ... failed: command too long`,
+    `Summary: 0 PASS, 0 XFAIL, 13 FAIL`; earlier stages passed. This is an
+    inherited-environment harness limit, not evidence of command resolution.
+  - [x] **Audit/regression hardening verification:** the exact mandatory chain
+    passed with a minimal inherited environment (164 bindings, Node tests,
+    Rust tests, 61 Neovim cases, 13 real-Neovim UI scenarios). This subtask
+    does not close the parent R-VS-3 UI acceptance item.
+    No test-owned server remains. Read-only inspection through
+    `/proc/1593986/fd/35` recovered the user's deleted live extension-host log:
+    `magit-lsp.magit-lsp` activated on `magit.open` at 13:10:09.085. Its
+    magit-lsp output log (`fd/41`) was empty; neither establishes loaded
+    manifest version or winning refresh/fold bindings. That host and its
+    server PID 1594038 were left untouched.
 - [ ] **[P0] R-VS-4 — Restore semantic highlighting and theme integration**
   - **Finding:** VSCode status views have no colours or formatting.
   - **Change:** restore the LSP semantic-token path and VSCode theme

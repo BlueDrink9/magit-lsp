@@ -6,6 +6,15 @@ menu logic stays in the server.
 
 ## Protocol observations and gaps
 
+### 0. Initial status render and editor identity
+
+The `view/open` response may race the first `view/render`. The extension now
+holds the first document open until full server text has arrived, including
+renders queued before the descriptor. The virtual URI uses the descriptor's
+view ID and title, so repeat opens reuse the titled, read-only `magit:` document
+instead of exposing a repository-path or scratch filename. No status file is
+created.
+
 ### 1. Static clients never receive `view/keymap`
 
 `initialize` declares `keymapDelivery: "static"`, so the server skips the
@@ -70,15 +79,129 @@ not use.
 
 **Resolution:** `lib/foldkeys.js` strips JSONC comments (and trailing commas)
 from the user's `keybindings.json` and maps `editor.fold*`, `editor.unfold*` and
-`editor.toggleFold` to `magit.invoke` entries with `when: "magit.active"`. The
+`editor.toggleFold` to `magit.invoke` entries requiring `magit.active`,
+`editorTextFocus` and exclusions for Quick Input, suggestions, find and rename
+widgets. Regenerate previously
+copied entries to keep foreign pickers and inputs out of Magit dispatch. The
 `Magit: Mirror my fold shortcuts` command shows those entries in a scratch
 document and can copy them to the clipboard; it never modifies the user's file
 silently.
 
 ## Regenerating the static bindings
 
+### Refresh/fold command audit (R-VS-3)
+
+`magit.refresh` and `magit.toggle-fold` are **not registered commands**.
+The earlier assertion that the user's report must be caused by obsolete user
+mappings was unsupported. The user reports none. The following is concrete
+read-only evidence from the accessible filesystem, not proof of the affected
+window's loaded configuration:
+
+- `/home/william/.config/VSCodium/User/keybindings.json` and
+  `/home/william/.config/Code/User/keybindings.json` both resolve to
+  `/home/william/env/editors/vscode/keybindings.json`. At inspection, line 256
+  binds `g r` to `magit.refresh`; lines 367/371 bind Tab/Backspace to
+  `magit.toggle-fold`. Their guards use `editorTextFocus`, language `magit`,
+  and Vim mode; the fold guards additionally exclude insert mode.
+- `/home/william/.vscode-oss/extensions/kahole.magit-0.6.70-universal/package.json`
+  (edamagit 0.6.70) and
+  `/home/william/.vscode/extensions/kahole.magit-0.6.67/package.json`
+  (0.6.67) contribute `g → magit.refresh`, `tab → magit.toggle-fold`, guarded
+  by `editorTextFocus && editorLangId == 'magit'` and a Vim-mode regex. These
+  guards can match this client's document language too. Both installed
+  extension indexes list edamagit; neither lists `magit-lsp.magit-lsp`.
+- No installed magit-lsp copy was found under those extension directories,
+  `.vscode-server*` or Code/VSCodium config directories. The repository client
+  directory is not a symlink; no repository VSIX/copy packaging step was found.
+  Its package entry point is `extension.js`, version 0.1.0. Readable VSCodium
+  logs mention historical edamagit updates, but do not identify the current
+  magit-lsp activation or winning shortcut. The user's in-memory manifest,
+  remote/profile configuration and actual resolver result remain unverified.
+  A later read through `/proc/1593986/fd/35` recovered its deleted live log
+  (`~/.local/state/VSCodium/20261024T114412/window12/exthost/exthost.log`):
+  magit-lsp activated on `magit.open` at 13:10:09.085. Its output log at
+  `/proc/1593986/fd/41` was empty. This proves activation, not loaded version
+  or binding precedence; no process/config was changed to obtain it.
+
+The full repository search covered all client files (including generated
+package bindings, helpers, tests and scripts), Lua client, scripts, CI, both
+profiles and all snapshots. Only notes/tests mention the missing client IDs;
+action bindings use `magit.invoke` plus `common.refresh` / `common.toggle-section`.
+VSCode's **command not found** means client command resolution failed before
+`view/invoke`; the backend's distinct error is `unknown command: <server ID>`.
+
+In the affected window, enable **Developer: Toggle Keyboard Shortcuts
+Troubleshooting**, press the physical failing keys, and inspect the winning
+entry's source before changing anything. Compare **Developer: Show Running
+Extensions** with `/home/william/src/magit-lsp/clients/vscode`. Build with
+`cargo build`, regenerate bindings, then explicitly reload the development host
+or reinstall/reload the intended copy if its manifest differs. A reload cannot
+override a higher-priority user binding; only if the resolver confirms one,
+replace/remove that entry with the canonical example below. No config or user
+editor was modified/restarted by this audit.
+
+The standard defaults are Tab (toggle section) and F5 (refresh).
+
+```json
+[
+  {
+    "key": "f5",
+    "command": "magit.invoke",
+    "args": { "command": "common.refresh" },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && !magit.textMode"
+  },
+  {
+    "key": "tab",
+    "command": "magit.invoke",
+    "args": { "command": "common.toggle-section" },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && !magit.textMode"
+  },
+  {
+    "key": "ctrl+alt+]",
+    "command": "magit.invoke",
+    "args": { "command": "common.show-section", "args": { "recursive": true } },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && !magit.textMode"
+  }
+]
+```
+
+`args.command` is a canonical **server** ID, not a VSCode command name.
+Optional `args.args` is forwarded unchanged as the `view/invoke` request's
+`args`; without it the request omits `args`. The request also includes the
+server view ID and editor cursor/selection. Any canonical server command can
+use this dispatcher; no per-action registrations or aliases are needed.
+Generated action bindings use this same path. Magit menus still forward typed
+keys through `view/key`; native pickers remain excluded from editor bindings.
+
 `scripts/gen-keybindings.mjs` runs
 `magit-lsp keymap --format vscode --profile standard` and replaces
 `contributes.keybindings`. The output matches
 `tests/snapshots/keybindings-standard.json`. Use `--check` to verify without
 writing.
+By default it uses `cargo run` so an old debug/release binary cannot silently
+regenerate stale contributions; `MAGIT_LSP_BIN` explicitly overrides that choice.
+
+#### Real-client evidence and remaining blocker
+
+Two isolated runs were stopped after failures (no further UI retries):
+
+- `/tmp/opencode/vscode-review-Gak0FI/failure.txt`:
+  `Error: Timed out waiting for render/tokens`, `wait` at `integration.js:36:42`,
+  `run` at `integration.js:81:5` (physical F5, after successful Tab twice).
+- `/tmp/opencode/vscode-review-U4H694/failure.txt`:
+  `Error: Timed out waiting for render/tokens`, `wait` at `integration.js:43:42`,
+  `run` at `integration.js:90:5` (physical F5 on an expanded tracked diff).
+  `failure-state.json` identifies loaded extension path
+  `/home/william/src/magit-lsp/clients/vscode`, version 0.1.0, and its manifest.
+  Captured real `view/invoke` requests contain `common.show-all` and two
+  `common.toggle-section` calls, but **no `common.refresh`**. Thus fold and the
+  generic dispatcher worked in this host; physical F5 did not resolve through
+  that path. No backend unknown-command response or missing-alias error was
+  observed in these isolated runs. The exact F5 interception/resolver cause
+  remains unproven; do not claim this ticket is fully verified.
+
+The integration runner now waits for its isolated host and records wire calls
+and the loaded manifest on failure; successful binding checks also save a
+screen and `bindings-evidence.json` before unrelated picker scenarios. It does
+not restart the user's editor. The existing server owned by the user's normal
+VSCodium extension host was deliberately left running.

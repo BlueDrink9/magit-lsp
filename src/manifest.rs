@@ -172,7 +172,7 @@ pub struct VscodeEntry {
     pub profile: String,
     pub scope: String,
     pub key: String,
-    /// The magit command the key runs (the emitted `command` is always `magit.key`).
+    /// The canonical server command passed to `magit.invoke` as `args.command`.
     pub binding: String,
     /// The canonical step or chord passed as `args.key`.
     pub arg_key: String,
@@ -216,9 +216,9 @@ pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
 
 fn when_clause(scope: &str, text_mode: bool) -> String {
     if text_mode {
-        format!("magit.active && magit.scope == '{scope}' && magit.textMode")
+        format!("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '{scope}' && magit.textMode")
     } else {
-        format!("magit.active && magit.scope == '{scope}' && !magit.textMode")
+        format!("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '{scope}' && !magit.textMode")
     }
 }
 
@@ -354,7 +354,7 @@ pub fn json(manifest: &Manifest) -> String {
 pub fn vscode(manifest: &Manifest) -> String {
     #[derive(Serialize)]
     struct Args {
-        key: String,
+        command: String,
     }
 
     #[derive(Serialize)]
@@ -369,8 +369,8 @@ pub fn vscode(manifest: &Manifest) -> String {
         .into_iter()
         .map(|entry| Entry {
             key: entry.key,
-            command: "magit.key",
-            args: Args { key: entry.arg_key },
+            command: "magit.invoke",
+            args: Args { command: entry.binding },
             when: entry.when,
         })
         .collect();

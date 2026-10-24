@@ -229,6 +229,29 @@ test('pop keys are recognised', () => {
 
 // lib/foldkeys.js ----------------------------------------------------------
 
+test('generated and mirrored bindings require editor focus and exclude widgets', () => {
+  const generated = require('../package.json').contributes.keybindings;
+  const mirrored = foldkeys.mapFoldKeys([{ key: 'ctrl+k ctrl+l', command: 'editor.toggleFold' }]);
+  for (const entry of [...generated, ...mirrored]) {
+    const terms = entry.when.split(' && ');
+    for (const term of ['magit.active', 'editorTextFocus', '!quickInputVisible',
+      '!suggestWidgetVisible', '!findWidgetVisible', '!renameInputVisible']) {
+      assert(terms.includes(term), `${entry.key}: missing ${term}`);
+    }
+    // Test the focus gate independently of scope/text-mode variants.
+    const gate = (state) => terms.every((term) => {
+      if (term.startsWith('magit.scope') || term.includes('magit.textMode')) return true;
+      return term.startsWith('!') ? !state[term.slice(1)] : !!state[term];
+    });
+    const status = { 'magit.active': true, editorTextFocus: true };
+    assert(gate(status));
+    assert(!gate({ ...status, editorTextFocus: false }), 'sidebar/terminal/input focus');
+    for (const widget of ['quickInputVisible', 'suggestWidgetVisible', 'findWidgetVisible', 'renameInputVisible']) {
+      assert(!gate({ ...status, [widget]: true }), widget);
+    }
+  }
+});
+
 const KEYBINDINGS_JSONC = `[
   // Fold the region under the cursor.
   { "key": "ctrl+shift+[", "command": "editor.fold" },
@@ -259,7 +282,7 @@ test('native fold shortcuts map to magit.invoke entries', () => {
     key: 'ctrl+shift+[',
     command: 'magit.invoke',
     args: { command: 'common.hide-section' },
-    when: 'magit.active',
+    when: 'magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
   });
   assert.equal(entries[1].args.command, 'common.show-section');
   assert.equal(entries[2].args.command, 'common.toggle-section');
@@ -367,4 +390,9 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`ok ${passed} tests`);
+require('./open.test')().then(() => {
+  console.log(`ok ${passed} tests`);
+}).catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});

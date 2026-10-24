@@ -13,6 +13,10 @@ const menu = require('./lib/menu');
 const foldkeys = require('./lib/foldkeys');
 const prompt = require('./lib/prompt');
 const edit = require('./lib/edit');
+const semantic = require('./lib/semantic');
+
+/** Semantic-token invalidation event, registered after initialization. */
+let semanticChanged;
 
 const SCHEME = 'magit';
 
@@ -45,6 +49,9 @@ const uriToView = new Map();
 
 /** Renders that arrived before their descriptor's effect. */
 const pendingRenders = new Map();
+
+/** Repository path -> in-flight status open, including its first render. */
+const statusOpens = new Map();
 
 /** Git-owned edit documents, keyed by edit id. */
 const edits = new Map();
@@ -91,7 +98,9 @@ function activate(context) {
   client.onNotification('view/effects', (params) => {
     void applyEffects(params && params.effects);
   });
-  clientReady = client.start().catch((error) => {
+  clientReady = client.start().then(() => {
+    semanticChanged = semantic.register(vscode, client, stateForUri, context.subscriptions);
+  }).catch((error) => {
     output.appendLine(`language client failed: ${message(error)}`);
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
   });
@@ -126,7 +135,14 @@ function createClient() {
     {
       documentSelector: [{ scheme: SCHEME }],
       initializationOptions: { profile },
+      uriConverters: {
+        code2Protocol: (uri) => stateForUri(uri)?.descriptor.uri || uri.toString(),
+        protocol2Code: (uri) => Array.from(views.values())
+          .find((state) => state.descriptor.uri === uri)?.uri || vscode.Uri.parse(uri),
+      },
       middleware: {
+        // The explicit provider maps dotted server types to legal VSCode IDs.
+        provideDocumentSemanticTokens: () => null,
         initialize(params, second, third) {
           params.capabilities = params.capabilities || {};
           params.capabilities.keymapDelivery = 'static';
@@ -186,7 +202,14 @@ function ensureView(descriptor) {
     return existing;
   }
 
-  const uri = vscode.Uri.parse(descriptor.uri);
+  // Keep the server URI as the identity, but use a stable, titled VSCode URI
+  // so the editor never presents the repository path as a scratch filename.
+  const uri = vscode.Uri.from({
+    scheme: SCHEME,
+    authority: descriptor.id,
+    path: `/${encodeURIComponent(descriptor.title || descriptor.kind || 'Magit')}`,
+  });
+  let resolveFirstRender;
   const state = {
     id: descriptor.id,
     descriptor,
@@ -199,7 +222,10 @@ function ensureView(descriptor) {
     quickPick: undefined,
     quickPickHiding: false,
     pressQueue: Promise.resolve(),
+    firstRender: new Promise((resolve) => { resolveFirstRender = resolve; }),
+    resolveFirstRender: undefined,
   };
+  state.resolveFirstRender = resolveFirstRender;
   views.set(descriptor.id, state);
   uriToView.set(uri.toString(), descriptor.id);
   documentsChanged.fire(uri);
@@ -235,13 +261,20 @@ async function showView(descriptor) {
  * @param {object} state
  */
 async function showDocument(state) {
+  // `view/open` returns its descriptor before the first `view/render` can
+  // arrive. Do not open the provider document until its initial text is ready.
+  await state.firstRender;
   const document = await vscode.workspace.openTextDocument(state.uri);
+  state.changingLanguage = true;
   try {
     await vscode.languages.setTextDocumentLanguage(document, 'magit');
   } catch (error) {
     output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
+  } finally {
+    state.changingLanguage = false;
   }
   await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+  activateView(state);
   if (state.id === activeViewId) {
     applyCursor(state, state.cursor);
   }
@@ -421,7 +454,7 @@ async function press(viewId, key, info) {
  *
  * @param {string} viewId
  * @param {string} command
- * @param {object|string|undefined} args the command args, if any
+ * @param {unknown} args the command args, if any (not the VSCode envelope)
  * @param {{cursor: {line: number, column: number}, selection?: object}} info
  */
 async function invoke(viewId, command, args, info) {
@@ -438,8 +471,8 @@ async function invoke(viewId, command, args, info) {
   if (info.selection) {
     params.selection = info.selection;
   }
-  if (args && typeof args === 'object' && args.args !== undefined) {
-    params.args = args.args;
+  if (args !== undefined) {
+    params.args = args;
   }
 
   try {
@@ -477,6 +510,10 @@ function applyRender(params) {
   state.lines = result.lines;
   if (result.status === 'full' || result.status === 'edits') {
     state.version = result.version;
+    if (state.resolveFirstRender) {
+      state.resolveFirstRender();
+      state.resolveFirstRender = undefined;
+    }
   }
   if (params.mode) {
     state.mode = params.mode;
@@ -503,6 +540,7 @@ function applyRender(params) {
       viewId: state.id,
       version: params.version,
     });
+    semanticChanged?.fire();
   }
 }
 
@@ -832,7 +870,7 @@ async function answerEdit(command, editId) {
     output.appendLine(`cannot answer edit ${editId}: no status view`);
     return;
   }
-  await invoke(viewId, command, { args: edit.answerArgs(editId) }, {
+  await invoke(viewId, command, edit.answerArgs(editId), {
     cursor: { line: 0, column: 0 },
   });
 }
@@ -981,7 +1019,7 @@ async function onDocumentClosed(document) {
   }
 
   const state = stateForUri(document.uri);
-  if (!state) {
+  if (!state || state.changingLanguage) {
     return;
   }
   const viewId = state.id;
@@ -1028,12 +1066,33 @@ async function openStatus() {
 
   try {
     await clientReady;
-    const descriptor = await client.sendRequest('view/open', {
+    const repo = folders[0].uri.fsPath;
+    if (statusOpens.has(repo)) {
+      await statusOpens.get(repo);
+    }
+    const existing = Array.from(views.values()).find(
+      (state) => state.repo === repo && state.descriptor.kind === 'status'
+    );
+    if (existing) {
+      await focusView(existing.id);
+      return;
+    }
+    const opening = (async () => {
+      const descriptor = await client.sendRequest('view/open', {
       kind: 'status',
-      args: { repo_path: folders[0].uri.fsPath },
+      args: { repo_path: repo },
       viewport: viewport(),
-    });
-    await showView(descriptor);
+      });
+      const state = ensureView(descriptor);
+      state.repo = repo;
+      await showView(descriptor);
+    })();
+    statusOpens.set(repo, opening);
+    try {
+      await opening;
+    } finally {
+      statusOpens.delete(repo);
+    }
   } catch (error) {
     vscode.window.showErrorMessage(`magit-lsp: ${message(error)}`);
   }
@@ -1088,29 +1147,37 @@ async function pressCommand(args) {
     .catch((error) => {
       output.appendLine(`key failed: ${message(error)}`);
     });
+  await state.pressQueue;
 }
 
 /**
  * `magit.invoke`: run a command by ID.
  *
- * @param {{command?: string, args?: object}|string|undefined} args
+ * @param {{command?: string, args?: unknown}|string|undefined} args
  */
 async function invokeCommand(args) {
-  const state = activeState();
-  if (!state) {
-    return;
-  }
   const command = typeof args === 'string' ? args : args && args.command;
   if (!command) {
+    return;
+  }
+  // Generated edit-buffer bindings use the same dispatcher as view actions.
+  if (currentEdit()) {
+    if (command === 'common.confirm') await confirmEditCommand();
+    else if (command === 'common.cancel') await cancelEditCommand();
+    return;
+  }
+  const state = activeState();
+  if (!state) {
     return;
   }
 
   const info = state.quickPick ? { cursor: { line: 0, column: 0 } } : editorInfo();
   state.pressQueue = state.pressQueue
-    .then(() => invoke(state.id, command, args, info))
+    .then(() => invoke(state.id, command, typeof args === 'object' ? args.args : undefined, info))
     .catch((error) => {
       output.appendLine(`invoke failed: ${message(error)}`);
     });
+  await state.pressQueue;
 }
 
 /**

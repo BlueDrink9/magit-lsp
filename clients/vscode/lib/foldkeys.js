@@ -195,7 +195,7 @@ function mapFoldKeys(input) {
       key: entry.key,
       command: 'magit.invoke',
       args: { command: target.command },
-      when: 'magit.active',
+      when: 'magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
     };
     if (target.args) {
       result.args.args = target.args;

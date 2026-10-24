@@ -132,14 +132,15 @@ fn vscode_matches_snapshots() {
         let text = manifest::vscode(&manifest_for(profile));
         snapshot(&format!("keybindings-{}.json", profile.as_str()), &text);
         let entries: Vec<Value> = serde_json::from_str(&text).expect("keybindings are JSON");
-        assert!(entries.iter().all(|entry| entry["command"] == "magit.key"));
+        assert!(entries.iter().all(|entry| entry["command"] == "magit.invoke"
+            && entry["args"]["command"].as_str().is_some_and(|id| magit_lsp::commands::registry().get(id).is_some())));
         for entry in &entries {
-            assert!(entry["args"]["key"].is_string(), "entry: {entry}");
+            assert!(entry["args"]["command"].is_string(), "entry: {entry}");
             assert!(
                 entry["when"]
                     .as_str()
                     .expect("when clause")
-                    .starts_with("magit.active && magit.scope == '"),
+                    .starts_with("magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == '"),
                 "entry: {entry}"
             );
         }
@@ -152,6 +153,21 @@ fn vscode_matches_snapshots() {
         .find(|entry| entry.arg_key == "S" && entry.scope == "status")
         .expect("status.stage-all binding");
     assert_eq!(stage_all.key, "shift+s");
+}
+
+#[test]
+fn contributed_vscode_payloads_are_canonical_server_commands() {
+    let package: Value = serde_json::from_str(include_str!("../clients/vscode/package.json"))
+        .expect("extension package is JSON");
+    let bindings = package["contributes"]["keybindings"].as_array().expect("bindings");
+    for binding in bindings {
+        assert_eq!(binding["command"], "magit.invoke");
+        let id = binding["args"]["command"].as_str().expect("canonical ID");
+        assert!(magit_lsp::commands::registry().get(id).is_some(), "unknown server command: {id}");
+    }
+    for (key, id) in [("f5", "common.refresh"), ("tab", "common.toggle-section")] {
+        assert!(bindings.iter().any(|binding| binding["key"] == key && binding["args"]["command"] == id));
+    }
 }
 
 #[test]

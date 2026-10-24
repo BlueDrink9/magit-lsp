@@ -8,7 +8,7 @@
 // committed manifest is current.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,16 +18,10 @@ const repoRoot = resolve(clientRoot, '..', '..');
 const manifestPath = join(clientRoot, 'package.json');
 const checkOnly = process.argv.includes('--check');
 
-/** The server binary, falling back to `cargo run` when it is not built. */
+/** Build current sources; only an explicit override may select another binary. */
 function serverCommand() {
   if (process.env.MAGIT_LSP_BIN) {
     return { command: process.env.MAGIT_LSP_BIN, args: [] };
-  }
-  for (const relative of ['target/debug/magit-lsp', 'target/release/magit-lsp']) {
-    const candidate = join(repoRoot, relative);
-    if (existsSync(candidate)) {
-      return { command: candidate, args: [] };
-    }
   }
   return {
     command: 'cargo',

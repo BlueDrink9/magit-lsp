@@ -6,6 +6,43 @@ rendering, structure and actions; clients display its text verbatim and forward
 input. Long-term goals are thin clients and a backend boundary that permits
 other VCS implementations.
 
+## Architecture and code map
+
+The server owns repository state, view structure, rendering and actions. A
+client is a thin editor adapter: it displays server-rendered text verbatim,
+forwards input and reports which rendered version it has applied. The wire
+contract is LSP plus the project methods and notifications in `src/protocol.rs`.
+
+The normal flow is:
+
+1. Opening a document/view reaches `src/server.rs`, which finds or creates the
+repository's `Session` and asks it to open a view.
+2. Commands and captured keys (including menu/key sequences) are resolved by
+the session using `src/commands.rs`, `src/keyhandler.rs` and `src/menu.rs`.
+3. An action refreshes or mutates through the Git/backend boundary; resulting
+effects may open views, prompt the user, or request a render.
+4. A view renders into a structured `Tree`; the server sends text and
+structure, using edits only when the client acknowledged the base version.
+5. The client applies the notification and acknowledges its view/version. The
+session records that ack as the base for a later incremental update.
+
+Start in these components:
+
+- `src/tree.rs` defines the server-owned node hierarchy, text and associated
+  navigation/display metadata. Never recover structure by parsing text.
+- `src/status_view.rs` builds the status view tree from Git status and patch
+  hunks; `src/view.rs` defines the common server-owned view contract.
+- `src/session.rs` owns open views, rendered trees, key/menu state, versions
+  and client acknowledgements; it refreshes, renders and diffs views.
+- `src/commands.rs` describes actions and their context/effects;
+  `src/keyhandler.rs` resolves key sequences and `src/menu.rs` handles
+  transient menus and arguments.
+- `src/git.rs` is the Git repository boundary; `src/patch.rs` models and
+  applies patch/hunk operations. Keep VCS work behind these boundaries.
+- `src/server.rs` connects LSP/transport requests to sessions and notifications;
+  `src/protocol.rs` defines wire payloads. The Neovim adapter lives in
+  `lua/magit-lsp/` and should remain a thin display/input client.
+
 ## Read the right source
 
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap, glossary, design and
@@ -18,11 +55,8 @@ other VCS implementations.
   requirements and test instructions.
 - [`ui-test-plan.md`](./ui-test-plan.md) defines real-UI test rules and scenario
   syntax (§A.5).
-- For code, start at the implementation named by the relevant TASKS section:
-  `src/tree.rs` (document structure), `src/status_view.rs` (status tree),
-  `src/session.rs` / `src/server.rs` (views and protocol), `src/git.rs` /
-  `src/patch.rs` / `src/dispatch.rs` (Git operations), and
-  `lua/magit-lsp/` (Neovim client). These are pointers, not a complete inventory.
+- For task-specific code, start with the component above and follow the
+  relevant TASKS section. The component list is a starting point, not exhaustive.
 
 ## Working conventions
 
