@@ -7,68 +7,9 @@ mod common;
 use common::*;
 use expect_test::expect_file;
 use magit_lsp::commands::{registry, CommandStatus};
-use magit_lsp::config::{Config, Profile};
-use magit_lsp::keymap::{self, Keymap};
+use magit_lsp::config::Profile;
 use magit_lsp::menu::{Item, Menu, MenuStatus};
-use magit_lsp::protocol::{Cursor, Effect, ViewInvokeParams, ViewKeyParams};
-use magit_lsp::session::Session;
 use magit_lsp::view::{Placement, ViewKind, Viewport};
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-fn keymaps(profile: Profile) -> Arc<BTreeMap<String, Keymap>> {
-    let config = Config {
-        profile,
-        ..Default::default()
-    };
-    Arc::new(keymap::validate(&config).expect("resolve keymaps"))
-}
-
-fn session(repo: &std::path::Path, profile: Profile) -> Session {
-    let mut session = Session::new(repo.to_string_lossy());
-    session.set_keymaps(keymaps(profile));
-    session
-}
-
-fn open_status(session: &mut Session) {
-    let (_descriptor, render) = session
-        .open(
-            "v1",
-            ViewKind::Status,
-            Placement::Main,
-            Viewport { cols: 100, rows: 30 },
-        )
-        .expect("open status view");
-    session.ack("v1", render.version).expect("ack");
-}
-
-fn press(session: &mut Session, view: &str, key: &str) -> magit_lsp::session::InvokeResult {
-    let mut result = None;
-    for step in key.split(' ') {
-        let outcome = session
-            .key(&ViewKeyParams {
-                view_id: view.to_string(),
-                version: 1,
-                key: step.to_string(),
-                editor_mode: magit_lsp::keymap::EditorMode::Normal,
-                cursor: Cursor { line: 0, column: 0 },
-                selection: None,
-            })
-            .expect("view/key");
-        result = Some(outcome);
-    }
-    result.expect("at least one step")
-}
-
-fn messages(effects: &[Effect]) -> Vec<&str> {
-    effects
-        .iter()
-        .filter_map(|effect| match effect {
-            Effect::Message { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
 
 fn actions(menu: &Menu) -> Vec<&Item> {
     menu.groups
@@ -113,8 +54,8 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
         .modify_standard()
         .build();
     let before = git_state(tmp.path());
-    let mut session = session(tmp.path(), Profile::Vim);
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
 
     let mut checked = 0;
     for (name, menu) in menus() {
@@ -122,15 +63,13 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
         if planned.is_empty() {
             continue;
         }
-        let (descriptor, render) = session
-            .open(
-                "m1",
-                ViewKind::Menu(format!("menu.{name}")),
-                Placement::Bottom,
-                Viewport { cols: 100, rows: 30 },
-            )
-            .expect("open menu");
-        session.ack(&descriptor.id, render.version).expect("ack");
+        let (descriptor, _render) = test.open_view(
+            "m1",
+            ViewKind::Menu(format!("menu.{name}")),
+            Placement::Bottom,
+            WIDE_VIEWPORT,
+        );
+        test.ack_view(&descriptor.id);
 
         for item in planned {
             let Item::Action {
@@ -142,25 +81,31 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
             else {
                 unreachable!("filtered to planned actions");
             };
-            let outcome = press(&mut session, &descriptor.id, key);
+            let outcome = test.press(key);
             let expected = format!("Not implemented yet: {label} (roadmap {roadmap_id})");
             assert_eq!(
-                messages(&outcome.effects),
+                message_texts(&outcome.effects),
                 vec![expected.as_str()],
                 "{name} {key}"
             );
             assert!(outcome.render.is_none(), "{name} {key} re-rendered");
             assert!(
-                session.views().get(&descriptor.id).is_some(),
+                test.session().views().get(&descriptor.id).is_some(),
                 "{name} {key} closed the menu"
             );
             checked += 1;
         }
-        session.close(&descriptor.id).expect("close menu");
+        test.session_mut()
+            .close(&descriptor.id)
+            .expect("close menu");
     }
 
     assert!(checked > 100, "checked {checked} planned menu actions");
-    assert_eq!(git_state(tmp.path()), before, "a planned action touched git");
+    assert_eq!(
+        git_state(tmp.path()),
+        before,
+        "a planned action touched git"
+    );
 }
 
 /// A hand-maintained list of Magit's well-known key → menu pairs. The key is
@@ -291,8 +236,8 @@ const PARITY_KEYS: &[(&str, &str)] = &[
 #[test]
 fn the_hand_maintained_parity_keys_exist_in_their_menus() {
     for (menu_name, key) in PARITY_KEYS {
-        let menu = magit_lsp::menus::named(menu_name)
-            .unwrap_or_else(|| panic!("menu {menu_name} exists"));
+        let menu =
+            magit_lsp::menus::named(menu_name).unwrap_or_else(|| panic!("menu {menu_name} exists"));
         assert!(
             menu.item(key).is_some(),
             "{menu_name} has no item for key `{key}`"
@@ -303,36 +248,15 @@ fn the_hand_maintained_parity_keys_exist_in_their_menus() {
 #[test]
 fn the_dispatch_menu_lists_exactly_the_keys_the_profile_binds() {
     for profile in [Profile::Standard, Profile::Vim] {
-        let keymaps = keymaps(profile);
         let (tmp, _repo) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
             .build();
-        let mut session = Session::new(tmp.path().to_string_lossy());
-        session.set_keymaps(Arc::clone(&keymaps));
-        open_status(&mut session);
+        let (mut test, _initial) = TestSession::open_status(&tmp, profile);
+        test.ack();
 
-        let outcome = session
-            .invoke(&ViewInvokeParams {
-                view_id: "v1".to_string(),
-                command: "open.dispatch".to_string(),
-                args: None,
-                cursor: None,
-                selection: None,
-            })
-            .expect("open.dispatch");
-        let descriptor = outcome
-            .effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::PushView { descriptor } => Some(descriptor.clone()),
-                _ => None,
-            })
-            .expect("a pushed dispatch menu");
-        let menu = session
-            .views()
-            .get(&descriptor.id)
-            .and_then(|view| view.menu())
-            .expect("the dispatch model");
+        let (descriptor, _render) = test.open_via_command("open.dispatch");
+        let menu = test.menu(&descriptor.id).expect("the dispatch model");
+        let keymaps = test.keymaps();
 
         let status = keymaps.get("status").expect("status keymap");
         let mut expected = 0;
@@ -362,14 +286,12 @@ fn the_dispatch_menu_lists_exactly_the_keys_the_profile_binds() {
 
         // The active profile's keys are used, not Magit's defaults.
         match profile {
-            Profile::Standard => assert!(
-                menu.item("z")
-                    .is_some_and(|item| matches!(item, Item::Action { command, .. } if command == "open.stash"))
-            ),
-            Profile::Vim => assert!(
-                menu.item("Z")
-                    .is_some_and(|item| matches!(item, Item::Action { command, .. } if command == "open.stash"))
-            ),
+            Profile::Standard => assert!(menu.item("z").is_some_and(
+                |item| matches!(item, Item::Action { command, .. } if command == "open.stash")
+            )),
+            Profile::Vim => assert!(menu.item("Z").is_some_and(
+                |item| matches!(item, Item::Action { command, .. } if command == "open.stash")
+            )),
         }
         assert!(menu.item("g ?").is_none(), "dispatch does not list itself");
 
@@ -389,7 +311,11 @@ fn the_dispatch_menu_lists_exactly_the_keys_the_profile_binds() {
                 .bindings()
                 .iter()
                 .any(|binding| binding.command == *command && binding.keys.contains(key));
-            assert!(bound, "{}: {command} key {key} is not bound", profile.as_str());
+            assert!(
+                bound,
+                "{}: {command} key {key} is not bound",
+                profile.as_str()
+            );
         }
     }
 }
@@ -423,37 +349,23 @@ fn every_menu_opener_is_implemented_and_pushes_its_menu() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path(), Profile::Vim);
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
 
     for (command, menu) in openers {
-        let registered = registry().get(command).unwrap_or_else(|| panic!("{command}"));
+        let registered = registry()
+            .get(command)
+            .unwrap_or_else(|| panic!("{command}"));
         assert_eq!(registered.status, CommandStatus::Implemented, "{command}");
-        let outcome = session
-            .invoke(&ViewInvokeParams {
-                view_id: "v1".to_string(),
-                command: command.to_string(),
-                args: None,
-                cursor: None,
-                selection: None,
-            })
-            .expect("open menu");
-        let descriptor = outcome
-            .effects
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::PushView { descriptor } => Some(descriptor.clone()),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("{command} pushed no view"));
+        test.focus("v1");
+        let (descriptor, _render) = test.open_via_command(command);
         assert_eq!(
             descriptor.kind,
             ViewKind::Menu(format!("menu.{menu}")),
             "{command}"
         );
-        let (render, _keymap) = outcome.opened.into_iter().next().expect("initial render");
-        session.ack(&descriptor.id, render.version).expect("ack");
-        session.close(&descriptor.id).expect("close");
+        test.ack_view(&descriptor.id);
+        test.session_mut().close(&descriptor.id).expect("close");
     }
 }
 

@@ -7,9 +7,15 @@ use common::stdio::*;
 use common::*;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+use tempfile::TempDir;
+
+/// The answer the askpass tests type when Git asks for a secret.
+const ASKPASS_ANSWER: &str = "s3cret";
+/// The question Git asks in the askpass tests.
+const ASKPASS_QUESTION: &str = "Password for 'git@example.com':";
 
 impl TestServer {
     /// The bridge socket path, from the server's startup log.
@@ -54,11 +60,16 @@ impl TestServer {
             },
         }));
         let response = self.response_with_id(id);
+        // Never print the response: it belongs to the exchange that carried
+        // the (possibly secret) answer.
         assert!(
             response.get("error").is_none(),
-            "the prompt answer was rejected: {response}"
+            "the prompt answer was rejected"
         );
-        assert_eq!(response["result"], Value::Null, "{response}");
+        assert!(
+            response["result"].is_null(),
+            "the prompt answer did not return a null result"
+        );
     }
 }
 
@@ -288,6 +299,85 @@ fn a_cancel_creates_no_commit() {
     assert!(exit.success(), "server exited: {exit:?}");
 }
 
+/// The bridge socket path, from a server log file at `path`.
+fn socket_path_in_log(path: &Path) -> PathBuf {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Ok(log) = std::fs::read_to_string(path) {
+            if let Some(socket) = log.lines().find_map(|line| {
+                line.split_once("editor bridge listening socket=")
+                    .map(|(_, socket)| socket.trim())
+            }) {
+                return PathBuf::from(socket);
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the server did not report a bridge socket in its log"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Ask Git's question through the bridge and return the helper's output.
+fn answer_askpass(
+    server: &mut TestServer,
+    socket: &Path,
+    question: &str,
+    answer: &str,
+) -> Output {
+    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        .arg("--askpass")
+        .arg(question)
+        .env("MAGIT_LSP_SOCKET", socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the askpass helper");
+
+    let prompt = server.prompt();
+    let params = &prompt["params"];
+    assert_eq!(params["kind"], json!("text"), "the prompt kind");
+    assert_eq!(params["secret"], json!(true), "the prompt is secret");
+    assert!(
+        params["title"].as_str() == Some(question),
+        "the prompt asks Git's question"
+    );
+    let prompt_id = params["promptId"].as_str().expect("prompt id").to_string();
+    // A text answer is the bare string on the wire.
+    server.respond_prompt(90, &prompt_id, false, json!(answer));
+
+    helper.wait_with_output().expect("the helper finished")
+}
+
+/// Assert the helper printed exactly the answer and nothing to stderr.
+///
+/// The diagnostics never include the captured streams: after a successful
+/// round trip the answer is in stdout by design.
+fn assert_helper_kept_the_answer(output: &Output, answer: &str) {
+    assert!(output.status.success(), "the askpass helper failed");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).trim() == answer,
+        "the askpass helper did not print the answered secret"
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains(answer),
+        "the askpass helper wrote the answer to stderr"
+    );
+}
+
+/// Assert `log` proves the traced askpass path ran and omits the answer.
+fn assert_log_kept_the_answer(sink: &str, log: &str, answer: &str) {
+    assert!(
+        log.contains("editor bridge: askpass"),
+        "the {sink} log is missing the askpass trace; logging was not active"
+    );
+    assert!(
+        !log.contains(answer),
+        "the {sink} log contains the askpass answer"
+    );
+}
+
 /// Run the askpass helper against the running server's bridge.
 ///
 /// The helper is what Git runs when it needs a password: it asks the server
@@ -300,45 +390,72 @@ fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
     let response = server.initialize(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
-        "initialize response: {response}"
+        "the server did not initialize"
     );
     let socket = server.socket_path();
 
-    let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
-        .arg("--askpass")
-        .arg("Password for 'git@example.com':")
-        .env("MAGIT_LSP_SOCKET", &socket)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn the askpass helper");
-
-    // The server turns Git's question into a secret text prompt.
-    let prompt = server.prompt();
-    let params = &prompt["params"];
-    assert_eq!(params["kind"], json!("text"), "{prompt}");
-    assert_eq!(params["secret"], json!(true), "{prompt}");
-    assert_eq!(
-        params["title"],
-        json!("Password for 'git@example.com':"),
-        "{prompt}"
-    );
-
-    let prompt_id = params["promptId"].as_str().expect("prompt id").to_string();
-    // A text answer is the bare string on the wire.
-    server.respond_prompt(90, &prompt_id, false, json!("s3cret"));
-
-    let output = helper.wait_with_output().expect("the helper finished");
-    assert!(output.status.success(), "the helper exited: {output:?}");
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "s3cret",
-        "the helper printed the secret"
-    );
+    let output = answer_askpass(&mut server, &socket, ASKPASS_QUESTION, ASKPASS_ANSWER);
+    assert_helper_kept_the_answer(&output, ASKPASS_ANSWER);
 
     server.shutdown_and_exit();
     let exit = server.finish(Duration::from_secs(20));
     assert!(exit.success(), "server exited: {exit:?}");
+}
+
+/// The server's trace log on stderr must never receive the askpass answer.
+#[test]
+fn the_askpass_answer_is_never_logged_to_stderr() {
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "the server did not initialize"
+    );
+    let socket = server.socket_path();
+
+    let output = answer_askpass(&mut server, &socket, ASKPASS_QUESTION, ASKPASS_ANSWER);
+    assert_helper_kept_the_answer(&output, ASKPASS_ANSWER);
+
+    // Drain stderr fully: the trace that proves the round trip was logged may
+    // still be in flight when the helper exits.
+    server.shutdown_and_exit();
+    let (exit, log) = server.finish_with_stderr(Duration::from_secs(20));
+    assert!(exit.success(), "the server exited unsuccessfully");
+    assert_log_kept_the_answer("stderr", &log, ASKPASS_ANSWER);
+}
+
+/// The same guard for trace logging redirected to `MAGIT_LSP_LOG_FILE`.
+///
+/// The socket comes from that file as well, so this exercises the file sink
+/// end to end instead of relying on stderr.
+#[test]
+fn the_askpass_answer_is_never_logged_to_a_log_file() {
+    let dir = TempDir::new().expect("temp dir for the log");
+    let log_path = dir.path().join("magit-lsp.log");
+    let log_path_arg = log_path.to_string_lossy().into_owned();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::FILE_ENV, &log_path_arg)]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "the server did not initialize"
+    );
+    let socket = socket_path_in_log(&log_path);
+
+    let output = answer_askpass(&mut server, &socket, ASKPASS_QUESTION, ASKPASS_ANSWER);
+    assert_helper_kept_the_answer(&output, ASKPASS_ANSWER);
+
+    server.shutdown_and_exit();
+    let (exit, stderr) = server.finish_with_stderr(Duration::from_secs(20));
+    assert!(exit.success(), "the server exited unsuccessfully");
+
+    let log = std::fs::read_to_string(&log_path).expect("read the server log");
+    assert_log_kept_the_answer("file", &log, ASKPASS_ANSWER);
+    assert!(
+        !stderr.contains(ASKPASS_ANSWER),
+        "the server wrote the askpass answer to stderr"
+    );
 }
 
 #[test]

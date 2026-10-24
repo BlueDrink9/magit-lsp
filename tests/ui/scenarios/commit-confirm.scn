@@ -1,0 +1,46 @@
+# R-UI-5: `c c` with only unstaged changes asks before staging.
+#
+# The client renders the confirm prompt with `vim.ui.select`, which Neovim
+# shows as numbered command-line choices, so the answers are `2` (No) and `1`
+# (Yes) followed by Enter. `wait prompt` waits for the pending prompt state;
+# `wait` (idle) cannot, because the prompt keeps the client busy.
+#
+# Running `commit.commit` from the menu closes the menu first (the command is
+# status-scoped), so the declined branch asserts the status view directly and
+# reopens the menu with `c` for the accepted branch. After Yes the commit
+# editor opens: `wait` cannot be used while the editor bridge holds the commit,
+# so the scenario waits for the visible instruction and cancels with `q`.
+fixture: modified-two-files
+---
+wait
+keys: c
+wait
+keys: c
+wait prompt
+snapshot: confirm
+keys: 2 Enter
+wait
+expect screen contains "Staged changes (0)"
+expect screen contains "Unstaged changes (2)"
+snapshot: declined
+keys: c
+wait
+keys: c
+wait prompt
+keys: 1 Enter
+wait screen contains "Committing"
+snapshot: accepted
+keys: Enter
+wait screen contains "Please enter the commit message"
+snapshot: editor
+keys: q
+wait
+keys standard: g
+keys vim: g r
+wait
+# With every change staged the expanded diffs fill an 80x24 screen, so the
+# empty Unstaged section is below the viewport; the staged count and contents
+# are the evidence that Yes staged everything.
+expect screen contains "Staged changes (2)"
+expect screen contains "+line3 CHANGED"
+snapshot: staged

@@ -1,5 +1,75 @@
 # VSCode client notes
 
+## R-VS-5 resumed permission (2026-10-24 16:25 NZDT)
+
+The user explicitly confirmed they are away and permitted resuming immediately,
+without waiting for 16:30. Historical pause and failure evidence below is retained.
+This is the single circuit-breaker retry: repair the driver before running the
+full verification chain once; on failure stop, clean up only the isolated host,
+and retain incomplete gates. No user configuration or existing editor is changed.
+The driver now avoids reactivating an already focused window, opens Find with
+`actions.find` (not claimed as physical opening-key evidence), observes its actual
+textarea focus/value, and captures the renderer through CDP Page.captureScreenshot
+rather than the invalid X11 window capture. A generated mirrored shortcut is
+installed only in the unique temporary user-data-dir.
+
+### Single resumed run: verified evidence
+
+The exact ticket verification chain ran once and exited **0**: `cargo build &&
+npm --prefix clients/vscode test && npm --prefix clients/vscode run
+test:integration && env -i HOME="$HOME" PATH="$PATH" make test && env -i
+HOME="$HOME" PATH="$PATH" make ui-test`. Node: 21 tests; Rust and 61 Neovim
+cases passed. Real Neovim UI: **16 PASS, 1 XFAIL, 0 FAIL**. The existing
+`process-log` scenario remains XFAIL in all four profile/size variants with exact
+reason `wait timed out for screen text 'Process log'`; this is not a new pass
+and was not retried or edited here.
+
+Evidence directory: **`/tmp/opencode/vscode-review-l9j8d4/`**. Request payloads,
+per-case counts, loaded canonical guards, token types and F5 result are in
+`r-vs-5-evidence.json`; loaded extension path/version are in
+`bindings-evidence.json`; the isolated generated user binding is in
+`mirrored-bindings.json`. Physical input uses XTEST, never `magit.invoke` API
+calls as key evidence. `common.show-all` with `{}` is separate programmatic
+generic-dispatch setup, and the three opening/reopening calls yielded one Status
+tab without a backing status document.
+
+| Actual client case | Physical input/result | Magit requests | Inspected screenshot |
+| --- | --- | --- | --- |
+| Foreign QuickPick | mirrored Ctrl+Alt+], `beta g`, Enter accepts `beta g` | 0 | `01-foreign-quickpick.png` |
+| Foreign InputBox | mirrored Ctrl+Alt+], `hello foreign`, Enter accepts text | 0 | `02-foreign-inputbox.png` |
+| Find | mirrored Ctrl+Alt+], `g`, Ctrl+A, `tracked`, Enter selects match; Ctrl+A/C copies `tracked`; Escape returns | 0 | `03-find-widget.png` |
+| Restored status | Enter reaches `common.visit` (planned-action message, not file visiting) | 1 | `04-status-enter.png` |
+| Restored status | Tab twice folds/unfolds the server section | 2 toggles | `05-status-fold.png` |
+| Restored status | mirrored Ctrl+Alt+] twice folds/unfolds the server section | 2 toggles | `05b-mirrored-fold.png` |
+| Restored status | `g` rereads Git and renders `+after-return` | 1 refresh | `06-status-refresh.png` |
+| Magit commit QuickPick | `c` opens; `-`, `a` turn `--all` on; `q` pops to status | `open.commit` plus 3 `view/key` | `07-magit-quickpick.png` |
+| F5 diagnostic | no refresh request, no `+f5-probe` render | 0 | `08-f5-before-dismissal.png`, `08-f5-probe.png` |
+
+All listed screenshots except the redundant post-dismissal F5 image were opened
+and visually inspected, along with `00-status-expanded.png` and `screen.png`:
+the editor text actually paints, the find textarea contains `tracked`, foreign
+inputs contain their typed text, and the commit row shows `--all · on`.
+The initial expanded screen visibly styles section headings, additions and
+deletions under Default Dark Modern; no theme-switch evidence was collected.
+Find was opened using `actions.find`, with actual focused Find textarea/value
+observed through read-only CDP; **physical Ctrl+F opening is not claimed**.
+Rename and suggest are **not exercised / unsupported in this fixture**: the
+read-only Magit virtual document has no rename/completion provider. Their
+exclusions have unit evidence only, not fabricated actual-client keyboard
+evidence. Foreign Tab/F5 behavior is likewise not claimed by this matrix.
+
+F5 remains an explicitly unsuccessful physical-key diagnostic: the real editor
+retained a native edit-context DIV, Find was absent, and no picker was visible
+in the pre-dismissal screenshot. The interception/resolver cause is unproven;
+no API refresh substituted for F5. R-VS-3 therefore stays unchecked. R-VS-2
+retains its first-open screen gate (the saved screen follows reopen/expansion),
+and R-VS-4 retains explicit theme verification. R-VS-5's applicable-widget gate
+is satisfied with the unsupported cases above explicitly bounded.
+
+The runner terminated only processes naming its unique temporary user-data-dir.
+A post-run process check found no remaining magit-lsp or isolated-host process;
+no existing editor or user config was modified.
+
 The extension is a thin client: it forwards keys and commands, applies
 `view/render`, and renders menus as QuickPicks. All Git, layout, keymap and
 menu logic stays in the server.
@@ -205,3 +275,55 @@ and the loaded manifest on failure; successful binding checks also save a
 screen and `bindings-evidence.json` before unrelated picker scenarios. It does
 not restart the user's editor. The existing server owned by the user's normal
 VSCodium extension host was deliberately left running.
+
+#### R-VS-5 evidence paused by the user (2026-10-24 14:43 NZDT)
+
+The user paused all VSCode testing because live tests disrupt their work. All
+live-client activity stopped at 14:43 NZDT: no isolated editor of this run
+remains, and the `magit-lsp` process still visible belongs to the user's own
+VSCodium extension host (parent user-data-dir `/home/william/.config/VSCodium`);
+it was not touched. Do not launch another editor or run
+`npm --prefix clients/vscode run test:integration` until the user confirms they
+are away (expected today 16:30 NZDT). R-VS-5 stays unchecked.
+
+Changes already in the working tree, not yet committed:
+
+- `clients/vscode/test/integration.js` — rewritten around the R-VS-5 matrix:
+  foreign QuickPick and InputBox, find widget, status Enter/Tab/`g` after
+  returning, Magit commit QuickPick, and an F5 diagnostic recorded separately
+  from the pass/fail refresh path. It also captures per-step screenshots and
+  `r-vs-5-evidence.json`.
+- `clients/vscode/scripts/test-integration.mjs` — longer isolated-host timeout,
+  DISPLAY/binary precondition checks, screenshot listing, and targeted cleanup
+  of only editors launched from that run's unique `--user-data-dir`.
+- `clients/vscode/test/test.js` — added the canonical status `enter`, `tab`,
+  `g` and `f5` when-clause matrix assertion (21 tests pass).
+
+Observed verification failures (isolated host only, user's editor untouched):
+
+- `/tmp/opencode/vscode-review-R6XxnW/failure.txt`: `Timed out waiting for find
+  widget receiving the typed query`. `failure-state.json` shows the foreign
+  QuickPick and InputBox cases passed with **zero** captured Magit requests;
+  the failure occurred before any status key was sent.
+- `/tmp/opencode/vscode-review-yMFQOG/failure.txt`: `Timed out waiting for find
+  widget typing a query that selects the match`; the same two widget cases
+  passed first, again with zero Magit requests.
+
+A diagnostic probe (also stopped; `/tmp/opencode/probe/`) explains the find
+blocker rather than a binding defect: physical `ctrl+f` does open the find
+widget in this Codium build, but the focused element stayed the editor's
+`native-edit-context` and typed text therefore went to the read-only status
+document; `actions.find` did focus a `TEXTAREA` labelled `Find`. So the find
+case needs a different focus mechanism and re-verification, not a broader
+binding change. The probe also confirmed `import -window` does not paint the
+editor/Monaco layer here (sidebar, status bar and QuickPick overlays do paint),
+so status-text screenshots from `import` are not valid evidence. `F5` was not
+re-run in those two failures; it remains a separate diagnostic.
+
+Deferred until the user confirms they are away: finish/re-run the isolated real
+client scenario, verify the find-widget focus path, capture the screenshots and
+matrix, record them here, and only then consider R-VS-5. Automated evidence
+that is already valid: the unit-level when-clause matrix for canonical and
+mirrored bindings (foreign Quick Input, suggest, find and rename exclusions plus
+`editorTextFocus`) and the two real foreign Quick Input cases above (zero Magit
+dispatch). Those do not complete the acceptance gate.

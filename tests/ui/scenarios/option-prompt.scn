@@ -1,0 +1,20 @@
+# R-3.1 menu option prompt in the real Neovim UI.
+#
+# `=A` asks for the author. The client shows the prompt on the command line
+# while its RPC loop is blocked, so the scenario waits for the visible prompt
+# instead of `wait` (idle). The answer updates the option value and the menu's
+# argument preview.
+fixture: modified-two-files
+---
+keys: c
+wait
+expect screen contains "Commit"
+keys: = A
+wait prompt
+snapshot: prompt
+keys: Alice Enter
+wait
+expect screen contains "--author=Alice"
+expect windows.floating == 1
+expect pending == ""
+snapshot: answered

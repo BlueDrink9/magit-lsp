@@ -252,6 +252,28 @@ test('generated and mirrored bindings require editor focus and exclude widgets',
   }
 });
 
+test('canonical status Enter, fold and refresh bindings keep the focus gate', () => {
+  const generated = require('../package.json').contributes.keybindings;
+  const required = [
+    ['enter', 'common.visit'],
+    ['tab', 'common.toggle-section'],
+    ['g', 'common.refresh'],
+    ['f5', 'common.refresh'],
+  ];
+  for (const [key, command] of required) {
+    const matches = generated.filter((entry) => entry.key === key
+      && entry.args && entry.args.command === command
+      && entry.when.includes("magit.scope == 'status'"));
+    assert.equal(matches.length, 1, `${key} -> ${command} for status`);
+    const terms = matches[0].when.split(' && ');
+    for (const term of ['magit.active', 'editorTextFocus', '!quickInputVisible',
+      '!suggestWidgetVisible', '!findWidgetVisible', '!renameInputVisible',
+      '!magit.textMode']) {
+      assert(terms.includes(term), `${key}: missing ${term}`);
+    }
+  }
+});
+
 const KEYBINDINGS_JSONC = `[
   // Fold the region under the cursor.
   { "key": "ctrl+shift+[", "command": "editor.fold" },

@@ -1565,7 +1565,29 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
 
 ### VSCode extension review (immediate queue for this request)
 
-- [ ] **[P0] R-VS-5 — Keep Magit editor bindings out of foreign widgets**
+- [x] **[P0] R-VS-5 — Keep Magit editor bindings out of foreign widgets**
+  - **Resumed permission (2026-10-24 16:25 NZDT):** user confirmed they are
+    away and explicitly permitted testing now, superseding the historical pause
+    below; do not wait until 16:30. One circuit-breaker retry only, after repairing
+    find focus and actual-renderer screenshot capture; stop on verification failure.
+    Only a unique isolated development host/profile may be touched.
+  - **Verified single resumed run:** exact ticket chain exited 0; 21 Node tests,
+    Rust tests and 61 Neovim cases passed; real Neovim UI reported 16 PASS,
+    1 XFAIL (`process-log`: `wait timed out for screen text 'Process log'`),
+    0 FAIL. No failed-chain retry was needed. Evidence:
+    `/tmp/opencode/vscode-review-l9j8d4/r-vs-5-evidence.json`,
+    `bindings-evidence.json`, `mirrored-bindings.json` and actual-renderer PNGs.
+    Screenshots and request trace were inspected: foreign QuickPick, InputBox
+    and Find retain physical typed input/Enter plus mirrored Ctrl+Alt+] with
+    zero Magit requests; return to status restores Enter, Tab, mirrored folding
+    and `g` refresh; Magit commit QuickPick forwards `-`, `a`, `q` to the server.
+    Find setup uses `actions.find`, not claimed physical Ctrl+F evidence.
+    Rename/suggest are unsupported in this read-only no-provider fixture and
+    have unit guard evidence only; foreign Tab/F5 are not claimed. Exact input,
+    request counts and screenshot names are recorded in `clients/vscode/NOTES.md`.
+    Physical F5 separately produced no request/render; its cause is unproven.
+    R-VS-2/3/4 remain unchecked for first-open screenshot / F5 / theme gates.
+    Only the unique isolated host was stopped; no orphan server remains.
   - **Original finding:** editor bindings swallowed Enter in foreign widgets.
   - **Scope:** require editor text focus in canonical generated bindings and
     mirrored fold bindings; preserve Magit-owned QuickPick handling and generic
@@ -1574,6 +1596,19 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
   - **Remaining gate:** recorded automated/real-client regression evidence for
     the full foreign-widget matrix and status Enter/fold/refresh. Ctrl+P Enter
     is user-confirmed working; do not keep treating that symptom as unresolved.
+  - **Status (2026-10-24 14:43 NZDT): paused with R-VS-5 unchecked.** The
+    automated gate landed: canonical status `enter`, `tab`, `g` and `f5` plus
+    mirrored fold bindings require `editorTextFocus` and exclude Quick Input,
+    suggest, find and rename widgets (21 Node tests pass). Two isolated client
+    runs verified the foreign QuickPick and InputBox cases with zero Magit
+    dispatch, then stopped at the find-widget case. A stopped diagnostic probe
+    showed physical `ctrl+f` opens the widget but the input did not take focus
+    under synthetic X11 input, while `actions.find` did focus it; this is a
+    test-driver problem, not evidence of a binding regression. Live client
+    testing is paused by the user: do not launch an editor or run
+    `npm --prefix clients/vscode run test:integration` until the user confirms
+    they are away (expected today 16:30 NZDT). Details and evidence paths are
+    in `clients/vscode/NOTES.md`.
 
 - [ ] **[P0] R-VS-2 — Fix virtual status opening blank or as a temporary file**
   - **Finding:** opening status first displays a blank editor; opening it a
@@ -1680,13 +1715,13 @@ Completed P1 review work (historical tracking, not new verification):
   spawn/framing/initialize/notifications/stderr/bounded shutdown for async,
   tokens, text-mode, bridge and stdout-hygiene tests; per-file semantics stay.
 
-- [ ] **[P1] Build the §8.1 in-process `TestSession` and migrate the session tests** (`tests/views.rs:14`, `visibility.rs:14`, `keys_protocol.rs:33`, `text_mode.rs:28`, `menu.rs:34`, `menus.rs:33`, `commands.rs:117`, `prompts.rs:35`, `process_log.rs:38`, `commit_preflight.rs:29`)
+- [x] **[P1] Build the §8.1 in-process `TestSession` and migrate the session tests** (`tests/views.rs:14`, `visibility.rs:14`, `keys_protocol.rs:33`, `text_mode.rs:28`, `menu.rs:34`, `menus.rs:33`, `commands.rs:117`, `prompts.rs:35`, `process_log.rs:38`, `commit_preflight.rs:29`)
   - **Problem:** `open_status`, `keymaps()`/`session_with()`, `line_with_marker`, `node_at`, and `press`/`invoke` wrappers (with a hard-coded `version: 1`) are copied in about ten files.
   - **Change:** add `tests/common/session.rs` with `TestSession::open_status(&RepoFixture, Profile)`, `press(key)`, `press_visual(start,end,key)`, `invoke(cmd)`, `invoke_args(cmd,args)`, `ack()`, `goto_marker(path, marker)`, `goto_text(path, text)`, `text()`, `tree()`, `focused_node()`, and a `version` field that tracks the last render so keys send the real version. Migrate the listed files one per commit; delete their local copies.
   - **Done when:** `grep -c "fn open_status" tests/*.rs` is 0 for in-process files; no test sends a literal `version: 1`.
   - **Constraints:** keep behaviour of each test; use tree nodes (`line_nodes`, `marker`), never rendered text, to find cursor lines.
 
-- [ ] **[P1] Test that the askpass secret is never logged** (`tests/editor_bridge.rs:484-525`)
+- [x] **[P1] Test that the askpass secret is never logged** (`tests/editor_bridge.rs:484-525`)
   - **Problem:** §3.6/§3.10 say the secret must not be written to any log; the askpass test sends `s3cret` but never inspects the server's stderr or log file.
   - **Change:** with the shared `TestServer` (after the stdio-client task) spawn with trace logging to stderr and a second run with `MAGIT_LSP_LOG_FILE`; after the round trip assert neither contains `s3cret`.
   - **Done when:** the test fails if the answer is passed to `tracing::debug!`.

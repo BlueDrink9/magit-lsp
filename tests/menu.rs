@@ -5,140 +5,22 @@ mod common;
 
 use common::*;
 use expect_test::expect_file;
-use magit_lsp::config::{Config, Profile};
-use magit_lsp::keymap::{self, Keymap};
+use magit_lsp::config::Profile;
 use magit_lsp::menu::{Menu, MenuStatus};
 use magit_lsp::menus;
-use magit_lsp::protocol::{Cursor, Effect, MessageLevel, ViewInvokeParams, ViewKeyParams};
+use magit_lsp::protocol::{Effect, MessageLevel, ViewRender};
 use magit_lsp::semantic_tokens;
-use magit_lsp::session::{InvokeResult, Session};
-use magit_lsp::ui::ScriptedUi;
-use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, Viewport};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use magit_lsp::view::{Placement, ViewKind, Viewport};
 
-fn keymaps(config: &Config) -> Arc<BTreeMap<String, Keymap>> {
-    Arc::new(keymap::validate(config).expect("resolve keymaps"))
-}
-
-fn session(repo: &std::path::Path) -> Session {
-    let config = Config {
-        profile: Profile::Vim,
-        ..Default::default()
-    };
-    let mut session = Session::new(repo.to_string_lossy());
-    session.set_keymaps(keymaps(&config));
-    session
-}
-
-fn open_status(session: &mut Session) -> u64 {
-    let (_descriptor, render) = session
-        .open(
-            "v1",
-            ViewKind::Status,
-            Placement::Main,
-            Viewport { cols: 100, rows: 30 },
-        )
-        .expect("open status view");
-    session.ack("v1", render.version).expect("ack");
-    render.version
-}
-
-fn invoke(session: &mut Session, view: &str, command: &str) -> InvokeResult {
-    session
-        .invoke(&ViewInvokeParams {
-            view_id: view.to_string(),
-            command: command.to_string(),
-            args: None,
-            cursor: None,
-            selection: None,
-        })
-        .expect("invoke")
-}
-
-fn press(session: &mut Session, view: &str, key: &str, cursor: Cursor) -> InvokeResult {
-    session
-        .key(&ViewKeyParams {
-            view_id: view.to_string(),
-            version: 1,
-            key: key.to_string(),
-            editor_mode: magit_lsp::keymap::EditorMode::Normal,
-            cursor,
-            selection: None,
-        })
-        .expect("view/key")
-}
-
-fn press_ui(
-    session: &mut Session,
-    ui: &ScriptedUi,
-    view: &str,
-    key: &str,
-    cursor: Cursor,
-) -> InvokeResult {
-    session
-        .key_ui(
-            &ViewKeyParams {
-                view_id: view.to_string(),
-                version: 1,
-                key: key.to_string(),
-                editor_mode: magit_lsp::keymap::EditorMode::Normal,
-                cursor,
-                selection: None,
-            },
-            ui,
-        )
-        .expect("view/key")
-}
-
-fn messages(effects: &[Effect]) -> Vec<&str> {
-    effects
-        .iter()
-        .filter_map(|effect| match effect {
-            Effect::Message { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Open the commit menu from the status view and return its descriptor and
-/// initial render, already acknowledged.
-fn open_commit(session: &mut Session) -> (ViewDescriptor, magit_lsp::protocol::ViewRender) {
-    let outcome = invoke(session, "v1", "open.commit");
-    let descriptor = outcome
-        .effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::PushView { descriptor } => Some(descriptor.clone()),
-            _ => None,
-        })
-        .expect("a pushView effect");
-    let (render, _keymap) = outcome.opened.into_iter().next().expect("the menu render");
-    session.ack(&descriptor.id, render.version).expect("ack menu");
-    (descriptor, render)
-}
-
-fn view_ids(session: &Session) -> Vec<String> {
-    session
-        .views()
-        .iter()
-        .map(|view| view.descriptor().id.clone())
-        .collect()
-}
-
-fn menu_switch(session: &Session, view: &str, key: &str) -> bool {
-    let menu = session
-        .views()
-        .get(view)
-        .and_then(|view| view.menu())
-        .expect("a menu view");
+fn menu_switch(test: &TestSession, view: &str, key: &str) -> bool {
+    let menu = test.menu(view).expect("a menu view");
     match menu.item(key) {
         Some(magit_lsp::menu::Item::Switch { on, .. }) => *on,
         other => panic!("expected a switch at {key}, got {other:?}"),
     }
 }
 
-fn preview_line(render: &magit_lsp::protocol::ViewRender) -> Option<String> {
+fn preview_line(render: &ViewRender) -> Option<String> {
     let menu = render.menu.as_ref()?;
     Some(menu.preview())
 }
@@ -146,7 +28,9 @@ fn preview_line(render: &magit_lsp::protocol::ViewRender) -> Option<String> {
 #[test]
 fn the_commit_menu_reflows_its_action_columns() {
     for cols in [60u32, 100, 140] {
-        let tree = menus::named("commit").expect("commit menu").render(Viewport { cols, rows: 30 });
+        let tree = menus::named("commit")
+            .expect("commit menu")
+            .render(Viewport { cols, rows: 30 });
         let text = tree.lines.join("\n");
         match cols {
             60 => expect_file!["snapshots/menu-60.txt"].assert_eq(&text),
@@ -170,12 +54,12 @@ fn the_argument_preview_follows_the_switches_and_options() {
     assert_eq!(menu.preview(), "git commit --no-verify");
 
     assert!(menu.set_option("=A", Some("Alice".to_string())));
-    assert_eq!(
-        menu.preview(),
-        "git commit --no-verify --author=Alice"
-    );
+    assert_eq!(menu.preview(), "git commit --no-verify --author=Alice");
 
-    let tree = menu.render(Viewport { cols: 100, rows: 30 });
+    let tree = menu.render(Viewport {
+        cols: 100,
+        rows: 30,
+    });
     assert!(
         tree.lines.iter().any(|line| line.contains("(--no-verify)")),
         "{:?}",
@@ -199,9 +83,10 @@ fn toggling_a_switch_updates_the_model_and_emits_a_preview_edit() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, initial) = open_commit(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, initial) = test.open_via_command("open.commit");
+    test.ack();
     assert_eq!(descriptor.kind, ViewKind::Menu("menu.commit".to_string()));
     assert!(descriptor.capture, "menus capture every key");
     assert_eq!(descriptor.placement, Placement::Bottom);
@@ -210,17 +95,13 @@ fn toggling_a_switch_updates_the_model_and_emits_a_preview_edit() {
         initial.menu.is_some(),
         "view/render carries the structured menu model"
     );
-
-    let cursor = Cursor { line: 0, column: 0 };
-    let prefix = press(&mut session, &descriptor.id, "-", cursor);
+    let prefix = test.press("-");
     assert!(prefix.effects.is_empty());
     let prefix_render = prefix.render.expect("the pending prefix re-renders");
     assert_eq!(prefix_render.pending, "-");
-    session
-        .ack(&descriptor.id, prefix_render.version)
-        .expect("ack the prefix render");
+    test.ack();
 
-    let toggled = press(&mut session, &descriptor.id, "a", cursor);
+    let toggled = test.press("a");
     assert!(toggled.effects.is_empty(), "{:?}", toggled.effects);
     let render = toggled.render.expect("a re-render");
     assert_eq!(render.pending, "", "completing the switch clears pending");
@@ -234,7 +115,7 @@ fn toggling_a_switch_updates_the_model_and_emits_a_preview_edit() {
         other => panic!("expected the --all switch, got {other:?}"),
     }
     assert_eq!(menu.preview(), "git commit --all");
-    assert!(menu_switch(&session, &descriptor.id, "-a"));
+    assert!(menu_switch(&test, &descriptor.id, "-a"));
     assert_eq!(preview_line(&render).as_deref(), Some("git commit --all"));
     assert!(
         render
@@ -251,21 +132,17 @@ fn setting_an_option_prompts_and_applies_the_value() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (_descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    let ui = ScriptedUi::new();
-    ui.reply_text(Some("Alice".to_string()));
-
-    let cursor = Cursor { line: 0, column: 0 };
-    let prefix = press_ui(&mut session, &ui, &descriptor.id, "=", cursor);
+    test.ui().reply_text(Some("Alice".to_string()));
+    let prefix = test.press_ui("=");
     let prefix_render = prefix.render.expect("the pending prefix re-renders");
     assert_eq!(prefix_render.pending, "=");
-    session
-        .ack(&descriptor.id, prefix_render.version)
-        .expect("ack the prefix render");
-    let outcome = press_ui(&mut session, &ui, &descriptor.id, "A", cursor);
+    test.ack();
+    let outcome = test.press_ui("A");
     assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
     let render = outcome.render.expect("the option change re-renders");
     let menu = render.menu.as_ref().expect("the structured menu");
@@ -277,15 +154,14 @@ fn setting_an_option_prompts_and_applies_the_value() {
     }
     assert_eq!(menu.preview(), "git commit --author=Alice");
     assert!(
-        render
-            .edits
-            .expect("edits")
+        render.edits.expect("edits").iter().any(|edit| edit
+            .lines
             .iter()
-            .any(|edit| edit.lines.iter().any(|line| line.contains("--author=Alice"))),
+            .any(|line| line.contains("--author=Alice"))),
         "the preview and value appear in the edit"
     );
 
-    let requests = ui.requests();
+    let requests = test.ui().requests();
     assert_eq!(requests.len(), 1, "one prompt was asked");
     assert_eq!(requests[0].kind, magit_lsp::protocol::PromptKind::Text);
     assert_eq!(requests[0].title, "Override the author (--author=)");
@@ -298,19 +174,15 @@ fn a_planned_action_reports_its_roadmap_and_changes_nothing() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
     let before = tmp.git(&["status", "--porcelain"]);
 
-    let outcome = press(
-        &mut session,
-        &descriptor.id,
-        "e",
-        Cursor { line: 0, column: 0 },
-    );
+    let outcome = test.press("e");
     assert_eq!(
-        messages(&outcome.effects),
+        message_texts(&outcome.effects),
         vec!["Not implemented yet: Extend (roadmap R-4.1)"]
     );
     assert_eq!(
@@ -322,7 +194,7 @@ fn a_planned_action_reports_its_roadmap_and_changes_nothing() {
     );
     assert!(outcome.render.is_none());
     assert!(
-        session.views().get(&descriptor.id).is_some(),
+        test.session().views().get(&descriptor.id).is_some(),
         "the menu stays open"
     );
     assert_eq!(tmp.git(&["status", "--porcelain"]), before);
@@ -334,16 +206,12 @@ fn escape_q_and_ctrl_c_pop_the_menu_and_restore_the_status_keymap() {
         let (tmp, _repo) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
             .build();
-        let mut session = session(tmp.path());
-        open_status(&mut session);
-        let (descriptor, _render) = open_commit(&mut session);
+        let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        test.ack();
+        let (descriptor, _render) = test.open_via_command("open.commit");
+        test.ack();
 
-        let outcome = press(
-            &mut session,
-            &descriptor.id,
-            key,
-            Cursor { line: 0, column: 0 },
-        );
+        let outcome = test.press(key);
         assert!(
             outcome.effects.iter().any(
                 |effect| matches!(effect, Effect::PopView { view_id } if view_id == &descriptor.id)
@@ -362,8 +230,8 @@ fn escape_q_and_ctrl_c_pop_the_menu_and_restore_the_status_keymap() {
         assert_eq!(keymap.view_id, "v1");
         assert_eq!(keymap.scope, "status");
         assert!(!keymap.capture);
-        assert!(session.views().get(&descriptor.id).is_none());
-        assert_eq!(view_ids(&session), vec!["v1".to_string()]);
+        assert!(test.session().views().get(&descriptor.id).is_none());
+        assert_eq!(test.view_ids(), vec!["v1".to_string()]);
     }
 }
 
@@ -373,18 +241,14 @@ fn an_unbound_menu_key_is_swallowed_with_a_hint() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (_descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
     let before = tmp.git(&["status", "--porcelain"]);
 
-    let outcome = press(
-        &mut session,
-        &descriptor.id,
-        "z",
-        Cursor { line: 0, column: 0 },
-    );
-    assert_eq!(messages(&outcome.effects), vec!["Unbound key: z"]);
+    let outcome = test.press("z");
+    assert_eq!(message_texts(&outcome.effects), vec!["Unbound key: z"]);
     assert!(outcome.render.is_none());
     assert_eq!(tmp.git(&["status", "--porcelain"]), before);
 }
@@ -394,16 +258,12 @@ fn menu_help_replaces_the_current_menu() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (commit, _render) = open_commit(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (commit, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    let replaced = press(
-        &mut session,
-        &commit.id,
-        "?",
-        Cursor { line: 0, column: 0 },
-    );
+    let replaced = test.press("?");
     let dispatch = replaced
         .effects
         .iter()
@@ -412,10 +272,7 @@ fn menu_help_replaces_the_current_menu() {
             _ => None,
         })
         .expect("the dispatch menu is pushed");
-    assert_eq!(
-        dispatch.kind,
-        ViewKind::Menu("menu.dispatch".to_string())
-    );
+    assert_eq!(dispatch.kind, ViewKind::Menu("menu.dispatch".to_string()));
     assert!(
         replaced
             .effects
@@ -431,22 +288,15 @@ fn menu_help_replaces_the_current_menu() {
             .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")),
         "focus returns to status before the dispatch opens"
     );
-    assert_eq!(
-        view_ids(&session),
-        vec!["v1".to_string(), dispatch.id.clone()]
-    );
-    assert!(session.views().get(&commit.id).is_none());
+    assert_eq!(test.view_ids(), vec!["v1".to_string(), dispatch.id.clone()]);
+    assert!(test.session().views().get(&commit.id).is_none());
 
-    let popped = press(
-        &mut session,
-        &dispatch.id,
-        "q",
-        Cursor { line: 0, column: 0 },
-    );
-    assert!(popped.effects.iter().any(
-        |effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)
-    ));
-    assert_eq!(view_ids(&session), vec!["v1".to_string()]);
+    let popped = test.press("q");
+    assert!(popped
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)));
+    assert_eq!(test.view_ids(), vec!["v1".to_string()]);
     assert_eq!(popped.keymap.expect("keymap").view_id, "v1");
 }
 
@@ -455,29 +305,15 @@ fn opening_a_top_level_menu_from_a_menu_replaces_it() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
 
-    let outcome = invoke(&mut session, "v1", "open.dispatch");
-    let dispatch = outcome
-        .effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::PushView { descriptor } => Some(descriptor.clone()),
-            _ => None,
-        })
-        .expect("a pushed dispatch menu");
-    let (render, _keymap) = outcome.opened.into_iter().next().expect("dispatch render");
-    session.ack(&dispatch.id, render.version).expect("ack");
+    let (dispatch, _render) = test.open_via_command("open.dispatch");
+    test.ack();
 
     // `c` on the dispatch is `open.commit`, which belongs to the status view:
     // the dispatch is popped and the commit menu takes its place.
-    let replaced = press(
-        &mut session,
-        &dispatch.id,
-        "c",
-        Cursor { line: 0, column: 0 },
-    );
+    let replaced = test.press("c");
     let commit = replaced
         .effects
         .iter()
@@ -487,13 +323,11 @@ fn opening_a_top_level_menu_from_a_menu_replaces_it() {
         })
         .expect("the commit menu is pushed");
     assert_eq!(commit.kind, ViewKind::Menu("menu.commit".to_string()));
-    assert!(replaced.effects.iter().any(
-        |effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)
-    ));
-    assert_eq!(
-        view_ids(&session),
-        vec!["v1".to_string(), commit.id.clone()]
-    );
+    assert!(replaced
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &dispatch.id)));
+    assert_eq!(test.view_ids(), vec!["v1".to_string(), commit.id.clone()]);
 }
 
 #[test]
@@ -501,34 +335,36 @@ fn save_and_reset_args_restore_the_saved_switches() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
-    let cursor = Cursor { line: 0, column: 0 };
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    press(&mut session, &descriptor.id, "-", cursor);
-    press(&mut session, &descriptor.id, "a", cursor);
-    let saved = invoke(&mut session, &descriptor.id, "menu.save-args");
-    assert_eq!(messages(&saved.effects), vec!["Saved menu arguments"]);
+    test.press("-");
+    test.press("a");
+    let saved = test.invoke("menu.save-args");
+    assert_eq!(message_texts(&saved.effects), vec!["Saved menu arguments"]);
     assert!(saved.render.is_some(), "saving re-renders");
 
-    press(&mut session, &descriptor.id, "-", cursor);
-    press(&mut session, &descriptor.id, "a", cursor);
-    assert!(!menu_switch(&session, &descriptor.id, "-a"));
+    test.press("-");
+    test.press("a");
+    assert!(!menu_switch(&test, &descriptor.id, "-a"));
 
-    let reset = invoke(&mut session, &descriptor.id, "menu.reset-args");
-    assert_eq!(messages(&reset.effects), vec!["Reset menu arguments"]);
-    assert!(menu_switch(&session, &descriptor.id, "-a"));
+    let reset = test.invoke("menu.reset-args");
+    assert_eq!(message_texts(&reset.effects), vec!["Reset menu arguments"]);
+    assert!(menu_switch(&test, &descriptor.id, "-a"));
     let render = reset.render.expect("resetting re-renders");
-    assert_eq!(
-        render.menu.expect("menu").preview(),
-        "git commit --all"
-    );
+    assert_eq!(render.menu.expect("menu").preview(), "git commit --all");
 }
 
 #[test]
 fn menu_tokens_decode_to_the_documented_types() {
-    let tree = menus::named("commit").expect("commit menu").render(Viewport { cols: 100, rows: 30 });
+    let tree = menus::named("commit")
+        .expect("commit menu")
+        .render(Viewport {
+            cols: 100,
+            rows: 30,
+        });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
     let types = semantic_tokens::TOKEN_TYPES;
     let mut seen = Vec::new();
@@ -547,16 +383,16 @@ fn menu_tokens_decode_to_the_documented_types() {
         "magit.menu.preview",
         "magit.menu.planned",
     ] {
-        assert!(
-            seen.contains(&expected),
-            "missing {expected}: {seen:?}"
-        );
+        assert!(seen.contains(&expected), "missing {expected}: {seen:?}");
     }
 
     // The switch marker and the flag text change type when the switch is on.
     let mut menu = menus::named("commit").expect("commit menu");
     let flag_token = |menu: &Menu| {
-        let tree = menu.render(Viewport { cols: 100, rows: 30 });
+        let tree = menu.render(Viewport {
+            cols: 100,
+            rows: 30,
+        });
         let line = tree
             .lines
             .iter()
@@ -573,7 +409,10 @@ fn menu_tokens_decode_to_the_documented_types() {
     assert_eq!(flag_token(&menu), "magit.menu.flag.off");
 
     menu.toggle_switch("-a");
-    let tree = menu.render(Viewport { cols: 100, rows: 30 });
+    let tree = menu.render(Viewport {
+        cols: 100,
+        rows: 30,
+    });
     let data = semantic_tokens::encode_lines(&tree.lines, &tree.tokens);
     let seen: Vec<&str> = data
         .iter()
@@ -597,19 +436,40 @@ fn token_at(tree: &magit_lsp::tree::Tree, text: &str, offset: usize) -> Option<S
 #[test]
 fn a_pending_prefix_dims_items_that_cannot_complete_it() {
     let menu = menus::named("commit").expect("commit menu");
-    let tree = menu.render_with_pending(Viewport { cols: 100, rows: 30 }, &["-".to_string()]);
+    let tree = menu.render_with_pending(
+        Viewport {
+            cols: 100,
+            rows: 30,
+        },
+        &["-".to_string()],
+    );
 
     // An option cannot follow `-`, so its whole key is disabled.
-    assert_eq!(token_at(&tree, "=A", 0).as_deref(), Some("magit.menu.disabled"));
+    assert_eq!(
+        token_at(&tree, "=A", 0).as_deref(),
+        Some("magit.menu.disabled")
+    );
     // A switch can: its `-` is the pending prefix and `a` is the ordinary key.
-    assert_eq!(token_at(&tree, "-a", 0).as_deref(), Some("magit.menu.pending"));
+    assert_eq!(
+        token_at(&tree, "-a", 0).as_deref(),
+        Some("magit.menu.pending")
+    );
     assert_eq!(token_at(&tree, "-a", 1).as_deref(), Some("magit.menu.key"));
     // An action cannot follow `-` either.
-    assert_eq!(token_at(&tree, "  c  Commit", 2).as_deref(), Some("magit.menu.disabled"));
+    assert_eq!(
+        token_at(&tree, "  c  Commit", 2).as_deref(),
+        Some("magit.menu.disabled")
+    );
 
     // With no pending steps every item is normal again.
-    let normal = menu.render(Viewport { cols: 100, rows: 30 });
-    assert_eq!(token_at(&normal, "=A", 0).as_deref(), Some("magit.menu.option"));
+    let normal = menu.render(Viewport {
+        cols: 100,
+        rows: 30,
+    });
+    assert_eq!(
+        token_at(&normal, "=A", 0).as_deref(),
+        Some("magit.menu.option")
+    );
 }
 
 #[test]
@@ -618,24 +478,22 @@ fn a_non_matching_key_keeps_pending_and_hints() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
-    let cursor = Cursor { line: 0, column: 0 };
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    press(&mut session, &descriptor.id, "-", cursor);
+    test.press("-");
     let before = tmp.git(&["status", "--porcelain"]);
 
     // `c` is an action, but with `-` pending only switches are live.
-    let outcome = press(&mut session, &descriptor.id, "c", cursor);
-    assert_eq!(messages(&outcome.effects), vec!["Unbound key: -c"]);
+    let outcome = test.press("c");
+    assert_eq!(message_texts(&outcome.effects), vec!["Unbound key: -c"]);
     assert!(outcome.render.is_none(), "the pending state is unchanged");
     assert_eq!(tmp.git(&["status", "--porcelain"]), before);
-    let notice = session
-        .keymap_notice(&descriptor.id)
-        .expect("the menu keymap");
+    let notice = test.keymap_notice().expect("the menu keymap");
     assert_eq!(notice.pending, "-", "a non-matching key keeps the prefix");
-    assert!(session.views().get(&descriptor.id).is_some());
+    assert!(test.session().views().get(&descriptor.id).is_some());
 }
 
 #[test]
@@ -643,18 +501,26 @@ fn backspace_pops_one_pending_step() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
-    let cursor = Cursor { line: 0, column: 0 };
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    press(&mut session, &descriptor.id, "-", cursor);
-    let popped = press(&mut session, &descriptor.id, "Backspace", cursor);
+    test.press("-");
+    let popped = test.press("Backspace");
     assert!(popped.effects.is_empty(), "{:?}", popped.effects);
     let render = popped.render.expect("popping a step re-renders");
     assert_eq!(render.pending, "");
-    assert!(session.views().get(&descriptor.id).is_some(), "the menu stays open");
-    let tree = session.views().get(&descriptor.id).expect("view").tree();
+    assert!(
+        test.session().views().get(&descriptor.id).is_some(),
+        "the menu stays open"
+    );
+    let tree = test
+        .session()
+        .views()
+        .get(&descriptor.id)
+        .expect("view")
+        .tree();
     assert_eq!(
         token_at(tree, "=A", 0).as_deref(),
         Some("magit.menu.option"),
@@ -667,22 +533,19 @@ fn backspace_with_empty_pending_does_nothing() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
-    let cursor = Cursor { line: 0, column: 0 };
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    let outcome = press(&mut session, &descriptor.id, "Backspace", cursor);
+    let outcome = test.press("Backspace");
     assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
     assert!(outcome.render.is_none(), "nothing changed");
-    assert!(session.views().get(&descriptor.id).is_some(), "the menu stays open");
-    assert_eq!(
-        session
-            .keymap_notice(&descriptor.id)
-            .expect("the menu keymap")
-            .pending,
-        ""
+    assert!(
+        test.session().views().get(&descriptor.id).is_some(),
+        "the menu stays open"
     );
+    assert_eq!(test.keymap_notice().expect("the menu keymap").pending, "");
 }
 
 #[test]
@@ -690,23 +553,19 @@ fn the_keymap_reports_pending_and_live_keys() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = session(tmp.path());
-    open_status(&mut session);
-    let (descriptor, _render) = open_commit(&mut session);
-    let cursor = Cursor { line: 0, column: 0 };
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (_descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
 
-    let notice = session
-        .keymap_notice(&descriptor.id)
-        .expect("the menu keymap");
+    let notice = test.keymap_notice().expect("the menu keymap");
     assert_eq!(notice.pending, "");
     assert!(notice.live_keys.contains(&"c".to_string()));
     assert!(notice.live_keys.contains(&"-a".to_string()));
     assert!(!notice.live_keys.contains(&"Backspace".to_string()));
 
-    press(&mut session, &descriptor.id, "-", cursor);
-    let notice = session
-        .keymap_notice(&descriptor.id)
-        .expect("the menu keymap");
+    test.press("-");
+    let notice = test.keymap_notice().expect("the menu keymap");
     assert_eq!(notice.pending, "-");
     assert!(notice.live_keys.contains(&"-a".to_string()));
     assert!(!notice.live_keys.contains(&"c".to_string()));
@@ -716,8 +575,15 @@ fn the_keymap_reports_pending_and_live_keys() {
 #[test]
 fn the_registry_exposes_open_commit_and_the_menu_commands() {
     use magit_lsp::commands::{registry, CommandStatus};
-    for id in ["open.commit", "open.dispatch", "menu.save-args", "menu.reset-args"] {
-        let command = registry().get(id).unwrap_or_else(|| panic!("{id} is registered"));
+    for id in [
+        "open.commit",
+        "open.dispatch",
+        "menu.save-args",
+        "menu.reset-args",
+    ] {
+        let command = registry()
+            .get(id)
+            .unwrap_or_else(|| panic!("{id} is registered"));
         assert_eq!(
             command.status,
             CommandStatus::Implemented,

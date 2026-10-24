@@ -47,16 +47,19 @@ class Expectation:
     key: str | None = None
     budget_ms: float | None = None
     operator: str = "<="
+    name: str | None = None
 
 
 @dataclass
 class Statement:
-    """One scenario statement: keys, wait, expect or snapshot."""
+    """One scenario statement: keys, wait, expect, capture or snapshot."""
 
     kind: str
     keys: list[str] = field(default_factory=list)
     expectation: Expectation | None = None
     name: str | None = None
+    text: str | None = None
+    profile: str | None = None
 
 
 @dataclass
@@ -192,6 +195,14 @@ def parse_expectation(line: str) -> Expectation:
     if match:
         return Expectation(kind="screen-matches", pattern=match.group(1))
 
+    match = re.match(
+        r"^expect\s+document\s+(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')\s+"
+        r"unchanged$",
+        line,
+    )
+    if match:
+        return Expectation(kind="document-unchanged", name=unquote(match.group(1)))
+
     match = re.match(r"^expect\s+no_message\s+/(.*)/$", line)
     if match:
         return Expectation(kind="no-message", pattern=match.group(1))
@@ -234,19 +245,47 @@ def parse_expectation(line: str) -> Expectation:
     raise ScenarioError(f"unknown expectation `{line}`")
 
 
+def parse_statement_name(line: str, keyword: str, where: str) -> str:
+    """Read and validate the artefact name after `keyword:`."""
+    name = line[len(keyword) :].strip()
+    if not name:
+        raise ScenarioError(f"{where}: `{keyword}` needs a name")
+    if "/" in name or "\\" in name or name in (".", ".."):
+        raise ScenarioError(f"{where}: invalid {keyword} name `{name}`")
+    return name
+
+
 def parse_statement(line: str, where: str) -> Statement:
     """Parse one non-empty scenario line."""
+    match = re.match(r"^keys\s+(standard|vim)\s*:\s*(.+)$", line)
+    if match:
+        return Statement(
+            kind="keys",
+            keys=parse_keys(match.group(2)),
+            profile=match.group(1),
+        )
     if line.startswith("keys:"):
         return Statement(kind="keys", keys=parse_keys(line[len("keys:") :]))
     if line == "wait":
         return Statement(kind="wait")
+    if line == "wait prompt":
+        return Statement(kind="wait-prompt")
+    match = re.match(r"^wait\s+screen\s+contains\s+(.+)$", line)
+    if match:
+        text = unquote(match.group(1))
+        if not text:
+            raise ScenarioError(f"{where}: `wait screen contains` needs text")
+        return Statement(kind="wait-screen", text=text)
     if line.startswith("snapshot:"):
-        name = line[len("snapshot:") :].strip()
-        if not name:
-            raise ScenarioError(f"{where}: `snapshot:` needs a name")
-        if "/" in name or "\\" in name or name in (".", ".."):
-            raise ScenarioError(f"{where}: invalid snapshot name `{name}`")
-        return Statement(kind="snapshot", name=name)
+        return Statement(
+            kind="snapshot",
+            name=parse_statement_name(line, "snapshot:", where),
+        )
+    if line.startswith("document:"):
+        return Statement(
+            kind="document",
+            name=parse_statement_name(line, "document:", where),
+        )
     if line.startswith("expect "):
         return Statement(kind="expect", expectation=parse_expectation(line))
     raise ScenarioError(f"{where}: unknown statement `{line}`")
@@ -546,6 +585,8 @@ def format_expectation(expectation: Expectation) -> str:
         return f'expect screen not-contains "{expectation.text}"'
     if expectation.kind == "screen-matches":
         return f"expect screen matches /{expectation.pattern}/"
+    if expectation.kind == "document-unchanged":
+        return f'expect document "{expectation.name}" unchanged'
     if expectation.kind == "no-message":
         return f"expect no_message /{expectation.pattern}/"
     if expectation.kind == "style":
@@ -560,6 +601,20 @@ def format_expectation(expectation: Expectation) -> str:
     return f"expect {expectation.path} == {_format_value(expectation.value)}"
 
 
+def check_document_unchanged(
+    name: str, document: str | None, documents: dict[str, str]
+) -> tuple[bool, str]:
+    """True when `document` still equals the text captured as `name`."""
+    saved = documents.get(name)
+    if saved is None:
+        return False, f"no captured document {name!r}"
+    if document is None:
+        return False, f"no current document to compare with {name!r}"
+    if document == saved:
+        return True, f"document {name!r} is unchanged"
+    return False, f"document {name!r} changed"
+
+
 def evaluate(
     expectation: Expectation,
     *,
@@ -567,8 +622,14 @@ def evaluate(
     ansi: str,
     snapshot: dict,
     events: list[dict],
+    document: str | None = None,
+    documents: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
     """Evaluate one expectation against a captured UI state."""
+    if expectation.kind == "document-unchanged":
+        return check_document_unchanged(
+            expectation.name or "", document, documents or {}
+        )
     if expectation.kind == "screen-contains":
         return check_screen_contains(screen, expectation.text or "")
     if expectation.kind == "screen-not-contains":
@@ -687,10 +748,13 @@ def _run_combo(
             ok=False, reason=str(error), screen="", profile=profile, size=size
         )
 
+    documents: dict[str, str] = {}
     try:
         _clear_command_line(run)
         for number, statement in enumerate(scenario.statements, start=1):
             if statement.kind == "keys":
+                if statement.profile and statement.profile != profile:
+                    continue
                 driver.send_keys(run, statement.keys)
             elif statement.kind == "wait":
                 if not driver.wait_idle(run, timeout_ms=WAIT_TIMEOUT_MS):
@@ -701,6 +765,30 @@ def _run_combo(
                         profile=profile,
                         size=size,
                     )
+            elif statement.kind == "wait-prompt":
+                if not driver.wait_prompt(run, timeout_ms=WAIT_TIMEOUT_MS):
+                    return ComboResult(
+                        ok=False,
+                        reason="wait timed out for a prompt",
+                        screen=driver.capture(run),
+                        profile=profile,
+                        size=size,
+                    )
+            elif statement.kind == "wait-screen":
+                if not driver.wait_screen(
+                    run, statement.text or "", timeout_ms=WAIT_TIMEOUT_MS
+                ):
+                    return ComboResult(
+                        ok=False,
+                        reason=(
+                            f"wait timed out for screen text {statement.text!r}"
+                        ),
+                        screen=driver.capture(run),
+                        profile=profile,
+                        size=size,
+                    )
+            elif statement.kind == "document":
+                documents[statement.name or ""] = driver.document(run)
             elif statement.kind == "snapshot":
                 _write_snapshot(
                     run, scenario, profile, size, statement.name or "snapshot", snapshots
@@ -715,6 +803,12 @@ def _run_combo(
                         ansi=driver.capture(run, ansi=True),
                         snapshot=driver.snapshot(run),
                         events=driver.read_trace(run),
+                        document=(
+                            driver.document(run)
+                            if expectation.kind == "document-unchanged"
+                            else None
+                        ),
+                        documents=documents,
                     )
                 except driver.DriverError as error:
                     ok, actual = False, str(error)

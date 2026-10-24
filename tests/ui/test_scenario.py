@@ -166,6 +166,80 @@ class ParserTest(unittest.TestCase):
                 write_temp("fixture: clean\n---\nsnapshot: ../escape\n")
             )
 
+    def test_profile_keys(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                "fixture: clean\n---\n"
+                "keys standard: g\n"
+                "keys vim: g r\n"
+                'keys: x\n',
+                "profile-keys.scn",
+            )
+        )
+        self.assertEqual(parsed.statements[0].profile, "standard")
+        self.assertEqual(parsed.statements[0].keys, ["g"])
+        self.assertEqual(parsed.statements[1].profile, "vim")
+        self.assertEqual(parsed.statements[1].keys, ["g", "r"])
+        self.assertIsNone(parsed.statements[2].profile)
+
+    def test_unknown_profile_keys_are_rejected(self) -> None:
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_scenario(
+                write_temp("fixture: clean\n---\nkeys emacs: g\n")
+            )
+
+    def test_wait_screen_contains(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                "fixture: clean\n---\n"
+                'wait screen contains "Nothing staged. Stage all changes?"\n'
+                "wait\n",
+                "wait-screen.scn",
+            )
+        )
+        self.assertEqual(parsed.statements[0].kind, "wait-screen")
+        self.assertEqual(
+            parsed.statements[0].text, "Nothing staged. Stage all changes?"
+        )
+        self.assertEqual(parsed.statements[1].kind, "wait")
+
+    def test_wait_prompt(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\nwait prompt\n", "wait-prompt.scn")
+        )
+        self.assertEqual(parsed.statements[0].kind, "wait-prompt")
+
+    def test_wait_screen_contains_needs_text(self) -> None:
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_scenario(
+                write_temp("fixture: clean\n---\nwait screen contains\n")
+            )
+
+    def test_document_capture_and_expectation(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                "fixture: clean\n---\n"
+                "document: before\n"
+                "keys: J\n"
+                'expect document "before" unchanged\n',
+                "document.scn",
+            )
+        )
+        self.assertEqual(parsed.statements[0].kind, "document")
+        self.assertEqual(parsed.statements[0].name, "before")
+        expectation = parsed.statements[2].expectation
+        self.assertIsNotNone(expectation)
+        self.assertEqual(expectation.kind, "document-unchanged")
+        self.assertEqual(expectation.name, "before")
+
+    def test_document_name_is_required(self) -> None:
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_scenario(write_temp("fixture: clean\n---\ndocument:\n"))
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_scenario(
+                write_temp("fixture: clean\n---\ndocument: ../escape\n")
+            )
+
 
 class HelperTest(unittest.TestCase):
     def test_strip_comment_respects_quotes(self) -> None:
@@ -204,6 +278,7 @@ class HelperTest(unittest.TestCase):
             'expect latency("?") <= 100ms',
             "expect windows.floating == 1",
             'expect pending == "-"',
+            'expect document "before" unchanged',
         ]
         for line in cases:
             with self.subTest(line=line):
@@ -289,6 +364,49 @@ class PathPredicateTest(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertIn("no path", actual)
+
+
+class DocumentPredicateTest(unittest.TestCase):
+    def test_unchanged(self) -> None:
+        ok, actual = scenario.check_document_unchanged(
+            "before", "one\ntwo", {"before": "one\ntwo"}
+        )
+        self.assertTrue(ok)
+        self.assertIn("unchanged", actual)
+
+    def test_changed(self) -> None:
+        ok, actual = scenario.check_document_unchanged(
+            "before", "one\ntwo three", {"before": "one\ntwo"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("changed", actual)
+
+    def test_missing_capture(self) -> None:
+        ok, actual = scenario.check_document_unchanged("before", "one", {})
+        self.assertFalse(ok)
+        self.assertIn("no captured document", actual)
+
+    def test_missing_current_document(self) -> None:
+        ok, actual = scenario.check_document_unchanged(
+            "before", None, {"before": "one"}
+        )
+        self.assertFalse(ok)
+        self.assertIn("no current document", actual)
+
+    def test_evaluate_document(self) -> None:
+        expectation = scenario.parse_expectation(
+            'expect document "before" unchanged'
+        )
+        ok, _ = scenario.evaluate(
+            expectation,
+            screen="",
+            ansi="",
+            snapshot={},
+            events=[],
+            document="same",
+            documents={"before": "same"},
+        )
+        self.assertTrue(ok)
 
 
 class MessagePredicateTest(unittest.TestCase):

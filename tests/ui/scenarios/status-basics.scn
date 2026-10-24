@@ -1,0 +1,48 @@
+# R-1.x/R-2.4 staging, folding, visual stage and a refused native edit.
+#
+# The vim profile uses a real visual selection (`V j s`). The standard profile
+# binds `V` to `open.revert` and `v` to `status.reverse` (§5) and R4 forbids
+# visual-mode keys there, so it stages the same hunk with a normal `s`; both
+# runs must end with the same staged state. `J` is a native join in both
+# profiles: its refusal is proven by comparing the full document text, not by
+# the absence of a warning.
+fixture: modified-two-files
+---
+wait
+keys: j j j j
+wait
+expect cursor on "Unstaged changes"
+keys: Tab
+wait
+expect screen not-contains "M f.txt"
+snapshot: folded
+keys: Tab
+wait
+expect screen contains "M f.txt"
+keys: j Right Right
+wait
+expect cursor on "M f.txt"
+keys: s
+wait
+expect screen contains "Staged changes (1)"
+snapshot: staged-file
+keys: u
+wait
+expect screen contains "Staged changes (0)"
+expect screen contains "Unstaged changes (2)"
+snapshot: unstaged-file
+keys: k k k k k k k k k k k k k k k k k k k k
+keys: j j j j j j j j j j
+keys: Right Right Right Right
+wait
+expect cursor on "+line3 CHANGED"
+document: before-edit
+keys: J
+wait
+expect document "before-edit" unchanged
+snapshot: refused-edit
+keys vim: V j s
+keys standard: s
+wait
+expect screen contains "Staged changes (1)"
+snapshot: staged-hunk

@@ -21,6 +21,8 @@ DEFAULT_SIZE = (100, 30)
 DEFAULT_PROFILE = "vim"
 START_TIMEOUT_MS = 20000
 SOCKET_TIMEOUT_MS = 15000
+SCREEN_POLL_MS = 50
+SCREEN_TIMEOUT_MS = 2000
 
 
 class DriverError(RuntimeError):
@@ -188,6 +190,16 @@ _SNAPSHOT_EXPR = (
     'luaeval(\'vim.json.encode(require("magit-lsp.debug").snapshot())\')'
 )
 _IDLE_EXPR = 'luaeval(\'require("magit-lsp.debug").idle()\')'
+# `vim.ui.input` uses the `@` command-line type and `vim.ui.select`/`inputlist`
+# the `-` textlist type; both mean a prompt is waiting for the user.
+_PROMPT_EXPR = "getcmdtype()"
+PROMPT_TYPES = ("@", "-")
+# JSON keeps line breaks and leading whitespace intact, so an exact comparison
+# does not depend on how `--remote-expr` prints a multi-line value.
+_DOCUMENT_EXPR = (
+    'luaeval(\'vim.json.encode(table.concat('
+    'vim.api.nvim_buf_get_lines(0, 0, -1, false), string.char(10)))\')'
+)
 
 
 def snapshot(run: Run) -> dict:
@@ -212,6 +224,24 @@ def idle(run: Run) -> bool:
     return output in ("true", "1")
 
 
+def document(run: Run) -> str:
+    """Return the active buffer's text exactly, lines joined by a newline.
+
+    Used to prove that a native edit (for example `J`) was refused because the
+    document still has the same content; screen text alone is not enough.
+    """
+    output = _expr(run, _DOCUMENT_EXPR)
+    if output is None:
+        raise DriverError("Neovim did not answer the document request")
+    try:
+        text = json.loads(output)
+    except ValueError as error:
+        raise DriverError(f"invalid document from Neovim: {output!r}") from error
+    if not isinstance(text, str):
+        raise DriverError("Neovim returned a non-string document")
+    return text
+
+
 def clear_message_line(run: Run) -> None:
     """Clear the command-line message display without touching `:messages`.
 
@@ -219,6 +249,25 @@ def clear_message_line(run: Run) -> None:
     warning through `snapshot()["messages"]`.
     """
     _expr(run, 'execute("mode")')
+
+
+def prompt_pending(run: Run) -> bool:
+    """True while a `vim.ui` prompt is waiting for the user."""
+    return _expr(run, _PROMPT_EXPR, timeout=1.0) in PROMPT_TYPES
+
+
+def wait_prompt(run: Run, timeout_ms: int = 2000, poll_ms: int = 20) -> bool:
+    """Poll until a prompt is waiting, or return False at the timeout.
+
+    `idle()` stays false while a prompt is pending and the prompt blocks the
+    key request that opened it, so a prompt scenario cannot use `wait_idle`.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if prompt_pending(run):
+            return True
+        time.sleep(poll_ms / 1000)
+    return prompt_pending(run)
 
 
 def wait_idle(run: Run, timeout_ms: int = 2000, settle_ms: int = 50) -> bool:
@@ -252,6 +301,21 @@ def capture(run: Run, ansi: bool = False) -> str:
     lines = result.stdout.splitlines()
     lines = (lines + [""] * run.rows)[: run.rows]
     return "\n".join(lines)
+
+
+def wait_screen(run: Run, text: str, timeout_ms: int = SCREEN_TIMEOUT_MS) -> bool:
+    """Poll the pane until `text` appears, or return False at the timeout.
+
+    A pending prompt blocks Neovim's RPC loop, so `idle()` cannot be the gate
+    for a key that opens one. This waits on the visible screen instead, which
+    keeps the wait bounded and independent of the prompt implementation.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if text in capture(run):
+            return True
+        time.sleep(SCREEN_POLL_MS / 1000)
+    return text in capture(run)
 
 
 _TMUX_KEY = re.compile(

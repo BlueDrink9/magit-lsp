@@ -4,9 +4,8 @@ mod common;
 
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, Scope};
-use magit_lsp::protocol::{Effect, MessageLevel, ViewInvokeParams};
-use magit_lsp::session::Session;
-use magit_lsp::view::{Placement, ViewKind, Viewport};
+use magit_lsp::config::Profile;
+use magit_lsp::protocol::{Effect, MessageLevel};
 
 /// Every command id named in TASKS.md §5.1–§5.5.
 const EXPECTED: &[&str] = &[
@@ -114,28 +113,17 @@ const MENU_NAMESPACES: &[&str] = &[
     "blame",
 ];
 
-fn open_status(session: &mut Session) {
-    session
-        .open(
-            "v1",
-            ViewKind::Status,
-            Placement::Main,
-            Viewport { cols: 80, rows: 24 },
-        )
-        .expect("open status view");
-}
-
 #[test]
 fn the_registry_lists_every_named_command_once() {
     let mut seen = std::collections::HashSet::new();
     let mut profile_commands = 0;
     for command in registry().iter() {
-        assert!(seen.insert(command.id), "duplicate command id {}", command.id);
-        let namespace = command
-            .id
-            .split('.')
-            .next()
-            .expect("an id has a namespace");
+        assert!(
+            seen.insert(command.id),
+            "duplicate command id {}",
+            command.id
+        );
+        let namespace = command.id.split('.').next().expect("an id has a namespace");
         assert!(
             NAMESPACES.contains(&namespace) || MENU_NAMESPACES.contains(&namespace),
             "{} has no known namespace",
@@ -175,7 +163,9 @@ fn the_registry_lists_every_named_command_once() {
                 assert_eq!(registered.scope, Scope::MenuAction, "{command}");
                 assert_eq!(
                     registered.status,
-                    CommandStatus::Planned { roadmap_id: roadmap },
+                    CommandStatus::Planned {
+                        roadmap_id: roadmap
+                    },
                     "{command}"
                 );
             }
@@ -205,8 +195,8 @@ fn planned_commands_report_their_roadmap_and_change_nothing() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = Session::new(tmp.path().to_string_lossy());
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
 
     let status_before = tmp.git(&["status", "--porcelain"]);
     let cached_before = cached_diff(tmp.path());
@@ -219,22 +209,8 @@ fn planned_commands_report_their_roadmap_and_change_nothing() {
     assert!(!planned.is_empty(), "there are planned commands to check");
 
     for command in planned {
-        let before = session
-            .views()
-            .get("v1")
-            .expect("view")
-            .tree()
-            .lines
-            .clone();
-        let outcome = session
-            .invoke(&ViewInvokeParams {
-                view_id: "v1".to_string(),
-                command: command.id.to_string(),
-                args: None,
-                cursor: None,
-                selection: None,
-            })
-            .expect("invoke a planned command");
+        let before = test.text();
+        let outcome = test.invoke(command.id);
 
         let CommandStatus::Planned { roadmap_id } = command.status else {
             unreachable!("filtered to planned");
@@ -249,9 +225,13 @@ fn planned_commands_report_their_roadmap_and_change_nothing() {
             "{} produced the wrong effects",
             command.id
         );
-        assert!(outcome.render.is_none(), "{} must not re-render", command.id);
+        assert!(
+            outcome.render.is_none(),
+            "{} must not re-render",
+            command.id
+        );
         assert_eq!(
-            session.views().get("v1").expect("view").tree().lines,
+            test.text(),
             before,
             "{} changed the rendered text",
             command.id
@@ -267,17 +247,11 @@ fn an_unknown_command_is_a_protocol_error() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
-    let mut session = Session::new(tmp.path().to_string_lossy());
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
 
-    let error = session
-        .invoke(&ViewInvokeParams {
-            view_id: "v1".to_string(),
-            command: "no.such-command".to_string(),
-            args: None,
-            cursor: None,
-            selection: None,
-        })
+    let error = test
+        .try_invoke("no.such-command")
         .expect_err("unknown command is a JSON-RPC error");
     assert!(error.message.contains("unknown command"), "{error}");
 }

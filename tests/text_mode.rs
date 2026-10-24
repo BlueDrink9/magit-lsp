@@ -5,85 +5,38 @@ mod common;
 
 use common::stdio::*;
 use common::*;
-use magit_lsp::config::{Config, Profile};
-use magit_lsp::keymap::{self, Keymap};
-use magit_lsp::protocol::{
-    Cursor, Effect, Selection, ViewInvokeParams, ViewKeyParams, ViewSetModeParams,
-};
-use magit_lsp::session::Session;
+use magit_lsp::config::Profile;
+use magit_lsp::protocol::{Cursor, Effect, Selection};
 use magit_lsp::tree::NodeKind;
-use magit_lsp::view::{Placement, ViewKind, Viewport};
+use magit_lsp::view::ViewMode;
 use serde_json::json;
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
-
-fn keymaps(config: &Config) -> Arc<BTreeMap<String, Keymap>> {
-    Arc::new(keymap::validate(config).expect("resolve keymaps"))
-}
-
-fn open_status(session: &mut Session) -> u64 {
-    let (_descriptor, render) = session
-        .open(
-            "v1",
-            ViewKind::Status,
-            Placement::Main,
-            Viewport { cols: 80, rows: 24 },
-        )
-        .expect("open status view");
-    session.ack("v1", render.version).expect("ack");
-    render.version
-}
-
-fn session_with(profile: Profile, repo: &std::path::Path) -> Session {
-    let config = Config {
-        profile,
-        ..Default::default()
-    };
-    let mut session = Session::new(repo.to_string_lossy());
-    session.set_keymaps(keymaps(&config));
-    session
-}
-
-fn invoke(session: &mut Session, command: &str) -> magit_lsp::session::InvokeResult {
-    session
-        .invoke(&ViewInvokeParams {
-            view_id: "v1".to_string(),
-            command: command.to_string(),
-            args: None,
-            cursor: None,
-            selection: None,
-        })
-        .expect("invoke")
-}
-
-fn press(session: &mut Session, key: &str, cursor: Cursor) -> magit_lsp::session::InvokeResult {
-    session
-        .key(&ViewKeyParams {
-            view_id: "v1".to_string(),
-            version: 1,
-            key: key.to_string(),
-            editor_mode: magit_lsp::keymap::EditorMode::Normal,
-            cursor,
-            selection: None,
-        })
-        .expect("view/key")
-}
-
-fn first_plus_line(session: &Session) -> Cursor {
-    let tree = session.views().get("v1").expect("view").tree();
-    let line = tree
-        .line_nodes
-        .iter()
-        .position(|line| line.kind == NodeKind::Line && line.marker == Some('+'))
-        .expect("a '+' line");
-    Cursor { line, column: 0 }
-}
 
 fn message(effect: &Effect) -> &str {
     match effect {
         Effect::Message { text, .. } => text,
         other => panic!("expected a message, got {other:?}"),
+    }
+}
+
+fn copy_invoke(
+    test: &mut TestSession,
+    line: Option<usize>,
+    selection: Option<(usize, usize)>,
+) -> magit_lsp::session::InvokeResult {
+    let cursor = line.map(|line| Cursor { line, column: 0 });
+    let selection = selection.map(|(start_line, end_line)| Selection {
+        start_line,
+        end_line,
+    });
+    test.invoke_selection("common.copy-value", cursor, selection)
+}
+
+fn copy_at(test: &mut TestSession, line: usize, selection: Option<(usize, usize)>) -> String {
+    let outcome = copy_invoke(test, Some(line), selection);
+    match outcome.effects.as_slice() {
+        [Effect::Clipboard { text }] => text.clone(),
+        other => panic!("expected one clipboard effect, got {other:?}"),
     }
 }
 
@@ -93,31 +46,28 @@ fn text_mode_narrows_the_keymap_and_refuses_every_other_command() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session_with(Profile::Vim, tmp.path());
-    open_status(&mut session);
-    let cursor = first_plus_line(&session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    test.goto_first_marker('+');
 
-    let entered = invoke(&mut session, "common.toggle-text-mode");
+    let entered = test.invoke("common.toggle-text-mode");
     assert!(entered.effects.is_empty(), "{:?}", entered.effects);
     assert!(
         entered.render.is_none(),
         "entering text mode renders nothing"
     );
     let keymap = entered.keymap.expect("a keymap notice");
-    assert_eq!(keymap.mode, magit_lsp::view::ViewMode::Text);
+    assert_eq!(keymap.mode, ViewMode::Text);
     assert_eq!(keymap.bindings.len(), 1, "only the toggle stays bound");
     assert_eq!(keymap.bindings[0].command, "common.toggle-text-mode");
     assert!(!keymap.capture);
 
     // The toggle binding in the text-mode keymap replaces the full one.
-    let notice = session.keymap_notice("v1").expect("keymap");
-    assert_eq!(notice.mode, magit_lsp::view::ViewMode::Text);
+    let notice = test.keymap_notice().expect("keymap");
+    assert_eq!(notice.mode, ViewMode::Text);
     assert_eq!(notice.bindings.len(), 1);
 
-    for outcome in [
-        press(&mut session, "s", cursor),
-        invoke(&mut session, "status.stage"),
-    ] {
+    for outcome in [test.press("s"), test.invoke("status.stage")] {
         assert_eq!(outcome.effects.len(), 1, "{:?}", outcome.effects);
         assert_eq!(
             message(&outcome.effects[0]),
@@ -134,39 +84,30 @@ fn a_refresh_in_text_mode_is_queued_and_applied_on_exit() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session_with(Profile::Vim, tmp.path());
-    open_status(&mut session);
-    let cursor = first_plus_line(&session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    test.goto_first_marker('+');
 
-    session
-        .set_mode(&ViewSetModeParams {
-            view_id: "v1".to_string(),
-            mode: magit_lsp::view::ViewMode::Text,
-        })
-        .expect("enter text mode");
+    test.set_mode(ViewMode::Text);
 
     // An external change arrives while editing as text.
     git(tmp.path(), &["add", "f.txt"]);
-    let queued = session.refresh("v1").expect("refresh");
+    let queued = test.refresh();
     assert!(queued.is_none(), "text mode queues refreshes");
-    let current = session.views().get("v1").expect("view").tree();
+    let current = test.text();
     assert!(
-        current
-            .lines
-            .iter()
-            .any(|line| line == "Unstaged changes (1)"),
-        "the queued refresh must not render yet: {:?}",
-        current.lines
+        current.iter().any(|line| line == "Unstaged changes (1)"),
+        "the queued refresh must not render yet: {current:?}"
     );
 
-    let exited = press(&mut session, "ctrl+t", cursor);
+    let exited = test.press("ctrl+t");
     let render = exited.render.expect("exiting text mode renders");
     assert!(
         render.text.is_some(),
         "the client's text diverged, so the exit is a full replace"
     );
     assert!(render.base_version.is_none());
-    assert_eq!(render.mode, magit_lsp::view::ViewMode::Interactive);
+    assert_eq!(render.mode, ViewMode::Interactive);
     let text = render.text.expect("full text");
     assert!(
         text.iter().any(|line| line == "Staged changes (1)"),
@@ -175,7 +116,7 @@ fn a_refresh_in_text_mode_is_queued_and_applied_on_exit() {
     assert!(render.cursor.is_some(), "the cursor follows its node");
 
     let keymap = exited.keymap.expect("the full keymap is pushed back");
-    assert_eq!(keymap.mode, magit_lsp::view::ViewMode::Interactive);
+    assert_eq!(keymap.mode, ViewMode::Interactive);
     assert!(keymap.bindings.len() > 1, "the toggle is no longer alone");
 }
 
@@ -185,10 +126,10 @@ fn copy_value_returns_the_right_text_per_node_kind() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = session_with(Profile::Vim, tmp.path());
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
 
-    let tree = session.views().get("v1").expect("view").tree().clone();
+    let tree = test.tree().clone();
     let line_of = |kind: NodeKind, n: usize| -> usize {
         tree.line_nodes
             .iter()
@@ -202,11 +143,11 @@ fn copy_value_returns_the_right_text_per_node_kind() {
 
     // File node copies the repo-relative path.
     let file = line_of(NodeKind::File, 0);
-    assert_eq!(copy_at(&mut session, file, None), "f.txt");
+    assert_eq!(copy_at(&mut test, file, None), "f.txt");
 
     // A hunk header copies the patch hunk text (header + marked lines).
     let hunk = line_of(NodeKind::Hunk, 0);
-    let hunk_text = copy_at(&mut session, hunk, None);
+    let hunk_text = copy_at(&mut test, hunk, None);
     assert!(hunk_text.starts_with("@@ -1,10 +1,10 @@"), "{hunk_text:?}");
     assert!(hunk_text.contains("\n+NEW line"), "{hunk_text:?}");
     assert!(
@@ -220,49 +161,22 @@ fn copy_value_returns_the_right_text_per_node_kind() {
         .iter()
         .position(|line| line.text.as_deref() == Some("NEW line"))
         .expect("the added line");
-    assert_eq!(copy_at(&mut session, added, None), "NEW line");
+    assert_eq!(copy_at(&mut test, added, None), "NEW line");
 
     // A selection copies the selected lines as diff text, markers included.
-    let selected = copy_at(&mut session, added, Some((added, added + 1)));
+    let selected = copy_at(&mut test, added, Some((added, added + 1)));
     assert!(selected.starts_with("+NEW line\n"), "{selected:?}");
 
     // A section header copies its title.
     let section = line_of(NodeKind::Section, 1);
-    assert_eq!(copy_at(&mut session, section, None), "Unstaged changes");
+    assert_eq!(copy_at(&mut test, section, None), "Unstaged changes");
     assert!(node(section).label == "Unstaged changes");
 
     // Nothing copyable under the cursor is an info message, not a clipboard.
     let header = line_of(NodeKind::Header, 0);
-    let outcome = copy_invoke(&mut session, Some(header), None);
+    let outcome = copy_invoke(&mut test, Some(header), None);
     assert_eq!(outcome.effects.len(), 1);
     assert_eq!(message(&outcome.effects[0]), "Nothing to copy here");
-}
-
-fn copy_invoke(
-    session: &mut Session,
-    line: Option<usize>,
-    selection: Option<(usize, usize)>,
-) -> magit_lsp::session::InvokeResult {
-    session
-        .invoke(&ViewInvokeParams {
-            view_id: "v1".to_string(),
-            command: "common.copy-value".to_string(),
-            args: None,
-            cursor: line.map(|line| Cursor { line, column: 0 }),
-            selection: selection.map(|(start_line, end_line)| Selection {
-                start_line,
-                end_line,
-            }),
-        })
-        .expect("invoke copy-value")
-}
-
-fn copy_at(session: &mut Session, line: usize, selection: Option<(usize, usize)>) -> String {
-    let outcome = copy_invoke(session, Some(line), selection);
-    match outcome.effects.as_slice() {
-        [Effect::Clipboard { text }] => text.clone(),
-        other => panic!("expected one clipboard effect, got {other:?}"),
-    }
 }
 
 // --- The real server proves positional requests go quiet in text mode. ---
@@ -292,6 +206,17 @@ fn positional_requests_return_null_in_text_mode() {
         .expect("view id")
         .to_string();
     let uri = opened["result"]["uri"].as_str().expect("uri").to_string();
+
+    // Ask the server which version the client really holds; never assume 1.
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "view/resync",
+        "params": {"viewId": view_id},
+    }));
+    let version = server.response_with_id(20)["result"]["version"]
+        .as_u64()
+        .expect("initial view version");
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -375,7 +300,7 @@ fn positional_requests_return_null_in_text_mode() {
         "method": "view/key",
         "params": {
             "viewId": view_id,
-            "version": 1,
+            "version": version,
             "key": "s",
             "editorMode": "normal",
             "cursor": {"line": 0, "column": 0},

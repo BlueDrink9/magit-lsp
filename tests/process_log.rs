@@ -4,10 +4,10 @@
 mod common;
 
 use common::*;
-use magit_lsp::protocol::{Cursor, Effect, ViewInvokeParams, ViewRender};
+use magit_lsp::config::Profile;
+use magit_lsp::protocol::{Cursor, Effect};
 use magit_lsp::runner;
-use magit_lsp::session::{InvokeResult, Session};
-use magit_lsp::view::{Placement, ViewDescriptor, ViewKind, ViewMode, Viewport};
+use magit_lsp::view::{Placement, ViewKind};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -15,53 +15,8 @@ use std::time::Duration;
 /// The process log is process-global, so tests that inspect it run one at a time.
 static LOCK: Mutex<()> = Mutex::new(());
 
-fn viewport() -> Viewport {
-    Viewport { cols: 100, rows: 30 }
-}
-
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn invoke(session: &mut Session, view: &str, command: &str, line: Option<usize>) -> InvokeResult {
-    session
-        .invoke(&ViewInvokeParams {
-            view_id: view.to_string(),
-            command: command.to_string(),
-            args: None,
-            cursor: line.map(|line| Cursor { line, column: 0 }),
-            selection: None,
-        })
-        .expect("invoke")
-}
-
-fn open_status(session: &mut Session) -> ViewRender {
-    let (_descriptor, render) = session
-        .open("v1", ViewKind::Status, Placement::Main, viewport())
-        .expect("open status view");
-    session.ack("v1", render.version).expect("ack status");
-    render
-}
-
-fn open_process_log(session: &mut Session) -> (ViewDescriptor, ViewRender) {
-    let outcome = invoke(session, "v1", "open.process-log", None);
-    let descriptor = outcome
-        .effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::PushView { descriptor } => Some(descriptor.clone()),
-            _ => None,
-        })
-        .expect("a pushView effect");
-    let (render, _keymap) = outcome
-        .opened
-        .into_iter()
-        .next()
-        .expect("the process log render");
-    session
-        .ack(&descriptor.id, render.version)
-        .expect("ack process log");
-    (descriptor, render)
 }
 
 #[test]
@@ -70,15 +25,14 @@ fn opens_by_kind_and_by_command() {
     runner::global_log().clear();
 
     let (tmp, _repo) = init_repo();
-    let mut session = Session::new(tmp.path().to_string_lossy());
+    let mut test = TestSession::new(tmp.path().to_string_lossy(), Profile::Vim);
 
-    let (descriptor, render) = session
-        .open("pl", ViewKind::ProcessLog, Placement::Main, viewport())
-        .expect("open process log");
+    let (descriptor, render) =
+        test.open_view("pl", ViewKind::ProcessLog, Placement::Main, WIDE_VIEWPORT);
     assert_eq!(descriptor.kind, ViewKind::ProcessLog);
     assert_eq!(descriptor.title, "Process log");
     assert_eq!(descriptor.scope.as_str(), "process-log");
-    assert_eq!(descriptor.mode, ViewMode::Interactive);
+    assert_eq!(descriptor.mode, magit_lsp::view::ViewMode::Interactive);
     assert!(!descriptor.capture);
     assert_eq!(descriptor.placement, Placement::Main);
     assert!(
@@ -87,18 +41,20 @@ fn opens_by_kind_and_by_command() {
         descriptor.uri
     );
     assert!(render.text.expect("full text")[0].starts_with("Process log ("));
-    session.close("pl").expect("close process log");
+    test.session_mut().close("pl").expect("close process log");
 
     let kind: ViewKind = serde_json::from_str("\"process-log\"").expect("kind deserializes");
     assert_eq!(kind, ViewKind::ProcessLog);
 
-    open_status(&mut session);
-    let (descriptor, render) = open_process_log(&mut session);
+    test.open_status_view(WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, render) = test.open_via_command("open.process-log");
+    test.ack();
     assert_eq!(descriptor.kind, ViewKind::ProcessLog);
     assert_eq!(descriptor.placement, Placement::Main);
     assert_eq!(descriptor.scope.as_str(), "process-log");
     assert!(render.text.expect("full text")[0].starts_with("Process log ("));
-    assert!(session.views().get(&descriptor.id).is_some());
+    assert!(test.session().views().get(&descriptor.id).is_some());
 }
 
 #[test]
@@ -108,38 +64,25 @@ fn a_stage_shows_its_real_git_arguments_and_copy_value_yields_the_command() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let mut session = Session::new(tmp.path().to_string_lossy());
-    open_status(&mut session);
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
     runner::global_log().clear();
 
-    let (descriptor, _render) = open_process_log(&mut session);
-    let staged = invoke(&mut session, "v1", "status.stage-all", None);
+    let (descriptor, _render) = test.open_via_command("open.process-log");
+    test.ack();
+    test.focus("v1");
+    let staged = test.invoke("status.stage-all");
     assert!(staged.render.is_some(), "staging re-renders the status");
 
-    let refreshed = invoke(&mut session, &descriptor.id, "common.refresh", None);
-    let render = refreshed.render.expect("refresh re-renders");
-    session
-        .ack(&descriptor.id, render.version)
-        .expect("ack refreshed log");
+    test.focus(&descriptor.id);
+    let refreshed = test.invoke("common.refresh");
+    assert!(refreshed.render.is_some(), "refresh re-renders");
+    test.ack();
 
-    let tree = session
-        .views()
-        .get(&descriptor.id)
-        .expect("process log view")
-        .tree()
-        .clone();
-    let line = tree
-        .lines
-        .iter()
-        .position(|line| line.starts_with("git add -u "))
-        .unwrap_or_else(|| panic!("no `git add -u` record: {:?}", tree.lines));
-
-    let copied = invoke(
-        &mut session,
-        &descriptor.id,
-        "common.copy-value",
-        Some(line),
-    );
+    // The record node records its exact command; the cursor target comes from
+    // the node, never from parsing the rendered record line.
+    let line = test.goto_copy("git add -u");
+    let copied = test.invoke_at("common.copy-value", Cursor { line, column: 0 });
     assert_eq!(
         copied.effects,
         vec![Effect::Clipboard {
@@ -161,13 +104,11 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
         b"fatal: not a git repository",
     );
 
-    let mut session = Session::new("/repo");
-    let (_descriptor, _render) = session
-        .open("pl", ViewKind::ProcessLog, Placement::Main, viewport())
-        .expect("open process log");
+    let mut test = TestSession::new("/repo", Profile::Vim);
+    test.open_view("pl", ViewKind::ProcessLog, Placement::Main, WIDE_VIEWPORT);
 
     let node_id = format!("process-log:record:{id}");
-    let tree = session.views().get("pl").expect("view").tree().clone();
+    let tree = test.tree_of("pl").clone();
     assert_eq!(tree.lines[0], "Process log (1)");
     assert!(tree.node(&node_id).is_some(), "record node missing");
     assert!(
@@ -176,17 +117,23 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
             .any(|token| token.token_type == "magit.message.error"),
         "failed stderr has no error token"
     );
-    let record_line = tree
-        .node(&node_id)
-        .expect("record node")
-        .start_line;
+    let record_line = tree.node(&node_id).expect("record node").start_line;
 
     // A refresh keeps the id-derived node, even though the line moved.
-    invoke(&mut session, "pl", "common.refresh", None);
-    let tree = session.views().get("pl").expect("view").tree().clone();
-    assert_eq!(tree.node(&node_id).expect("stable record node").start_line, record_line);
+    test.invoke("common.refresh");
+    let tree = test.tree_of("pl").clone();
+    assert_eq!(
+        tree.node(&node_id).expect("stable record node").start_line,
+        record_line
+    );
 
-    let copied = invoke(&mut session, "pl", "common.copy-value", Some(record_line));
+    let copied = test.invoke_at(
+        "common.copy-value",
+        Cursor {
+            line: record_line,
+            column: 0,
+        },
+    );
     assert_eq!(
         copied.effects,
         vec![Effect::Clipboard {
@@ -194,11 +141,8 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
         }]
     );
 
-    let cleared = invoke(&mut session, "pl", "process-log.clear", None);
+    let cleared = test.invoke("process-log.clear");
     assert!(cleared.render.is_some(), "clearing re-renders");
     assert!(runner::global_log().is_empty());
-    assert_eq!(
-        session.views().get("pl").expect("view").tree().lines,
-        vec!["Process log (0)".to_string()]
-    );
+    assert_eq!(test.text_of("pl"), vec!["Process log (0)".to_string()]);
 }

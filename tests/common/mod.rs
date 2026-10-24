@@ -296,3 +296,9 @@ pub fn init_repo_40() -> (RepoFixture, GitRepo) {
 
 /// Real-server stdio transport shared by integration suites.
 pub mod stdio;
+
+/// In-process session harness shared by the session suites.
+pub mod session;
+
+#[allow(unused_imports)]
+pub use session::{keymaps, message_texts, TestSession, STATUS_VIEWPORT, WIDE_VIEWPORT};
