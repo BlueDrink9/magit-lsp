@@ -1,0 +1,32 @@
+# Independent Magit key reference for the static menu action inventory.
+# Source release: Magit v4.7.1 (2026-09-01), immutable commit
+# 659f89955cf60fe3d4326d881c412df06c69680d (annotated tag object
+# bb79175d7c2ddc309b89f33b499c8f27d7965503). Manual and transient source
+# provenance, including section/line links, is recorded in magit-key-audit.md.
+# Format: menu-id<TAB>suffix-key(s), one row per action; keys are after the
+# menu prefix. Multi-key suffixes are space-separated. Arguments, menu-opening
+# `?`, profile dispatch, and generated/dynamic commands are not static actions.
+# This is evidence data only; tests/menus.rs does not read this draft yet.
+
+commit	c e a w d f s A n W F S R x X
+branch	d B b l o r c s w n S W C m x k h H
+fetch	p u e a o r m C
+pull	p u e U f F
+push	p u e o r m T t n C
+merge	m e n a p s d
+rebase	p u e i s m w k f t r a
+stash	z i w x P Z I W r a p k l v b B f
+tag	t r k p
+reset	b f m s h k i w
+cherry-pick	A a h m d n s
+revert	V v
+bisect	B s g m k r
+remote	a r k C p P z "d u"
+submodule	a r p u s d k l f
+worktree	b c m k g
+ignore	t s p g w W u U
+log	l o h u L b a R B T m r O H i w s
+diff	d r p u s w c t
+patch-apply	m w a
+patch-create	c w a s r
+blame	b r f e n N p P c

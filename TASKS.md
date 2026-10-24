@@ -1823,7 +1823,7 @@ Completed P1 review work (historical tracking, not new verification):
   - **Constraints:** no change to unrelated visibility behaviour.
   - **Verified (2026-10-24):** focused visibility/keymap tests, clean-environment `make test` (64 Neovim cases), `make ui-test` (19 PASS, 0 FAIL), and VSCode generated bindings check (164 bindings) passed. The detail-level scenario sends real `M-3`/`M-4` keys for standard and `z m`/`z r` for Vim. Inspected `build/ui/detail-levels/{standard,vim}-{80x24,100x30}/hunk-{headers,bodies}.screen`: headers retain `@@` without bodies; expanded screens show `+line3 CHANGED`. Full verification output: `/tmp/opencode/detail-levels-verification.log`.
 
-- [ ] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs:166-301`)
+- [x] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs:166-301`)
   - **Problem:** the list was written alongside the menus and "corrected here" to match them (TASKS §10: keys partly from memory). It covers about 120 of 355 rows.
    - **Change:** move the list to `tests/data/magit-keys.txt` with a header naming the Magit manual version and sections; verify each key against the Magit manual. The test must fail when a menu action key is missing from the file and when a file entry has no action. Keep documented deviations (reset `X`, rebase `s`/`e`, bisect `B`) in a separate `EXCEPTIONS` table with reasons.
   - **Done when:** the data file is the single source and both directions are checked.
