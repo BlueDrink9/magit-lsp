@@ -274,6 +274,72 @@ test('canonical status Enter, fold and refresh bindings keep the focus gate', ()
   }
 });
 
+test('status semantic-token types map to theme scopes', () => {
+  const contributions = require('../package.json').contributes;
+  const scopes = contributions.semanticTokenScopes.find(
+    (entry) => entry.language === 'magit'
+  );
+  assert(scopes, 'package.json contributes no magit semanticTokenScopes');
+  // The status legend in src/semantic_tokens.rs, dasherised by lib/semantic.js.
+  const statusTypes = [
+    'magit-section',
+    'magit-count',
+    'magit-file',
+    'magit-file-modified',
+    'magit-file-added',
+    'magit-file-deleted',
+    'magit-file-renamed',
+    'magit-file-untracked',
+    'magit-hunk-header',
+    'magit-diff-added',
+    'magit-diff-removed',
+  ];
+  for (const type of statusTypes) {
+    assert(Array.isArray(scopes.scopes[type]) && scopes.scopes[type].length > 0, type);
+  }
+  for (const type of ['magit-section', 'magit-diff-added', 'magit-diff-removed']) {
+    assert(
+      contributions.semanticTokenTypes.some((entry) => entry.id === type),
+      `${type} is not a declared semantic token type`
+    );
+  }
+  assert.deepEqual(scopes.scopes['magit-diff-added'], ['markup.inserted']);
+  assert.deepEqual(scopes.scopes['magit-diff-removed'], ['markup.deleted']);
+  assert(
+    scopes.scopes['magit-section'].includes('entity.name.section'),
+    'section headings have no theme scope'
+  );
+  assert.equal(
+    contributions.configurationDefaults['[magit]']['editor.semanticHighlighting.enabled'],
+    true,
+    'semantic highlighting is not enabled for the magit language'
+  );
+});
+
+test('one generic dispatcher carries every contributed action binding', () => {
+  const contributions = require('../package.json').contributes;
+  const clientCommands = contributions.commands.map((entry) => entry.command).sort();
+  assert.deepEqual(clientCommands, [
+    'magit.invoke',
+    'magit.key',
+    'magit.mirrorFoldShortcuts',
+    'magit.open',
+  ]);
+  // No contributed VSCode command may be named after a server action; every
+  // action binding goes through `magit.invoke` with a canonical server ID.
+  for (const perAction of ['magit.refresh', 'magit.toggle-fold', 'magit.show-section',
+    'magit.hide-section', 'magit.stage']) {
+    assert(!clientCommands.includes(perAction), perAction);
+  }
+  assert.equal(contributions.keybindings.length > 100, true);
+  for (const binding of contributions.keybindings) {
+    assert.equal(binding.command, 'magit.invoke', binding.key);
+    assert.equal(typeof binding.args?.command, 'string', binding.key);
+    assert.match(binding.args.command, /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/);
+    assert(!clientCommands.includes(binding.args.command), binding.key);
+  }
+});
+
 const KEYBINDINGS_JSONC = `[
   // Fold the region under the cursor.
   { "key": "ctrl+shift+[", "command": "editor.fold" },

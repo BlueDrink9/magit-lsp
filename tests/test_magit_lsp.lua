@@ -17,11 +17,11 @@ local function git_out(args)
   return sys(vim.list_extend({ 'git', '-C', repo }, args))
 end
 
-local function make_repo(with_changes)
+local function make_repo(with_changes, path)
   if with_changes == nil then
     with_changes = true
   end
-  local path = project .. '/build/test-repos/fixture'
+  path = path or (project .. '/build/test-repos/fixture')
   sys({ 'rm', '-rf', path })
   vim.fn.mkdir(path, 'p')
   sys({ 'git', 'init', '-q', '-b', 'main', path })
@@ -83,12 +83,12 @@ local function setup_child(opts)
     init[key] = value
   end
   child.lua(
-    string.format("M = require('magit-lsp'); M.setup(%s)", vim.inspect(init))
+    string.format("VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); STATUS = M.status_view()", vim.inspect(init))
   )
   child.lua([[
     HELPERS = {
       lines = function()
-        return vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)
+        return vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)
       end,
       has_line = function(s)
         return vim.tbl_contains(HELPERS.lines(), s)
@@ -168,11 +168,11 @@ local function setup_child(opts)
         return nil
       end,
       token_at = function(row, col)
-        local tokens = vim.lsp.semantic_tokens.get_at_pos(M.buf, row, col)
+        local tokens = vim.lsp.semantic_tokens.get_at_pos(STATUS.buf, row, col)
         return tokens and tokens[1] or nil
       end,
       token_type_on = function(text, col)
-        for i, line in ipairs(M.lines) do
+        for i, line in ipairs(STATUS.lines) do
           if line == text then
             local token = HELPERS.token_at(i - 1, col or 0)
             return token and token.type or nil
@@ -182,7 +182,7 @@ local function setup_child(opts)
       end,
       wait_tokens = function()
         return vim.wait(5000, function()
-          for i = 0, #M.lines - 1 do
+          for i = 0, #STATUS.lines - 1 do
             if HELPERS.token_at(i, 0) then
               return true
             end
@@ -191,7 +191,7 @@ local function setup_child(opts)
         end, 20)
       end,
       legend = function()
-        local client = vim.lsp.get_client_by_id(M.client_id)
+        local client = vim.lsp.get_client_by_id(STATUS.client_id)
         return client.server_capabilities.semanticTokensProvider.legend
       end,
       missing_links = function()
@@ -216,12 +216,12 @@ local function setup_child(opts)
         return vim.api.nvim_get_hl(0, { name = group, link = false }).fg
       end,
       resync = function()
-        local client = vim.lsp.get_client_by_id(M.client_id)
+        local client = vim.lsp.get_client_by_id(STATUS.client_id)
         local done, result
-        client:request('view/resync', { viewId = M.view_id }, function(err, value)
+        client:request('view/resync', { viewId = STATUS.id }, function(err, value)
           result = value
           done = true
-        end, M.buf)
+        end, STATUS.buf)
         vim.wait(5000, function()
           return done
         end, 10)
@@ -239,7 +239,7 @@ local function setup_child(opts)
       end,
       applied_lhs = function(mode)
         local out = {}
-        for _, map in ipairs(vim.api.nvim_buf_get_keymap(M.buf, mode or 'n')) do
+        for _, map in ipairs(vim.api.nvim_buf_get_keymap(STATUS.buf, mode or 'n')) do
           out[map.lhs] = true
         end
         return out
@@ -290,7 +290,7 @@ local function setup_child(opts)
         return missing, extra
       end,
       keymap_diff = function(mode)
-        local want = HELPERS.expected_keymap(M.last_keymap, mode or 'n')
+        local want = HELPERS.expected_keymap(STATUS.keymap, mode or 'n')
         local got = HELPERS.applied_lhs(mode or 'n')
         local missing, extra = HELPERS.diff_keys(got, want)
         return { missing = missing, extra = extra }
@@ -352,7 +352,13 @@ local T = MiniTest.new_set({
     post_case = function()
       pcall(
         child.lua,
-        'if M and M.client_id then local c = vim.lsp.get_client_by_id(M.client_id); if c then c:stop(true) end end'
+        [[if M then
+          require('magit-lsp.view').close_all()
+          for _, session in pairs(M.sessions) do
+            local c = vim.lsp.get_client_by_id(session.client_id)
+            if c then c:stop(true) end
+          end
+        end]]
       )
       child.stop()
     end,
@@ -361,13 +367,13 @@ local T = MiniTest.new_set({
 
 T['creates a server-named virtual buffer and attaches LSP'] = function()
   setup_child()
-  local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = M.buf })")
+  local buftype = child.lua_get("vim.api.nvim_get_option_value('buftype', { buf = STATUS.buf })")
   MiniTest.expect.equality(buftype, 'nofile')
 
-  local bufname = child.lua_get('vim.api.nvim_buf_get_name(M.buf)')
+  local bufname = child.lua_get('vim.api.nvim_buf_get_name(STATUS.buf)')
   MiniTest.expect.equality(bufname, 'magit://status' .. repo)
 
-  local attached = child.lua_get('vim.lsp.buf_is_attached(M.buf, M.client_id)')
+  local attached = child.lua_get('vim.lsp.buf_is_attached(STATUS.buf, STATUS.client_id)')
   MiniTest.expect.equality(attached, true)
 end
 
@@ -521,7 +527,7 @@ end
 T['semantic tokens highlight sections, files, hunks and diff lines'] = function()
   setup_child()
   MiniTest.expect.equality(
-    child.lua_get("vim.api.nvim_get_option_value('filetype', { buf = M.buf })"),
+    child.lua_get("vim.api.nvim_get_option_value('filetype', { buf = STATUS.buf })"),
     'magit-lsp'
   )
   MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
@@ -584,7 +590,7 @@ T['tokens are refreshed after a mutation'] = function()
   local staged = child.lua_get([[
     (function()
       return vim.wait(5000, function()
-        for i, line in ipairs(M.lines) do
+        for i, line in ipairs(STATUS.lines) do
           if line == '  M f.txt' then
             local token = HELPERS.token_at(i - 1, 2)
             if token and token.modifiers and token.modifiers.staged then
@@ -606,8 +612,8 @@ T['uses manual folding and serves fold ranges from the server'] = function()
 
   local count = child.lua_get([[
     (function()
-      local r = vim.lsp.buf_request_sync(M.buf, 'textDocument/foldingRange', {
-        textDocument = { uri = M.uri },
+      local r = vim.lsp.buf_request_sync(STATUS.buf, 'textDocument/foldingRange', {
+        textDocument = { uri = STATUS.uri },
       }, 5000)
       for _, res in pairs(r or {}) do
         return #(res.result or {})
@@ -620,10 +626,10 @@ end
 
 T['status buffer is read-only to native edits'] = function()
   setup_child()
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
 
   local function opt(name)
-    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = M.buf })", name))
+    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name))
   end
   MiniTest.expect.equality(opt('buftype'), 'nofile')
   MiniTest.expect.equality(opt('bufhidden'), 'hide')
@@ -651,7 +657,7 @@ T['status buffer is read-only to native edits'] = function()
   )
   child.v.errmsg = ''
 
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   MiniTest.expect.equality(after, before)
   MiniTest.expect.equality(opt('modified'), false)
 end
@@ -671,7 +677,7 @@ T['refresh and mutations still work after blocked edits'] = function()
   child.lua('M.refresh()')
   assert_line('    +line11')
   MiniTest.expect.equality(
-    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = M.buf })"),
+    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
     false
   )
 
@@ -688,7 +694,7 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
       table.insert(HINTS, { msg = msg, level = level })
     end
   ]])
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
 
   local ok, err = pcall(child.type_keys, 100, ':write<CR>')
   MiniTest.expect.equality(ok, true, 'write must not raise: ' .. tostring(err))
@@ -706,14 +712,14 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
   vim.loop.sleep(100)
   MiniTest.expect.equality(child.lua_get('#HINTS'), 1, 'the hint is shown once per session')
 
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   MiniTest.expect.equality(after, before)
   MiniTest.expect.equality(
-    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = M.buf })"),
+    child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
     false
   )
   MiniTest.expect.equality(
-    child.lua_get("vim.api.nvim_get_option_value('modifiable', { buf = M.buf })"),
+    child.lua_get("vim.api.nvim_get_option_value('modifiable', { buf = STATUS.buf })"),
     false
   )
 end
@@ -722,8 +728,8 @@ T['navigation jumps follow document symbols'] = function()
   setup_child()
   local symbols = child.lua_get([[
     (function()
-      local r = vim.lsp.buf_request_sync(M.buf, 'textDocument/documentSymbol', {
-        textDocument = { uri = M.uri },
+      local r = vim.lsp.buf_request_sync(STATUS.buf, 'textDocument/documentSymbol', {
+        textDocument = { uri = STATUS.uri },
       }, 5000)
       for _, res in pairs(r or {}) do
         return res.result or {}
@@ -734,7 +740,7 @@ T['navigation jumps follow document symbols'] = function()
   MiniTest.expect.equality(#symbols > 0, true, 'documentSymbol returns items')
 
   local staged_line, unstaged_section_line, unstaged_line, hunk_line
-  for i, line in ipairs(child.lua_get('M.lines')) do
+  for i, line in ipairs(child.lua_get('STATUS.lines')) do
     if line == 'Staged changes (0)' then
       staged_line = i
     elseif line == 'Unstaged changes (1)' then
@@ -800,7 +806,7 @@ end
 T['renders untracked files in their own section'] = function()
   repo = make_untracked_repo()
   setup_child()
-  MiniTest.expect.equality(child.lua_get('M.lines'), {
+  MiniTest.expect.equality(child.lua_get('STATUS.lines'), {
     'Head: main',
     '',
     'Staged changes (0)',
@@ -884,20 +890,20 @@ T['rapid successive invokes keep the buffer consistent with the server'] = funct
   local buffer = child.lua_get('HELPERS.lines()')
   local resync = child.lua_get('HELPERS.resync()')
   MiniTest.expect.equality(buffer, resync.text)
-  MiniTest.expect.equality(child.lua_get('M.version'), resync.version)
+  MiniTest.expect.equality(child.lua_get('STATUS.version'), resync.version)
   assert_line('Staged changes (1)')
 end
 
 T['a lost update triggers a full resync'] = function()
   setup_child()
   -- Pretend the client missed a render: the next edits no longer match.
-  child.lua('M.version = M.version - 1')
+  child.lua('STATUS.version = STATUS.version - 1')
   child.lua("M.invoke('status.stage-all')")
 
   local buffer = child.lua_get('HELPERS.lines()')
   local resync = child.lua_get('HELPERS.resync()')
   MiniTest.expect.equality(buffer, resync.text)
-  MiniTest.expect.equality(child.lua_get('M.version'), resync.version)
+  MiniTest.expect.equality(child.lua_get('STATUS.version'), resync.version)
   assert_line('Staged changes (1)')
 end
 
@@ -925,10 +931,10 @@ T['a second view/keymap replaces the applied maps'] = function()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['gr'] ~= nil"), true)
 
   child.lua([[
-    M.apply_keymap({
-      viewId = M.view_id,
+    VIEW.apply_keymap({
+      viewId = STATUS.id,
       scope = 'status',
-      version = M.version,
+      version = STATUS.version,
       capture = false,
       bindings = {
         {
@@ -941,7 +947,7 @@ T['a second view/keymap replaces the applied maps'] = function()
           status = 'implemented',
         },
       },
-    })
+    }, STATUS.client_id)
   ]])
 
   local normal = child.lua_get("HELPERS.applied_lhs('n')")
@@ -995,13 +1001,13 @@ T['Tab toggles a file section through the server'] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
   MiniTest.expect.equality(type(target), 'number', 'file line index')
-  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<Tab>')
 
   local collapsed = false
   for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
     if collapsed then
       break
     end
@@ -1033,13 +1039,13 @@ T['mirrors a user mapping whose rhs is a fold command'] = function()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F2>'] ~= nil"), true)
 
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<F2>')
 
   local collapsed = false
   for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
     if collapsed then
       break
     end
@@ -1052,13 +1058,13 @@ T['a user Tab fold mapping toggles the section'] = function()
   child.cmd('nnoremap <Tab> za')
   setup_child()
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<Tab>')
 
   local collapsed = false
   for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
     if collapsed then
       break
     end
@@ -1072,13 +1078,13 @@ T['fold_keys mirrors a Lua-function fold mapping'] = function()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['<F3>'] ~= nil"), true)
 
   local target = child.lua_get("HELPERS.find_first('file', 'unstaged')")
-  local before = child.lua_get('vim.api.nvim_buf_line_count(M.buf)')
+  local before = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)')
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<F3>')
 
   local collapsed = false
   for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(M.buf)') < before
+    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
     if collapsed then
       break
     end
@@ -1090,13 +1096,13 @@ end
 T['capture mode forwards printable keys and shows the server hint'] = function()
   setup_child()
   child.lua([[
-    M.apply_keymap({
-      viewId = M.view_id,
+    VIEW.apply_keymap({
+      viewId = STATUS.id,
       scope = 'menu',
-      version = M.version,
+      version = STATUS.version,
       capture = true,
       bindings = {},
-    })
+    }, STATUS.client_id)
     SENT = {}
     vim.lsp.buf_request_sync = function(_, method, params)
       if method == 'view/key' then
@@ -1120,14 +1126,14 @@ T['capture mode forwards printable keys and shows the server hint'] = function()
   ]])
 
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['Q'] ~= nil"), true)
-  local before = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   child.type_keys(50, 'Q')
 
   MiniTest.expect.equality(child.lua_get('SENT'), { 'Q' })
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
   local msg = child.lua_get('NOTIFIES[1].msg')
   MiniTest.expect.equality(msg:find('Unbound key: Q', 1, true) ~= nil, true, msg)
-  local after = child.lua_get('vim.api.nvim_buf_get_lines(M.buf, 0, -1, false)')
+  local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   MiniTest.expect.equality(after, before)
 end
 
@@ -1162,16 +1168,16 @@ end
 
 T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = function()
   setup_child()
-  local before = child.lua_get('M.lines')
-  local undo = child.lua_get('M.undolevels')
+  local before = child.lua_get('STATUS.lines')
+  local undo = child.lua_get("require('magit-lsp.buffer').undo_levels(STATUS.buf)")
   MiniTest.expect.equality(undo ~= -1, true, 'the user undo setting was captured')
 
   local function opt(name)
-    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = M.buf })", name))
+    return child.lua_get(string.format("vim.api.nvim_get_option_value(%q, { buf = STATUS.buf })", name))
   end
   local function mode_is(wanted)
     return vim.wait(5000, function()
-      return child.lua_get('M.mode') == wanted
+      return child.lua_get('STATUS.mode') == wanted
     end, 20)
   end
 
@@ -1180,7 +1186,7 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
   MiniTest.expect.equality(opt('modifiable'), true)
   MiniTest.expect.equality(opt('undolevels'), undo)
   MiniTest.expect.equality(
-    child.lua_get("#vim.api.nvim_buf_get_keymap(M.buf, 'n')"),
+    child.lua_get("#vim.api.nvim_buf_get_keymap(STATUS.buf, 'n')"),
     1,
     'only the toggle stays mapped in text mode'
   )
@@ -1190,7 +1196,7 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
   child.type_keys(50, 'ihello<Esc>')
   vim.loop.sleep(50)
   MiniTest.expect.equality(
-    child.lua_get('vim.deep_equal(HELPERS.lines(), M.lines)'),
+    child.lua_get('vim.deep_equal(HELPERS.lines(), STATUS.lines)'),
     false,
     'the buffer is editable'
   )
@@ -1198,7 +1204,7 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
   child.type_keys(50, '<C-t>')
   MiniTest.expect.equality(mode_is('interactive'), true, 'ctrl+t left text mode')
   vim.wait(5000, function()
-    return child.lua_get('M.lines') ~= nil
+    return child.lua_get('STATUS.lines') ~= nil
   end, 20)
   MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before, 'the server text is back')
   MiniTest.expect.equality(opt('modifiable'), false)
@@ -1271,22 +1277,30 @@ end
 local function wait_menu()
   local state = false
   local ok = vim.wait(5000, function()
-    state = child.lua_get([[(function()
-      local menu = require('magit-lsp.menu')
-      local id = menu.last_id
+    state = child.lua_get([==[(function()
+      local v = require('magit-lsp.view')
+      local id
+      for index = #v.order, 1, -1 do
+        local record = v.views[v.order[index]]
+        if record and record.placement == 'bottom' then
+          id = record.key
+          break
+        end
+      end
       if not id then return false end
-      local view = menu.views[id]
-      if not view or not view.win or not vim.api.nvim_win_is_valid(view.win) then
+      local record = v.views[id]
+      if not record or not record.win or not vim.api.nvim_win_is_valid(record.win)
+        or record.version == nil or not record.keymap_ready then
         return false
       end
-      local lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
+      local lines = vim.api.nvim_buf_get_lines(record.buf, 0, -1, false)
       return {
         id = id,
-        win = view.win,
-        buf = view.buf,
-        config = vim.api.nvim_win_get_config(view.win),
-        width = vim.api.nvim_win_get_width(view.win),
-        height = vim.api.nvim_win_get_height(view.win),
+        win = record.win,
+        buf = record.buf,
+        config = vim.api.nvim_win_get_config(record.win),
+        width = vim.api.nvim_win_get_width(record.win),
+        height = vim.api.nvim_win_get_height(record.win),
         lines = lines,
         current = vim.api.nvim_get_current_win(),
         cap = math.max(1, vim.o.lines - vim.o.cmdheight - 1),
@@ -1294,7 +1308,7 @@ local function wait_menu()
         screen_lines = vim.o.lines,
         cmdheight = vim.o.cmdheight,
       }
-    end)()]])
+    end)()]==])
     return type(state) == 'table'
   end, 20)
   return ok and state or nil
@@ -1303,16 +1317,15 @@ end
 --- The current lines of menu `id`, or an empty list when it closed.
 local function menu_lines(id)
   return child.lua_get(string.format([[(function()
-    local menu = require('magit-lsp.menu')
-    local view = menu.views[%q]
-    if not view then return {} end
-    return vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
+    local record = require('magit-lsp.view').views[%q]
+    if not record then return {} end
+    return vim.api.nvim_buf_get_lines(record.buf, 0, -1, false)
   end)()]], id))
 end
 
 local function menu_closed(id)
   return child.lua_get(string.format(
-    "(function() local m=require('magit-lsp.menu'); return m.views[%q] == nil end)()",
+    "(function() return require('magit-lsp.view').views[%q] == nil end)()",
     id
   ))
 end
@@ -1366,7 +1379,7 @@ T['pressing c opens the commit menu in a bottom float'] = function()
   )
   MiniTest.expect.equality(
     child.lua_get('vim.api.nvim_get_current_win()'),
-    child.lua_get('vim.fn.bufwinid(M.buf)'),
+    child.lua_get('vim.fn.bufwinid(STATUS.buf)'),
     'focus returns to the status window'
   )
 end
@@ -1480,8 +1493,7 @@ T['planned menu actions are greyed with the menu.planned token'] = function()
 
   local position = child.lua_get(string.format([[
     (function()
-      local menu = require('magit-lsp.menu')
-      local view = menu.views[%q]
+      local view = require('magit-lsp.view').views[%q]
       for i, line in ipairs(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)) do
         local column = line:find('Extend', 1, true)
         if column then return { row = i - 1, column = column - 1 } end
@@ -1493,8 +1505,7 @@ T['planned menu actions are greyed with the menu.planned token'] = function()
 
   local token = child.lua_get(string.format([[
     (function()
-      local menu = require('magit-lsp.menu')
-      local view = menu.views[%q]
+      local view = require('magit-lsp.view').views[%q]
       local ok = vim.wait(5000, function()
         return vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d) ~= nil
       end, 20)
@@ -1560,21 +1571,29 @@ T['? from a menu replaces it and leaves one float'] = function()
   child.type_keys(50, '?')
   local state
   local replaced = vim.wait(5000, function()
-    state = child.lua_get(string.format([[(function()
-      local menu = require('magit-lsp.menu')
+    state = child.lua_get(string.format([==[(function()
+      local view = require('magit-lsp.view')
       local debug_api = require('magit-lsp.debug')
       local snapshot = debug_api.snapshot()
       local floats = 0
       for _, window in ipairs(snapshot.windows) do
         if window.float then floats = floats + 1 end
       end
+      local last
+      for index = #view.order, 1, -1 do
+        local record = view.views[view.order[index]]
+        if record and record.placement == 'bottom' then
+          last = record.key
+          break
+        end
+      end
       return {
         floats = floats,
-        last = menu.last_id,
-        old_closed = menu.views[%q] == nil,
+        last = last,
+        old_closed = view.views[%q] == nil,
         current = vim.api.nvim_get_current_win(),
       }
-    end)()]], commit.id))
+    end)()]==], commit.id))
     return type(state) == 'table'
       and state.floats == 1
       and state.old_closed
@@ -1590,21 +1609,28 @@ T['? from a menu replaces it and leaves one float'] = function()
   child.type_keys(50, 'q')
   local closed = vim.wait(5000, function()
     local snapshot = child.lua_get([[(function()
-      local menu = require('magit-lsp.menu')
+      local view = require('magit-lsp.view')
       local debug_api = require('magit-lsp.debug')
       local state = debug_api.snapshot()
       local floats = 0
       for _, window in ipairs(state.windows) do
         if window.float then floats = floats + 1 end
       end
-      return { floats = floats, open = #menu.order }
+      local open = 0
+      for _, id in ipairs(view.order) do
+        local record = view.views[id]
+        if record and record.placement == 'bottom' then
+          open = open + 1
+        end
+      end
+      return { floats = floats, open = open }
     end)()]])
     return type(snapshot) == 'table' and snapshot.floats == 0 and snapshot.open == 0
   end, 20)
   MiniTest.expect.equality(closed, true, 'q closes the only menu')
   MiniTest.expect.equality(
     child.lua_get('vim.api.nvim_get_current_win()'),
-    child.lua_get('vim.fn.bufwinid(M.buf)'),
+    child.lua_get('vim.fn.bufwinid(STATUS.buf)'),
     'focus returns to the status window'
   )
 end
@@ -1629,7 +1655,7 @@ T['debug.snapshot reports the status view state'] = function()
   MiniTest.expect.equality(snapshot.pending, '')
 
   MiniTest.expect.equality(#snapshot.view_stack, 1)
-  MiniTest.expect.equality(snapshot.view_stack[1].id, child.lua_get('M.view_id'))
+  MiniTest.expect.equality(snapshot.view_stack[1].id, child.lua_get('STATUS.key'))
   MiniTest.expect.equality(snapshot.view_stack[1].kind, 'status')
 
   MiniTest.expect.equality(snapshot.render.version, snapshot.render.acked)
@@ -1639,7 +1665,7 @@ T['debug.snapshot reports the status view state'] = function()
   MiniTest.expect.equality(snapshot.keymap.capture, false)
   local refresh_key = child.lua_get([[
     (function()
-      for _, binding in ipairs(M.last_keymap.bindings or {}) do
+      for _, binding in ipairs(STATUS.keymap.bindings or {}) do
         if binding.command == 'common.refresh' and binding.keys[1] then
           return binding.keys[1]
         end
@@ -1649,7 +1675,7 @@ T['debug.snapshot reports the status view state'] = function()
   ]])
   MiniTest.expect.equality(vim.tbl_contains(snapshot.keymap.keys, refresh_key), true)
 
-  local status_buf = child.lua_get('M.buf')
+  local status_buf = child.lua_get('STATUS.buf')
   local status_window
   for _, window in ipairs(snapshot.windows) do
     if window.buffer == status_buf then
@@ -1679,7 +1705,7 @@ T['buffers renders that beat the view/open response'] = function()
           vim.defer_fn(function()
             -- Proves the race: the render was received (and buffered) before
             -- the response handler ran.
-            RENDER_BEFORE_RESPONSE = next(M.pending_render) ~= nil
+            RENDER_BEFORE_RESPONSE = next(VIEW.pending_render) ~= nil
             handler(unpack(args, 1, args.n))
           end, 300)
         end)
@@ -1733,10 +1759,10 @@ T['debug.trace writes one JSON line per event'] = function()
 
   child.lua([[
     local debug_api = require('magit-lsp.debug')
-    local before = M.version
+    local before = STATUS.version
     M.press({ 'g', 'r' })
     vim.wait(5000, function()
-      return M.version ~= before and debug_api.idle()
+      return STATUS.version ~= before and debug_api.idle()
     end, 10)
     debug_api.idle()
   ]])
@@ -1768,6 +1794,287 @@ T['debug.trace writes one JSON line per event'] = function()
   for index = 2, #times do
     MiniTest.expect.equality(times[index] >= times[index - 1], true, 'the clock is monotonic')
   end
+end
+
+T['two repositories get independent status views'] = function()
+  setup_child()
+  local other = make_repo(true, project .. '/build/test-repos/fixture-other')
+  vim.fn.writefile({ 'other' }, other .. '/other.txt')
+
+  child.lua(string.format("vim.cmd('tabnew'); SECOND = M.setup({ root_dir = %q })", other))
+  local state = child.lua_get([==[(function()
+    local v = require('magit-lsp.view')
+    local out = {}
+    for _, id in ipairs(v.order) do
+      local record = v.views[id]
+      if record.kind == 'status' then
+        out[#out + 1] = {
+          id = record.id,
+          key = record.key,
+          client_id = record.client_id,
+          buf = record.buf,
+          root = record.root,
+          lines = vim.api.nvim_buf_get_lines(record.buf, 0, -1, false),
+        }
+      end
+    end
+    return out
+  end)()]==])
+
+  MiniTest.expect.equality(#state, 2, 'both repositories opened a status view')
+  local first, second = state[1], state[2]
+  MiniTest.expect.equality(first.root, repo)
+  MiniTest.expect.equality(second.root, other)
+  MiniTest.expect.equality(first.id, second.id, 'independent servers reuse bare view ids')
+  MiniTest.expect.equality(first.client_id ~= second.client_id, true)
+  MiniTest.expect.equality(first.key ~= second.key, true, 'client/view identities are independent')
+  MiniTest.expect.equality(first.buf ~= second.buf, true, 'buffers are independent')
+  MiniTest.expect.equality(vim.tbl_contains(first.lines, '  ? other.txt'), false)
+  MiniTest.expect.equality(vim.tbl_contains(second.lines, '  ? other.txt'), true)
+
+  -- A render is routed by view id: applying one for the first view must never
+  -- rewrite the second buffer.
+  child.lua(string.format([[
+    local v = require('magit-lsp.view')
+    local record = v.views[%q]
+    v.apply_render({ viewId = %q, version = (record.version or 0) + 1, text = { 'FIRST ONLY' } }, record.client_id)
+  ]], first.key, first.id))
+  MiniTest.expect.equality(
+    child.lua_get(string.format('vim.api.nvim_buf_get_lines(%d, 0, -1, false)', first.buf)),
+    { 'FIRST ONLY' }
+  )
+  MiniTest.expect.equality(
+    child.lua_get(string.format(
+      'vim.tbl_contains(vim.api.nvim_buf_get_lines(%d, 0, -1, false), "FIRST ONLY")',
+      second.buf
+    )),
+    false,
+    'the second view kept its own text'
+  )
+
+  -- Quitting a nested view must focus the existing status record, preserving
+  -- its buffer, cursor and folds. The other repository stays live throughout.
+  child.lua(string.format([[
+    VIEW.focus(%q)
+    local render = VIEW.sync(STATUS.buf, STATUS.client_id, 'view/resync', { viewId = STATUS.id })
+    VIEW.apply_render(render, STATUS.client_id)
+    local parent = VIEW.views[%q]
+    vim.api.nvim_win_set_cursor(parent.win, { 8, 2 })
+    vim.api.nvim_win_call(parent.win, function() vim.cmd('2,4fold') end)
+    PARENT = { key = parent.key, buf = parent.buf, version = parent.version,
+      cursor = vim.api.nvim_win_get_cursor(parent.win), fold = vim.fn.foldclosed(3),
+      text = parent.lines }
+    M.press({ 'g', '$' })
+    NESTED = VIEW.current()
+    vim.wait(5000, function() return NESTED.version ~= nil and NESTED.keymap_ready end, 10)
+    M.press({ 'q' })
+    RETURNED = VIEW.current()
+    RETURNED_STATE = { key = RETURNED.key, buf = RETURNED.buf, version = RETURNED.version,
+      cursor = vim.api.nvim_win_get_cursor(RETURNED.win), fold = vim.fn.foldclosed(3),
+      text = RETURNED.lines }
+  ]], first.key, first.key))
+  MiniTest.expect.equality(child.lua_get('NESTED.placement'), 'main')
+  MiniTest.expect.equality(child.lua_get('RETURNED == STATUS'), true)
+  MiniTest.expect.equality(child.lua_get('RETURNED_STATE'), child.lua_get('PARENT'))
+  MiniTest.expect.equality(child.lua_get('vim.lsp.buf_is_attached(RETURNED.buf, RETURNED.client_id)'), true)
+  MiniTest.expect.equality(child.lua_get(string.format('VIEW.views[%q] ~= nil', second.key)), true)
+  child.lua([[
+    FRESH_BEFORE = RETURNED.version
+    M.press({ 'g', 'r' })
+    FRESH_REFRESHED = vim.wait(5000, function() return RETURNED.version > FRESH_BEFORE end, 10)
+    M.press({ 'c' })
+  ]])
+  MiniTest.expect.equality(child.lua_get('FRESH_REFRESHED'), true, 'original status can refresh')
+  MiniTest.expect.equality(type(wait_menu()), 'table', 'original status can open a menu')
+  child.lua("M.press({ 'q' })")
+  MiniTest.expect.equality(child.lua_get('VIEW.current().key == STATUS.key'), true)
+  child.lua(string.format([[
+    VIEW.focus(%q)
+    SECOND_STATUS = VIEW.current()
+    SECOND_BEFORE = SECOND_STATUS.version
+    M.press({ 'g', 'r' })
+    SECOND_REFRESHED = vim.wait(5000, function() return SECOND_STATUS.version > SECOND_BEFORE end, 10)
+  ]], second.key))
+  MiniTest.expect.equality(
+    child.lua_get('SECOND_REFRESHED'), true, 'other repository still refreshes'
+  )
+end
+
+T['real-file edit documents share identity and keymap queues without scratch-buffer semantics'] = function()
+  setup_child()
+  child.lua(string.format([[
+    local edit = require('magit-lsp.edit')
+    local path = %q .. '/.git/COMMIT_EDITMSG'
+    vim.fn.writefile({ 'original message' }, path)
+    ANSWERS = {}
+    VIEW.invoke = function(command, opts, key)
+      ANSWERS[#ANSWERS + 1] = { command, opts.args.editId, key }
+    end
+    local function open(id)
+      VIEW.apply_keymap({ viewId = id, scope = 'commit-message', mode = 'interactive',
+        capture = false, bindings = {
+          { command = 'common.confirm', keys = { 'Z Z' }, modes = { 'normal' } },
+          { command = 'common.cancel', keys = { 'Z Q' }, modes = { 'normal' } },
+        },
+      }, STATUS.client_id)
+      return edit.open({ editId = id, path = path, kind = 'commit-message' },
+        { client_id = STATUS.client_id, root = STATUS.root })
+    end
+    DOC = open('edit-confirm')
+    local maps = {}
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(DOC.buf, 'n')) do maps[map.lhs] = true end
+    DOCUMENT = { name = vim.api.nvim_buf_get_name(DOC.buf),
+      buftype = vim.bo[DOC.buf].buftype, filetype = vim.bo[DOC.buf].filetype,
+      editable = vim.bo[DOC.buf].modifiable, base = DOC.base, current = VIEW.current() == DOC,
+      maps = maps, server_views = #VIEW.order,
+      debug_views = #require('magit-lsp.debug').order,
+      pending_empty = next(VIEW.pending_keymap) == nil }
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'saved message' })
+    edit.confirm(DOC.key)
+    SAVED = vim.fn.readfile(path)
+    CONFIRMED = VIEW.views[DOC.key] == nil and VIEW.current() == STATUS
+    DOC = open('edit-cancel')
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'discard me' })
+    edit.cancel(DOC.key)
+    CANCELLED = vim.fn.readfile(path)
+    DOC = open('edit-wipe')
+    vim.api.nvim_buf_delete(DOC.buf, { force = true })
+    WIPED = VIEW.views[DOC.key] == nil
+
+    FLOAT = VIEW.open({ id = 'float-test', kind = 'unrelated-kind',
+      uri = 'magit://test/float', placement = 'float', mode = 'interactive' },
+      { client_id = STATUS.client_id, root = STATUS.root })
+    VIEW.apply_render({ viewId = FLOAT.id, version = 1, mode = 'interactive',
+      text = { 'one', '  two', 'three' } }, STATUS.client_id)
+    FLOAT_STATE = { height = vim.api.nvim_win_get_height(FLOAT.win),
+      relative = vim.api.nvim_win_get_config(FLOAT.win).relative, text = FLOAT.lines }
+    VIEW.close(FLOAT.key, true)
+  ]], repo))
+  MiniTest.expect.equality(child.lua_get('DOCUMENT'), {
+    name = repo .. '/.git/COMMIT_EDITMSG', buftype = '', filetype = 'gitcommit',
+    editable = true, base = child.lua_get('STATUS.key'), current = true,
+    maps = { ZZ = true, ZQ = true }, server_views = 1, debug_views = 1, pending_empty = true,
+  })
+  MiniTest.expect.equality(child.lua_get('SAVED'), { 'saved message' })
+  MiniTest.expect.equality(child.lua_get('CANCELLED'), { 'saved message' })
+  MiniTest.expect.equality(child.lua_get('CONFIRMED and WIPED'), true)
+  local base = child.lua_get('STATUS.key')
+  MiniTest.expect.equality(child.lua_get('ANSWERS'), {
+    { 'common.confirm', 'edit-confirm', base },
+    { 'common.cancel', 'edit-cancel', base },
+    { 'common.cancel', 'edit-wipe', base },
+  })
+  MiniTest.expect.equality(child.lua_get('FLOAT_STATE'), {
+    height = 3, relative = 'editor', text = { 'one', '  two', 'three' },
+  })
+end
+
+T['descriptor queues, deferred renders and resync preserve client identity and text mode'] = function()
+  child.lua([[
+    VIEW = require('magit-lsp.view')
+    local debug_api = require('magit-lsp.debug')
+    ACKS = {}
+    RESYNCS = {}
+    local clients = {}
+    for _, id in ipairs({ 101, 202 }) do
+      clients[id] = {
+        initialized = true,
+        notify = function(_, method, params)
+          if method == 'view/rendered' then
+            ACKS[#ACKS + 1] = { id, params.viewId, params.version }
+          end
+        end,
+        request = function(_, method, params, callback)
+          assert(method == 'view/resync')
+          RESYNCS[#RESYNCS + 1] = { client_id = id, callback = callback }
+        end,
+      }
+    end
+    vim.lsp.get_client_by_id = function(id) return clients[id] end
+    vim.lsp.buf_is_attached = function() return true end
+    vim.lsp.semantic_tokens.force_refresh = function() end
+    vim.lsp.buf_request_sync = function() return { [101] = { result = {} } } end
+    VIEW.configure({})
+    for _, id in ipairs({ 101, 202 }) do
+      VIEW.apply_render({ viewId = 'same', version = 1,
+        mode = id == 101 and 'text' or 'interactive',
+        text = id == 101 and { '  alpha', 'βeta', '' } or { 'second' },
+      }, id)
+      VIEW.apply_keymap({ viewId = 'same', version = 1, scope = 'new-kind',
+        mode = id == 101 and 'text' or 'interactive', capture = false, bindings = {},
+      }, id)
+    end
+    VIEW.apply_render({ viewId = 'same', version = 2, baseVersion = 1, mode = 'text',
+      edits = { { startLine = 1, endLine = 2, lines = { '  replacement' } } },
+    }, 101)
+    A = VIEW.open({ id = 'same', kind = 'new-kind', uri = 'magit://test/a',
+      placement = 'main', mode = 'text' }, { client_id = 101 })
+    B = VIEW.open({ id = 'same', kind = 'new-kind', uri = 'magit://test/b',
+      placement = 'side', mode = 'interactive' }, { client_id = 202 })
+    EARLY = {
+      a = A.lines, b = B.lines, versions = { A.version, B.version },
+      editable = { vim.bo[A.buf].modifiable, vim.bo[B.buf].modifiable },
+      keymaps = { A.keymap.scope, B.keymap.scope },
+      pending_empty = next(VIEW.pending_render) == nil and next(VIEW.pending_keymap) == nil,
+      distinct = A.key ~= B.key and A.buf ~= B.buf and A.win ~= B.win,
+    }
+    debug_api.request_started()
+    VIEW.apply_render({ viewId = 'same', version = 3, baseVersion = 2, mode = 'text',
+      edits = { { startLine = 0, endLine = 1, lines = { 'a deferred' } } },
+    }, 101)
+    VIEW.apply_render({ viewId = 'same', version = 2, baseVersion = 1, mode = 'interactive',
+      edits = { { startLine = 0, endLine = 1, lines = { 'b deferred' } } },
+    }, 202)
+    HELD = { A.version, B.version, #ACKS }
+    debug_api.request_finished()
+    VIEW.sync(A.buf, A.client_id, 'probe', {})
+    DEFERRED = { a = A.lines, b = B.lines, versions = { A.version, B.version },
+      editable = { vim.bo[A.buf].modifiable, vim.bo[B.buf].modifiable },
+      empty = next(VIEW.deferred_render) == nil }
+
+    VIEW.apply_render({ viewId = 'same', version = 99, baseVersion = 0, mode = 'interactive',
+      edits = { { startLine = 0, endLine = 1, lines = { 'WRONG BASE' } } },
+    }, 101)
+    MISMATCH = { mode = A.mode, editable = vim.bo[A.buf].modifiable,
+      text = A.lines, version = A.version, acks = #ACKS,
+      resyncs = #RESYNCS, client_id = RESYNCS[1].client_id }
+    RESYNCS[1].callback(nil, { viewId = 'same', version = 4,
+      mode = 'interactive', text = { 'fresh server text' } })
+    RECOVERED = { mode = A.mode, editable = vim.bo[A.buf].modifiable,
+      text = A.lines, version = A.version, other = B.lines }
+    VIEW.close(A.key)
+    INDEPENDENT_CLOSE = VIEW.views[A.key] == nil and VIEW.views[B.key] == B
+    vim.api.nvim_buf_delete(B.buf, { force = true })
+    CLEAN = vim.wait(1000, function() return debug_api.idle() end, 10)
+      and #VIEW.order == 0 and #debug_api.order == 0
+  ]])
+  MiniTest.expect.equality(child.lua_get('EARLY'), {
+    a = { '  alpha', '  replacement', '' }, b = { 'second' }, versions = { 2, 1 },
+    editable = { true, false }, keymaps = { 'new-kind', 'new-kind' },
+    pending_empty = true, distinct = true,
+  })
+  MiniTest.expect.equality(child.lua_get('HELD'), { 2, 1, 3 })
+  MiniTest.expect.equality(child.lua_get('DEFERRED'), {
+    a = { 'a deferred', '  replacement', '' }, b = { 'b deferred' }, versions = { 3, 2 },
+    editable = { true, false }, empty = true,
+  })
+  MiniTest.expect.equality(child.lua_get('MISMATCH'), {
+    mode = 'text', editable = true, text = { 'a deferred', '  replacement', '' },
+    version = 3, acks = 5, resyncs = 1, client_id = 101,
+  })
+  MiniTest.expect.equality(child.lua_get('RECOVERED'), {
+    mode = 'interactive', editable = false, text = { 'fresh server text' },
+    version = 4, other = { 'b deferred' },
+  })
+  local acks = child.lua_get('ACKS')
+  table.sort(acks, function(a, b)
+    return a[1] < b[1] or (a[1] == b[1] and a[3] < b[3])
+  end)
+  MiniTest.expect.equality(acks, {
+    { 101, 'same', 1 }, { 101, 'same', 2 }, { 101, 'same', 3 }, { 101, 'same', 4 },
+    { 202, 'same', 1 }, { 202, 'same', 2 },
+  })
+  MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
 end
 
 return T

@@ -42,6 +42,69 @@ fn the_commit_menu_reflows_its_action_columns() {
 }
 
 #[test]
+fn resizing_an_acked_commit_menu_reflows_incrementally_and_keeps_arguments() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(
+        &tmp,
+        Profile::Vim,
+        Viewport {
+            cols: 140,
+            rows: 30,
+        },
+    );
+    test.ack();
+    let (_descriptor, _) = test.open_via_command("open.commit");
+    test.ack();
+
+    test.press("-");
+    test.ack();
+    test.press("a");
+    test.ack();
+    test.ui().reply_text(Some("Alice".to_string()));
+    test.press_ui("=");
+    test.ack();
+    test.press_ui("A");
+    test.ack();
+
+    let base_version = test.acked_version().expect("acked menu version");
+    let base_text = test.text();
+    let render = test
+        .resize(Viewport { cols: 60, rows: 30 })
+        .expect("menu resize emits a render");
+    assert_eq!(render.base_version, Some(base_version));
+    assert_eq!(render.version, base_version + 1);
+    let edits = render.edits.as_ref().expect("incremental resize edits");
+    assert!(render.text.is_none(), "acked clients receive edits only");
+
+    let resized_text = magit_lsp::diff_text::apply_edits(&base_text, edits);
+    let mut canonical = menus::named("commit").expect("commit menu");
+    canonical.toggle_switch("-a");
+    canonical.set_option("=A", Some("Alice".to_string()));
+    let expected = canonical.render(Viewport { cols: 60, rows: 30 });
+    assert_eq!(resized_text, expected.lines);
+    assert_eq!(
+        render.menu.as_ref().expect("menu model").preview(),
+        "git commit --all --author=Alice"
+    );
+
+    let default_narrow = menus::named("commit")
+        .expect("commit menu")
+        .render(Viewport { cols: 60, rows: 30 });
+    expect_file!["snapshots/menu-60.txt"].assert_eq(&default_narrow.lines.join("\n"));
+    assert_ne!(
+        resized_text, default_narrow.lines,
+        "resize retains switch and option state"
+    );
+    assert_eq!(
+        test.acked_version(),
+        Some(base_version),
+        "resize is not an implicit ack"
+    );
+}
+
+#[test]
 fn the_argument_preview_follows_the_switches_and_options() {
     let mut menu = menus::named("commit").expect("commit menu");
     assert_eq!(menu.preview(), "git commit");

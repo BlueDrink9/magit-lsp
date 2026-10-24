@@ -1,5 +1,196 @@
 # VSCode client notes
 
+## R-VS-4 semantic highlighting and theme verification (2026-10-24)
+
+The user's away permission covered this isolated actual-host verification. Only
+a unique Extension Development Host (`--user-data-dir`/`--extensions-dir` under
+`/tmp/opencode/vscode-review-JQ3MsM`) was launched; no user editor, user
+configuration or existing process was touched. No commit was created and all
+existing working-tree changes were preserved. The loaded extension is
+`/home/william/src/magit-lsp/clients/vscode`; the actual host binary is
+`/usr/bin/codium` 1.140.06880.
+
+The exact ticket verification chain ran once and exited **0**: `cargo build &&
+npm --prefix clients/vscode test && npm --prefix clients/vscode run
+test:integration && env -i HOME="$HOME" PATH="$PATH" make test && env -i
+HOME="$HOME" PATH="$PATH" make ui-test`. Results: **23 Node tests**; all Rust
+test binaries passed (**300 tests**); **61 Neovim cases**; real Neovim UI
+**16 PASS, 1 XFAIL, 0 FAIL**. The XFAIL is the unchanged `process-log` baseline
+(`wait timed out for screen text 'Process log'`), not a new failure.
+
+Evidence directory: **`/tmp/opencode/vscode-review-JQ3MsM/`**.
+`r-vs-4-evidence.json` contains the loaded legend and contributions, every
+`textDocument/semanticTokens/full` request, and the decoded token ranges with
+the measured class, colour, background and weight of each rendered span.
+`r-vs-4-theme-dark.png`, `r-vs-4-theme-light.png` and
+`r-vs-4-theme-dark-restored.png` are actual renderer captures through CDP
+`Page.captureScreenshot`; all three were opened and inspected. R-VS-2, R-VS-3
+and R-VS-5 evidence from the same isolated run was preserved.
+
+| R-VS-4 gate | Exact result |
+| --- | --- |
+| Contributions map status token types | `contributes.semanticTokenScopes` for language `magit` maps all eleven status types (`magit-section`, `magit-count`, `magit-file`, four `magit-file-*` variants, `magit-hunk-header`, `magit-diff-added`, `magit-diff-removed`) to theme scopes: section → `entity.name.section`, additions → `markup.inserted`, deletions → `markup.deleted`. `magit-section`, `magit-diff-added` and `magit-diff-removed` are declared in `contributes.semanticTokenTypes`, and `[magit]` enables `editor.semanticHighlighting.enabled`. The new unit test `status semantic-token types map to theme scopes` asserts all of this (23 Node tests pass). No `package.json` change was needed: the contributions already covered the legend. |
+| Actual host requests and applies tokens | The instrumented `LanguageClient.sendRequest` recorded **6** `textDocument/semanticTokens/full` requests, each for the server view URI `magit://status/tmp/opencode/vscode-review-JQ3MsM/repo`. The decoded legend has 26 token types. `vscode.provideDocumentSemanticTokens` returned the server's ranges; the test identified the `magit-section`, `magit-diff-added` and `magit-diff-removed` spans only from those decoded ranges and the server-owned document lines, never by parsing rendered text. |
+| Visible styling in the active theme | Rendered spans for `magit-section` (`Staged changes`, `Unstaged changes`, `Untracked files`), `magit-diff-removed` (`    -original`) and `magit-diff-added` (`    +replacement`) were found in the real DOM and their computed styles measured. Under Dark Modern: default foreground `rgb(204, 204, 204)`; sections `mtk18`/`rgb(78, 201, 176)`; deletions `mtk13`/`rgb(206, 145, 120)`; additions `mtk7`/`rgb(181, 206, 168)`. Every gate token differs from the default foreground. |
+| Theme switch updates styling | The workspace theme was switched from the active `Dark Modern` to the bundled `Light Modern` and back. Under Light Modern: default foreground `rgb(59, 59, 59)`; sections `mtk16`/`rgb(38, 127, 153)`; deletions `mtk13`/`rgb(163, 21, 21)`; additions `mtk7`/`rgb(9, 134, 88)`. All three gate colours changed, and after restoring `Dark Modern` each returned to its exact dark-theme value (`restored` in the evidence). |
+| Server text stays server-owned | The document text before the switch, in Light Modern and after restoring Dark Modern was byte-identical (`text.identical: true`) and equalled the received `view/render` text. Only styles changed; the extension did not recompose text or recover structure from it. |
+| Screenshots | `r-vs-4-theme-dark.png`, `r-vs-4-theme-light.png`, `r-vs-4-theme-dark-restored.png` show the same `Status` document with painted headings, additions and deletions; dark and light screenshots visibly differ in chrome and token colours, and the restored screenshot matches the first. |
+
+Two test-driver facts were learned from the real host and are recorded, not
+worked around as product changes:
+
+- Codium 1.140 migrates the legacy setting value `Default Dark Modern` to the
+  bundled id `Dark Modern`; the runner records the effective value and restores
+  exactly that value instead of assuming the legacy string.
+- A theme change repaints default foreground colours first and applies semantic
+  token classes asynchronously. The first draft measured after a fixed 300 ms
+  and saw `mtk1` defaults in Light Modern. The driver now waits until the
+  measured spans themselves are painted (colour differs from the editor default
+  and the workbench has the expected `vs`/`vs-dark` class); this is a test
+  synchronisation fix, not a product change.
+
+R-VS-4 is checked on this evidence. The isolated host was stopped; a post-run
+check found no `magit-lsp` or isolated Codium process. No user configuration,
+editor, keybinding or existing process was modified, and no commit was created.
+
+## R-VS-3 generic dispatch, default fold/refresh and F5 (2026-10-24)
+
+The user's away permission covered this isolated actual-host verification. Only
+a unique Extension Development Host (`--user-data-dir`/`--extensions-dir` under
+`/tmp/opencode/vscode-review-wdkMOI`) was launched; no user editor, user
+configuration or existing process was touched. No commit was created and all
+existing working-tree changes were preserved. The loaded extension is
+`/home/william/src/magit-lsp/clients/vscode`, version `0.1.0`.
+
+The exact ticket verification chain ran once and exited **0**: `cargo build &&
+npm --prefix clients/vscode test && npm --prefix clients/vscode run
+test:integration && env -i HOME="$HOME" PATH="$PATH" make test && env -i
+HOME="$HOME" PATH="$PATH" make ui-test`. Results: **22 Node tests**; all Rust
+test binaries passed (**300 tests**); **61 Neovim cases**; real Neovim UI
+**16 PASS, 1 XFAIL, 0 FAIL**. The XFAIL is the unchanged
+`process-log` baseline (`wait timed out for screen text 'Process log'`), not a
+new failure.
+
+Evidence directory: **`/tmp/opencode/vscode-review-wdkMOI/`**. Exact request
+params, registered commands, bindings and window geometry are in
+`r-vs-3-evidence.json`; the F5 host-input reproduction is
+`f5-host-input-repro.txt` plus `f5-host-input-xev.log`. The isolated window was
+floated and sized to `1200x760` (`isolatedWindow.geometry`), because a window
+manager tile had shrunk an earlier host to `450x214` and the find widget could
+not take focus at that size.
+
+| R-VS-3 gate | Exact result |
+| --- | --- |
+| One generic dispatcher for arbitrary server IDs | `magit.invoke` is registered. The loaded manifest contributes exactly `magit.invoke`, `magit.key`, `magit.mirrorFoldShortcuts` and `magit.open`; the registered `magit.*` commands are those four plus the internal `magit.confirmEdit`/`magit.cancelEdit` edit actions. No per-action command exists: `magit.refresh`, `magit.toggle-fold`, `magit.show-section` and server IDs such as `common.refresh`, `common.toggle-section`, `common.hide-section`, `common.show-section` are not VSCode commands. All **164** contributed keybindings use `magit.invoke` with a canonical server ID (`bindingsWithoutDispatcher: []`). |
+| Arbitrary ID and opaque arguments forwarded unchanged | `magit.invoke { command: "common.hide-section", args: { recursive: true } }` produced `view/invoke` `{ viewId: "v1", command: "common.hide-section", cursor: { line: 4, column: 0 }, args: { recursive: true } }`. The server-rendered text visibly collapsed the targeted section (`r-vs-3-generic-dispatch.png`). Dispatching `common.show-section` with the same `{ recursive: true }` restored the exact previous server text (`r-vs-3-generic-restored.png`). The arguments were opaque: nothing was added, removed or rewritten. |
+| Another action through the dispatcher visibly takes effect | `magit.invoke { command: "status.stage-all" }` sent that canonical ID and moved the file: `git diff --cached --name-only` was empty before and `tracked.txt` after, and the status render visibly changed to `Staged changes (1)` / `Unstaged changes (0)` (`r-vs-3-generic-action.png`). `status.unstage-all` through the same dispatcher restored an empty index and `Staged changes (0)` (`repositoryRestored: true`). |
+| Default fold shortcut in active status | Physical `Tab` (the server-owned `common.toggle-section` default) sent exactly two `view/invoke` requests `{ viewId: "v1", command: "common.toggle-section", cursor: { line: 4, column: 0 } }`. The screen visibly folded the `Unstaged changes (1)` section (`r-vs-3-fold.png`) and restored it on the second press. Two additional requests came from the mirrored `ctrl+alt+]` binding, giving four toggles in total. |
+| Default refresh shortcut in active status | Physical `g` sent exactly one `view/invoke` `{ viewId: "v1", command: "common.refresh", cursor: { line: 4, column: 0 } }`; the server reread the worktree and rendered the new `+after-return` line in the same visible, server-owned view (`06-status-refresh.png`). The document text equalled the received server render and the URI/tab were unchanged. |
+
+All of these screenshots were opened and inspected: `00-status-expanded.png`,
+`r-vs-3-fold.png`, `r-vs-3-generic-dispatch.png`,
+`r-vs-3-generic-restored.png`, `r-vs-3-generic-action.png`,
+`06-status-refresh.png`, `07-magit-quickpick.png`,
+`08-f5-before-dismissal.png`, `08-f5-probe.png`, `08-f5-control-g.png`, and the
+run's `r-vs-2-*.png` files. Text and tree ownership stayed with the server:
+structural targets came from the server semantic-token ranges, never from parsed
+display text, and the client only displayed the received render.
+
+### Physical F5: recorded limitation, not claimed
+
+F5 is contributed with the same `magit.invoke → common.refresh` payload and the
+same guards as `g`, and the loaded manifest was verified. Two physical attempts
+were recorded. Both were delivered to the renderer as **Alt+F5**
+(`key: "F5"`, `altKey: true`, preceded by an `Alt_L` keydown), so the plain `f5`
+binding correctly did not match; no `view/invoke` was sent, no render occurred,
+no picker appeared and no debug session started. Immediately after, the same
+focus/scope dispatched and rendered the canonical `g` refresh in the control
+step, and the F5 diagnostic screenshots show no `+f5-*` content.
+
+The host input stack prepends Alt to function keys: a disposable `xev` window
+(no editor targeted) showed `xdotool`-injected F4/F5/F6 arriving with an
+`Alt_L` press/release around them, while Tab and `g` arrive alone. The component
+responsible was not modified or conclusively identified. **F5 is therefore not
+claimed as working.** No API dispatch was substituted for the physical key, and
+the failure is recorded verbatim in `r-vs-3-evidence.json` (`f5.attempts`,
+`f5.limitation`).
+
+This limitation is environment-level, not a missing client command: the
+contribution exists, is identical to the working `g` payload, and the generic
+dispatcher demonstrably resolves canonical server commands. R-VS-3's written UI
+gate asks for the default fold and refresh shortcuts to update status. The
+server's `standard` profile binds `refresh` to `["g", "F5"]`; `g` is the Magit
+refresh key (and the key in the user's original report) and was physically
+verified in an active status view. The remaining written gates are therefore
+evidenced, and R-VS-3 is checked with the F5 limitation recorded here rather
+than silently substituting for it. R-VS-4 has since been verified with actual
+theme-switch evidence in the top section.
+
+Only the run's isolated host was stopped; no `magit-lsp` or isolated Codium
+process remains. The temporary xev windows were terminated and verified absent
+before the final chain; mapping them may have caused the window manager to
+re-tile existing windows, but no user window was deliberately targeted,
+resized, moved or closed. No product shortcut, context key or extension source
+was changed by this evidence work. The driver additions are limited to the R-VS-3
+traces/screenshots, a bounded retry for focusing the existing find-widget setup,
+and deterministic geometry for the isolated window.
+
+## R-VS-2 first-open/reopen/refresh verification (2026-10-24)
+
+The user's away permission covers this isolated actual-host verification. Only a
+unique Extension Development Host (`--user-data-dir`/`--extensions-dir` under
+`/tmp/opencode/vscode-review-K6aS1m`) was launched; no user configuration,
+existing editor, or existing process was touched. No commit was created: the
+existing `85b0adf` commit and all prior working-tree work are preserved.
+
+The exact ticket verification chain ran once and exited **0**: `cargo build &&
+npm --prefix clients/vscode test && npm --prefix clients/vscode run
+test:integration && env -i HOME="$HOME" PATH="$PATH" make test && env -i
+HOME="$HOME" PATH="$PATH" make ui-test`. Results: **21 Node tests**; all Rust
+test binaries passed (**300 tests**); **61 Neovim cases**; real Neovim UI
+**16 PASS, 1 XFAIL, 0 FAIL**. The XFAIL is the unchanged pre-existing baseline
+`process-log` (`wait timed out for screen text 'Process log'`), not a new
+failure.
+
+Evidence directory: **`/tmp/opencode/vscode-review-K6aS1m/`**.
+
+- `r-vs-2-evidence.json` — exact URI, descriptor, tab, visibility, render
+  versions/edits, refresh request and backing-file checks.
+- `r-vs-2-first-open.png` — screen captured before any reopen/expand/action.
+- `r-vs-2-reopen.png` — screen after one sequential and two concurrent opens.
+- `r-vs-2-refresh.png` — screen after the `g` refresh.
+- `r-vs-5-evidence.json`, `bindings-evidence.json`, and the existing R-VS-5
+  PNGs — preserved from the same run.
+
+Loaded extension path/version: `/home/william/src/magit-lsp/clients/vscode`,
+`0.1.0`, from `bindings-evidence.json`.
+
+| Gate | Exact result |
+| --- | --- |
+| First open from a fresh window | `view/open` returned descriptor `id=v1`, `kind=status`, `title=Status`, server URI `magit://status/tmp/opencode/vscode-review-K6aS1m/repo`. The VSCode document is `magit://v1/Status`; its text exactly equalled the received full `view/render` text (version 1, 12 lines), including `Head: main`, `Unstaged changes (1)`, `M tracked.txt`, `-original`, `+replacement` and `Untracked files (1)`. The tab label is `Status`; exactly one status tab existed; the editor was visible and its visible ranges covered line 0. `r-vs-2-first-open.png`. |
+| Repeat/concurrent opens | One sequential `magit.open` plus two concurrent calls produced **no** additional `view/open` request (count stayed 1), one `Status` tab, the same `magit://v1/Status` URI, unchanged server text and a visible editor. `r-vs-2-reopen.png`. |
+| Refresh | `g` sent `view/invoke common.refresh`; the server returned version 2 edits with `baseVersion: 1`; the document text exactly matched the applied render chain, `+after-return` was in a visible range, and the URI/tab stayed `magit://v1/Status` / `Status`. `r-vs-2-refresh.png`. |
+| No backing document | Workspace files were `[.vscode/settings.json, tracked.txt]` both before open and after refresh; `/tmp/opencode/vscode-review-K6aS1m/repo/Status` does not exist; no file-scheme document was opened; the test never creates a backing status file. |
+| Regression tests | `clients/vscode/test/open.test.js` now asserts a fresh open renders the received server text on a titled `magit` URI and opens no file document, sequential/concurrent opens reuse the one view/URI, and a refresh edit updates the same URI. All 21 Node tests pass. |
+
+All three PNGs were opened and visually inspected: first open and reopen show the
+painted server status (`Head: main` through `+replacement`) in a `Status` tab;
+refresh shows `+after-return` in the same `Status` tab. No blank,
+filename-only, or temporary editor appears. These are actual renderer captures
+through CDP `Page.captureScreenshot`, not `import -window`. Structure and
+navigation were not recovered from rendered text; assertions use the server's
+`view/render` text and the VSCode document/editor APIs, and text is displayed
+verbatim.
+
+The same run preserved R-VS-5 evidence: one `Status` tab, the foreign
+QuickPick/InputBox/Find matrix with zero Magit dispatch, restored status
+Enter/Tab/refresh, the Magit commit QuickPick, and the separate physical-F5
+diagnostic (`dispatched=false`, `rendered=false`; cause still unproven). R-VS-2
+is checked; R-VS-3 was later checked on the evidence in the top section with
+that same F5 limitation recorded explicitly; R-VS-4 has since been verified for
+its theme gate in the top section. The isolated host was stopped; no `magit-lsp`
+or isolated Codium process remains.
+
 ## R-VS-5 resumed permission (2026-10-24 16:25 NZDT)
 
 The user explicitly confirmed they are away and permitted resuming immediately,
@@ -61,10 +252,13 @@ evidence. Foreign Tab/F5 behavior is likewise not claimed by this matrix.
 F5 remains an explicitly unsuccessful physical-key diagnostic: the real editor
 retained a native edit-context DIV, Find was absent, and no picker was visible
 in the pre-dismissal screenshot. The interception/resolver cause is unproven;
-no API refresh substituted for F5. R-VS-3 therefore stays unchecked. R-VS-2
-retains its first-open screen gate (the saved screen follows reopen/expansion),
-and R-VS-4 retains explicit theme verification. R-VS-5's applicable-widget gate
-is satisfied with the unsupported cases above explicitly bounded.
+no API refresh substituted for F5. R-VS-3 was later checked on the top section's
+evidence, which diagnoses this as a host input limitation (Alt prepended to
+function keys) and keeps F5 unclaimed. R-VS-2 retains its first-open screen gate
+(the saved screen follows reopen/expansion), and R-VS-4 has since been verified
+with actual dark/light theme measurements in the top section. R-VS-5's
+applicable-widget gate is satisfied with the unsupported cases above explicitly
+bounded.
 
 The runner terminated only processes naming its unique temporary user-data-dir.
 A post-run process check found no remaining magit-lsp or isolated-host process;
@@ -210,7 +404,10 @@ override a higher-priority user binding; only if the resolver confirms one,
 replace/remove that entry with the canonical example below. No config or user
 editor was modified/restarted by this audit.
 
-The standard defaults are Tab (toggle section) and F5 (refresh).
+The standard defaults are Tab (toggle section) and `g` / F5 (refresh); `g` is
+the canonical Magit refresh key. F5 is contributed with the identical payload
+but is not claimed as physically verified on this host (see the R-VS-3 section
+at the top: the host input stack delivers it as Alt+F5).
 
 ```json
 [

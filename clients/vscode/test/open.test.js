@@ -13,6 +13,8 @@ module.exports = async function testStatusOpenLifecycle() {
   let openCount = 0;
   let renderVersion = 0;
   let closeDocument;
+  let fileOpened = false;
+  const renderPayloads = [];
   const requests = [];
 
   class Uri {
@@ -48,6 +50,9 @@ module.exports = async function testStatusOpenLifecycle() {
       },
       onDidCloseTextDocument: (callback) => { closeDocument = callback; return { dispose() {} }; },
       openTextDocument: async (uri) => {
+        if (uri.scheme !== 'magit') {
+          fileOpened = true;
+        }
         const document = {
           uri,
           getText: () => providers.get(uri.scheme).provideTextDocumentContent(uri),
@@ -110,6 +115,7 @@ module.exports = async function testStatusOpenLifecycle() {
         text: [`Status for /repo (${openCount})`, 'Working tree clean'],
         mode: 'interactive',
       };
+      renderPayloads.push(payload);
       if (openCount === 1) {
         // Render can precede the descriptor response; it must be replayed.
         notifications.get('view/render')(payload);
@@ -141,15 +147,52 @@ module.exports = async function testStatusOpenLifecycle() {
   assert.equal(openCount, 1);
   assert.equal(tabs.length, 1);
   assert.match(tabs[0].uri.path, /Status$/);
-  assert.equal(tabs[0].getText(), 'Status for /repo (1)\nWorking tree clean');
+  const firstText = renderPayloads[0].text.join('\n');
+  assert.equal(tabs[0].getText(), firstText);
+  assert.equal(tabs[0].getText().trim().length > 0, true);
+  assert.notEqual(tabs[0].getText(), 'Status');
   assert.equal(tabs[0].uri.scheme, 'magit');
+  assert.equal(fileOpened, false, 'first open must not use a file document');
+  assert.equal(documents.every((document) => document.uri.scheme === 'magit'), true);
+  const statusUri = tabs[0].uri.toString();
 
   await commands.get('magit.open')();
   assert.equal(openCount, 1);
   assert.equal(tabs.length, 2);
   assert.equal(tabs[1].uri.toString(), tabs[0].uri.toString());
-  assert.equal(tabs[1].getText(), 'Status for /repo (1)\nWorking tree clean');
+  assert.equal(tabs[1].getText(), firstText);
   assert.equal(documents.length, 2);
+  assert.equal(providers.has('file'), false);
+
+  // Two concurrent opens must share the one existing status view.
+  await Promise.all([commands.get('magit.open')(), commands.get('magit.open')()]);
+  assert.equal(openCount, 1, 'concurrent opens must reuse the one server view');
+  assert.equal(
+    requests.filter((request) => request.method === 'view/open').length,
+    1,
+    'concurrent opens must send one view/open request'
+  );
+  for (const tab of tabs.slice(2)) {
+    assert.equal(tab.uri.toString(), statusUri);
+    assert.equal(tab.getText(), firstText);
+  }
+  assert.equal(fileOpened, false, 'repeat opens must not use a file document');
+
+  // A refresh render must replace the server text on the same read-only URI.
+  await commands.get('magit.invoke')({ command: 'common.refresh' });
+  assert.equal(requests.at(-1).params.command, 'common.refresh');
+  const refreshedVersion = ++renderVersion;
+  notifications.get('view/render')({
+    viewId: 'status-1',
+    version: refreshedVersion,
+    baseVersion: refreshedVersion - 1,
+    edits: [{ startLine: 1, endLine: 2, lines: ['Working tree changed'] }],
+    mode: 'interactive',
+  });
+  assert.equal(tabs[0].getText(), 'Status for /repo (1)\nWorking tree changed');
+  assert.equal(tabs[1].getText(), tabs[0].getText());
+  assert.equal(tabs[0].uri.toString(), statusUri);
+  assert.equal(fileOpened, false, 'refresh must not use a file document');
   assert.equal(providers.has('file'), false);
 
   await commands.get('magit.invoke')({ command: 'arbitrary.command', args: { value: 42 } });

@@ -3,17 +3,10 @@
 # Stage a hunk, then open the process log with the profile's binding (`$` in
 # standard, `g $` in vim). The staging command must be recorded as a `git
 # apply` entry, and `q` must return to the status view behind it.
-#
-# XFAIL: the Neovim client has no main-placement view manager (R-NV-2). Every
-# pushed descriptor goes through `menu.lua`, which opens a one-line float, and
-# the process log's `view/render` is then dropped by `init.lua` because its
-# view id is not the status view's. The view therefore never shows text, so
-# this scenario fails at `wait screen contains "Process log"` until R-NV-2
-# lands; remove this tag only when the real client can display the view.
-xfail: R-NV-2
 fixture: modified-two-files
 ---
 wait
+snapshot: initial-status
 keys: j j j j j j j j j j Right Right Right Right
 wait
 expect cursor on "+line3 CHANGED"
@@ -23,9 +16,26 @@ expect screen contains "Staged changes (1)"
 keys standard: $
 keys vim: g $
 wait screen contains "Process log"
+expect view_stack.count == 2
+snapshot: process-log-header
+# Native search is generic navigation: earlier Git output fills the viewport.
+keys: "/git apply" Enter
+wait
 expect screen contains "git apply"
 snapshot: process-log
 keys: q
 wait
 expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+keys standard: g
+keys vim: g r
+wait
+expect screen contains "Staged changes (1)"
+keys: c
+wait screen contains "Commit"
+keys: q
+wait
+expect windows.floating == 0
+expect screen contains "Unstaged changes"
+expect no_message /failed|view not found|unknown view/
 snapshot: back-to-status

@@ -350,6 +350,104 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+#[test]
+fn view_resize_notification_reflows_an_acked_menu_incrementally() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": repo},
+            "viewport": {"cols": 140, "rows": 30},
+        },
+    }));
+    let opened = server.response_with_id(2);
+    let status_id = opened["result"]["id"].as_str().expect("status view id");
+    let initial_status = server.recv();
+    assert_eq!(initial_status["method"], json!("view/render"));
+    let status_keymap = server.recv();
+    assert_eq!(status_keymap["method"], json!("view/keymap"));
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "view/rendered",
+        "params": {"viewId": status_id, "version": 1},
+    }));
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": status_id, "command": "open.commit"},
+    }));
+    let invoke = server.response_with_id(3);
+    let menu_id = invoke["result"]["effects"]
+        .as_array()
+        .expect("invoke effects")
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .and_then(|effect| effect["descriptor"]["id"].as_str())
+        .expect("pushed commit menu")
+        .to_string();
+    let initial_menu = server.recv();
+    assert_eq!(initial_menu["method"], json!("view/render"));
+    assert_eq!(initial_menu["params"]["viewId"], json!(menu_id));
+    assert_eq!(initial_menu["params"]["version"], json!(1));
+    assert!(initial_menu["params"]["baseVersion"].is_null());
+    let initial_text: Vec<String> =
+        serde_json::from_value(initial_menu["params"]["text"].clone()).expect("initial menu text");
+    assert_eq!(
+        initial_text.join("\n"),
+        include_str!("snapshots/menu-140.txt").trim_end()
+    );
+    let menu_keymap = server.recv();
+    assert_eq!(menu_keymap["method"], json!("view/keymap"));
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "view/rendered",
+        "params": {"viewId": menu_id, "version": 1},
+    }));
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "method": "view/resize",
+        "params": {"viewId": menu_id, "cols": 60, "rows": 30},
+    }));
+    let resized = server.recv();
+    assert_eq!(resized["method"], json!("view/render"), "{resized}");
+    assert_eq!(resized["params"]["viewId"], json!(menu_id));
+    assert_eq!(resized["params"]["version"], json!(2));
+    assert_eq!(resized["params"]["baseVersion"], json!(1));
+    assert!(resized["params"]["text"].is_null());
+    let edits: Vec<magit_lsp::protocol::LineEdit> =
+        serde_json::from_value(resized["params"]["edits"].clone())
+            .expect("incremental resize edits");
+    let reconstructed = magit_lsp::diff_text::apply_edits(&initial_text, &edits);
+    assert_eq!(
+        reconstructed.join("\n"),
+        include_str!("snapshots/menu-60.txt").trim_end()
+    );
+    let wide = initial_text.join("\n");
+    let narrow = reconstructed.join("\n");
+    assert_ne!(wide, narrow, "the resize changes the menu's layout");
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
 /// The keys bound to `command` in a `view/keymap` notification.
 fn keymap_keys(notification: &Value, command: &str) -> Option<Vec<String>> {
     notification["params"]["bindings"]

@@ -81,6 +81,30 @@ fn profile_chords(profile: Profile) -> Vec<KeyChord> {
     chords
 }
 
+fn vim_rule_violation(chords: &[KeyChord]) -> Option<String> {
+    let reserved_motions: BTreeSet<KeyStep> = [
+        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "h",
+        "j", "k", "l", "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
+    ]
+    .into_iter()
+    .map(|key| KeyChord::parse(key).expect("reserved key parses").steps()[0].clone())
+    .collect();
+
+    for chord in chords {
+        let canonical = chord.to_canonical();
+        if canonical == "g g" {
+            return Some(format!("vim profile rebinds `{canonical}`"));
+        }
+        if reserved_motions.contains(&chord.steps()[0]) {
+            return Some(format!(
+                "vim profile rebinds reserved motion prefix `{:?}` in `{canonical}`",
+                chord.steps()[0]
+            ));
+        }
+    }
+    None
+}
+
 #[test]
 fn standard_respects_r1_no_emacs_prefixes_or_alt_letters() {
     for chord in profile_chords(Profile::Standard) {
@@ -111,18 +135,94 @@ fn standard_respects_r1_no_emacs_prefixes_or_alt_letters() {
 
 #[test]
 fn vim_respects_r4_does_not_rebind_vim_motions() {
-    let forbidden: BTreeSet<&str> = [
-        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "h", "j", "k",
-        "l", "gg", "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
-    ]
-    .into_iter()
-    .collect();
-    for chord in profile_chords(Profile::Vim) {
-        let canonical = chord.to_canonical();
+    let chords = profile_chords(Profile::Vim);
+    assert_eq!(vim_rule_violation(&chords), None);
+}
+
+#[test]
+fn vim_r4_validator_rejects_injected_canonical_gg_and_motion_prefixes() {
+    for key in ["g g", "ctrl+d x", "h g"] {
+        let injected = [KeyChord::parse(key).expect("injected key parses")];
         assert!(
-            !forbidden.contains(canonical.as_str()),
-            "vim profile rebinds `{canonical}`"
+            vim_rule_violation(&injected).is_some(),
+            "validator must reject injected `{key}`"
         );
+    }
+
+    let allowed: Vec<_> = ["g r", "ctrl+h", "ctrl+shift+d x", "alt+g g"]
+        .into_iter()
+        .map(|key| KeyChord::parse(key).expect("permitted key parses"))
+        .collect();
+    assert_eq!(vim_rule_violation(&allowed), None);
+}
+
+#[test]
+fn profiles_follow_r2_mnemonics_for_status_operations() {
+    let expected = [
+        ("status.stage", "s"),
+        ("status.unstage", "u"),
+        ("status.stage-all", "S"),
+        ("status.unstage-all", "U"),
+        ("open.commit", "c"),
+        ("open.branch", "b"),
+        ("open.diff", "d"),
+        ("open.fetch", "f"),
+        ("open.pull", "F"),
+        ("open.push", "P"),
+        ("open.merge", "m"),
+        ("open.rebase", "r"),
+        ("open.tag", "t"),
+    ];
+    // §10 documents Vim's `g l` exception to §5.2: native `l` stays a motion.
+    for (profile, log_key) in [(Profile::Standard, "l"), (Profile::Vim, "g l")] {
+        let config = Config { profile, ..Default::default() };
+        let map = Keymap::resolve("status", profile, &config).expect("status resolves");
+        for (command, key) in expected.into_iter().chain([("open.log", log_key)]) {
+            assert_eq!(
+                map.command(command).unwrap().keys,
+                vec![key],
+                "{}: {command} mnemonic",
+                profile.as_str()
+            );
+        }
+    }
+}
+
+#[test]
+fn standard_resolved_common_confirm_and_cancel_use_direct_keys() {
+    let config = Config { profile: Profile::Standard, ..Default::default() };
+    let map = Keymap::resolve("common", Profile::Standard, &config).unwrap();
+    assert_eq!(map.command("common.confirm").unwrap().keys, vec!["Enter"]);
+    assert!(map.command("common.cancel").unwrap().keys.contains(&"Escape".to_string()));
+}
+
+#[test]
+fn ctrl_c_is_cancel_in_every_non_editable_scope_for_both_profiles() {
+    // §3.10/§5.5 makes commit-message the sole editable scope; ctrl+c there is
+    // intentionally not cancel because standard editors use it to copy.
+    for profile in [Profile::Standard, Profile::Vim] {
+        for scope in ["common", "status", "select", "menu", "process-log"] {
+            let config = Config { profile, ..Default::default() };
+            let map = Keymap::resolve(scope, profile, &config)
+                .unwrap_or_else(|error| panic!("{} {scope}: {error}", profile.as_str()));
+            let cancel = map.command("common.cancel").unwrap_or_else(|| {
+                panic!("{} {scope}: common.cancel must resolve", profile.as_str())
+            });
+            assert!(
+                cancel.keys.iter().any(|key| key == "ctrl+c"),
+                "{} {scope}: ctrl+c must resolve to common.cancel; got {:?}",
+                profile.as_str(), cancel.keys
+            );
+            let steps = KeyChord::parse("ctrl+c").unwrap().steps().to_vec();
+            for mode in [EditorMode::Normal, EditorMode::Visual] {
+                assert_eq!(
+                    map.lookup(&steps, mode),
+                    Match::Exact("common.cancel".to_string()),
+                    "{} {scope}: ctrl+c cancels in {mode:?}",
+                    profile.as_str()
+                );
+            }
+        }
     }
 }
 

@@ -112,5 +112,15 @@ if (result.error) console.error(result.error);
 if (existsSync(`${directory}/failure.txt`)) {
   console.error(await (await import('node:fs/promises')).readFile(`${directory}/failure.txt`, 'utf8'));
 }
-// Some editor CLIs return zero even if the test host failed to start.
-process.exit(result.status === 0 && existsSync(`${directory}/r-vs-5-evidence.json`) ? 0 : 1);
+// Some editor CLIs return zero even if the test host failed to start. The
+// R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
+const evidenceReady = existsSync(`${directory}/r-vs-2-evidence.json`)
+  && existsSync(`${directory}/r-vs-3-evidence.json`)
+  && existsSync(`${directory}/r-vs-4-evidence.json`)
+  && existsSync(`${directory}/r-vs-5-evidence.json`);
+if (!evidenceReady) {
+  console.error(
+    'Missing R-VS-2/R-VS-3/R-VS-4/R-VS-5 evidence; see the isolated evidence directory above.'
+  );
+}
+process.exit(result.status === 0 && evidenceReady ? 0 : 1);

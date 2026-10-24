@@ -779,7 +779,7 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-/// Quit asks the client to close every view of the session.
+/// Quit the current view, closing the session when it is the root view.
 fn quit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     ctx.extend(vec![Effect::Quit]);
     Ok(CommandOutcome::default())

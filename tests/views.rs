@@ -46,6 +46,41 @@ fn staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk() {
 }
 
 #[test]
+fn quitting_a_nested_view_restores_the_same_parent_but_root_quit_clears_session() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    let parent_id = test.view_id().to_string();
+    let parent_tree = test.tree().clone();
+    test.ack();
+
+    let (child, _) = test.open_via_command("open.process-log");
+    let child_id = child.id;
+    let result = test.invoke("common.quit");
+    assert_eq!(
+        result.effects,
+        vec![
+            Effect::PopView {
+                view_id: child_id.clone(),
+            },
+            Effect::FocusView {
+                view_id: parent_id.clone(),
+            },
+        ]
+    );
+    assert!(result.render.is_none());
+    assert_eq!(test.view_ids(), vec![parent_id.clone()]);
+    assert_eq!(test.view_id(), parent_id);
+    assert_eq!(test.version(), initial.version);
+    assert_eq!(test.tree(), &parent_tree);
+
+    let root_quit = test.invoke("common.quit");
+    assert_eq!(root_quit.effects, vec![Effect::Quit]);
+    assert!(test.view_ids().is_empty());
+}
+
+#[test]
 fn refresh_after_an_external_stage_sends_edits_and_keeps_the_cursor_on_the_hunk() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

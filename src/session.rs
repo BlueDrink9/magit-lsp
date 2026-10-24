@@ -1163,9 +1163,12 @@ impl Session {
             }
         };
 
-        // `common.quit` closes every view of this session; the client gets the
-        // same effects and drops its windows.
+        // Nested `common.quit` returns to the existing parent. Only quitting
+        // the root view clears the whole session.
         if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
+            if self.views.previous_of(view_id).is_some() {
+                return self.pop_view(view_id);
+            }
             self.views.clear();
             return Ok(InvokeResult {
                 effects,

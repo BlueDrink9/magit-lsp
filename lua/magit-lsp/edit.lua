@@ -2,25 +2,13 @@
 ---
 --- The server asks the client to edit a real file (a commit message, a merge
 --- message, a rebase todo) and keeps Git blocked until `common.confirm` or
---- `common.cancel` answers the edit id. This module opens the file in a bottom
---- split, applies the server's `commit-message` keymap and forwards the two
---- answers. Closing the buffer without confirming cancels the edit.
+--- `common.cancel` answers the edit id. This module contributes only the
+--- `edit` placement and the two command handlers; opening, the pending keymap
+--- queue and closing are the shared view manager's job.
 
-local keymap = require('magit-lsp.keymap')
-local debug_api = require('magit-lsp.debug')
+local view = require('magit-lsp.view')
 
 local M = {}
-
---- Open edits, keyed by edit id.
----@type table<string, table>
-M.views = {}
-
---- Keymaps that arrived before their `editDocument` effect, by edit id.
----@type table<string, table[]>
-M.pending_keymap = {}
-
---- Callbacks into the main client.
-M.host = {}
 
 --- The filetype for each edit kind; unknown kinds edit as a commit message.
 local FILETYPES = {
@@ -30,99 +18,83 @@ local FILETYPES = {
   ['rebase-todo'] = 'gitrebase',
 }
 
---- Called by the main client once the LSP client exists.
----@param opts table { client_id, invoke, focus_status }
-function M.configure(opts)
-  for key, value in pairs(opts or {}) do
-    M.host[key] = value
-  end
+--- Open the real file of an edit document in a bottom split.
+--- `view.open_document` calls this before it installs the close autocmds.
+---@param record table the document record
+---@return integer win
+function M.place(record)
+  local buf = vim.fn.bufadd(record.uri)
+  vim.fn.bufload(buf)
+  vim.bo[buf].swapfile = false
+  record.buf = buf
+
+  vim.cmd('botright split')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  return win
 end
 
-local function client()
-  if not M.host.client_id then
-    return nil
-  end
-  return vim.lsp.get_client_by_id(M.host.client_id)
-end
-
---- Whether `id` is an edit this module owns (open or waiting for its keymap).
----@param id string
-function M.owns(id)
-  return id ~= nil and (M.views[id] ~= nil or M.pending_keymap[id] ~= nil)
-end
-
-local function close(view)
-  view.closing = true
-  M.views[view.id] = nil
-  M.pending_keymap[view.id] = nil
-  if view.win and vim.api.nvim_win_is_valid(view.win) then
-    pcall(vim.api.nvim_win_close, view.win, true)
-  end
-  if view.buf and vim.api.nvim_buf_is_valid(view.buf) then
-    pcall(vim.api.nvim_buf_delete, view.buf, { force = true })
-  end
-  if M.host.focus_status then
-    M.host.focus_status()
-  end
-end
-
-local function answer(view, command)
-  if M.host.invoke then
-    M.host.invoke(command, { editId = view.id })
-  end
-  close(view)
+--- Register the `edit` placement.
+function M.setup()
+  view.register_placement('edit', { place = M.place })
 end
 
 --- Save the edited file and let Git continue.
----@param id string
-function M.confirm(id)
-  local view = M.views[id]
-  if not view or view.closing then
+---@param key string local view key
+function M.confirm(key)
+  local record = view.views[key]
+  if not record or record.closing then
     return
   end
-  if view.buf and vim.api.nvim_buf_is_valid(view.buf) then
-    pcall(vim.api.nvim_buf_call, view.buf, function()
+  if record.buf and vim.api.nvim_buf_is_valid(record.buf) then
+    local ok, err = pcall(vim.api.nvim_buf_call, record.buf, function()
       vim.cmd('silent write')
     end)
+    if not ok then
+      vim.notify('magit-lsp: could not save edit document: ' .. tostring(err), vim.log.levels.ERROR)
+      return
+    end
   end
-  answer(view, 'common.confirm')
+  M.answer(record, 'common.confirm')
 end
 
 --- Abort the edit, leaving Git's operation undone.
----@param id string
-function M.cancel(id)
-  local view = M.views[id]
-  if not view or view.closing then
+---@param key string local view key
+function M.cancel(key)
+  local record = view.views[key]
+  if not record or record.closing then
     return
   end
-  answer(view, 'common.cancel')
+  M.answer(record, 'common.cancel')
 end
 
---- A buffer was wiped or deleted: unless we closed it, that means cancel.
----@param id string
-function M.on_closed(id)
-  local view = M.views[id]
-  if not view or view.closing then
+--- A real-file buffer was wiped or deleted: unless we closed it, cancel.
+---@param record table the document record
+function M.on_closed(record)
+  if not record or record.closing then
     return
   end
-  M.cancel(id)
+  M.answer(record, 'common.cancel')
 end
 
---- Apply a `view/keymap` for an edit; buffer it when the effect is late.
----@param notice table
-function M.apply_keymap(notice)
-  if type(notice) ~= 'table' or not notice.viewId then
-    return
+--- Answer Git on the base view of the same session, then close the document.
+---@param record table
+---@param command string `common.confirm` or `common.cancel`
+function M.answer(record, command)
+  local base = record.base
+  view.close(record.key, false)
+  if base and view.views[base] then
+    view.invoke(command, { args = { editId = record.id } }, base)
+    view.focus(base)
   end
-  local view = M.views[notice.viewId]
-  if not view then
-    local queue = M.pending_keymap[notice.viewId] or {}
-    queue[#queue + 1] = notice
-    M.pending_keymap[notice.viewId] = queue
-    return
-  end
-  view.notice = notice
-  keymap.apply(view.buf, notice, {
+end
+
+--- Key handling for an edit: only the server's confirm/cancel bindings apply,
+--- so the real file keeps its ordinary editor keys.
+---@param record table
+---@return table handlers, table opts
+local function keymap_options(record)
+  return {
     press = function() end,
     command = function() end,
   }, {
@@ -130,95 +102,38 @@ function M.apply_keymap(notice)
     only_commands = true,
     commands = {
       ['common.confirm'] = function()
-        M.confirm(view.id)
+        M.confirm(record.key)
       end,
       ['common.cancel'] = function()
-        M.cancel(view.id)
+        M.cancel(record.key)
       end,
       -- `q`/quit in an edit buffer means "stop editing", i.e. cancel.
       ['common.quit'] = function()
-        M.cancel(view.id)
+        M.cancel(record.key)
       end,
     },
-  })
-  debug_api.keymap_received(view.id, notice)
+  }
 end
 
 --- Open the real file for an `editDocument` effect.
----@param effect table
----@return table|nil view
-function M.open(effect)
+---@param effect table `editDocument` effect
+---@param source table|nil the server view whose command produced it
+---@return table|nil record
+function M.open(effect, source)
   if type(effect) ~= 'table' or not effect.editId or not effect.path then
     return nil
   end
-  local id = effect.editId
-  local existing = M.views[id]
-  if existing then
-    if existing.win and vim.api.nvim_win_is_valid(existing.win) then
-      vim.api.nvim_set_current_win(existing.win)
-    end
-    return existing
-  end
-
-  local buf = vim.fn.bufadd(effect.path)
-  vim.fn.bufload(buf)
-  local view = {
-    id = id,
-    buf = buf,
-    effect = effect,
-    closing = false,
-  }
-  M.views[id] = view
-
-  vim.cmd('botright split')
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
-  view.win = win
-  vim.bo[buf].filetype = FILETYPES[effect.kind] or 'gitcommit'
-  vim.bo[buf].swapfile = false
-
-  local c = client()
-  if c and vim.lsp.buf_attach_client then
-    pcall(vim.lsp.buf_attach_client, buf, c.id)
-  end
-
-  vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
-    buffer = buf,
-    callback = function()
-      M.on_closed(id)
-    end,
+  source = source and source.key and source or view.last_for_client(source and source.client_id)
+  local base = source and (source.document and source.base or source.key) or nil
+  return view.open_document(effect, {
+    placement = 'edit',
+    filetype = FILETYPES[effect.kind] or 'gitcommit',
+    client_id = source and source.client_id or nil,
+    root = source and source.root or nil,
+    base = base,
+    keymap_options = keymap_options,
+    on_closed = M.on_closed,
   })
-
-  debug_api.trace('edit_open', { edit = id, kind = effect.kind, path = effect.path })
-
-  local pending = M.pending_keymap[id]
-  M.pending_keymap[id] = nil
-  for _, notice in ipairs(pending or {}) do
-    M.apply_keymap(notice)
-  end
-  return view
-end
-
---- Handle the `editDocument` effects of one response or notification.
----@param effects table[]
-function M.apply_effects(effects)
-  for _, effect in ipairs(effects or {}) do
-    if effect.type == 'editDocument' then
-      M.open(effect)
-    end
-  end
-end
-
---- Close every edit buffer, e.g. on `VimLeavePre`.
-function M.close_all()
-  local open = {}
-  for _, view in pairs(M.views) do
-    open[#open + 1] = view
-  end
-  for _, view in ipairs(open) do
-    view.closing = true
-    close(view)
-  end
 end
 
 return M

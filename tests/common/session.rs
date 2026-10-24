@@ -621,6 +621,18 @@ impl TestSession {
         render
     }
 
+    /// Resize the focused view through the real session entry point and track its emitted render.
+    pub fn resize(&mut self, viewport: Viewport) -> Option<ViewRender> {
+        let render = self
+            .session
+            .resize(&self.view, viewport)
+            .expect("resize view");
+        if let Some(render) = &render {
+            self.apply(render);
+        }
+        render
+    }
+
     /// The focused view's keymap scope, when it has one.
     pub fn keymap_scope(&self) -> Option<String> {
         self.session

@@ -1044,8 +1044,9 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Review (highest priority; grouped by stated priority)
 
-- **P0:** R-VS-2…R-VS-5 (§12). Functional findings are user-confirmed resolved;
-  the remaining gates are regression/real-client evidence, not new alias fixes.
+- **P0:** none remaining for the VSCode review: R-VS-2, R-VS-3, R-VS-4 and
+  R-VS-5 (§12) all have recorded regression/real-client evidence; R-VS-3's F5
+  limitation and R-VS-4's actual theme measurements are explicit.
 - **P1:** Build `TestSession`; verify askpass secrets are
   not logged; add missing real-UI scenarios; test resize reflow.
 - **P2:** Fix keymap rule checks; resolve detail-level mismatch; authoritative
@@ -1193,7 +1194,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       `?`/`j` still move the cursor (assert `cursor` changes before idle).
       *Done when:* no `vim.wait` remains outside tests and `debug.lua`;
       `make test` and `make ui-test` green.
-- [ ] R-NV-2 **One view manager** (§11.1 finding 2): replace the three parallel
+- [x] R-NV-2 **One view manager** (§11.1 finding 2): replace the three parallel
       implementations (`init.lua` status, `menu.lua`, `edit.lua`) of
       render/keymap/press/invoke/resync/pending-queue with one `view.lua`
       keyed by `viewId`, driven only by the `ViewDescriptor` (placement
@@ -1524,7 +1525,7 @@ proof or a claim that unchecked client/Phase 4–9 work is complete.
 | Runner | Deliberately retain synchronous `GitRepo`/`std::process` in `spawn_blocking` rather than API-wide Tokio rewrite without behavioural gain. `RepoLocks` serialises mutations; reads remain concurrent; cancellable work-done progress and bounded invocation log. Thread-local `CancelHandle` kills by PID (`kill -KILL`, no libc), consumes cancellation so failure can refresh. Debug-delay coverage gap → P2 ordering task. |
 | Process log | Read-only `runner::global_log()`, scope `process-log`, Main placement; status-scoped opener uses normal views. Sole command `process-log.clear`. Monotonic record IDs and `Node.copy = git <args>` support identity-based copy/refresh; no new tokens. |
 | Bridge core | `--editor-helper <path>` sends `{editId,path,kind}` on per-process Unix socket, waits for `{ok}`. No session/repo lock during Git's editor wait; create returns immediately, confirm/cancel answers edit ID, worker later sends render/effects. Fake Rust client milestone; real clients/askpass → R-3.4b, full commit flow → R-4.1; other edit kinds not emitted then. |
-| Prompt protocol | Notification `view/prompt`, request `view/promptRespond` returning null, avoiding nested client requests. Worker std mpsc wait, not Tokio; sync `CommandCtx` carries `&dyn PromptUi`, convenience session methods use `NullUi`, UI-aware mode variants exist. Reader text/path/date/number/ref/commit use text; Choice empty items + `allowCustom:true`. Cancel: no change/render; Quit closes all views. |
+| Prompt protocol | Notification `view/prompt`, request `view/promptRespond` returning null, avoiding nested client requests. Worker std mpsc wait, not Tokio; sync `CommandCtx` carries `&dyn PromptUi`, convenience session methods use `NullUi`, UI-aware mode variants exist. Reader text/path/date/number/ref/commit use text; Choice empty items + `allowCustom:true`. Cancel: no change/render. `common.quit` on a nested view is a server-side pop to the existing parent; at the root it retains the established close-all behavior. |
 | Build footprint | Line-table debug info and disabled incremental builds followed disk exhaustion; keep `target/` small. |
 
 ---
@@ -1535,6 +1536,15 @@ proof or a claim that unchecked client/Phase 4–9 work is complete.
 
 Review-time sizes: init 996, menu 564, debug 423, keys 326, edit 224 (in
 progress), prompt 193, keymap 194 lines. Findings map to canonical §7 tickets:
+Accepted R-NV-2 sizes: init 385, view 1068, menu 98, edit 139, buffer 154,
+effects 88, highlights 107; debug 423, keys 326, prompt 193, keymap 194.
+The Lua suite, Rust tests, UI unit suite, all 18 UI scenarios, and all 3 tour
+scenarios passed. `process-log` and `multiple-views` passed both profiles at
+100x30 and 80x24. Inspected screens show the visible `git apply` entry and the
+staged status restored after nested quit. The nested-quit regression confirms
+the existing parent view and root close-all contract. Full evidence is recorded
+in `tmp-task.md`.
+
 1. Blocking key/invoke/open and re-entrant waits → R-NV-1.
 2. Triplicated view plumbing and status singleton → R-NV-2.
 3. Always-loaded instrumentation (~35 calls) → R-NV-3.
@@ -1586,7 +1596,8 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
     have unit guard evidence only; foreign Tab/F5 are not claimed. Exact input,
     request counts and screenshot names are recorded in `clients/vscode/NOTES.md`.
     Physical F5 separately produced no request/render; its cause is unproven.
-    R-VS-2/3/4 remain unchecked for first-open screenshot / F5 / theme gates.
+    R-VS-3 is since checked with its F5 limitation recorded; R-VS-4 has since
+    been verified with actual theme measurements; R-VS-2 is verified separately.
     Only the unique isolated host was stopped; no orphan server remains.
   - **Original finding:** editor bindings swallowed Enter in foreign widgets.
   - **Scope:** require editor text focus in canonical generated bindings and
@@ -1610,7 +1621,7 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
     they are away (expected today 16:30 NZDT). Details and evidence paths are
     in `clients/vscode/NOTES.md`.
 
-- [ ] **[P0] R-VS-2 — Fix virtual status opening blank or as a temporary file**
+- [x] **[P0] R-VS-2 — Fix virtual status opening blank or as a temporary file**
   - **Finding:** opening status first displays a blank editor; opening it a
     second time shows only a temporary filename instead of the status view.
   - **Change:** trace the initial open/render/virtual-document lifecycle in the
@@ -1628,9 +1639,22 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
     still appears with no temporary filename-only editor.
   - **Done when:** regression tests pass and the described behavior is verified
     in the actual VSCode UI without any status document on disk.
+  - **Verified (2026-10-24):** exact ticket chain exited 0 (21 Node tests, 300
+    Rust tests, 61 Neovim cases, real Neovim UI 16 PASS / 1 unchanged XFAIL /
+    0 FAIL). Isolated Extension Development Host evidence:
+    `/tmp/opencode/vscode-review-K6aS1m/` (`r-vs-2-evidence.json`,
+    `r-vs-2-first-open.png`, `r-vs-2-reopen.png`, `r-vs-2-refresh.png`).
+    First open matched the received server render on `magit://v1/Status` with a
+    `Status` tab; sequential plus two concurrent opens sent no additional
+    `view/open` and kept one tab/URI/text; `g` refreshed the same URI and made
+    `+after-return` visible. Workspace files were unchanged before/after; no
+    `repo/Status` file or file-scheme document existed. All three screenshots
+    were inspected. No commit was created; R-VS-5 evidence was preserved.
   - **Status:** user confirms status appearance and duplicate-open are fixed;
-    retain the regression and recorded Extension Development Host evidence gate.
-- [ ] **[P0] R-VS-3 — Expose generic server commands and restore defaults**
+    regression and actual-host evidence gates now pass. R-VS-3 has since been
+    checked with its F5 host limitation recorded; R-VS-4 has since been checked
+    with its theme/token gate.
+- [x] **[P0] R-VS-3 — Expose generic server commands and restore defaults**
   - **Resolution:** repository bindings use `magit.invoke` with canonical server
     IDs; missing `magit.refresh` / `magit.toggle-fold` came from external
     edamagit/user binding conflicts. The user confirms "That was the issue."
@@ -1658,7 +1682,31 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
     omitted args; Rust validates contributed payloads against the registry.
     Generation now defaults to `cargo run` (explicit `MAGIT_LSP_BIN` override).
     This is not the remaining actual-VSCode UI acceptance evidence.
-- [ ] **[P0] R-VS-4 — Restore semantic highlighting and theme integration**
+  - **Verified (2026-10-24):** exact ticket chain exited 0 (22 Node tests, 300
+    Rust tests, 61 Neovim cases, real Neovim UI 16 PASS / 1 unchanged XFAIL /
+    0 FAIL). Isolated Extension Development Host evidence:
+    `/tmp/opencode/vscode-review-wdkMOI/` (`r-vs-3-evidence.json`, request
+    traces, 20 PNGs, `f5-host-input-repro.txt`, `f5-host-input-xev.log`).
+    Gates: `magit.invoke` is the only generic dispatcher and all 164 contributed
+    bindings use it with canonical server IDs; the manifest contributes no
+    per-action command (no `magit.refresh`, `magit.toggle-fold`,
+    `magit.show-section`); `common.hide-section` / `common.show-section` with
+    opaque `{recursive:true}` folded and restored the server text unchanged;
+    `status.stage-all` through the dispatcher staged `tracked.txt` visibly and
+    `status.unstage-all` restored the repository; physical `Tab` folded and
+    restored the status section (plus mirrored `ctrl+alt+]`); physical `g`
+    refreshed the same server-owned view and showed `+after-return`.
+    Physical F5 is **not claimed**: this host's input stack delivers it as
+    Alt+F5, so it matched no plain `f5` binding and sent no request, while the
+    `g` control in the same focus rendered immediately. The identical F5
+    contribution and the `standard` profile's `refresh = ["g", "F5"]` are
+    recorded; `g` is Magit's canonical refresh key and satisfies the refresh
+    gate. All inspected screenshots, counts and the verbatim F5 limitation are
+    in `clients/vscode/NOTES.md`. No product shortcut, context key, extension
+    source or user configuration was changed; no commit was created.
+  - **Status:** checked on the recorded evidence above with the F5 host
+    limitation explicit. R-VS-4 has since been checked for its theme/token gate.
+- [x] **[P0] R-VS-4 — Restore semantic highlighting and theme integration**
   - **Finding:** VSCode status views have no colours or formatting.
   - **Change:** restore the LSP semantic-token path and VSCode theme
     integration for server-provided token types, using contributed semantic
@@ -1674,6 +1722,24 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
     visibly styled and follows the active theme.
   - **Done when:** regression tests pass and the actual VSCode UI confirms
     semantic highlighting and theme integration.
+  - **Verified (2026-10-24):** exact ticket chain exited 0 (23 Node tests, 300
+    Rust tests, 61 Neovim cases, real Neovim UI 16 PASS / 1 unchanged XFAIL /
+    0 FAIL). Isolated Extension Development Host evidence:
+    `/tmp/opencode/vscode-review-JQ3MsM/` (`r-vs-4-evidence.json`,
+    `r-vs-4-theme-dark.png`, `r-vs-4-theme-light.png`,
+    `r-vs-4-theme-dark-restored.png`). The host requested the server's
+    `textDocument/semanticTokens/full` 6 times for the server view URI; the
+    decoded server ranges identified section, added and removed spans, whose
+    actual computed styles were measured. Dark Modern: default `rgb(204,204,204)`,
+    sections `rgb(78,201,176)`, deletions `rgb(206,145,120)`, additions
+    `rgb(181,206,168)`. Light Modern: default `rgb(59,59,59)`, sections
+    `rgb(38,127,153)`, deletions `rgb(163,21,21)`, additions `rgb(9,134,88)`;
+    restoring Dark Modern returned each exact dark value. The server text was
+    identical before, during and after the switch and equalled the received
+    `view/render`. The unit test asserts the status token mappings and declared
+    types; no `package.json` change was needed. The theme repaint is
+    asynchronous, so the driver waits for painted spans instead of a fixed
+    delay. All screenshots were inspected. No commit was created.
 
 #### VSCode resolution and evidence (2026-10-24)
 
@@ -1681,17 +1747,19 @@ Human evidence: Ctrl+P Enter works; status appearance and duplicate-open are
 fixed; the commit menu works quickly. Refresh/fold command-not-found was the
 identified external edamagit/user binding conflict, confirmed by the user.
 These are resolved functional findings, not proof of automated acceptance.
-R-VS-2…R-VS-5 remain unchecked only for their stated regression/UI evidence
-gates; R-VS-4 still needs explicit theme/token verification beyond appearance.
+R-VS-2, R-VS-3, R-VS-4 and R-VS-5 now have recorded
+regression/actual-host evidence; R-VS-4's theme/token gate was measured from
+rendered spans across a dark/light theme switch. R-VS-3's physical-F5 attempt is
+a recorded host limitation, not a substituted or claimed success.
 Keep the client thin: server text/structure verbatim, generic invocation.
 
 Earlier runs hit tmux's inherited-environment command-length limit; the
-sanitized chain later passed as recorded under R-VS-3. Isolated VSCode runs
-timed out on picker/render/token/F5 waits, so no complete successful automated
-VSCode run is claimed. Tab and generic invocation were captured in one host;
-the isolated physical-F5 interception remains unproven, distinct from the
-user-confirmed external conflict. The read-only audit changed no user config
-or editor processes. `clients/vscode/NOTES.md` retains raw audit paths/run
+sanitized chain later passed as recorded under R-VS-3. Earlier isolated VSCode
+runs timed out on picker/render/token/F5 waits; the later R-VS-2/R-VS-3/R-VS-4/
+R-VS-5 runs completed and their evidence is recorded in `NOTES.md`. The isolated
+physical-F5 interception remains unproven, distinct from the user-confirmed
+external conflict. The read-only audit changed no user config or editor
+processes. `clients/vscode/NOTES.md` retains raw audit paths/run
 details; its earlier uncertainty about the user's conflict is superseded by
 this confirmation, not a new open root-cause investigation.
 
@@ -1727,19 +1795,19 @@ Completed P1 review work (historical tracking, not new verification):
   - **Done when:** the test fails if the answer is passed to `tracing::debug!`.
   - **Constraints:** do not print the secret in assertion messages.
 
-- [ ] **[P1] Add missing real-UI scenarios** (`tests/ui/scenarios/`)
+- [x] **[P1] Add missing real-UI scenarios** (`tests/ui/scenarios/`)
   - **Problem:** §7's rule "every task that opens a new view adds a scenario" and "UI-affecting tasks are not done until a `.scn` drove the UI" is unmet for: R-3.3 process log view; R-3.1 menu option prompt; staging/unstage/fold/visual/refused-edit basics (R-1.x/R-2.4); the R-UI-5 unstaged-only confirm ("Nothing staged. Stage all changes and commit?"). `no-readonly-warning.scn` only checks no W10 and never proves an edit is refused.
   - **Change:** add `process-log.scn` (stage a hunk, open the process log with `$`/`g $`, expect `git apply` on screen, `q` returns to status), `option-prompt.scn` (`c`, `=A`, answer the prompt, expect `--author=` on screen), `status-basics.scn` (stage `s`, unstage `u`, `Tab` fold, visual `V s`, then a native edit like `J` leaves the screen unchanged), `commit-confirm.scn` (`c c` with unstaged only, answer `n` then `y`). Under both profiles and sizes unless an opt-out is justified in a header comment.
   - **Done when:** `make ui-test` passes with the four new scenarios and writes their `.screen` files.
   - **Constraints:** no `sleep`; use `wait`. Do not add wall-clock assertions.
 
-- [ ] **[P1] Test `view/resize` reflow** (no test exists; `src/session.rs`, `src/menu.rs`)
+- [x] **[P1] Test `view/resize` reflow** (no test exists; `src/session.rs`, `src/menu.rs`)
   - **Problem:** R-2.7 says menu layout is "re-flowed on `view/resize`"; `grep resize tests/` is empty.
   - **Change:** in `tests/menu.rs` (or the new `TestSession`) open the commit menu at 140 cols, send the resize through the real session/server entry point to 60, and assert the resulting render's text (after applying edits) equals `menus::named("commit").render(Viewport{cols:60,..})`. Add one stdio check that the `view/resize` notification yields a `view/render` with `baseVersion`.
   - **Done when:** removing the resize handler fails the test.
   - **Constraints:** reuse the existing snapshots, add none.
 
-- [ ] **[P2] Fix the vacuous R4 check and add rule tests** (`tests/keymap.rs:113-127`)
+- [x] **[P2] Fix the vacuous R4 check and add rule tests** (`tests/keymap.rs:113-127`)
   - **Problem:** the forbidden set contains `"gg"` but canonical chords are space-separated (`"g g"`), so it never matches. Only whole chords are compared, so a `g g` or `ctrl+d <x>` chord is not caught. Rules R2, R3, R6 have no test.
   - **Change:** use `"g g"`; also compare `chord.steps()[0]` for single-key motions; extract the check into a function and add an injected-key negative test (like `tests/manifest.rs:216`). Add small tests: standard `common.confirm=Enter`, `common.cancel` contains `Escape`; `ctrl+c` is cancel in every non-editable scope (R6).
   - **Done when:** adding `g g` to the vim profile (temporarily) fails the suite.
