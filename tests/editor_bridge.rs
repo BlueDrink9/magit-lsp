@@ -299,6 +299,220 @@ fn a_cancel_creates_no_commit() {
     assert!(exit.success(), "server exited: {exit:?}");
 }
 
+/// The processes holding a pending edit: Git's commit and its editor helper.
+///
+/// Both carry the edit id the server injected into their environment, so they
+/// are exactly the processes this test owns through its own server. Git may
+/// also run the helper through `sh -c`, which execs and keeps the same pid.
+struct OwnedEdit {
+    edit_id: String,
+    socket: PathBuf,
+    pids: Vec<u32>,
+}
+
+impl OwnedEdit {
+    /// Release the ownership once every process ended by itself.
+    fn finished(&mut self) {
+        self.pids.clear();
+    }
+}
+
+impl Drop for OwnedEdit {
+    fn drop(&mut self) {
+        if self.pids.is_empty() {
+            // Every process ended by itself before the assertions ran.
+            return;
+        }
+        for pid in std::mem::take(&mut self.pids) {
+            // Re-verify the identity before killing: a pid may have been
+            // reused by an unrelated process since it was recorded.
+            let environ = std::fs::read(format!("/proc/{pid}/environ"));
+            if matches!(&environ, Ok(bytes) if owned_environ(bytes, &self.edit_id, &self.socket)) {
+                kill_pid(pid);
+            }
+        }
+        // A failed run must never leave a Git commit or a helper waiting on a
+        // dead socket behind, so wait until every owned process is really gone.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match edit_processes(&self.edit_id, &self.socket) {
+                Ok(processes) if processes.is_empty() => return,
+                Ok(_) => {}
+                Err(warning) => {
+                    eprintln!("warning: {warning}");
+                    return;
+                }
+            }
+            if Instant::now() >= deadline {
+                eprintln!(
+                    "warning: owned processes for edit {:?} survived the cleanup guard",
+                    self.edit_id
+                );
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+/// Kill one owned process; only this test's own Git and helper need it.
+fn kill_pid(pid: u32) {
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+}
+
+/// The environments of the processes carrying the edit id and socket path.
+///
+/// The socket path is part of the match: edit ids restart at `e1` in every
+/// server process, so an id alone cannot distinguish this test's Git and
+/// helper processes from another server's. A missing or unreadable `/proc`
+/// is a hard error, never a silent pass.
+fn owned_environ(environ: &[u8], edit_id: &str, socket: &Path) -> bool {
+    let id_marker = format!("MAGIT_LSP_EDIT_ID={edit_id}\0");
+    let socket_marker = format!("MAGIT_LSP_SOCKET={}\0", socket.to_string_lossy());
+    let (id_marker, socket_marker) = (id_marker.as_bytes(), socket_marker.as_bytes());
+    let carries = |marker: &[u8]| environ.windows(marker.len()).any(|w| w == marker);
+    carries(id_marker) && carries(socket_marker)
+}
+
+/// A live process carrying the markers: its pid and its command line.
+struct OwnedProcess {
+    pid: u32,
+    command: String,
+}
+
+/// The processes whose environment carries the edit id and socket path.
+fn edit_processes(edit_id: &str, socket: &Path) -> Result<Vec<OwnedProcess>, String> {
+    let mut processes = Vec::new();
+    let entries =
+        std::fs::read_dir("/proc").map_err(|error| format!("cannot inspect /proc: {error}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(environ) = std::fs::read(entry.path().join("environ")) else {
+            continue;
+        };
+        if owned_environ(&environ, edit_id, socket) {
+            let command = std::fs::read_to_string(entry.path().join("cmdline"))
+                .map(|command| command.replace('\0', " "))
+                .unwrap_or_default();
+            processes.push(OwnedProcess {
+                pid: name.parse().expect("a numeric pid"),
+                command,
+            });
+        }
+    }
+    Ok(processes)
+}
+
+/// Wait until both the Git commit and its editor helper are running.
+fn wait_for_edit_processes(edit_id: &str, socket: &Path) -> OwnedEdit {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let processes = edit_processes(edit_id, socket).expect("/proc inspection");
+        let has_git = processes
+            .iter()
+            .any(|process| process.command.contains(" commit ") || process.command.ends_with(" commit"));
+        let has_helper = processes
+            .iter()
+            .any(|process| process.command.contains("--editor-helper"));
+        if has_git && has_helper {
+            return OwnedEdit {
+                edit_id: edit_id.to_string(),
+                socket: socket.to_path_buf(),
+                pids: processes.into_iter().map(|p| p.pid).collect(),
+            };
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no Git commit was running for the edit {edit_id:?}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The client leaving (stdin closed) must abort the pending edit so Git never
+/// hangs: the server ends on its own, the Git commit and its editor helper end
+/// by themselves, no commit was created, and the staged change survives (§3.10
+/// step 7).
+///
+/// `close_stdin` is the same EOF every real client produces, so this observes
+/// the natural shutdown rather than a killed process. The owned Git commit and
+/// its helper are watched by pid, so a server exit alone cannot count as the
+/// abort, and the assertion happens before any cleanup could fake a pass.
+#[test]
+fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
+    let (tmp, _repo) = staged_repo();
+    let before = tmp.git(&["status", "--porcelain"]);
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let repo = json!(tmp.path().to_string_lossy());
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    let response = server.initialize(json!({}));
+    let socket = server.socket_path();
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "initialize response: {response}"
+    );
+
+    let status = open_status(&mut server, 2, &repo);
+    let _menu = invoke(&mut server, 3, &status, "open.commit", json!(null));
+
+    let edit = start_commit(&mut server, &status);
+    let edit_id = edit["editId"].as_str().expect("edit id").to_string();
+    let path = edit["path"].as_str().expect("edit path");
+    write(Path::new(path), "Never confirmed\n");
+
+    let mut owned = wait_for_edit_processes(&edit_id, &socket);
+    assert!(
+        !owned.pids.is_empty(),
+        "no Git commit was running for the edit {edit_id:?}"
+    );
+
+    // The client is gone: close its input and let the server end by itself.
+    server.close_stdin();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let server_gone = server.try_wait().is_some();
+        let git_gone = edit_processes(&edit_id, &socket)
+            .expect("/proc inspection")
+            .is_empty();
+        if server_gone && git_gone {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the Git commit or its editor helper outlived the disconnect"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    // Every process ended by itself; the guard must not kill anything now.
+    owned.finished();
+
+    assert_eq!(
+        tmp.git(&["log", "-1", "--format=%B"]).trim(),
+        "init",
+        "no new commit was created"
+    );
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]),
+        before_head,
+        "HEAD did not move"
+    );
+    assert_eq!(
+        tmp.git(&["status", "--porcelain"]),
+        before,
+        "the staged change survives the disconnect"
+    );
+
+    let exit = server.finish(Duration::from_secs(20));
+    assert!(exit.success(), "server exited: {exit:?}");
+}
+
 /// The bridge socket path, from a server log file at `path`.
 fn socket_path_in_log(path: &Path) -> PathBuf {
     let deadline = Instant::now() + Duration::from_secs(20);

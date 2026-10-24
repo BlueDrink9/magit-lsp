@@ -659,7 +659,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 ));
             }
             Ok(Some(Message::Notification(notification))) => match notification.method.as_str() {
-                "exit" => break if shutdown_requested { 0 } else { 1 },
+                "exit" => {
+                    // The client is going away: a pending edit can never be
+                    // answered, so abort it and let the worker (and Git)
+                    // finish instead of hanging (§3.10 step 7).
+                    editor::registry().abort_all();
+                    break if shutdown_requested { 0 } else { 1 };
+                }
                 // Acks and resizes update session state; they never answer.
                 "view/rendered" | "view/resize" => {
                     for message in handle_view_notification(&shared, &notification) {
@@ -691,7 +697,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 _ => {}
             },
             Ok(Some(Message::Response(_))) => {}
-            Ok(None) => break 0,
+            Ok(None) => {
+                // The client disconnected without a goodbye: every pending
+                // edit must abort so Git never hangs (§3.10 step 7), and the
+                // commit worker can then finish and release the writer.
+                editor::registry().abort_all();
+                break 0;
+            }
             Err(error) => {
                 return Err(Error::new(format!("failed to read LSP message: {error}")));
             }

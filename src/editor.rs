@@ -130,6 +130,18 @@ impl EditRegistry {
         self.lock().remove(edit_id);
     }
 
+    /// Abort every pending edit: the client is gone, so Git must never hang.
+    ///
+    /// A helper that already connected receives the abort reply and Git aborts
+    /// (§3.10 step 7); an entry no helper connected to is dropped, so the
+    /// helper fails fast once it finally connects.
+    pub fn abort_all(&self) {
+        let ids: Vec<String> = self.lock().keys().cloned().collect();
+        for edit_id in ids {
+            self.resolve(&edit_id, Reply::Abort);
+        }
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, EditEntry>> {
         self.entries
             .lock()

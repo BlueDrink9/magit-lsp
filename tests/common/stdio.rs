@@ -150,6 +150,11 @@ impl TestServer {
         self.stdin.take();
     }
 
+    /// Poll for the server's exit without blocking.
+    pub fn try_wait(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().expect("poll server")
+    }
+
     /// Wait for exit, killing the process on timeout.
     pub fn wait_timeout(&mut self, timeout: Duration) -> ExitStatus {
         let deadline = Instant::now() + timeout;
