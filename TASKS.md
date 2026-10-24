@@ -892,8 +892,9 @@ meant to be committed as the first version; edit freely.
 | `common.toggle-section` | `Tab` | `Tab`, `z a` |
 | `common.show-section` / `hide-section` | — | `z o` / `z c` |
 | `common.cycle-visibility` (all sections) | `shift+Tab` | `shift+Tab` |
-| `common.show-all` / `hide-all` | `alt+4` / `alt+1` | `z R` / `z M` |
-| `common.more-detail` / `less-detail` | `alt+3`, `alt+2` set levels (see note) | `z r` / `z m` |
+| `common.show-all` / `hide-all` | unbound | `z R` / `z M` |
+| `common.more-detail` / `less-detail` | unbound | `z r` / `z m` |
+| `common.detail-level-1` … `detail-level-4` | `alt+1` … `alt+4` | unbound |
 | `common.next-section` / `prev-section` | `n` / `p` | `] ]` / `[ [` |
 | `common.next-sibling` / `prev-sibling` | `alt+ArrowDown` / `alt+ArrowUp` | `g j` / `g k` |
 | `common.parent-section` | `alt+ArrowLeft` | `g u` |
@@ -902,10 +903,12 @@ meant to be committed as the first version; edit freely.
 | `common.visit` | `Enter` | `Enter` |
 | `open.dispatch` (help / menu of menus) | `?` | `g ?` |
 
-Visibility has four levels: section (staged/unstaged) → files → hunks →
-individually visible hunks. `standard` binds `alt+1` … `alt+4` to set level N;
-`vim` uses `z m`/`z r` to step the level down/up. §5.1, profile bindings and
-tests must agree with this hierarchy.
+Visibility has four levels: section headers → file headers → hunk headers
+(without body lines) → individually expanded hunk bodies. The four
+`common.detail-level-N` actions set an absolute level; `standard` binds
+`alt+1` … `alt+4` to these actions. `vim` uses `z m`/`z r` to step down/up
+and `z M`/`z R` to hide/show extremes. These are server-owned visibility
+actions; clients do not infer structure or key-specific state.
 
 ### 5.2 `status` scope (also used by diff-like views for staging)
 
@@ -1813,11 +1816,12 @@ Completed P1 review work (historical tracking, not new verification):
   - **Done when:** adding `g g` to the vim profile (temporarily) fails the suite.
   - **Constraints:** do not edit the shipped profiles.
 
-- [ ] **[P2] Resolve the spec/impl mismatch on detail levels** (`tests/visibility.rs:232-331`, §5.1)
+- [x] **[P2] Resolve the spec/impl mismatch on detail levels** (`tests/visibility.rs:232-331`, §5.1)
   - **Problem:** §5.1 defines levels 1-4 and `alt+1..4`; implementation and test have three levels (AGENTS says 1-3).
    - **Decision:** retain four levels: section (staged/unstaged) → files → hunks → individually visible hunks. Align §5.1, shipped profile bindings and tests with this model.
-  - **Done when:** spec text, profile bindings and test agree.
+  - **Done when:** spec text, profile bindings and test agree on all four visible levels.
   - **Constraints:** no change to unrelated visibility behaviour.
+  - **Verified (2026-10-24):** focused visibility/keymap tests, clean-environment `make test` (64 Neovim cases), `make ui-test` (19 PASS, 0 FAIL), and VSCode generated bindings check (164 bindings) passed. The detail-level scenario sends real `M-3`/`M-4` keys for standard and `z m`/`z r` for Vim. Inspected `build/ui/detail-levels/{standard,vim}-{80x24,100x30}/hunk-{headers,bodies}.screen`: headers retain `@@` without bodies; expanded screens show `+line3 CHANGED`. Full verification output: `/tmp/opencode/detail-levels-verification.log`.
 
 - [ ] **[P2] Make `PARITY_KEYS` authoritative, not circular** (`tests/menus.rs:166-301`)
   - **Problem:** the list was written alongside the menus and "corrected here" to match them (TASKS §10: keys partly from memory). It covers about 120 of 355 rows.

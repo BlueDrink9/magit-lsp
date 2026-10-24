@@ -36,7 +36,10 @@ fn every_profile_parses_and_covers_every_command() {
         for (scope, scope_keys) in &keys.scopes {
             for name in scope_keys.commands.keys() {
                 let id = command_for_key(scope, name).unwrap_or_else(|| {
-                    panic!("{}: `{name}` in scope `{scope}` is not a command", profile.as_str())
+                    panic!(
+                        "{}: `{name}` in scope `{scope}` is not a command",
+                        profile.as_str()
+                    )
                 });
                 declared.insert(id.to_string());
             }
@@ -83,8 +86,8 @@ fn profile_chords(profile: Profile) -> Vec<KeyChord> {
 
 fn vim_rule_violation(chords: &[KeyChord]) -> Option<String> {
     let reserved_motions: BTreeSet<KeyStep> = [
-        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "h",
-        "j", "k", "l", "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
+        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "h", "j", "k", "l",
+        "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
     ]
     .into_iter()
     .map(|key| KeyChord::parse(key).expect("reserved key parses").steps()[0].clone())
@@ -175,7 +178,10 @@ fn profiles_follow_r2_mnemonics_for_status_operations() {
     ];
     // §10 documents Vim's `g l` exception to §5.2: native `l` stays a motion.
     for (profile, log_key) in [(Profile::Standard, "l"), (Profile::Vim, "g l")] {
-        let config = Config { profile, ..Default::default() };
+        let config = Config {
+            profile,
+            ..Default::default()
+        };
         let map = Keymap::resolve("status", profile, &config).expect("status resolves");
         for (command, key) in expected.into_iter().chain([("open.log", log_key)]) {
             assert_eq!(
@@ -190,10 +196,52 @@ fn profiles_follow_r2_mnemonics_for_status_operations() {
 
 #[test]
 fn standard_resolved_common_confirm_and_cancel_use_direct_keys() {
-    let config = Config { profile: Profile::Standard, ..Default::default() };
+    let config = Config {
+        profile: Profile::Standard,
+        ..Default::default()
+    };
     let map = Keymap::resolve("common", Profile::Standard, &config).unwrap();
     assert_eq!(map.command("common.confirm").unwrap().keys, vec!["Enter"]);
-    assert!(map.command("common.cancel").unwrap().keys.contains(&"Escape".to_string()));
+    assert!(map
+        .command("common.cancel")
+        .unwrap()
+        .keys
+        .contains(&"Escape".to_string()));
+}
+
+#[test]
+fn detail_level_keys_are_absolute_in_standard_and_stepwise_in_vim() {
+    let standard = Keymap::resolve(
+        "common",
+        Profile::Standard,
+        &Config {
+            profile: Profile::Standard,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    for level in 1..=4 {
+        assert_eq!(
+            standard
+                .command(&format!("common.detail-level-{level}"))
+                .unwrap()
+                .keys,
+            vec![format!("alt+{level}")]
+        );
+    }
+    let vim = Keymap::resolve(
+        "common",
+        Profile::Vim,
+        &Config {
+            profile: Profile::Vim,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(vim.command("common.more-detail").unwrap().keys, vec!["z r"]);
+    assert_eq!(vim.command("common.less-detail").unwrap().keys, vec!["z m"]);
+    assert_eq!(vim.command("common.show-all").unwrap().keys, vec!["z R"]);
+    assert_eq!(vim.command("common.hide-all").unwrap().keys, vec!["z M"]);
 }
 
 #[test]
@@ -202,7 +250,10 @@ fn ctrl_c_is_cancel_in_every_non_editable_scope_for_both_profiles() {
     // intentionally not cancel because standard editors use it to copy.
     for profile in [Profile::Standard, Profile::Vim] {
         for scope in ["common", "status", "select", "menu", "process-log"] {
-            let config = Config { profile, ..Default::default() };
+            let config = Config {
+                profile,
+                ..Default::default()
+            };
             let map = Keymap::resolve(scope, profile, &config)
                 .unwrap_or_else(|error| panic!("{} {scope}: {error}", profile.as_str()));
             let cancel = map.command("common.cancel").unwrap_or_else(|| {
@@ -211,7 +262,8 @@ fn ctrl_c_is_cancel_in_every_non_editable_scope_for_both_profiles() {
             assert!(
                 cancel.keys.iter().any(|key| key == "ctrl+c"),
                 "{} {scope}: ctrl+c must resolve to common.cancel; got {:?}",
-                profile.as_str(), cancel.keys
+                profile.as_str(),
+                cancel.keys
             );
             let steps = KeyChord::parse("ctrl+c").unwrap().steps().to_vec();
             for mode in [EditorMode::Normal, EditorMode::Visual] {
@@ -258,7 +310,12 @@ fn dispatch_is_reachable_from_status_under_both_profiles() {
         let binding = map
             .command("open.dispatch")
             .unwrap_or_else(|| panic!("{}: open.dispatch is bound in status", profile.as_str()));
-        assert_eq!(binding.keys, expected, "{}: status dispatch keys", profile.as_str());
+        assert_eq!(
+            binding.keys,
+            expected,
+            "{}: status dispatch keys",
+            profile.as_str()
+        );
 
         for key in expected {
             let steps = KeyChord::parse(key).unwrap().steps().to_vec();

@@ -71,9 +71,13 @@ impl Scope {
 pub enum CommandStatus {
     Implemented,
     /// Listed but not built yet; the roadmap item it will arrive with.
-    Planned { roadmap_id: &'static str },
+    Planned {
+        roadmap_id: &'static str,
+    },
     /// The backend cannot do this; the reason is shown instead.
-    Unavailable { reason: &'static str },
+    Unavailable {
+        reason: &'static str,
+    },
 }
 
 /// A synchronous command handler.
@@ -309,6 +313,34 @@ fn build() -> Registry {
             run: less_detail,
         },
         Command {
+            id: "common.detail-level-1",
+            scope: Scope::Common,
+            doc: "Show section headers only",
+            status: CommandStatus::Implemented,
+            run: detail_level_1,
+        },
+        Command {
+            id: "common.detail-level-2",
+            scope: Scope::Common,
+            doc: "Show section and file headers",
+            status: CommandStatus::Implemented,
+            run: detail_level_2,
+        },
+        Command {
+            id: "common.detail-level-3",
+            scope: Scope::Common,
+            doc: "Show hunk headers",
+            status: CommandStatus::Implemented,
+            run: detail_level_3,
+        },
+        Command {
+            id: "common.detail-level-4",
+            scope: Scope::Common,
+            doc: "Show hunk bodies",
+            status: CommandStatus::Implemented,
+            run: detail_level_4,
+        },
+        Command {
             id: "common.next-section",
             scope: Scope::Common,
             doc: "Move to the next section",
@@ -380,7 +412,12 @@ fn build() -> Registry {
             "Cycle the visibility of every section",
             "R-2.3",
         ),
-        planned("common.next-sibling", Scope::Common, "Move to the next sibling", "R-2.3"),
+        planned(
+            "common.next-sibling",
+            Scope::Common,
+            "Move to the next sibling",
+            "R-2.3",
+        ),
         planned(
             "common.prev-sibling",
             Scope::Common,
@@ -407,10 +444,30 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: copy_value,
         },
-        planned("common.visit", Scope::Common, "Visit the thing at point", "R-2.3"),
-        planned("status.discard", Scope::Status, "Discard the change at point", "R-3.6"),
-        planned("status.reverse", Scope::Status, "Reverse-apply the change at point", "R-3.6"),
-        planned("status.apply", Scope::Status, "Apply the change at point", "R-8.2"),
+        planned(
+            "common.visit",
+            Scope::Common,
+            "Visit the thing at point",
+            "R-2.3",
+        ),
+        planned(
+            "status.discard",
+            Scope::Status,
+            "Discard the change at point",
+            "R-3.6",
+        ),
+        planned(
+            "status.reverse",
+            Scope::Status,
+            "Reverse-apply the change at point",
+            "R-3.6",
+        ),
+        planned(
+            "status.apply",
+            Scope::Status,
+            "Apply the change at point",
+            "R-8.2",
+        ),
         Command {
             id: "open.dispatch",
             scope: Scope::Common,
@@ -454,14 +511,23 @@ fn build() -> Registry {
         menu("open.submodule", "Open the submodule menu", open_submodule),
         menu("open.worktree", "Open the worktree menu", open_worktree),
         menu("open.ignore", "Open the ignore menu", open_ignore),
-        menu("open.patch-apply", "Open the apply-patches menu", open_patch_apply),
+        menu(
+            "open.patch-apply",
+            "Open the apply-patches menu",
+            open_patch_apply,
+        ),
         menu(
             "open.patch-create",
             "Open the format-patches menu",
             open_patch_create,
         ),
         planned("open.refs", Scope::Status, "Open the refs view", "R-5.3"),
-        planned("open.cherries", Scope::Status, "Open the cherry view", "R-7.2"),
+        planned(
+            "open.cherries",
+            Scope::Status,
+            "Open the cherry view",
+            "R-7.2",
+        ),
         planned("open.run", Scope::Status, "Run a Git command", "R-8.2"),
         Command {
             id: "open.process-log",
@@ -785,7 +851,10 @@ fn quit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-fn apply_visibility(ctx: &mut CommandCtx<'_>, command: VisibilityCommand) -> Result<CommandOutcome> {
+fn apply_visibility(
+    ctx: &mut CommandCtx<'_>,
+    command: VisibilityCommand,
+) -> Result<CommandOutcome> {
     // Resolve against the acked tree, like every other action.
     let source = ctx
         .view
@@ -828,6 +897,22 @@ fn less_detail(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     apply_visibility(ctx, VisibilityCommand::LessDetail)
 }
 
+fn detail_level_1(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    apply_visibility(ctx, VisibilityCommand::SetDetail(1))
+}
+
+fn detail_level_2(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    apply_visibility(ctx, VisibilityCommand::SetDetail(2))
+}
+
+fn detail_level_3(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    apply_visibility(ctx, VisibilityCommand::SetDetail(3))
+}
+
+fn detail_level_4(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    apply_visibility(ctx, VisibilityCommand::SetDetail(4))
+}
+
 fn next_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome {
         cursor: section_cursor(ctx.view, ctx.cursor, true),
@@ -850,7 +935,10 @@ fn unstage(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     stage_or_unstage(ctx, dispatch::Command::Unstage)
 }
 
-fn stage_or_unstage(ctx: &mut CommandCtx<'_>, command: dispatch::Command) -> Result<CommandOutcome> {
+fn stage_or_unstage(
+    ctx: &mut CommandCtx<'_>,
+    command: dispatch::Command,
+) -> Result<CommandOutcome> {
     let selection = ctx.selection.map(|selection| dispatch::LineRange {
         start: selection.start_line as u32,
         end: selection.end_line as u32,

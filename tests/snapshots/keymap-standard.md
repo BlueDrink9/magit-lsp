@@ -8,10 +8,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -33,10 +37,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `status.stage` | `s` | implemented | Stage the change at point |
@@ -91,10 +99,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -118,10 +130,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -145,10 +161,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `common.cancel` | `ctrl+shift+x` | implemented | Cancel the current operation |
@@ -173,10 +193,14 @@
 | `common.toggle-section` | `Tab` | implemented | Fold or unfold the section at point |
 | `common.show-section` | (unbound) | implemented | Unfold the section at point |
 | `common.hide-section` | (unbound) | implemented | Fold the section at point |
-| `common.show-all` | `alt+4` | implemented | Unfold every section |
-| `common.hide-all` | `alt+1` | implemented | Fold every section |
-| `common.more-detail` | `alt+3` | implemented | Show one more level of detail |
-| `common.less-detail` | `alt+2` | implemented | Show one less level of detail |
+| `common.show-all` | (unbound) | implemented | Unfold every section |
+| `common.hide-all` | (unbound) | implemented | Fold every section |
+| `common.more-detail` | (unbound) | implemented | Show one more level of detail |
+| `common.less-detail` | (unbound) | implemented | Show one less level of detail |
+| `common.detail-level-1` | `alt+1` | implemented | Show section headers only |
+| `common.detail-level-2` | `alt+2` | implemented | Show section and file headers |
+| `common.detail-level-3` | `alt+3` | implemented | Show hunk headers |
+| `common.detail-level-4` | `alt+4` | implemented | Show hunk bodies |
 | `common.next-section` | `n` | implemented | Move to the next section |
 | `common.prev-section` | `p` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |

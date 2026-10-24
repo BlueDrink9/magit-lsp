@@ -24,26 +24,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
   },
@@ -51,7 +35,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'common' && !magit.textMode"
   },
@@ -192,26 +192,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
   },
@@ -219,7 +203,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
   },
@@ -624,26 +624,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
   },
@@ -651,7 +635,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'select' && !magit.textMode"
   },
@@ -808,26 +808,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
   },
@@ -835,7 +819,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'menu' && !magit.textMode"
   },
@@ -992,26 +992,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
   },
@@ -1019,7 +1003,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
   },
@@ -1160,26 +1160,10 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
   },
   {
-    "key": "alt+4",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.show-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
-  },
-  {
     "key": "alt+1",
     "command": "magit.invoke",
     "args": {
-      "command": "common.hide-all"
-    },
-    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
-  },
-  {
-    "key": "alt+3",
-    "command": "magit.invoke",
-    "args": {
-      "command": "common.more-detail"
+      "command": "common.detail-level-1"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
   },
@@ -1187,7 +1171,23 @@
     "key": "alt+2",
     "command": "magit.invoke",
     "args": {
-      "command": "common.less-detail"
+      "command": "common.detail-level-2"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "alt+3",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-3"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
+  },
+  {
+    "key": "alt+4",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.detail-level-4"
     },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'process-log' && !magit.textMode"
   },

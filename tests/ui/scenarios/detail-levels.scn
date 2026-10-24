@@ -1,0 +1,16 @@
+# Four status visibility levels: hunk headers are distinct from diff bodies.
+fixture: modified-two-files
+---
+wait
+keys standard: M-3
+keys vim: z m
+wait
+expect screen contains "@@"
+expect screen not-contains "+line3 CHANGED"
+snapshot: hunk-headers
+keys standard: M-4
+keys vim: z r
+wait
+expect screen contains "@@"
+expect screen contains "+line3 CHANGED"
+snapshot: hunk-bodies

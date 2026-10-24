@@ -27,26 +27,8 @@
     "scope": "common"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "common"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "common"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -55,7 +37,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "common"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"
@@ -207,26 +207,8 @@
     "scope": "status"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "status"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "status"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -235,7 +217,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "status"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"
@@ -684,26 +684,8 @@
     "scope": "select"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "select"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "select"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -712,7 +694,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "select"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"
@@ -882,26 +882,8 @@
     "scope": "menu"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "menu"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "menu"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -910,7 +892,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "menu"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"
@@ -1080,26 +1080,8 @@
     "scope": "commit-message"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "commit-message"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "commit-message"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -1108,7 +1090,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "commit-message"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"
@@ -1260,26 +1260,8 @@
     "scope": "process-log"
   },
   {
-    "lhs": "<A-4>",
-    "command": "common.show-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "process-log"
-  },
-  {
     "lhs": "<A-1>",
-    "command": "common.hide-all",
-    "modes": [
-      "normal",
-      "visual"
-    ],
-    "scope": "process-log"
-  },
-  {
-    "lhs": "<A-3>",
-    "command": "common.more-detail",
+    "command": "common.detail-level-1",
     "modes": [
       "normal",
       "visual"
@@ -1288,7 +1270,25 @@
   },
   {
     "lhs": "<A-2>",
-    "command": "common.less-detail",
+    "command": "common.detail-level-2",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<A-3>",
+    "command": "common.detail-level-3",
+    "modes": [
+      "normal",
+      "visual"
+    ],
+    "scope": "process-log"
+  },
+  {
+    "lhs": "<A-4>",
+    "command": "common.detail-level-4",
     "modes": [
       "normal",
       "visual"

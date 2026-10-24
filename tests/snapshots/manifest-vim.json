@@ -128,6 +128,58 @@
               "scope": "common"
             },
             {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
+              "group": "common",
+              "status": "implemented",
+              "scope": "common"
+            },
+            {
               "command": "common.next-section",
               "keys": [
                 "] ]"
@@ -430,6 +482,58 @@
               ],
               "label": "Show one less level of detail",
               "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "status"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
               "group": "common",
               "status": "implemented",
               "scope": "status"
@@ -1236,6 +1340,58 @@
               "scope": "select"
             },
             {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
+              "group": "common",
+              "status": "implemented",
+              "scope": "select"
+            },
+            {
               "command": "common.next-section",
               "keys": [
                 "] ]"
@@ -1573,6 +1729,58 @@
               "scope": "menu"
             },
             {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
+              "group": "common",
+              "status": "implemented",
+              "scope": "menu"
+            },
+            {
               "command": "common.next-section",
               "keys": [
                 "] ]"
@@ -1905,6 +2113,58 @@
               ],
               "label": "Show one less level of detail",
               "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "commit-message"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
               "group": "common",
               "status": "implemented",
               "scope": "commit-message"
@@ -2255,6 +2515,58 @@
               ],
               "label": "Show one less level of detail",
               "doc": "Show one less level of detail",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.detail-level-1",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "doc": "Show section headers only",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "doc": "Show section and file headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "doc": "Show hunk headers",
+              "group": "common",
+              "status": "implemented",
+              "scope": "process-log"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "doc": "Show hunk bodies",
               "group": "common",
               "status": "implemented",
               "scope": "process-log"

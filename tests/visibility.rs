@@ -187,19 +187,45 @@ fn detail_levels_and_recursive_toggles_control_the_visible_tree() {
     assert!(count_kind(test.tree(), NodeKind::File) > 0);
     assert_eq!(count_kind(test.tree(), NodeKind::Hunk), 0);
 
-    // Level 3: hunks and diff lines.
+    // Level 3: hunk headers, but no diff lines.
     let hunks = toggle(&mut test, "common.more-detail", None, None);
     assert!(hunks.render.is_some(), "more-detail renders");
     test.ack();
     assert!(count_kind(test.tree(), NodeKind::Hunk) > 0);
-    assert!(count_kind(test.tree(), NodeKind::Line) > 0);
+    assert_eq!(count_kind(test.tree(), NodeKind::Line), 0);
 
-    // One level down hides hunks again.
-    let files = toggle(&mut test, "common.less-detail", None, None);
-    assert!(files.render.is_some(), "less-detail renders");
+    // Level 4: individually expanded hunk bodies.
+    let bodies = toggle(&mut test, "common.more-detail", None, None);
+    assert!(bodies.render.is_some(), "more-detail renders");
+    test.ack();
+    assert!(count_kind(test.tree(), NodeKind::Line) > 0);
+    toggle(&mut test, "common.more-detail", None, None);
+    test.ack();
+    assert!(
+        count_kind(test.tree(), NodeKind::Line) > 0,
+        "level 4 clamps upward"
+    );
+
+    // One level down hides only hunk bodies.
+    let hunks = toggle(&mut test, "common.less-detail", None, None);
+    assert!(hunks.render.is_some(), "less-detail renders");
+    test.ack();
+    assert!(count_kind(test.tree(), NodeKind::Hunk) > 0);
+    assert_eq!(count_kind(test.tree(), NodeKind::Line), 0);
+
+    toggle(&mut test, "common.less-detail", None, None);
     test.ack();
     assert!(count_kind(test.tree(), NodeKind::File) > 0);
     assert_eq!(count_kind(test.tree(), NodeKind::Hunk), 0);
+    toggle(&mut test, "common.less-detail", None, None);
+    test.ack();
+    toggle(&mut test, "common.less-detail", None, None);
+    test.ack();
+    assert_eq!(
+        count_kind(test.tree(), NodeKind::File),
+        0,
+        "level 1 clamps downward"
+    );
 
     // show-all returns to the default full body.
     let shown = toggle(&mut test, "common.show-all", None, None);
@@ -256,6 +282,38 @@ fn detail_levels_and_recursive_toggles_control_the_visible_tree() {
     let render = shown.render.expect("render");
     assert!(count_kind(test.tree(), NodeKind::Hunk) > 0);
     assert!(render.cursor.is_some());
+}
+
+#[test]
+fn standard_absolute_detail_levels_override_any_prior_level() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+
+    for (start, target) in [(4, 1), (1, 2), (2, 3), (3, 4), (4, 2), (2, 1)] {
+        toggle(
+            &mut test,
+            &format!("common.detail-level-{start}"),
+            None,
+            None,
+        );
+        test.ack();
+        let outcome = toggle(
+            &mut test,
+            &format!("common.detail-level-{target}"),
+            None,
+            None,
+        );
+        assert!(outcome.render.is_some());
+        test.ack();
+        let tree = test.tree();
+        assert_eq!(count_kind(tree, NodeKind::File) > 0, target >= 2);
+        assert_eq!(count_kind(tree, NodeKind::Hunk) > 0, target >= 3);
+        assert_eq!(count_kind(tree, NodeKind::Line) > 0, target >= 4);
+    }
 }
 
 #[test]

@@ -12,6 +12,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -37,6 +41,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `status.stage` | `s` | implemented | Stage the change at point |
@@ -95,6 +103,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -122,6 +134,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |
@@ -149,6 +165,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Z Q` | implemented | Cancel the current operation |
@@ -177,6 +197,10 @@
 | `common.hide-all` | `z M` | implemented | Fold every section |
 | `common.more-detail` | `z r` | implemented | Show one more level of detail |
 | `common.less-detail` | `z m` | implemented | Show one less level of detail |
+| `common.detail-level-1` | (unbound) | implemented | Show section headers only |
+| `common.detail-level-2` | (unbound) | implemented | Show section and file headers |
+| `common.detail-level-3` | (unbound) | implemented | Show hunk headers |
+| `common.detail-level-4` | (unbound) | implemented | Show hunk bodies |
 | `common.next-section` | `] ]` | implemented | Move to the next section |
 | `common.prev-section` | `[ [` | implemented | Move to the previous section |
 | `common.cancel` | `Escape`, `ctrl+c` | implemented | Cancel the current operation |

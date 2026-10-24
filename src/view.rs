@@ -178,6 +178,8 @@ pub enum VisibilityCommand {
     MoreDetail,
     /// Show one less level of detail.
     LessDetail,
+    /// Set the status view to an absolute detail level (1–4).
+    SetDetail(u8),
 }
 
 /// One server-owned screen.

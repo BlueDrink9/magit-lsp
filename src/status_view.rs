@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 /// The shallowest visibility level: section headers only.
 const LEVEL_MIN: u8 = 1;
-/// The deepest visibility level: sections, files and hunks.
-const LEVEL_MAX: u8 = 3;
+/// The deepest visibility level: sections, files, hunks and hunk bodies.
+const LEVEL_MAX: u8 = 4;
 /// The level the status view opens at, which matches the old full render.
 const LEVEL_DEFAULT: u8 = LEVEL_MAX;
 
@@ -48,6 +48,31 @@ impl StatusView {
 
     /// Render the visible tree, loading hunks only for expanded files.
     fn render_tree(&mut self) -> Tree {
+        for (section, path) in self.file_keys() {
+            if section == "untracked" || !self.visibility.is_expanded(&format!("{section}/{path}"))
+            {
+                continue;
+            }
+            let key = (path.clone(), section == "staged");
+            if !self.hunks.contains_key(&key) {
+                let loaded = match self.repo.file_hunks(&path, key.1) {
+                    Ok(hunks) => hunks,
+                    Err(error) => {
+                        tracing::warn!(path = %path, %error, "failed to load file body");
+                        Vec::new()
+                    }
+                };
+                self.hunks.insert(key.clone(), loaded);
+            }
+            if self.level < 4 {
+                for hunk in self.hunks.get(&key).into_iter().flatten() {
+                    self.visibility.set(
+                        format!("{section}/{path}/hunk:{}", hunk.id),
+                        VisibilityState::Collapsed,
+                    );
+                }
+            }
+        }
         let status = &self.status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
@@ -117,7 +142,12 @@ impl StatusView {
         } else {
             VisibilityState::Collapsed
         };
-        let body_state = if level >= 3 {
+        let hunk_state = if level >= 3 {
+            VisibilityState::Expanded
+        } else {
+            VisibilityState::Collapsed
+        };
+        let body_state = if level >= 4 {
             VisibilityState::Expanded
         } else {
             VisibilityState::Collapsed
@@ -127,7 +157,7 @@ impl StatusView {
                 .set(format!("section:{section}"), section_state);
         }
         for (section, path) in self.file_keys() {
-            self.visibility.set(format!("{section}/{path}"), body_state);
+            self.visibility.set(format!("{section}/{path}"), hunk_state);
             for hunk_id in self.hunk_ids(&section, &path) {
                 self.visibility.set(hunk_id, body_state);
             }
@@ -273,6 +303,10 @@ impl View for StatusView {
             }
             VisibilityCommand::LessDetail => {
                 self.apply_level(self.level.saturating_sub(1));
+                true
+            }
+            VisibilityCommand::SetDetail(level) => {
+                self.apply_level(level);
                 true
             }
             VisibilityCommand::Show { recursive } => {
