@@ -710,14 +710,38 @@ index 4083766..31cf455 100644\n\
         parse_unified_diff(SAMPLE).remove(0)
     }
 
+    /// Run `git apply --check` on `patch` against `original` in a scratch
+    /// directory, returning Git's stderr when the patch does not apply.
+    fn apply_check(original: &str, patch: &str) -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        std::fs::write(dir.path().join("f.txt"), original).map_err(|error| error.to_string())?;
+        let file = dir.path().join("reconstruction.patch");
+        std::fs::write(&file, format!("--- a/f.txt\n+++ b/f.txt\n{patch}"))
+            .map_err(|error| error.to_string())?;
+        let output = std::process::Command::new("git")
+            .args(["apply", "--check"])
+            .arg(&file)
+            .current_dir(dir.path())
+            .output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
+    }
+
     #[test]
     fn full_hunk_reconstruction_is_valid() {
         let h = sample_hunk();
-        let p = full_hunk_patch(&h);
-        assert!(p.starts_with("@@ -1,10 +1,10 @@"));
-        assert!(p.contains("-line3\n"));
-        assert!(p.contains("+line3 CHANGED\n"));
-        assert!(p.contains("-line8\n"));
+        let original: String = h
+            .lines
+            .iter()
+            .filter(|line| line.marker != '+')
+            .map(|line| format!("{}\n", line.text))
+            .collect();
+        apply_check(&original, &full_hunk_patch(&h))
+            .expect("the reconstructed hunk applies to the original");
     }
 
     #[test]

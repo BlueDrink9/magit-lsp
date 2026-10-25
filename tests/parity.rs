@@ -14,28 +14,63 @@ fn readme_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md")
 }
 
-#[test]
-fn every_menu_item_has_a_parity_row() {
-    let rows = parity::rows();
-    for def in menus::all() {
-        let menu = menus::build(&def);
-        for group in &menu.groups {
-            for item in &group.items {
-                let suffix = format!(" {}", item.key());
-                assert!(
-                    rows.iter().any(|row| row.menu == def.id
-                        && (row.magit_key == item.key() || row.magit_key.ends_with(&suffix))),
-                    "{} has no parity row for {}",
-                    def.id,
-                    item.key()
-                );
-            }
-        }
+/// The Magit menu prefix §5 puts in front of each action key.
+fn magit_prefix(menu: &str) -> &'static str {
+    match menu {
+        "commit" => "c",
+        "branch" => "b",
+        "fetch" => "f",
+        "pull" => "F",
+        "push" => "P",
+        "merge" => "m",
+        "rebase" => "r",
+        "stash" => "z",
+        "tag" => "t",
+        "reset" => "X",
+        "cherry-pick" => "A",
+        "revert" => "V",
+        "bisect" => "B",
+        "remote" => "M",
+        "submodule" => "o",
+        "worktree" => "Z",
+        "ignore" => "i",
+        "log" => "l",
+        "diff" => "d",
+        "patch-apply" => "w",
+        "patch-create" => "W",
+        _ => "",
     }
 }
 
 #[test]
-fn every_action_row_matches_the_registry_and_the_menu_status() {
+fn every_menu_item_has_a_parity_row() {
+    let mut expected = std::collections::BTreeSet::new();
+    for def in menus::all() {
+        for group in &def.groups {
+            for item in &group.items {
+                let key = match item {
+                    ItemDef::Switch { key, .. } | ItemDef::Option { key, .. } => (*key).to_string(),
+                    ItemDef::Action { key, .. } => match magit_prefix(def.id) {
+                        "" => (*key).to_string(),
+                        prefix => format!("{prefix} {key}"),
+                    },
+                };
+                expected.insert((def.id.to_string(), key));
+            }
+        }
+        if def.id != "dispatch" {
+            expected.insert((def.id.to_string(), "?".to_string()));
+        }
+    }
+    let actual: std::collections::BTreeSet<_> = parity::rows()
+        .into_iter()
+        .map(|row| (row.menu, row.magit_key))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn every_action_matches_the_registry_and_the_menu_status() {
     let mut actions = std::collections::BTreeSet::new();
     for def in menus::all() {
         let menu = menus::build(&def);

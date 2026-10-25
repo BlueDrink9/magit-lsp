@@ -224,9 +224,17 @@ fn positional_requests_return_null_in_text_mode() {
         "method": "textDocument/documentSymbol",
         "params": {"textDocument": {"uri": uri}},
     }));
-    assert!(
-        server.response_with_id(3)["result"].is_array(),
-        "interactive documentSymbol returns symbols"
+    let response = server.response_with_id(3);
+    let symbols = response["result"]
+        .as_array()
+        .expect("interactive documentSymbol returns symbols");
+    let names: Vec<&str> = symbols
+        .iter()
+        .map(|symbol| symbol["name"].as_str().expect("symbol name"))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Staged changes", "Unstaged changes", "Untracked files"]
     );
 
     server.notifications.clear();

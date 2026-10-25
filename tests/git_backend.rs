@@ -8,6 +8,147 @@ use proptest::prelude::*;
 use std::path::Path;
 use tempfile::TempDir;
 
+/// `git diff [-U3]` for [`standard_changes`]: the whole fixture staged.
+const STANDARD_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..31cf455 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -1,10 +1,10 @@\n",
+    " line1\n",
+    " line2\n",
+    "-line3\n",
+    "+line3 CHANGED\n",
+    " line4\n",
+    " line5\n",
+    "+NEW line\n",
+    " line6\n",
+    " line7\n",
+    "-line8\n",
+    " line9\n",
+    " line10\n",
+);
+
+/// Only the `line3` replacement staged.
+const MODIFICATION_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..cf23a08 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -1,6 +1,6 @@\n",
+    " line1\n",
+    " line2\n",
+    "-line3\n",
+    "+line3 CHANGED\n",
+    " line4\n",
+    " line5\n",
+    " line6\n",
+);
+
+/// Only the `NEW line` insertion staged.
+const ADDITION_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..411441e 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -3,6 +3,7 @@ line2\n",
+    " line3\n",
+    " line4\n",
+    " line5\n",
+    "+NEW line\n",
+    " line6\n",
+    " line7\n",
+    " line8\n",
+);
+
+/// Only the `line8` deletion staged.
+const DELETION_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..fddd710 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -5,6 +5,5 @@ line4\n",
+    " line5\n",
+    " line6\n",
+    " line7\n",
+    "-line8\n",
+    " line9\n",
+    " line10\n",
+);
+
+/// The insertion and the deletion staged, with `line3` left alone.
+const INSERTION_AND_DELETION_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..54d9ea4 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -3,8 +3,8 @@ line2\n",
+    " line3\n",
+    " line4\n",
+    " line5\n",
+    "+NEW line\n",
+    " line6\n",
+    " line7\n",
+    "-line8\n",
+    " line9\n",
+    " line10\n",
+);
+
+/// Both replacements of the 30-line fixture staged.
+const TWO_HUNKS_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 19339a3..b5dd80e 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -1,5 +1,5 @@\n",
+    " line1\n",
+    "-line2\n",
+    "+line2 CHANGED\n",
+    " line3\n",
+    " line4\n",
+    " line5\n",
+    "@@ -25,6 +25,6 @@ line24\n",
+    " line25\n",
+    " line26\n",
+    " line27\n",
+    "-line28\n",
+    "+line28 CHANGED\n",
+    " line29\n",
+    " line30\n",
+);
+
+/// `f.txt`'s `line3` replacement in the two-file fixture.
+const TWO_FILES_F_DIFF: &str = concat!(
+    "diff --git a/f.txt b/f.txt\n",
+    "index 4083766..a716c2d 100644\n",
+    "--- a/f.txt\n",
+    "+++ b/f.txt\n",
+    "@@ -1,6 +1,6 @@\n",
+    " line1\n",
+    " line2\n",
+    "-line3\n",
+    "+f3 CHANGED\n",
+    " line4\n",
+    " line5\n",
+    " line6\n",
+);
+
+/// `g.txt`'s `line3` replacement in the two-file fixture.
+const TWO_FILES_G_DIFF: &str = concat!(
+    "diff --git a/g.txt b/g.txt\n",
+    "index 4083766..4ad0b2b 100644\n",
+    "--- a/g.txt\n",
+    "+++ b/g.txt\n",
+    "@@ -1,6 +1,6 @@\n",
+    " line1\n",
+    " line2\n",
+    "-line3\n",
+    "+g3 CHANGED\n",
+    " line4\n",
+    " line5\n",
+    " line6\n",
+);
+
 #[test]
 fn identical_fixtures_produce_identical_commit_hashes() {
     let (first, _) = RepoFixture::new()
@@ -43,14 +184,11 @@ fn diff_unstaged_returns_full_diff() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
     let diff = repo.diff_unstaged("f.txt").expect("diff");
-    assert!(diff.contains("-line3"));
-    assert!(diff.contains("+line3 CHANGED"));
-    assert!(diff.contains("+NEW line"));
-    assert!(diff.contains("-line8"));
+    assert_eq!(diff, STANDARD_DIFF);
 }
 
 #[test]
-fn stage_hunk_stages_entire_file() {
+fn stage_hunk_stages_the_hunk() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
@@ -59,11 +197,7 @@ fn stage_hunk_stages_entire_file() {
 
     repo.stage_hunk("f.txt", &hunk_id).expect("stage hunk");
 
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("-line3"));
-    assert!(cached.contains("+line3 CHANGED"));
-    assert!(cached.contains("+NEW line"));
-    assert!(cached.contains("-line8"));
+    assert_eq!(cached_diff(tmp.path()), STANDARD_DIFF);
 
     let status = repo.status().expect("status");
     assert!(status.unstaged.is_empty());
@@ -168,11 +302,7 @@ fn stage_lines_stages_only_modification() {
     repo.stage_lines("f.txt", &hunk_id, 2, 3)
         .expect("stage lines");
 
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("-line3"));
-    assert!(cached.contains("+line3 CHANGED"));
-    assert!(!cached.contains("NEW line"));
-    assert!(!cached.contains("-line8"));
+    assert_eq!(cached_diff(tmp.path()), MODIFICATION_DIFF);
 }
 
 #[test]
@@ -186,10 +316,7 @@ fn stage_lines_stages_only_addition() {
     repo.stage_lines("f.txt", &hunk_id, 6, 6)
         .expect("stage lines");
 
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("+NEW line"));
-    assert!(!cached.contains("line3 CHANGED"));
-    assert!(!cached.contains("-line8"));
+    assert_eq!(cached_diff(tmp.path()), ADDITION_DIFF);
 }
 
 #[test]
@@ -203,10 +330,7 @@ fn stage_lines_stages_only_deletion() {
     repo.stage_lines("f.txt", &hunk_id, 9, 9)
         .expect("stage lines");
 
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("-line8"));
-    assert!(!cached.contains("line3 CHANGED"));
-    assert!(!cached.contains("NEW line"));
+    assert_eq!(cached_diff(tmp.path()), DELETION_DIFF);
 }
 
 #[test]
@@ -611,11 +735,7 @@ fn selection_context_plus_change_stages_only_change() {
         .expect("apply selection");
 
     assert!(applied);
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("-line3"));
-    assert!(cached.contains("+line3 CHANGED"));
-    assert!(!cached.contains("NEW line"));
-    assert!(!cached.contains("-line8"));
+    assert_eq!(cached_diff(tmp.path()), MODIFICATION_DIFF);
 }
 
 #[test]
@@ -630,10 +750,7 @@ fn selection_header_plus_change_stages_whole_file() {
         .expect("apply selection");
 
     assert!(applied);
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("+line3 CHANGED"));
-    assert!(cached.contains("+NEW line"));
-    assert!(cached.contains("-line8"));
+    assert_eq!(cached_diff(tmp.path()), STANDARD_DIFF);
 }
 
 #[test]
@@ -654,9 +771,7 @@ fn selection_crossing_two_hunks_stages_both() {
         .expect("apply selection");
 
     assert!(applied);
-    let cached = cached_diff(tmp.path());
-    assert!(cached.contains("+line2 CHANGED"), "got: {cached}");
-    assert!(cached.contains("+line28 CHANGED"), "got: {cached}");
+    assert_eq!(cached_diff(tmp.path()), TWO_HUNKS_DIFF);
 }
 
 #[test]
@@ -680,8 +795,14 @@ fn selection_crossing_two_files_stages_both() {
         .expect("apply selection");
 
     assert!(applied);
-    assert!(git(tmp.path(), &["diff", "--cached", "--", "f.txt"]).contains("f3 CHANGED"));
-    assert!(git(tmp.path(), &["diff", "--cached", "--", "g.txt"]).contains("g3 CHANGED"));
+    assert_eq!(
+        git(tmp.path(), &["diff", "--cached", "--", "f.txt"]),
+        TWO_FILES_F_DIFF
+    );
+    assert_eq!(
+        git(tmp.path(), &["diff", "--cached", "--", "g.txt"]),
+        TWO_FILES_G_DIFF
+    );
 }
 
 #[test]
@@ -698,10 +819,7 @@ fn selection_inside_staged_hunk_unstages_only_that_change() {
         .expect("apply selection");
 
     assert!(applied);
-    let cached = cached_diff(tmp.path());
-    assert!(!cached.contains("line3 CHANGED"), "got: {cached}");
-    assert!(cached.contains("+NEW line"), "got: {cached}");
-    assert!(cached.contains("-line8"), "got: {cached}");
+    assert_eq!(cached_diff(tmp.path()), INSERTION_AND_DELETION_DIFF);
 }
 
 #[test]

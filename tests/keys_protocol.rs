@@ -3,7 +3,6 @@
 mod common;
 
 use common::*;
-use magit_lsp::commands::registry;
 use magit_lsp::config::{BindingSpec, Config, Profile};
 use magit_lsp::errors;
 use magit_lsp::keyhandler::{self, MenuResolution, PendingChord, Resolution};
@@ -318,7 +317,6 @@ fn view_keymap_notices_follow_the_profile_and_config_reloads() {
         .find(|binding| binding.command == "status.stage")
         .expect("status.stage binding");
     assert_eq!(stage.keys, vec!["q"]);
-    assert!(registry().get("status.stage").is_some());
 }
 
 #[test]

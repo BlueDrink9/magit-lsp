@@ -145,21 +145,19 @@ fn shipped_profiles_never_shadow_workbench_shortcuts_without_allow() {
 }
 
 #[test]
-fn allow_entries_are_scoped_with_reasons() {
-    assert!(WORKBENCH_DENY_LIST.contains(&"ctrl+t"));
-    assert!(WORKBENCH_DENY_LIST.contains(&"ctrl+c"));
-    assert!(WORKBENCH_ALLOW.iter().any(|allow| {
-        allow.key == "ctrl+t" && allow.scope.is_none() && !allow.reason.is_empty()
-    }));
-    assert!(WORKBENCH_ALLOW.iter().any(|allow| {
-        allow.key == "ctrl+c" && allow.scope.is_none() && !allow.reason.is_empty()
-    }));
-    assert!(WORKBENCH_ALLOW.iter().any(|allow| {
-        allow.key == "ctrl+s" && allow.scope == Some("menu") && !allow.reason.is_empty()
-    }));
-    assert!(WORKBENCH_ALLOW.iter().any(|allow| {
-        allow.key == "ctrl+r" && allow.scope == Some("menu") && !allow.reason.is_empty()
-    }));
+fn every_allow_entry_overrides_a_denied_key_with_a_reason() {
+    for allow in WORKBENCH_ALLOW {
+        assert!(
+            WORKBENCH_DENY_LIST.contains(&allow.key),
+            "{} overrides a key outside the deny list",
+            allow.key
+        );
+        assert!(
+            !allow.reason.trim().is_empty(),
+            "{} has no reason for overriding the deny list",
+            allow.key
+        );
+    }
 }
 
 #[test]
