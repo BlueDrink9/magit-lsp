@@ -2103,11 +2103,19 @@ Completed P1 review work (historical tracking, not new verification):
     - Decision: `tests/git_version.rs`'s local `FakeGit` fakes `git --version`/`status` output rather than gating a real subprocess, so it is a distinct fixture; only the duplicated runner/server fake moved.
   - **Evidence:** `make test` exited 0 (30 lib unit tests, every integration suite green — e.g. 38 `git_backend`, 41 `dispatch`, 15 `status`, 10 `errors`, 9 `status_render`, 5 `runner` — then 52 Neovim cases, 23 VSCode tests, 164 keybindings). `tests/stdout_hygiene` is now 2 tests. `cargo clippy --all-targets` was already failing before this change on `clippy::never_loop` in the untouched `src/config.rs` (`git show HEAD:src/config.rs | diff - src/config.rs` is empty); with that pre-existing error allowed it reports only the pre-existing `tests/menu.rs:429` unused-variable warning and nothing from the new code. No orphan `magit-lsp` processes remained.
 
-- [ ] **[P3] Remaining small coverage gaps**
+- [x] **[P3] Remaining small coverage gaps**
   - **Problem:** (a) IMM-3: exit code is 128 in every row of `errors.rs:52-119`; no real `non-fast-forward` via a local bare remote; no `processLogId`; (b) §3.13 `diff.context` parsed but no test that `-U<n>` reaches both diffs; (c) §8.4 colour checks beyond links (section ≠ file ≠ hunk header ≠ hash; `menu.planned` dimmer than `menu.label`) are absent; (d) R-UI-5 progress ending on a failed commit is only asserted at L3; (e) `.cargo/config.toml` alias `cargo xtask parity` is untested; (f) `make test` omits `ui-unit` and the node tests (document it).
   - **Change:** add one test per item (reuse existing fixtures; (c) goes into the existing colour-scheme Lua case, (d) into `server_async.rs` with a failing `pre-commit` hook).
   - **Done when:** each item has a test or a recorded decision to skip.
   - **Constraints:** do not add Lua cases beyond (c).
+  - **Done (2026-10-25):** five gaps have tests and (b) is a recorded skip.
+    - (a) `tests/errors.rs::a_real_non_fast_forward_push_is_readable_without_a_process_log` pushes a divergent local commit to a local bare remote (advanced from a clone), asserts the real rejected push does not use exit code 128, maps to the non-fast-forward summary at exit codes 1/128/255, and that `processLogId` is `None` and absent from the serialised effect.
+    - (b) **Decision: skip.** `diff.context` is parsed into `Config::diff.context` (`src/config.rs:396`) but never reaches `GitRepo::diff_side`, which hardcodes `-U3` (`src/git.rs:300`). A passing test would need config→session→`StatusView`→`GitRepo` plumbing in `src/`, outside this ticket's target files, so no test can assert `-U<n>` today.
+    - (c) The existing `theme links survive a colorscheme switch` Lua case now checks `magit.menu.planned` is dimmer than `magit.menu.label` and, after the switch, that section/file/hunk-header/hash foregrounds are pairwise distinct. No Lua case was added.
+    - (d) `tests/server_async.rs::a_failed_commit_ends_its_progress_with_an_error` installs a failing `pre-commit` hook, runs `commit.create` on a staged change, and asserts the create/begin/end handshake shares one token and ends after a failed `git commit` whose error carries the hook output.
+    - (e) `tests/parity.rs::the_cargo_xtask_alias_runs_the_parity_command` reads `.cargo/config.toml`, asserts the `xtask` alias forwards to `parity`, and runs the binary the alias expands to (spawning `cargo` from `cargo test` would wait on the target-directory lock).
+    - (f) `README.md` ("Running the tests") and the `test` target comment in `Makefile` state that `make test` covers Rust, Neovim and VSCode only; `make ui-unit` and `make ui-test` are separate.
+  - **Evidence:** `cargo test --test errors --test server_async --test parity` exited 0 (11 errors, 15 passed + 1 ignored `server_async`, 6 parity), `make test-file FILE=tests/test_magit_lsp.lua` passed 46 cases, and `make test` exited 0 with 52 Neovim cases, 23 VSCode tests and 164 keybindings. No orphan `magit-lsp` processes remained.
 
 ### Test-review summary (for the human)
 

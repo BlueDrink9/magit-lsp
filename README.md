@@ -85,6 +85,11 @@ make vscode-test                           # VSCode node tests + keybinding drif
 Neovim integration tests start the real `target/debug/magit-lsp` binary against
 a throwaway git repository under `build/test-repos/`.
 
+`make test` does not run the real-UI Python suites. `make ui-unit` tests the
+scenario/driver harness itself, while `make ui-test` (and `make ui-tour`) drive
+real Neovim screens; run them separately when changing the UI harness or
+user-visible rendering.
+
 ### VSCode client tests
 
 The VSCode extension requires VSCode 1.85 or newer. Running its Node tests also

@@ -119,6 +119,69 @@ fn maps_every_table_row() {
 }
 
 #[test]
+fn a_real_non_fast_forward_push_is_readable_without_a_process_log() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "a\nb\nc\n")])
+        .build();
+    let remote = TempDir::new().expect("bare remote");
+    git(remote.path(), &["init", "--bare", "-q"]);
+    // Match the fixture's branch so a clone checks out `main`.
+    git(remote.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    let remote_url = remote.path().to_str().expect("utf8 remote");
+    tmp.git(&["remote", "add", "origin", remote_url]);
+    tmp.git(&["push", "-q", "-u", "origin", "main"]);
+
+    // Advance the remote from a clone so the next local push is rejected.
+    let other = TempDir::new().expect("other clone");
+    git(other.path(), &["clone", "-q", remote_url, "."]);
+    write(&other.path().join("f.txt"), "a\nREMOTE\nc\n");
+    git(other.path(), &["commit", "-q", "-am", "remote advance"]);
+    git(other.path(), &["push", "-q", "origin", "main"]);
+
+    write(&tmp.path().join("f.txt"), "a\nLOCAL\nc\n");
+    tmp.git(&["commit", "-q", "-am", "local advance"]);
+    let failure = git_failure(tmp.path(), &["push", "origin", "main"], None);
+    assert_ne!(
+        failure.exit_code, 128,
+        "a rejected push must exercise Git's own exit code, not the table's 128"
+    );
+
+    let effect = Effect::from_git_failure(&failure);
+    let Effect::Message {
+        text,
+        hint,
+        process_log_id,
+        ..
+    } = &effect
+    else {
+        panic!("expected a message effect, got {effect:?}");
+    };
+    assert_eq!(
+        text, "The remote has commits you do not have. Fetch or pull first.",
+        "stderr: {}",
+        failure.stderr
+    );
+    assert!(hint.is_none());
+    assert!(
+        process_log_id.is_none(),
+        "the link to a process log is reserved"
+    );
+    let wire = serde_json::to_value(&effect).expect("serialise the effect");
+    assert!(
+        wire.get("processLogId").is_none(),
+        "a reserved processLogId must stay off the wire: {wire}"
+    );
+
+    // The mapping follows stderr, not the particular exit code Git used.
+    for exit_code in [1, 128, 255] {
+        let user = map_git_failure(exit_code, &failure.stderr, "push");
+        assert_eq!(user.summary, *text, "exit code {exit_code}");
+        assert!(user.hint.is_none());
+        assert!(user.process_log_id.is_none());
+    }
+}
+
+#[test]
 fn unmapped_failure_uses_the_fallback_with_stderr_detail() {
     let stderr = "fatal: pathspec 'missing' did not match any files";
     let user = map_git_failure(128, stderr, "add");

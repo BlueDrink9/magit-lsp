@@ -551,6 +551,26 @@ T['theme links survive a colorscheme switch'] = function()
   MiniTest.expect.equality(type(removed), 'number', 'removed has a foreground')
   MiniTest.expect.equality(added ~= removed, true, 'added and removed differ')
 
+  --- Perceived brightness of a 24-bit colour, for relative-dimness checks.
+  ---@param colour integer
+  ---@return number
+  local function luminance(colour)
+    local r = math.floor(colour / 65536) % 256
+    local g = math.floor(colour / 256) % 256
+    local b = colour % 256
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  end
+
+  local planned = child.lua_get("HELPERS.resolved_fg('magit.menu.planned')")
+  local label = child.lua_get("HELPERS.resolved_fg('magit.menu.label')")
+  MiniTest.expect.equality(type(planned), 'number', 'menu.planned has a foreground')
+  MiniTest.expect.equality(type(label), 'number', 'menu.label has a foreground')
+  MiniTest.expect.equality(
+    luminance(planned) < luminance(label),
+    true,
+    'menu.planned must be dimmer than menu.label'
+  )
+
   child.lua("vim.cmd('colorscheme vim')")
   MiniTest.expect.equality(child.lua_get('HELPERS.missing_links()'), {})
 
@@ -558,6 +578,23 @@ T['theme links survive a colorscheme switch'] = function()
   local switched_removed = child.lua_get("HELPERS.resolved_fg('magit.diff.removed')")
   MiniTest.expect.equality(switched_added ~= switched_removed, true, 'added and removed differ')
   MiniTest.expect.equality(switched_added ~= added, true, 'the scheme changed the colour')
+
+  local headings = {
+    { name = 'section', fg = child.lua_get("HELPERS.resolved_fg('magit.section')") },
+    { name = 'file', fg = child.lua_get("HELPERS.resolved_fg('magit.file')") },
+    { name = 'hunk header', fg = child.lua_get("HELPERS.resolved_fg('magit.hunk.header')") },
+    { name = 'hash', fg = child.lua_get("HELPERS.resolved_fg('magit.hash')") },
+  }
+  for i = 1, #headings do
+    MiniTest.expect.equality(type(headings[i].fg), 'number', headings[i].name .. ' has a foreground')
+    for j = 1, i - 1 do
+      MiniTest.expect.equality(
+        headings[i].fg ~= headings[j].fg,
+        true,
+        headings[i].name .. ' must differ from ' .. headings[j].name
+      )
+    end
+  end
 end
 
 T['tokens are refreshed after a mutation'] = function()

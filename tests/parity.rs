@@ -167,6 +167,33 @@ fn the_cli_prints_the_generated_table() {
 }
 
 #[test]
+fn the_cargo_xtask_alias_runs_the_parity_command() {
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".cargo/config.toml");
+    let text = std::fs::read_to_string(&config_path).expect("read .cargo/config.toml");
+    let document: toml_edit::DocumentMut = text.parse().expect("parse .cargo/config.toml");
+    let alias = document["alias"]["xtask"]
+        .as_str()
+        .expect("the xtask alias is a string");
+    assert_eq!(
+        alias, "run --quiet --bin magit-lsp --",
+        "the alias must expand to the parity-capable binary"
+    );
+
+    // `cargo` cannot be invoked here: the parent `cargo test` holds the target
+    // directory lock, so run the command the alias expands to.
+    let output = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        .arg("parity")
+        .output()
+        .expect("run the alias's parity command");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), parity::markdown());
+}
+
+#[test]
 fn the_readme_block_is_generated_and_up_to_date() {
     let path = readme_path();
     let readme = std::fs::read_to_string(&path).expect("read README.md");

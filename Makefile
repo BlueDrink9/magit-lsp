@@ -3,6 +3,10 @@
 build:
 	cargo build
 
+# `make test` covers the Rust, Neovim and VSCode suites. The real-UI Python
+# suites are separate: `make ui-unit` (harness) and `make ui-test`/`make ui-tour`
+# (scripted Neovim screens) must be run when touching the UI harness or
+# user-visible rendering.
 test: test-rust test-lua vscode-test
 
 vscode-test:

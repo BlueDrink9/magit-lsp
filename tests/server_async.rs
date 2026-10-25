@@ -1099,6 +1099,117 @@ fn a_mutation_reports_work_done_progress() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+/// Make the next `git commit` fail in its pre-commit hook.
+#[cfg(unix)]
+fn install_failing_pre_commit_hook(repo: &RepoFixture) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let hook = repo.path().join(".git/hooks/pre-commit");
+    write(
+        &hook,
+        "#!/bin/sh\necho \"pre-commit refused\" >&2\nexit 1\n",
+    );
+    let mut permissions = std::fs::metadata(&hook)
+        .expect("read the hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&hook, permissions).expect("make the hook executable");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_commit_ends_its_progress_with_an_error() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .staged_file("f.txt", standard_changes())
+        .build();
+    install_failing_pre_commit_hook(&tmp);
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    let response = server.initialize(json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["foldingRangeProvider"],
+        json!(true),
+        "initialize response: {response}"
+    );
+    let view_id = open_view(&mut server, 2, &repo);
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "commit.create"},
+    }));
+
+    let mut progress: Vec<(String, String)> = Vec::new();
+    let mut response = None;
+    let mut failure = None;
+    let saw_end = |progress: &[(String, String)]| progress.iter().any(|(_, phase)| phase == "end");
+    while response.is_none() || failure.is_none() || !saw_end(&progress) {
+        let message = server.recv();
+        if message["id"] == json!(3) {
+            response = Some(message);
+            continue;
+        }
+        if let Some(event) = progress_event(&message) {
+            progress.push(event);
+        }
+        if message["method"] == json!("view/effects")
+            && message["params"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects.iter().any(|effect| {
+                        effect["type"] == json!("message") && effect["level"] == json!("error")
+                    })
+                })
+        {
+            failure = Some(message);
+        }
+    }
+
+    let response = response.expect("commit.create response");
+    assert!(
+        response["result"]["effects"]
+            .as_array()
+            .is_some_and(|effects| effects
+                .iter()
+                .any(|effect| effect["text"] == json!("Committing…"))),
+        "the commit must announce itself before the worker starts: {response}"
+    );
+
+    let phases: Vec<String> = progress.iter().map(|(_, phase)| phase.clone()).collect();
+    assert_eq!(
+        phases,
+        vec!["create".to_string(), "begin".to_string(), "end".to_string()],
+        "a failed commit still ends its progress: {progress:?}"
+    );
+    assert!(
+        progress.windows(2).all(|pair| pair[0].0 == pair[1].0),
+        "create, begin and end must share one token: {progress:?}"
+    );
+
+    let failure = failure.expect("the failed commit effect");
+    let error = failure["params"]["effects"]
+        .as_array()
+        .and_then(|effects| {
+            effects
+                .iter()
+                .find(|effect| effect["level"] == json!("error"))
+        })
+        .unwrap_or_else(|| panic!("no error effect: {failure}"));
+    assert_eq!(error["text"], json!("`git commit` failed."), "{error}");
+    assert!(
+        error["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("pre-commit refused")),
+        "the hook output is the detail: {error}"
+    );
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
 #[test]
 fn a_cancel_notification_aborts_a_slow_mutation() {
     let (tmp, _repo) = RepoFixture::new()
