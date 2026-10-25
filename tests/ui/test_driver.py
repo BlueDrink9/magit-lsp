@@ -162,6 +162,76 @@ class KeyNameTest(unittest.TestCase):
                 self.assertFalse(driver.is_key_name(token))
 
 
+class CsiUKeyTest(unittest.TestCase):
+    def test_ctrl_enter_becomes_csi_u_bytes(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("C-Enter"),
+            ["1b", "5b", "31", "33", "3b", "35", "75"],
+        )
+
+    def test_profile_spellings_normalize(self) -> None:
+        expected = ["1b", "5b", "31", "33", "3b", "35", "75"]
+        for token in ("C-Enter", "ctrl+Enter", "Ctrl+Enter", "control-Enter"):
+            with self.subTest(token=token):
+                self.assertEqual(driver._csi_u_bytes(token), expected)
+
+    def test_shift_tab_becomes_csi_u_bytes(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("shift+Tab"), ["1b", "5b", "39", "3b", "32", "75"]
+        )
+
+    def test_ctrl_arrow_uses_the_legacy_form(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("C-Left"), ["1b", "5b", "31", "3b", "35", "44"]
+        )
+
+    def test_arrow_aliases(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("ctrl+ArrowDown"),
+            ["1b", "5b", "31", "3b", "35", "42"],
+        )
+
+    def test_modified_page_keys_use_tilde_form(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("C-PPage"), ["1b", "5b", "35", "3b", "35", "7e"]
+        )
+
+    def test_alt_stays_on_tmux_named_keys(self) -> None:
+        for token in ("M-3", "M-4", "alt+ArrowDown", "alt+x"):
+            with self.subTest(token=token):
+                self.assertIsNone(driver._csi_u_bytes(token))
+
+    def test_untranslated_tokens_keep_their_existing_path(self) -> None:
+        for token in ("Enter", "Tab", "BTab", "Escape", "C-t", "C-a", "x", "-", "Z"):
+            with self.subTest(token=token):
+                self.assertIsNone(driver._csi_u_bytes(token))
+
+
+class SendKeysTest(unittest.TestCase):
+    def test_modified_special_keys_go_through_hex_mode(self) -> None:
+        with patch.object(driver, "_tmux") as tmux:
+            driver.send_keys(object(), ["C-Enter", "x"])
+        self.assertEqual(
+            [call.args[1:] for call in tmux.call_args_list],
+            [
+                ("send-keys", "-t", "magit", "-H",
+                 "1b", "5b", "31", "33", "3b", "35", "75"),
+                ("send-keys", "-t", "magit", "-l", "--", "x"),
+            ],
+        )
+
+    def test_plain_named_and_alt_keys_are_unchanged(self) -> None:
+        with patch.object(driver, "_tmux") as tmux:
+            driver.send_keys(object(), ["BSpace", "M-3"])
+        self.assertEqual(
+            [call.args[1:] for call in tmux.call_args_list],
+            [
+                ("send-keys", "-t", "magit", "BSpace"),
+                ("send-keys", "-t", "magit", "M-3"),
+            ],
+        )
+
+
 class LauncherTest(unittest.TestCase):
     def test_environment_stays_out_of_the_tmux_command(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

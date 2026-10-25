@@ -42,6 +42,14 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   (`git commit --all`) updates as switches change. Every not-yet-built action is
   listed as `Planned` and reports its roadmap item. `Escape`, `ctrl+c` or `q`
   closes the menu; `ctrl+s`/`ctrl+r` save/reset the current arguments.
+- **Commit message editor**: `c c` with a staged change starts `git commit`
+  through the editor bridge (§3.10). Git's `COMMIT_EDITMSG` opens in the same
+  instance as a bottom split with the `gitcommit` filetype, so ordinary editor
+  plugins keep working while the status view stays live (a pending edit never
+  freezes Neovim). The status view's confirm key (`ctrl+Enter` in `standard`,
+  `Z Z` in `vim`) saves the file and answers Git; the edit scope's cancel key
+  or closing the window aborts and reports why. Credential prompts from Git
+  (SSH passphrases, HTTPS tokens) go through the same bridge.
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
 - **Foldable** sections and files: the server owns visibility, and the client
   mirrors Neovim's fold keys to server commands.
@@ -264,6 +272,14 @@ code, duration); failures are logged at `warn`. Patch contents passed to
 With no subcommand `magit-lsp` runs the LSP server on stdio, so editors can
 spawn it directly. `--config <path>` selects a config file for that server, and
 `--version` / `--help` print and exit.
+
+Two helper modes are internal to the editor bridge and never speak LSP:
+
+- `--editor-helper <path>` is Git's `GIT_EDITOR`: it sends the file to the
+  running server and blocks until the client confirms or cancels.
+- `--askpass <prompt>` is Git's `core.askPass` credential helper: it forwards
+  the prompt (SSH passphrases, HTTPS tokens) to the running server and prints
+  the answer on stdout. The secret is never written to any log.
 
 The `keymap` subcommand prints the static keymap manifest — every profile ×
 scope × binding — and never speaks LSP, so its output goes to stdout:

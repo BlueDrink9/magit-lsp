@@ -1,0 +1,42 @@
+# R-3.4b: `c c` with a staged change opens the commit message editor.
+#
+# The commit menu's `c` starts `git commit` through the editor bridge, so the
+# client stays busy while Git waits and waits use `wait screen contains`. Git's
+# COMMIT_EDITMSG opens as a bottom-split `gitcommit` buffer in the same
+# instance; the message is typed in insert mode and confirmed with the
+# commit-message scope's confirm key (`ctrl+Enter` in standard, `Z Z` in vim).
+# Confirming leaves a clean tree, reports the committed subject and records the
+# `git commit` invocation in the process log.
+fixture: staged-one-file
+---
+wait
+snapshot: staged
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+expect windows.count == 2
+expect windows.1.filetype == gitcommit
+snapshot: editor
+keys: i A commit from the UI
+keys: Escape
+keys standard: C-Enter
+keys vim: Z Z
+wait screen contains "Committed"
+wait
+expect screen contains "Staged changes (0)"
+expect screen not-contains "Please enter the commit message"
+snapshot: committed
+keys standard: $
+keys vim: g $
+wait screen contains "Process log"
+keys: "/git commit" Enter
+wait
+expect screen contains "git commit"
+expect screen not-contains "exit 1"
+snapshot: process-log
+keys: q
+wait
+expect view_stack.count == 1
+expect screen contains "Staged changes (0)"
+expect no_message /failed|error/

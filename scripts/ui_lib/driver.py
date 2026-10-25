@@ -367,10 +367,83 @@ def is_key_name(token: str) -> bool:
     return bool(_TMUX_KEY.fullmatch(token))
 
 
+# tmux named keys drop the modifier for special keys terminfo has no sequence
+# for (`send-keys C-Enter` delivers plain Enter on tmux 3.8). Neovim decodes
+# the xterm modifyOtherKeys/CSI-u forms below, so the driver sends those bytes
+# directly with `send-keys -H` (one hex byte per argument). Alt combinations
+# stay on the tmux named-key path: Neovim drops the alt bit from CSI-u
+# sequences, while tmux named keys deliver the ESC-prefixed form it already
+# understands.
+_CSI_U_CODEPOINT = {
+    "Enter": "13",
+    "CR": "13",
+    "Tab": "9",
+    "BTab": "9",
+    "Escape": "27",
+    "Esc": "27",
+    "Space": "32",
+    "BSpace": "127",
+}
+_CSI_U_FINAL = {
+    "Up": "A",
+    "Down": "B",
+    "Right": "C",
+    "Left": "D",
+    "Home": "H",
+    "End": "F",
+}
+_CSI_U_TILDE = {"PPage": "5", "NPage": "6", "Insert": "2", "IC": "2"}
+_ARROW_ALIASES = {
+    "ArrowUp": "Up",
+    "ArrowDown": "Down",
+    "ArrowLeft": "Left",
+    "ArrowRight": "Right",
+}
+# modifyOtherKeys modifier value = 1 + shift(1) + ctrl(4); alt is unsupported.
+_KEY_MODIFIER_VALUE = {"c": 4, "s": 1, "ctrl": 4, "control": 4, "shift": 1}
+_MODIFIED_KEY = re.compile(
+    r"^(?:(?:[CS]|(?i:ctrl|control|shift))[+-])+(?P<key>[A-Za-z0-9]+)$"
+)
+
+
+def _csi_u_bytes(token: str) -> list[str] | None:
+    """Hex bytes for a modifier+special-key token tmux cannot encode.
+
+    Returns one hex string per byte for `send-keys -H`, or `None` when the
+    token carries no modifier, carries alt (kept on tmux named keys), or
+    names a key with no verified CSI-u encoding (single characters, F-keys).
+    """
+    match = _MODIFIED_KEY.fullmatch(token)
+    if match is None:
+        return None
+    value = 1
+    for modifier in re.findall(r"[A-Za-z]+", token[: -len(match.group("key"))]):
+        if modifier.lower() not in _KEY_MODIFIER_VALUE:
+            return None
+        value += _KEY_MODIFIER_VALUE[modifier.lower()]
+    key = _ARROW_ALIASES.get(match.group("key"), match.group("key"))
+    if key in _CSI_U_CODEPOINT:
+        sequence = f"\x1b[{_CSI_U_CODEPOINT[key]};{value}u"
+    elif key in _CSI_U_FINAL:
+        sequence = f"\x1b[1;{value}{_CSI_U_FINAL[key]}"
+    elif key in _CSI_U_TILDE:
+        sequence = f"\x1b[{_CSI_U_TILDE[key]};{value}~"
+    else:
+        return None
+    return [f"{byte:02x}" for byte in sequence.encode("ascii")]
+
+
 def send_keys(run: Run, tokens: list[str]) -> None:
-    """Send each token to the pane, literal text or named key."""
+    """Send each token to the pane, literal text or named key.
+
+    Modifier+special-key tokens (such as `C-Enter`) go through raw CSI-u
+    bytes; plain tmux names would drop their modifier.
+    """
     for token in tokens:
-        if is_key_name(token):
+        raw = _csi_u_bytes(token)
+        if raw is not None:
+            _tmux(run, "send-keys", "-t", SESSION, "-H", *raw)
+        elif is_key_name(token):
             _tmux(run, "send-keys", "-t", SESSION, token)
         else:
             _tmux(run, "send-keys", "-t", SESSION, "-l", "--", token)

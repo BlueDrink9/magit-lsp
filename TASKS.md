@@ -1125,7 +1125,7 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Feature
 
-- R-3.4b editor bridge clients/askpass; R-3.5…R-3.7;
+- R-3.5…R-3.7;
   R-4.1…R-4.3; R-5.1…R-5.5; R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
   R-9.1…R-9.5. Their full acceptance criteria remain in the phase entries.
 
@@ -1228,7 +1228,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       *Done when:* `make vscode-test` passes locally, README steps are
       verified by running the commands listed in it, and CI runs
       `make vscode-test`.
-- [ ] R-3.4b **Editor bridge clients and askpass** (U2.4): handle
+- [x] R-3.4b **Editor bridge clients and askpass** (U2.4): handle
       `editDocument` in Neovim and VSCode, implement `--askpass`, and add the
       `commit-message-editor` scenario (`c c` with a staged change → bottom
       split with a `gitcommit` buffer → type and confirm → clean tree and the
@@ -1237,6 +1237,14 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       Scenarios: `commit-message-editor`.
       *Done when:* remove the `xfail` tag from the listed scenario(s); `make
       test` and `make ui-test` green.
+      *Done:* the Neovim client opens the real file in a bottom split with the
+      kind's filetype (`lua/magit-lsp/edit.lua`), VSCode handles `editDocument`
+      in its edit flow, and `--askpass` forwards Git's prompt to the running
+      server without ever logging the secret (`src/editor.rs`, `src/cli.rs`;
+      `tests/editor_bridge.rs` covers the typed commit, cancel, client
+      disconnect and secret-never-logged cases). The driver now sends
+      modifier+special keys (`C-Enter`, `shift+Tab`, …) as raw CSI-u bytes
+      because tmux named keys drop the modifier.
 
 ### Phase 3N — Neovim client debt (findings in §11.1; do before R-3.5)
 
