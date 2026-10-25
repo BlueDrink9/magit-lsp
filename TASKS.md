@@ -1195,7 +1195,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
   `build/ui/tour.md` (status, dispatch, 21 menus, switch/chord, unavailable
   action, clean-tree commit and hook failure). Bug 5 did not reproduce
   (11–16 ms); latency remains a regression guard, not a diagnosed slowdown.
-- [ ] R-UI-7 **Status fills the window by default**: `setup()` must no longer
+- [x] R-UI-7 **Status fills the window by default**: `setup()` must no longer
       `vsplit`. The status view replaces the current window's buffer (the
       full screen); the client option `status = { placement = "replace" |
       "vsplit" | "split" | "tab" }` (default `"replace"`) restores a split or

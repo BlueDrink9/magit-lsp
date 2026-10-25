@@ -441,8 +441,13 @@ def start(
     size: str = f"{DEFAULT_SIZE[0]}x{DEFAULT_SIZE[1]}",
     profile: str = DEFAULT_PROFILE,
     color: str = "ansi",
+    extra_env: dict[str, str] | None = None,
 ) -> Run:
-    """Build a fixture, start Neovim in tmux and wait for the first render."""
+    """Build a fixture, start Neovim in tmux and wait for the first render.
+
+    `extra_env` adds scenario-specific variables (such as
+    `MAGIT_LSP_PLACEMENT`) to Neovim's otherwise cleared environment.
+    """
     check_tools()
     if profile not in ("standard", "vim"):
         raise DriverError(f"unknown profile `{profile}`; expected standard or vim")
@@ -484,6 +489,8 @@ def start(
                 "MAGIT_LSP_UI_ROOT": str(run.repo_path),
             }
         )
+        if extra_env:
+            env.update(extra_env)
 
         _tmux(
             run,

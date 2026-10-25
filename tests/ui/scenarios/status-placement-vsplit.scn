@@ -1,0 +1,13 @@
+# R-UI-7: `MAGIT_LSP_PLACEMENT=vsplit` restores the split placement.
+#
+# The placement is a client-only option; the UI harness passes this variable
+# through `scripts/minimal_init.lua` to `setup({ status = { placement = ... } })`.
+# The status view keeps its own window and the previous buffer stays visible.
+fixture: modified-two-files
+env: MAGIT_LSP_PLACEMENT=vsplit
+---
+wait
+expect screen contains "Unstaged changes"
+expect windows.count == 2
+expect windows.floating == 0
+snapshot: status-placement-vsplit

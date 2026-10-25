@@ -1,0 +1,14 @@
+# R-UI-7: the status view replaces the current window and fills the screen.
+#
+# `setup()` used to open a vertical split, so half the screen belonged to an
+# empty buffer. The default placement is now `replace`: exactly one non-floating
+# window, spanning the terminal columns, showing the rendered status view.
+fixture: modified-two-files
+---
+wait
+expect screen contains "Unstaged changes"
+expect windows.count == 1
+expect windows.floating == 0
+expect windows.0.filetype == "magit-lsp"
+expect windows.0.full_width == true
+snapshot: status-fills-screen

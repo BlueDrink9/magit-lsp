@@ -357,13 +357,16 @@ local function window_state(win)
     row = math.max(0, position[1] - 1)
     col = math.max(0, position[2] - 1)
   end
+  local width = vim.api.nvim_win_get_width(win)
   return {
     id = win,
     float = float,
     row = row,
     col = col,
-    width = vim.api.nvim_win_get_width(win),
+    width = width,
     height = vim.api.nvim_win_get_height(win),
+    -- True when this window spans the whole editor, as the status view does.
+    full_width = width == vim.o.columns,
     buffer = buf,
     filetype = vim.bo[buf].filetype,
   }

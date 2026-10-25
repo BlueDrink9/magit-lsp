@@ -74,6 +74,8 @@ class Scenario:
     size_only: bool = False
     profile_only: bool = False
     xfail: str | None = None
+    # Extra environment variables for Neovim, e.g. MAGIT_LSP_PLACEMENT=vsplit.
+    env: dict[str, str] = field(default_factory=dict)
     statements: list[Statement] = field(default_factory=list)
 
 
@@ -179,6 +181,23 @@ def parse_keys(text: str) -> list[str]:
     if not keys:
         raise ScenarioError("`keys:` needs at least one key")
     return keys
+
+
+def parse_env(text: str) -> dict[str, str]:
+    """Parse an `env:` header payload of space-separated `KEY=VALUE` pairs."""
+    try:
+        tokens = shlex.split(text, comments=False)
+    except ValueError as error:
+        raise ScenarioError(f"invalid env `{text}`: {error}") from error
+    if not tokens:
+        raise ScenarioError("`env:` needs at least one KEY=VALUE pair")
+    env: dict[str, str] = {}
+    for token in tokens:
+        key, separator, value = token.partition("=")
+        if not separator or not key:
+            raise ScenarioError(f"invalid env entry `{token}`; expected KEY=VALUE")
+        env[key] = value
+    return env
 
 
 def parse_expectation(line: str) -> Expectation:
@@ -338,6 +357,7 @@ def parse_scenario(path: Path) -> Scenario:
                 "size-only",
                 "profile-only",
                 "xfail",
+                "env",
             ):
                 raise ScenarioError(f"{where}: unknown header `{key}`")
             header[key] = value
@@ -361,6 +381,7 @@ def parse_scenario(path: Path) -> Scenario:
         if "profile-only" in header
         else False,
         xfail=header.get("xfail") or None,
+        env=parse_env(header["env"]) if "env" in header else {},
         statements=statements,
     )
     if scenario.size:
@@ -769,7 +790,9 @@ def _run_combo(
     snapshots: list[tuple[str, str, str, str, str]],
 ) -> ComboResult:
     try:
-        run = driver.start(scenario.fixture, size=size, profile=profile)
+        run = driver.start(
+            scenario.fixture, size=size, profile=profile, extra_env=scenario.env
+        )
     except driver.DriverError as error:
         return ComboResult(
             ok=False, reason=str(error), screen="", profile=profile, size=size

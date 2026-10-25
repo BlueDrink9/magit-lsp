@@ -159,8 +159,8 @@ tmux settings for the dedicated server: `set -g escape-time 0`, `set -g status o
   "cursor": {"row": 5, "col": 2},
   "idle": true,
   "windows": [
-    {"id": 1000, "float": false, "row": 0, "col": 0, "width": 100, "height": 28, "buffer": 3, "filetype": "magit-lsp"},
-    {"id": 1004, "float": true,  "row": 20, "col": 0, "width": 100, "height": 9,  "buffer": 5, "filetype": "magit-lsp"}
+    {"id": 1000, "float": false, "row": 0, "col": 0, "width": 100, "height": 28, "full_width": true, "buffer": 3, "filetype": "magit-lsp"},
+    {"id": 1004, "float": true,  "row": 20, "col": 0, "width": 100, "height": 9,  "full_width": true, "buffer": 5, "filetype": "magit-lsp"}
   ],
   "view_stack": [{"id": "v1", "kind": "status"}, {"id": "v2", "kind": "menu.commit"}],
   "pending": "-",
@@ -190,6 +190,7 @@ fixture: modified-two-files
 size: 100x30            # runner also runs 80x24 unless "size-only: true"
 profile: vim            # runner also runs "standard" unless "profile-only: true"
 xfail: bug-2            # optional; see Rules
+env: MAGIT_LSP_PLACEMENT=vsplit   # optional extra Neovim environment
 ---
 keys: m ?               # space-separated keys, each sent separately
 goto "+line3 CHANGED"   # move the cursor to the first line containing the text

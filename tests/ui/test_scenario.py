@@ -24,6 +24,7 @@ profile: vim
 size-only: true
 profile-only: true
 xfail: bug-2
+env: MAGIT_LSP_PLACEMENT=vsplit
 ---
 keys: m ?
 wait
@@ -86,6 +87,7 @@ class ParserTest(unittest.TestCase):
         self.assertTrue(parsed.size_only)
         self.assertTrue(parsed.profile_only)
         self.assertEqual(parsed.xfail, "bug-2")
+        self.assertEqual(parsed.env, {"MAGIT_LSP_PLACEMENT": "vsplit"})
         self.assertEqual(
             [statement.kind for statement in parsed.statements],
             ["keys", "wait"] + ["expect"] * 11 + ["snapshot"],
@@ -102,6 +104,7 @@ class ParserTest(unittest.TestCase):
         self.assertFalse(parsed.size_only)
         self.assertFalse(parsed.profile_only)
         self.assertIsNone(parsed.xfail)
+        self.assertEqual(parsed.env, {})
         self.assertEqual(parsed.name, "defaults")
 
     def test_missing_fixture_is_rejected(self) -> None:
@@ -115,6 +118,12 @@ class ParserTest(unittest.TestCase):
     def test_unknown_header_is_rejected(self) -> None:
         with self.assertRaises(scenario.ScenarioError):
             scenario.parse_scenario(write_temp("fixture: clean\nbogus: 1\n---\n"))
+
+    def test_invalid_env_entry_is_rejected(self) -> None:
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_scenario(
+                write_temp("fixture: clean\nenv: NOVALUE\n---\n")
+            )
 
     def test_duplicate_header_is_rejected(self) -> None:
         with self.assertRaises(scenario.ScenarioError):

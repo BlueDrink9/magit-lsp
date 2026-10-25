@@ -184,10 +184,11 @@ Manual smoke checklist:
    If `target/debug/magit-lsp` exists the client spawns it directly; otherwise
    it falls back to `cargo run`.
 
-The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in a
-vertical split. It is a read-only view: native editing keys are refused and
-`:w`/`:write` is a no-op. Use `g r` to refresh it after changes in the
-repository.
+The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in
+the current window by replacing its buffer. It is a read-only view: native
+editing keys are refused and `:w`/`:write` is a no-op. Use `g r` to refresh it
+after changes in the repository. `setup({ status = { placement = 'vsplit' } })`
+opens it in a vertical split instead (see below).
 
 Press the text-mode key (`ctrl+t` in both shipped profiles) to turn it into
 plain editable text. The buffer becomes modifiable, the user's `undolevels` is
@@ -206,6 +207,7 @@ text (`undolevels` goes back to `-1` first, so undo cannot reach stale edits).
 | `cmd` | `target/debug/magit-lsp`, else `cargo run` | Server command |
 | `profile` | `"vim"` | Shipped keymap profile, forwarded as `initializationOptions.profile` |
 | `visit_key` | `"<CR>"` | Client-side visit key (see below) |
+| `status` | `{ placement = "replace" }` | Status window: replace the current window (`"replace"`), or open a `"vsplit"`, `"split"` or new `"tab"` |
 | `fold_keys` | `{}` | Extra fold mirrors, e.g. `{ ['<Tab>'] = 'common.toggle-section' }` |
 | `menu` | `{ style = "float" }` | Menu placement: a bottom float (default) or `style = "split"` for `botright {height}split` |
 
@@ -227,7 +229,11 @@ Lua-function mappings, which cannot be inspected.
 `common.visit` is still `Planned` (R-4/R-5), so `visit_key` is a documented
 temporary client-side exception: while the server's binding is not
 `implemented`, the client maps `visit_key` (normal mode) to its own `visit`.
-It disappears as soon as the server implements `common.visit`.
+It disappears as soon as the server implements `common.visit`. With the default
+`replace` placement the status view owns the only window, so `visit` opens the
+file in that window and leaves the status buffer listed (`:b`, `:ls` return to
+it); with a split or tab placement it opens the file in the other window so the
+status view stays visible.
 
 Menus are separate `magit://menu.*` buffers created from the server's
 `pushView`/`openView` effects. The default placement is a bottom floating

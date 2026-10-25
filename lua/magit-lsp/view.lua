@@ -562,7 +562,7 @@ end
 
 --- Open (or focus) the window for a server descriptor.
 ---@param descriptor table `viewDescriptor` from `view/open` or a push effect
----@param opts table|nil { buf?: integer, win?: integer, client_id?: integer, root?: string }
+---@param opts table|nil { buf?: integer, win?: integer, client_id?: integer, root?: string, placement?: string } `placement` selects a client window implementation and leaves the descriptor's placement advisory
 ---@return table|nil view
 function M.open(descriptor, opts)
   if not descriptor or not descriptor.id then
@@ -616,7 +616,10 @@ function M.open(descriptor, opts)
 
   M.order[#M.order + 1] = key
 
-  local placement = M.placements[view.placement] or M.placements.main
+  -- A client may choose the window implementation for a descriptor (the
+  -- status view's placement is a client option, R-UI-7); the descriptor's own
+  -- placement stays advisory and still decides close/focus behaviour.
+  local placement = M.placements[opts.placement or view.placement] or M.placements.main
   view.win = placement.place(view, opts)
   attach(view)
   debug_api.view_open(key, view.kind, view.buf)

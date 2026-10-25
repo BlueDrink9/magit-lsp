@@ -30,8 +30,12 @@ end
 local ui_root = vim.env.MAGIT_LSP_UI_ROOT
 if ui_root and ui_root ~= '' then
   local profile = vim.env.MAGIT_LSP_PROFILE
+  -- The status placement is a client-only option; scenarios use this hook to
+  -- run with the default (`replace`) or an explicit split/tab placement.
+  local placement = vim.env.MAGIT_LSP_PLACEMENT
   require('magit-lsp').setup({
     root_dir = ui_root,
     profile = profile ~= '' and profile or nil,
+    status = placement and placement ~= '' and { placement = placement } or nil,
   })
 end

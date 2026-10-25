@@ -20,6 +20,68 @@ local M = {}
 ---@type table<string, table>
 M.sessions = {}
 
+--- The status placements this client understands (R-UI-7). They are window
+--- implementations only: the server's descriptor placement stays advisory.
+local STATUS_PLACEMENTS = { 'replace', 'vsplit', 'split', 'tab' }
+
+--- Client-only options; nothing here is sent to the server.
+local options = { status = { placement = 'replace' } }
+
+--- Show `buf` in `win`, hiding an unsaved buffer instead of failing with E37.
+---@param win integer
+---@param buf integer
+local function show_buffer(win, buf)
+  if vim.api.nvim_win_get_buf(win) == buf then
+    return
+  end
+  if pcall(vim.api.nvim_win_set_buf, win, buf) then
+    return
+  end
+  -- The window holds an unsaved buffer and 'hidden' is off; hide it rather
+  -- than abort the status view.
+  vim.api.nvim_win_call(win, function()
+    pcall(vim.cmd, 'hide')
+  end)
+  vim.api.nvim_win_set_buf(win, buf)
+end
+
+--- Build a status placement: `command` opens its window, nil reuses `opts.win`.
+---@param command string|nil `vsplit`, `split` or `tabnew`
+---@return fun(view: table, opts: table|nil): integer
+local function status_placement(command)
+  return function(place_view, opts)
+    local win = opts and opts.win
+    if command then
+      vim.cmd(command)
+      win = vim.api.nvim_get_current_win()
+    elseif not win or not vim.api.nvim_win_is_valid(win) then
+      win = vim.api.nvim_get_current_win()
+    end
+    show_buffer(win, place_view.buf)
+    buffer.enable_folding(win)
+    return win
+  end
+end
+
+--- Validate the client-only `status.placement` option.
+---@param value any
+---@return string
+local function placement_name(value)
+  if value == nil then
+    return 'replace'
+  end
+  for _, name in ipairs(STATUS_PLACEMENTS) do
+    if value == name then
+      return name
+    end
+  end
+  vim.notify(
+    'magit-lsp: unknown status.placement ' .. vim.inspect(value) .. '; using replace',
+    vim.log.levels.WARN
+  )
+  return 'replace'
+end
+
 local function project_root()
   local source = debug.getinfo(1, 'S').source
   local path = source:sub(2)
@@ -129,10 +191,12 @@ local function open_status(session)
     root = session.root,
     visit_key = session.visit_key,
     fold_keys = session.fold_keys,
+    placement = options.status.placement,
   })
   if not record then
     return nil, 'view/open returned no view'
   end
+  session.win = record.win
 
   -- The initial render is a notification that follows the response; a render
   -- that beat it is already in the pending queue. Either way it must be
@@ -229,23 +293,52 @@ function M.jump(kind, dir)
   return view.jump(target_record(), symbols, kind, dir)
 end
 
+--- The window a visited file should open in.
+---
+--- A split or tab placement leaves another window free, so the status view
+--- stays visible. When the status view replaced the only buffer there is no
+--- second window and the file opens in place; the status buffer stays listed,
+--- so `:b`/the buffer list return to it.
+---@return integer
+local function visit_window()
+  local current = vim.api.nvim_get_current_win()
+  local windows = vim.api.nvim_list_wins()
+  if #windows < 2 then
+    return current
+  end
+  local previous_number = vim.fn.winnr('#')
+  if previous_number > 0 then
+    local previous = vim.fn.win_getid(previous_number)
+    if previous ~= 0 and previous ~= current and vim.api.nvim_win_is_valid(previous) then
+      return previous
+    end
+  end
+  for _, win in ipairs(windows) do
+    if win ~= current and vim.api.nvim_win_is_valid(win) then
+      return win
+    end
+  end
+  return current
+end
+
 --- Visit the file (and new-side line) under the cursor.
---- Opens it in the window the view was split from, so the view stays visible.
+--- Opens it in another window when the view is split so the view stays
+--- visible, and in the status window itself when the view fills the screen.
 ---@param record table|nil defaults to the focused view
 function M.visit(record)
   record = record or view.current()
   if not record then
     return
   end
-  local win = vim.api.nvim_get_current_win()
   vim.lsp.buf.definition({
     on_list = function(options)
       local item = options.items[1]
       if not item or not item.filename then
         return
       end
-      if vim.api.nvim_get_current_win() == win then
-        vim.cmd('wincmd p')
+      local target = visit_window()
+      if vim.api.nvim_get_current_win() ~= target then
+        vim.api.nvim_set_current_win(target)
       end
       vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
       vim.api.nvim_win_set_cursor(0, { item.lnum, math.max((item.col or 1) - 1, 0) })
@@ -287,6 +380,13 @@ local function configure()
     end,
   })
 
+  -- The status view's window is the client's choice (R-UI-7); these are window
+  -- implementations, not server descriptor placements.
+  view.register_placement('replace', { place = status_placement(nil) })
+  view.register_placement('vsplit', { place = status_placement('vsplit') })
+  view.register_placement('split', { place = status_placement('split') })
+  view.register_placement('tab', { place = status_placement('tabnew') })
+
   edit.setup()
   highlights.setup(buffer.filetype)
 
@@ -325,7 +425,7 @@ end
 
 --- Start an LSP client for one repository and open its status view.
 --- Calling it again for an already-open root focuses that status view.
----@param opts table|nil { root_dir?, cmd?, profile?, visit_key?, fold_keys?, menu? }
+---@param opts table|nil { root_dir?, cmd?, profile?, status?, visit_key?, fold_keys?, menu? }
 ---@return table|nil descriptor, any err
 function M.setup(opts)
   opts = opts or {}
@@ -341,6 +441,7 @@ function M.setup(opts)
 
   configure()
   menu.setup(opts.menu)
+  options.status.placement = placement_name((opts.status or {}).placement)
 
   local profile = opts.profile or 'vim'
   local visit_key = opts.visit_key or '<CR>'
@@ -358,10 +459,9 @@ function M.setup(opts)
   session.fold_keys = fold_keys
   if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
 
-  vim.cmd('vsplit')
+  -- The placement owns the window: `replace` uses this one, a split or tab
+  -- command opens another. `setup()` never splits on its own (R-UI-7).
   session.win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(session.win, session.buf)
-  buffer.enable_folding(session.win)
 
   if not session.client_id then
     session.client_id = vim.lsp.start({
