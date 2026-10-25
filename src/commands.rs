@@ -17,6 +17,7 @@ use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
 use crate::view::{Placement, ViewKind, ViewMode, VisibilityCommand};
 use crate::Result;
+use lsp_types::Position;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -444,12 +445,13 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: copy_value,
         },
-        planned(
-            "common.visit",
-            Scope::Common,
-            "Visit the thing at point",
-            "R-2.3",
-        ),
+        Command {
+            id: "common.visit",
+            scope: Scope::Common,
+            doc: "Visit the thing at point",
+            status: CommandStatus::Implemented,
+            run: visit,
+        },
         planned(
             "status.discard",
             Scope::Status,
@@ -808,6 +810,35 @@ fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         Some(text) => ctx.effects.push(Effect::Clipboard { text }),
         None => ctx.info("Nothing to copy here"),
     }
+    Ok(CommandOutcome::default())
+}
+
+/// Visit the worktree file at point.
+///
+/// Resolution is server-owned: the acked tree maps the cursor's line to a file
+/// and new-side line, and the client only opens the resulting location.
+fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let Some(cursor) = ctx.cursor else {
+        ctx.info("Nothing to visit here");
+        return Ok(CommandOutcome::default());
+    };
+    let source = ctx
+        .view
+        .acked_tree()
+        .cloned()
+        .unwrap_or_else(|| ctx.view.tree().clone());
+    let Some(location) = source.definition(
+        ctx.repo_path,
+        Position::new(cursor.line as u32, cursor.column as u32),
+    ) else {
+        ctx.info("Nothing to visit here");
+        return Ok(CommandOutcome::default());
+    };
+    ctx.effects.push(Effect::VisitFile {
+        uri: location.uri.as_str().to_string(),
+        line: location.range.start.line,
+        column: location.range.start.character,
+    });
     Ok(CommandOutcome::default())
 }
 

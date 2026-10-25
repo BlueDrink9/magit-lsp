@@ -40,12 +40,55 @@ pub const TOKEN_TYPES: &[&str] = &[
 /// Token modifiers, in legend bit order.
 pub const TOKEN_MODIFIERS: &[&str] = &["staged", "selected", "planned", "disabled", "bold"];
 
+/// Suggested theme group per token type, in [`TOKEN_TYPES`] order.
+///
+/// Clients link `@lsp.type.<token_type>.<filetype>` to these groups, so a new
+/// token type needs no client change. The names are colourscheme groups except
+/// the `Magit*` intermediates the Neovim client defines locally.
+pub const TOKEN_GROUPS: &[&str] = &[
+    "Title",
+    "Comment",
+    "Directory",
+    "Changed",
+    "Added",
+    "Removed",
+    "Changed",
+    "Comment",
+    "Special",
+    "@diff.plus",
+    "@diff.minus",
+    "Title",
+    "Statement",
+    "Keyword",
+    "Normal",
+    "Special",
+    "Special",
+    "MagitMenuFlagOff",
+    "String",
+    "Comment",
+    "String",
+    "String",
+    "Comment",
+    "MagitMenuDisabled",
+    "MagitMenuPending",
+    "Comment",
+];
+
 /// The legend advertised in `semanticTokensProvider`.
 pub fn legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
         token_types: TOKEN_TYPES.iter().copied().map(Into::into).collect(),
         token_modifiers: TOKEN_MODIFIERS.iter().copied().map(Into::into).collect(),
     }
+}
+
+/// The server-suggested theme group for each token type, keyed by type.
+pub fn token_groups() -> serde_json::Value {
+    let mut groups = serde_json::Map::new();
+    for (token_type, group) in TOKEN_TYPES.iter().zip(TOKEN_GROUPS) {
+        groups.insert((*token_type).to_string(), (*group).into());
+    }
+    serde_json::Value::Object(groups)
 }
 
 /// Encode every token of `tree` as a full-document semantic-token response.
@@ -212,5 +255,17 @@ mod tests {
         staged.modifiers = vec!["staged".to_string(), "unknown".to_string()];
         let data = encode_lines(&lines, &[staged]);
         assert_eq!(data[0].token_modifiers_bitset, 1);
+    }
+
+    #[test]
+    fn every_token_type_has_a_suggested_group() {
+        assert_eq!(TOKEN_TYPES.len(), TOKEN_GROUPS.len());
+        let groups = token_groups();
+        for token_type in TOKEN_TYPES {
+            assert!(
+                groups.get(*token_type).and_then(serde_json::Value::as_str).is_some(),
+                "{token_type} has no suggested group"
+            );
+        }
     }
 }

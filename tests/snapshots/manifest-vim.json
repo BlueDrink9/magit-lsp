@@ -774,7 +774,7 @@
               "label": "Visit the thing at point",
               "doc": "Visit the thing at point",
               "group": "common",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {

@@ -1,0 +1,16 @@
+# R-NV-4/R-UI-7: a split placement leaves a window free for the visited file.
+#
+# The status view stays visible while Enter opens the server-resolved file and
+# line in the other window.
+fixture: modified-two-files
+env: MAGIT_LSP_PLACEMENT=vsplit
+---
+wait
+goto "+line3 CHANGED"
+keys: Enter
+wait
+expect windows.count == 2
+expect windows.0.filetype == "magit-lsp"
+expect windows.1.filetype == "text"
+expect screen contains "Unstaged changes"
+snapshot: visit-file-split

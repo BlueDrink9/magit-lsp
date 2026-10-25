@@ -83,6 +83,22 @@ async function applyEffects(effectList) {
       case 'focusView':
         await views.focusView(effect.viewId);
         break;
+      case 'visitFile': {
+        const document = await vscode.workspace.openTextDocument(
+          vscode.Uri.parse(effect.uri)
+        );
+        const editor = await vscode.window.showTextDocument(document, {
+          preview: false,
+          preserveFocus: false,
+        });
+        const position = new vscode.Position(effect.line || 0, effect.column || 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(
+          new vscode.Range(position, position),
+          vscode.TextEditorRevealType.InCenterIfOutsideViewport
+        );
+        break;
+      }
       case 'editDocument':
         await edits.openEdit(effect);
         break;

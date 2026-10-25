@@ -71,8 +71,7 @@ end
 --- Apply `notice` as the complete keymap of `bufnr`.
 ---
 --- `handlers.press(steps)` forwards a chord's canonical steps; `handlers.command`
---- runs a server command (used by the fold mirrors). `opts.visit` overrides one
---- normal-mode `lhs` with a client-side function, and `opts.fold_keys` adds
+--- runs a server command (used by the fold mirrors). `opts.fold_keys` adds
 --- explicit fold mirrors for Lua-function user mappings.
 ---
 --- `opts.commands` maps a command id to a client-side function (an edit's
@@ -81,7 +80,7 @@ end
 ---@param bufnr integer
 ---@param notice table `view/keymap` params
 ---@param handlers table { press: fun(steps: string[]), command: fun(command: string, args: table|nil) }
----@param opts table|nil { visit?: table, fold_keys?: table<string, string>, folds?: boolean, commands?: table<string, function>, only_commands?: boolean }
+---@param opts table|nil { fold_keys?: table<string, string>, folds?: boolean, commands?: table<string, function>, only_commands?: boolean }
 ---@return table[] applied entries
 function M.apply(bufnr, notice, handlers, opts)
   opts = opts or {}
@@ -95,15 +94,6 @@ function M.apply(bufnr, notice, handlers, opts)
     end
     seen[key] = true
     entries[#entries + 1] = { mode = mode, lhs = lhs, fn = fn, desc = desc }
-  end
-
-  local function drop_lhs(lhs)
-    for index = #entries, 1, -1 do
-      if entries[index].lhs == lhs then
-        seen[entries[index].mode .. '\0' .. entries[index].lhs] = nil
-        table.remove(entries, index)
-      end
-    end
   end
 
   local function command_fn(target)
@@ -133,12 +123,6 @@ function M.apply(bufnr, notice, handlers, opts)
         end
       end
     end
-  end
-
-  -- Visit is a documented client-side exception until `common.visit` lands.
-  if opts.visit and not text_mode then
-    drop_lhs(opts.visit.lhs)
-    add('n', opts.visit.lhs, opts.visit.fn, 'Visit file at line')
   end
 
   -- Mirror the native fold keys; a server binding for the same lhs wins.

@@ -625,7 +625,7 @@ T['theme links survive a colorscheme switch'] = function()
     { name = 'section', fg = child.lua_get("HELPERS.resolved_fg('magit.section')") },
     { name = 'file', fg = child.lua_get("HELPERS.resolved_fg('magit.file')") },
     { name = 'hunk header', fg = child.lua_get("HELPERS.resolved_fg('magit.hunk.header')") },
-    { name = 'hash', fg = child.lua_get("HELPERS.resolved_fg('magit.hash')") },
+    { name = 'menu key', fg = child.lua_get("HELPERS.resolved_fg('magit.menu.key')") },
   }
   for i = 1, #headings do
     MiniTest.expect.equality(type(headings[i].fg), 'number', headings[i].name .. ' has a foreground')
@@ -1130,24 +1130,23 @@ T['capture mode forwards printable keys and shows the server hint'] = function()
   MiniTest.expect.equality(after, before)
 end
 
-T['visit_key overrides the planned common.visit binding'] = function()
-  setup_child({ visit_key = '<F4>' })
+T['Enter visits the file and new-side line from the server effect'] = function()
+  setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'line3 CHANGED', 'unstaged')")
   MiniTest.expect.equality(type(target), 'number', 'change line index')
   child.api.nvim_win_set_cursor(0, { target, 0 })
 
-  -- `common.visit` is Planned, so Enter must not leave the view. The queued
-  -- native input needs a real processing barrier before asserting the buffer
-  -- is unchanged: poll for the violation (leaving the view) so absence is
-  -- observed, not assumed.
+  -- `common.visit` is a server command now: the effect names the file and line,
+  -- and the client only opens it. No rendered text is parsed.
   child.type_keys(50, '<CR>')
-  local left = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('magit://') == nil end, 500)")
-  MiniTest.expect.equality(left, false, 'Enter stays in the view until common.visit is implemented')
-
-  child.type_keys(50, '<F4>')
   local opened = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)")
-  MiniTest.expect.equality(opened, true, 'the configured visit key opened the file')
+  MiniTest.expect.equality(opened, true, 'Enter opened the visited file')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
+  MiniTest.expect.equality(
+    child.lua_get("#vim.api.nvim_list_wins()"),
+    1,
+    'the file opens in the only window'
+  )
 end
 
 T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = function()

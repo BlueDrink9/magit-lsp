@@ -48,6 +48,13 @@ pub enum Effect {
     },
     /// Close every view of the session.
     Quit,
+    /// Open a worktree file at a location the server resolved from its tree.
+    /// `uri` is a `file:` URI; `line` and `column` are 0-based.
+    VisitFile {
+        uri: String,
+        line: u32,
+        column: u32,
+    },
     /// Open a Git-owned file in the client's own editor and keep the operation
     /// that spawned Git waiting until `common.confirm`/`common.cancel` answers
     /// with the same `edit_id`. The metadata is selected by the server: `scope`

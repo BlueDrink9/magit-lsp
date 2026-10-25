@@ -181,8 +181,11 @@ Manual smoke checklist:
    :lua require('magit-lsp').setup({ root_dir = '/path/to/repo' })
    ```
 
-   If `target/debug/magit-lsp` exists the client spawns it directly; otherwise
-   it falls back to `cargo run`.
+   The client spawns the first server binary it finds: an explicit
+   `setup({ cmd = ... })`, `$MAGIT_LSP_BIN`, `target/release/magit-lsp`,
+   `target/debug/magit-lsp`, then `magit-lsp` on `$PATH`. There is no
+   `cargo run` fallback: when none is usable, `setup()` reports a clear error
+   instead of starting a surprise build.
 
 The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in
 the current window by replacing its buffer. It is a read-only view: native
@@ -204,9 +207,8 @@ text (`undolevels` goes back to `-1` first, so undo cannot reach stale edits).
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `root_dir` | `vim.fn.getcwd()` | Repository to show |
-| `cmd` | `target/debug/magit-lsp`, else `cargo run` | Server command |
+| `cmd` | discovered: `$MAGIT_LSP_BIN`, `target/release`, `target/debug`, `$PATH` | Server command |
 | `profile` | `"vim"` | Shipped keymap profile, forwarded as `initializationOptions.profile` |
-| `visit_key` | `"<CR>"` | Client-side visit key (see below) |
 | `status` | `{ placement = "replace" }` | Status window: replace the current window (`"replace"`), or open a `"vsplit"`, `"split"` or new `"tab"` |
 | `fold_keys` | `{}` | Extra fold mirrors, e.g. `{ ['<Tab>'] = 'common.toggle-section' }` |
 | `menu` | `{ style = "float" }` | Menu placement: a bottom float (default) or `style = "split"` for `botright {height}split` |
@@ -226,14 +228,13 @@ Folding is server-owned. The view window uses `foldmethod=manual` with
 side is a fold command (e.g. `nnoremap <Tab> za`). `fold_keys` covers
 Lua-function mappings, which cannot be inspected.
 
-`common.visit` is still `Planned` (R-4/R-5), so `visit_key` is a documented
-temporary client-side exception: while the server's binding is not
-`implemented`, the client maps `visit_key` (normal mode) to its own `visit`.
-It disappears as soon as the server implements `common.visit`. With the default
-`replace` placement the status view owns the only window, so `visit` opens the
-file in that window and leaves the status buffer listed (`:b`, `:ls` return to
-it); with a split or tab placement it opens the file in the other window so the
-status view stays visible.
+Visit resolution is server-owned. The `common.visit` binding the server sends
+names the file and new-side line from its own tree, and the client only opens
+the location in a `visitFile` effect; it never parses rendered text. With the
+default `replace` placement the status view owns the only window, so the file
+opens there and the status buffer stays listed (`:b`, `:ls` return to it); with
+a split or tab placement the file opens in the other window so the status view
+stays visible.
 
 Menus are separate `magit://menu.*` buffers created from the server's
 `pushView`/`openView` effects. The default placement is a bottom floating

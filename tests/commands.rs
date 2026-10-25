@@ -268,6 +268,49 @@ fn planned_commands_report_their_roadmap_and_change_nothing() {
     assert_eq!(cached_diff(tmp.path()), cached_before);
 }
 
+/// `common.visit` resolves through the server tree: the acked line names both
+/// the worktree file and its new-side line, and the client only receives the
+/// resulting location.
+#[test]
+fn visit_reports_the_server_resolved_worktree_location() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let line = test.goto_text("f.txt", "line3 CHANGED");
+    let outcome = test.invoke_at("common.visit", Cursor { line, column: 0 });
+
+    let uri = format!("file://{}/f.txt", tmp.path().display());
+    assert_eq!(
+        outcome.effects,
+        vec![Effect::VisitFile {
+            uri,
+            line: 2,
+            column: 0,
+        }]
+    );
+}
+
+/// A section header has no file location, so visiting it must explain instead
+/// of opening an arbitrary file.
+#[test]
+fn visiting_a_line_without_a_location_reports_nothing_to_visit() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let line = test.goto_section("unstaged");
+    let outcome = test.invoke_at("common.visit", Cursor { line, column: 0 });
+
+    assert_eq!(message_texts(&outcome.effects), vec!["Nothing to visit here"]);
+}
+
 /// Transferred from the deleted Lua `unstaging an untracked file reports
 /// nothing to unstage` case: an untracked file has no index entry to remove,
 /// so the invoke must notify instead of resolving an `UnstageFile` action.

@@ -1271,7 +1271,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       active; `debug.lua` must not be required on a normal start.
       *Done when:* a normal `setup()` never loads `debug.lua`
       (L2 assert on `package.loaded`); `make ui-test` green.
-- [ ] R-NV-4 **Structure and defaults** (§11.1 findings 4–7): split `init.lua`
+- [x] R-NV-4 **Structure and defaults** (§11.1 findings 4–7): split `init.lua`
       (highlights, buffer/read-only, setup/config); find the server binary in
       this order: `setup{cmd}`, `$MAGIT_LSP_BIN`, `target/release`,
       `target/debug`, `magit-lsp` on `$PATH`, and report a clear error instead
@@ -1609,6 +1609,28 @@ in `tmp-task.md`.
 hand-maintained token links → R-NV-4. Startup splitting → R-UI-7.
 Keep the intentional fold mirroring, pure key translation, atomic keymaps,
 prompt adapter and no Git/tree parsing. Acceptance criteria live only in §7.
+
+R-NV-4 resolution (findings 4–7):
+- `config.lua` now owns placement validation, project root and the ordered
+  server lookup (`setup{cmd}`, `$MAGIT_LSP_BIN`, `target/release`,
+  `target/debug`, `magit-lsp` on `$PATH`), plus key-modifier detection and
+  client capabilities. There is no `cargo run` fallback; a missing binary is a
+  clear `vim.notify` error. `init.lua` only wires sessions and views.
+- `common.visit` is implemented on the server: it resolves the acked tree's
+  line to a file/new-side line and returns `Effect::VisitFile`. The Lua
+  `M.visit`, `visit_key` option, keymap override and visit exception are
+  deleted; the client only opens the server-provided URI/line.
+- `highlights.lua` keeps only `OVERRIDES` and modifier links. The semantic-token
+  legend carries `tokenTypeGroups` (suggested theme group per token type), so a
+  new token type needs no Lua edit; the client applies it from `on_init`.
+- VSCode's `package.json` theme contributions are deliberately retained:
+  VSCode cannot consume arbitrary per-token legend suggestions, so its own
+  theme mapping stays. It does handle the new `visitFile` effect.
+- New UI scenarios `visit-file` (single window, replace) and
+  `visit-file-split` (split keeps status visible) drive the real editor.
+Sizes after R-NV-4: init 385, config 107, view 1111, menu 98, edit 139,
+buffer 154, effects 133, highlights 100, keymap 178; debug 442, keys 326,
+prompt 193.
 
 ### 11.2 VSCode extension (`clients/vscode/`)
 

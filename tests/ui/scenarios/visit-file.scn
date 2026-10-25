@@ -1,0 +1,16 @@
+# R-NV-4: `common.visit` is server-owned; Enter opens the resolved file.
+#
+# The default `replace` placement gives the status view the only window, so the
+# visited file replaces it in place. R-UI-7 keeps the status buffer listed, but
+# the screen must show the worktree file at the server-resolved new-side line.
+fixture: modified-two-files
+---
+wait
+goto "+line3 CHANGED"
+keys: Enter
+wait
+expect windows.count == 1
+expect windows.0.filetype == "text"
+expect cursor on "line3 CHANGED"
+expect screen not-contains "Unstaged changes"
+snapshot: visit-file

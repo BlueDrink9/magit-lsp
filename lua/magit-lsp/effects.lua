@@ -68,6 +68,51 @@ function M.replay(key)
   vim.api.nvim_feedkeys(keys.termcodes(lhs), 'n', false)
 end
 
+--- The window a visited file should open in.
+---
+--- A split or tab placement leaves another window free, so the status view
+--- stays visible. When the status view replaced the only buffer there is no
+--- second window and the file opens in place; the status buffer stays listed,
+--- so `:b`/the buffer list return to it.
+---@return integer
+local function visit_window()
+  local current = vim.api.nvim_get_current_win()
+  local windows = vim.api.nvim_list_wins()
+  if #windows < 2 then
+    return current
+  end
+  local previous_number = vim.fn.winnr('#')
+  if previous_number > 0 then
+    local previous = vim.fn.win_getid(previous_number)
+    if previous ~= 0 and previous ~= current and vim.api.nvim_win_is_valid(previous) then
+      return previous
+    end
+  end
+  for _, win in ipairs(windows) do
+    if win ~= current and vim.api.nvim_win_is_valid(win) then
+      return win
+    end
+  end
+  return current
+end
+
+--- Open a server-resolved worktree location, keeping the view visible.
+---@param effect table `visitFile` effect with `uri`, `line` and `column`
+function M.visit_file(effect)
+  if type(effect) ~= 'table' or not effect.uri then
+    return
+  end
+  local filename = vim.uri_to_fname(effect.uri)
+  local target = visit_window()
+  if vim.api.nvim_get_current_win() ~= target then
+    vim.api.nvim_set_current_win(target)
+  end
+  vim.cmd('edit ' .. vim.fn.fnameescape(filename))
+  local line = math.max((effect.line or 0) + 1, 1)
+  local column = math.max(effect.column or 0, 0)
+  vim.api.nvim_win_set_cursor(0, { line, column })
+end
+
 --- Open the detail of the last error in a scratch split.
 function M.error_detail()
   local detail = M.last_error_detail

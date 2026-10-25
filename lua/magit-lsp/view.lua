@@ -295,7 +295,7 @@ end
 
 local function set_cursor(view, cursor)
   local win = view.win
-  if not win or not vim.api.nvim_win_is_valid(win) then
+  if not win or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= view.buf then
     win = vim.fn.bufwinid(view.buf)
   end
   if win == -1 then
@@ -435,8 +435,7 @@ end
 --- Apply a `view/keymap` notification atomically (§3.9).
 ---
 --- The map set is the server's bindings translated to Neovim keys plus the
---- client-side fold mirrors and, for the status scope, the temporary visit
---- exception until `common.visit` is implemented.
+--- client-side fold mirrors.
 ---@param notice table `view/keymap` params
 ---@param client_id integer the client that sent the notification
 function M.apply_keymap(notice, client_id)
@@ -476,24 +475,7 @@ function M.apply_keymap(notice, client_id)
   if view.keymap_options then
     handlers, opts = view.keymap_options(view, notice)
   else
-    local visit
-    if notice.scope == 'status' and notice.mode ~= 'text' then
-      local binding
-      for _, candidate in ipairs(notice.bindings or {}) do
-        if candidate.command == 'common.visit' then
-          binding = candidate
-          break
-        end
-      end
-      if not binding or binding.status ~= 'implemented' then
-        visit = { lhs = view.visit_key or M.host.visit_key or '<CR>', fn = function()
-          if M.host.visit then
-            M.host.visit(view)
-          end
-        end }
-      end
-    end
-    opts = { visit = visit, fold_keys = view.fold_keys or M.host.fold_keys }
+    opts = { fold_keys = view.fold_keys or M.host.fold_keys }
   end
 
   keymap.apply(view.buf, notice, handlers, opts)
@@ -636,7 +618,6 @@ function M.open(descriptor, opts)
     descriptor = descriptor,
     client_id = client_id,
     root = opts.root,
-    visit_key = opts.visit_key,
     fold_keys = opts.fold_keys,
     version = nil,
     lines = (last and last.params.text) or {},
@@ -1017,6 +998,10 @@ function M.apply_effects(effects, source)
       M.focus(effect.viewId, client_id)
     elseif kind == 'quit' then
       M.quit(source)
+    elseif kind == 'visitFile' then
+      if M.host.visit_file then
+        M.host.visit_file(effect)
+      end
     elseif kind == 'editDocument' then
       if M.host.edit_document then
         M.host.edit_document(effect, source)

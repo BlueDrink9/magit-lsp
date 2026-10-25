@@ -6,6 +6,7 @@
 --- public API used by scripts and tests.
 
 local buffer = require('magit-lsp.buffer')
+local config = require('magit-lsp.config')
 local effects = require('magit-lsp.effects')
 local highlights = require('magit-lsp.highlights')
 local view = require('magit-lsp.view')
@@ -19,10 +20,6 @@ local M = {}
 --- Open sessions by repository root.
 ---@type table<string, table>
 M.sessions = {}
-
---- The status placements this client understands (R-UI-7). They are window
---- implementations only: the server's descriptor placement stays advisory.
-local STATUS_PLACEMENTS = { 'replace', 'vsplit', 'split', 'tab' }
 
 --- Client-only options; nothing here is sent to the server.
 local options = { status = { placement = 'replace' } }
@@ -67,59 +64,7 @@ end
 ---@param value any
 ---@return string
 local function placement_name(value)
-  if value == nil then
-    return 'replace'
-  end
-  for _, name in ipairs(STATUS_PLACEMENTS) do
-    if value == name then
-      return name
-    end
-  end
-  vim.notify(
-    'magit-lsp: unknown status.placement ' .. vim.inspect(value) .. '; using replace',
-    vim.log.levels.WARN
-  )
-  return 'replace'
-end
-
-local function project_root()
-  local source = debug.getinfo(1, 'S').source
-  local path = source:sub(2)
-  path = vim.fn.fnamemodify(path, ':h') -- lua/magit-lsp
-  path = vim.fn.fnamemodify(path, ':h') -- lua
-  return vim.fn.fnamemodify(path, ':h') -- project root
-end
-
-local function default_cmd()
-  local bin = project_root() .. '/target/debug/magit-lsp'
-  if vim.fn.filereadable(bin) == 1 then
-    return { bin }
-  end
-  return { 'cargo', 'run', '--manifest-path', project_root() .. '/Cargo.toml' }
-end
-
---- How faithfully this client can report key modifiers (§3.8).
-local function detect_key_modifiers()
-  if vim.fn.has('gui_running') == 1 then
-    return 'full'
-  end
-  local program = vim.env.TERM_PROGRAM
-  if program == 'iTerm.app' or program == 'WezTerm' or vim.env.KITTY_WINDOW_ID then
-    return 'full'
-  end
-  return 'basic'
-end
-
---- The client capabilities the server reads, plus the key-delivery contract.
----@return table
-local function client_capabilities()
-  local capabilities = vim.lsp.protocol.make_client_capabilities()
-  capabilities.keymapDelivery = 'dynamic'
-  capabilities.keyModifiers = detect_key_modifiers()
-  capabilities.prompts = true
-  capabilities.placements = { 'main', 'side', 'bottom', 'float' }
-  capabilities.editorBridge = false
-  return capabilities
+  return config.placement(value)
 end
 
 local function error_message(err)
@@ -191,7 +136,6 @@ function open_status(session)
       win = session.win,
       client_id = session.client_id,
       root = session.root,
-      visit_key = session.visit_key,
       fold_keys = session.fold_keys,
       placement = options.status.placement,
     })
@@ -294,59 +238,6 @@ function M.jump(kind, dir)
   end)
 end
 
---- The window a visited file should open in.
----
---- A split or tab placement leaves another window free, so the status view
---- stays visible. When the status view replaced the only buffer there is no
---- second window and the file opens in place; the status buffer stays listed,
---- so `:b`/the buffer list return to it.
----@return integer
-local function visit_window()
-  local current = vim.api.nvim_get_current_win()
-  local windows = vim.api.nvim_list_wins()
-  if #windows < 2 then
-    return current
-  end
-  local previous_number = vim.fn.winnr('#')
-  if previous_number > 0 then
-    local previous = vim.fn.win_getid(previous_number)
-    if previous ~= 0 and previous ~= current and vim.api.nvim_win_is_valid(previous) then
-      return previous
-    end
-  end
-  for _, win in ipairs(windows) do
-    if win ~= current and vim.api.nvim_win_is_valid(win) then
-      return win
-    end
-  end
-  return current
-end
-
---- Visit the file (and new-side line) under the cursor.
---- Opens it in another window when the view is split so the view stays
---- visible, and in the status window itself when the view fills the screen.
----@param record table|nil defaults to the focused view
-function M.visit(record)
-  record = record or view.current()
-  if not record then
-    return
-  end
-  vim.lsp.buf.definition({
-    on_list = function(options)
-      local item = options.items[1]
-      if not item or not item.filename then
-        return
-      end
-      local target = visit_window()
-      if vim.api.nvim_get_current_win() ~= target then
-        vim.api.nvim_set_current_win(target)
-      end
-      vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
-      vim.api.nvim_win_set_cursor(0, { item.lnum, math.max((item.col or 1) - 1, 0) })
-    end,
-  })
-end
-
 --- Open the detail of the last error in a scratch split.
 function M.error_detail()
   effects.error_detail()
@@ -370,9 +261,7 @@ local function configure()
     notify = effects.notify,
     clipboard = effects.copy,
     replay = effects.replay,
-    visit = function(record)
-      M.visit(record)
-    end,
+    visit_file = effects.visit_file,
     edit_document = function(effect, source)
       edit.open(effect, source)
     end,
@@ -430,7 +319,7 @@ end
 --- Opening is asynchronous: the status view appears when the server answers
 --- `view/open`, and the render and keymap that follow it are applied as they
 --- arrive. `setup()` itself never waits.
----@param opts table|nil { root_dir?, cmd?, profile?, status?, visit_key?, fold_keys?, menu? }
+---@param opts table|nil { root_dir?, cmd?, profile?, status?, fold_keys?, menu? }
 ---@return table|nil descriptor, any err the descriptor of an already-open status view
 function M.setup(opts)
   opts = opts or {}
@@ -444,23 +333,25 @@ function M.setup(opts)
     end
   end
 
+  local cmd, cmd_error = config.server_command(opts.cmd)
+  if not cmd then
+    vim.notify(cmd_error, vim.log.levels.ERROR)
+    return nil, cmd_error
+  end
+
   configure()
   menu.setup(opts.menu)
   options.status.placement = placement_name((opts.status or {}).placement)
 
   local profile = opts.profile or 'vim'
-  local visit_key = opts.visit_key or '<CR>'
   local fold_keys = opts.fold_keys or {}
-  local cmd = opts.cmd or default_cmd()
   local session = existing or {
     root = root,
     profile = profile,
-    visit_key = visit_key,
     fold_keys = fold_keys,
     buf = buffer.fresh(),
   }
   M.sessions[root] = session
-  session.visit_key = visit_key
   session.fold_keys = fold_keys
   if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
 
@@ -473,8 +364,13 @@ function M.setup(opts)
       name = 'magit-lsp',
       cmd = cmd,
       root_dir = root,
-      capabilities = client_capabilities(),
+      capabilities = config.client_capabilities(),
       init_options = { profile = profile },
+      on_init = function(_, result)
+        local capabilities = result and result.capabilities
+        local provider = capabilities and capabilities.semanticTokensProvider
+        highlights.apply_legend(buffer.filetype, provider and provider.legend)
+      end,
     }, { bufnr = session.buf })
     if not session.client_id then
       vim.notify('Failed to start magit-lsp server', vim.log.levels.ERROR)

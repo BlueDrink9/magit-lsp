@@ -1525,6 +1525,16 @@ fn capabilities() -> Result<Value> {
             serde_json::json!({ "workDoneProgress": true }),
         );
     }
+    // The legend carries a suggested theme group per token type, so a client
+    // never has to maintain a token-type table of its own.
+    if let Some(legend) = capabilities.pointer_mut("/semanticTokensProvider/legend") {
+        if let Some(object) = legend.as_object_mut() {
+            object.insert(
+                "tokenTypeGroups".to_string(),
+                semantic_tokens::token_groups(),
+            );
+        }
+    }
     Ok(capabilities)
 }
 
