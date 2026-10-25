@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -43,6 +45,34 @@ class DocumentTest(unittest.TestCase):
     def test_expression_reads_the_active_buffer(self) -> None:
         self.assertIn("nvim_buf_get_lines", driver._DOCUMENT_EXPR)
         self.assertIn("vim.json.encode", driver._DOCUMENT_EXPR)
+
+
+class GotoTest(unittest.TestCase):
+    def test_sends_the_literal_text_and_sets_the_cursor(self) -> None:
+        with patch.object(driver, "_expr", return_value="1") as expression:
+            driver.goto_text(object(), "+line3 CHANGED")
+        request = expression.call_args.args[1]
+        payload = re.search(r'base64\.decode\("([A-Za-z0-9+/=]*)"\)', request)
+        self.assertIsNotNone(payload)
+        self.assertEqual(
+            base64.b64decode(payload.group(1)).decode("utf-8"), "+line3 CHANGED"
+        )
+        self.assertIn("line:find(text, 1, true)", request)
+        self.assertIn("nvim_win_set_cursor", request)
+
+    def test_true_answer_is_success(self) -> None:
+        with patch.object(driver, "_expr", return_value="true"):
+            driver.goto_text(object(), "text")
+
+    def test_missing_text_is_an_error(self) -> None:
+        with patch.object(driver, "_expr", return_value="0"):
+            with self.assertRaises(driver.DriverError):
+                driver.goto_text(object(), "absent")
+
+    def test_no_answer_is_an_error(self) -> None:
+        with patch.object(driver, "_expr", return_value=None):
+            with self.assertRaises(driver.DriverError):
+                driver.goto_text(object(), "text")
 
 
 class WaitScreenTest(unittest.TestCase):

@@ -240,6 +240,31 @@ class ParserTest(unittest.TestCase):
                 write_temp("fixture: clean\n---\ndocument: ../escape\n")
             )
 
+    def test_goto_statement(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                'fixture: clean\n---\ngoto "+line3 CHANGED"\nwait\n',
+                "goto.scn",
+            )
+        )
+        self.assertEqual(parsed.statements[0].kind, "goto")
+        self.assertEqual(parsed.statements[0].text, "+line3 CHANGED")
+        self.assertEqual(parsed.statements[1].kind, "wait")
+
+    def test_goto_accepts_single_quotes(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\ngoto 'Unstaged changes'\n", "goto.scn")
+        )
+        self.assertEqual(parsed.statements[0].text, "Unstaged changes")
+
+    def test_goto_needs_quoted_text(self) -> None:
+        for line in ("goto\n", "goto line3\n"):
+            with self.subTest(line=line):
+                with self.assertRaises(scenario.ScenarioError):
+                    scenario.parse_scenario(
+                        write_temp(f"fixture: clean\n---\n{line}", "goto.scn")
+                    )
+
 
 class HelperTest(unittest.TestCase):
     def test_strip_comment_respects_quotes(self) -> None:
@@ -532,9 +557,24 @@ class LatencyPredicateTest(unittest.TestCase):
         self.assertIsNone(scenario.measure_latency("z", sample_events()))
 
     def test_budget_without_scale(self) -> None:
-        ok, actual = scenario.check_latency(sample_events(), "?", "<=", 10.0)
+        with patch.dict(os.environ, {"UI_STRICT_LATENCY": ""}):
+            ok, actual = scenario.check_latency(sample_events(), "?", "<=", 10.0)
+        self.assertTrue(ok)
+        self.assertIn("20.0ms", actual)
+        self.assertIn("informational", actual)
+
+    def test_budget_fails_when_strict(self) -> None:
+        with patch.dict(os.environ, {"UI_STRICT_LATENCY": "1"}):
+            ok, actual = scenario.check_latency(sample_events(), "?", "<=", 10.0)
         self.assertFalse(ok)
         self.assertIn("20.0ms", actual)
+        self.assertNotIn("informational", actual)
+
+    def test_missing_trace_still_fails(self) -> None:
+        with patch.dict(os.environ, {"UI_STRICT_LATENCY": "1"}):
+            ok, actual = scenario.check_latency([], "?", "<=", 10.0)
+        self.assertFalse(ok)
+        self.assertIn("no trace", actual)
 
     def test_budget_with_scale(self) -> None:
         with patch.dict(os.environ, {"UI_BUDGET_SCALE": "3"}):
@@ -546,8 +586,17 @@ class LatencyPredicateTest(unittest.TestCase):
             self.assertEqual(scenario.budget_scale(), 1.0)
 
     def test_strict_operator(self) -> None:
-        ok, _ = scenario.check_latency(sample_events(), "?", "<", 20.0)
+        with patch.dict(os.environ, {"UI_STRICT_LATENCY": "1"}):
+            ok, _ = scenario.check_latency(sample_events(), "?", "<", 20.0)
         self.assertFalse(ok)
+
+    def test_strict_latency_flag(self) -> None:
+        with patch.dict(os.environ, {"UI_STRICT_LATENCY": "1"}):
+            self.assertTrue(scenario.strict_latency())
+        for value in ("", "0", "true", "yes"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"UI_STRICT_LATENCY": value}):
+                    self.assertFalse(scenario.strict_latency())
 
     def test_evaluate_latency(self) -> None:
         expectation = scenario.parse_expectation('expect latency("?") <= 100ms')

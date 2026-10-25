@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -200,6 +201,16 @@ _DOCUMENT_EXPR = (
     'luaeval(\'vim.json.encode(table.concat('
     'vim.api.nvim_buf_get_lines(0, 0, -1, false), string.char(10)))\')'
 )
+# The search text travels as base64 so neither quoting level needs escaping.
+_GOTO_EXPR = (
+    "luaeval('(function(text)"
+    " for index = 1, vim.api.nvim_buf_line_count(0) do"
+    ' local line = vim.api.nvim_buf_get_lines(0, index - 1, index, false)[1] or ""'
+    " local start = line:find(text, 1, true)"
+    " if start then vim.api.nvim_win_set_cursor(0, {{ index, start - 1 }})"
+    " return true end"
+    ' end return false end)(vim.base64.decode("{}"))\')'
+)
 
 
 def snapshot(run: Run) -> dict:
@@ -240,6 +251,21 @@ def document(run: Run) -> str:
     if not isinstance(text, str):
         raise DriverError("Neovim returned a non-string document")
     return text
+
+
+def goto_text(run: Run, text: str) -> None:
+    """Move the cursor to the first buffer line containing `text`.
+
+    The match is literal and the cursor lands on the first character, so a
+    scenario can name its target instead of counting motions. It is an RPC
+    call, not a key press, so it never contributes to a latency measurement.
+    """
+    payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    output = _expr(run, _GOTO_EXPR.format(payload))
+    if output is None:
+        raise DriverError("Neovim did not answer the goto request")
+    if output not in ("true", "1"):
+        raise DriverError(f"{text!r} is not in the active document")
 
 
 def clear_message_line(run: Run) -> None:

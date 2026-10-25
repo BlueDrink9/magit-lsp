@@ -192,6 +192,7 @@ profile: vim            # runner also runs "standard" unless "profile-only: true
 xfail: bug-2            # optional; see Rules
 ---
 keys: m ?               # space-separated keys, each sent separately
+goto "+line3 CHANGED"   # move the cursor to the first line containing the text
 wait                    # until idle
 expect screen contains "Transient and dwim commands"
 expect screen not-contains "Committing"
@@ -207,6 +208,10 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 ```
 
 `style` predicates use the ANSI decoder on the run containing the quoted text. `latency` uses the trace. A failed `expect` prints the expectation, the actual value, and the full current screen, then continues to the next scenario.
+
+`goto "<text>"` moves the cursor to the first character of the first buffer line containing the quoted text (a literal match, no regex). It fails when the text is absent. It is an RPC call rather than a key press, so it neither appears in the trace nor contributes to a `latency` measurement; scenarios use it to name a target instead of counting motion keys.
+
+`latency` always reports the measured key-to-idle time. Budgets are multiplied by `UI_BUDGET_SCALE`, and an over-budget measurement only fails the run when `UI_STRICT_LATENCY=1`; otherwise it is informational.
 
 ---
 
