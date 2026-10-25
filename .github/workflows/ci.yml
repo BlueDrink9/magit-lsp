@@ -28,6 +28,15 @@ jobs:
           neovim: true
           version: stable
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The vscode keybinding drift check and node tests are part of
+      # `make test`; install the locked dependencies first.
+      - name: npm ci
+        run: npm ci --prefix clients/vscode
+
       - name: make test
         run: make test
 

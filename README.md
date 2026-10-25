@@ -67,12 +67,17 @@ All tests (Rust + Neovim integration) run from the project root:
 make test
 ```
 
+Local prerequisites: `git` (2.30.8 recommended), a Rust toolchain (`cargo`,
+stable), Neovim (any recent version with Lua) and Node.js 22 or newer with
+npm for the VSCode client tests. See below for the exact pieces.
+
 Individual pieces:
 
 ```sh
 make test-rust                             # cargo unit + integration tests
 make test-lua                              # native Neovim tests via mini.test
 make test-file FILE=tests/test_magit_lsp.lua
+make vscode-test                           # VSCode node tests + keybinding drift check
 ```
 
 `make test-lua` clones `mini.nvim` into `build/deps/mini.nvim` on first run
@@ -94,8 +99,15 @@ npm --prefix clients/vscode test
 
 These are Node unit tests for the extension's context, rendering, menu,
 fold-shortcut and prompt helpers. They do not launch VSCode or the language
-server. `make test` runs only Rust and Neovim tests; it does **not** run the
-VSCode tests.
+server. `make vscode-test` runs the same node tests plus
+`node clients/vscode/scripts/gen-keybindings.mjs --check`, which regenerates
+`contributes.keybindings` from the server's static manifest and fails when the
+committed one is stale (e.g. after editing a profile in Rust without running
+the generator). `npm ci --prefix clients/vscode` installs the locked
+dependency versions from `package-lock.json`; it is the only supported way to
+set up the client's dependencies, so CI and local runs see identical versions.
+`make test` includes `vscode-test` and CI installs the locked dependencies
+(Node 22) before running it.
 
 To test the extension in an Extension Development Host, build the server and
 install the extension dependencies first. Then create a disposable repository

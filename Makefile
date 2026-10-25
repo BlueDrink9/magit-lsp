@@ -1,9 +1,13 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test
 
 build:
 	cargo build
 
-test: test-rust test-lua
+test: test-rust test-lua vscode-test
+
+vscode-test:
+	npm --prefix clients/vscode test
+	node clients/vscode/scripts/gen-keybindings.mjs --check
 
 test-rust:
 	cargo test

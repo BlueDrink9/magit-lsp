@@ -295,6 +295,22 @@ local function setup_child(opts)
         local missing, extra = HELPERS.diff_keys(got, want)
         return { missing = missing, extra = extra }
       end,
+      --- Poll `fn` with a bounded `vim.wait`, yielding the Neovim event loop
+      --- so queued input, LSP notifications and scheduled callbacks can run.
+      --- Returns false on timeout so the caller's assertion reports the
+      --- actual state instead of concealing it; never hangs.
+      ---@param fn fun(): boolean
+      ---@param timeout integer|nil milliseconds, default 5000
+      ---@return boolean
+      wait_for = function(fn, timeout)
+        return vim.wait(timeout or 5000, fn, 20)
+      end,
+      --- Poll until the magit-lsp client is idle: no outstanding requests,
+      --- prompts, progress tokens, scheduled work or unacknowledged renders.
+      ---@return boolean
+      wait_idle = function()
+        return HELPERS.wait_for(function() return require('magit-lsp.debug').idle() end)
+      end,
     }
   ]])
 end
@@ -321,22 +337,109 @@ local function invoke_at(line, command, opts)
   return child.lua_get('R ~= nil')
 end
 
--- Type keys that the read-only buffer should refuse. `type_keys()` raises when
--- `v:errmsg` is set, so accept only the expected native E21 and never a Lua
--- traceback.
-local function type_edit(keys)
-  local ok, err = pcall(child.type_keys, 50, keys)
-  vim.loop.sleep(50)
-  local errmsg = child.v.errmsg
+-- Type keys against the read-only status buffer (TASKS.md IMM-4). Every
+-- attempt must leave the full buffer text and `modified=false` untouched.
+-- `type_keys()` raises when `v:errmsg` is set, so a mapped path must never
+-- surface a Lua traceback; a key unbound in the active profile must fail
+-- natively with E21 and never silently. Stale `v:errmsg` is cleared before
+-- the input so the observed error belongs to this attempt.
+--
+-- Mapped keys are distinguished honestly: `u` is bound to unstage (a no-op
+-- on the header), so it is passed `{ bound_noop = true }` and must produce
+-- NO E21 — claiming E21 there would be a false assertion. IMM-4's `dd`/`x`
+-- deviation: `d` opens the diff menu and `x` discards, so neither is typed
+-- as a native edit here. `c` opens the commit view, so `ciw<Esc>` is NOT
+-- unbound; the native `ciw` path is exercised with mappings deliberately
+-- bypassed (`{ native = true }`, feedkeys noremap) and covered by the
+-- non-vacuity check below, where the same bypass makes the guard fail.
+local function type_edit(keys, opts)
+  opts = opts or {}
+  -- Clear stale `v:errmsg` before typing so the poll below observes this
+  -- attempt's error only.
   child.v.errmsg = ''
-  if not ok then
+  local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  local ok, err, after, modified, native_errmsg
+  if opts.native then
+    -- Deliberately bypass mappings to exercise the native command itself;
+    -- expand termcodes, then `x` (execute now) + `n` (noremap).
+    -- The control edits, snapshots and restores in one child call without
+    -- yielding to live renders. Cleanup runs even if input/snapshotting fails.
+    local result = child.lua_get(string.format([[
+      (function()
+        local buf = STATUS.buf
+        local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+        local modifiable, modified = vim.bo[buf].modifiable, vim.bo[buf].modified
+        local cursor, errmsg = vim.api.nvim_win_get_cursor(0), vim.v.errmsg
+        local control = %s
+        local success, result = pcall(function()
+          local input = vim.api.nvim_replace_termcodes(%q, true, false, true)
+          if control then vim.bo[buf].modifiable = true end
+          local ok, err = pcall(vim.fn.feedkeys, input, 'xn')
+          return {
+            ok = ok, err = tostring(err), errmsg = vim.v.errmsg, before = lines,
+            after = vim.api.nvim_buf_get_lines(buf, 0, -1, false),
+            modified = vim.bo[buf].modified,
+          }
+        end)
+        if control then
+          vim.bo[buf].modifiable = true
+          local restored, restore_err = pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false, lines)
+          vim.bo[buf].modifiable, vim.bo[buf].modified = modifiable, modified
+          vim.api.nvim_win_set_cursor(0, cursor)
+          vim.v.errmsg = errmsg
+          if not restored then error(restore_err) end
+        end
+        if not success then error(result) end
+        return result
+      end)()
+    ]], tostring(opts.control == true), keys))
+    ok, err, after, modified = result.ok, result.err, result.after, result.modified
+    before = result.before
+    -- Keep the observed error even though the control restored v:errmsg.
+    native_errmsg = result.errmsg
+  else
+    ok, err = pcall(child.type_keys, 50, keys)
+  end
+  -- Mapped input may queue work; native feedkeys above executes synchronously.
+  -- Never sleep: poll for the mapped attempt's error before classifying it.
+  if not opts.native then
+    child.lua_get("HELPERS.wait_for(function() return vim.v.errmsg ~= '' end, 500)")
+  end
+  local errmsg = native_errmsg or child.v.errmsg
+  child.v.errmsg = ''
+  -- Any command the refused key mapped to (e.g. `u` on the header) must have
+  -- drained before the next step, so a pending render cannot leak out.
+  if not opts.control then child.lua_get('HELPERS.wait_idle()') end
+  -- Independent guards, buffer state first: a silently successful edit (e.g.
+  -- the negative control while temporarily modifiable) must be reported as an
+  -- unchanged-buffer violation even though no E21 can occur; the E21
+  -- classification below then still covers every refusal path, so neither
+  -- check is weakened.
+  after = after or child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
+  if modified == nil then
+    modified = child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })")
+  end
+  MiniTest.expect.equality(after, before, { fail_reason = 'buffer must be unchanged after ' .. keys })
+  MiniTest.expect.equality(
+    modified,
+    false,
+    { fail_reason = 'buffer must stay unmodified after ' .. keys }
+  )
+  if opts.bound_noop then
+    -- A mapped no-op must succeed, not masquerade as a native refusal.
+    MiniTest.expect.equality(ok, true, { fail_reason = tostring(err) })
+    MiniTest.expect.equality(errmsg, '', { fail_reason = 'mapped no-op must not set an error: ' .. errmsg })
+  elseif not ok then
+    -- A mapped path must fail natively, never with a Lua traceback.
     MiniTest.expect.equality(
       tostring(err):find('E21', 1, true) ~= nil,
       true,
-      'unexpected error: ' .. tostring(err)
+      { fail_reason = 'unexpected error: ' .. tostring(err) }
     )
-  elseif errmsg ~= '' then
-    MiniTest.expect.equality(errmsg:find('E21', 1, true) ~= nil, true, 'unexpected error: ' .. errmsg)
+  else
+    -- An unbound native edit must actually be refused with E21.
+    MiniTest.expect.equality(errmsg:find('E21', 1, true) ~= nil, true,
+      { fail_reason = 'unexpected error: ' .. errmsg })
   end
 end
 
@@ -416,14 +519,7 @@ T['staging a visual line range stages only those lines'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, 'V', 's')
 
-  local staged = false
-  for _ = 1, 40 do
-    staged = child.lua_get("HELPERS.has_line('    +NEW line')")
-    if staged then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +NEW line') end)")
   MiniTest.expect.equality(staged, true)
 
   local cached = git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' })
@@ -641,19 +737,36 @@ T['status buffer is read-only to native edits'] = function()
   MiniTest.expect.equality(opt('undolevels'), -1)
   MiniTest.expect.equality(opt('modified'), false)
 
-  -- Native edits that are unbound in every profile; `u` is mapped to unstage
-  -- and the cursor sits on the header, so it is a no-op.
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
+  -- Non-vacuity: enable modifiable only for the guard's actual native x.
+  -- It snapshots the successful edit and restores in a finally-style cleanup
+  -- before returning, without yielding to a render or retrying input.
+  local guard_ok, guard_err = pcall(type_edit, 'x', { native = true, control = true })
+  MiniTest.expect.equality(guard_ok, false,
+    { fail_reason = 'the guard must reject a successful edit: ' .. tostring(guard_err) })
+  MiniTest.expect.equality(tostring(guard_err):find('unchanged after x', 1, true) ~= nil, true,
+    { fail_reason = 'guard failure must be the buffer-unchanged check: ' .. tostring(guard_err) })
+  MiniTest.expect.equality(child.lua_get('HELPERS.lines()'), before,
+    { fail_reason = 'mutation must be fully restored' })
+  MiniTest.expect.equality(opt('modifiable'), false)
+  MiniTest.expect.equality(opt('modified'), false)
+
+  -- `u` is bound to unstage and is a no-op with the cursor on the header, so
+  -- it is classified as a bound no-op (no E21 expected).
+  type_edit('u', { bound_noop = true })
+  -- `J` and `~` are unbound in every profile, so they must fail with E21.
   type_edit('J')
   type_edit('~')
-  type_edit('ciw<Esc>')
-  type_edit('u')
+  -- `c` opens the commit view, so `ciw<Esc>` is not an unbound edit; type the
+  -- native `ciw` with mappings bypassed to assert E21 honestly.
+  type_edit('ciw<Esc>', { native = true })
 
   local ok, err = pcall(child.cmd, 's/a/b/')
-  MiniTest.expect.equality(ok, false, 'substitute should be refused')
+  MiniTest.expect.equality(ok, false, { fail_reason = 'substitute should be refused' })
   MiniTest.expect.equality(
     tostring(err):find('E21', 1, true) ~= nil,
     true,
-    'substitute should fail with E21: ' .. tostring(err)
+    { fail_reason = 'substitute should fail with E21: ' .. tostring(err) }
   )
   child.v.errmsg = ''
 
@@ -698,7 +811,13 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
 
   local ok, err = pcall(child.type_keys, 100, ':write<CR>')
   MiniTest.expect.equality(ok, true, 'write must not raise: ' .. tostring(err))
-  vim.loop.sleep(100)
+  -- Wait until the queued `:write` actually ran (its hint is the observable
+  -- result) before reading `v:errmsg` below.
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.wait_for(function() return #HINTS >= 1 end, 2000)"),
+    true,
+    'write must reach the read-only hint'
+  )
   MiniTest.expect.equality(child.v.errmsg, '', 'write must not produce a Vim error')
   child.v.errmsg = ''
 
@@ -709,8 +828,13 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
   MiniTest.expect.equality(child.lua_get('HINTS[1].level'), vim.log.levels.INFO)
 
   child.type_keys(100, ':write<CR>')
-  vim.loop.sleep(100)
-  MiniTest.expect.equality(child.lua_get('#HINTS'), 1, 'the hint is shown once per session')
+  -- The second write must not add a hint; poll for the violation until the
+  -- queued `:write` has had time to run, so absence is a real observation.
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.wait_for(function() return #HINTS > 1 end, 500)"),
+    false,
+    'the hint is shown once per session'
+  )
 
   local after = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   MiniTest.expect.equality(after, before)
@@ -790,15 +914,7 @@ T['<CR> on a change line opens the real file at the new-side line'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<CR>')
 
-  local opened = false
-  for _ = 1, 100 do
-    local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
-    if name:match('f%.txt$') then
-      opened = true
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local opened = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)")
   MiniTest.expect.equality(opened, true, 'the worktree file opened')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
@@ -963,14 +1079,7 @@ T['pressing s stages the change under the cursor'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, 's')
 
-  local staged = false
-  for _ = 1, 40 do
-    staged = child.lua_get("HELPERS.has_line('Staged changes (1)')")
-    if staged then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)")
   MiniTest.expect.equality(staged, true)
   MiniTest.expect.equality(
     git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' }):find('+NEW line', 1, true) ~= nil,
@@ -986,14 +1095,7 @@ T['the g r chord refreshes the view'] = function()
   vim.fn.writefile(lines, path)
 
   child.type_keys(50, 'g', 'r')
-  local refreshed = false
-  for _ = 1, 40 do
-    refreshed = child.lua_get("HELPERS.has_line('    +line11')")
-    if refreshed then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local refreshed = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +line11') end)")
   MiniTest.expect.equality(refreshed, true)
 end
 
@@ -1005,14 +1107,10 @@ T['Tab toggles a file section through the server'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<Tab>')
 
-  local collapsed = false
-  for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
-    if collapsed then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local collapsed = child.lua_get(string.format(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+    before
+  ))
   MiniTest.expect.equality(collapsed, true, 'the file body collapsed')
   assert_no_line('    +NEW line')
 end
@@ -1043,14 +1141,10 @@ T['mirrors a user mapping whose rhs is a fold command'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<F2>')
 
-  local collapsed = false
-  for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
-    if collapsed then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local collapsed = child.lua_get(string.format(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+    before
+  ))
   MiniTest.expect.equality(collapsed, true, 'the mirrored fold key collapsed the file')
 end
 
@@ -1062,14 +1156,10 @@ T['a user Tab fold mapping toggles the section'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<Tab>')
 
-  local collapsed = false
-  for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
-    if collapsed then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local collapsed = child.lua_get(string.format(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+    before
+  ))
   MiniTest.expect.equality(collapsed, true, 'the user Tab mapping toggled the file')
 end
 
@@ -1082,14 +1172,10 @@ T['fold_keys mirrors a Lua-function fold mapping'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<F3>')
 
-  local collapsed = false
-  for _ = 1, 40 do
-    collapsed = child.lua_get('vim.api.nvim_buf_line_count(STATUS.buf)') < before
-    if collapsed then
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local collapsed = child.lua_get(string.format(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_line_count(STATUS.buf) < %d end)",
+    before
+  ))
   MiniTest.expect.equality(collapsed, true, 'the configured fold key collapsed the file')
 end
 
@@ -1143,25 +1229,16 @@ T['visit_key overrides the planned common.visit binding'] = function()
   MiniTest.expect.equality(type(target), 'number', 'change line index')
   child.api.nvim_win_set_cursor(0, { target, 0 })
 
-  -- `common.visit` is Planned, so Enter must not leave the view.
+  -- `common.visit` is Planned, so Enter must not leave the view. The queued
+  -- native input needs a real processing barrier before asserting the buffer
+  -- is unchanged: poll for the violation (leaving the view) so absence is
+  -- observed, not assumed.
   child.type_keys(50, '<CR>')
-  vim.loop.sleep(100)
-  MiniTest.expect.equality(
-    child.lua_get('vim.api.nvim_buf_get_name(0)'):match('magit://') ~= nil,
-    true,
-    'Enter stays in the view until common.visit is implemented'
-  )
+  local left = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('magit://') == nil end, 500)")
+  MiniTest.expect.equality(left, false, 'Enter stays in the view until common.visit is implemented')
 
   child.type_keys(50, '<F4>')
-  local opened = false
-  for _ = 1, 100 do
-    local name = child.lua_get('vim.api.nvim_buf_get_name(0)')
-    if name:match('f%.txt$') then
-      opened = true
-      break
-    end
-    vim.loop.sleep(50)
-  end
+  local opened = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)")
   MiniTest.expect.equality(opened, true, 'the configured visit key opened the file')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
@@ -1194,10 +1271,10 @@ T['ctrl+t makes the buffer editable and ctrl+t restores the server text'] = func
 
   child.type_keys(50, 'dd')
   child.type_keys(50, 'ihello<Esc>')
-  vim.loop.sleep(50)
+  -- Wait for the queued edits to land in the buffer instead of a fixed delay.
   MiniTest.expect.equality(
-    child.lua_get('vim.deep_equal(HELPERS.lines(), STATUS.lines)'),
-    false,
+    child.lua_get("HELPERS.wait_for(function() return vim.deep_equal(HELPERS.lines(), STATUS.lines) == false end)"),
+    true,
     'the buffer is editable'
   )
 
