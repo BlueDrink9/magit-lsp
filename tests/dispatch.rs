@@ -601,55 +601,23 @@ fn execute_selection_without_changes_reports_message() {
     assert!(cached_diff(tmp.path()).is_empty());
 }
 
-// --- Executor: discard is deferred ---------------------------------------
-
-// remove with R-3.6
 #[test]
-fn execute_discard_is_deferred() {
-    let (tmp, repo) = RepoFixture::new()
+fn execute_discard_file_restores_worktree() {
+    let (_tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let before = repo.status().expect("status");
-    let before_content = std::fs::read_to_string(tmp.path().join("f.txt")).expect("read");
-
-    let variants = [
-        Resolution::DiscardAllUnstaged,
-        Resolution::DiscardAllUntracked,
-        Resolution::DiscardFile {
-            path: "f.txt".to_string(),
+    let effects = dispatch::execute(
+        &repo,
+        &Resolution::DiscardFile {
+            path: "f.txt".into(),
         },
-        Resolution::DiscardHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string(),
-        },
-        Resolution::DiscardSelection {
-            start: 4,
-            end: 5,
-        },
-    ];
-
-    for variant in variants {
-        let effects = dispatch::execute(&repo, &variant, &[]).expect("execute");
-        assert_eq!(effects.len(), 1, "for {variant:?}");
-        match &effects[0] {
-            Effect::Message { level, text, .. } => {
-                assert_eq!(*level, MessageLevel::Info);
-                assert!(
-                    text.starts_with("Not implemented yet:"),
-                    "for {variant:?} got: {text}"
-                );
-            }
-            other => panic!("unexpected effect: {other:?}"),
-        }
-        assert_eq!(repo.status().expect("status"), before, "for {variant:?}");
-    }
-
-    // The file content itself must remain untouched, too.
-    assert_eq!(
-        std::fs::read_to_string(tmp.path().join("f.txt")).expect("read"),
-        before_content
-    );
+        &[],
+    )
+    .expect("execute");
+    assert!(effects.is_empty());
+    assert_eq!(repo.status().expect("status").unstaged.len(), 0);
+    assert_eq!(repo.status().expect("status").staged.len(), 0);
 }
 
 #[test]

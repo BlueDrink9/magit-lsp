@@ -452,12 +452,13 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: visit,
         },
-        planned(
-            "status.discard",
-            Scope::Status,
-            "Discard the change at point",
-            "R-3.6",
-        ),
+        Command {
+            id: "status.discard",
+            scope: Scope::Status,
+            doc: "Discard the change at point",
+            status: CommandStatus::Implemented,
+            run: discard,
+        },
         planned(
             "status.reverse",
             Scope::Status,
@@ -966,6 +967,10 @@ fn unstage(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     stage_or_unstage(ctx, dispatch::Command::Unstage)
 }
 
+fn discard(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    stage_or_unstage(ctx, dispatch::Command::Discard)
+}
+
 fn stage_or_unstage(
     ctx: &mut CommandCtx<'_>,
     command: dispatch::Command,
@@ -974,7 +979,14 @@ fn stage_or_unstage(
         start: selection.start_line as u32,
         end: selection.end_line as u32,
     });
-    let effects = stage_or_unstage_at(ctx.view, ctx.repo_path, command, ctx.cursor, selection)?;
+    let effects = stage_or_unstage_at(
+        ctx.view,
+        ctx.repo_path,
+        command,
+        ctx.cursor,
+        selection,
+        ctx.ui,
+    )?;
     ctx.extend(effects);
     Ok(CommandOutcome {
         refresh: true,
@@ -1036,6 +1048,7 @@ fn stage_or_unstage_at(
     command: dispatch::Command,
     cursor: Option<Cursor>,
     selection: Option<dispatch::LineRange>,
+    ui: &dyn crate::ui::PromptUi,
 ) -> Result<Vec<Effect>> {
     // Resolve against the last tree the client acknowledged; actions are
     // addressed by the node there, never by index in whatever is current.
@@ -1091,8 +1104,49 @@ fn stage_or_unstage_at(
     };
 
     let repo = GitRepo::open(repo_path)?;
+    if matches!(
+        resolution,
+        dispatch::Resolution::DiscardAllUnstaged
+            | dispatch::Resolution::DiscardAllUntracked
+            | dispatch::Resolution::DiscardFile { .. }
+            | dispatch::Resolution::DiscardHunk { .. }
+            | dispatch::Resolution::DiscardSelection { .. }
+    ) {
+        let what = match &resolution {
+            dispatch::Resolution::DiscardFile { path } => format!("Discard changes to {path}?"),
+            dispatch::Resolution::DiscardHunk { path, .. } => {
+                format!("Discard this hunk in {path}?")
+            }
+            dispatch::Resolution::DiscardSelection { .. } => {
+                "Discard the selected changes?".to_string()
+            }
+            dispatch::Resolution::DiscardAllUntracked => "Delete all untracked files?".to_string(),
+            _ => "Discard all unstaged changes?".to_string(),
+        };
+        let prompt = ViewPromptParams {
+            prompt_id: String::new(),
+            kind: PromptKind::Confirm,
+            title: what,
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: Some(true),
+            default: Some(Value::Bool(false)),
+            placeholder: None,
+            secret: None,
+            items: None,
+            allow_custom: None,
+            preselected: None,
+            min: None,
+            max: None,
+        };
+        if ui.confirm(&prompt)? != Some(true) {
+            return Ok(Vec::new());
+        }
+    }
     let layouts = match &resolution {
-        dispatch::Resolution::Selection { start, end, .. } => layouts_for_selection(
+        dispatch::Resolution::Selection { start, end, .. }
+        | dispatch::Resolution::DiscardSelection { start, end } => layouts_for_selection(
             &repo,
             source,
             *start,

@@ -1,0 +1,21 @@
+# R-3.6: discarding an unstaged hunk asks a destructive confirmation.
+fixture: modified-two-files
+---
+wait screen contains "+line3 CHANGED"
+goto "+line3 CHANGED"
+keys standard: Delete
+keys vim: x
+wait prompt
+snapshot: confirm
+keys: 1 Enter
+wait
+expect screen contains "Unstaged changes (2)"
+snapshot: declined
+goto "+line3 CHANGED"
+keys standard: Delete
+keys vim: x
+wait prompt
+keys: 2 Enter
+wait
+expect screen not-contains "+line3 CHANGED"
+snapshot: accepted

@@ -26,6 +26,9 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   hunks and diff lines. Never blank — shows `Working tree clean` when clean.
 - **Staging**: whole file, whole hunk, or a selected range of lines — and the
   symmetric unstage operations — all through `view/invoke`.
+- **Discard**: discard a file, hunk, or selected changed lines from the
+  worktree after a destructive confirmation. Discarded content is not saved to
+  a private ref; use Git commits or stashes when you need recoverable history.
 - **Auto-refresh**: a file watcher watches the worktree (ignoring noisy `.git`
   internals) and refreshes open status views when tracked files or the index
   change, so changes made outside Neovim appear without `g r`. Events are

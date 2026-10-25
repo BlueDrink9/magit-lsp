@@ -1301,11 +1301,17 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       `build/ui/auto-refresh/standard-80x24/after-refresh.screen`,
       `build/ui/auto-refresh/vim-100x30/after-refresh.screen`, and
       `build/ui/auto-refresh/vim-80x24/after-refresh.screen`.
-- [ ] R-3.6 Discard (`status.discard`) for files, hunks, selections, with
-      `confirm` prompt (`destructive: true`); consider saving discarded content
-      under a private ref for undo.
-      *UI:* add scenario `discard-confirm`: `x` on a hunk shows the destructive
-      confirm prompt; `n` leaves the change, `y` removes it from the screen.
+- [x] R-3.6 Discard (`status.discard`) for files, hunks, selections, with a
+      destructive confirmation before mutation. Discarded content is not saved
+      to a private ref: callers should commit or stash content they need to
+      recover.
+       *UI:* `discard-confirm` PASS in `make ui-test`: the hunk prompt is
+       destructive, No preserves the change and Yes removes it. Screens:
+       `build/ui/discard-confirm/standard-100x30/{confirm,declined,accepted}.screen`,
+       `build/ui/discard-confirm/standard-80x24/{confirm,declined,accepted}.screen`,
+       `build/ui/discard-confirm/vim-100x30/{confirm,declined,accepted}.screen`,
+       `build/ui/discard-confirm/vim-80x24/{confirm,declined,accepted}.screen`.
+       Verified with `make test && make ui-test && make ui-tour`.
 - [ ] R-3.7 `UserError` mapping table for all remaining Git failures as they
       are met.
 

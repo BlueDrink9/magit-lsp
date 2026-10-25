@@ -781,7 +781,7 @@
               "label": "Discard the change at point",
               "doc": "Discard the change at point",
               "group": "status",
-              "status": "planned",
+              "status": "implemented",
               "scope": "status"
             },
             {

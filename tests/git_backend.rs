@@ -210,6 +210,47 @@ fn stage_hunk_stages_the_hunk() {
 }
 
 #[test]
+fn discard_hunk_preserves_unrelated_worktree_content() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let id = repo.status().expect("status").unstaged[0].hunks[0].id.clone();
+    repo.discard_hunk("f.txt", &id).expect("discard hunk");
+    assert!(repo.status().expect("status").unstaged.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("f.txt")).expect("read"),
+        TEN_LINES
+    );
+}
+
+#[test]
+fn discard_untracked_file_removes_it() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    write(&tmp.path().join("untracked.bin"), "binary\0contents");
+    repo.discard_file("untracked.bin").expect("discard untracked");
+    assert!(!tmp.path().join("untracked.bin").exists());
+    assert!(repo.status().expect("status").untracked.is_empty());
+}
+
+#[test]
+fn discard_selection_removes_selected_line_only() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let layout = FileLayout::from_diff(&repo.diff_unstaged("f.txt").expect("diff"), 0)
+        .expect("layout");
+    let first = layout.hunks[0].first_line;
+    assert!(repo.discard_selection(&[layout], first + 3, first + 3).expect("discard selection"));
+    let content = std::fs::read_to_string(tmp.path().join("f.txt")).expect("read");
+    assert!(!content.contains("line3 CHANGED"));
+    assert!(content.contains("NEW line"));
+}
+
+#[test]
 fn stage_hunk_by_id_survives_line_shifts() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", lines(40).to_string())])

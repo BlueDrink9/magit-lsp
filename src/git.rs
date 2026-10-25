@@ -340,6 +340,94 @@ impl GitRepo {
         )
     }
 
+    /// Discard an unstaged hunk by its content-based identity.
+    pub fn discard_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
+        let layout = self.file_layout(path, false)?;
+        let hunk = layout
+            .hunks
+            .iter()
+            .find(|h| h.hunk.id == hunk_id)
+            .ok_or_else(|| Error::hunk_not_found(path))?;
+        self.apply_worktree(
+            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
+            true,
+        )
+    }
+
+    /// Discard a document-line selection from the worktree without changing the index.
+    pub fn discard_selection(&self, files: &[FileLayout], start: u32, end: u32) -> Result<bool> {
+        let Selection::Ops(ops) = patch::normalise_selection(files, start, end) else {
+            return Ok(false);
+        };
+        for file in files {
+            let file_ops: Vec<&SelectionOp> =
+                ops.iter().filter(|op| op.path() == file.path).collect();
+            if file_ops.is_empty() {
+                continue;
+            }
+            if file_ops
+                .iter()
+                .any(|op| matches!(op, SelectionOp::WholeFile { .. }))
+            {
+                self.discard_file(&file.path)?;
+                continue;
+            }
+            let mut body = String::new();
+            for op in file_ops {
+                let (hunk_id, lines) = match op {
+                    SelectionOp::WholeHunk { hunk_id, .. } => {
+                        let h = file
+                            .hunks
+                            .iter()
+                            .find(|h| &h.hunk.id == hunk_id)
+                            .ok_or_else(|| Error::hunk_not_found(&file.path))?;
+                        body.push_str(&patch::full_hunk_patch(&h.hunk));
+                        continue;
+                    }
+                    SelectionOp::Lines { hunk_id, lines, .. } => (hunk_id, lines),
+                    SelectionOp::WholeFile { .. } => unreachable!(),
+                };
+                let hunk = file
+                    .hunks
+                    .iter()
+                    .find(|h| &h.hunk.id == hunk_id)
+                    .ok_or_else(|| Error::hunk_not_found(&file.path))?;
+                body.push_str(&patch::selected_hunk_patch(&hunk.hunk, lines, true));
+            }
+            self.apply_worktree(&format!("{}{}", file.header, body), true)?;
+        }
+        Ok(true)
+    }
+
+    /// Discard all worktree changes for a path, preserving its index contents.
+    pub fn discard_file(&self, path: &str) -> Result<()> {
+        let status = self.status_listing()?;
+        if status.untracked.iter().any(|file| file.path == path) {
+            let full = self.root.join(path);
+            if full.is_dir() {
+                std::fs::remove_dir_all(full)?;
+            } else if full.exists() {
+                std::fs::remove_file(full)?;
+            }
+            return Ok(());
+        }
+        self.run(&["restore", "--worktree", "--", path]).map(|_| ())
+    }
+
+    /// Discard all tracked worktree changes, leaving untracked files untouched.
+    pub fn discard_all_unstaged(&self) -> Result<()> {
+        self.run(&["restore", "--worktree", "--", "."])?;
+        Ok(())
+    }
+
+    /// Remove every untracked path without changing tracked files.
+    pub fn discard_all_untracked(&self) -> Result<()> {
+        for file in self.status_listing()?.untracked {
+            self.discard_file(&file.path)?;
+        }
+        Ok(())
+    }
+
     /// Stage the lines in `start..=end` of the unstaged hunk with `hunk_id`.
     /// Returns `false` when the range contains no changed lines.
     pub fn stage_lines(&self, path: &str, hunk_id: &str, start: usize, end: usize) -> Result<bool> {
@@ -560,10 +648,18 @@ impl GitRepo {
     }
 
     fn apply_index(&self, patch_text: &str, reverse: bool) -> Result<()> {
+        self.apply_patch(patch_text, true, reverse)
+    }
+
+    fn apply_patch(&self, patch_text: &str, cached: bool, reverse: bool) -> Result<()> {
         // `--unidiff-zero` lets line subsets of a new file apply, where the
         // hunk has no context lines to anchor it. `--recount` lets us keep the
         // original hunk header counts after neutralising unselected lines.
-        let mut args: Vec<&str> = vec!["apply", "--cached", "--unidiff-zero", "--recount"];
+        let mut args: Vec<&str> = vec!["apply"];
+        if cached {
+            args.push("--cached");
+        }
+        args.extend(["--unidiff-zero", "--recount"]);
         if reverse {
             args.push("-R");
         }
@@ -609,6 +705,10 @@ impl GitRepo {
         }
         written?;
         Ok(())
+    }
+
+    fn apply_worktree(&self, patch_text: &str, reverse: bool) -> Result<()> {
+        self.apply_patch(patch_text, false, reverse)
     }
 
     /// Run `git commit` with extra environment variables and return the

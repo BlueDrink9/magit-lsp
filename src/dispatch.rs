@@ -21,8 +21,13 @@ pub enum NodeKind {
     SectionUnstaged,
     SectionStaged,
     SectionUntracked,
-    FileHeader { path: String },
-    HunkHeader { path: String, hunk_id: String },
+    FileHeader {
+        path: String,
+    },
+    HunkHeader {
+        path: String,
+        hunk_id: String,
+    },
     DiffLine {
         changed: bool,
         path: String,
@@ -121,20 +126,18 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
             NodeKind::SectionStaged => info(NOTHING_TO_STAGE),
             NodeKind::SectionUntracked => Resolution::StageAllUntracked,
             NodeKind::FileHeader { path } => Resolution::StageFile { path },
-            NodeKind::HunkHeader { path, hunk_id }
-            | NodeKind::DiffLine {
-                path, hunk_id, ..
-            } => Resolution::StageHunk { path, hunk_id },
+            NodeKind::HunkHeader { path, hunk_id } | NodeKind::DiffLine { path, hunk_id, .. } => {
+                Resolution::StageHunk { path, hunk_id }
+            }
             NodeKind::Other => info(NOTHING_TO_STAGE),
         },
         Command::Unstage => match target {
             NodeKind::SectionStaged => Resolution::UnstageAllStaged,
             NodeKind::SectionUnstaged | NodeKind::SectionUntracked => info(NOTHING_TO_UNSTAGE),
             NodeKind::FileHeader { path } => Resolution::UnstageFile { path },
-            NodeKind::HunkHeader { path, hunk_id }
-            | NodeKind::DiffLine {
-                path, hunk_id, ..
-            } => Resolution::UnstageHunk { path, hunk_id },
+            NodeKind::HunkHeader { path, hunk_id } | NodeKind::DiffLine { path, hunk_id, .. } => {
+                Resolution::UnstageHunk { path, hunk_id }
+            }
             NodeKind::Other => info(NOTHING_TO_UNSTAGE),
         },
         Command::Discard => match target {
@@ -142,13 +145,9 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
             NodeKind::SectionStaged => info(NOTHING_TO_DISCARD),
             NodeKind::SectionUntracked => Resolution::DiscardAllUntracked,
             NodeKind::FileHeader { path } => Resolution::DiscardFile { path },
-            NodeKind::HunkHeader { path, hunk_id }
-            | NodeKind::DiffLine {
-                path, hunk_id, ..
-            } => Resolution::DiscardHunk {
-                path,
-                hunk_id,
-            },
+            NodeKind::HunkHeader { path, hunk_id } | NodeKind::DiffLine { path, hunk_id, .. } => {
+                Resolution::DiscardHunk { path, hunk_id }
+            }
             NodeKind::Other => info(NOTHING_TO_DISCARD),
         },
     }
@@ -157,16 +156,14 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
 /// Run a resolution against the repository and return the effects to show.
 ///
 /// `layouts` are the parsed file diffs for the section the selection was made
-/// in; they are only consulted for [`Resolution::Selection`].
+/// in; they are consulted only for selection resolutions.
 pub fn execute(
     repo: &GitRepo,
     resolution: &Resolution,
     layouts: &[FileLayout],
 ) -> Result<Vec<Effect>> {
     match resolution {
-        Resolution::StageAllUnstaged => {
-            errors::effects_for_result(repo.stage_all().map(|_| true))
-        }
+        Resolution::StageAllUnstaged => errors::effects_for_result(repo.stage_all().map(|_| true)),
         Resolution::UnstageAllStaged => {
             errors::effects_for_result(repo.unstage_all().map(|_| true))
         }
@@ -200,27 +197,20 @@ pub fn execute(
             }
         }
         Resolution::Message(effect) => Ok(vec![effect.clone()]),
-        // Discard has no backend yet (it lands in a later roadmap item), so it
-        // reports the gap instead of touching the repository.
-        discard @ (Resolution::DiscardAllUnstaged { .. }
-        | Resolution::DiscardAllUntracked { .. }
-        | Resolution::DiscardFile { .. }
-        | Resolution::DiscardHunk { .. }
-        | Resolution::DiscardSelection { .. }) => Ok(vec![Effect::message(
-            MessageLevel::Info,
-            deferred_text(discard),
-        )]),
+        Resolution::DiscardAllUnstaged => {
+            errors::effects_for_result(repo.discard_all_unstaged().map(|_| true))
+        }
+        Resolution::DiscardAllUntracked => {
+            errors::effects_for_result(repo.discard_all_untracked().map(|_| true))
+        }
+        Resolution::DiscardFile { path } => {
+            errors::effects_for_result(repo.discard_file(path).map(|_| true))
+        }
+        Resolution::DiscardHunk { path, hunk_id } => {
+            errors::effects_for_result(repo.discard_hunk(path, hunk_id).map(|_| true))
+        }
+        Resolution::DiscardSelection { start, end } => {
+            errors::effects_for_result(repo.discard_selection(layouts, *start, *end))
+        }
     }
-}
-
-fn deferred_text(resolution: &Resolution) -> String {
-    let what = match resolution {
-        Resolution::DiscardAllUnstaged { .. } => "discard all unstaged changes".to_string(),
-        Resolution::DiscardAllUntracked { .. } => "discard all untracked files".to_string(),
-        Resolution::DiscardFile { path, .. } => format!("discard {path}"),
-        Resolution::DiscardHunk { path, .. } => format!("discard a hunk of {path}"),
-        Resolution::DiscardSelection { .. } => "discard the selection".to_string(),
-        _ => "discard".to_string(),
-    };
-    format!("Not implemented yet: {what}")
 }
