@@ -4,6 +4,28 @@ import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 
+/**
+ * Optional real-editor suite: launch a unique Extension Development Host and
+ * run `suite.js` inside it. The suite is skipped, not failed, when no editor
+ * binary or display is available, so `make vscode-test` stays portable.
+ */
+const root = resolve(import.meta.dirname, '../../../..');
+const candidates = [process.env.MAGIT_VSCODE_BIN, '/usr/bin/codium', '/usr/bin/code']
+  .filter(Boolean);
+const editor = candidates.find((candidate) => existsSync(candidate));
+if (!editor) {
+  console.log('skip e2e: no `code`/`codium` binary found (set MAGIT_VSCODE_BIN to run it)');
+  process.exit(0);
+}
+if (!process.env.DISPLAY) {
+  console.log('skip e2e: DISPLAY is required for the real-editor keyboard checks');
+  process.exit(0);
+}
+if (!existsSync(`${root}/target/debug/magit-lsp`)) {
+  console.log('skip e2e: missing target/debug/magit-lsp; run cargo build first');
+  process.exit(0);
+}
+
 // This subprocess observes the isolated renderer; it never sets context keys or
 // dispatches commands. Page.captureScreenshot captures Monaco's actual surface.
 if (process.argv[2] === '--cdp') {
@@ -26,10 +48,9 @@ if (process.argv[2] === '--cdp') {
 }
 
 // Launch an isolated real editor; never reuse or close the user's instance.
-const root = resolve(import.meta.dirname, '../../..');
 const directory = mkdtempSync('/tmp/opencode/vscode-review-');
 const repo = `${directory}/repo`;
-const mirror = createRequire(import.meta.url)('../lib/foldkeys.js').mapFoldKeys([
+const mirror = createRequire(import.meta.url)('../../lib/foldkeys.js').mapFoldKeys([
   { key: 'ctrl+alt+]', command: 'editor.toggleFold' },
 ]);
 mkdirSync(`${directory}/user/User`, { recursive: true });
@@ -57,15 +78,6 @@ const listener = createServer();
 await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
 env.MAGIT_VSCODE_CDP_PORT = String(listener.address().port);
 await new Promise((resolve) => listener.close(resolve));
-if (!existsSync(`${root}/target/debug/magit-lsp`)) {
-  console.error('Missing target/debug/magit-lsp; run cargo build first.');
-  process.exit(1);
-}
-if (!process.env.DISPLAY) {
-  console.error('DISPLAY is required for the real-client keyboard checks.');
-  process.exit(1);
-}
-const editor = process.env.MAGIT_VSCODE_BIN || '/usr/bin/codium';
 
 /**
  * PIDs whose command line names this run's unique user-data directory.
@@ -99,7 +111,7 @@ const result = spawnSync(editor, [
   '--disable-workspace-trust', '--user-data-dir', `${directory}/user`,
   '--extensions-dir', `${directory}/extensions`,
   `--extensionDevelopmentPath=${root}/clients/vscode`,
-  `--extensionTestsPath=${root}/clients/vscode/test/integration.js`, repo,
+  `--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`, repo,
 ], { env, stdio: 'inherit', timeout: 180000 });
 stopOwned(directory);
 console.log(`VSCode evidence: ${directory}`);

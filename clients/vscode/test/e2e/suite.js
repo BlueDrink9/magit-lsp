@@ -1,0 +1,1271 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const vscode = require('vscode');
+const { LanguageClient } = require('vscode-languageclient/node');
+
+/** Requests this test records as evidence; notifications are not captured. */
+const WATCHED = new Set(['view/invoke', 'view/key', 'view/open']);
+
+/**
+ * Resolve after `milliseconds`, only used to let a native widget mount.
+ *
+ * The test still polls observable state for every assertion; this is not a
+ * substitute for waiting on a condition.
+ *
+ * @param {number} milliseconds
+ */
+function settle(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * Poll `condition` until it is truthy or the timeout elapses.
+ *
+ * @param {() => unknown|Promise<unknown>} condition
+ * @param {string} label
+ * @param {number} [timeout]
+ */
+async function waitFor(condition, label, timeout = 15000) {
+  const deadline = Date.now() + timeout;
+  while (!(await condition())) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}`);
+    await settle(30);
+  }
+}
+
+/**
+ * List the workspace's files, excluding Git metadata, to prove no backing
+ * status document is created by opening or refreshing a view.
+ *
+ * @param {string} root
+ * @returns {string[]}
+ */
+function workspaceFiles(root) {
+  const files = [];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === '.git') continue;
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else files.push(path.relative(root, full));
+    }
+  };
+  walk(root);
+  return files.sort();
+}
+
+/** Verify first-open/reopen/refresh plus foreign-widget isolation and status keys. */
+async function run() {
+  const evidence = process.env.MAGIT_VSCODE_EVIDENCE;
+  assert(evidence, 'MAGIT_VSCODE_EVIDENCE must name the isolated evidence directory');
+  const extension = vscode.extensions.getExtension('magit-lsp.magit-lsp');
+  const requests = [];
+  /** Server semantic-token pulls, kept separate from Magit view traffic. */
+  const semanticRequests = [];
+  const openedViews = [];
+  const renderedLines = new Map();
+  const renderEvents = [];
+  const recordRender = (params) => {
+    if (!params || !params.viewId) return;
+    let next = renderedLines.get(params.viewId) || [];
+    if (Array.isArray(params.text)) {
+      next = params.text.slice();
+    } else if (Array.isArray(params.edits)) {
+      next = next.slice();
+      for (const edit of params.edits
+        .slice()
+        .sort((left, right) => right.startLine - left.startLine)) {
+        const start = Math.max(0, edit.startLine);
+        const end = Math.max(start, edit.endLine);
+        next.splice(start, end - start, ...(edit.lines || []));
+      }
+    }
+    renderedLines.set(params.viewId, next);
+    renderEvents.push(params);
+  };
+  const sendRequest = LanguageClient.prototype.sendRequest;
+  LanguageClient.prototype.sendRequest = function (method, params, ...rest) {
+    if (WATCHED.has(method)) requests.push({ method, params });
+    // The semantic provider asks the client for the server's own tokens; this
+    // is evidence for R-VS-4 and must not inflate Magit view traffic counts.
+    if (method === 'textDocument/semanticTokens/full') {
+      semanticRequests.push({ method, params });
+    }
+    const result = sendRequest.call(this, method, params, ...rest);
+    if (method === 'view/open') {
+      return Promise.resolve(result).then((descriptor) => {
+        openedViews.push(descriptor);
+        return descriptor;
+      });
+    }
+    if (method === 'view/resync') {
+      return Promise.resolve(result).then((render) => {
+        recordRender(render);
+        return render;
+      });
+    }
+    return result;
+  };
+  const onNotification = LanguageClient.prototype.onNotification;
+  LanguageClient.prototype.onNotification = function (method, handler, ...rest) {
+    if (method !== 'view/render') {
+      return onNotification.call(this, method, handler, ...rest);
+    }
+    return onNotification.call(this, method, (params) => {
+      recordRender(params);
+      return handler(params);
+    }, ...rest);
+  };
+  const magitTraffic = () => requests.length;
+  const invoked = (command) => requests.some(
+    (request) => request.method === 'view/invoke' && request.params.command === command
+  );
+  const keysSent = () => requests.filter((request) => request.method === 'view/key')
+    .map((request) => request.params.key);
+  const matrix = [];
+  const interactions = [];
+  const cdp = (method, params) => JSON.parse(execFileSync('node', [
+    `${extension.extensionPath}/test/e2e/run.mjs`, '--cdp',
+    process.env.MAGIT_VSCODE_CDP_PORT, method, JSON.stringify(params),
+  ], { timeout: 10000, maxBuffer: 16 * 1024 * 1024 }).toString());
+  const observe = () => cdp('Runtime.evaluate', {
+    expression: `({tag: document.activeElement?.tagName,
+      aria: document.activeElement?.getAttribute('aria-label'),
+      value: document.activeElement?.value,
+      findVisible: Boolean(document.querySelector('.find-widget.visible'))})`,
+    returnByValue: true,
+  }).result.value;
+  const shot = (name) => {
+    const target = `${evidence}/${name}`;
+    fs.writeFileSync(target, Buffer.from(cdp('Page.captureScreenshot', {
+      format: 'png', fromSurface: true,
+    }).data, 'base64'));
+    return target;
+  };
+  /**
+   * Record every physical keydown the isolated renderer sees, with modifier
+   * state, so a key that resolves to nothing can be distinguished from a key
+   * that never reached the workbench. It observes input and dispatches nothing.
+   *
+   * @returns {unknown}
+   */
+  const startKeyProbe = () => cdp('Runtime.evaluate', {
+    expression: `(() => {
+      window.__magitKeyEvents = [];
+      const listener = (event) => {
+        window.__magitKeyEvents.push({ key: event.key, code: event.code,
+          ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey,
+          meta: event.metaKey, repeat: event.repeat });
+      };
+      window.addEventListener('keydown', listener, true);
+      window.__magitKeyProbeStop = () => window.removeEventListener('keydown', listener, true);
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  /**
+   * Stop the keydown probe and return what it recorded.
+   *
+   * @returns {object[]}
+   */
+  const stopKeyProbe = () => {
+    const events = cdp('Runtime.evaluate', {
+      expression: 'window.__magitKeyEvents',
+      returnByValue: true,
+    }).result.value || [];
+    cdp('Runtime.evaluate', {
+      expression: 'window.__magitKeyProbeStop && window.__magitKeyProbeStop()',
+      returnByValue: true,
+    });
+    return events;
+  };
+  /**
+   * Report whether a native quick-input widget is actually painted.
+   *
+   * @returns {{visible: boolean, text: (string|null)}}
+   */
+  const quickInputState = () => cdp('Runtime.evaluate', {
+    expression: `(() => {
+      const widget = document.querySelector('.quick-input-widget');
+      if (!widget) return { visible: false, text: null };
+      const style = getComputedStyle(widget);
+      const visible = style.display !== 'none' && style.visibility !== 'hidden'
+        && widget.getBoundingClientRect().height > 0;
+      return { visible, text: visible
+        ? widget.innerText.replace(/\\s+/g, ' ').slice(0, 120) : null };
+    })()`,
+    returnByValue: true,
+  }).result.value;
+  const captureFailure = () => shot('failure-screen.png');
+  await extension.activate();
+  let windowId;
+  let windowGeometry = 'unknown';
+  try {
+    const registered = new Set(await vscode.commands.getCommands(true));
+    for (const { command } of extension.packageJSON.contributes.commands) {
+      assert(registered.has(command), `unregistered contribution: ${command}`);
+    }
+
+    const repo = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const filesBefore = workspaceFiles(repo);
+    // Target only this isolated host window, never a user's existing editor.
+    // Give it a deterministic geometry so a small WM tile cannot squeeze out
+    // the editor or the find widget between runs.
+    await waitFor(() => {
+      try {
+        const matches = execFileSync('xdotool', ['search', '--name', evidence])
+          .toString().trim().split('\n').filter(Boolean);
+        if (matches.length !== 1) return false;
+        [windowId] = matches;
+        return true;
+      } catch {
+        return false;
+      }
+    }, 'one isolated host window', 20000);
+    // bspwm tiles new windows, which can shrink this isolated host below a
+    // usable editor width. Float only the test window so screenshots and the
+    // physical-key path use a deterministic geometry.
+    try {
+      execFileSync('bspc', ['node', windowId, '-t', 'floating'], { stdio: 'ignore' });
+    } catch {
+      // Non-bspwm hosts: xdotool sizes an already-floating window below.
+    }
+    execFileSync('xdotool', ['windowsize', '--sync', windowId, '1200', '760']);
+    await settle(600);
+    windowGeometry = execFileSync(
+      'xdotool', ['getwindowgeometry', '--shell', windowId]
+    ).toString().trim().split('\n').filter((line) => /^(WIDTH|HEIGHT)=/.test(line)).join(' ');
+    await vscode.commands.executeCommand('magit.open');
+    const editor = vscode.window.activeTextEditor;
+    assert(editor, 'status open did not focus an editor');
+    assert.equal(editor.document.uri.scheme, 'magit');
+    assert.equal(editor.document.languageId, 'magit');
+    const uri = editor.document.uri;
+    await waitFor(() => renderedLines.has(uri.authority), 'first server render');
+    const first = editor.document.getText();
+    const firstRender = (renderedLines.get(uri.authority) || []).join('\n');
+    assert(firstRender.trim().length > 0, 'first server render was empty');
+    assert(first.split('\n').length > 3, 'first open did not show the status body');
+    assert.equal(first, firstRender, 'first-open text does not match the received server render');
+    assert.match(first, /tracked\.txt/);
+    assert.equal(openedViews.length, 1, 'first open did not return one descriptor');
+    assert.equal(openedViews[0].id, uri.authority, 'status URI is not the opened view id');
+    assert.equal(openedViews[0].kind, 'status');
+    const statusTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      .filter((tab) => tab.input?.uri?.scheme === 'magit');
+    assert.equal(statusTabs().length, 1, 'first open did not create exactly one status tab');
+    assert.equal(statusTabs()[0].label, openedViews[0].title, 'status tab is not the titled view');
+    const statusPath = path.join(repo, decodeURIComponent(uri.path.replace(/^\//, '')));
+    assert.equal(fs.existsSync(statusPath), false, 'status view has a backing file on disk');
+    assert.deepEqual(workspaceFiles(repo), filesBefore, 'first open created a workspace file');
+    await settle(500);
+    const firstVisible = vscode.window.visibleTextEditors.find(
+      (visible) => visible.document.uri.toString() === uri.toString()
+    );
+    assert(firstVisible, 'first-open status editor is not visible');
+    assert(
+      firstVisible.visibleRanges.some((range) => range.start.line === 0),
+      'first-open status body is not in the visible editor'
+    );
+    const firstShot = shot('r-vs-2-first-open.png');
+
+    // Repeat and concurrent opens must focus the one status tab, not create a
+    // second view or a temporary filename document.
+    const viewOpensBeforeReopen = requests.filter(
+      (request) => request.method === 'view/open'
+    ).length;
+    await vscode.commands.executeCommand('magit.open');
+    await Promise.all([
+      vscode.commands.executeCommand('magit.open'),
+      vscode.commands.executeCommand('magit.open'),
+    ]);
+    assert.equal(
+      requests.filter((request) => request.method === 'view/open').length,
+      viewOpensBeforeReopen,
+      'repeat/concurrent opens requested another status view'
+    );
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+    assert.equal(statusTabs().length, 1, 'repeat/concurrent opens created another status tab');
+    assert.equal(statusTabs()[0].label, openedViews[0].title, 'reopen tab label is not the view title');
+    assert.equal(editor.document.getText(), first, 'reopen changed the server-owned status text');
+    assert.equal(fs.existsSync(statusPath), false, 'reopen created a backing status file');
+    assert.deepEqual(workspaceFiles(repo), filesBefore, 'reopen created a workspace file');
+    await settle(300);
+    const reopenVisible = vscode.window.visibleTextEditors.find(
+      (visible) => visible.document.uri.toString() === uri.toString()
+    );
+    assert(reopenVisible, 'reopened status editor is not visible');
+    assert(
+      reopenVisible.visibleRanges.some((range) => range.start.line === 0),
+      'reopened status body is not in the visible editor'
+    );
+    const reopenShot = shot('r-vs-2-reopen.png');
+    const reopenTextUnchanged = editor.document.getText() === first;
+
+    await vscode.commands.executeCommand('magit.invoke', { command: 'common.show-all', args: {} });
+    await waitFor(() => editor.document.getText().includes('+replacement'), 'expanded status diff');
+
+    // Use the server's semantic-token ranges instead of parsing display text.
+    const legend = await vscode.commands.executeCommand(
+      'vscode.provideDocumentSemanticTokensLegend', uri
+    );
+    let tokens;
+    await waitFor(async () => {
+      tokens = await vscode.commands.executeCommand('vscode.provideDocumentSemanticTokens', uri);
+      return tokens?.data.length > 0;
+    }, 'semantic tokens');
+    const tokenEntries = [];
+    let tokenLine = 0;
+    let tokenStart = 0;
+    for (let index = 0; index < tokens.data.length; index += 5) {
+      tokenLine += tokens.data[index];
+      tokenStart = tokens.data[index] === 0
+        ? tokenStart + tokens.data[index + 1]
+        : tokens.data[index + 1];
+      tokenEntries.push({
+        line: tokenLine,
+        start: tokenStart,
+        length: tokens.data[index + 2],
+        type: legend.tokenTypes[tokens.data[index + 3]],
+      });
+    }
+    const types = new Set(tokenEntries.map((entry) => entry.type));
+    for (const type of ['magit-section', 'magit-diff-added', 'magit-diff-removed']) {
+      assert(types.has(type), type);
+    }
+    // R-VS-4: the host must request the server's semantic tokens and the
+    // active theme must actually paint section headings and both diff
+    // directions. Spans are located from the decoded server token ranges and
+    // the server-owned document lines, never by parsing display text.
+    assert(semanticRequests.length > 0, 'the extension host never requested semantic tokens');
+    assert(
+      semanticRequests.some(
+        (request) => request.params.textDocument.uri === openedViews[0].uri
+      ),
+      'semantic-token requests did not use the server view URI'
+    );
+    const documentLines = () => editor.document.getText().split('\n');
+    const themeTokens = tokenEntries.filter(
+      (entry) => ['magit-section', 'magit-diff-added', 'magit-diff-removed'].includes(entry.type)
+    );
+    const styleEvidence = (entries) => {
+      const lines = documentLines();
+      const wanted = entries.map((entry) => ({
+        type: entry.type,
+        line: entry.line,
+        start: entry.start,
+        length: entry.length,
+        lineText: lines[entry.line] || '',
+        text: (lines[entry.line] || '').slice(entry.start, entry.start + entry.length),
+      }));
+      const measured = cdp('Runtime.evaluate', {
+        expression: `(() => {
+          const wanted = ${JSON.stringify(wanted)};
+          const normalize = (text) => text.replace(/\\u00a0/g, ' ');
+          const viewLines = [...document.querySelectorAll('.view-line')];
+          const lineTexts = viewLines.map((element) => normalize(element.textContent));
+          const editorElement = document.querySelector('.monaco-editor');
+          const workbench = document.querySelector('.monaco-workbench');
+          const editorStyle = editorElement && getComputedStyle(editorElement);
+          const tokens = wanted.map((token) => {
+            const index = lineTexts.indexOf(token.lineText);
+            if (index < 0) return { ...token, found: false };
+            const lineElement = viewLines[index];
+            const cells = [];
+            const walker = document.createTreeWalker(lineElement, NodeFilter.SHOW_TEXT);
+            let offset = 0;
+            let node;
+            while ((node = walker.nextNode())) {
+              const text = normalize(node.nodeValue);
+              for (let position = 0; position < text.length; position += 1) {
+                cells.push({ element: node.parentElement, at: offset + position });
+              }
+              offset += text.length;
+            }
+            const cell = cells[Math.min(token.start, Math.max(0, cells.length - 1))];
+            const style = cell && getComputedStyle(cell.element);
+            return { ...token, found: true,
+              html: lineElement.outerHTML.slice(0, 400),
+              className: cell && cell.element.className,
+              color: style && style.color,
+              backgroundColor: style && style.backgroundColor,
+              fontWeight: style && style.fontWeight,
+              fontStyle: style && style.fontStyle,
+              textDecoration: style && style.textDecorationLine };
+          });
+          return {
+            themeClass: workbench && workbench.className,
+            background: editorStyle && editorStyle.backgroundColor,
+            defaultColor: editorStyle && editorStyle.color,
+            tokens,
+          };
+        })()`,
+        returnByValue: true,
+      }).result.value;
+      // The document is still exactly the server-owned render.
+      assert.equal(
+        editor.document.getText(),
+        (renderedLines.get(uri.authority) || []).join('\n'),
+        'theme measurement changed the server-owned text'
+      );
+      return measured;
+    };
+    const themeSetting = () => vscode.workspace.getConfiguration('workbench').get('colorTheme');
+    const isDarkWorkbench = (measurement) => /(^|\s)vs-dark(\s|$)/.test(
+      measurement.themeClass || ''
+    );
+    // A theme change repaints default colours first and semantic tokens
+    // asynchronously. Wait for the measured spans themselves, not just the
+    // workbench class or a fixed pause.
+    const isPainted = (measurement) => measurement.tokens.every(
+      (token) => token.found && token.color !== measurement.defaultColor
+    );
+    const waitForStyles = async (predicate, label) => {
+      let last;
+      await waitFor(() => {
+        last = styleEvidence(themeTokens);
+        return predicate(last);
+      }, label, 20000);
+      await settle(200);
+      return styleEvidence(themeTokens);
+    };
+    const initialTheme = themeSetting();
+    assert(initialTheme, 'no active workbench theme');
+    const darkStyles = styleEvidence(themeTokens);
+    assert(isDarkWorkbench(darkStyles), 'the isolated host did not start on a dark theme');
+    assert(isPainted(darkStyles), 'the dark theme did not paint the status tokens');
+    const darkText = editor.document.getText();
+    const darkThemeShot = shot('r-vs-4-theme-dark.png');
+    // Record the first stage before switching, so a later failure still leaves
+    // the measured dark-theme evidence inspectable.
+    const writeThemeEvidence = (light, restored) => fs.writeFileSync(
+      `${evidence}/r-vs-4-evidence.json`,
+      JSON.stringify({
+        gate: 'R-VS-4',
+        uri: uri.toString(),
+        serverViewUri: openedViews[0].uri,
+        legend,
+        contributions: {
+          semanticTokenTypes: extension.packageJSON.contributes.semanticTokenTypes,
+          semanticTokenScopes: extension.packageJSON.contributes.semanticTokenScopes,
+          configurationDefaults: extension.packageJSON.contributes.configurationDefaults,
+        },
+        semanticTokenRequests: semanticRequests,
+        themes: {
+          initial: initialTheme,
+          switched: 'Light Modern',
+          restored: themeSetting(),
+        },
+        dark: darkStyles,
+        light,
+        restored,
+        text: {
+          dark: darkText,
+          light: light && light.text,
+          restored: restored && restored.text,
+          identical: Boolean(light && restored)
+            && light.text === darkText && restored.text === darkText,
+          serverRender: (renderedLines.get(uri.authority) || []).join('\n'),
+        },
+        screenshots: [darkThemeShot, light && light.shot, restored && restored.shot]
+          .filter(Boolean),
+      }, null, 2)
+    );
+    writeThemeEvidence(undefined, undefined);
+    await vscode.workspace.getConfiguration('workbench').update(
+      'colorTheme', 'Light Modern', vscode.ConfigurationTarget.Workspace
+    );
+    const lightStyles = await waitForStyles(
+      (measurement) => !isDarkWorkbench(measurement) && isPainted(measurement),
+      'bundled light theme painting the status tokens'
+    );
+    const lightText = editor.document.getText();
+    const lightThemeShot = shot('r-vs-4-theme-light.png');
+    writeThemeEvidence({ ...lightStyles, text: lightText, shot: lightThemeShot }, undefined);
+    await vscode.workspace.getConfiguration('workbench').update(
+      'colorTheme', initialTheme, vscode.ConfigurationTarget.Workspace
+    );
+    const restoredStyles = await waitForStyles(
+      (measurement) => isDarkWorkbench(measurement) && isPainted(measurement),
+      'bundled dark theme painting the status tokens again'
+    );
+    const restoredText = editor.document.getText();
+    const restoredThemeShot = shot('r-vs-4-theme-dark-restored.png');
+    assert.equal(themeSetting(), initialTheme, 'theme was not restored');
+    assert.equal(lightText, darkText, 'switching theme changed the server text');
+    assert.equal(restoredText, darkText, 'restoring the theme changed the server text');
+    const colorOf = (measurement, type) => measurement.tokens.find(
+      (token) => token.type === type
+    )?.color;
+    for (const [label, measurement] of [
+      ['dark', darkStyles], ['light', lightStyles], ['dark-restored', restoredStyles],
+    ]) {
+      assert(
+        measurement.tokens.every((token) => token.found),
+        `${label}: token span missing from the rendered document`
+      );
+      for (const token of measurement.tokens) {
+        assert.notEqual(
+          token.color,
+          measurement.defaultColor,
+          `${label}: ${token.type} is painted with the default foreground`
+        );
+      }
+    }
+    for (const type of ['magit-section', 'magit-diff-added', 'magit-diff-removed']) {
+      assert.notEqual(
+        colorOf(darkStyles, type),
+        colorOf(lightStyles, type),
+        `${type} did not follow the active theme`
+      );
+      assert.equal(
+        colorOf(restoredStyles, type),
+        colorOf(darkStyles, type),
+        `${type} did not return to its dark-theme colour`
+      );
+    }
+    writeThemeEvidence(
+      { ...lightStyles, text: lightText, shot: lightThemeShot },
+      { ...restoredStyles, text: restoredText, shot: restoredThemeShot }
+    );
+
+    const fileLine = tokenEntries.find((entry) => entry.type.startsWith('magit-file-'))?.line;
+    assert.notEqual(fileLine, undefined, 'no file token to focus');
+    const sectionLine = tokenEntries.find(
+      (entry) => entry.type === 'magit-section' && entry.line > 2
+    )?.line;
+    assert.notEqual(sectionLine, undefined, 'no section token to fold');
+    const selectLine = (line) => {
+      editor.selection = new vscode.Selection(line, 0, line, 0);
+      editor.revealRange(new vscode.Range(line, 0, line, 0));
+    };
+
+    // Target only this isolated host window, never a user's existing editor.
+    const key = async (name) => {
+      // Re-activating an already active Chromium window can move focus away
+      // from its find textarea back into the editor's native edit context.
+      if (execFileSync('xdotool', ['getactivewindow']).toString().trim() !== windowId) {
+        execFileSync('xdotool', ['windowactivate', '--sync', windowId]);
+      }
+      assert.equal(execFileSync('xdotool', ['getactivewindow']).toString().trim(), windowId);
+      execFileSync('xdotool', ['key', '--clearmodifiers', name]);
+    };
+    // XTEST typing needs the real window focused; `xdotool type --window`
+    // uses synthetic events that Chromium ignores.
+    const type = (text) => execFileSync('xdotool', [
+      'type', '--clearmodifiers', '--delay', '25', text,
+    ]);
+    const focusStatus = async () => {
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+    };
+    await focusStatus();
+    shot('00-status-expanded.png');
+
+    // 1. A foreign QuickPick over the focused status must keep its own input.
+    let pickValue = '';
+    let picked;
+    const pick = vscode.window.createQuickPick();
+    pick.title = 'Foreign QuickPick';
+    pick.items = [{ label: 'alpha' }, { label: 'beta g' }];
+    pick.onDidChangeValue((value) => { pickValue = value; });
+    pick.onDidAccept(() => {
+      picked = pick.selectedItems[0]?.label;
+      pick.hide();
+    });
+    const beforePick = magitTraffic();
+    pick.show();
+    await settle(300);
+    await key('ctrl+alt+bracketright');
+    await type('beta g');
+    await waitFor(() => pickValue === 'beta g', 'foreign QuickPick typed value');
+    const pickShot = shot('01-foreign-quickpick.png');
+    await key('Return');
+    await waitFor(() => picked === 'beta g', 'foreign QuickPick Enter accepting beta g');
+    assert.equal(magitTraffic(), beforePick, 'foreign QuickPick typing dispatched Magit traffic');
+    pick.dispose();
+    matrix.push({
+      widget: 'foreign QuickPick', input: 'mirrored ctrl+alt+], beta g + Enter', result: 'typed beta g and accepted beta g',
+      magitRequests: 0, screenshot: pickShot,
+    });
+    interactions.push('foreign QuickPick typed beta g and accepted beta g with no Magit dispatch');
+
+    // 2. A foreign InputBox over the focused status must keep its own input.
+    const input = vscode.window.createInputBox();
+    input.title = 'Foreign InputBox';
+    input.placeholder = 'type here';
+    let inputValue = '';
+    let inputAccepted;
+    input.onDidChangeValue((value) => { inputValue = value; });
+    input.onDidAccept(() => {
+      inputAccepted = input.value;
+      input.hide();
+    });
+    const beforeInput = magitTraffic();
+    input.show();
+    await settle(300);
+    await key('ctrl+alt+bracketright');
+    await type('hello foreign');
+    await waitFor(() => inputValue === 'hello foreign', 'foreign InputBox typed value');
+    const inputShot = shot('02-foreign-inputbox.png');
+    await key('Return');
+    await waitFor(() => inputAccepted === 'hello foreign', 'foreign InputBox Enter accepting text');
+    assert.equal(magitTraffic(), beforeInput, 'foreign InputBox typing dispatched Magit traffic');
+    input.dispose();
+    matrix.push({
+      widget: 'foreign InputBox', input: 'mirrored ctrl+alt+], hello foreign + Enter',
+      result: 'typed hello foreign and accepted it', magitRequests: 0, screenshot: inputShot,
+    });
+    interactions.push('foreign InputBox typed and accepted its text with no Magit dispatch');
+
+    // 3. The find widget over the focused status must keep Ctrl+A/Ctrl+C/Enter.
+    await focusStatus();
+    editor.selection = new vscode.Selection(0, 0, 0, 0);
+    await vscode.env.clipboard.writeText('');
+    const beforeFind = magitTraffic();
+    // Set up the widget through its public command, then prove keyboard input
+    // using physical XTEST events. Opening it is not binding evidence.
+    // `actions.find` occasionally leaves focus in the editor's native edit
+    // context; re-open the widget once, then still require its actual focus.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await vscode.commands.executeCommand('actions.find');
+      try {
+        await waitFor(() => observe().aria === 'Find', 'focused Find textarea', 4000);
+        break;
+      } catch (error) {
+        if (attempt === 1) throw error;
+        await focusStatus();
+      }
+    }
+    await key('ctrl+alt+bracketright');
+    await key('ctrl+a');
+    await type('g');
+    await waitFor(() => observe().value === 'g', 'find input retaining canonical g');
+    await key('ctrl+a');
+    await type('tracked');
+    await waitFor(() => observe().value === 'tracked', 'find input containing tracked');
+    const findShot = shot('03-find-widget.png');
+    // If the query reached the find input, Enter selects the match in this
+    // read-only status document. A swallowed query would leave it unchanged.
+    await key('Return');
+    await waitFor(
+      () => !editor.selection.isEmpty && editor.document.getText(editor.selection).includes('tracked'),
+      'find widget typing a query that selects the match'
+    );
+    const findText = editor.document.getText(editor.selection);
+    // Ctrl+A/Ctrl+C must act on the find input, not cancel the Magit view.
+    await key('ctrl+a');
+    await key('ctrl+c');
+    let copied = '';
+    await vscode.env.clipboard.readText().then((text) => { copied = text; });
+    assert.equal(copied, 'tracked', 'find input copy did not retain its text');
+    await key('Escape');
+    await waitFor(
+      () => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      'status focus after find'
+    );
+    assert.equal(magitTraffic(), beforeFind, 'find widget keyboard input dispatched Magit traffic');
+    matrix.push({
+      widget: 'find widget', setup: 'actions.find (not physical opening-key evidence)',
+      input: 'mirrored ctrl+alt+], g, ctrl+a, tracked, Enter, ctrl+a, ctrl+c',
+      result: `find selected "${findText}" without Magit dispatch (clipboard: ${JSON.stringify(copied)})`,
+      magitRequests: 0, screenshot: findShot,
+    });
+    interactions.push('find widget received the typed query and Enter selected the match without Magit dispatch');
+    for (const widget of ['rename input', 'suggest widget']) {
+      matrix.push({ widget, result: 'not exercised',
+        reason: 'Read-only magit virtual document has no rename/completion provider; no fake context keys or synthetic provider installed. Unit when-clause exclusion only, not actual-client keyboard evidence.' });
+    }
+
+    // 4. Returning to status: Enter is delivered to the server again.
+    await focusStatus();
+    selectLine(fileLine);
+    const beforeEnter = magitTraffic();
+    await key('Return');
+    await waitFor(() => magitTraffic() > beforeEnter, 'status Enter request');
+    assert(invoked('common.visit'), 'status Enter did not dispatch common.visit');
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+    const enterShot = shot('04-status-enter.png');
+    matrix.push({
+      widget: 'status editor', input: 'Enter', result: 'dispatched common.visit to the server',
+      magitRequests: magitTraffic() - beforeEnter, screenshot: enterShot,
+    });
+    interactions.push('status Enter dispatched common.visit after foreign widgets');
+    const togglesBefore = requests.filter(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.toggle-section'
+    ).length;
+
+    // 5. Returning to status: Tab still folds through the server tree.
+    selectLine(sectionLine);
+    const unfolded = editor.document.getText();
+    await key('Tab');
+    await waitFor(() => editor.document.getText() !== unfolded, 'status Tab folding');
+    const tabFoldShot = shot('r-vs-3-fold.png');
+    await key('Tab');
+    await waitFor(() => editor.document.getText() === unfolded, 'status Tab unfolding');
+    const toggleCount = requests.filter(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.toggle-section'
+    ).length;
+    assert.equal(toggleCount - togglesBefore, 2, 'status Tab did not dispatch two toggles');
+    const foldShot = shot('05-status-fold.png');
+    matrix.push({
+      widget: 'status editor', input: 'Tab twice',
+      result: 'folded and unfolded the server section',
+      magitRequests: 2, screenshot: foldShot,
+    });
+    interactions.push('status Tab folded/unfolded the server section after foreign widgets');
+    const mirrorBefore = requests.length;
+    await key('ctrl+alt+bracketright');
+    await waitFor(() => editor.document.getText() !== unfolded, 'mirrored fold shortcut folding');
+    await key('ctrl+alt+bracketright');
+    await waitFor(() => editor.document.getText() === unfolded, 'mirrored fold shortcut unfolding');
+    assert.equal(requests.slice(mirrorBefore).filter((request) =>
+      request.method === 'view/invoke' && request.params.command === 'common.toggle-section').length, 2);
+    matrix.push({ widget: 'status editor', input: 'mirrored ctrl+alt+] twice',
+      result: 'folded and unfolded server section', magitRequests: requests.length - mirrorBefore,
+      screenshot: shot('05b-mirrored-fold.png') });
+
+    // 6. Returning to status: the canonical refresh binding re-reads Git and
+    // must keep the same server-owned text and URI without a backing file.
+    fs.writeFileSync(`${vscode.workspace.workspaceFolders[0].uri.fsPath}/tracked.txt`, 'after-return\n');
+    const beforeRefresh = editor.document.getText();
+    const refreshBefore = requests.length;
+    await key('g');
+    await waitFor(
+      () => editor.document.getText().includes('+after-return'),
+      'status g refresh',
+      15000
+    );
+    const refreshed = editor.document.getText();
+    const refreshedRender = (renderedLines.get(uri.authority) || []).join('\n');
+    assert.notEqual(refreshed, beforeRefresh);
+    assert(invoked('common.refresh'), 'status refresh did not dispatch common.refresh');
+    assert.equal(refreshed, refreshedRender, 'refreshed text does not match the server render');
+    assert.equal(editor.document.uri.toString(), uri.toString(), 'refresh changed the status view URI');
+    assert.equal(statusTabs().length, 1, 'refresh created another status tab');
+    assert.equal(statusTabs()[0].label, openedViews[0].title, 'refresh changed the tab label');
+    assert.equal(fs.existsSync(statusPath), false, 'refresh created a backing status file');
+    assert.deepEqual(workspaceFiles(repo), filesBefore, 'refresh created a workspace file');
+    await settle(300);
+    const refreshVisible = vscode.window.visibleTextEditors.find(
+      (visible) => visible.document.uri.toString() === uri.toString()
+    );
+    assert(refreshVisible, 'refreshed status editor is not visible');
+    const afterReturnLine = refreshed.split('\n')
+      .findIndex((line) => line.includes('+after-return'));
+    assert(afterReturnLine >= 0, 'refreshed text is missing the server-added line');
+    assert(
+      refreshVisible.visibleRanges.some(
+        (range) => afterReturnLine >= range.start.line && afterReturnLine <= range.end.line
+      ),
+      'refreshed server line is not in the visible editor'
+    );
+    const refreshShot = shot('06-status-refresh.png');
+    const rvs2RefreshShot = shot('r-vs-2-refresh.png');
+    matrix.push({
+      widget: 'status editor', input: 'g',
+      result: 're-read the worktree diff from the server',
+      magitRequests: requests.length - refreshBefore, screenshot: refreshShot,
+    });
+    interactions.push('status g refreshed the worktree diff after foreign widgets');
+    fs.writeFileSync(`${evidence}/r-vs-2-evidence.json`, JSON.stringify({
+      gate: 'R-VS-2',
+      evidenceDirectory: evidence,
+      repo,
+      descriptor: openedViews[0],
+      uri: uri.toString(),
+      statusTab: { count: statusTabs().length, label: statusTabs()[0].label },
+      workspaceFiles: { before: filesBefore, afterRefresh: workspaceFiles(repo) },
+      viewOpenRequests: requests.filter((request) => request.method === 'view/open').length,
+      firstOpen: {
+        screenshot: firstShot,
+        textMatchesServerRender: first === firstRender,
+        lineCount: first.split('\n').length,
+        visibleEditor: true,
+        bodyLineVisible: true,
+      },
+      reopen: {
+        screenshot: reopenShot,
+        viewOpenRequestsBefore: viewOpensBeforeReopen,
+        viewOpenRequestsAfter: requests.filter((request) => request.method === 'view/open').length,
+        statusTabCount: statusTabs().length,
+        statusTabLabel: statusTabs()[0].label,
+        textUnchanged: reopenTextUnchanged,
+        visibleEditor: true,
+        bodyLineVisible: true,
+      },
+      refresh: {
+        screenshot: rvs2RefreshShot,
+        requests: requests.slice(refreshBefore).map((request) => ({
+          method: request.method,
+          command: request.params.command,
+          key: request.params.key,
+        })),
+        textMatchesServerRender: refreshed === refreshedRender,
+        visibleEditor: true,
+        serverLineVisible: true,
+        backingFileExists: fs.existsSync(statusPath),
+      },
+      renderEvents: renderEvents.map((event) => ({
+        viewId: event.viewId,
+        version: event.version,
+        baseVersion: event.baseVersion,
+        text: Array.isArray(event.text),
+        edits: Array.isArray(event.edits),
+      })),
+    }, null, 2));
+
+    // 7. R-VS-3: one generic dispatcher carries arbitrary canonical server
+    // command IDs and opaque arguments; there is no VSCode command per action.
+    const registeredCommands = await vscode.commands.getCommands(true);
+    const registeredMagitCommands = registeredCommands
+      .filter((command) => command.startsWith('magit.')).sort();
+    assert(registeredCommands.includes('magit.invoke'), 'generic dispatcher is not registered');
+    assert.deepEqual(registeredMagitCommands, [
+      'magit.cancelEdit', 'magit.confirmEdit', 'magit.invoke', 'magit.key',
+      'magit.mirrorFoldShortcuts', 'magit.open',
+    ], 'per-action VSCode command registrations exist');
+    const contributed = extension.packageJSON.contributes;
+    const clientCommands = contributed.commands.map((entry) => entry.command).sort();
+    for (const perAction of ['magit.refresh', 'magit.toggle-fold', 'magit.show-section']) {
+      assert(!registeredCommands.includes(perAction), `${perAction} must not be registered`);
+      assert(!clientCommands.includes(perAction), `${perAction} must not be contributed`);
+    }
+    for (const serverCommand of ['common.refresh', 'common.toggle-section',
+      'common.hide-section', 'common.show-section']) {
+      assert(!registeredCommands.includes(serverCommand),
+        `${serverCommand} must not be a VSCode command`);
+    }
+    for (const binding of contributed.keybindings) {
+      assert.equal(binding.command, 'magit.invoke', `${binding.key} bypasses the dispatcher`);
+      assert.equal(typeof binding.args?.command, 'string', `${binding.key} lacks a server command`);
+    }
+    const entriesAt = async () => {
+      const tokenLegend = await vscode.commands.executeCommand(
+        'vscode.provideDocumentSemanticTokensLegend', uri
+      );
+      const tokenData = await vscode.commands.executeCommand(
+        'vscode.provideDocumentSemanticTokens', uri
+      );
+      const entries = [];
+      let current = 0;
+      for (let index = 0; index < tokenData.data.length; index += 5) {
+        current += tokenData.data[index];
+        entries.push({ line: current, type: tokenLegend.tokenTypes[tokenData.data[index + 3]] });
+      }
+      return entries;
+    };
+    const dispatchLine = (await entriesAt()).find(
+      (entry) => entry.type === 'magit-section' && entry.line > 2
+    )?.line;
+    assert.notEqual(dispatchLine, undefined, 'no section token for generic dispatch');
+    await focusStatus();
+    selectLine(dispatchLine);
+    const dispatchExpanded = editor.document.getText();
+    const dispatchBefore = requests.length;
+    await vscode.commands.executeCommand('magit.invoke', {
+      command: 'common.hide-section', args: { recursive: true },
+    });
+    await waitFor(
+      () => editor.document.getText() !== dispatchExpanded,
+      'generic hide-section dispatch folding a section'
+    );
+    const dispatchCollapsed = editor.document.getText();
+    assert(
+      dispatchCollapsed.length < dispatchExpanded.length,
+      'generic hide-section dispatch did not fold the section children'
+    );
+    const hideRequest = requests.slice(dispatchBefore).find(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.hide-section'
+    );
+    assert(hideRequest, 'generic dispatch did not reach view/invoke');
+    assert.deepEqual(hideRequest.params.args, { recursive: true },
+      'generic dispatch altered the opaque arguments');
+    assert.equal(hideRequest.params.viewId, uri.authority);
+    assert(hideRequest.params.cursor, 'generic dispatch lost the cursor');
+    const dispatchShot = shot('r-vs-3-generic-dispatch.png');
+    await vscode.commands.executeCommand('magit.invoke', {
+      command: 'common.show-section', args: { recursive: true },
+    });
+    await waitFor(
+      () => editor.document.getText() === dispatchExpanded,
+      'generic show-section dispatch restoring the section'
+    );
+    const showRequest = requests.slice(dispatchBefore).find(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.show-section'
+    );
+    assert.deepEqual(showRequest.params.args, { recursive: true });
+    const dispatchRestored = editor.document.getText() === dispatchExpanded;
+    assert(dispatchRestored, 'generic show-section did not restore the section');
+    const dispatchRestoredShot = shot('r-vs-3-generic-restored.png');
+    const foldRequests = requests.filter(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.toggle-section'
+    );
+    const refreshRequests = requests.filter(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'common.refresh'
+    );
+    assert.equal(foldRequests.length, 4, 'physical Tab/mirror folding did not dispatch four toggles');
+    assert.equal(refreshRequests.length, 1, 'physical g did not dispatch one refresh');
+
+    // 8. The Magit-owned QuickPick still forwards typed menu keys.
+    await focusStatus();
+    selectLine(fileLine);
+    const menuText = editor.document.getText();
+    const beforeMenu = requests.length;
+    await key('c');
+    await waitFor(
+      () => requests.slice(beforeMenu).some(
+         (request) => request.method === 'view/invoke' && request.params.command === 'open.commit'
+      ),
+      'commit menu open.commit request'
+    );
+    await waitFor(() => observe().tag === 'INPUT', 'Magit QuickPick input focus');
+    await type('-');
+    await waitFor(
+      () => keysSent().includes('-'),
+      'typed menu key reaching view/key'
+    );
+    await type('a');
+    await waitFor(
+      () => keysSent().includes('a'),
+      'second typed menu key reaching view/key'
+    );
+    const menuShot = shot('07-magit-quickpick.png');
+    await key('q');
+    await waitFor(() => keysSent().includes('q'), 'menu q reaching the server');
+    await waitFor(
+      () => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      'status focus after the Magit QuickPick closed'
+    );
+    await waitFor(() => editor.document.getText() === menuText, 'menu pop restoring status text');
+    assert(keysSent().includes('q'), 'menu q did not reach the server');
+    assert(!invoked('commit.create'), 'typing a menu key ran an action instead of a key step');
+    matrix.push({
+      widget: 'Magit QuickPick (commit menu)', input: 'c, -, a, q',
+      result: 'menu keys reached view/key and q popped back to status',
+      magitRequests: requests.length - beforeMenu, screenshot: menuShot,
+    });
+    interactions.push('Magit commit QuickPick forwarded typed -/a as view/key and q popped to status');
+
+    // 9. F5 is a second canonical refresh default (`profiles/standard.toml`),
+    // so its physical behaviour must be recorded honestly rather than assumed.
+    // Instrument the isolated renderer to show whether the key reached it and
+    // whether a native picker appeared; then press the canonical `g` refresh in
+    // the same focus/scope as a control. This never substitutes API dispatch
+    // for the physical refresh evidence, which is the `g` press above.
+    const f5Binding = contributed.keybindings.find(
+      (binding) => binding.key === 'f5' && binding.when.includes("magit.scope == 'status'")
+    );
+    let f5Shot;
+    let f5Note;
+    const f5Attempts = [];
+    let f5ControlG;
+    /**
+     * Press physical F5 once and record what the isolated host actually did.
+     *
+     * @param {string} label
+     * @param {string} probe marker line rewritten before the press
+     */
+    const pressF5 = async (label, probe) => {
+      await focusStatus();
+      fs.writeFileSync(
+        `${vscode.workspace.workspaceFolders[0].uri.fsPath}/tracked.txt`, `${probe}\n`
+      );
+      await startKeyProbe();
+      const before = requests.length;
+      await key('F5');
+      // Let key resolution finish before reading the probe; the refresh is
+      // still awaited through `waitFor`, never through this pause.
+      await settle(600);
+      const events = stopKeyProbe();
+      const dispatched = requests.slice(before).some(
+        (request) => request.method === 'view/invoke'
+          && request.params.command === 'common.refresh'
+      );
+      let rendered = false;
+      try {
+        await waitFor(() => editor.document.getText().includes(`+${probe}`),
+          `physical F5 refresh probe (${label})`, 3000);
+        rendered = true;
+      } catch {
+        rendered = false;
+      }
+      return {
+        label,
+        probe,
+        dispatched,
+        rendered,
+        keydownsReachingRenderer: events,
+        quickInputAfterKey: quickInputState(),
+        focus: observe(),
+        activeDebugSession: Boolean(vscode.debug.activeDebugSession),
+      };
+    };
+    try {
+      // First press without extra input hygiene, so the recorded result matches
+      // what a user of this isolated host would see.
+      f5Attempts.push(await pressF5('as-is', 'f5-first'));
+      shot('08-f5-before-dismissal.png');
+      // Dismiss any picker F5 may have opened, then refocus through the API
+      // (never with keys).
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await focusStatus();
+      f5Shot = shot('08-f5-probe.png');
+      // A second press follows an explicit modulation reset: earlier physical
+      // ctrl+alt chords can leave the X layer reporting a modifier that the
+      // renderer still treats as held. This changes test input hygiene only.
+      try {
+        execFileSync('xdotool', ['keyup', 'alt', 'ctrl', 'shift', 'super']);
+      } catch {
+        // Key names differ across XKB maps; the retry is diagnostic only.
+      }
+      const clean = await pressF5('after modifier reset', 'f5-second');
+      f5Attempts.push(clean);
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await focusStatus();
+      // Control: the canonical `g` refresh must still dispatch in exactly this
+      // focus/scope, proving the F5 result is key-specific.
+      fs.writeFileSync(`${vscode.workspace.workspaceFolders[0].uri.fsPath}/tracked.txt`, 'g-control\n');
+      const controlBefore = requests.length;
+      await startKeyProbe();
+      await key('g');
+      await waitFor(
+        () => requests.slice(controlBefore).some(
+          (request) => request.method === 'view/invoke'
+            && request.params.command === 'common.refresh'
+        ),
+        'control g refresh dispatch',
+        8000
+      );
+      await waitFor(
+        () => editor.document.getText().includes('+g-control'),
+        'control g refresh render'
+      );
+      f5ControlG = {
+        dispatched: true,
+        rendered: editor.document.getText().includes('+g-control'),
+        keydownsReachingRenderer: stopKeyProbe(),
+        screenshot: shot('08-f5-control-g.png'),
+      };
+    } catch (error) {
+      f5Note = `F5 probe stopped: ${error && error.message}`;
+      await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      try {
+        f5Shot = shot('08-f5-probe.png');
+      } catch {
+        f5Shot = undefined;
+      }
+    }
+    const f5Worked = f5Attempts.some((attempt) => attempt.dispatched && attempt.rendered);
+    const f5ObservedAttempt = f5Attempts.find(
+      (attempt) => attempt.keydownsReachingRenderer.some((event) => event.key === 'F5')
+    );
+    const f5ArrivedWithAlt = f5Attempts.some(
+      (attempt) => attempt.keydownsReachingRenderer.some(
+        (event) => event.key === 'F5' && event.alt
+      )
+    );
+    const f5Limitation = f5Worked
+      ? 'Physical F5 dispatched and rendered common.refresh in this isolated host.'
+      : 'Physical F5 produced no refresh request/render in this isolated host. '
+        + `Keydowns reaching the renderer: ${JSON.stringify(
+          f5Attempts.map((attempt) => ({
+            label: attempt.label, events: attempt.keydownsReachingRenderer,
+          }))
+        )}. `
+        + (f5ArrivedWithAlt
+          ? 'The renderer received the key as Alt+F5 (altKey true), so the '
+            + 'contributed plain `f5` binding correctly did not match. A '
+            + 'disposable xev window reproduced the same host behaviour: '
+            + 'xdotool-injected F4/F5/F6 arrive with a preceding Alt_L press, '
+            + 'while Tab and g do not. The host component prepending Alt was '
+            + 'not modified or conclusively identified.'
+          : f5ObservedAttempt
+            ? 'The renderer received a plain F5 keydown, so the key was '
+              + 'resolved (or swallowed) inside the workbench; the resolver '
+              + 'cause remains unproven.'
+            : 'The renderer never received an F5 keydown, so the key was '
+              + 'consumed before the workbench; the interceptor remains unproven.')
+        + ' No programmatic refresh was substituted. R-VS-3 refresh acceptance '
+        + 'rests on the canonical `g` binding, physically verified before and '
+        + 'again as a control here.';
+    interactions.push(
+      `F5 probe: ${f5Attempts.map((attempt) => `${attempt.label} dispatched=${
+        attempt.dispatched} rendered=${attempt.rendered}`).join('; ')}; `
+      + `controlG dispatched=${Boolean(f5ControlG && f5ControlG.dispatched)}`
+    );
+
+    // Loaded-manifest evidence for the canonical status keys.
+    const bindings = extension.packageJSON.contributes.keybindings.filter(
+      (binding) => binding.when.includes("magit.scope == 'status'")
+    );
+    const canonical = [
+      ['enter', 'common.visit'],
+      ['tab', 'common.toggle-section'],
+      ['g', 'common.refresh'],
+      ['f5', 'common.refresh'],
+    ].map(([bindingKey, command]) => {
+      const binding = bindings.find(
+        (candidate) => candidate.key === bindingKey && candidate.args?.command === command
+      );
+      assert(binding, `loaded manifest is missing ${bindingKey} -> ${command} for status`);
+      for (const term of ['magit.active', 'editorTextFocus', '!quickInputVisible',
+        '!suggestWidgetVisible', '!findWidgetVisible', '!renameInputVisible']) {
+        assert(binding.when.split(' && ').includes(term), `${bindingKey}: missing ${term}`);
+      }
+      return { key: bindingKey, command, when: binding.when };
+    });
+    fs.writeFileSync(`${evidence}/r-vs-5-evidence.json`, JSON.stringify({
+      uri: uri.toString(),
+      text: editor.document.getText(),
+      matrix,
+      interactions,
+      canonical,
+      f5: { attempts: f5Attempts, worked: f5Worked, controlG: f5ControlG,
+        screenshot: f5Shot, note: f5Note, limitation: f5Limitation },
+      tokenTypes: [...types],
+      requests,
+      tabs: vscode.window.tabGroups.all.flatMap((group) => group.tabs).map((tab) => tab.label),
+    }, null, 2));
+    // A non-fold canonical action through the same dispatcher must visibly
+    // change both the server render and the repository, then restore cleanly.
+    await focusStatus();
+    const stagedNames = () => execFileSync(
+      'git', ['-C', repo, 'diff', '--cached', '--name-only']
+    ).toString().trim();
+    assert.equal(stagedNames(), '', 'fixture index must start clean');
+    const actionBefore = requests.length;
+    await vscode.commands.executeCommand('magit.invoke', { command: 'status.stage-all' });
+    await waitFor(() => stagedNames() === 'tracked.txt', 'generic stage-all repository effect');
+    await waitFor(
+      () => editor.document.getText().includes('Staged changes (1)'),
+      'generic stage-all server render'
+    );
+    const stageRequest = requests.slice(actionBefore).find(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'status.stage-all'
+    );
+    assert(stageRequest, 'generic stage-all did not reach view/invoke');
+    assert.equal(stageRequest.params.args, undefined, 'stage-all must carry no args');
+    const stageShot = shot('r-vs-3-generic-action.png');
+    await vscode.commands.executeCommand('magit.invoke', { command: 'status.unstage-all' });
+    await waitFor(() => stagedNames() === '', 'generic unstage-all repository effect');
+    const unstageRequest = requests.slice(actionBefore).find(
+      (request) => request.method === 'view/invoke'
+        && request.params.command === 'status.unstage-all'
+    );
+    assert(unstageRequest, 'generic unstage-all did not reach view/invoke');
+    await waitFor(
+      () => editor.document.getText().includes('Staged changes (0)'),
+      'generic unstage-all server render'
+    );
+    const actionRestored = stagedNames() === '';
+    fs.writeFileSync(`${evidence}/r-vs-3-evidence.json`, JSON.stringify({
+      gate: 'R-VS-3',
+      evidenceDirectory: evidence,
+      isolatedWindow: { id: windowId, geometry: windowGeometry },
+      dispatcher: {
+        command: 'magit.invoke',
+        registered: registeredCommands.includes('magit.invoke'),
+        contributedCommands: clientCommands,
+        registeredMagitCommands,
+        perActionRegistrations: false,
+        actionBindings: contributed.keybindings.length,
+        bindingsWithoutDispatcher: contributed.keybindings
+          .filter((binding) => binding.command !== 'magit.invoke').map((binding) => binding.key),
+      },
+      genericDispatch: {
+        command: 'common.hide-section',
+        args: { recursive: true },
+        request: hideRequest.params,
+        textChanged: dispatchCollapsed !== dispatchExpanded,
+        screenshot: dispatchShot,
+        restoredCommand: 'common.show-section',
+        restoredArgs: showRequest.params.args,
+        restored: dispatchRestored,
+        restoredScreenshot: dispatchRestoredShot,
+      },
+      genericAction: {
+        command: 'status.stage-all',
+        request: stageRequest.params,
+        repositoryStaged: 'tracked.txt',
+        screenshot: stageShot,
+        restoredCommand: 'status.unstage-all',
+        restoredRequest: unstageRequest.params,
+        repositoryRestored: actionRestored,
+      },
+      foldShortcut: {
+        key: 'tab',
+        binding: canonical.find((entry) => entry.key === 'tab'),
+        physicalPresses: 2,
+        togglesDispatched: foldRequests.length,
+        requests: foldRequests.map((request) => request.params),
+        screenshots: [tabFoldShot, '05-status-fold.png', '05b-mirrored-fold.png'],
+      },
+      refreshShortcut: {
+        key: 'g',
+        binding: canonical.find((entry) => entry.key === 'g'),
+        physicalPresses: 1,
+        refreshDispatched: refreshRequests.length,
+        requests: refreshRequests.map((request) => request.params),
+        renderedLine: '+after-return',
+        sameUri: editor.document.uri.toString() === uri.toString(),
+        screenshot: '06-status-refresh.png',
+      },
+      f5: {
+        key: 'f5',
+        binding: f5Binding,
+        attempts: f5Attempts,
+        worked: f5Worked,
+        controlG: f5ControlG,
+        screenshot: f5Shot,
+        limitation: f5Limitation,
+      },
+    }, null, 2));
+    fs.writeFileSync(`${evidence}/bindings-evidence.json`, JSON.stringify({
+      extensionPath: extension.extensionPath,
+      version: extension.packageJSON.version,
+      bindings: canonical,
+      interactions,
+    }, null, 2));
+    shot('screen.png');
+    console.log(
+      'PASS real VSCode R-VS-2 first open/reopen/refresh, '
+      + 'R-VS-3 generic dispatcher with physical default fold/refresh and a '
+      + 'repository-changing generic action, '
+      + 'R-VS-4 server semantic tokens painted by the active theme '
+      + '(dark -> light -> dark with identical server text), and '
+      + 'R-VS-5 foreign widgets, status Enter/Tab/refresh and Magit QuickPick'
+    );
+  } catch (error) {
+    try { captureFailure?.(); } catch { /* Keep the original verification failure. */ }
+    fs.writeFileSync(`${process.env.MAGIT_VSCODE_EVIDENCE}/failure.txt`, error.stack);
+    fs.writeFileSync(`${process.env.MAGIT_VSCODE_EVIDENCE}/failure-state.json`, JSON.stringify({
+      extensionPath: extension.extensionPath,
+      version: extension.packageJSON.version,
+      window: { id: windowId, geometry: windowGeometry },
+      matrix,
+      interactions,
+      requests,
+      renderedLines: Object.fromEntries(renderedLines),
+      text: vscode.window.activeTextEditor?.document.getText(),
+    }, null, 2));
+    throw error;
+  } finally {
+    LanguageClient.prototype.sendRequest = sendRequest;
+    LanguageClient.prototype.onNotification = onNotification;
+    await extension.exports.deactivate();
+  }
+}
+
+module.exports = { run };

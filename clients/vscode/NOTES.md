@@ -485,12 +485,12 @@ are away (expected today 16:30 NZDT). R-VS-5 stays unchecked.
 
 Changes already in the working tree, not yet committed:
 
-- `clients/vscode/test/integration.js` — rewritten around the R-VS-5 matrix:
+- `clients/vscode/test/e2e/suite.js` — rewritten around the R-VS-5 matrix:
   foreign QuickPick and InputBox, find widget, status Enter/Tab/`g` after
   returning, Magit commit QuickPick, and an F5 diagnostic recorded separately
   from the pass/fail refresh path. It also captures per-step screenshots and
   `r-vs-5-evidence.json`.
-- `clients/vscode/scripts/test-integration.mjs` — longer isolated-host timeout,
+- `clients/vscode/test/e2e/run.mjs` — longer isolated-host timeout,
   DISPLAY/binary precondition checks, screenshot listing, and targeted cleanup
   of only editors launched from that run's unique `--user-data-dir`.
 - `clients/vscode/test/test.js` — added the canonical status `enter`, `tab`,

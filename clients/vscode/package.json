@@ -21,8 +21,10 @@
   "main": "./extension.js",
   "scripts": {
     "gen:keybindings": "node scripts/gen-keybindings.mjs",
-    "test": "node test/test.js",
-    "test:integration": "node scripts/test-integration.mjs"
+    "test": "node test/test.js && node test/integration.js",
+    "test:unit": "node test/test.js",
+    "test:integration": "node test/integration.js",
+    "test:e2e": "node test/e2e/run.mjs"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run magit-lsp VSCode extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/clients/vscode",
+        "${workspaceFolder}"
+      ],
+      "outFiles": [],
+      "console": "integratedTerminal"
+    }
+  ]
+}

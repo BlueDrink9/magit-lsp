@@ -1211,7 +1211,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       windows). Every existing scenario must still pass at 100x30 and 80x24.
       *Done when:* both scenarios PASS under both profiles and sizes;
       `make test` and `make ui-test` green.
-- [ ] R-VS-1 **VSCode extension: build, test and document** (see §11.2): a
+- [x] R-VS-1 **VSCode extension: build, test and document** (see §11.2): a
       `clients/vscode/README.md` that explains how to run it (Extension
       Development Host, F5 launch config in `.vscode/launch.json`), how to
       point it at the server binary, how to package (`vsce package` or

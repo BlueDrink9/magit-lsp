@@ -1,0 +1,6 @@
+.gitignore
+NOTES.md
+package-lock.json
+scripts/**
+test/**
+*.vsix

@@ -9,7 +9,7 @@ build:
 # user-visible rendering.
 test: test-rust test-lua vscode-test
 
-vscode-test:
+vscode-test: build
 	npm --prefix clients/vscode test
 	node clients/vscode/scripts/gen-keybindings.mjs --check
 
