@@ -421,6 +421,149 @@ fn save_and_reset_args_restore_the_saved_switches() {
 }
 
 #[test]
+fn pressing_a_set_option_again_clears_it_without_prompting() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (descriptor, _render) = test.open_via_command("open.commit");
+    test.ack();
+
+    // Set `=A` with one queued text reply.
+    test.ui().reply_text(Some("Alice".to_string()));
+    test.press("=");
+    let set = test.press_ui("A");
+    let menu = set
+        .render
+        .expect("setting an option re-renders")
+        .menu
+        .expect("the structured menu");
+    match menu.item("=A") {
+        Some(magit_lsp::menu::Item::Option {
+            value: Some(value),
+            ..
+        }) => assert_eq!(value, "Alice"),
+        other => panic!("expected the set author option, got {other:?}"),
+    }
+
+    // Press `=A` again with no reply queued: if the code path prompted, the
+    // scripted UI would error out and this line would panic.
+    test.press("=");
+    let clear = test.press_ui("A");
+    let menu = clear
+        .render
+        .expect("clearing an option re-renders")
+        .menu
+        .expect("the structured menu");
+    match menu.item("=A") {
+        Some(magit_lsp::menu::Item::Option { value: None, .. }) => {}
+        other => panic!("expected the cleared author option, got {other:?}"),
+    }
+    assert_eq!(menu.preview(), "git commit");
+    assert_eq!(
+        test.text(),
+        menus::named("commit")
+            .expect("commit menu")
+            .render(WIDE_VIEWPORT)
+            .lines,
+        "the cleared menu renders like a fresh one"
+    );
+
+    // The clearing press asked no prompt at all.
+    let requests = test.ui().requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "only the original set prompted: {requests:?}"
+    );
+}
+
+#[test]
+fn opening_a_menu_with_saved_args_initializes_and_restores_the_arguments() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+
+    let saved = serde_json::json!({
+        "saved_args": {
+            "switches": ["-a"],
+            "options": { "=A": "Alice" },
+        }
+    });
+    let (descriptor, render) = test.open_view_with_args(
+        "saved-menu",
+        ViewKind::Menu("menu.commit".to_string()),
+        Placement::Bottom,
+        WIDE_VIEWPORT,
+        &saved,
+    );
+    let menu = render.menu.as_ref().expect("the structured menu");
+    match menu.item("-a") {
+        Some(magit_lsp::menu::Item::Switch { on: true, .. }) => {}
+        other => panic!("expected the saved --all switch on, got {other:?}"),
+    }
+    match menu.item("=A") {
+        Some(magit_lsp::menu::Item::Option {
+            value: Some(value),
+            ..
+        }) => assert_eq!(value, "Alice"),
+        other => panic!("expected the saved author option, got {other:?}"),
+    }
+    assert_eq!(menu.preview(), "git commit --all --author=Alice");
+    assert_eq!(
+        test.menu(&descriptor.id).expect("the menu view").saved_args,
+        magit_lsp::menu::Args {
+            switches: vec!["-a".to_string()],
+            options: [("=A".to_string(), "Alice".to_string())].into_iter().collect(),
+        },
+        "the open args also become the reset defaults"
+    );
+
+    // Change the arguments, then restore the ones the view was opened with.
+    test.press("- a");
+    assert!(
+        !menu_switch(&test, &descriptor.id, "-a"),
+        "toggling changes the saved argument"
+    );
+    let reset = test.invoke("menu.reset-args");
+    assert_eq!(message_texts(&reset.effects), vec!["Reset menu arguments"]);
+    assert!(menu_switch(&test, &descriptor.id, "-a"));
+    let menu = test.menu(&descriptor.id).expect("the menu view");
+    match menu.item("=A") {
+        Some(magit_lsp::menu::Item::Option {
+            value: Some(value),
+            ..
+        }) => assert_eq!(value, "Alice"),
+        other => panic!("expected the restored author option, got {other:?}"),
+    }
+    assert_eq!(menu.preview(), "git commit --all --author=Alice");
+
+    // Saving now stores the current arguments as the new reset defaults:
+    // add `--no-verify`, save, then disturb everything and reset.
+    test.press("- n");
+    let save = test.invoke("menu.save-args");
+    assert_eq!(message_texts(&save.effects), vec!["Saved menu arguments"]);
+    test.press("- n");
+    test.press("= A");
+    let menu = test.menu(&descriptor.id).expect("the menu view");
+    assert_eq!(menu.preview(), "git commit --all");
+    let reset = test.invoke("menu.reset-args");
+    let menu = reset
+        .render
+        .expect("resetting re-renders")
+        .menu
+        .expect("the structured menu");
+    assert_eq!(
+        menu.preview(),
+        "git commit --all --no-verify --author=Alice",
+        "reset restores the arguments saved after the open"
+    );
+}
+
+#[test]
 fn menu_tokens_decode_to_the_documented_types() {
     let tree = menus::named("commit")
         .expect("commit menu")

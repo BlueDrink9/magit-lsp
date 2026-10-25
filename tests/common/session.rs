@@ -145,6 +145,25 @@ impl TestSession {
         (descriptor, render)
     }
 
+    /// Open a view with kind-specific arguments (e.g. a menu's `saved_args`
+    /// for the real `view/open` path), track its initial version and focus it.
+    pub fn open_view_with_args(
+        &mut self,
+        id: impl Into<String>,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: &Value,
+    ) -> (ViewDescriptor, ViewRender) {
+        let (descriptor, render) = self
+            .session
+            .open_with_args(id, kind, placement, viewport, Some(args))
+            .expect("open view with args");
+        self.apply(&render);
+        self.view = descriptor.id.clone();
+        (descriptor, render)
+    }
+
     /// Run a command that pushes a view, focus it and return it with its first
     /// render. The caller still decides when to acknowledge that render.
     pub fn open_via_command(&mut self, command: &str) -> (ViewDescriptor, ViewRender) {

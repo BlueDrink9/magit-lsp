@@ -147,30 +147,6 @@ pub struct UiSettings {
     pub confirm_discard: bool,
 }
 
-/// Where saved menu arguments live.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuSaveScope {
-    Global,
-    Repo,
-}
-
-impl MenuSaveScope {
-    /// Parse the config value.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "global" => Ok(MenuSaveScope::Global),
-            "repo" => Ok(MenuSaveScope::Repo),
-            other => Err(format!("unknown menu save scope: {other}")),
-        }
-    }
-}
-
-/// Menu settings.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MenuSettings {
-    pub save_scope: MenuSaveScope,
-}
-
 /// Log view defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogSettings {
@@ -187,7 +163,6 @@ pub struct Config {
     pub diff: DiffSettings,
     pub sections: SectionSettings,
     pub ui: UiSettings,
-    pub menus: MenuSettings,
     pub log: LogSettings,
     /// Every file that contributed, for the watcher.
     pub files: Vec<PathBuf>,
@@ -209,9 +184,6 @@ impl Default for Config {
             },
             ui: UiSettings {
                 confirm_discard: true,
-            },
-            menus: MenuSettings {
-                save_scope: MenuSaveScope::Global,
             },
             log: LogSettings {
                 default_args: Vec::new(),
@@ -408,7 +380,6 @@ struct Layered {
     sections_order: Option<Vec<String>>,
     sections_default_visibility: Option<String>,
     ui_confirm_discard: Option<bool>,
-    menus_save_scope: Option<MenuSaveScope>,
     log_default_args: Option<Vec<String>>,
     log_margin: Option<u32>,
     files: Vec<PathBuf>,
@@ -436,9 +407,6 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     }
     if let Some(confirm) = layered.ui_confirm_discard {
         config.ui.confirm_discard = confirm;
-    }
-    if let Some(scope) = layered.menus_save_scope {
-        config.menus.save_scope = scope;
     }
     if let Some(args) = layered.log_default_args {
         config.log.default_args = args;
@@ -614,19 +582,13 @@ fn apply_document(
                 }
             }
             "menus" => {
+                // The saved-argument persistence scope is deferred (TASKS §0):
+                // every `menus.*` setting is obsolete and rejected by its exact
+                // name instead of being parsed and silently ignored.
                 let table = settings_table(item, "menus", file, line)?;
                 for (name, value) in table.iter() {
                     let line = item_line(source, value);
-                    match name {
-                        "save_scope" => {
-                            let setting = string(value, "menus.save_scope", file, line)?;
-                            layered.menus_save_scope =
-                                Some(MenuSaveScope::parse(&setting).map_err(|message| {
-                                    ConfigError::new(message).at_file_line(file, line)
-                                })?);
-                        }
-                        other => return Err(unknown_key(file, line, "menus", other)),
-                    }
+                    return Err(unknown_key(file, line, "menus", name));
                 }
             }
             "log" => {

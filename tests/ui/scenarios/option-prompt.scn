@@ -4,6 +4,11 @@
 # while its RPC loop is blocked, so the scenario waits for the visible prompt
 # instead of `wait` (idle). The answer updates the option value and the menu's
 # argument preview.
+#
+# Pressing `=A` again while the value is set clears it (§3.11): no prompt is
+# shown and the menu goes back to its default preview, so the final `wait` is
+# an idle wait — if a second prompt appeared, the client would never go idle
+# and the scenario would fail.
 fixture: modified-two-files
 ---
 keys: c
@@ -18,3 +23,9 @@ expect screen contains "--author=Alice"
 expect windows.floating == 1
 expect pending == ""
 snapshot: answered
+keys: = A
+wait
+expect screen not-contains "--author=Alice"
+expect pending == ""
+expect windows.floating == 1
+snapshot: cleared

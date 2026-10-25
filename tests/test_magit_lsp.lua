@@ -1453,6 +1453,366 @@ T['menu.style split opens a bottom split'] = function()
   )
 end
 
+--- Replace every string equal to `secret` with a marker, so a failed equality
+--- below never prints the synthetic secret into the failure diagnostics.
+local function redact(value, secret)
+  if type(value) == 'table' then
+    local out = {}
+    for key, item in pairs(value) do
+      out[key] = redact(item, secret)
+    end
+    return out
+  end
+  if type(value) == 'string' and value == secret then
+    return '<redacted>'
+  end
+  return value
+end
+
+T['every prompt kind answers view/promptRespond with its §3.6 shape'] = function()
+  setup_child()
+  child.lua([[
+    -- Drive one synthetic `view/prompt` through the real notification handler
+    -- with a fake capturing client and per-row `vim.ui`/`vim.fn` stubs.
+    RUN_PROMPT = function(scenario)
+      local debug_api = require('magit-lsp.debug')
+      local sent = {}
+      local calls = { input = {}, select = {}, inputsecret = {} }
+      local real_client = vim.lsp.get_client_by_id
+      vim.lsp.get_client_by_id = function(id)
+        if id == 777 then
+          return {
+            request = function(_, method, params, handler)
+              sent[#sent + 1] = { method = method, params = params }
+              if handler then handler(nil, {}) end
+            end,
+          }
+        end
+        return real_client(id)
+      end
+      local select_answers = {}
+      for index, answer in ipairs(scenario.selectAnswers or {}) do
+        select_answers[index] = answer
+      end
+      vim.ui.input = function(opts, on_confirm)
+        calls.input[#calls.input + 1] = { prompt = opts.prompt, default = opts.default }
+        on_confirm(scenario.inputAnswer)
+      end
+      vim.fn.inputsecret = function(title)
+        calls.inputsecret[#calls.inputsecret + 1] = title
+        return scenario.secretAnswer
+      end
+      vim.ui.select = function(items, opts, on_confirm)
+        local entry = { prompt = opts.prompt, items = vim.deepcopy(items) }
+        if opts.format_item then
+          entry.formatted = vim.tbl_map(opts.format_item, items)
+        end
+        calls.select[#calls.select + 1] = entry
+        local answer = table.remove(select_answers, 1)
+        if answer == nil then
+          on_confirm(nil)
+          return
+        end
+        if type(answer) == 'number' then
+          on_confirm(items[answer])
+          return
+        end
+        for _, item in ipairs(items) do
+          if (type(item) == 'table' and item.id or item) == answer then
+            on_confirm(item)
+            return
+          end
+        end
+        on_confirm(nil)
+      end
+      vim.lsp.handlers['view/prompt'](nil, scenario.params, { client_id = 777 })
+      vim.lsp.get_client_by_id = real_client
+      return { sent = sent, calls = calls, prompts_pending = debug_api.state.prompts }
+    end
+  ]])
+
+  local multi_items = {
+    { id = 'a', label = 'a' },
+    { id = 'b', label = 'b', description = 'desc b' },
+    { id = 'c', label = 'c' },
+  }
+  local scenarios = {
+    {
+      name = 'text success',
+      params = { promptId = 'p-text-ok', kind = 'text', title = 'Author name?', default = 'seed' },
+      inputAnswer = 'Alice',
+      want = { promptId = 'p-text-ok', cancelled = false, value = 'Alice' },
+      want_input = { prompt = 'Author name?', default = 'seed' },
+    },
+    {
+      name = 'text empty answer',
+      params = { promptId = 'p-text-empty', kind = 'text', title = 'Name?' },
+      inputAnswer = '',
+      want = { promptId = 'p-text-empty', cancelled = false, value = '' },
+      want_input = { prompt = 'Name?' },
+    },
+    {
+      name = 'text cancel',
+      params = { promptId = 'p-text-cancel', kind = 'text', title = 'Name?' },
+      want = { promptId = 'p-text-cancel', cancelled = true, value = nil },
+      want_input = { prompt = 'Name?' },
+    },
+    {
+      name = 'confirm yes',
+      params = { promptId = 'p-confirm-yes', kind = 'confirm', title = 'Delete branch feature/x?' },
+      selectAnswers = { 1 },
+      want = { promptId = 'p-confirm-yes', cancelled = false, value = true },
+      want_select_items = { 'Yes', 'No' },
+    },
+    {
+      name = 'confirm no',
+      params = { promptId = 'p-confirm-no', kind = 'confirm', title = 'Delete branch feature/x?' },
+      selectAnswers = { 2 },
+      want = { promptId = 'p-confirm-no', cancelled = false, value = false },
+    },
+    {
+      name = 'confirm cancel',
+      params = { promptId = 'p-confirm-cancel', kind = 'confirm', title = 'Delete branch feature/x?' },
+      want = { promptId = 'p-confirm-cancel', cancelled = true, value = nil },
+    },
+    {
+      name = 'confirm destructive focuses No first',
+      params = {
+        promptId = 'p-confirm-destructive',
+        kind = 'confirm',
+        title = 'Drop the stash?',
+        yesLabel = 'Keep it',
+        noLabel = 'Drop it',
+        destructive = true,
+      },
+      selectAnswers = { 1 },
+      want = { promptId = 'p-confirm-destructive', cancelled = false, value = false },
+      want_select_items = { 'Drop it', 'Keep it' },
+    },
+    {
+      name = 'choice answers a fixed id',
+      params = {
+        promptId = 'p-choice',
+        kind = 'choice',
+        title = 'Which base?',
+        items = {
+          { id = 'head', label = 'HEAD' },
+          { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
+        },
+      },
+      selectAnswers = { 'branch-x' },
+      want = { promptId = 'p-choice', cancelled = false, value = { id = 'branch-x' } },
+      want_select_items = {
+        { id = 'head', label = 'HEAD' },
+        { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
+      },
+      want_select_formatted = { 'HEAD', 'branch x — 2 commits ahead' },
+    },
+    {
+      name = 'choice cancel',
+      params = {
+        promptId = 'p-choice-cancel',
+        kind = 'choice',
+        title = 'Which base?',
+        items = {
+          { id = 'head', label = 'HEAD' },
+          { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
+        },
+      },
+      want = { promptId = 'p-choice-cancel', cancelled = true, value = nil },
+    },
+    {
+      name = 'choice with allowCustom types a custom value',
+      params = {
+        promptId = 'p-choice-custom',
+        kind = 'choice',
+        title = 'Which base?',
+        allowCustom = true,
+        items = { { id = 'head', label = 'HEAD' } },
+      },
+      selectAnswers = { '__custom__' },
+      inputAnswer = 'refs/heads/wip',
+      want = { promptId = 'p-choice-custom', cancelled = false, value = { custom = 'refs/heads/wip' } },
+      want_input = { prompt = 'Which base?' },
+      want_select_items = {
+        { id = 'head', label = 'HEAD' },
+        { id = '__custom__', label = 'Enter custom value…' },
+      },
+    },
+    {
+      name = 'choice with allowCustom can cancel the custom input',
+      params = {
+        promptId = 'p-choice-custom-cancel',
+        kind = 'choice',
+        title = 'Which base?',
+        allowCustom = true,
+        items = { { id = 'head', label = 'HEAD' } },
+      },
+      selectAnswers = { '__custom__' },
+      want = { promptId = 'p-choice-custom-cancel', cancelled = true, value = nil },
+      want_input = { prompt = 'Which base?' },
+    },
+    {
+      name = 'multiChoice toggles preselected items and answers Done',
+      params = {
+        promptId = 'p-multi',
+        kind = 'multiChoice',
+        title = 'Pick branches',
+        items = multi_items,
+        preselected = { 'a' },
+      },
+      selectAnswers = { 'b', 'a', '__done__' },
+      want = { promptId = 'p-multi', cancelled = false, value = { ids = { 'b' } } },
+      want_select_steps = {
+        { '[x] a', '[ ] b — desc b', '[ ] c', 'Done' },
+        { '[x] a', '[x] b — desc b', '[ ] c', 'Done' },
+        { '[ ] a', '[x] b — desc b', '[ ] c', 'Done' },
+      },
+    },
+    {
+      name = 'multiChoice answers an empty selection',
+      params = {
+        promptId = 'p-multi-empty',
+        kind = 'multiChoice',
+        title = 'Pick branches',
+        items = { { id = 'a', label = 'a' } },
+      },
+      selectAnswers = { '__done__' },
+      want = { promptId = 'p-multi-empty', cancelled = false, value = { ids = {} } },
+    },
+    {
+      name = 'multiChoice cancel',
+      params = {
+        promptId = 'p-multi-cancel',
+        kind = 'multiChoice',
+        title = 'Pick branches',
+        items = { { id = 'a', label = 'a' } },
+      },
+      want = { promptId = 'p-multi-cancel', cancelled = true, value = nil },
+    },
+    {
+      name = 'secret success',
+      params = { promptId = 'p-secret-ok', kind = 'text', title = 'SSH passphrase', secret = true },
+      secretAnswer = 'correct horse battery',
+      secret = 'correct horse battery',
+      want = { promptId = 'p-secret-ok', cancelled = false, value = '<redacted>' },
+      want_secret_titles = { 'SSH passphrase' },
+      want_no_input = true,
+    },
+    {
+      name = 'secret empty answer cancels',
+      params = { promptId = 'p-secret-empty', kind = 'text', title = 'SSH passphrase', secret = true },
+      secretAnswer = '',
+      want = { promptId = 'p-secret-empty', cancelled = true, value = nil },
+      want_secret_titles = { 'SSH passphrase' },
+      want_no_input = true,
+    },
+    {
+      name = 'secret cancel',
+      params = { promptId = 'p-secret-cancel', kind = 'text', title = 'SSH passphrase', secret = true },
+      want = { promptId = 'p-secret-cancel', cancelled = true, value = nil },
+      want_secret_titles = { 'SSH passphrase' },
+      want_no_input = true,
+    },
+  }
+
+  for _, scenario in ipairs(scenarios) do
+    local label = scenario.name
+    child.lua(string.format('RESULT = RUN_PROMPT(%s)', vim.inspect(scenario)))
+    local result = child.lua_get('RESULT')
+    MiniTest.expect.equality(type(result), 'table', label .. ': the prompt was handled')
+    if type(result) == 'table' then
+      MiniTest.expect.equality(#result.sent, 1, label .. ': exactly one respond request')
+      if result.sent[1] then
+        MiniTest.expect.equality(
+          result.sent[1].method,
+          'view/promptRespond',
+          label .. ': the answer method'
+        )
+        local got, want = result.sent[1].params, scenario.want
+        if scenario.secret then
+          got, want = redact(got, scenario.secret), redact(want, scenario.secret)
+        end
+        MiniTest.expect.equality(got, want, label .. ': the respond payload')
+      end
+      MiniTest.expect.equality(
+        result.prompts_pending,
+        0,
+        label .. ': the prompt counter is back to zero'
+      )
+
+      if scenario.want_input then
+        MiniTest.expect.equality(
+          result.calls.input[1],
+          scenario.want_input,
+          label .. ': the vim.ui.input options'
+        )
+        MiniTest.expect.equality(#result.calls.input, 1, label .. ': one vim.ui.input call')
+      end
+      if scenario.want_no_input then
+        MiniTest.expect.equality(#result.calls.input, 0, label .. ': vim.ui.input was never used')
+      end
+      if scenario.want_secret_titles then
+        MiniTest.expect.equality(
+          result.calls.inputsecret,
+          scenario.want_secret_titles,
+          label .. ': inputsecret got the title'
+        )
+      else
+        MiniTest.expect.equality(
+          #result.calls.inputsecret,
+          0,
+          label .. ': inputsecret was never used'
+        )
+      end
+
+      if scenario.want_select_items then
+        MiniTest.expect.equality(
+          result.calls.select[1].items,
+          scenario.want_select_items,
+          label .. ': the select items'
+        )
+        MiniTest.expect.equality(
+          result.calls.select[1].prompt,
+          scenario.params.title,
+          label .. ': the select prompt'
+        )
+      end
+      if scenario.want_select_formatted then
+        MiniTest.expect.equality(
+          result.calls.select[1].formatted,
+          scenario.want_select_formatted,
+          label .. ': the rendered item labels'
+        )
+      end
+      if scenario.want_select_steps then
+        MiniTest.expect.equality(
+          #result.calls.select,
+          #scenario.want_select_steps,
+          label .. ': one select call per toggle step'
+        )
+        for step, want in ipairs(scenario.want_select_steps) do
+          MiniTest.expect.equality(
+            result.calls.select[step].formatted,
+            want,
+            label .. ': the step ' .. step .. ' labels'
+          )
+          MiniTest.expect.equality(
+            result.calls.select[step].prompt,
+            scenario.params.title,
+            label .. ': the step ' .. step .. ' prompt'
+          )
+        end
+      end
+    end
+  end
+
+  MiniTest.expect.equality(
+    child.lua('return vim.wait(2000, function() return require("magit-lsp.debug").idle() end, 10)'),
+    true,
+    'the client is back to idle'
+  )
+end
 
 T['a menu option prompt asks through vim.ui.input and lands the value'] = function()
   setup_child()

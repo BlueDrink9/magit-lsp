@@ -343,15 +343,26 @@ fn profile_defaults_to_vim_and_typed_settings_parse() {
     let main = dir.path().join("main.toml");
     write(
         &main,
-        "[diff]\ncontext = 7\n[ui]\nconfirm_discard = false\n[menus]\nsave_scope = \"repo\"\n[log]\ndefault_args = [\"--graph\"]\nmargin = 5\n",
+        "[diff]\ncontext = 7\n[ui]\nconfirm_discard = false\n[log]\ndefault_args = [\"--graph\"]\nmargin = 5\n",
     );
     let config = load(&main).unwrap();
     assert_eq!(config.profile, Profile::Vim);
     assert_eq!(config.diff.context, 7);
     assert!(!config.ui.confirm_discard);
-    assert_eq!(config.menus.save_scope, magit_lsp::config::MenuSaveScope::Repo);
     assert_eq!(config.log.default_args, vec!["--graph"]);
     assert_eq!(config.log.margin, Some(5));
+}
+
+#[test]
+fn obsolete_menus_save_scope_is_rejected_with_its_exact_name() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("main.toml");
+    write(&main, "[diff]\ncontext = 7\n[menus]\nsave_scope = \"repo\"\n");
+    let error = load(&main).unwrap_err();
+    assert!(
+        error.to_string().contains("main.toml:4: unknown setting `menus.save_scope`"),
+        "{error}"
+    );
 }
 
 #[test]
