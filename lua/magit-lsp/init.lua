@@ -12,7 +12,7 @@ local view = require('magit-lsp.view')
 local menu = require('magit-lsp.menu')
 local edit = require('magit-lsp.edit')
 local prompt = require('magit-lsp.prompt')
-local debug_api = require('magit-lsp.debug')
+local hooks = require('magit-lsp.hooks')
 
 local M = {}
 
@@ -364,7 +364,7 @@ local function configure()
   end
   configured = true
 
-  debug_api.configure()
+  hooks.configure()
 
   view.configure({
     notify = effects.notify,

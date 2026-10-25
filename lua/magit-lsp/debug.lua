@@ -416,4 +416,27 @@ function M.snapshot()
   }
 end
 
+-- Fill the product-side hook table with the real recorder. Product modules only
+-- require `magit-lsp.hooks`, so a normal start never loads this module; the test
+-- harness and `MAGIT_LSP_TRACE` do, and this is where recording turns on.
+local hooks = require('magit-lsp.hooks')
+hooks.configure = M.configure
+hooks.prompt_started = M.prompt_started
+hooks.prompt_finished = M.prompt_finished
+hooks.request_started = M.request_started
+hooks.request_finished = M.request_finished
+hooks.queued_started = M.queued_started
+hooks.queued_finished = M.queued_finished
+hooks.schedule = M.schedule
+hooks.render_received = M.render_received
+hooks.render_applied = M.render_applied
+hooks.render_acked = M.render_acked
+hooks.set_pending = M.set_pending
+hooks.keymap_received = M.keymap_received
+hooks.view_open = M.view_open
+hooks.view_close = M.view_close
+hooks.key_pressed = M.key_pressed
+hooks.trace_id = M.trace_id
+hooks.key_sent = M.key_sent
+
 return M

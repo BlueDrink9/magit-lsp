@@ -8,7 +8,7 @@
 
 local buffer = require('magit-lsp.buffer')
 local keymap = require('magit-lsp.keymap')
-local debug_api = require('magit-lsp.debug')
+local hooks = require('magit-lsp.hooks')
 local requests = require('magit-lsp.requests')
 
 local M = {}
@@ -254,7 +254,7 @@ local function ack(view)
   local c = client(view.client_id)
   if c then
     c:notify('view/rendered', { viewId = view.id, version = view.version })
-    debug_api.render_acked(view.key, view.version)
+    hooks.render_acked(view.key, view.version)
   end
 end
 
@@ -275,7 +275,7 @@ function M.flush_acks(client_id)
     local c = client(pending.client_id)
     if view and c then
       c:notify('view/rendered', { viewId = pending.view_id, version = pending.version })
-      debug_api.render_acked(key, pending.version)
+      hooks.render_acked(key, pending.version)
     end
   end
 end
@@ -286,7 +286,7 @@ requests.on_quiet = M.flush_acks
 --- The server owns highlighting, but only sends tokens on request.
 ---@param buf integer
 local function refresh_tokens(buf)
-  debug_api.schedule(function()
+  hooks.schedule(function()
     if buf and vim.api.nvim_buf_is_valid(buf) then
       vim.lsp.semantic_tokens.force_refresh(buf)
     end
@@ -316,9 +316,9 @@ local function request_resync(view)
     return
   end
   view.resyncing = true
-  debug_api.request_started()
+  hooks.request_started()
   c:request('view/resync', { viewId = view.id }, function(err, result)
-    debug_api.request_finished()
+    hooks.request_finished()
     view.resyncing = false
     if err or type(result) ~= 'table' then
       flush_deferred(view.key)
@@ -344,8 +344,8 @@ function M.apply_render(params, client_id)
   end
   local key = view_key(client_id, params.viewId)
   local view = M.views[key]
-  debug_api.render_received(key, params.version)
-  debug_api.set_pending(key, params.pending)
+  hooks.render_received(key, params.version)
+  hooks.set_pending(key, params.pending)
   if not view then
     local queue = M.pending_render[key] or {}
     queue[#queue + 1] = { client_id = client_id, params = params }
@@ -392,7 +392,7 @@ function M.apply_render(params, client_id)
   end
   view.lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)
   view.version = params.version
-  debug_api.render_applied(key, params.version)
+  hooks.render_applied(key, params.version)
   if params.cursor then
     set_cursor(view, params.cursor)
   end
@@ -497,7 +497,7 @@ function M.apply_keymap(notice, client_id)
   end
 
   keymap.apply(view.buf, notice, handlers, opts)
-  debug_api.keymap_received(view.key, notice)
+  hooks.keymap_received(view.key, notice)
   view.capture = notice.capture == true
 
   -- Backspace pops one server-side pending step; it is not printable, so the
@@ -589,7 +589,7 @@ local function on_wiped(key)
   M.pending_ack[key] = nil
   remove_from_order(key)
   if not view.document then
-    debug_api.view_close(key)
+    hooks.view_close(key)
   end
   if view.document then
     if view.on_closed then
@@ -666,7 +666,7 @@ function M.open(descriptor, opts)
   local placement = M.placements[opts.placement or view.placement] or M.placements.main
   view.win = placement.place(view, opts)
   attach(view)
-  debug_api.view_open(key, view.kind, view.buf)
+  hooks.view_open(key, view.kind, view.buf)
 
   vim.api.nvim_create_autocmd('BufWipeout', {
     buffer = view.buf,
@@ -784,7 +784,7 @@ function M.close(id, focus_previous_window, client_id)
   M.pending_ack[key] = nil
   remove_from_order(key)
   if not view.document then
-    debug_api.view_close(key)
+    hooks.view_close(key)
   end
 
   local win = view.win
@@ -897,7 +897,7 @@ function M.press(steps, id)
   if not view then
     return
   end
-  debug_api.key_pressed(steps)
+  hooks.key_pressed(steps)
   local cursor, selection, mode = position(view)
   for _, step in ipairs(steps) do
     local key = view.key
@@ -911,10 +911,10 @@ function M.press(steps, id)
         editorMode = mode,
         cursor = cursor,
         selection = selection,
-        traceId = debug_api.trace_id(),
+        traceId = hooks.trace_id(),
       },
       on_send = function()
-        debug_api.key_sent(step, key)
+        hooks.key_sent(step, key)
       end,
       on_result = function(resp, err)
         if M.views[key] ~= view then
@@ -966,7 +966,7 @@ function M.invoke(command, opts, id)
       cursor = cursor,
       selection = selection,
       args = opts.args,
-      traceId = debug_api.trace_id(),
+      traceId = hooks.trace_id(),
     },
     on_result = function(resp, err)
       if not resp then

@@ -7,7 +7,7 @@
 --- a response callback runs on Neovim's event loop, so the editor stays
 --- responsive while a slow Git command, prompt or editor bridge is outstanding.
 
-local debug_api = require('magit-lsp.debug')
+local hooks = require('magit-lsp.hooks')
 
 local uv = vim.uv or vim.loop
 
@@ -98,12 +98,12 @@ function M.pump(client_id)
   local item = table.remove(state.items, 1)
   state.running = true
 
-  debug_api.request_started()
+  hooks.request_started()
   local finished = false
 
   --- Release the queue slot after the response's follow-up notifications.
   local function release()
-    debug_api.queued_finished()
+    hooks.queued_finished()
     if M.queues[client_id] ~= state then
       return
     end
@@ -128,7 +128,7 @@ function M.pump(client_id)
       return
     end
     finished = true
-    debug_api.request_finished()
+    hooks.request_finished()
     local ok, failure = pcall(item.on_result, result, err)
     vim.defer_fn(function()
       release()
@@ -159,7 +159,7 @@ function M.finish(client_id, item, result, err)
   if state then
     state.running = false
   end
-  debug_api.queued_finished()
+  hooks.queued_finished()
   local ok, failure = pcall(item.on_result, result, err)
   if state and M.queues[client_id] == state and #state.items == 0 and M.on_quiet then
     M.on_quiet(client_id)
@@ -180,7 +180,7 @@ end
 function M.enqueue(client_id, spec)
   local state = queue(client_id)
   state.items[#state.items + 1] = spec
-  debug_api.queued_started()
+  hooks.queued_started()
   M.pump(client_id)
 end
 
@@ -201,7 +201,7 @@ function M.clear(client_id)
   local state = M.queues[client_id]
   if state then
     for _ = 1, #state.items do
-      debug_api.queued_finished()
+      hooks.queued_finished()
     end
   end
   M.queues[client_id] = nil

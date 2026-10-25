@@ -28,6 +28,15 @@ end
 -- set up the client themselves leave them unset. `MAGIT_LSP_TRACE` is read by
 -- the debug module directly.
 local ui_root = vim.env.MAGIT_LSP_UI_ROOT
+local trace_path = vim.env.MAGIT_LSP_TRACE
+
+-- The debug recorder backs the harness `idle()`/snapshot contract and the
+-- trace. Product code only requires `magit-lsp.hooks`, so loading it here is
+-- what opts a test or harness run in; a normal `setup()` never loads it.
+if (trace_path and trace_path ~= '') or (ui_root and ui_root ~= '') or rawget(_G, 'MiniTest') then
+  require('magit-lsp.debug')
+end
+
 if ui_root and ui_root ~= '' then
   local profile = vim.env.MAGIT_LSP_PROFILE
   -- The status placement is a client-only option; scenarios use this hook to

@@ -1264,7 +1264,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       *Done when:* `init.lua` is under ~400 lines, `menu.lua` and `edit.lua`
       contain only placement and effects; all L2 cases and `make ui-test`
       green; line counts recorded in §11.1.
-- [ ] R-NV-3 **Isolate debug instrumentation** (§11.1 finding 3): product code
+- [x] R-NV-3 **Isolate debug instrumentation** (§11.1 finding 3): product code
       calls `debug_api.*` about 35 times. Route them through one thin hook
       table (`require('magit-lsp.hooks')` with no-op defaults) that
       `debug.lua` fills only when `MAGIT_LSP_TRACE` or the test harness is

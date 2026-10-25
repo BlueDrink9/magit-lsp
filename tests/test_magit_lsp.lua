@@ -2231,6 +2231,25 @@ T['buffers renders that beat the view/open response'] = function()
   MiniTest.expect.equality(state.scope, 'status')
 end
 
+T['a normal setup never loads the debug module'] = function()
+  child.restart({ '-u', 'NONE' })
+  child.lua(string.format([[
+    vim.opt.rtp:append(%q)
+    M = require('magit-lsp')
+    M.setup({ root_dir = %q })
+    vim.wait(5000, function()
+      local v = M.status_view()
+      return v ~= nil and v.version ~= nil
+    end, 10)
+  ]], project, repo))
+
+  MiniTest.expect.equality(
+    child.lua_get("package.loaded['magit-lsp.debug'] == nil"),
+    true,
+    'a normal setup must not load the debug recorder'
+  )
+end
+
 T['debug.trace writes one JSON line per event'] = function()
   local trace_path = project .. '/build/test-output/trace-lua.jsonl'
   vim.fn.mkdir(project .. '/build/test-output', 'p')
