@@ -388,15 +388,28 @@ fn format_step(step: &KeyStep) -> String {
 mod tests {
     use super::*;
 
+    /// The shared §3.8 fixture at `tests/data/keys.json`; `tests/test_keymap.lua`
+    /// pins the Lua translator to the same cases.
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        #[serde(rename = "roundTrip")]
+        round_trip: Vec<String>,
+        #[serde(rename = "toNeovim")]
+        to_neovim: Vec<(String, String)>,
+        #[serde(rename = "toVscode")]
+        to_vscode: Vec<(String, String)>,
+        #[serde(rename = "invalidCanonical")]
+        invalid_canonical: Vec<String>,
+    }
+
+    fn fixture() -> Fixture {
+        serde_json::from_str(include_str!("../tests/data/keys.json")).expect("keys fixture")
+    }
+
     #[test]
     fn round_trips_canonical_keys() {
-        let cases = [
-            "s", "S", "?", "%", "$", "!", "-", "=", "Enter", "ctrl+Enter", "Escape",
-            "Delete", "shift+Tab", "alt+ArrowDown", "ctrl+c", "] ]", "g r", "ctrl+k ctrl+s",
-            "z a", "Space", "Plus", "ctrl+Plus", "F5", "meta+PageUp", "ctrl+shift+c",
-        ];
-        for case in cases {
-            let parsed = KeyChord::parse(case).unwrap_or_else(|e| panic!("{case}: {e}"));
+        for case in fixture().round_trip {
+            let parsed = KeyChord::parse(&case).unwrap_or_else(|e| panic!("{case}: {e}"));
             assert_eq!(parsed.to_canonical(), case, "canonical form of {case}");
             assert_eq!(KeyChord::parse(&parsed.to_canonical()).unwrap(), parsed);
         }
@@ -404,48 +417,16 @@ mod tests {
 
     #[test]
     fn rejects_invalid_keys() {
-        for case in [
-            "",
-            "   ",
-            "shift+s",
-            "shift+S",
-            "ctrl+",
-            "+",
-            "ctrl+nope",
-            "NotAKey",
-            "ctrl+ctrl+s",
-        ] {
-            assert!(KeyChord::parse(case).is_err(), "expected rejection: {case:?}");
+        for case in fixture().invalid_canonical {
+            assert!(KeyChord::parse(&case).is_err(), "expected rejection: {case:?}");
         }
     }
 
     #[test]
     fn translates_to_vscode_keybindings() {
-        let cases = [
-            ("s", "s"),
-            ("S", "shift+s"),
-            ("?", "shift+/"),
-            ("%", "shift+5"),
-            ("$", "shift+4"),
-            ("Enter", "enter"),
-            ("Escape", "escape"),
-            ("Tab", "tab"),
-            ("shift+Tab", "shift+tab"),
-            ("Delete", "delete"),
-            ("Backspace", "backspace"),
-            ("ArrowUp", "up"),
-            ("ctrl+c", "ctrl+c"),
-            ("alt+ArrowDown", "alt+down"),
-            ("ctrl+Enter", "ctrl+enter"),
-            ("ctrl+shift+c", "ctrl+shift+c"),
-            ("g r", "g r"),
-            ("] ]", "] ]"),
-            ("F5", "f5"),
-            ("Space", "space"),
-        ];
-        for (canonical, expected) in cases {
+        for (canonical, expected) in fixture().to_vscode {
             assert_eq!(
-                KeyChord::parse(canonical).unwrap().to_vscode(),
+                KeyChord::parse(&canonical).unwrap().to_vscode(),
                 expected,
                 "{canonical}"
             );
@@ -454,30 +435,9 @@ mod tests {
 
     #[test]
     fn translates_to_neovim_lhs() {
-        let cases = [
-            ("s", "s"),
-            ("S", "S"),
-            ("?", "?"),
-            ("Enter", "<CR>"),
-            ("Escape", "<Esc>"),
-            ("Tab", "<Tab>"),
-            ("shift+Tab", "<S-Tab>"),
-            ("Delete", "<Del>"),
-            ("Backspace", "<BS>"),
-            ("ArrowUp", "<Up>"),
-            ("ctrl+c", "<C-c>"),
-            ("alt+ArrowDown", "<A-Down>"),
-            ("ctrl+Enter", "<C-CR>"),
-            ("ctrl+shift+c", "<C-S-c>"),
-            ("g r", "gr"),
-            ("z a", "za"),
-            ("] ]", "]]"),
-            ("Space", "<Space>"),
-            ("F5", "<F5>"),
-        ];
-        for (canonical, expected) in cases {
+        for (canonical, expected) in fixture().to_neovim {
             assert_eq!(
-                KeyChord::parse(canonical).unwrap().to_neovim(),
+                KeyChord::parse(&canonical).unwrap().to_neovim(),
                 expected,
                 "{canonical}"
             );

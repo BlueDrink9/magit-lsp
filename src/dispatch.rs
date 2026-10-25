@@ -64,25 +64,18 @@ pub enum Resolution {
         end: u32,
         reverse: bool,
     },
-    DiscardAllUnstaged {
-        needs_confirm: bool,
-    },
-    DiscardAllUntracked {
-        needs_confirm: bool,
-    },
+    DiscardAllUnstaged,
+    DiscardAllUntracked,
     DiscardFile {
         path: String,
-        needs_confirm: bool,
     },
     DiscardHunk {
         path: String,
         hunk_id: String,
-        needs_confirm: bool,
     },
     DiscardSelection {
         start: u32,
         end: u32,
-        needs_confirm: bool,
     },
     /// Nothing to do, with a sentence to show the user.
     Message(Effect),
@@ -118,7 +111,6 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
             Command::Discard => Resolution::DiscardSelection {
                 start: range.start,
                 end: range.end,
-                needs_confirm: true,
             },
         };
     }
@@ -146,24 +138,16 @@ pub fn resolve(command: Command, target: NodeKind, selection: Option<LineRange>)
             NodeKind::Other => info(NOTHING_TO_UNSTAGE),
         },
         Command::Discard => match target {
-            NodeKind::SectionUnstaged => Resolution::DiscardAllUnstaged {
-                needs_confirm: true,
-            },
+            NodeKind::SectionUnstaged => Resolution::DiscardAllUnstaged,
             NodeKind::SectionStaged => info(NOTHING_TO_DISCARD),
-            NodeKind::SectionUntracked => Resolution::DiscardAllUntracked {
-                needs_confirm: true,
-            },
-            NodeKind::FileHeader { path } => Resolution::DiscardFile {
-                path,
-                needs_confirm: true,
-            },
+            NodeKind::SectionUntracked => Resolution::DiscardAllUntracked,
+            NodeKind::FileHeader { path } => Resolution::DiscardFile { path },
             NodeKind::HunkHeader { path, hunk_id }
             | NodeKind::DiffLine {
                 path, hunk_id, ..
             } => Resolution::DiscardHunk {
                 path,
                 hunk_id,
-                needs_confirm: true,
             },
             NodeKind::Other => info(NOTHING_TO_DISCARD),
         },

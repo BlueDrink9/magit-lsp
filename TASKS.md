@@ -1059,9 +1059,10 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
   parity keys; test unavailable/scope mismatch; acked versions; keymap delivery;
   cross-scope conflicts; config gaps; minimum Git version; editor disconnect;
   Neovim prompts; option clearing/saved args; VSCode keybinding drift; remove
-  Lua sleeps; strengthen read-only assertions; mutation ordering; prune duplicate
-  tests; reduce snapshots; remove magic counts; tighten assertions; remove
-  global environment mutation.
+  Lua sleeps; strengthen read-only assertions; mutation ordering (ordering
+  review done; its unsolved read-responsiveness defect is BUG-READ-1,
+  §7 Bugfix); prune duplicate tests; reduce snapshots; remove magic counts;
+  tighten assertions; remove global environment mutation.
 - **P3:** UI latency assertions; rendered-text parsing in tests; housekeeping;
   remaining small coverage gaps.
 - Client review follow-ups: R-NV-1…R-NV-4 and R-VS-1.
@@ -1069,6 +1070,56 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Bugfix
 
+- [ ] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
+  blocked inside real Git** (unsolved; moved out of the completed
+  mutation-ordering review item, §12; **not scheduled for implementation
+  until the user asks**)
+  - **Requirement (preserved from the review item's read half):** a read
+    (`view/resync`, and by the same root cause `view/rendered`, `view/resize`
+    and `view/open` in any repository) must not be delayed by a `view/invoke`
+    that is blocked inside a real Git command. The probe asserts this
+    contract with the real gate; it currently fails and is `#[ignore]`d as
+    BUG-READ-1 (run `cargo test --test server_async -- --ignored`), so the
+    green debug+release suites say nothing about read responsiveness.
+  - **Evidence (known-failing probe, retained intact in
+    `tests/server_async.rs`):** bounded evidence from the failing run: the
+    server spawned `git add -u` at 05:58:35.173604Z (child blocked in the
+    gate, `entered` observed), the `view/resync` request was received at
+    05:58:35.181196Z, and the read produced no response within the 3 s window
+    while the server stayed alive (`server exit: Ok(None)`). Full log:
+    `/tmp/opencode/read_probe1.log`. Cause: `invoke_view` locks
+    `Shared.sessions` before `session.invoke_ui` and the whole Git command
+    runs inside that call, while `view/resync` needs the same mutex; the lock
+    is global across repositories, so a slow Git in one view also blocks
+    `view/rendered`/`view/resize`/`view/open` everywhere.
+  - **Proposed design-review gate (PROPOSED only — not implemented and not
+    approved; flagged for design/user review, not a decided shortcut; the bug
+    is not scheduled until the user asks):**
+    - global registry lookup only → per-repo session handle;
+    - per-view published latest-sent and last-acked immutable state, outside
+      the Git and prompt locks;
+    - a render publishes before it notifies and derives its edit base from
+      the same ack slot;
+    - `Session::ack` and the transport share one authoritative equal-version
+      promotion implementation;
+    - positional/resync reads never need the session lock;
+    - acks are handled directly and resize is queued off the reader thread;
+    - view lifecycle remains server-owned;
+    - the current initial-unacked fallback is preserved unless explicitly
+      reviewed, and a stale ack must never erase a valid ack;
+    - a resync during a mutation returns the latest PUBLISHED pre-mutation
+      state, with the post-mutation render arriving as a later notification.
+  - **Required tests:** blocked-Git resync, positional and cross-repo reads;
+    ack during a mutation and the edit-base derivation; stale-ack
+    preservation; resize does not block intake.
+  - **Escalation:** escalate before implementing if this needs a
+    View/`CommandCtx` rewrite or multiple unacked versions per view; an
+    async/backend redesign is out of scope.
+  - **Minimal first step (unchanged from the review item's separate-ticket
+    scope):** stop holding `Shared.sessions` across the Git run in
+    `invoke_view` (and the identical `key_view`/`set_mode_view` shape), then
+    un-ignore the probe; the now-unused debug-only `maybe_test_delay`/
+    `MAGIT_LSP_TEST_DELAY_MS` hook in `src/server.rs` can be removed with it.
 - **P1:** Diagnose Neovim harness startup/socket creation and
   connection independently of scenario behavior (§11.3).
 
@@ -1528,7 +1579,7 @@ proof or a claim that unchecked client/Phase 4–9 work is complete.
 | Tokens/visit | Dotted types work; modifiers add attributes above types. Added/removed use `@diff.plus`/`@diff.minus`. Visit is `definition` (deleted files empty). Inline diffs replaced `vcs/*`; historical Lua API: `setup/open/refresh/invoke/error_detail`. |
 | Input/config | Visit was status-scoped (confirm's Enter); vim log `g l`, not native `l`. Modified shifted letters allowed. Reload: 150 ms hash poll, not notify. Full-chord lhs incurs `timeoutlen`; visit exception → R-NV-4. Reasoned deny-list exceptions: `ctrl+t`, `ctrl+c`, menu-only `ctrl+s`/`ctrl+r`. |
 | Menus/parity | Saved args session-only; `cargo xtask parity` aliases `magit-lsp parity`; reset `X`. Clashing in-progress keys omitted; branch `u/r/p/R/P` are options. Historical inventory: 22 menus, 355 rows, ~191 Planned; manual-key validation → §12. |
-| Runner | Deliberately retain synchronous `GitRepo`/`std::process` in `spawn_blocking` rather than API-wide Tokio rewrite without behavioural gain. `RepoLocks` serialises mutations; reads remain concurrent; cancellable work-done progress and bounded invocation log. Thread-local `CancelHandle` kills by PID (`kill -KILL`, no libc), consumes cancellation so failure can refresh. Debug-delay coverage gap → P2 ordering task. |
+| Runner | Deliberately retain synchronous `GitRepo`/`std::process` in `spawn_blocking` rather than API-wide Tokio rewrite without behavioural gain. `RepoLocks` serialises mutations; reads remain concurrent; cancellable work-done progress and bounded invocation log. Thread-local `CancelHandle` kills by PID (`kill -KILL`, no libc), consumes cancellation so failure can refresh. The former debug-delay test (`MAGIT_LSP_TEST_DELAY_MS`) slept *before* the sessions lock was taken, so its pass never proved read responsiveness during a mutation blocked inside real Git; it was removed and replaced by a gated real-Git probe that fails and is ignored as BUG-READ-1 (§7 Bugfix): `invoke_view`/`key_view`/`set_mode_view` still hold `Shared.sessions` across their Git runs, so runner-level read concurrency is not read responsiveness. |
 | Process log | Read-only `runner::global_log()`, scope `process-log`, Main placement; status-scoped opener uses normal views. Sole command `process-log.clear`. Monotonic record IDs and `Node.copy = git <args>` support identity-based copy/refresh; no new tokens. |
 | Bridge core | `--editor-helper <path>` sends `{editId,path,kind}` on per-process Unix socket, waits for `{ok}`. No session/repo lock during Git's editor wait; create returns immediately, confirm/cancel answers edit ID, worker later sends render/effects. Fake Rust client milestone; real clients/askpass → R-3.4b, full commit flow → R-4.1; other edit kinds not emitted then. |
 | Prompt protocol | Notification `view/prompt`, request `view/promptRespond` returning null, avoiding nested client requests. Worker std mpsc wait, not Tokio; sync `CommandCtx` carries `&dyn PromptUi`, convenience session methods use `NullUi`, UI-aware mode variants exist. Reader text/path/date/number/ref/commit use text; Choice empty items + `allowCustom:true`. Cancel: no change/render. `common.quit` on a nested view is a server-side pop to the existing parent; at the root it retains the established close-all behavior. |
@@ -1921,25 +1972,68 @@ Completed P1 review work (historical tracking, not new verification):
   - **Constraints:** no new Lua cases.
   - **Verified (2026-10-25):** corrected MiniTest `fail_reason` options; native keys expand termcodes and execute without mappings. The modifiable negative control edits, snapshots and restores buffer/options in one protected child call without yielding or retrying; its caught failure identifies the unchanged-buffer guard. `env -i HOME="$HOME" PATH="$PATH" make test-lua && env -i HOME="$HOME" PATH="$PATH" make test` exited 0 on the first verification attempt: both Lua runs reported 65 cases, Fails (0), Notes (0); Rust tests, 23 VSCode tests and 164 generated keybindings passed. Unexpected verification failures: 0. The unrelated Nix jscpd/pulp bootstrap failed before the commands, which still ran successfully.
 
-- [ ] **[P2] Force overlap in the mutation-ordering test** (`tests/server_async.rs:373-410`, `325-370`)
-  - **Problem:** `mutations_for_one_repository_apply_in_request_order` passes even without serialisation because both mutations are fast. `a_slow_mutation_does_not_delay_a_later_read` exists only under `cfg(debug_assertions)` via `MAGIT_LSP_TEST_DELAY_MS`.
-  - **Change:** reuse the fake-git `add` hook (shared fixture, see C9 task) so the first mutation blocks until released; send the second; assert the second's `$/progress` `begin` follows the first's `end`. Switch the read-concurrency test to the same hook so it also runs in `--release`.
+- [x] **[P2] Force overlap in the mutation-ordering test** (`tests/server_async.rs`)
+  - **Problem (bounded scope):** `mutations_for_one_repository_apply_in_request_order` passed even without serialisation because both mutations were fast, and the read-concurrency test existed only under `cfg(debug_assertions)` via `MAGIT_LSP_TEST_DELAY_MS`.
+  - **Change (bounded scope):** reuse the fake-git `add` hook (shared fixture, see C9 task) so the first mutation blocks until released; send the second; assert the second's `$/progress` `begin` follows the first's `end`; run the coverage in both debug and release.
   - **Done when:** removing the repo lock fails the ordering test.
   - **Constraints:** bounded waits only.
+  - **Completed (2026-10-25) — bounded scope only; the read-responsiveness half moved to BUG-READ-1 (§7 Bugfix, unchecked).**
+    The shared gated fixture landed as `tests/common/fake_git.rs`: a tests-only fake `git`
+    with an explicit entered/release handshake (the gated child writes its pid to `entered`
+    and blocks; the test creates `release`; bounded polls, no fixed sleeps and no debug-only
+    delay), scoped to the server child's `PATH` only, whose `Drop` always releases and then
+    verifies (never kills a foreign, possibly recycled pid) its own gated child. The fixture
+    now also backs `a_cancel_notification_aborts_a_slow_mutation` (the `sleep 30` fake and
+    `fake_git_env`/`wait_for_file` are gone), and the debug-only
+    `MAGIT_LSP_TEST_DELAY_MS` test was removed, so the coverage runs in `--release`.
+    `mutations_for_one_repository_apply_in_request_order` arms the gate on `add`: it waits
+    for the first mutation's `create`/`begin` plus the entered marker (first mutation
+    verifiably inside real Git), submits `status.unstage-all` only then, releases, and
+    records every progress token/phase; it asserts the exact stream
+    `create/begin/end` ×2 with two distinct tokens (second `begin` strictly after first
+    `end`) and the repository result (index empty again, worktree still changed).
+    Negative controls (temporary `src/server.rs` edits, fully reverted — `git diff` empty):
+    bypassing both `MutationTurn.wait` **and** the repo lock fails the test with
+    `[create t1, begin t1, create t2, begin t2, end t1, end t2]`, i.e. the second begin
+    precedes the first end; bypassing only the repo lock still passes, because the turn
+    gate alone also serialises — so the original "removing the repo lock fails" gate was
+    only reachable via the both-bypass control.
+    Verified (2026-10-25): `cargo test --test server_async && cargo test --release
+    --test server_async && env -i HOME="$HOME" PATH="$PATH" make test` exited 0
+    (14+14 async tests including the new ordering test in both profiles, full Rust suite,
+    65 Neovim cases, 23 VSCode tests, 164 keybindings; no orphan processes).
+  - **Split (2026-10-25):** the unmet real-Git read-responsiveness requirement and its
+    evidence moved to **[BUG-READ-1]** (§7 Bugfix, still unchecked, probe retained
+    failing and `#[ignore]`d). This checked item covers only the forced mutation
+    overlap/order, the negative controls and the debug+release coverage; the green
+    debug+release suites do **not** cover read responsiveness.
 
-- [ ] **[P2] Prune cross-layer duplicate tests** (see list)
+- [x] **[P2] Prune cross-layer duplicate tests** (see list)
   - **Problem:** the same behaviour is asserted in several layers: ~12 Lua staging/untracked cases (`tests/test_magit_lsp.lua:395-500, 800-872`) duplicate `views.rs`/`git_backend.rs`/`status.rs`; the 23-line status table in Lua `800-829` duplicates `status_render.rs:102`; `tests/keys.rs` duplicates `src/keys.rs:392-420`; `tests/manifest.rs:86-127` duplicates `src/keys.rs:423-485`; `src/runner.rs:392-420` duplicates `tests/runner.rs:131-169`; `unbind_removes_a_profile_binding` exists in `config.rs:172` and `keymap.rs:219`; Planned-action checks exist in `commands.rs:203`, `menu.rs:296`, `menus.rs:110`.
   - **Change:** keep one Lua stage round trip (`pressing s…`, `visual line range`), the Lua notify case for planned actions, and delete the rest of the listed duplicates. Delete `tests/keys.rs`, the two `*_keys_follow_the_section_3_8_table` tests and one of each duplicated pair above. For Rust/Lua translator drift, share one `tests/data/keys.json` read by `src/keys.rs` tests and `test_keymap.lua`.
   - **Done when:** each behaviour has one primary owner; `make test` passes; Lua case count drops by at least 12.
   - **Constraints:** do not remove the only test of any behaviour; do after the `TestSession` task.
+  - **Done (2026-10-25), tests-only.** Neovim case count 65 → 52 (`test_magit_lsp.lua` 59 → 46, `test_keymap.lua` unchanged at 6): −13 ≥ 12. Deleted Lua staging/untracked cases and the 23-line status table all had equivalent Rust coverage; two unique assertions were transferred instead of lost (marked below). `tests/data/keys.json` is now the single §3.8 fixture consumed by `src/keys.rs` cfg(test) (`include_str!`) and `test_keymap.lua` (`vim.json.decode`), holding the union of all former cases (modified punctuation `%`/`$`, `ctrl+Plus`/`meta+PageUp`, chords, invalid canonical + invalid Neovim lhs). Behaviour → retained primary owner:
+    - status content render (staged/unstaged/untracked/rename) → `status_render.rs::snapshot_shows_staged_unstaged_untracked_and_a_rename`; clean-tree non-blank message (unique, transferred) → new `status_render.rs::a_clean_tree_renders_a_non_blank_working_tree_clean_message`
+    - stage a hunk/diff line → `views.rs::staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk`; visual line-range staging stays Lua (`staging a visual line range…`) with `views.rs::a_visual_selection_stages_only_the_lines_it_covers`
+    - unstage a hunk → `dispatch.rs::execute_unstage_hunk_unstages_only_that_hunk` (+ `git_backend.rs::unstage_hunk_reverts_staged_hunk`); stage/unstage file and hunk headers → `dispatch.rs::stage_file_header_stages_file` / `stage_hunk_header_stages_hunk` / `unstage_*` + `execute_stage_file_stages_it` / `execute_unstage_file_unstages_it`
+    - `S`/`U` stage-all/unstage-all → `views.rs::stage_all_and_unstage_all_run_through_the_view` (+ `dispatch.rs::execute_stage_all_unstaged_stages_tracked_changes` / `execute_unstage_all_staged_unstages_everything`); unborn-HEAD unstage-all → `git_backend.rs::unstage_all_works_without_commits`
+    - untracked section render/stage → `status.rs::untracked_files_are_separate_from_unstaged` / `stage_untracked_stages_only_untracked_files` + `dispatch.rs::stage_untracked_section_stages_all_untracked` / `execute_stage_all_untracked_stages_only_untracked` + `git_backend.rs::stage_file_stages_untracked_file`; untracked-file unstage notify (unique, transferred) → new `commands.rs::unstaging_an_untracked_file_reports_nothing_to_unstage`
+    - §3.8 key round trips → `src/keys.rs` unit tests + `tests/test_keymap.lua` from `tests/data/keys.json` (single owner pair, one fixture); deleted `tests/keys.rs` and both `manifest.rs::*_keys_follow_the_section_3_8_table` tests (all their cases are in the fixture)
+    - process-log ring/truncation → `tests/runner.rs::capacity_evicts_the_oldest_and_ids_strictly_increase` / `oversized_output_is_truncated_per_field` (deleted both `src/runner.rs` cfg(test) duplicates); config `unbind` → `config.rs::unbind_removes_a_profile_binding` (covers TOML parse + `Keymap::resolve`; deleted the `keymap.rs` copy); Planned actions → `commands.rs::planned_commands_report_their_roadmap_and_change_nothing` (registry) + `menus.rs::every_planned_menu_action_reports_its_roadmap_and_changes_nothing` (every menu, Git state) + Lua planned notify (deleted the single-item `menu.rs` copy)
+    - Kept unique adapter contracts untouched: read-only/E21, `:write` hint, tokens/theme, prompts, independent views/queues, input forwarding, failed-mutation notify, key-driven `pressing s…` round trip.
 
-- [ ] **[P2] Reduce snapshot sprawl and use one snapshot mechanism** (`tests/manifest.rs:22-43`, `tests/parity.rs:119-164`, `tests/menu.rs:146-158`, `tests/menus.rs:527-556`, `tests/snapshots/`)
+- [x] **[P2] Reduce snapshot sprawl and use one snapshot mechanism** (`tests/manifest.rs:22-43`, `tests/parity.rs:119-164`, `tests/menu.rs:146-158`, `tests/menus.rs:527-556`, `tests/snapshots/`)
   - **Problem:** three snapshot mechanisms (`expect_file!`, a custom `UPDATE_SNAPSHOTS` helper twice). `parity` is snapshotted three times (README block, `parity.md` with 355 rows, CLI output). 12 menu layout snapshots pin incidental spacing. Manifest snapshots in four formats pin docs/statuses that change every phase.
   - **Change:** use `expect_file!` everywhere and delete both custom helpers. Delete `tests/snapshots/parity.md` and its test; keep the README-block check. Keep layout snapshots for the commit menu at 60 and 140 only; for rebase/push/diff assert width invariants (no line wider than `cols`, fewer columns at smaller widths, every Planned action has a `magit.menu.planned` token). Keep `manifest-*.json` and `keybindings-*.json` (R-2.5 requires a CI snapshot); drop the markdown and `.neo.json` snapshots.
   - **Done when:** `tests/snapshots/` has ≤ 6 files and one update command (`UPDATE_EXPECT=1`); documented in `README.md`/`AGENTS.md`.
   - **Constraints:** keep the R-2.5 manifest snapshot.
+  - **Done (2026-10-25), tests + one small layout fix.** `tests/snapshots/` now holds exactly six files (`manifest-standard.json`, `manifest-vim.json`, `keybindings-standard.json`, `keybindings-vim.json`, `menu-60.txt`, `menu-140.txt`); deleted `parity.md`, both `keymap-*.md`, both `keymap-*.neo.json`, `menu-100.txt` and the nine `menus-*` spacing snapshots. Both custom `UPDATE_SNAPSHOTS` helpers are gone (`tests/manifest.rs` snapshot fn deleted, `tests/parity.rs` update branches deleted); every snapshot comparison is `expect_file!`. The README-block check now runs `expect_file!` against the reconstructed README (prose preserved; `UPDATE_EXPECT=1` rewrites the block in place) and `the_parity_markdown_matches_its_snapshot` is deleted; the neovim/markdown serializers keep structural checks (`neovim_serialises_lhs_entries`, `markdown_renders_one_table_per_profile_and_scope`) plus the existing CLI tests. `menus.rs::the_largest_menus_reflow_and_grey_every_planned_action` asserts, for rebase/push/diff at 60 and 140: every line ≤ `cols` (chars), strictly fewer action columns per line at 60 than at 140, and the sorted planned-token texts equal the sorted planned action labels. `menu.rs::the_commit_menu_reflows_its_action_columns` keeps the 60/140 snapshots (100 dropped) and additionally checks the wrapped line's label/flag/marker tokens.
+    - **Small `src/menu.rs` layout fix (authorized):** the known defect (rebase menu at 60 columns rendered its `-d` switch 78 columns wide; the commit menu's `-R` line was 66) is fixed by wrapping rendered argument lines: `wrap_line` breaks at space runs, indents continuations under the label column, hard-breaks words wider than the viewport, and re-bases (or splits) tokens so each still covers exactly its text; wrapped items keep one item node spanning both lines plus a per-line `line_node`. No text, keys, statuses or tree identities changed; `menu-140.txt` is byte-identical, `menu-60.txt` gains exactly one wrapped line.
+    - **Real-UI evidence:** new `tests/ui/scenarios/menu-width.scn` (fixture `modified-two-files`, `size: 60x24` so the runner pairs it with 80x24 under both profiles; the 60-column size is justified in the header because the default pair 100x30/80x24 never reaches the wrap point). The menu float is `nowrap`, so the scenario's flag expectations fail unless the server wrapped. Inspected screens: 60x24 shows `  -R  Claim authorship and reset author date` with continuation `      (--reset-author)  [ ]`; 80x24 shows the unwrapped line; artefacts in `build/ui/menu-width/{vim,standard}-{60x24,80x24}/commit-menu-width.screen`. All four combos PASS.
+    - **Verified (2026-10-25):** `cargo test --test manifest --test parity --test menu --test menus` exited 0 (15/19/8/5 tests), `env -i HOME="$HOME" PATH="$PATH" make test` exited 0, `env -i HOME="$HOME" PATH="$PATH" make ui-test` exited 0 with `menu-width` passing under both profiles and both sizes. Unexpected verification failures: 2 (`expect_file` mismatch after the layout change, then a `then_some` eager-evaluation overflow in `wrap_line`) — both fixed before the final green runs. The unrelated Nix bootstrap failure of `scripts/ui start` outside `env -i` (command too long) was worked around by running the driver with the same minimal env the Makefile targets use; BUG-READ-1's ignored probe remains explicitly unsolved.
 
-- [ ] **[P2] Replace magic counts and interim-state asserts** (`tests/commands.rs:199`, `tests/menus.rs:162`, `tests/parity.rs:82`, `tests/menu.rs:716-742`, `tests/dispatch.rs:583-664`)
+- [x] **[P2] Replace magic counts and interim-state asserts** (`tests/commands.rs:199`, `tests/menus.rs:162`, `tests/parity.rs:82`, `tests/menu.rs:716-742`, `tests/dispatch.rs:583-664`)
   - **Problem:** `== 32`, `> 100`, `> 150` thresholds; asserts that commit keys `e`/`f`/`a` are `Planned R-4.1` (breaks when R-4.1 lands); five `execute_discard_*` tests pin "Not implemented yet" for R-3.6; `needs_confirm: true` appears in every discard row with no `false` case.
   - **Change:** use relational checks (`planned + implemented == total`, "at least one planned action exists"); keep a single discard-deferred test marked `// remove with R-3.6`; drop `needs_confirm` or add a row where it is false.
   - **Done when:** landing R-4.1 or R-3.6 breaks at most one clearly marked test.

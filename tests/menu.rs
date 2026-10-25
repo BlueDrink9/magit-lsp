@@ -8,7 +8,7 @@ use expect_test::expect_file;
 use magit_lsp::config::Profile;
 use magit_lsp::menu::{Menu, MenuStatus};
 use magit_lsp::menus;
-use magit_lsp::protocol::{Effect, MessageLevel, ViewRender};
+use magit_lsp::protocol::{Effect, ViewRender};
 use magit_lsp::semantic_tokens;
 use magit_lsp::view::{Placement, ViewKind, Viewport};
 
@@ -27,17 +27,48 @@ fn preview_line(render: &ViewRender) -> Option<String> {
 
 #[test]
 fn the_commit_menu_reflows_its_action_columns() {
-    for cols in [60u32, 100, 140] {
+    for cols in [60u32, 140] {
         let tree = menus::named("commit")
             .expect("commit menu")
             .render(Viewport { cols, rows: 30 });
-        let text = tree.lines.join("\n");
-        match cols {
-            60 => expect_file!["snapshots/menu-60.txt"].assert_eq(&text),
-            100 => expect_file!["snapshots/menu-100.txt"].assert_eq(&text),
-            140 => expect_file!["snapshots/menu-140.txt"].assert_eq(&text),
-            _ => unreachable!(),
-        }
+        expect_file![format!("snapshots/menu-{cols}.txt")].assert_eq(&tree.lines.join("\n"));
+    }
+
+    // The 60-column render wraps the widest switch line; the continuation
+    // keeps its flag and switch marker tokens over exactly their text and
+    // the label token stays on the first line.
+    let tree = menus::named("commit")
+        .expect("commit menu")
+        .render(Viewport { cols: 60, rows: 30 });
+    let label_line = tree
+        .lines
+        .iter()
+        .position(|line| line.contains("Claim authorship and reset author date"))
+        .expect("the wrapped label line");
+    let label = "Claim authorship and reset author date";
+    let start = tree.lines[label_line].find(label).expect("label text");
+    assert!(tree.tokens.iter().any(|token| token.line == label_line
+        && token.start == start
+        && token.length == label.len()
+        && token.token_type == "magit.menu.label"));
+    let flag_line = label_line + 1;
+    assert_eq!(
+        tree.lines[flag_line].trim(),
+        "(--reset-author)  [ ]",
+        "the flag and marker continue on the next line"
+    );
+    for (text, length, token_type) in [
+        ("--reset-author", "--reset-author".len(), "magit.menu.flag.off"),
+        ("[ ]", 3, "magit.menu.switch.off"),
+    ] {
+        let start = tree.lines[flag_line].find(text).expect("continuation text");
+        assert!(
+            tree.tokens.iter().any(|token| token.line == flag_line
+                && token.start == start
+                && token.length == length
+                && token.token_type == token_type),
+            "no {token_type} token on the continuation line"
+        );
     }
 }
 
@@ -229,38 +260,6 @@ fn setting_an_option_prompts_and_applies_the_value() {
     assert_eq!(requests[0].kind, magit_lsp::protocol::PromptKind::Text);
     assert_eq!(requests[0].title, "Override the author (--author=)");
     assert_eq!(requests[0].placeholder.as_deref(), Some("--author"));
-}
-
-#[test]
-fn a_planned_action_reports_its_roadmap_and_changes_nothing() {
-    let (tmp, _repo) = RepoFixture::new()
-        .commit("init", [("f.txt", TEN_LINES)])
-        .modify_standard()
-        .build();
-    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
-    test.ack();
-    let (descriptor, _render) = test.open_via_command("open.commit");
-    test.ack();
-    let before = tmp.git(&["status", "--porcelain"]);
-
-    let outcome = test.press("e");
-    assert_eq!(
-        message_texts(&outcome.effects),
-        vec!["Not implemented yet: Extend (roadmap R-4.1)"]
-    );
-    assert_eq!(
-        outcome.effects,
-        vec![Effect::message(
-            MessageLevel::Info,
-            "Not implemented yet: Extend (roadmap R-4.1)"
-        )]
-    );
-    assert!(outcome.render.is_none());
-    assert!(
-        test.session().views().get(&descriptor.id).is_some(),
-        "the menu stays open"
-    );
-    assert_eq!(tmp.git(&["status", "--porcelain"]), before);
 }
 
 #[test]

@@ -4,7 +4,8 @@
   -e  Allow empty commit (--allow-empty)  [ ]
   -v  Show diff of changes to be committed (--verbose)  [ ]
   -n  Disable hooks (--no-verify)  [ ]
-  -R  Claim authorship and reset author date (--reset-author)  [ ]
+  -R  Claim authorship and reset author date
+      (--reset-author)  [ ]
   -s  Add Signed-off-by trailer (--signoff)  [ ]
   =A  Override the author (--author=)
   =D  Override the author date (--date=)

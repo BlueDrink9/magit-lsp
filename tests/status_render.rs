@@ -136,6 +136,28 @@ fn snapshot_shows_staged_unstaged_untracked_and_a_rename() {
     .assert_eq(&text);
 }
 
+/// The clean-tree message the Lua suite used to assert: even an empty tree
+/// renders a non-blank buffer ending in the clean message.
+#[test]
+fn a_clean_tree_renders_a_non_blank_working_tree_clean_message() {
+    let (_tmp, repo) = init_repo();
+    let tree = status_view::build(&repo.status().expect("status"));
+    assert_eq!(
+        tree.lines,
+        vec![
+            "Head: main",
+            "",
+            "Staged changes (0)",
+            "",
+            "Unstaged changes (0)",
+            "",
+            "Untracked files (0)",
+            "",
+            "Working tree clean",
+        ]
+    );
+}
+
 #[test]
 fn node_ids_survive_a_hunk_shifting_lines() {
     let (tmp, repo) = init_40_line_repo();

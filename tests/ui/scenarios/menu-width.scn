@@ -1,0 +1,19 @@
+# The commit menu wraps its widest argument line at narrow widths (see
+# tests/snapshots/menu-60.txt): "Claim authorship and reset author date" must
+# keep its label, and the (--reset-author) flag plus [ ] marker must stay
+# visible. The menu float is `nowrap`, so in a real 60-column terminal an
+# overflowing line would be clipped and the flag assertions below would fail.
+# The 60-column size is the point of this scenario: the runner's default pair
+# (100x30/80x24) is wider than the wrap point, so it declares 60x24 and the
+# runner pairs it with its 80x24 secondary size under both profiles.
+fixture: modified-two-files
+size: 60x24
+---
+keys: c
+wait
+expect screen contains "Commit"
+expect screen contains "Stage all modified and deleted files"
+expect screen matches /(^ {2}-R {2}Claim authorship and reset author date \(--reset-author\) {2}\[ \]$)|(^ {6}\(--reset-author\) {2}\[ \]$)/
+expect screen contains "Extend"
+expect screen contains "Amend"
+snapshot: commit-menu-width

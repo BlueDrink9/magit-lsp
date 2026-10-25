@@ -298,6 +298,9 @@ pub fn init_repo_40() -> (RepoFixture, GitRepo) {
 /// Real-server stdio transport shared by integration suites.
 pub mod stdio;
 
+/// A gated fake `git` executable shared by the real-server suites.
+pub mod fake_git;
+
 /// In-process session harness shared by the session suites.
 pub mod session;
 

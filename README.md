@@ -282,11 +282,20 @@ Generated VSCode keys are checked against a deny-list of workbench shortcuts
 `ctrl+c` (`common.cancel` passes through to copy when nothing is cancelable),
 and `ctrl+s`/`ctrl+r`, which are scoped to menu views.
 
-Snapshots of all four formats for both profiles are committed under
-`tests/snapshots/`. Regenerate them with:
+`tests/snapshots/` holds six committed snapshots: the JSON manifest and the
+generated VSCode keybindings for both profiles (the R-2.5 CI snapshot), and
+the commit menu rendered at 60 and 140 columns. The other large menus
+(rebase, push, diff) are checked against structural invariants instead of
+spacing snapshots: every rendered line fits the viewport, action columns
+reflow to fewer columns at narrower widths, and every planned action carries
+a `magit.menu.planned` token over exactly its label.
+
+Snapshot tests use `expect_file!` with a single update mechanism. Run this to
+rewrite stale snapshots — and the README parity block below — in place,
+preserving the hand-written prose around them:
 
 ```sh
-UPDATE_SNAPSHOTS=1 cargo test --test manifest
+UPDATE_EXPECT=1 cargo test --test manifest --test parity --test menu --test menus
 ```
 
 The `parity` subcommand prints the Magit command parity table (every switch,
@@ -299,8 +308,8 @@ cargo xtask parity            # the same command through the cargo alias
 ```
 
 The markdown form is embedded in this README between the `parity:start` and
-`parity:end` markers; `UPDATE_SNAPSHOTS=1 cargo test --test parity` rewrites
-both the block and `tests/snapshots/parity.md`.
+`parity:end` markers; the parity test compares the block against the generated
+table, and the `UPDATE_EXPECT=1` command above rewrites the block in place.
 
 ## Configuration
 

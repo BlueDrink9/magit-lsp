@@ -81,6 +81,11 @@ Start in these components:
 - `make test` runs Rust and Neovim integration tests.
 - `make ui-unit` tests the real-UI harness; `make ui-test` runs scripted real-UI
   scenarios; `make ui-tour` writes `build/ui/tour.md`.
+- Snapshot tests use `expect_file!` with one update command:
+  `UPDATE_EXPECT=1 cargo test --test manifest --test parity --test menu --test
+  menus` rewrites stale snapshots in `tests/snapshots/` (six files: manifest
+  and keybindings JSON per profile, the commit menu at 60/140 columns) and the
+  README parity block in place, preserving surrounding prose.
 - User-visible changes are not done until a scripted real-UI scenario drives
   the real Neovim UI and its screen output is checked. Follow inspect → act →
   inspect: `scripts/ui start <fixture>`, inspect with `screen`/`state`, act with

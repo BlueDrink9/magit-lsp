@@ -2,10 +2,13 @@
   description = "magit-lsp development shell with Rust, Lua and Node LSP servers";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.jscpd.url = "github:kucherenko/jscpd";
-  inputs.jscpd.inputs.nixpkgs.follows = "nixpkgs";
+  # inputs.jscpd.url = "github:kucherenko/jscpd";
+  # inputs.jscpd.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs, jscpd }:
+  outputs = { self
+  , nixpkgs
+  # , jscpd
+  }:
     let
       systems = [
         "x86_64-linux"
@@ -37,7 +40,7 @@
               rustfmt
               tmux
               typescript-language-server
-              jscpd.packages.${system}.default
+              # jscpd.packages.${system}.default
             ];
 
             shellHook = ''

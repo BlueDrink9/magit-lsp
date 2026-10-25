@@ -474,25 +474,6 @@ fn distinct_commands_at_the_same_scope_precedence_still_conflict() {
 }
 
 #[test]
-fn unbind_removes_a_profile_binding() {
-    let mut config = Config {
-        profile: Profile::Vim,
-        ..Default::default()
-    };
-    config
-        .keys
-        .scopes
-        .entry("status".to_string())
-        .or_default()
-        .unbind
-        .push(KeyChord::parse("x").unwrap());
-
-    let map = Keymap::resolve("status", Profile::Vim, &config).unwrap();
-    assert!(map.command("status.discard").unwrap().keys.is_empty());
-    assert_eq!(map.command("status.stage").unwrap().keys, vec!["s"]);
-}
-
-#[test]
 fn modes_can_restrict_a_binding() {
     let mut spec = binding(&["[ m"]);
     spec.modes = vec![EditorMode::Normal];

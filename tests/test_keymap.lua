@@ -3,57 +3,33 @@ local keys = require('magit-lsp.keys')
 
 local T = MiniTest.new_set()
 
---- The translator table of TASKS.md §3.8, both directions.
-local CASES = {
-  { 's', 's' },
-  { 'S', 'S' },
-  { '?', '?' },
-  { 'Enter', '<CR>' },
-  { 'Escape', '<Esc>' },
-  { 'Tab', '<Tab>' },
-  { 'shift+Tab', '<S-Tab>' },
-  { 'Delete', '<Del>' },
-  { 'Backspace', '<BS>' },
-  { 'Insert', '<Insert>' },
-  { 'Home', '<Home>' },
-  { 'End', '<End>' },
-  { 'PageUp', '<PageUp>' },
-  { 'PageDown', '<PageDown>' },
-  { 'ArrowUp', '<Up>' },
-  { 'ArrowDown', '<Down>' },
-  { 'ArrowLeft', '<Left>' },
-  { 'ArrowRight', '<Right>' },
-  { 'ctrl+c', '<C-c>' },
-  { 'alt+ArrowDown', '<A-Down>' },
-  { 'ctrl+Enter', '<C-CR>' },
-  { 'ctrl+shift+c', '<C-S-c>' },
-  { 'Space', '<Space>' },
-  { 'Plus', '+' },
-  { 'F1', '<F1>' },
-  { 'F5', '<F5>' },
-  { 'F12', '<F12>' },
-  { 'g g', 'gg' },
-  { 'z a', 'za' },
-  { '] ]', ']]' },
-  { 'ctrl+k ctrl+s', '<C-k><C-s>' },
-}
+--- The shared §3.8 fixture; the `src/keys.rs` unit tests pin the Rust
+--- translator to the same cases.
+local here = vim.fs.dirname(debug.getinfo(1, 'S').source:sub(2))
+local fixture_file = vim.fs.joinpath(here, 'data', 'keys.json')
+local fixture_file_handle = io.open(fixture_file, 'r')
+if not fixture_file_handle then
+  error('cannot read the shared keys fixture: ' .. fixture_file)
+end
+local FIXTURE = vim.json.decode(fixture_file_handle:read('a'))
+fixture_file_handle:close()
 
 T['canonical keys translate to Neovim lhs'] = function()
-  for _, case in ipairs(CASES) do
+  for _, case in ipairs(FIXTURE.toNeovim) do
     local canonical, lhs = case[1], case[2]
     MiniTest.expect.equality(keys.to_lhs(canonical), lhs, canonical)
   end
 end
 
 T['Neovim lhs translate back to canonical keys'] = function()
-  for _, case in ipairs(CASES) do
+  for _, case in ipairs(FIXTURE.toNeovim) do
     local canonical, lhs = case[1], case[2]
     MiniTest.expect.equality(keys.from_lhs(lhs), canonical, lhs)
   end
 end
 
 T['translation round-trips both ways'] = function()
-  for _, case in ipairs(CASES) do
+  for _, case in ipairs(FIXTURE.toNeovim) do
     local canonical, lhs = case[1], case[2]
     MiniTest.expect.equality(keys.to_lhs(keys.from_lhs(lhs)), lhs, lhs)
     MiniTest.expect.equality(keys.from_lhs(keys.to_lhs(canonical)), canonical, canonical)
@@ -69,31 +45,13 @@ T['chord steps are exposed for the server'] = function()
 end
 
 T['invalid canonical keys are rejected'] = function()
-  for _, canonical in ipairs({
-    '',
-    '   ',
-    'shift+s',
-    'shift+S',
-    'ctrl+',
-    '+',
-    'ctrl+ctrl+s',
-    'ctrl+nope',
-    'NotAKey',
-    'ctrl+space',
-  }) do
+  for _, canonical in ipairs(FIXTURE.invalidCanonical) do
     MiniTest.expect.equality(keys.to_lhs(canonical), nil, canonical)
   end
 end
 
 T['invalid Neovim lhs are rejected'] = function()
-  for _, lhs in ipairs({
-    '',
-    '<C->',
-    '<C-nope>',
-    '<nope>',
-    '<S-s>',
-    'abc<',
-  }) do
+  for _, lhs in ipairs(FIXTURE.invalidNeovim) do
     MiniTest.expect.equality(keys.from_lhs(lhs), nil, lhs)
   end
 end

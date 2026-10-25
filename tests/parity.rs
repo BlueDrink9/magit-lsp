@@ -1,10 +1,12 @@
 //! The parity table generator (R-2.8): coverage, statuses and the README
-//! block.
+//! block. The README block is the only parity snapshot; the CLI output is
+//! compared against the generators directly.
 
 use magit_lsp::commands::{registry, CommandStatus};
 use magit_lsp::menu::MenuStatus;
 use magit_lsp::menus::{self, ItemDef};
 use magit_lsp::parity;
+use expect_test::expect_file;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -126,39 +128,14 @@ fn the_readme_block_is_generated_and_up_to_date() {
     let end = readme
         .find(parity::README_END)
         .expect("README has the parity end marker");
-    let actual = &readme[start..end + parity::README_END.len() + 1];
-    let expected = parity::readme_block();
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-        let updated = format!(
-            "{}{}{}",
-            &readme[..start],
-            expected,
-            &readme[end + parity::README_END.len() + 1..]
-        );
-        std::fs::write(&path, updated).expect("rewrite README.md");
-        return;
-    }
-    assert_eq!(
-        actual, expected,
-        "README parity table is stale; run UPDATE_SNAPSHOTS=1 cargo test --test parity"
+    // The expected file is the hand-written prose around a freshly generated
+    // block, so an `UPDATE_EXPECT=1` run rewrites the block in place and
+    // preserves the prose.
+    let expected = format!(
+        "{}{}{}",
+        &readme[..start],
+        parity::readme_block(),
+        &readme[end + parity::README_END.len() + 1..]
     );
-}
-
-#[test]
-fn the_parity_markdown_matches_its_snapshot() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/snapshots")
-        .join("parity.md");
-    let actual = parity::markdown();
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-        std::fs::write(&path, &actual).expect("write parity snapshot");
-        return;
-    }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-        panic!(
-            "read {}: {error}; run with UPDATE_SNAPSHOTS=1",
-            path.display()
-        )
-    });
-    assert_eq!(expected, actual);
+    expect_file![path].assert_eq(&expected);
 }

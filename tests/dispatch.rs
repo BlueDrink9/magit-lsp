@@ -216,12 +216,10 @@ fn unstage_selection_delegates_to_imm2() {
 // --- IMM-6 table: status.discard -----------------------------------------
 
 #[test]
-fn discard_unstaged_section_needs_confirm() {
+fn discard_unstaged_section_resolves_to_discard_all_unstaged() {
     assert_eq!(
         dispatch::resolve(Command::Discard, NodeKind::SectionUnstaged, None),
-        Resolution::DiscardAllUnstaged {
-            needs_confirm: true
-        }
+        Resolution::DiscardAllUnstaged
     );
 }
 
@@ -232,58 +230,52 @@ fn discard_staged_section_is_na() {
 }
 
 #[test]
-fn discard_untracked_section_needs_confirm() {
+fn discard_untracked_section_resolves_to_discard_all_untracked() {
     assert_eq!(
         dispatch::resolve(Command::Discard, NodeKind::SectionUntracked, None),
-        Resolution::DiscardAllUntracked {
-            needs_confirm: true
-        }
+        Resolution::DiscardAllUntracked
     );
 }
 
 #[test]
-fn discard_file_header_needs_confirm() {
+fn discard_file_header_resolves_to_discard_file() {
     assert_eq!(
         dispatch::resolve(Command::Discard, file_target(), None),
         Resolution::DiscardFile {
-            path: "f.txt".to_string(),
-            needs_confirm: true
+            path: "f.txt".to_string()
         }
     );
 }
 
 #[test]
-fn discard_hunk_header_needs_confirm() {
+fn discard_hunk_header_resolves_to_discard_hunk() {
     assert_eq!(
         dispatch::resolve(Command::Discard, hunk_target(), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_id: "h0".to_string(),
-            needs_confirm: true
+            hunk_id: "h0".to_string()
         }
     );
 }
 
 #[test]
-fn discard_changed_line_needs_confirm() {
+fn discard_changed_line_resolves_to_discard_hunk() {
     assert_eq!(
         dispatch::resolve(Command::Discard, diff_line_target(true), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_id: "h0".to_string(),
-            needs_confirm: true
+            hunk_id: "h0".to_string()
         }
     );
 }
 
 #[test]
-fn discard_context_line_needs_confirm() {
+fn discard_context_line_resolves_to_discard_hunk() {
     assert_eq!(
         dispatch::resolve(Command::Discard, diff_line_target(false), None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
-            hunk_id: "h0".to_string(),
-            needs_confirm: true
+            hunk_id: "h0".to_string()
         }
     );
 }
@@ -295,7 +287,7 @@ fn discard_other_row_is_na() {
 }
 
 #[test]
-fn discard_selection_needs_confirm() {
+fn discard_selection_resolves_to_discard_selection() {
     assert_eq!(
         dispatch::resolve(
             Command::Discard,
@@ -304,8 +296,7 @@ fn discard_selection_needs_confirm() {
         ),
         Resolution::DiscardSelection {
             start: 4,
-            end: 5,
-            needs_confirm: true
+            end: 5
         }
     );
 }
@@ -582,67 +573,27 @@ fn execute_selection_without_changes_reports_message() {
 
 // --- Executor: discard is deferred ---------------------------------------
 
+// remove with R-3.6
 #[test]
-fn execute_discard_file_changes_nothing() {
+fn execute_discard_is_deferred() {
     let (tmp, repo) = init_repo();
     make_standard_changes(tmp.path());
     let before = repo.status().expect("status");
     let before_content = std::fs::read_to_string(tmp.path().join("f.txt")).expect("read");
 
-    let effects = dispatch::execute(
-        &repo,
-        &Resolution::DiscardFile {
-            path: "f.txt".to_string(),
-            needs_confirm: true,
-        },
-        &[],
-    )
-    .expect("execute");
-
-    assert_eq!(repo.status().expect("status"), before);
-    assert_eq!(
-        std::fs::read_to_string(tmp.path().join("f.txt")).expect("read"),
-        before_content
-    );
-    assert_eq!(effects.len(), 1);
-    match &effects[0] {
-        Effect::Message { level, text, .. } => {
-            assert_eq!(*level, MessageLevel::Info);
-            assert!(
-                text.starts_with("Not implemented yet:"),
-                "got: {text}"
-            );
-        }
-        other => panic!("unexpected effect: {other:?}"),
-    }
-}
-
-#[test]
-fn execute_every_discard_variant_is_deferred() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
-    let before = repo.status().expect("status");
-
     let variants = [
-        Resolution::DiscardAllUnstaged {
-            needs_confirm: true,
-        },
-        Resolution::DiscardAllUntracked {
-            needs_confirm: true,
-        },
+        Resolution::DiscardAllUnstaged,
+        Resolution::DiscardAllUntracked,
         Resolution::DiscardFile {
             path: "f.txt".to_string(),
-            needs_confirm: true,
         },
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
             hunk_id: "h0".to_string(),
-            needs_confirm: true,
         },
         Resolution::DiscardSelection {
             start: 4,
             end: 5,
-            needs_confirm: true,
         },
     ];
 
@@ -661,6 +612,12 @@ fn execute_every_discard_variant_is_deferred() {
         }
         assert_eq!(repo.status().expect("status"), before, "for {variant:?}");
     }
+
+    // The file content itself must remain untouched, too.
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("f.txt")).expect("read"),
+        before_content
+    );
 }
 
 #[test]

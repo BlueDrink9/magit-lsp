@@ -1,45 +1,23 @@
 //! Static keymap manifest tests: per-format structure, snapshots and the
 //! VSCode workbench deny-list.
 //!
-//! Snapshots live in `tests/snapshots/` and are compared byte for byte.
-//! Regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --test manifest`.
+//! The JSON manifest and the generated VSCode keybindings are snapshotted in
+//! `tests/snapshots/` (R-2.5) with `expect_file!`; regenerate stale snapshots
+//! with `UPDATE_EXPECT=1 cargo test --test manifest --test parity --test menu
+//! --test menus`.
 
+use expect_test::expect_file;
 use magit_lsp::config::{BindingSpec, Config, Profile};
 use magit_lsp::keys::KeyChord;
 use magit_lsp::manifest::{self, Format, WORKBENCH_ALLOW, WORKBENCH_DENY_LIST};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 const PROFILES: [Profile; 2] = [Profile::Standard, Profile::Vim];
 
 fn manifest_for(profile: Profile) -> manifest::Manifest {
     manifest::build(&[profile], &Config::default()).expect("manifest builds")
-}
-
-/// Compare `actual` against `tests/snapshots/<name>`, rewriting on
-/// `UPDATE_SNAPSHOTS=1`.
-fn snapshot(name: &str, actual: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/snapshots")
-        .join(name);
-    if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
-        std::fs::create_dir_all(path.parent().expect("snapshot dir")).expect("create snapshot dir");
-        std::fs::write(&path, actual).expect("write snapshot");
-        return;
-    }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-        panic!(
-            "read snapshot {}: {error}; run with UPDATE_SNAPSHOTS=1",
-            path.display()
-        )
-    });
-    assert_eq!(
-        expected,
-        actual,
-        "snapshot {} changed; run with UPDATE_SNAPSHOTS=1",
-        path.display()
-    );
 }
 
 fn binary() -> Command {
@@ -64,7 +42,7 @@ fn isolated_command(dir: &Path) -> Command {
 fn json_matches_snapshots_and_has_the_documented_shape() {
     for profile in PROFILES {
         let text = manifest::json(&manifest_for(profile));
-        snapshot(&format!("manifest-{}.json", profile.as_str()), &text);
+        expect_file![format!("snapshots/manifest-{}.json", profile.as_str())].assert_eq(&text);
 
         let value: Value = serde_json::from_str(&text).expect("manifest is JSON");
         let profiles = value["profiles"].as_array().expect("profiles array");
@@ -83,54 +61,10 @@ fn json_matches_snapshots_and_has_the_documented_shape() {
 }
 
 #[test]
-fn vscode_keys_follow_the_section_3_8_table() {
-    for (canonical, expected) in [
-        ("S", "shift+s"),
-        ("?", "shift+/"),
-        ("Enter", "enter"),
-        ("alt+ArrowDown", "alt+down"),
-        ("ctrl+Enter", "ctrl+enter"),
-        ("ctrl+c", "ctrl+c"),
-        ("Escape", "escape"),
-        ("g r", "g r"),
-    ] {
-        assert_eq!(
-            KeyChord::parse(canonical).expect("key parses").to_vscode(),
-            expected,
-            "VSCode spelling of `{canonical}`"
-        );
-    }
-}
-
-#[test]
-fn neovim_keys_follow_the_section_3_8_table() {
-    for (canonical, expected) in [
-        ("Enter", "<CR>"),
-        ("Escape", "<Esc>"),
-        ("Tab", "<Tab>"),
-        ("shift+Tab", "<S-Tab>"),
-        ("Delete", "<Del>"),
-        ("Backspace", "<BS>"),
-        ("ArrowUp", "<Up>"),
-        ("ctrl+c", "<C-c>"),
-        ("alt+ArrowDown", "<A-Down>"),
-        ("ctrl+Enter", "<C-CR>"),
-        ("g g", "gg"),
-        ("z a", "za"),
-    ] {
-        assert_eq!(
-            KeyChord::parse(canonical).expect("key parses").to_neovim(),
-            expected,
-            "Neovim spelling of `{canonical}`"
-        );
-    }
-}
-
-#[test]
 fn vscode_matches_snapshots() {
     for profile in PROFILES {
         let text = manifest::vscode(&manifest_for(profile));
-        snapshot(&format!("keybindings-{}.json", profile.as_str()), &text);
+        expect_file![format!("snapshots/keybindings-{}.json", profile.as_str())].assert_eq(&text);
         let entries: Vec<Value> = serde_json::from_str(&text).expect("keybindings are JSON");
         assert!(entries.iter().all(|entry| entry["command"] == "magit.invoke"
             && entry["args"]["command"].as_str().is_some_and(|id| magit_lsp::commands::registry().get(id).is_some())));
@@ -171,12 +105,13 @@ fn contributed_vscode_payloads_are_canonical_server_commands() {
 }
 
 #[test]
-fn neovim_matches_snapshots() {
+fn neovim_serialises_lhs_entries() {
     for profile in PROFILES {
         let text = manifest::neovim(&manifest_for(profile));
-        snapshot(&format!("keymap-{}.neo.json", profile.as_str()), &text);
         let entries: Vec<Value> = serde_json::from_str(&text).expect("bindings are JSON");
+        assert!(!entries.is_empty(), "{} has bindings", profile.as_str());
         assert!(entries.iter().all(|entry| entry["lhs"].is_string()));
+        assert!(text.ends_with('\n'), "trailing newline");
     }
 
     let entries = manifest::neovim_entries(&manifest_for(Profile::Vim));
@@ -188,10 +123,9 @@ fn neovim_matches_snapshots() {
 }
 
 #[test]
-fn markdown_matches_snapshots() {
+fn markdown_renders_one_table_per_profile_and_scope() {
     for profile in PROFILES {
         let text = manifest::markdown(&manifest_for(profile));
-        snapshot(&format!("keymap-{}.md", profile.as_str()), &text);
         assert!(text.contains(&format!("# magit-lsp keymap: {}", profile.as_str())));
         assert!(text.contains("## status"));
         assert!(text.contains("| Command | Keys | Status | Description |"));

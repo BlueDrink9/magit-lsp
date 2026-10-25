@@ -278,7 +278,7 @@ impl Menu {
     pub fn render_with_pending(&self, viewport: Viewport, pending: &[String]) -> Tree {
         let mut builder = Builder::new(self, pending);
         builder.title();
-        builder.arguments();
+        builder.arguments(viewport.cols as usize);
         builder.preview();
         builder.actions(viewport.cols as usize);
         builder.finish()
@@ -378,8 +378,9 @@ impl<'a> Builder<'a> {
         self.token(line, 1, self.menu.title.len(), "magit.menu.title");
     }
 
-    /// The `Arguments` group is vertical: one switch or option per line.
-    fn arguments(&mut self) {
+    /// The `Arguments` group is vertical: one switch or option per line,
+    /// wrapped so every line fits `cols`.
+    fn arguments(&mut self, cols: usize) {
         let arguments: Vec<&Group> = self
             .menu
             .groups
@@ -402,7 +403,7 @@ impl<'a> Builder<'a> {
 
             let mut children = Vec::new();
             for item in &group.items {
-                children.push(self.argument_item(item));
+                children.push(self.argument_item(item, cols));
             }
             group_node.children = children;
             group_node.end_line = self.tree.lines.len().saturating_sub(1);
@@ -410,11 +411,10 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn argument_item(&mut self, item: &Item) -> String {
+    fn argument_item(&mut self, item: &Item, cols: usize) -> String {
         let key = item.key();
         let label = item.label();
         let id = format!("menu:{}/item:{key}", self.menu.id);
-        let line = self.tree.lines.len();
         let mut text = format!("  {key}  {label}");
         let live = self.item_live(key);
         let label_start = 2 + key.len() + 2;
@@ -471,11 +471,26 @@ impl<'a> Builder<'a> {
             }
         }
 
-        self.tree.lines.push(text);
-        for (start, length, token_type) in tokens {
-            self.token(line, start, length, token_type);
+        // Wrap the line so it fits the viewport; a continuation keeps the
+        // key/label/flag/marker tokens over exactly their text.
+        let wrapped = wrap_line(&text, &tokens, cols, 2 + key.len() + 2);
+        let total = wrapped.len();
+        let first_line = self.tree.lines.len();
+        for (offset, (line_text, line_tokens)) in wrapped.into_iter().enumerate() {
+            let line = first_line + offset;
+            self.tree.lines.push(line_text);
+            for (start, length, token_type) in line_tokens {
+                self.token(line, start, length, token_type);
+            }
+            let mut entry = line_node(&id, NodeKind::Line);
+            entry.status = Some(status_name(item.status()));
+            self.tree.line_nodes.push(entry);
+            if offset == 0 {
+                let mut node = item_node(&id, item, line);
+                node.end_line = first_line + total - 1;
+                self.tree.nodes.push(node);
+            }
         }
-        self.item_nodes(&id, item, line);
         id
     }
 
@@ -621,13 +636,6 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn item_nodes(&mut self, id: &str, item: &Item, line: usize) {
-        let mut entry = line_node(id, NodeKind::Line);
-        entry.status = Some(status_name(item.status()));
-        self.tree.line_nodes.push(entry);
-        self.tree.nodes.push(item_node(id, item, line));
-    }
-
     fn token(&mut self, line: usize, start: usize, length: usize, token_type: &str) {
         if length == 0 {
             return;
@@ -700,6 +708,104 @@ fn wrap<'a>(blocks: &'a [Block], cols: usize) -> Vec<Vec<&'a Block>> {
         rows.push(current);
     }
     rows
+}
+
+/// Wrap one rendered argument line so it fits `cols`, breaking at runs of
+/// spaces and indenting continuation lines by `indent` spaces so flags and
+/// values stay aligned under the label. Nothing is dropped: continuation
+/// lines carry the same key, label, flag, value and marker text, and tokens
+/// keep covering exactly their text, so a token that spans a wrap point is
+/// split in two. A single word wider than the viewport is broken at the
+/// column limit.
+fn wrap_line(
+    text: &str,
+    tokens: &[(usize, usize, &'static str)],
+    cols: usize,
+    indent: usize,
+) -> Vec<(String, Vec<(usize, usize, &'static str)>)> {
+    if text.len() <= cols || cols == 0 {
+        return vec![(text.to_string(), tokens.to_vec())];
+    }
+    let bytes = text.as_bytes();
+
+    // The non-space runs of `text`; the spaces between them are wrap points.
+    let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b' ' {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < bytes.len() && bytes[index] != b' ' {
+            index += 1;
+        }
+        words.push((start, index));
+    }
+    // A word wider than the continuation capacity cannot fit any line, so
+    // break it at the column limit up front.
+    let content_capacity = (cols.saturating_sub(indent)).max(1);
+    words = words
+        .into_iter()
+        .flat_map(|(start, end)| {
+            (start..end)
+                .step_by(content_capacity)
+                .map(move |begin| (begin, (begin + content_capacity).min(end)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    // Greedy fill. A row is a byte range of `text`, so interior spacing is
+    // kept verbatim; the space run at a wrap point is the only thing dropped.
+    let mut rows: Vec<(usize, usize)> = Vec::new();
+    let mut row_start = 0;
+    let mut row_end = 0;
+    let mut empty = true;
+    for &(start, end) in &words {
+        let first_row = rows.is_empty();
+        let base = if first_row { 0 } else { indent };
+        let capacity = if first_row { cols } else { content_capacity };
+        let span_start = if first_row {
+            0
+        } else if empty {
+            start
+        } else {
+            row_start
+        };
+        if !empty && base + end - span_start > capacity {
+            rows.push((row_start, row_end));
+            row_start = start;
+        } else {
+            row_start = span_start;
+        }
+        row_end = end;
+        empty = false;
+    }
+    if !empty {
+        rows.push((row_start, row_end));
+    }
+
+    rows.into_iter()
+        .map(|(start, end)| {
+            let padding = " ".repeat(if start == 0 { 0 } else { indent });
+            let line = format!("{padding}{}", &text[start..end]);
+            let offset = padding.len();
+            let line_tokens = tokens
+                .iter()
+                .filter_map(|&(token_start, token_length, token_type)| {
+                    let token_end = token_start + token_length;
+                    let clipped_start = token_start.max(start);
+                    let clipped_end = token_end.min(end);
+                    (clipped_start < clipped_end).then(|| (
+                        offset + (clipped_start - start),
+                        clipped_end - clipped_start,
+                        token_type,
+                    ))
+                })
+                .collect();
+            (line, line_tokens)
+        })
+        .collect()
 }
 
 fn key_token(item: &Item) -> &'static str {

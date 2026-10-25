@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, Scope};
 use magit_lsp::config::Profile;
-use magit_lsp::protocol::{Effect, MessageLevel};
+use magit_lsp::protocol::{Cursor, Effect, MessageLevel};
 
 /// Every command id named in TASKS.md §5.1–§5.5.
 const EXPECTED: &[&str] = &[
@@ -244,6 +244,28 @@ fn planned_commands_report_their_roadmap_and_change_nothing() {
 
     assert_eq!(tmp.git(&["status", "--porcelain"]), status_before);
     assert_eq!(cached_diff(tmp.path()), cached_before);
+}
+
+/// Transferred from the deleted Lua `unstaging an untracked file reports
+/// nothing to unstage` case: an untracked file has no index entry to remove,
+/// so the invoke must notify instead of resolving an `UnstageFile` action.
+#[test]
+fn unstaging_an_untracked_file_reports_nothing_to_unstage() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    write(&tmp.path().join("new.txt"), "new\n");
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let line = test.goto_file("untracked", "new.txt");
+    let outcome = test.invoke_at("status.unstage", Cursor { line, column: 0 });
+
+    assert_eq!(
+        message_texts(&outcome.effects),
+        vec![magit_lsp::dispatch::NOTHING_TO_UNSTAGE]
+    );
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "?? new.txt\n");
 }
 
 #[test]

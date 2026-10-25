@@ -5,7 +5,6 @@
 mod common;
 
 use common::*;
-use expect_test::expect_file;
 use magit_lsp::commands::{registry, CommandStatus};
 use magit_lsp::config::Profile;
 use magit_lsp::menu::{Item, Menu, MenuStatus};
@@ -404,31 +403,56 @@ fn every_menu_renders_all_of_its_action_keys() {
 
 #[test]
 fn the_largest_menus_reflow_and_grey_every_planned_action() {
-    for (name, cols) in [
-        ("rebase", 60u32),
-        ("rebase", 100),
-        ("rebase", 140),
-        ("push", 60),
-        ("push", 100),
-        ("push", 140),
-        ("diff", 60),
-        ("diff", 100),
-        ("diff", 140),
-    ] {
-        let menu = magit_lsp::menus::named(name).expect("menu");
-        let tree = menu.render(Viewport { cols, rows: 40 });
-        let text = tree.lines.join("\n");
-        expect_file![format!("snapshots/menus-{name}-{cols}.txt")].assert_eq(&text);
+    for name in ["rebase", "push", "diff"] {
+        let menu = magit_lsp::menus::named(name).expect("menu exists");
+        let mut trees = Vec::new();
+        for cols in [60u32, 140] {
+            let tree = menu.render(Viewport { cols, rows: 40 });
+            // Width: no rendered line exceeds the viewport.
+            for (line_no, line) in tree.lines.iter().enumerate() {
+                assert!(
+                    line.chars().count() <= cols as usize,
+                    "{name} at {cols}: line {line_no} is {} columns wide: {line:?}",
+                    line.chars().count()
+                );
+            }
+            // Every planned action is greyed by a planned token whose range
+            // covers exactly its label, and nothing else is greyed.
+            let mut planned: Vec<String> = planned_actions(&menu)
+                .iter()
+                .map(|item| item.label().to_string())
+                .collect();
+            planned.sort();
+            assert!(!planned.is_empty(), "{name} has planned actions");
+            let mut greyed: Vec<String> = tree
+                .tokens
+                .iter()
+                .filter(|token| token.token_type == "magit.menu.planned")
+                .map(|token| tree.lines[token.line][token.start..token.start + token.length].to_string())
+                .collect();
+            greyed.sort();
+            assert_eq!(greyed, planned, "{name} at {cols}");
+            trees.push((cols, tree));
+        }
 
-        let planned = planned_actions(&menu).len();
-        let greyed = tree
-            .tokens
-            .iter()
-            .filter(|token| token.token_type == "magit.menu.planned")
-            .count();
-        assert_eq!(
-            greyed, planned,
-            "{name} at {cols}: every planned action is greyed"
+        // Reflow: fewer action columns share a line at the narrower width.
+        let narrow = columns(&trees.iter().find(|(cols, _)| *cols == 60).unwrap().1);
+        let wide = columns(&trees.iter().find(|(cols, _)| *cols == 140).unwrap().1);
+        assert!(
+            narrow < wide,
+            "{name}: {narrow} action columns at 60 vs {wide} at 140"
         );
     }
 }
+
+/// How many action-group columns share the busiest rendered line.
+fn columns(tree: &magit_lsp::tree::Tree) -> usize {
+    let mut per_line: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for token in &tree.tokens {
+        if token.token_type == "magit.menu.group" {
+            *per_line.entry(token.line).or_insert(0) += 1;
+        }
+    }
+    per_line.into_values().max().unwrap_or(0)
+}
+
