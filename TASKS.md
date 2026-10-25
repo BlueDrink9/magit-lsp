@@ -56,6 +56,7 @@ here. General agent working conventions and verification guidance live in
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
+| Commit selection | Selecting a commit normally pushes/focuses a server-rendered log in select mode; clients forward selection/confirm/cancel and display its text verbatim. The server resolves structured commit nodes, restores the caller on confirm/cancel, and validates optional free-form revisions. This is not a client picker or choice prompt (§3.7) |
 
 ---
 
@@ -306,7 +307,8 @@ completion list, and the server must not log it. Used for Git credential and
 SSH passphrase requests arriving through the askpass helper (§3.10).
 
 **Fuzzy matching** is a client concern, not part of the protocol. Clients may
-filter `items` however their picker does.
+filter generic `choice` prompt `items` however their picker does. Commit
+selection is not a generic choice prompt and does not use client fuzzy matching.
 
 **Commit picking is not a prompt kind.** The server implements
 `ctx.pick_commit` by sending an `openView`/`pushView` for a log view in *select
@@ -329,17 +331,25 @@ These map onto the user's own picker plugins automatically in Neovim because
 ### 3.7 Select mode (picking commits and other things)
 
 Used when a command needs the user to pick a commit (rebase onto, cherry-pick,
-fixup target, reset to, …).
+fixup target, reset to, …). This server-owned log select mode is the normal
+commit-selection flow; it is not a client fuzzy picker, QuickPick, or `choice`
+prompt. The client displays server-rendered text verbatim and forwards input.
 
-- Server opens a view (usually `log`) with
-  `select: {purpose: "rebase onto", multi: false, prompt: "Rebase onto which commit?", allowFreeText: true}`.
-  `purpose`/`prompt` are shown in the view's title area.
-- Extra bindings active (scope `log.select`): `common.confirm` (returns the
-  commit under the cursor, or all marked commits if `multi`), `common.cancel`,
-  `select.toggle-mark` (multi only).
-- `allowFreeText`: a key (`select.enter-rev`) opens a `text` prompt so the user
-  can type `HEAD~3`, a branch, or a tag; the server resolves it with
-  `git rev-parse --verify`.
+- Server pushes and focuses a log view with
+  `select: {purpose: "rebase onto", multi: false, prompt: "Rebase onto which commit?", allowFreeText: true}`;
+  the visible purpose/prompt is rendered by the server. Native editor navigation
+  and search remain available (search keys must not be swallowed by key capture).
+- Extra bindings active (scope `log.select`): `common.confirm` returns the
+  commit under the cursor (or all marked commits if `multi`),
+  `common.cancel` returns without mutation, and `select.toggle-mark` is
+  multi-only. Selection identity comes from structured commit nodes, never
+  rendered-text parsing or row indices. Confirm returns the selected identity
+  to the waiting operation and restores the caller view; cancel restores the
+  caller without mutation.
+- `allowFreeText` is an optional escape hatch, not the default flow: a key
+  (`select.enter-rev`) opens a `text` prompt so the user can type `HEAD~3`, a
+  branch, or a tag; the server validates it with `git rev-parse --verify`.
+  No client Git, filtering, or commit-selection implementation is required.
 - The same pattern selects a branch (refs view), a stash, or files.
 
 ### 3.8 Key notation
@@ -1010,21 +1020,21 @@ support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 | View | Magit analog | Contents | Key commands | Phase |
 | --- | --- | --- | --- | --- |
 | **Status** | `magit-status` | Header lines (Head, Merge, Push, Tag); sections: in-progress operation, Untracked, Unstaged, Staged, Unmerged, Stashes, Unpulled, Unpushed, Recent commits, Submodules | stage/unstage/discard/apply/reverse, visit, toggle, refresh, all menus | 1–2, grows to 6 |
-| **Log** | `magit-log` | Commit list with graph, decorations, author, date; options (`-n`, `--graph`, `--decorate`, `--author`, `--since`, `--grep`, `-S`, `-G`, path limits); lazy "load more"; **select mode** | show commit, checkout/reset/branch/rebase/cherry-pick/revert from the commit at point, confirm/cancel | 5 |
-| **Log variants** | `l` menu | current, other, all, local branches, reflog, file log, line-range log (`-L`), `HEAD..upstream`, `upstream..HEAD` | same | 5 |
-| **Revision** | `magit-revision` | Header (hash, parents, author, committer, dates, refs, message), diffstat, full diff with hunks; parent/child navigation; combined diff for merges | visit file, apply/reverse hunk, copy hash | 5 |
-| **Diff** | `magit-diff` | Any range `a..b`, `a...b`, worktree vs index vs revision, path-limited, stash vs parent, stat-only; context/whitespace/rename/word-diff options | visit, stage/unstage when applicable | 5 |
-| **Refs** | `magit-show-refs` | Local branches, remotes, tags with ahead/behind vs a base; also select mode | checkout, create, delete, rename, reset, merge, rebase onto, log | 5 |
+| **Log** | `magit-log` | Commit list with graph, decorations, author, date; options (`-n`, `--graph`, `--decorate`, `--author`, `--since`, `--grep`, `-S`, `-G`, path limits); lazy "load more"; **select mode** | show commit, checkout/reset/branch/rebase/cherry-pick/revert from the commit at point, confirm/cancel | 4 |
+| **Log variants** | `l` menu | current, other, all, local branches, reflog, file log, line-range log (`-L`), `HEAD..upstream`, `upstream..HEAD` | same | 4 |
+| **Revision** | `magit-revision` | Header (hash, parents, author, committer, dates, refs, message), diffstat, full diff with hunks; parent/child navigation; combined diff for merges | visit file, apply/reverse hunk, copy hash | 4 |
+| **Diff** | `magit-diff` | Any range `a..b`, `a...b`, worktree vs index vs revision, path-limited, stash vs parent, stat-only; context/whitespace/rename/word-diff options | visit, stage/unstage when applicable | 4 |
+| **Refs** | `magit-show-refs` | Local branches, remotes, tags with ahead/behind vs a base; also select mode | checkout, create, delete, rename, reset, merge, rebase onto, log | 4 |
 | **Cherry** | `magit-cherry` | `git cherry` between two refs | cherry-pick, show | 7 |
 | **Stash list / show** | `magit-stash-list` | Stashes; show = diff view of a stash | apply, pop, drop, branch | 6 |
 | **Rebase todo** | `git-rebase-mode` | Planned structured interactive todo: pick/reword/edit/squash/fixup/drop/exec/label/merge lines with commit summaries; reorder | move up/down, set action, show commit, confirm, abort | 7 |
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | 7 |
 | **Merge / conflicts** | `magit-merge` + unmerged | Unmerged section; per-conflict actions | take ours/theirs, mark resolved, open merge tool (client effect `openMergeTool`), continue, abort | 7 |
 | **Sequencer** | `A`, `V` | In-progress cherry-pick/revert | continue, skip, abort | 7 |
-| **Commit message** | with-editor buffer | Message editor (real file) + companion read-only staged diff, history ring, trailers, lint diagnostics | confirm, cancel, history prev/next, add trailer | 4 |
+| **Commit message** | with-editor buffer | Message editor (real file) + companion read-only staged diff, history ring, trailers, lint diagnostics | confirm, cancel, history prev/next, add trailer | 5 |
 | **Process log** | `magit-process-buffer` | Every Git invocation: args, exit code, duration, output, hook output | visit, copy command, clear | 3 |
 | **Blame** | `magit-blame` | Annotated file (hash, author, date, summary); also inlay hints/code lens in real file buffers | show commit, blame at parent, copy hash | 8 |
-| **File at revision** | `magit-find-file` | Virtual doc `magit://blob/<rev>/<path>` | diff against worktree | 5 |
+| **File at revision** | `magit-find-file` | Virtual doc `magit://blob/<rev>/<path>` | diff against worktree | 4 |
 | **Bisect** | `magit-bisect` | In-progress section: good/bad/skip log, candidate | good, bad, skip, run, reset | 8 |
 | **Worktrees** | `magit-worktree` | List with branch/path/state | add, checkout, move, delete, visit | 8 |
 | **Submodules** | `magit-submodule` | Modules section and list | add, register, update, sync, fetch, populate, unpopulate | 8 |
@@ -1125,8 +1135,11 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Feature
 
-- R-3.5…R-3.7;
-  R-4.1…R-4.3; R-5.1…R-5.5; R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
+- First scheduled feature: **R-5.1**, log plus reusable server-owned select-mode
+  infrastructure. Phase order changed: Read views are now Phase 4 and Commit
+  flow Phase 5; retain R-5.* and R-4.* IDs because Planned messages and other
+  stable references already use them. Then R-5.2…R-5.5; R-4.1…R-4.3;
+  R-3.5…R-3.7; R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
   R-9.1…R-9.5. Their full acceptance criteria remain in the phase entries.
 
 ### Task ticket template and UI rule
@@ -1176,7 +1189,7 @@ adds a scenario for it.
 
 - [x] R-3.1…R-3.4: prompts/`ScriptedUi`, runner queue/progress/cancel/ring log,
   process-log view and editor-bridge core with a fake-client commit test.
-  This historical core milestone does not close R-3.4b or Phase 4. Protocol
+  This historical core milestone does not close R-3.4b or Phase 5 (commit flow). Protocol
   and runner decisions are §§3.6/3.10/3.16 and §10; UI coverage gaps are §12.
 
 ### Phase 3U — Real-UI harness and UI bug fixes (do before R-3.5)
@@ -1327,27 +1340,25 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       `build/ui/git-error-readable/vim-80x24/readable-git-error.screen`.
       Verified with `make test && make ui-test && make ui-tour`.
 
-### Phase 4 — Commit flow
+### Phase 4 — Read views
 
-- [ ] R-4.1 Commit menu: commit, extend, amend, reword, fixup, squash, augment,
-      instant fixup/squash, alter; switches `--all`, `--allow-empty`,
-      `--verbose`, `--no-verify`, `--signoff`, `--gpg-sign`, `--reset-author`,
-      option `--author=`. Items flip from `Planned` to `Implemented`.
-      *UI:* extend `commit-menu-shows-actions` with switch toggling (`-a` flips
-      the `--all` flag) and the `c c` flow; after pressing `c` the screen lists
-      `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
-- [ ] R-4.2 Commit-message view over the editor bridge: staged-diff companion
-      view, history ring, trailers, lint diagnostics, confirm/cancel/close.
-      *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
-      split shows the `gitcommit` buffer and the staged diff; confirm closes
-      it and the status screen shows a clean tree.
-- [ ] R-4.3 Status "Recent commits" section.
-      *UI:* add scenario `recent-commits`: the status screen shows a "Recent
-      commits" section with a commit subject; `Enter` visits the revision.
-
-### Phase 5 — Read views
-
-- [ ] R-5.1 Log (graph, decorations, filters, lazy load) and select mode (§3.7).
+- [ ] R-5.1 **First feature to implement: log and reusable select mode** (§3.7).
+      Implement the server-rendered log with visible selection purpose, cursor
+      and structured commit identity; confirm/cancel; native editor navigation
+      and search (search keys must not be swallowed by capture); and push/focus,
+      return-to-caller lifecycle. Confirm returns the selected commit to the
+      pending operation; cancel returns without mutation. This infrastructure
+      is a dependency of target-dependent actions in R-4.1 and later reset,
+      rebase and cherry-pick workflows. Selection must not depend on future
+      commit/rebase mutation implementations.
+      *Tests:* Rust/protocol acceptance tests for purpose rendering, structured
+      identity (no text parsing or row indices), native search/input forwarding,
+      confirm result, cancel without mutation, and restoration of the caller.
+      *UI:* add `log-select`: open a selection log, search/navigate, confirm
+      and assert the expected commit identity reaches a test operation and the
+      caller is restored; repeat with cancel and assert no mutation and correct
+      caller restoration. The scenario demonstrates selection independently of
+      commit/rebase mutation support.
       *UI:* add scenario `log-view`: `l l` opens the log, the screen shows the
       commit subject, `q` returns to status.
 - [ ] R-5.2 Revision view; Diff view (ranges, args).
@@ -1362,6 +1373,26 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 - [ ] R-5.5 Diff-argument menus applied across views.
       *UI:* add scenario `diff-args`: toggling `-w` in the diff menu re-renders
       the status diff without whitespace-only hunks.
+
+### Phase 5 — Commit flow
+
+- [ ] R-4.1 Commit menu: commit, extend, amend, reword, fixup, squash, augment,
+      instant fixup/squash, alter; switches `--all`, `--allow-empty`,
+      `--verbose`, `--no-verify`, `--signoff`, `--gpg-sign`, `--reset-author`,
+      option `--author=`. Items flip from `Planned` to `Implemented`. Depends
+      on R-5.1 for target-dependent commit actions; normal commit selection is
+      the server-owned log select-mode flow, not a client picker.
+      *UI:* extend `commit-menu-shows-actions` with switch toggling (`-a` flips
+      the `--all` flag) and the `c c` flow; after pressing `c` the screen lists
+      `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
+- [ ] R-4.2 Commit-message view over the editor bridge: staged-diff companion
+      view, history ring, trailers, lint diagnostics, confirm/cancel/close.
+      *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
+      split shows the `gitcommit` buffer and the staged diff; confirm closes
+      it and the status screen shows a clean tree.
+- [ ] R-4.3 Status "Recent commits" section.
+      *UI:* add scenario `recent-commits`: the status screen shows a "Recent
+      commits" section with a commit subject; `Enter` visits the revision.
 
 ### Phase 6 — Branches, remotes, stash
 
@@ -1383,7 +1414,10 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       autosquash, `--update-refs`, `--rebase-merges`), rebase-todo view via the
       editor bridge (`mode: virtual`), in-progress section. Non-interactive
       edits (reword, drop, fixup, modify) via a scripted `GIT_SEQUENCE_EDITOR`.
-- [ ] R-7.4 Commit pickers everywhere via select mode.
+- [ ] R-7.4 Integrate remaining commit-picker workflows via the R-5.1 select
+      mode infrastructure (including commit selection across rebase,
+      cherry-pick and reset); do not defer the core picker/log infrastructure
+      to this integration task.
 
 ### Phase 8 — Extras
 
