@@ -1240,7 +1240,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 
 ### Phase 3N — Neovim client debt (findings in §11.1; do before R-3.5)
 
-- [ ] R-NV-1 **Async request layer** (§11.1 finding 1): replace
+- [x] R-NV-1 **Async request layer** (§11.1 finding 1): replace
       `buf_request_sync`/`vim.wait` on every key, invoke and open with
       asynchronous `client:request` plus a small per-client request queue, so
       a slow Git command, a prompt or the editor bridge never freezes Neovim.

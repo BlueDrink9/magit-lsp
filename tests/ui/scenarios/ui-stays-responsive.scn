@@ -1,0 +1,24 @@
+# R-NV-1: a slow Git command must not freeze Neovim.
+#
+# The fixture's pre-commit hook sleeps for a second and then rejects the
+# commit, so the commit worker stays outstanding while the scenario types.
+# `j` is a native motion and must move the cursor before the client is idle
+# again; `?` is a server request and must be answered, not lost, while the
+# commit runs. Nothing here waits for idle until the commit is over.
+fixture: staged-slow-hook
+---
+wait
+goto "Staged changes (1)"
+keys: j
+expect cursor on "  M f.txt"
+keys: c
+wait
+keys: c
+wait screen contains "Committing"
+keys: j
+expect cursor on "    @@ -1,10 +1,10 @@"
+keys: ?
+wait
+expect screen contains "Transient and dwim commands"
+expect screen not-contains "Committing"
+snapshot: responsive

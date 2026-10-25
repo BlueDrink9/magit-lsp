@@ -45,6 +45,7 @@ class FixtureTest(unittest.TestCase):
                 "staged-one-file",
                 "staged-and-unstaged",
                 "staged-failing-hook",
+                "staged-slow-hook",
                 "untracked",
                 "unborn",
                 "in-progress-rebase",

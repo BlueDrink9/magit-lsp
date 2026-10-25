@@ -10,18 +10,13 @@ local M = {}
 
 local uv = vim.uv or vim.loop
 
--- LuaJIT has no `table.pack`; keep the argument count explicitly.
-local function pack(...)
-  return { n = select('#', ...), ... }
-end
-
-local unpack = table.unpack or unpack
-
 --- Client work that is still outstanding, counted by the client itself.
 M.state = {
   requests = 0,
   prompts = 0,
   scheduled = 0,
+  --- Requests queued locally and not answered yet.
+  queued = 0,
   --- Progress tokens the server has begun and not ended, by token.
   progress = {},
 }
@@ -256,19 +251,6 @@ function M.key_sent(step, id)
   M.trace('key_sent', { key = step, view = id })
 end
 
---- Run `fn` as one outstanding request; `idle` is false until it returns.
----@param fn fun(): ...
----@return ...
-function M.track_request(fn)
-  M.state.requests = M.state.requests + 1
-  local results = pack(pcall(fn))
-  M.state.requests = M.state.requests - 1
-  if not results[1] then
-    error(results[2], 0)
-  end
-  return unpack(results, 2, results.n)
-end
-
 --- Count one asynchronous request until `M.request_finished` runs.
 function M.request_started()
   M.state.requests = M.state.requests + 1
@@ -277,6 +259,16 @@ end
 --- Stop counting an asynchronous request.
 function M.request_finished()
   M.state.requests = math.max(0, M.state.requests - 1)
+end
+
+--- Count one request entering the client's queue.
+function M.queued_started()
+  M.state.queued = M.state.queued + 1
+end
+
+--- Stop counting a queued request once it has been answered or dropped.
+function M.queued_finished()
+  M.state.queued = math.max(0, M.state.queued - 1)
 end
 
 --- Count one prompt the client is waiting on.
@@ -306,6 +298,7 @@ end
 ---@return boolean
 function M.idle()
   local busy = M.state.requests > 0
+    or M.state.queued > 0
     or M.state.prompts > 0
     or M.state.scheduled > 0
     or next(M.state.progress) ~= nil

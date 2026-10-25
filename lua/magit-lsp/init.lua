@@ -169,56 +169,43 @@ function M.status_view(root)
 end
 
 --- Open the status view for `session` in its boot buffer.
+---
+--- The server names the view in its `view/open` response, so the request is
+--- asynchronous: the record appears when the descriptor does, and the render
+--- and keymap that follow it are applied by the view manager.
 ---@param session table
----@return table|nil record, any err
-local function open_status(session)
+function open_status(session)
   if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
   vim.lsp.buf_attach_client(session.buf, session.client_id)
-  local descriptor, err = view.sync(session.buf, session.client_id, 'view/open', {
+  view.request(session.buf, session.client_id, 'view/open', {
     kind = 'status',
     args = { repo_path = session.root },
     viewport = { cols = vim.o.columns, rows = vim.o.lines },
-  })
-  if not descriptor then
-    vim.notify('magit-lsp open failed: ' .. error_message(err), vim.log.levels.ERROR)
-    return nil, err
-  end
-
-  local record = view.open(descriptor, {
-    buf = session.buf,
-    win = session.win,
-    client_id = session.client_id,
-    root = session.root,
-    visit_key = session.visit_key,
-    fold_keys = session.fold_keys,
-    placement = options.status.placement,
-  })
-  if not record then
-    return nil, 'view/open returned no view'
-  end
-  session.win = record.win
-
-  -- The initial render is a notification that follows the response; a render
-  -- that beat it is already in the pending queue. Either way it must be
-  -- applied in the view's own buffer, never a global one. `view.open` already
-  -- applies both queues and flushes anything deferred by the sync request.
-  if not vim.wait(5000, function()
-    return record.version ~= nil
-  end, 10) then
-    vim.notify('magit-lsp did not render the view', vim.log.levels.ERROR)
-    return nil, 'no initial render'
-  end
-  -- `view/keymap` follows the render. Holding keys the server never sent is a
-  -- bug, so wait for the first set before reporting the view open.
-  vim.wait(5000, function()
-    return record.keymap_ready == true
-  end, 10)
-  return record
+  }, function(descriptor, err)
+    if not descriptor then
+      vim.notify('magit-lsp open failed: ' .. error_message(err), vim.log.levels.ERROR)
+      return
+    end
+    local record = view.open(descriptor, {
+      buf = session.buf,
+      win = session.win,
+      client_id = session.client_id,
+      root = session.root,
+      visit_key = session.visit_key,
+      fold_keys = session.fold_keys,
+      placement = options.status.placement,
+    })
+    if record then
+      session.win = record.win
+    end
+  end)
 end
 
 --- Open a status view for `root`, starting its session when needed.
+---
+--- Opening is asynchronous; the view is focused once the server has described
+--- it. Calling this for an already-open root focuses it immediately.
 ---@param root string|nil defaults to the current session or cwd
----@return table|nil descriptor, any err
 function M.open(root)
   local record = M.status_view(root)
   if record then
@@ -233,22 +220,21 @@ function M.open(root)
   if not session then
     return nil, 'no magit-lsp session is open'
   end
-  record = open_status(session)
-  return record and record.descriptor or nil, record and nil or 'open failed'
+  open_status(session)
 end
 
---- Send one key chord to the focused view (or `id`) and apply the answer.
+--- Send one key chord to the focused view (or `id`); the answer applies later.
 ---@param steps string[]
 ---@param id string|nil
 function M.press(steps, id)
   return view.press(steps, id)
 end
 
---- Run a command against the focused view (or `id`).
+--- Run a command against the focused view (or `id`), applied asynchronously.
 ---@param command string
 ---@param opts table|nil { cursor?, selection?, args? }
 ---@param id string|nil
----@return table|nil response
+---@return boolean|nil queued, string|nil err
 function M.invoke(command, opts, id)
   return view.invoke(command, opts, id)
 end
@@ -269,28 +255,43 @@ local function target_record()
   return view.current() or M.status_view()
 end
 
---- Fetch the current view's hierarchical symbol tree.
----@return table|nil symbols, any err
-function M.symbols()
+--- Fetch the current view's hierarchical symbol tree asynchronously.
+---
+--- `on_result(symbols, err)` runs after the server answers; navigation is
+--- server-owned, so no rendered text is parsed and nothing waits on the reply.
+---@param on_result fun(symbols: table|nil, err: any)
+---@return boolean|nil queued
+function M.symbols(on_result)
   local record = target_record()
   if not record then
-    return nil, 'no view is open'
+    if on_result then
+      on_result(nil, 'no view is open')
+    end
+    return nil
   end
-  return view.sync(record.buf, record.client_id, 'textDocument/documentSymbol', {
+  view.request(record.buf, record.client_id, 'textDocument/documentSymbol', {
     textDocument = { uri = view.uri(record) },
-  })
+  }, on_result or function() end)
+  return true
 end
 
 --- Move the cursor to the next/previous symbol of `kind` (`dir` is 1 or -1).
+---
+--- The symbol outline is fetched asynchronously; the cursor moves when it
+--- arrives, and a later key never waits for it.
 ---@param kind string `section`, `file` or `hunk`
 ---@param dir integer 1 or -1
----@return integer|nil line, any err
 function M.jump(kind, dir)
-  local symbols, err = M.symbols()
-  if not symbols then
-    return nil, err
+  local record = target_record()
+  if not record then
+    return
   end
-  return view.jump(target_record(), symbols, kind, dir)
+  M.symbols(function(symbols)
+    if not symbols then
+      return
+    end
+    view.jump(record, symbols, kind, dir)
+  end)
 end
 
 --- The window a visited file should open in.
@@ -425,8 +426,12 @@ end
 
 --- Start an LSP client for one repository and open its status view.
 --- Calling it again for an already-open root focuses that status view.
+---
+--- Opening is asynchronous: the status view appears when the server answers
+--- `view/open`, and the render and keymap that follow it are applied as they
+--- arrive. `setup()` itself never waits.
 ---@param opts table|nil { root_dir?, cmd?, profile?, status?, visit_key?, fold_keys?, menu? }
----@return table|nil descriptor, any err
+---@return table|nil descriptor, any err the descriptor of an already-open status view
 function M.setup(opts)
   opts = opts or {}
   local root = opts.root_dir or vim.fn.getcwd()
@@ -478,8 +483,7 @@ function M.setup(opts)
     prompt.configure({ client_id = session.client_id })
   end
 
-  local record, err = open_status(session)
-  return record and record.descriptor or nil, err
+  open_status(session)
 end
 
 return M

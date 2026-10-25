@@ -9,6 +9,7 @@
 local buffer = require('magit-lsp.buffer')
 local keymap = require('magit-lsp.keymap')
 local debug_api = require('magit-lsp.debug')
+local requests = require('magit-lsp.requests')
 
 local M = {}
 
@@ -26,7 +27,7 @@ M.order = {}
 M.pending_render = {}
 M.pending_keymap = {}
 
---- Renders held while a synchronous request is outstanding, by view id.
+--- Renders held while a resync is outstanding, by view key.
 ---@type table<string, table[]>
 M.deferred_render = {}
 
@@ -211,48 +212,75 @@ function M.uri(view)
   return view and vim.uri_from_bufnr(view.buf) or ''
 end
 
---- Run one synchronous LSP request through the client attached to `buf`.
+--- Queue one asynchronous LSP request for `buf` and call `on_result`.
+---
+--- Requests for one client run one at a time in enqueue order, so a key, an
+--- invoke or an open never blocks Neovim's event loop, and a request made
+--- while another is in flight waits its turn instead of racing it.
 ---@param buf integer
 ---@param client_id integer|nil
 ---@param method string
----@param params table
----@return any result, any err
-function M.sync(buf, client_id, method, params)
-  local c = client(client_id)
-  if c and not c.initialized then
-    vim.wait(5000, function()
-      return c.initialized
-    end, 10)
-  end
-  local result, err = debug_api.track_request(function()
-    for _ = 1, 20 do
-      local resp = vim.lsp.buf_request_sync(buf, method, params, 5000)
-      if resp then
-        for _, r in pairs(resp) do
-          if r.result ~= nil then
-            return r.result, nil
-          end
-          if r.err then
-            return nil, r.err
-          end
-        end
-        return nil, 'empty response for ' .. method
-      end
-      vim.wait(100)
-    end
-    return nil, 'timed out waiting for ' .. method
-  end)
-  flush_deferred()
-  return result, err
+---@param params table|fun(): table
+---@param on_result fun(result: any, err: any)|nil
+function M.request(buf, client_id, method, params, on_result)
+  requests.enqueue(client_id, {
+    method = method,
+    buf = buf,
+    params = params,
+    on_result = on_result or function() end,
+  })
 end
 
+--- Acknowledgements held while a request is in flight, keyed by view key.
+---@type table<string, { client_id: integer, view_id: string, version: integer }>
+M.pending_ack = {}
+
+--- Send, or hold, the acknowledgement of `view`'s applied version.
+---
+--- A `view/rendered` notification is handled inline by the server's reader,
+--- where it needs the session lock that a key handler can hold while a prompt
+--- waits. Acknowledging while a request is in flight could therefore block the
+--- prompt answer behind the ack, so it is held until the queue drains.
+---@param view table
 local function ack(view)
+  if requests.pending(view.client_id) > 0 then
+    M.pending_ack[view.key] = {
+      client_id = view.client_id,
+      view_id = view.id,
+      version = view.version,
+    }
+    return
+  end
   local c = client(view.client_id)
   if c then
     c:notify('view/rendered', { viewId = view.id, version = view.version })
     debug_api.render_acked(view.key, view.version)
   end
 end
+
+--- Send the acknowledgements held for `client_id`, dropping closed views.
+---@param client_id integer
+function M.flush_acks(client_id)
+  local keys = {}
+  for key, pending in pairs(M.pending_ack) do
+    if pending.client_id == client_id then
+      keys[#keys + 1] = key
+    end
+  end
+  table.sort(keys)
+  for _, key in ipairs(keys) do
+    local pending = M.pending_ack[key]
+    M.pending_ack[key] = nil
+    local view = M.views[key]
+    local c = client(pending.client_id)
+    if view and c then
+      c:notify('view/rendered', { viewId = pending.view_id, version = pending.version })
+      debug_api.render_acked(key, pending.version)
+    end
+  end
+end
+
+requests.on_quiet = M.flush_acks
 
 --- Ask Neovim to re-request semantic tokens for `buf`.
 --- The server owns highlighting, but only sends tokens on request.
@@ -280,16 +308,20 @@ local function set_cursor(view, cursor)
 end
 
 
+--- Hold renders of a view while its full resync is outstanding.
+---@param view table
 local function request_resync(view)
   local c = client(view.client_id)
-  if not c then
+  if not c or view.resyncing then
     return
   end
+  view.resyncing = true
   debug_api.request_started()
   c:request('view/resync', { viewId = view.id }, function(err, result)
     debug_api.request_finished()
+    view.resyncing = false
     if err or type(result) ~= 'table' then
-      flush_deferred()
+      flush_deferred(view.key)
       return
     end
     M.apply_render(result, view.client_id)
@@ -300,8 +332,10 @@ end
 --- Apply a `view/render` payload, then acknowledge the version.
 ---
 --- A client that does not hold the edit's base version has lost an update and
---- asks for a full resync. A render that arrives before the descriptor is
---- buffered keyed by its client and server view id, never dropped.
+--- asks for a full resync; renders that arrive while that resync is
+--- outstanding are held and applied after it. A render that arrives before the
+--- descriptor is buffered keyed by its client and server view id, never
+--- dropped.
 ---@param params table
 ---@param client_id integer the client that sent the notification
 function M.apply_render(params, client_id)
@@ -322,9 +356,9 @@ function M.apply_render(params, client_id)
     return
   end
 
-  -- A key request blocks the client in `buf_request_sync`. A render that
-  -- arrives while it waits is applied once the request returns.
-  if debug_api.state.requests > 0 then
+  -- A resync replaces the whole text; applying later edits on top of a
+  -- version the client does not hold yet would corrupt the buffer.
+  if view.resyncing then
     local queue = M.deferred_render[key] or {}
     queue[#queue + 1] = params
     M.deferred_render[key] = queue
@@ -372,20 +406,29 @@ function M.apply_render(params, client_id)
   refresh_tokens(view.buf)
 end
 
---- Apply renders held back while a key request was outstanding.
-function flush_deferred()
-  if debug_api.state.requests > 0 then
-    return
-  end
-  local queues = M.deferred_render
-  M.deferred_render = {}
-  for key, queue in pairs(queues) do
+--- Apply renders held while `key`'s resync was outstanding.
+---@param key string|nil view key; nil flushes every held render
+function flush_deferred(key)
+  if key then
+    local queue = M.deferred_render[key]
+    if not queue then
+      return
+    end
+    M.deferred_render[key] = nil
     local view = M.views[key]
     for _, params in ipairs(queue) do
-      if view then
+      if view and M.views[key] == view and not view.resyncing then
         M.apply_render(params, view.client_id)
       end
     end
+    return
+  end
+  local keys = {}
+  for queued in pairs(M.deferred_render) do
+    keys[#keys + 1] = queued
+  end
+  for _, queued in ipairs(keys) do
+    flush_deferred(queued)
   end
 end
 
@@ -543,6 +586,7 @@ local function on_wiped(key)
   M.pending_render[key] = nil
   M.pending_keymap[key] = nil
   M.deferred_render[key] = nil
+  M.pending_ack[key] = nil
   remove_from_order(key)
   if not view.document then
     debug_api.view_close(key)
@@ -737,6 +781,7 @@ function M.close(id, focus_previous_window, client_id)
   M.pending_render[key] = nil
   M.pending_keymap[key] = nil
   M.deferred_render[key] = nil
+  M.pending_ack[key] = nil
   remove_from_order(key)
   if not view.document then
     debug_api.view_close(key)
@@ -809,15 +854,10 @@ function M.close_all()
   end
 end
 
---- Send one key chord to a view and apply the answer.
----@param steps string[] canonical key steps
----@param id string|nil local view key or server view id; defaults to focused view
-function M.press(steps, id)
-  local view = id and find(id) or M.current()
-  if not view then
-    return
-  end
-  debug_api.key_pressed(steps)
+--- The cursor, visual selection and editor mode the server should act on.
+---@param view table
+---@return table cursor, table|nil selection, string mode
+local function position(view)
   local mode = 'normal'
   if vim.api.nvim_get_current_buf() == view.buf then
     local raw = vim.fn.mode()
@@ -838,98 +878,113 @@ function M.press(steps, id)
   end
   local cursor = { line = 0, column = 0 }
   if win ~= -1 then
-    local position = vim.api.nvim_win_get_cursor(win)
-    cursor = { line = position[1] - 1, column = position[2] }
+    local p = vim.api.nvim_win_get_cursor(win)
+    cursor = { line = p[1] - 1, column = p[2] }
   end
-
-  local effects = {}
-  for _, step in ipairs(steps) do
-    debug_api.key_sent(step, view.key)
-    local resp, err = M.sync(view.buf, view.client_id, 'view/key', {
-      viewId = view.id,
-      version = view.version or 0,
-      key = step,
-      editorMode = mode,
-      cursor = cursor,
-      selection = selection,
-      traceId = debug_api.trace_id(),
-    })
-    if not resp then
-      vim.notify('magit-lsp key ' .. step .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
-      flush_deferred(view.key)
-      return
-    end
-    vim.list_extend(effects, resp.effects or {})
-  end
-  M.apply_effects(effects, view)
-  flush_deferred(view.key)
+  return cursor, selection, mode
 end
 
---- Run a command against a view and apply its effects.
+--- Send one key chord to a view and apply each answer as it arrives.
+---
+--- The steps and any key pressed after them queue behind the request in
+--- flight, so the server sees them in the order the user produced them and a
+--- slow command never blocks the editor. The cursor and selection are read
+--- when the key is pressed: they describe what the user was looking at.
+---@param steps string[] canonical key steps
+---@param id string|nil local view key or server view id; defaults to focused view
+function M.press(steps, id)
+  local view = id and find(id) or M.current()
+  if not view then
+    return
+  end
+  debug_api.key_pressed(steps)
+  local cursor, selection, mode = position(view)
+  for _, step in ipairs(steps) do
+    local key = view.key
+    requests.enqueue(view.client_id, {
+      method = 'view/key',
+      buf = view.buf,
+      params = {
+        viewId = view.id,
+        version = view.version or 0,
+        key = step,
+        editorMode = mode,
+        cursor = cursor,
+        selection = selection,
+        traceId = debug_api.trace_id(),
+      },
+      on_send = function()
+        debug_api.key_sent(step, key)
+      end,
+      on_result = function(resp, err)
+        if M.views[key] ~= view then
+          return
+        end
+        if not resp then
+          vim.notify('magit-lsp key ' .. step .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
+          flush_deferred(key)
+          return
+        end
+        M.apply_effects(resp.effects, view)
+        flush_deferred(key)
+      end,
+    })
+  end
+end
+
+--- Run a command against a view and apply its effects asynchronously.
+---
+--- The command is queued behind any request in flight; its effects and render
+--- are applied when the server answers.
 ---@param command string
 ---@param opts table|nil { cursor?, selection?: boolean|table, args?: table }
 ---@param id string|nil local view key or server view id; defaults to focused view
----@return table|nil response
+---@return boolean|nil queued, string|nil err
 function M.invoke(command, opts, id)
   opts = opts or {}
   local view = id and find(id) or M.current()
   if not view then
     return nil, 'no view is open'
   end
-  local cursor = opts.cursor
-  if not cursor then
-    local win = view.win
-    if not win or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= view.buf then
-      win = vim.fn.bufwinid(view.buf)
-    end
-    cursor = { line = 0, column = 0 }
-    if win ~= -1 then
-      local position = vim.api.nvim_win_get_cursor(win)
-      cursor = { line = position[1] - 1, column = position[2] }
-    end
+  local cursor, visual_selection = position(view)
+  if opts.cursor then
+    cursor = opts.cursor
   end
   local selection = opts.selection
   if selection == true then
-    local first, last = vim.fn.line('v'), vim.fn.line('.')
-    if first ~= 0 and last ~= 0 then
-      selection = { startLine = math.min(first, last) - 1, endLine = math.max(first, last) - 1 }
-    else
-      selection = nil
-    end
+    selection = visual_selection
+  elseif selection == false then
+    selection = nil
   end
 
-  local before = view.version
-  local resp, err = M.sync(view.buf, view.client_id, 'view/invoke', {
-    viewId = view.id,
-    command = command,
-    cursor = cursor,
-    selection = selection,
-    args = opts.args,
-    traceId = debug_api.trace_id(),
+  requests.enqueue(view.client_id, {
+    method = 'view/invoke',
+    buf = view.buf,
+    params = {
+      viewId = view.id,
+      command = command,
+      cursor = cursor,
+      selection = selection,
+      args = opts.args,
+      traceId = debug_api.trace_id(),
+    },
+    on_result = function(resp, err)
+      if not resp then
+        if M.host.set_error_detail then
+          M.host.set_error_detail(type(err) == 'table' and err.data and err.data.detail or nil)
+        end
+        vim.notify(
+          'magit-lsp ' .. command .. ' failed: ' .. error_message(err),
+          vim.log.levels.WARN
+        )
+        flush_deferred(view.key)
+        return
+      end
+      M.apply_effects(resp.effects, view)
+      flush_deferred(view.key)
+    end,
   })
-  if not resp then
-    if M.host.set_error_detail then
-      M.host.set_error_detail(type(err) == 'table' and err.data and err.data.detail or nil)
-    end
-    vim.notify('magit-lsp ' .. command .. ' failed: ' .. error_message(err), vim.log.levels.WARN)
-    flush_deferred(view.key)
-    return nil, err
-  end
-
-  M.apply_effects(resp.effects, view)
-  flush_deferred(view.key)
-  local keep_waiting = M.views[view.key] ~= nil
-  for _, effect in ipairs(resp.effects or {}) do
-    if effect.type == 'pushView' or effect.type == 'openView' then
-      keep_waiting = false
-    end
-  end
-  if keep_waiting and view.version == before then
-    vim.wait(5000, function()
-      return view.version ~= before or M.views[view.key] == nil
-    end, 10)
-  end
-  return resp
+  return true
 end
 
 --- Apply effects produced by a key, command or detached notification.

@@ -63,7 +63,13 @@ local function setup_child(opts)
     init[key] = value
   end
   child.lua(
-    string.format("VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); STATUS = M.status_view()", vim.inspect(init))
+    string.format(
+      "VIEW = require('magit-lsp.view'); M = require('magit-lsp'); M.setup(%s); "
+        .. 'vim.wait(5000, function() local v = M.status_view(); '
+        .. 'return v ~= nil and v.version ~= nil and v.keymap_ready end, 10); '
+        .. 'STATUS = M.status_view()',
+      vim.inspect(init)
+    )
   )
   child.lua([[
     HELPERS = {
@@ -82,9 +88,29 @@ local function setup_child(opts)
         return nil
       end,
       --- The server's outline for the focused view, never rendered text.
+      --- Positions come from `textDocument/documentSymbol`; the product client
+      --- is asynchronous, so the test fetches synchronously itself.
       ---@return table[]
       symbols = function()
-        return M.symbols() or {}
+        local record = require('magit-lsp.view').current()
+        if not record then
+          return {}
+        end
+        local client = vim.lsp.get_client_by_id(record.client_id)
+        if not client then
+          return {}
+        end
+        local done, result
+        client:request('textDocument/documentSymbol', {
+          textDocument = { uri = require('magit-lsp.view').uri(record) },
+        }, function(_, value)
+          result = value
+          done = true
+        end, record.buf)
+        vim.wait(5000, function()
+          return done
+        end, 10)
+        return result or {}
       end,
       --- The section symbol named for `section` (`staged`, `unstaged`, `untracked`).
       ---@param section string
@@ -290,9 +316,23 @@ local function setup_child(opts)
       end,
       --- Poll until the magit-lsp client is idle: no outstanding requests,
       --- prompts, progress tokens, scheduled work or unacknowledged renders.
+      --- Idle must hold for a short settle period: the server sends a response
+      --- before the render it produced, so the first idle reading can race a
+      --- notification that is still in flight.
       ---@return boolean
       wait_idle = function()
-        return HELPERS.wait_for(function() return require('magit-lsp.debug').idle() end)
+        local since = nil
+        return HELPERS.wait_for(function()
+          if not require('magit-lsp.debug').idle() then
+            since = nil
+            return false
+          end
+          if since == nil then
+            since = vim.uv.now()
+            return false
+          end
+          return vim.uv.now() - since >= 50
+        end)
       end,
     }
   ]])
@@ -316,7 +356,8 @@ local function invoke_at(line, command, opts)
     command,
     opts and (', ' .. opts) or ''
   )
-  child.lua(call)
+  -- The product client is asynchronous; the test waits for its own idle.
+  child.lua(call .. '; HELPERS.wait_idle()')
   return child.lua_get('R ~= nil')
 end
 
@@ -488,10 +529,11 @@ T['a failed mutation notifies once with a readable summary'] = function()
     end
   ]])
   vim.fn.writefile({}, repo .. '/.git/index.lock')
-  child.lua("R = M.invoke('status.stage-all')")
+  child.lua("M.invoke('status.stage-all')")
+  local notified = child.lua_get('HELPERS.wait_for(function() return #NOTIFIES > 0 end)')
   vim.fn.delete(repo .. '/.git/index.lock')
 
-  MiniTest.expect.equality(child.lua_get('R ~= nil'), true)
+  MiniTest.expect.equality(notified, true, 'the failed mutation notified')
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
   local msg = child.lua_get('NOTIFIES[1].msg')
   MiniTest.expect.equality(type(msg), 'string')
@@ -602,7 +644,11 @@ T['tokens are refreshed after a mutation'] = function()
   MiniTest.expect.equality(child.lua_get('HELPERS.wait_tokens()'), true, 'semantic tokens arrive')
 
   child.lua("M.invoke('status.stage-all')")
-  assert_line('Staged changes (1)')
+  MiniTest.expect.equality(
+    child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('Staged changes (1)') end)"),
+    true,
+    'the mutation rendered'
+  )
 
   local staged = child.lua_get([[
     (function()
@@ -709,6 +755,7 @@ T['refresh and mutations still work after blocked edits'] = function()
   vim.fn.writefile(lines, path)
 
   child.lua('M.refresh()')
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
   assert_line('    +line11')
   MiniTest.expect.equality(
     child.lua_get("vim.api.nvim_get_option_value('modified', { buf = STATUS.buf })"),
@@ -797,15 +844,23 @@ T['navigation jumps follow document symbols'] = function()
     end
   end
 
-  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("section", 1)')
-  MiniTest.expect.equality(child.lua_get('J'), staged_line)
-  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("file", 1)')
-  MiniTest.expect.equality(child.lua_get('J'), unstaged_line)
-  child.lua('vim.api.nvim_win_set_cursor(0, { 1, 0 }); J = M.jump("hunk", 1)')
-  MiniTest.expect.equality(child.lua_get('J'), hunk_line)
+  -- Symbol navigation is asynchronous: move, then wait for the cursor to land.
+  local function jump_at(kind, dir, from, want)
+    child.lua(string.format(
+      'vim.api.nvim_win_set_cursor(0, {%s}); M.jump(%q, %d); '
+        .. 'J = vim.wait(5000, function() return vim.api.nvim_win_get_cursor(0)[1] == %d end, 10)',
+      from,
+      kind,
+      dir,
+      want
+    ))
+    MiniTest.expect.equality(child.lua_get('J'), true, kind .. ' jumps to ' .. want)
+  end
 
-  child.lua('vim.api.nvim_win_set_cursor(0, { vim.fn.line("$"), 0 }); J = M.jump("section", -1)')
-  MiniTest.expect.equality(child.lua_get('J'), unstaged_section_line)
+  jump_at('section', 1, '1, 0', staged_line)
+  jump_at('file', 1, '1, 0', unstaged_line)
+  jump_at('hunk', 1, '1, 0', hunk_line)
+  jump_at('section', -1, 'vim.fn.line("$"), 0', unstaged_section_line)
 end
 
 T['gO outline lists document symbols'] = function()
@@ -848,6 +903,7 @@ T['rapid successive invokes keep the buffer consistent with the server'] = funct
       M.invoke('status.unstage-all')
     end
     M.invoke('status.stage-all')
+    HELPERS.wait_idle()
   ]])
 
   local buffer = child.lua_get('HELPERS.lines()')
@@ -861,7 +917,7 @@ T['a lost update triggers a full resync'] = function()
   setup_child()
   -- Pretend the client missed a render: the next edits no longer match.
   child.lua('STATUS.version = STATUS.version - 1')
-  child.lua("M.invoke('status.stage-all')")
+  child.lua("M.invoke('status.stage-all'); HELPERS.wait_idle()")
 
   local buffer = child.lua_get('HELPERS.lines()')
   local resync = child.lua_get('HELPERS.resync()')
@@ -1037,20 +1093,19 @@ T['capture mode forwards printable keys and shows the server hint'] = function()
       bindings = {},
     }, STATUS.client_id)
     SENT = {}
-    vim.lsp.buf_request_sync = function(_, method, params)
+    local lsp_client = vim.lsp.get_client_by_id(STATUS.client_id)
+    local original_request = lsp_client.request
+    lsp_client.request = function(self, method, params, handler, bufnr)
       if method == 'view/key' then
         SENT[#SENT + 1] = params.key
-        return {
-          [1] = {
-            result = {
-              effects = {
-                { type = 'message', level = 3, text = 'Unbound key: ' .. params.key },
-              },
-            },
+        handler(nil, {
+          effects = {
+            { type = 'message', level = 3, text = 'Unbound key: ' .. params.key },
           },
-        }
+        })
+        return true
       end
-      return nil
+      return original_request(self, method, params, handler, bufnr)
     end
     NOTIFIES = {}
     vim.notify = function(msg, level)
@@ -1061,6 +1116,11 @@ T['capture mode forwards printable keys and shows the server hint'] = function()
   MiniTest.expect.equality(child.lua_get("HELPERS.applied_lhs('n')['Q'] ~= nil"), true)
   local before = child.lua_get('vim.api.nvim_buf_get_lines(STATUS.buf, 0, -1, false)')
   child.type_keys(50, 'Q')
+  MiniTest.expect.equality(
+    child.lua_get('HELPERS.wait_for(function() return #NOTIFIES == 1 end)'),
+    true,
+    'the unbound key was reported'
+  )
 
   MiniTest.expect.equality(child.lua_get('SENT'), { 'Q' })
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
@@ -1783,9 +1843,14 @@ local function menu_model(state)
     (function()
       local record = require('magit-lsp.view').views[%q]
       if not record then return nil end
-      local result, err = require('magit-lsp.view').sync(
-        record.buf, record.client_id, 'view/resync', { viewId = record.id })
-      if err or not result then return nil end
+      local client = vim.lsp.get_client_by_id(record.client_id)
+      local done, result
+      client:request('view/resync', { viewId = record.id }, function(err, value)
+        result = value
+        done = true
+      end, record.buf)
+      vim.wait(5000, function() return done end, 10)
+      if not result then return nil end
       return result.menu
     end)()
   ]], state.id))
@@ -2095,21 +2160,43 @@ T['buffers renders that beat the view/open response'] = function()
   child.lua([[
     DELAYED_OPEN = false
     RENDER_BEFORE_RESPONSE = false
-    local original = vim.lsp.buf_request
-    vim.lsp.buf_request = function(bufnr, method, params, handler)
-      if method == 'view/open' and type(handler) == 'function' then
-        DELAYED_OPEN = true
-        return original(bufnr, method, params, function(...)
-          local args = { n = select('#', ...), ... }
-          vim.defer_fn(function()
-            -- Proves the race: the render was received (and buffered) before
-            -- the response handler ran.
-            RENDER_BEFORE_RESPONSE = next(VIEW.pending_render) ~= nil
-            handler(unpack(args, 1, args.n))
-          end, 300)
-        end)
+    -- The queue resolves the client for every request, so a proxy that delays
+    -- only the `view/open` response proves the render is buffered, not lost.
+    local real_get_client = vim.lsp.get_client_by_id
+    local proxy
+    vim.lsp.get_client_by_id = function(id)
+      local c = real_get_client(id)
+      if not c then
+        return c
       end
-      return original(bufnr, method, params, handler)
+      if proxy then
+        return proxy
+      end
+      proxy = setmetatable({}, {
+        __index = function(_, key)
+          if key ~= 'request' then
+            return c[key]
+          end
+          return function(self, method, params, handler, bufnr)
+            if method == 'view/open' and type(handler) == 'function' then
+              DELAYED_OPEN = true
+              return c.request(c, method, params, function(err, result, ctx)
+                vim.defer_fn(function()
+                  -- Proves the race: the render was received (and buffered)
+                  -- before the response handler ran.
+                  RENDER_BEFORE_RESPONSE = next(VIEW.pending_render) ~= nil
+                  handler(err, result, ctx)
+                end, 300)
+              end, bufnr)
+            end
+            return c.request(c, method, params, handler, bufnr)
+          end
+        end,
+        __newindex = function(_, key, value)
+          c[key] = value
+        end,
+      })
+      return proxy
     end
   ]])
   setup_child()
@@ -2200,7 +2287,13 @@ T['two repositories get independent status views'] = function()
   local other = make_repo(true, project .. '/build/test-repos/fixture-other')
   vim.fn.writefile({ 'other' }, other .. '/other.txt')
 
-  child.lua(string.format("vim.cmd('tabnew'); SECOND = M.setup({ root_dir = %q })", other))
+  child.lua(string.format(
+    "vim.cmd('tabnew'); M.setup({ root_dir = %q }); "
+      .. 'vim.wait(5000, function() local v = M.status_view(%q); '
+      .. 'return v ~= nil and v.version ~= nil and v.keymap_ready end, 10)',
+    other,
+    other
+  ))
   local state = child.lua_get([==[(function()
     local v = require('magit-lsp.view')
     local out = {}
@@ -2255,7 +2348,14 @@ T['two repositories get independent status views'] = function()
   -- its buffer, cursor and folds. The other repository stays live throughout.
   child.lua(string.format([[
     VIEW.focus(%q)
-    local render = VIEW.sync(STATUS.buf, STATUS.client_id, 'view/resync', { viewId = STATUS.id })
+    local status_get = vim.lsp.get_client_by_id(STATUS.client_id)
+    local render
+    local done = false
+    status_get:request('view/resync', { viewId = STATUS.id }, function(_, value)
+      render = value
+      done = true
+    end, STATUS.buf)
+    vim.wait(5000, function() return done end, 10)
     VIEW.apply_render(render, STATUS.client_id)
     local parent = VIEW.views[%q]
     vim.api.nvim_win_set_cursor(parent.win, { 8, 2 })
@@ -2264,14 +2364,22 @@ T['two repositories get independent status views'] = function()
       cursor = vim.api.nvim_win_get_cursor(parent.win), fold = vim.fn.foldclosed(3),
       text = parent.lines }
     M.press({ 'g', '$' })
+    vim.wait(5000, function()
+      local current = VIEW.current()
+      return current ~= nil and current.key ~= %q
+        and current.version ~= nil and current.keymap_ready
+    end, 10)
     NESTED = VIEW.current()
-    vim.wait(5000, function() return NESTED.version ~= nil and NESTED.keymap_ready end, 10)
     M.press({ 'q' })
+    vim.wait(5000, function()
+      local current = VIEW.current()
+      return current ~= nil and current.key == %q
+    end, 10)
     RETURNED = VIEW.current()
     RETURNED_STATE = { key = RETURNED.key, buf = RETURNED.buf, version = RETURNED.version,
       cursor = vim.api.nvim_win_get_cursor(RETURNED.win), fold = vim.fn.foldclosed(3),
       text = RETURNED.lines }
-  ]], first.key, first.key))
+  ]], first.key, first.key, first.key, first.key))
   MiniTest.expect.equality(child.lua_get('NESTED.placement'), 'main')
   MiniTest.expect.equality(child.lua_get('RETURNED == STATUS'), true)
   MiniTest.expect.equality(child.lua_get('RETURNED_STATE'), child.lua_get('PARENT'))
@@ -2286,7 +2394,13 @@ T['two repositories get independent status views'] = function()
   MiniTest.expect.equality(child.lua_get('FRESH_REFRESHED'), true, 'original status can refresh')
   MiniTest.expect.equality(type(wait_menu()), 'table', 'original status can open a menu')
   child.lua("M.press({ 'q' })")
-  MiniTest.expect.equality(child.lua_get('VIEW.current().key == STATUS.key'), true)
+  MiniTest.expect.equality(
+    child.lua_get(
+      'HELPERS.wait_for(function() local c = VIEW.current(); return c ~= nil and c.key == STATUS.key end)'
+    ),
+    true,
+    'closing the menu returns to the status view'
+  )
   child.lua(string.format([[
     VIEW.focus(%q)
     SECOND_STATUS = VIEW.current()
@@ -2392,7 +2506,6 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
     vim.lsp.get_client_by_id = function(id) return clients[id] end
     vim.lsp.buf_is_attached = function() return true end
     vim.lsp.semantic_tokens.force_refresh = function() end
-    vim.lsp.buf_request_sync = function() return { [101] = { result = {} } } end
     VIEW.configure({})
     for _, id in ipairs({ 101, 202 }) do
       VIEW.apply_render({ viewId = 'same', version = 1,
@@ -2417,30 +2530,26 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
       pending_empty = next(VIEW.pending_render) == nil and next(VIEW.pending_keymap) == nil,
       distinct = A.key ~= B.key and A.buf ~= B.buf and A.win ~= B.win,
     }
-    debug_api.request_started()
-    VIEW.apply_render({ viewId = 'same', version = 3, baseVersion = 2, mode = 'text',
-      edits = { { startLine = 0, endLine = 1, lines = { 'a deferred' } } },
-    }, 101)
-    VIEW.apply_render({ viewId = 'same', version = 2, baseVersion = 1, mode = 'interactive',
-      edits = { { startLine = 0, endLine = 1, lines = { 'b deferred' } } },
-    }, 202)
-    HELD = { A.version, B.version, #ACKS }
-    debug_api.request_finished()
-    VIEW.sync(A.buf, A.client_id, 'probe', {})
-    DEFERRED = { a = A.lines, b = B.lines, versions = { A.version, B.version },
-      editable = { vim.bo[A.buf].modifiable, vim.bo[B.buf].modifiable },
-      empty = next(VIEW.deferred_render) == nil }
 
+    -- A render against a version the client does not hold asks for a resync;
+    -- it must not corrupt the text or change the mode.
     VIEW.apply_render({ viewId = 'same', version = 99, baseVersion = 0, mode = 'interactive',
       edits = { { startLine = 0, endLine = 1, lines = { 'WRONG BASE' } } },
     }, 101)
     MISMATCH = { mode = A.mode, editable = vim.bo[A.buf].modifiable,
       text = A.lines, version = A.version, acks = #ACKS,
       resyncs = #RESYNCS, client_id = RESYNCS[1].client_id }
+    -- A render that arrives while the resync is outstanding is held, then
+    -- applied after the fresh text, so the buffer never mixes versions.
+    VIEW.apply_render({ viewId = 'same', version = 5, mode = 'interactive',
+      text = { 'held during resync' } }, 101)
+    HELD = { text = A.lines, version = A.version,
+      deferred = #(VIEW.deferred_render[A.key] or {}) }
     RESYNCS[1].callback(nil, { viewId = 'same', version = 4,
       mode = 'interactive', text = { 'fresh server text' } })
     RECOVERED = { mode = A.mode, editable = vim.bo[A.buf].modifiable,
-      text = A.lines, version = A.version, other = B.lines }
+      text = A.lines, version = A.version, other = B.lines,
+      deferred = next(VIEW.deferred_render) == nil }
     VIEW.close(A.key)
     INDEPENDENT_CLOSE = VIEW.views[A.key] == nil and VIEW.views[B.key] == B
     vim.api.nvim_buf_delete(B.buf, { force = true })
@@ -2452,26 +2561,24 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
     editable = { true, false }, keymaps = { 'new-kind', 'new-kind' },
     pending_empty = true, distinct = true,
   })
-  MiniTest.expect.equality(child.lua_get('HELD'), { 2, 1, 3 })
-  MiniTest.expect.equality(child.lua_get('DEFERRED'), {
-    a = { 'a deferred', '  replacement', '' }, b = { 'b deferred' }, versions = { 3, 2 },
-    editable = { true, false }, empty = true,
-  })
   MiniTest.expect.equality(child.lua_get('MISMATCH'), {
-    mode = 'text', editable = true, text = { 'a deferred', '  replacement', '' },
-    version = 3, acks = 5, resyncs = 1, client_id = 101,
+    mode = 'text', editable = true, text = { '  alpha', '  replacement', '' },
+    version = 2, acks = 3, resyncs = 1, client_id = 101,
+  })
+  MiniTest.expect.equality(child.lua_get('HELD'), {
+    text = { '  alpha', '  replacement', '' }, version = 2, deferred = 1,
   })
   MiniTest.expect.equality(child.lua_get('RECOVERED'), {
-    mode = 'interactive', editable = false, text = { 'fresh server text' },
-    version = 4, other = { 'b deferred' },
+    mode = 'interactive', editable = false, text = { 'held during resync' },
+    version = 5, other = { 'second' }, deferred = true,
   })
   local acks = child.lua_get('ACKS')
   table.sort(acks, function(a, b)
     return a[1] < b[1] or (a[1] == b[1] and a[3] < b[3])
   end)
   MiniTest.expect.equality(acks, {
-    { 101, 'same', 1 }, { 101, 'same', 2 }, { 101, 'same', 3 }, { 101, 'same', 4 },
-    { 202, 'same', 1 }, { 202, 'same', 2 },
+    { 101, 'same', 1 }, { 101, 'same', 2 }, { 101, 'same', 4 }, { 101, 'same', 5 },
+    { 202, 'same', 1 },
   })
   MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
 end

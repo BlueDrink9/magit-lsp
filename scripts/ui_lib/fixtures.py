@@ -56,6 +56,7 @@ FIXTURES = (
     "staged-one-file",
     "staged-and-unstaged",
     "staged-failing-hook",
+    "staged-slow-hook",
     "untracked",
     "unborn",
     "in-progress-rebase",
@@ -178,6 +179,24 @@ def _staged_failing_hook(repo: Path, env: dict[str, str]) -> None:
     hook.chmod(0o755)
 
 
+def _staged_slow_hook(repo: Path, env: dict[str, str]) -> None:
+    """A staged change whose `pre-commit` hook is slow, then rejects the commit.
+
+    The delay keeps the commit outstanding long enough for `ui-stays-responsive`
+    to press keys while it runs. The failure means Git never opens an editor,
+    so the commit ends by itself and the client becomes idle again.
+    """
+    commit(repo, env, "initial", {"f.txt": TEN_LINES})
+    write(repo / "f.txt", STANDARD_CHANGES)
+    git(repo, env, "add", "f.txt")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    write(
+        hook,
+        "#!/bin/sh\nsleep 1\necho 'slow pre-commit hook: commit blocked' >&2\nexit 1\n",
+    )
+    hook.chmod(0o755)
+
+
 def _untracked(repo: Path, env: dict[str, str]) -> None:
     commit(repo, env, "initial", {"f.txt": TEN_LINES})
     write(repo / "new.txt", "brand new\n")
@@ -221,6 +240,7 @@ _BUILDERS = {
     "staged-one-file": _staged_one_file,
     "staged-and-unstaged": _staged_and_unstaged,
     "staged-failing-hook": _staged_failing_hook,
+    "staged-slow-hook": _staged_slow_hook,
     "untracked": _untracked,
     "unborn": _unborn,
     "in-progress-rebase": _in_progress_rebase,
