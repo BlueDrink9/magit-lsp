@@ -62,6 +62,10 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   mirrors Neovim's fold keys to server commands.
 - **LSP-provided navigation targets** for jumping between sections, files, and
   hunks.
+- **Readable Git errors**: common failures such as rejected pushes, missing
+  files and conflicts show a plain-language summary and
+  actionable hint; raw output remains available as detail when no specific
+  explanation applies.
 
 ## Requirements
 

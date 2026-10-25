@@ -183,13 +183,28 @@ fn a_real_non_fast_forward_push_is_readable_without_a_process_log() {
 
 #[test]
 fn unmapped_failure_uses_the_fallback_with_stderr_detail() {
-    let stderr = "fatal: pathspec 'missing' did not match any files";
+    let stderr = "fatal: an unusual Git failure";
     let user = map_git_failure(128, stderr, "add");
 
     assert_eq!(user.summary, "`git add` failed.");
     assert_eq!(user.hint, None);
     assert_eq!(user.detail.as_deref(), Some(stderr));
     assert_eq!(user.command.as_deref(), Some("git add"));
+}
+
+#[test]
+fn a_missing_pathspec_has_a_refreshable_summary() {
+    let (tmp, _repo) = init_repo();
+    let failure = git_failure(tmp.path(), &["add", "--", "missing.txt"], None);
+    assert_eq!(
+        Effect::from_git_failure(&failure),
+        message(
+            MessageLevel::Error,
+            "The requested file is no longer available to Git.",
+            Some("Refresh the status view and try again."),
+            None
+        )
+    );
 }
 
 #[test]
@@ -294,11 +309,8 @@ fn unmapped_git_failure_returns_the_fallback_effect() {
         panic!("expected a message effect, got {:?}", effects[0]);
     };
     assert_eq!(*level, MessageLevel::Error);
-    assert_eq!(text, "`git add` failed.");
-    assert!(detail
-        .as_deref()
-        .unwrap_or("")
-        .contains("did not match any files"));
+    assert_eq!(text, "The requested file is no longer available to Git.");
+    assert!(detail.is_none());
 }
 
 #[test]

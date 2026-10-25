@@ -77,6 +77,11 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
             "The operation stopped because of conflicts.".to_string(),
             Some("Resolve the conflicts, then continue the operation.".to_string()),
         )
+    } else if text.contains("pathspec") && text.contains("did not match any files") {
+        (
+            "The requested file is no longer available to Git.".to_string(),
+            Some("Refresh the status view and try again.".to_string()),
+        )
     } else {
         return UserError {
             summary: format!("`git {subcommand}` failed."),

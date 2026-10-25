@@ -1312,8 +1312,20 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
        `build/ui/discard-confirm/vim-100x30/{confirm,declined,accepted}.screen`,
        `build/ui/discard-confirm/vim-80x24/{confirm,declined,accepted}.screen`.
        Verified with `make test && make ui-test && make ui-tour`.
-- [ ] R-3.7 `UserError` mapping table for all remaining Git failures as they
-      are met.
+- [x] R-3.7 `UserError` mapping table for all remaining Git failures as they
+      are met. The pathspec failure emitted by the implemented `git add`
+      operation now has a refresh-and-retry summary; other stderr still uses
+      the readable `git <subcommand> failed.` fallback with raw output only in
+      the detail field. Existing process-log reservation and secret redaction
+      are unchanged. Regression coverage includes a real missing-path `git add`
+      and the error UI scenario.
+      *UI:* `git-error-readable` PASS in `make ui-test` under both profiles at
+      100x30 and 80x24. Screens:
+      `build/ui/git-error-readable/standard-100x30/readable-git-error.screen`,
+      `build/ui/git-error-readable/standard-80x24/readable-git-error.screen`,
+      `build/ui/git-error-readable/vim-100x30/readable-git-error.screen`,
+      `build/ui/git-error-readable/vim-80x24/readable-git-error.screen`.
+      Verified with `make test && make ui-test && make ui-tour`.
 
 ### Phase 4 — Commit flow
 

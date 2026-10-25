@@ -1,0 +1,11 @@
+# A failed Git command is presented as a readable message, not serialized data.
+fixture: staged-failing-hook
+---
+keys: c
+wait
+keys: c
+wait
+expect screen contains "`git commit` failed."
+expect screen not-contains "{\""
+expect screen not-contains "processLogId"
+snapshot: readable-git-error
