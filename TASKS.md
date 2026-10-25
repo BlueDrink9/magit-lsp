@@ -1139,7 +1139,7 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
   infrastructure. Phase order changed: Read views are now Phase 4 and Commit
   flow Phase 5; retain R-5.* and R-4.* IDs because Planned messages and other
   stable references already use them. Then R-5.2…R-5.5; R-4.1…R-4.3;
-  R-3.5…R-3.7; R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
+  R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
   R-9.1…R-9.5. Their full acceptance criteria remain in the phase entries.
 
 ### Task ticket template and UI rule
@@ -1342,8 +1342,9 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 
 ### Phase 4 — Read views
 
-- [ ] R-5.1 **First feature to implement: log and reusable select mode** (§3.7).
-      Implement the server-rendered log with visible selection purpose, cursor
+- [ ] R-5.1 **First feature to implement: log (graph, decorations, filters,
+      lazy loading) and reusable select mode** (§3.7). Implement the
+      server-rendered log with visible selection purpose, cursor
       and structured commit identity; confirm/cancel; native editor navigation
       and search (search keys must not be swallowed by capture); and push/focus,
       return-to-caller lifecycle. Confirm returns the selected commit to the
