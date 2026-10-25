@@ -796,18 +796,33 @@ fn the_registry_exposes_open_commit_and_the_menu_commands() {
         );
     }
 
-    // A menu action's status is separate from the registry: most commit
-    // actions stay Planned until R-4.1, `c` is implemented.
+    // A menu action's status mirrors its registry status, so a menu item can
+    // never report a state the registry does not know about.
     let menu = menus::named("commit").expect("commit menu");
     for key in ["e", "f", "a"] {
-        match menu.item(key).map(|item| item.status()) {
-            Some(MenuStatus::Planned { roadmap_id }) => assert_eq!(roadmap_id, "R-4.1"),
-            other => panic!("{key} is planned, got {other:?}"),
+        let item = menu.item(key).expect("commit menu item");
+        let magit_lsp::menu::Item::Action { command, .. } = item else {
+            panic!("{key} is an action");
+        };
+        let registered = registry()
+            .get(&command)
+            .unwrap_or_else(|| panic!("{command} is registered"));
+        match &registered.status {
+            CommandStatus::Implemented => {
+                assert_eq!(item.status(), &MenuStatus::Implemented);
+            }
+            CommandStatus::Planned { roadmap_id } => assert_eq!(
+                item.status(),
+                &MenuStatus::Planned {
+                    roadmap_id: roadmap_id.to_string()
+                }
+            ),
+            CommandStatus::Unavailable { reason } => assert_eq!(
+                item.status(),
+                &MenuStatus::Unavailable {
+                    reason: reason.to_string()
+                }
+            ),
         }
     }
-    assert_eq!(
-        menu.item("c").map(|item| item.status()),
-        Some(&MenuStatus::Implemented),
-        "c is implemented"
-    );
 }

@@ -1729,23 +1729,135 @@ T['a menu option prompt asks through vim.ui.input and lands the value'] = functi
   )
 end
 
-T['planned menu actions are greyed with the menu.planned token'] = function()
-  setup_child()
+--- Compatibility alias for `unpack` across Lua versions.
+local unpack = table.unpack or unpack
+
+--- Fetch the structured menu model of the view `state` from the server via
+--- `view/resync`. The wire request uses the actual `record.id`; the composite
+--- `record.key` is only used to look the view record up on the client.
+---@param state table the `wait_menu()` state of an open menu
+---@return table|nil menu the server's menu model, or nil
+local function menu_model(state)
+  if not state then return nil end
+  return child.lua_get(string.format([[
+    (function()
+      local record = require('magit-lsp.view').views[%q]
+      if not record then return nil end
+      local result, err = require('magit-lsp.view').sync(
+        record.buf, record.client_id, 'view/resync', { viewId = record.id })
+      if err or not result then return nil end
+      return result.menu
+    end)()
+  ]], state.id))
+end
+
+--- The first planned action of the menu model, with its key, label and roadmap
+--- id derived from the server metadata.
+---@param state table the `wait_menu()` state of an open menu
+---@return table|nil planned { key, label, roadmap }
+local function planned_in(state)
+  local menu = menu_model(state)
+  if not menu then return nil end
+  for _, group in ipairs(menu.groups or {}) do
+    for _, item in ipairs(group.items or {}) do
+      if item.status and item.status.status == 'planned' then
+        return { key = item.key, label = item.label, roadmap = item.status.roadmapId }
+      end
+    end
+  end
+  return nil
+end
+
+--- Find a real planned menu action without pinning any menu, key or label.
+---
+--- Tries the commit menu first; when it has no planned action, opens the
+--- dispatch menu and tries every opener it lists, so the cases keep working
+--- once every commit action is implemented.
+---@return table|nil planned { key, label, roadmap }
+---@return table|nil state the menu state the planned action was found in
+local function find_planned_action()
   child.type_keys(50, 'c')
   local state = wait_menu()
-  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+  local planned = planned_in(state)
+  if planned then return planned, state end
 
-  local position = child.lua_get(string.format([[
+  child.type_keys(50, 'q')
+  child.type_keys(50, 'g?')
+  local dispatch = wait_menu()
+  planned = planned_in(dispatch)
+  if planned then return planned, dispatch end
+  if not dispatch then return nil end
+
+  local dispatch_model = menu_model(dispatch)
+  if not dispatch_model then return nil end
+  for _, group in ipairs(dispatch_model.groups or {}) do
+    for _, item in ipairs(group.items or {}) do
+      if item.kind == 'action' and item.key then
+        local keys = {}
+        for key in item.key:gmatch('%S+') do
+          keys[#keys + 1] = key
+        end
+        child.type_keys(50, unpack(keys))
+        local opened = wait_menu()
+        local found = planned_in(opened)
+        if found then return found, opened end
+        if opened then
+          child.type_keys(50, 'q')
+          child.type_keys(50, 'g?')
+          wait_menu()
+        end
+      end
+    end
+  end
+  child.type_keys(50, 'q')
+  return nil
+end
+
+--- Locate the `magit.menu.planned` token for `label` through the server's
+--- semantic-token ranges, never by searching the rendered labels.
+---@param view_id string the composite key of the open menu view
+---@param label string the label of the planned action to locate
+---@return table|nil position { row, col } of the planned token
+local function planned_token_position(view_id, label)
+  return child.lua_get(string.format([[
     (function()
       local view = require('magit-lsp.view').views[%q]
-      for i, line in ipairs(vim.api.nvim_buf_get_lines(view.buf, 0, -1, false)) do
-        local column = line:find('Extend', 1, true)
-        if column then return { row = i - 1, column = column - 1 } end
+      if not view then return nil end
+      local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
+      local client = get_clients({ bufnr = view.buf })[1]
+      if not client then return nil end
+      local capability = client.server_capabilities.semanticTokensProvider
+      if not capability then return nil end
+      local responses = vim.lsp.buf_request_sync(view.buf,
+        'textDocument/semanticTokens/full',
+        { textDocument = { uri = view.uri } }, 5000)
+      local response = responses and responses[client.id]
+      if not response or not response.result then return nil end
+      local data = response.result.data
+      local line, char = 0, 0
+      for i = 1, #data, 5 do
+        local delta_line, delta_start, length, token_type =
+          data[i], data[i + 1], data[i + 2], data[i + 3]
+        line = line + delta_line
+        char = delta_line > 0 and delta_start or char + delta_start
+        if capability.legend.tokenTypes[token_type + 1] == 'magit.menu.planned'
+          and vim.api.nvim_buf_get_text(
+            view.buf, line, char, line, char + length, {})[1] == %q then
+          return { row = line, col = char }
+        end
       end
       return nil
     end)()
-  ]], state.id))
-  MiniTest.expect.equality(type(position), 'table', 'the Extend action line')
+  ]], view_id, label))
+end
+
+T['planned menu actions are greyed with the menu.planned token'] = function()
+  setup_child()
+  local planned, state = find_planned_action()
+  MiniTest.expect.equality(type(state), 'table', 'a menu with a planned action opened')
+
+  local position = planned_token_position(state.id, planned.label)
+  MiniTest.expect.equality(type(position), 'table', 'the planned action token position')
 
   local token = child.lua_get(string.format([[
     (function()
@@ -1757,15 +1869,14 @@ T['planned menu actions are greyed with the menu.planned token'] = function()
       local tokens = vim.lsp.semantic_tokens.get_at_pos(view.buf, %d, %d)
       return tokens and tokens[1] and tokens[1].type or nil
     end)()
-  ]], state.id, position.row, position.column, position.row, position.column))
+  ]], state.id, position.row, position.col, position.row, position.col))
   MiniTest.expect.equality(token, 'magit.menu.planned')
 end
 
 T['a planned menu action notifies once and keeps the menu open'] = function()
   setup_child()
-  child.type_keys(50, 'c')
-  local state = wait_menu()
-  MiniTest.expect.equality(type(state), 'table', 'the commit menu opened')
+  local planned, state = find_planned_action()
+  MiniTest.expect.equality(type(state), 'table', 'a menu with a planned action opened')
 
   child.lua([[
     NOTIFIES = {}
@@ -1773,14 +1884,18 @@ T['a planned menu action notifies once and keeps the menu open'] = function()
       table.insert(NOTIFIES, { msg = msg, level = level })
     end
   ]])
-  child.type_keys(50, 'e')
+  local keys = {}
+  for key in planned.key:gmatch('%S+') do
+    keys[#keys + 1] = key
+  end
+  child.type_keys(50, unpack(keys))
   vim.wait(5000, function()
     return child.lua_get('#NOTIFIES') > 0
   end, 20)
   MiniTest.expect.equality(child.lua_get('#NOTIFIES'), 1)
   MiniTest.expect.equality(
     child.lua_get('NOTIFIES[1].msg'),
-    'Not implemented yet: Extend (roadmap R-4.1)'
+    'Not implemented yet: ' .. planned.label .. ' (roadmap ' .. planned.roadmap .. ')'
   )
   MiniTest.expect.equality(child.lua_get('NOTIFIES[1].level'), vim.log.levels.INFO)
   MiniTest.expect.equality(menu_closed(state.id), false, 'the menu stays open')

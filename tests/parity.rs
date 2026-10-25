@@ -2,7 +2,7 @@
 //! block. The README block is the only parity snapshot; the CLI output is
 //! compared against the generators directly.
 
-use magit_lsp::commands::{registry, CommandStatus};
+use magit_lsp::commands::{registry, CommandStatus, Scope};
 use magit_lsp::menu::MenuStatus;
 use magit_lsp::menus::{self, ItemDef};
 use magit_lsp::parity;
@@ -36,7 +36,7 @@ fn every_menu_item_has_a_parity_row() {
 
 #[test]
 fn every_action_row_matches_the_registry_and_the_menu_status() {
-    let mut actions = 0;
+    let mut actions = std::collections::BTreeSet::new();
     for def in menus::all() {
         let menu = menus::build(&def);
         for group in &def.groups {
@@ -51,7 +51,7 @@ fn every_action_row_matches_the_registry_and_the_menu_status() {
                 else {
                     continue;
                 };
-                actions += 1;
+                actions.insert(*command);
                 assert!(!magit.is_empty(), "{}/{} has no Magit command", def.id, key);
                 let registered = registry()
                     .get(command)
@@ -81,7 +81,20 @@ fn every_action_row_matches_the_registry_and_the_menu_status() {
             }
         }
     }
-    assert!(actions > 150, "only {actions} actions");
+    // The definition walk is the only source of actions; the registry's
+    // menu-action scope must be fully covered by the walk. Some menu items
+    // (the `open.*` openers) are registered with their opener scope instead,
+    // so compare a subset relation rather than exact equality.
+    for command in registry()
+        .iter()
+        .filter(|command| command.scope == Scope::MenuAction)
+    {
+        assert!(
+            actions.contains(command.id),
+            "the walk covered every registered menu action: {}",
+            command.id
+        );
+    }
 }
 
 #[test]

@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use magit_lsp::commands::{registry, CommandStatus};
+use magit_lsp::commands::{registry, CommandStatus, Scope};
 use magit_lsp::config::Profile;
 use magit_lsp::menu::{Item, Menu, MenuStatus};
 use magit_lsp::view::{Placement, ViewKind, Viewport};
@@ -57,6 +57,7 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
     test.ack();
 
     let mut checked = 0;
+    let mut pressed: Vec<(String, String)> = Vec::new();
     for (name, menu) in menus() {
         let planned = planned_actions(&menu);
         if planned.is_empty() {
@@ -74,6 +75,7 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
             let Item::Action {
                 key,
                 label,
+                command,
                 status: MenuStatus::Planned { roadmap_id },
                 ..
             } = item
@@ -93,13 +95,37 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
                 "{name} {key} closed the menu"
             );
             checked += 1;
+            pressed.push((command.to_string(), key.to_string()));
         }
         test.session_mut()
             .close(&descriptor.id)
             .expect("close menu");
     }
 
-    assert!(checked > 100, "checked {checked} planned menu actions");
+    // The key presses cover exactly the planned commands that menus expose:
+    // the planned menu actions (Scope::MenuAction) and the planned status
+    // commands (Scope::Status, both the `status.*` actions and the `open.*`
+    // openers listed in the dispatch menu). A command may be exposed by
+    // several menus or keys, so compare unique command ids.
+    let planned_menu_commands: Vec<&str> = registry()
+        .iter()
+        .filter(|command| {
+            matches!(command.status, CommandStatus::Planned { .. })
+                && (command.scope == Scope::MenuAction || command.scope == Scope::Status)
+        })
+        .map(|command| command.id)
+        .collect();
+    let mut pressed_commands: Vec<&str> =
+        pressed.iter().map(|(command, _key)| command.as_str()).collect();
+    pressed_commands.sort_unstable();
+    pressed_commands.dedup();
+    let mut planned_menu_commands = planned_menu_commands;
+    planned_menu_commands.sort_unstable();
+    assert_eq!(
+        pressed_commands, planned_menu_commands,
+        "the menu key presses covered every planned menu item"
+    );
+    assert!(checked > 0, "there are planned menu actions to check");
     assert_eq!(
         git_state(tmp.path()),
         before,
@@ -185,7 +211,6 @@ fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
     let reference = parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
     let expected = definition_actions();
     validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(expected.len(), 192, "all static action occurrences covered");
     let aliases = [
         ("rebase", "s", "in-progress rebase: Skip", "magit-rebase-skip"),
         ("rebase", "e", "in-progress rebase: Edit", "magit-rebase-edit"),

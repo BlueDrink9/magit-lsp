@@ -190,7 +190,29 @@ fn the_registry_lists_every_named_command_once() {
     .map(|&scope| registry().by_scope(scope).count())
     .sum();
     assert_eq!(by_scope, seen.len());
-    assert_eq!(registry().by_scope(Scope::Status).count(), 32);
+
+    // The status scope (§5.2) consists of the `status.*` actions and every
+    // `open.*` opener except the dispatch menu (§5.1). Assert the exact
+    // partition instead of a hardcoded count.
+    let status_ids: Vec<&str> = EXPECTED
+        .iter()
+        .copied()
+        .filter(|id| {
+            id.starts_with("status.") || (id.starts_with("open.") && *id != "open.dispatch")
+        })
+        .collect();
+    for id in &status_ids {
+        assert_eq!(
+            registry().get(id).expect("registered").scope,
+            Scope::Status,
+            "{id} is in the status scope"
+        );
+    }
+    assert_eq!(
+        registry().by_scope(Scope::Status).count(),
+        status_ids.len(),
+        "the status scope contains exactly the §5.2 set"
+    );
 }
 
 #[test]
