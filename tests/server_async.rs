@@ -43,6 +43,32 @@ fn open_view_message(id: i64, repo: &Value) -> Value {
     })
 }
 
+/// The 0-based cursor line of the first hunk, resolved from the server's own
+/// outline. Tests never recover structure by matching rendered line shapes.
+fn first_hunk_line(server: &mut TestServer, uri: &str) -> u64 {
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 90,
+        "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}},
+    }));
+    let response = server.response_with_id(90);
+    let symbols: Vec<lsp_types::DocumentSymbol> =
+        serde_json::from_value(response["result"].clone())
+            .unwrap_or_else(|error| panic!("documentSymbol returns symbols: {error}: {response}"));
+    hunk_symbol_line(&symbols).unwrap_or_else(|| panic!("no hunk symbol: {response}"))
+}
+
+/// The selection line of the first hunk in an outline, at any depth.
+fn hunk_symbol_line(symbols: &[lsp_types::DocumentSymbol]) -> Option<u64> {
+    symbols.iter().find_map(|symbol| {
+        if symbol.kind == lsp_types::SymbolKind::METHOD {
+            return Some(u64::from(symbol.selection_range.start.line));
+        }
+        symbol.children.as_deref().and_then(hunk_symbol_line)
+    })
+}
+
 fn shutdown_and_exit(server: &mut TestServer) {
     server.send(json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null}));
     let response = server.response_with_id(99);
@@ -402,6 +428,10 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         .expect("view id")
         .to_string();
     assert_eq!(opened["result"]["kind"], json!("status"));
+    let uri = opened["result"]["uri"]
+        .as_str()
+        .expect("view uri")
+        .to_string();
     assert_eq!(
         opened["result"]["uri"],
         json!(format!(
@@ -415,16 +445,8 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
     assert_eq!(initial["params"]["viewId"], json!(view_id));
     assert_eq!(initial["params"]["version"], json!(1));
     assert!(initial["params"]["baseVersion"].is_null());
-    let text = initial["params"]["text"]
-        .as_array()
-        .expect("initial full text");
-    let line = text
-        .iter()
-        .position(|line| {
-            line.as_str()
-                .is_some_and(|line| line.trim_start().starts_with('+'))
-        })
-        .expect("a '+' line in the rendered status");
+    assert!(initial["params"]["text"].is_array());
+    let line = first_hunk_line(&mut server, &uri);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -651,19 +673,17 @@ fn forward_all_passes_through_unbound_keys_and_dispatches_bound_keys() {
         .as_str()
         .expect("view id")
         .to_string();
+    let uri = opened["result"]["uri"]
+        .as_str()
+        .expect("view uri")
+        .to_string();
     let render = server.recv();
     assert_eq!(render["method"], json!("view/render"));
     let version = render["params"]["version"]
         .as_u64()
         .expect("render version");
-    let text = render["params"]["text"].as_array().expect("render text");
-    let line = text
-        .iter()
-        .position(|line| {
-            line.as_str()
-                .is_some_and(|line| line.trim_start().starts_with('+'))
-        })
-        .expect("added line cursor target");
+    assert!(render["params"]["text"].is_array());
+    let line = first_hunk_line(&mut server, &uri);
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
 
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/key","params":{"viewId":view_id,"version":version,"key":"~","editorMode":"normal","cursor":{"line":line,"column":0}}}));
@@ -732,6 +752,10 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         .as_str()
         .expect("view id")
         .to_string();
+    let uri = opened["result"]["uri"]
+        .as_str()
+        .expect("view uri")
+        .to_string();
 
     let mut render = None;
     let mut keymap = None;
@@ -753,15 +777,8 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         Some(vec!["s".to_string()])
     );
 
-    let line = render["params"]["text"]
-        .as_array()
-        .expect("initial full text")
-        .iter()
-        .position(|line| {
-            line.as_str()
-                .is_some_and(|line| line.trim_start().starts_with('+'))
-        })
-        .expect("a '+' line in the rendered status");
+    assert!(render["params"]["text"].is_array());
+    let line = first_hunk_line(&mut server, &uri);
 
     server.send(json!({
         "jsonrpc": "2.0",

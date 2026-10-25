@@ -81,37 +81,37 @@ local function setup_child(opts)
         end
         return nil
       end,
-      section_range = function(section)
-        local headers = {
-          staged = 'Staged changes (',
-          unstaged = 'Unstaged changes (',
-          untracked = 'Untracked files (',
+      --- The server's outline for the focused view, never rendered text.
+      ---@return table[]
+      symbols = function()
+        return M.symbols() or {}
+      end,
+      --- The section symbol named for `section` (`staged`, `unstaged`, `untracked`).
+      ---@param section string
+      ---@return table|nil
+      section_symbol = function(section)
+        local names = {
+          staged = 'Staged changes',
+          unstaged = 'Unstaged changes',
+          untracked = 'Untracked files',
         }
-        local wanted = headers[section]
-        local lines = HELPERS.lines()
-        local first
-        for i, line in ipairs(lines) do
-          if vim.startswith(line, wanted) then
-            first = i
-            break
+        local wanted = names[section]
+        for _, symbol in ipairs(HELPERS.symbols()) do
+          if symbol.name == wanted then
+            return symbol
           end
         end
-        if not first then
+        return nil
+      end,
+      --- First and last buffer line (1-based) of a section's symbol range.
+      ---@param section string
+      ---@return integer|nil first, integer|nil last
+      section_range = function(section)
+        local symbol = HELPERS.section_symbol(section)
+        if not symbol then
           return nil
         end
-        local last = #lines
-        for i = first + 1, #lines do
-          local line = lines[i]
-          if
-            vim.startswith(line, 'Staged changes (')
-            or vim.startswith(line, 'Unstaged changes (')
-            or vim.startswith(line, 'Untracked files (')
-          then
-            last = i - 1
-            break
-          end
-        end
-        return first, last
+        return symbol.range.start.line + 1, symbol.range['end'].line + 1
       end,
       find_line = function(marker, text, section)
         local first, last = HELPERS.section_range(section)
@@ -128,21 +128,24 @@ local function setup_child(opts)
         return nil
       end,
       find_first = function(kind, section)
-        local first, last = HELPERS.section_range(section)
-        if not first then
+        local symbol = HELPERS.section_symbol(section)
+        if not symbol then
           return nil
         end
         if kind == 'section' then
-          return first
+          return symbol.selectionRange.start.line + 1
         end
-        local lines = HELPERS.lines()
-        for i = first, last do
-          local line = lines[i]
-          if kind == 'hunk' and vim.startswith(line, '    @@') then
-            return i
-          end
-          if kind == 'file' and line:match('^  %S ') then
-            return i
+        local children = symbol.children or {}
+        if kind == 'file' then
+          local file = children[1]
+          return file and (file.selectionRange.start.line + 1) or nil
+        end
+        if kind == 'hunk' then
+          for _, file in ipairs(children) do
+            local hunk = (file.children or {})[1]
+            if hunk then
+              return hunk.selectionRange.start.line + 1
+            end
           end
         end
         return nil
