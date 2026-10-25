@@ -4,8 +4,7 @@ mod common;
 
 use common::*;
 use serde_json::json;
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 type Server = common::stdio::TestServer;
 
@@ -108,53 +107,4 @@ fn log_file_receives_logs_and_stdout_stays_clean() {
     let written = std::fs::read_to_string(&log_file).expect("read log file");
     assert!(written.contains("git failed"), "log file: {written}");
     assert!(written.contains("index.lock"), "log file: {written}");
-}
-
-#[test]
-fn src_never_writes_to_stdout_directly() {
-    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    collect_rust_files(&src, &mut files);
-    assert!(!files.is_empty(), "no Rust sources under {}", src.display());
-
-    for file in files {
-        let source = std::fs::read_to_string(&file).expect("read source");
-        for name in ["println!", "print!", "dbg!"] {
-            if let Some(offset) = first_macro_hit(&source, name) {
-                let line = source[..offset].lines().count();
-                panic!(
-                    "{}:{line} uses {name}; stdout is the LSP pipe",
-                    file.display()
-                );
-            }
-        }
-    }
-}
-
-fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("read src dir") {
-        let path = entry.expect("dir entry").path();
-        if path.is_dir() {
-            collect_rust_files(&path, files);
-        } else if path.extension() == Some(OsStr::new("rs")) {
-            files.push(path);
-        }
-    }
-}
-
-/// Byte offset of a real `name!` invocation, ignoring `eprintln!` and friends.
-fn first_macro_hit(source: &str, name: &str) -> Option<usize> {
-    let mut start = 0;
-    while let Some(offset) = source[start..].find(name) {
-        let index = start + offset;
-        let qualified = source[..index]
-            .chars()
-            .next_back()
-            .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if !qualified {
-            return Some(index);
-        }
-        start = index + name.len();
-    }
-    None
 }

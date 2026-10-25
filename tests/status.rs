@@ -216,8 +216,10 @@ fn status_reports_renamed_path_hunks() {
 
 #[test]
 fn untracked_files_are_separate_from_unstaged() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     write(&tmp.path().join("new.txt"), "new\n");
     write(&tmp.path().join("spaced name.txt"), "spaced\n");
 
@@ -235,8 +237,10 @@ fn untracked_files_are_separate_from_unstaged() {
 
 #[test]
 fn stage_untracked_stages_only_untracked_files() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     write(&tmp.path().join("new.txt"), "new\n");
     write(&tmp.path().join("spaced name.txt"), "spaced\n");
 

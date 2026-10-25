@@ -84,36 +84,63 @@ pub fn hunk_count(diff: &str) -> usize {
     diff.lines().filter(|line| line.starts_with("@@")).count()
 }
 
-/// `n` numbered lines, each newline terminated.
-pub fn numbered_lines(n: usize) -> String {
-    (1..=n).map(|i| format!("line{i}\n")).collect()
+/// `n` numbered lines (`line1` … `line{n}`) under construction.
+///
+/// Override lines with [`Lines::with`], then render the file with
+/// [`std::string::ToString`].
+pub fn lines(n: usize) -> Lines {
+    Lines((1..=n).map(|i| format!("line{i}")).collect())
 }
 
-/// The worktree content produced by [`make_standard_changes`].
+/// A file body being built from numbered lines; see [`lines`].
+pub struct Lines(Vec<String>);
+
+impl Lines {
+    /// Replace 1-based line `n` with `text`.
+    pub fn with(mut self, n: usize, text: impl Into<String>) -> Self {
+        assert!(n >= 1 && n <= self.0.len(), "line {n} is out of range");
+        self.0[n - 1] = text.into();
+        self
+    }
+
+    /// Insert `text` as a new line directly after 1-based line `n`.
+    pub fn insert_after(mut self, n: usize, text: impl Into<String>) -> Self {
+        assert!(n >= 1 && n <= self.0.len(), "line {n} is out of range");
+        self.0.insert(n, text.into());
+        self
+    }
+
+    /// Remove the `n`th 1-based line.
+    pub fn remove(mut self, n: usize) -> Self {
+        assert!(n >= 1 && n <= self.0.len(), "line {n} is out of range");
+        self.0.remove(n - 1);
+        self
+    }
+}
+
+impl std::fmt::Display for Lines {
+    /// Render every line with a trailing newline.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.join("\n"))?;
+        f.write_str("\n")
+    }
+}
+
+/// The worktree content produced by [`RepoFixture::modify_standard`].
 pub fn standard_changes() -> String {
-    let mut lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
-    lines[2] = "line3 CHANGED".into();
-    lines.insert(5, "NEW line".into());
-    lines.remove(8);
-    lines.join("\n") + "\n"
+    lines(10)
+        .with(3, "line3 CHANGED")
+        .remove(8)
+        .insert_after(5, "NEW line")
+        .to_string()
 }
 
-/// The worktree content produced by [`make_two_hunks`].
+/// The worktree content produced by [`RepoFixture::modify_two_hunks`].
 pub fn two_hunk_changes() -> String {
-    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    lines[4] = "line5 CHANGED".into();
-    lines[34] = "line35 CHANGED".into();
-    lines.join("\n") + "\n"
-}
-
-/// Apply three interleaved edits to `f.txt` without staging them.
-pub fn make_standard_changes(tmp: &Path) {
-    write(&tmp.join("f.txt"), &standard_changes());
-}
-
-/// Change lines 5 and 35 of a 40-line `f.txt`, producing two hunks.
-pub fn make_two_hunks(tmp: &Path) {
-    write(&tmp.join("f.txt"), &two_hunk_changes());
+    lines(40)
+        .with(5, "line5 CHANGED")
+        .with(35, "line35 CHANGED")
+        .to_string()
 }
 
 /// Builder for deterministic temporary repositories.
@@ -194,12 +221,12 @@ impl RepoFixture {
         self
     }
 
-    /// Apply [`make_standard_changes`] to `f.txt` without staging it.
+    /// Apply [`standard_changes`] to `f.txt` without staging it.
     pub fn modify_standard(self) -> Self {
         self.modify("f.txt", standard_changes())
     }
 
-    /// Apply [`make_two_hunks`] to a 40-line `f.txt` without staging it.
+    /// Apply [`two_hunk_changes`] to a 40-line `f.txt` without staging it.
     pub fn modify_two_hunks(self) -> Self {
         self.modify("f.txt", two_hunk_changes())
     }
@@ -265,40 +292,10 @@ pub fn init_unborn_repo() -> (RepoFixture, GitRepo) {
         .build()
 }
 
-/// A repo with a 30-line file, so two distant edits produce two hunks.
-pub fn init_long_repo() -> (RepoFixture, GitRepo) {
-    RepoFixture::new()
-        .commit("init", [("f.txt", numbered_lines(30))])
-        .build()
-}
-
-/// A repo with two tracked files, both ten lines long.
-pub fn init_two_file_repo() -> (RepoFixture, GitRepo) {
-    let body = numbered_lines(10);
-    RepoFixture::new()
-        .commit("init", [("f.txt", body.clone()), ("g.txt", body)])
-        .build()
-}
-
-/// A repo with a 40-line tracked file.
-pub fn init_40_line_repo() -> (RepoFixture, GitRepo) {
-    RepoFixture::new()
-        .commit("init", [("f.txt", numbered_lines(40))])
-        .build()
-}
-
-/// Like [`init_repo`], with a second commit replacing `f.txt` with 40 lines.
-pub fn init_repo_40() -> (RepoFixture, GitRepo) {
-    RepoFixture::new()
-        .commit("init", [("f.txt", TEN_LINES)])
-        .commit("forty", [("f.txt", numbered_lines(40))])
-        .build()
-}
-
 /// Real-server stdio transport shared by integration suites.
 pub mod stdio;
 
-/// A gated fake `git` executable shared by the real-server suites.
+/// Fake `git` executables (gated and stalling) shared by the real-server suites.
 pub mod fake_git;
 
 /// In-process session harness shared by the session suites.

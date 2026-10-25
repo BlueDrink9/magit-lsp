@@ -1,3 +1,7 @@
+// The LSP wire protocol owns stdout; a stray print would corrupt it.
+#![deny(clippy::print_stdout)]
+#![deny(clippy::dbg_macro)]
+
 pub mod cli;
 pub mod commands;
 pub mod config;

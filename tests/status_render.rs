@@ -160,10 +160,11 @@ fn a_clean_tree_renders_a_non_blank_working_tree_clean_message() {
 
 #[test]
 fn node_ids_survive_a_hunk_shifting_lines() {
-    let (tmp, repo) = init_40_line_repo();
-    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    lines[34] = "line35 CHANGED".into();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .build();
+    let changed = lines(40).with(35, "line35 CHANGED").to_string();
+    write(&tmp.path().join("f.txt"), &changed);
 
     let before = status_view::build(&repo.status().expect("status"));
     let hunk = before
@@ -175,9 +176,7 @@ fn node_ids_survive_a_hunk_shifting_lines() {
     let hunk_line_before = hunk.start_line;
 
     // A new line far above the hunk shifts it but does not change its content.
-    let mut shifted = vec!["line0".to_string()];
-    shifted.extend(lines);
-    write(&tmp.path().join("f.txt"), &(shifted.join("\n") + "\n"));
+    write(&tmp.path().join("f.txt"), &format!("line0\n{changed}"));
 
     let after = status_view::build(&repo.status().expect("status"));
     let moved = after

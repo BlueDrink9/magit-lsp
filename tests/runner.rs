@@ -4,67 +4,16 @@
 
 mod common;
 
+use common::fake_git::{FakeGit, CHILD_ENV, MARKER_ENV};
 use common::*;
 use magit_lsp::git::GitRepo;
 use magit_lsp::runner::{self, CancelHandle, ProcessLog};
-use std::ffi::OsString;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
-
-/// Set in the re-executed child so it runs the test body instead of spawning.
-const CHILD_ENV: &str = "MAGIT_LSP_FAKE_GIT_CHILD";
-/// The start marker the fake `git` writes, handed to the child.
-const MARKER_ENV: &str = "MAGIT_LSP_FAKE_GIT_MARKER";
-
-/// A fake `git` for a child process's `PATH`; it delegates everything to the
-/// real Git except `add -u`, which signals its start and then sleeps until
-/// killed.
-struct FakeGit {
-    _dir: TempDir,
-    /// `PATH` value putting the fake first, passed with `Command::env`.
-    path: OsString,
-}
-
-impl FakeGit {
-    fn new() -> Self {
-        let real_git = real_git_path();
-        let dir = TempDir::new().expect("fake git tempdir");
-        let script = dir.path().join("git");
-        std::fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\n\
-                 if [ \"$1\" = \"add\" ] && [ \"$2\" = \"-u\" ]; then\n\
-                   printf 'started\\n' > \"${{{MARKER_ENV}}}\"\n\
-                   exec sleep 30\n\
-                 fi\n\
-                 exec '{}' \"$@\"\n",
-                real_git.display()
-            ),
-        )
-        .expect("write fake git");
-        let mut permissions = std::fs::metadata(&script)
-            .expect("fake git metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&script, permissions).expect("chmod fake git");
-
-        let mut paths = vec![dir.path().to_path_buf()];
-        if let Some(path) = std::env::var_os("PATH") {
-            paths.extend(std::env::split_paths(&path));
-        }
-
-        Self {
-            _dir: dir,
-            path: std::env::join_paths(paths).expect("join PATH"),
-        }
-    }
-}
 
 /// Run `test` alone in a child process whose `PATH` starts with a fake `git`.
 ///
@@ -92,17 +41,6 @@ fn in_fake_git_child() -> bool {
 /// The marker path the fake `git` writes when it starts.
 fn marker_path() -> PathBuf {
     PathBuf::from(std::env::var_os(MARKER_ENV).expect("the marker env is set by the parent"))
-}
-
-fn real_git_path() -> PathBuf {
-    let output = Command::new("sh")
-        .args(["-c", "command -v git"])
-        .output()
-        .expect("locate git");
-    assert!(output.status.success(), "git is not on PATH");
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    assert!(!path.is_empty(), "git is not on PATH");
-    PathBuf::from(path)
 }
 
 fn wait_for_start(marker: &Path) {

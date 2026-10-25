@@ -1,19 +1,75 @@
-//! A tests-only fake `git` whose first gated command blocks until the test
-//! explicitly releases it, with an explicit entered/release handshake.
+//! Tests-only fake `git` executables, each scoped to a spawned child's `PATH`.
 //!
-//! The fake is placed first on the *server child's* `PATH` only (via
-//! [`GatedGit::child_env`]); the test process and every other process keep the
-//! real Git, and no parent environment is ever mutated. Every non-gated
-//! command delegates to the real binary, and a released gate runs the real
-//! command too, so repository behaviour stays correct. The handshake is
-//! file-based and bounded: the child writes its pid to `entered` when it is
-//! blocked inside the gate, and the test creates `release` to let it proceed.
+//! [`GatedGit`] blocks a gated subcommand until the test explicitly releases it,
+//! with an entered/release handshake. [`FakeGit`] replaces `add -u` with a
+//! start marker and a long sleep so cancellation can be observed.
+//!
+//! Both are placed first on the *server child's* `PATH` only; the test process
+//! and every other process keep the real Git, and no parent environment is ever
+//! mutated. Every other command delegates to the real binary, so repository
+//! behaviour stays correct.
+//!
+//! [`GatedGit`] is file-based and bounded: the child writes its pid to
+//! `entered` when it is blocked inside the gate, and the test creates `release`
+//! to let it proceed.
 
+use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// Set in the re-executed child so it runs the test body instead of spawning.
+pub const CHILD_ENV: &str = "MAGIT_LSP_FAKE_GIT_CHILD";
+/// The start marker [`FakeGit`] writes, handed to the child.
+pub const MARKER_ENV: &str = "MAGIT_LSP_FAKE_GIT_MARKER";
+
+/// A fake `git` for a child process's `PATH`; it delegates everything to the
+/// real Git except `add -u`, which signals its start and then sleeps until
+/// killed.
+pub struct FakeGit {
+    _dir: tempfile::TempDir,
+    /// `PATH` value putting the fake first, passed with `Command::env`.
+    pub path: OsString,
+}
+
+impl FakeGit {
+    /// Install the fake in a private temp directory.
+    pub fn new() -> Self {
+        let real_git = real_git_path();
+        let dir = tempfile::TempDir::new().expect("fake git tempdir");
+        let script = dir.path().join("git");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"add\" ] && [ \"$2\" = \"-u\" ]; then\n\
+                   printf 'started\\n' > \"${{{MARKER_ENV}}}\"\n\
+                   exec sleep 30\n\
+                 fi\n\
+                 exec '{}' \"$@\"\n",
+                real_git.display()
+            ),
+        )
+        .expect("write fake git");
+        let mut permissions = std::fs::metadata(&script)
+            .expect("fake git metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).expect("chmod fake git");
+
+        let mut paths = vec![dir.path().to_path_buf()];
+        if let Some(path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&path));
+        }
+
+        Self {
+            _dir: dir,
+            path: std::env::join_paths(paths).expect("join PATH"),
+        }
+    }
+}
 
 /// How long the fake waits for the release file before giving up, so a killed
 /// test can never leak a child that blocks forever.

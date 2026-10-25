@@ -321,8 +321,10 @@ fn selection_wins_over_node_kind() {
 
 #[test]
 fn execute_stage_file_stages_it() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
 
     let effects = dispatch::execute(
         &repo,
@@ -340,8 +342,10 @@ fn execute_stage_file_stages_it() {
 
 #[test]
 fn execute_unstage_file_unstages_it() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     repo.stage_file("f.txt").expect("stage");
 
     let effects = dispatch::execute(
@@ -360,8 +364,11 @@ fn execute_unstage_file_unstages_it() {
 
 #[test]
 fn execute_stage_hunk_stages_only_that_hunk() {
-    let (tmp, repo) = init_repo_40();
-    make_two_hunks(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .commit("forty", [("f.txt", lines(40).to_string())])
+        .modify_two_hunks()
+        .build();
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id
         .clone();
@@ -384,8 +391,11 @@ fn execute_stage_hunk_stages_only_that_hunk() {
 
 #[test]
 fn execute_unstage_hunk_unstages_only_that_hunk() {
-    let (tmp, repo) = init_repo_40();
-    make_two_hunks(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .commit("forty", [("f.txt", lines(40).to_string())])
+        .modify_two_hunks()
+        .build();
     repo.stage_file("f.txt").expect("stage");
     let hunk_id = repo.status().expect("status").staged[0].hunks[0]
         .id
@@ -409,17 +419,22 @@ fn execute_unstage_hunk_unstages_only_that_hunk() {
 
 #[test]
 fn execute_stage_hunk_reports_hunk_changed_since_display() {
-    let (tmp, repo) = init_40_line_repo();
-    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    lines[34] = "line35 CHANGED".into();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .build();
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 CHANGED").to_string(),
+    );
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id
         .clone();
 
     // The rendered hunk no longer exists once its content changes.
-    lines[34] = "line35 DIFFERENT".into();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 DIFFERENT").to_string(),
+    );
 
     let effects = dispatch::execute(
         &repo,
@@ -443,15 +458,20 @@ fn execute_stage_hunk_reports_hunk_changed_since_display() {
 
 #[test]
 fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
-    let (tmp, repo) = init_40_line_repo();
-    let mut lines: Vec<String> = (1..=40).map(|i| format!("line{i}")).collect();
-    lines[34] = "line35 CHANGED".into();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .build();
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 CHANGED").to_string(),
+    );
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id
         .clone();
-    lines[34] = "line35 DIFFERENT".into();
-    write(&tmp.path().join("f.txt"), &(lines.join("\n") + "\n"));
+    write(
+        &tmp.path().join("f.txt"),
+        &lines(40).with(35, "line35 DIFFERENT").to_string(),
+    );
 
     let (status, effects) =
         magit_lsp::server::mutation(tmp.path().to_str().expect("utf-8 path"), |repo| {
@@ -469,8 +489,10 @@ fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
 
 #[test]
 fn execute_stage_all_unstaged_stages_tracked_changes() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     write(&tmp.path().join("g.txt"), "g1\n");
     git(tmp.path(), &["add", "g.txt"]);
     git(tmp.path(), &["commit", "-q", "-m", "g"]);
@@ -485,8 +507,10 @@ fn execute_stage_all_unstaged_stages_tracked_changes() {
 
 #[test]
 fn execute_unstage_all_staged_unstages_everything() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     repo.stage_file("f.txt").expect("stage");
 
     dispatch::execute(&repo, &Resolution::UnstageAllStaged, &[]).expect("execute");
@@ -497,8 +521,10 @@ fn execute_unstage_all_staged_unstages_everything() {
 
 #[test]
 fn execute_stage_all_untracked_stages_only_untracked() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     write(&tmp.path().join("new.txt"), "brand new\n");
     write(&tmp.path().join("spaced name.txt"), "spaced\n");
 
@@ -518,8 +544,10 @@ fn execute_stage_all_untracked_stages_only_untracked() {
 
 #[test]
 fn execute_selection_stages_only_changed_lines() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     let diff = repo.diff_unstaged("f.txt").expect("diff");
     let layout = FileLayout::from_diff(&diff, 0).expect("layout");
 
@@ -543,8 +571,10 @@ fn execute_selection_stages_only_changed_lines() {
 
 #[test]
 fn execute_selection_without_changes_reports_message() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     let diff = repo.diff_unstaged("f.txt").expect("diff");
     let layout = FileLayout::from_diff(&diff, 0).expect("layout");
 
@@ -576,8 +606,10 @@ fn execute_selection_without_changes_reports_message() {
 // remove with R-3.6
 #[test]
 fn execute_discard_is_deferred() {
-    let (tmp, repo) = init_repo();
-    make_standard_changes(tmp.path());
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
     let before = repo.status().expect("status");
     let before_content = std::fs::read_to_string(tmp.path().join("f.txt")).expect("read");
 

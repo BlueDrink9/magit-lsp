@@ -1,3 +1,7 @@
+// The LSP wire protocol owns stdout; a stray print would corrupt it.
+#![deny(clippy::print_stdout)]
+#![deny(clippy::dbg_macro)]
+
 /// Entry point: dispatch the `keymap` subcommand or run the stdio LSP server.
 fn main() {
     // The writers are dropped before the server starts so the server owns

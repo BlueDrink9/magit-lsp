@@ -131,12 +131,10 @@ fn unmapped_failure_uses_the_fallback_with_stderr_detail() {
 
 #[test]
 fn unborn_head_from_a_real_repository_is_readable() {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    write(&tmp.path().join("f.txt"), "hello\n");
-    git(tmp.path(), &["add", "f.txt"]);
+    let (tmp, _repo) = RepoFixture::new()
+        .unborn()
+        .staged_file("f.txt", "hello\n")
+        .build();
 
     let failure = git_failure(tmp.path(), &["reset", "HEAD"], None);
     assert_eq!(
@@ -268,17 +266,13 @@ fn no_op_selection_returns_an_info_effect() {
 
 #[test]
 fn would_be_overwritten_from_a_real_repository_is_readable() {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    write(&tmp.path().join("f.txt"), "a\nb\nc\n");
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    git(tmp.path(), &["checkout", "-q", "-b", "other"]);
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "a\nb\nc\n")])
+        .build();
+    tmp.git(&["checkout", "-q", "-b", "other"]);
     write(&tmp.path().join("f.txt"), "a\nOTHER\nc\n");
-    git(tmp.path(), &["commit", "-q", "-a", "-m", "other"]);
-    git(tmp.path(), &["checkout", "-q", "main"]);
+    tmp.git(&["commit", "-q", "-a", "-m", "other"]);
+    tmp.git(&["checkout", "-q", "main"]);
     write(&tmp.path().join("f.txt"), "a\nLOCAL\nc\n");
 
     let failure = git_failure(tmp.path(), &["merge", "other"], None);
@@ -295,19 +289,15 @@ fn would_be_overwritten_from_a_real_repository_is_readable() {
 
 #[test]
 fn conflicts_from_a_real_repository_are_readable() {
-    let tmp = TempDir::new().expect("tempdir");
-    git(tmp.path(), &["init", "-q", "-b", "main"]);
-    git(tmp.path(), &["config", "user.email", "t@example.com"]);
-    git(tmp.path(), &["config", "user.name", "t"]);
-    write(&tmp.path().join("f.txt"), "a\nb\nc\n");
-    git(tmp.path(), &["add", "."]);
-    git(tmp.path(), &["commit", "-q", "-m", "init"]);
-    git(tmp.path(), &["checkout", "-q", "-b", "other"]);
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "a\nb\nc\n")])
+        .build();
+    tmp.git(&["checkout", "-q", "-b", "other"]);
     write(&tmp.path().join("f.txt"), "a\nOTHER\nc\n");
-    git(tmp.path(), &["commit", "-q", "-a", "-m", "other"]);
-    git(tmp.path(), &["checkout", "-q", "main"]);
+    tmp.git(&["commit", "-q", "-a", "-m", "other"]);
+    tmp.git(&["checkout", "-q", "main"]);
     write(&tmp.path().join("f.txt"), "a\nMAIN\nc\n");
-    git(tmp.path(), &["commit", "-q", "-a", "-m", "main"]);
+    tmp.git(&["commit", "-q", "-a", "-m", "main"]);
 
     // Merge reports conflicts on stdout, so combine both streams.
     let out = Command::new("git")
