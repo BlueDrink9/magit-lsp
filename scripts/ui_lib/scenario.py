@@ -14,12 +14,13 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from . import decoder, driver
+from . import decoder, driver, fixtures
 from .paths import BUILD_UI
 
 DEFAULT_SIZE = "100x30"
@@ -60,6 +61,7 @@ class Statement:
     name: str | None = None
     text: str | None = None
     profile: str | None = None
+    command: str | None = None
 
 
 @dataclass
@@ -306,6 +308,11 @@ def parse_statement(line: str, where: str) -> Statement:
             kind="document",
             name=parse_statement_name(line, "document:", where),
         )
+    if line.startswith("sh:"):
+        command = line[len("sh:") :].strip()
+        if not command:
+            raise ScenarioError(f"{where}: `sh:` needs a command")
+        return Statement(kind="sh", command=command)
     match = re.match(
         r"^goto\s+(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')$", line
     )
@@ -784,6 +791,29 @@ def _clear_command_line(run: driver.Run) -> None:
         pass
 
 
+def _run_shell(run: driver.Run, command: str, where: int) -> None:
+    """Run `command` in the fixture repo with the deterministic Git env.
+
+    Scenarios use this to change the repository outside Neovim (the
+    auto-refresh watcher test modifies a tracked file this way). A failure is
+    a scenario error, not a screen expectation.
+    """
+    result = subprocess.run(
+        command,
+        shell=True,
+        cwd=run.repo_path,
+        env=fixtures.determinism_env(run.home_path),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise ScenarioError(
+            f"statement {where}: `sh:` failed ({result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
 def _run_combo(
     scenario: Scenario,
     size: str,
@@ -849,6 +879,8 @@ def _run_combo(
                     )
             elif statement.kind == "document":
                 documents[statement.name or ""] = driver.document(run)
+            elif statement.kind == "sh":
+                _run_shell(run, statement.command or "", where=number)
             elif statement.kind == "goto":
                 try:
                     driver.goto_text(run, statement.text or "")

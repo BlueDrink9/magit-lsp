@@ -1293,10 +1293,14 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 
 ### Phase 3 (continued) — file watcher, discard, error mapping
 
-- [ ] R-3.5 File watcher auto-refresh; `index.lock` handling.
+- [x] R-3.5 File watcher auto-refresh; `index.lock` handling.
       *UI:* add scenario `auto-refresh`: modify a tracked file outside Neovim,
       wait, and the status screen shows the new change without
-      `common.refresh`.
+      `common.refresh`. Verified PASS in `make ui-test`; saved screens:
+      `build/ui/auto-refresh/standard-100x30/after-refresh.screen`,
+      `build/ui/auto-refresh/standard-80x24/after-refresh.screen`,
+      `build/ui/auto-refresh/vim-100x30/after-refresh.screen`, and
+      `build/ui/auto-refresh/vim-80x24/after-refresh.screen`.
 - [ ] R-3.6 Discard (`status.discard`) for files, hunks, selections, with
       `confirm` prompt (`destructive: true`); consider saving discarded content
       under a private ref for undo.

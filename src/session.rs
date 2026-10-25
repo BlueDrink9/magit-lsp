@@ -1288,6 +1288,24 @@ impl Session {
         Ok(Some(view.refresh_and_render(None)?))
     }
 
+    /// Re-read every open view's backing state and collect the new renders.
+    ///
+    /// This is the single refresh entry for the file watcher and detached
+    /// workers: one lock acquisition refreshes the whole session, and text-mode
+    /// views queue their refresh instead of replacing the client's text. Views
+    /// whose backing state cannot be re-read (for example a deleted hunk source)
+    /// are skipped rather than failing the whole refresh.
+    pub fn refresh_all(&mut self) -> Vec<ViewRender> {
+        let ids: Vec<String> = self
+            .views
+            .iter()
+            .map(|view| view.descriptor().id.clone())
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| self.refresh(&id).ok().flatten())
+            .collect()
+    }
+
     /// Switch a view to `mode` through the same path as the toggle.
     ///
     /// Setting the mode it already has is a no-op.

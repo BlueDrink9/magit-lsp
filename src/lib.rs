@@ -30,6 +30,7 @@ pub mod transport;
 pub mod tree;
 pub mod ui;
 pub mod view;
+pub mod watcher;
 
 use std::fmt;
 

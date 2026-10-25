@@ -10,6 +10,7 @@ use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
 use crate::view::{ViewMode, Viewport};
+use crate::watcher::{RepoWatcher, Refresh, WatcherConfig};
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::request::Request as LspRequest;
@@ -20,6 +21,7 @@ use lsp_types::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tokio::io::{AsyncWrite, BufReader};
@@ -128,6 +130,8 @@ struct Shared {
     next_progress: Arc<AtomicU64>,
     /// Per-repository mutation tickets, allocated in request order.
     mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
+    /// Running repository watchers, keyed by repository root.
+    watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
 }
 
 impl Shared {
@@ -149,6 +153,7 @@ impl Shared {
             progress: Arc::new(Mutex::new(HashMap::new())),
             next_progress: Arc::new(AtomicU64::new(0)),
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -170,6 +175,101 @@ impl Shared {
             gate,
             ticket,
             repo_path,
+        }
+    }
+
+    /// Start the repository watcher for `repo` unless one is already running
+    /// (R-3.5).
+    ///
+    /// Watcher events are debounced by the watcher itself; the handler here
+    /// routes each burst through the normal incremental-update path: it refreshes
+    /// the repository's session (text-mode views queue instead of clobbering
+    /// client edits) and sends every render as a `view/render` notification. A
+    /// start failure only warns the user — watching is an enhancement, so the
+    /// view still opens.
+    fn ensure_watcher(&self, repo: &str) {
+        let mut watchers = self
+            .watchers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if watchers.contains_key(repo) {
+            return;
+        }
+        let shared = self.clone();
+        let repo_key = repo.to_string();
+        let repo_for_handler = repo_key.clone();
+        let result = RepoWatcher::start(
+            Path::new(repo),
+            WatcherConfig::default(),
+            move |refresh: Refresh| match refresh {
+                Refresh::Changed(_paths) => {
+                    // The sessions lock also serialises request handlers, so a
+                    // burst cannot race a server-owned mutation's session work.
+                    let renders = {
+                        let mut sessions = shared
+                            .sessions
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        match sessions.get_mut(&repo_for_handler) {
+                            Some(session) => session.refresh_all(),
+                            None => Vec::new(),
+                        }
+                    };
+                    for render in renders {
+                        match serde_json::to_value(&render) {
+                            Ok(value) => {
+                                let _ = shared.sender.send(Message::Notification(
+                                    Notification::new(VIEW_RENDER.to_string(), value),
+                                ));
+                            }
+                            Err(error) => {
+                                tracing::debug!(%error, "watcher render failed to serialise");
+                            }
+                        }
+                    }
+                }
+                Refresh::IndexLocked => {
+                    let _ = shared.sender.send(show_message(
+                        2,
+                        "magit-lsp: waiting for Git to release .git/index.lock before refreshing"
+                            .to_string(),
+                    ));
+                }
+            },
+        );
+        match result {
+            Ok(watcher) => {
+                watchers.insert(repo_key, watcher);
+            }
+            Err(error) => {
+                tracing::debug!(%error, "repository watcher failed to start");
+                let _ = self.sender.send(show_message(
+                    2,
+                    format!("magit-lsp: file watching unavailable ({error}); views refresh only on common.refresh"),
+                ));
+            }
+        }
+    }
+
+    /// Stop and join the watcher for `repo` when its last view has closed.
+    ///
+    /// Views in other repositories keep their watcher; an idle repository no
+    /// longer costs an inotify tree or a refresh thread.
+    fn stop_watcher_if_idle(&self, repo: &str) {
+        let mut watchers = self
+            .watchers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let no_views_left = self
+            .view_repos
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .all(|owner| owner != repo);
+        if no_views_left {
+            if let Some(mut watcher) = watchers.remove(repo) {
+                watcher.join();
+            }
         }
     }
 
@@ -1153,11 +1253,13 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     )?;
     let keymap = session.keymap_notice(&id);
     drop(sessions);
+    let repo = repo.as_str();
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(id, repo);
+        .insert(id, repo.to_string());
+    shared.ensure_watcher(repo);
 
     let mut notifications = vec![Message::Notification(Notification::new(
         VIEW_RENDER.to_string(),
@@ -1196,6 +1298,7 @@ fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .remove(&p.view_id);
+    shared.stop_watcher_if_idle(&repo);
     Ok(Dispatched::value(Value::Null))
 }
 
@@ -1292,6 +1395,8 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
 
     // Views pushed or popped by an effect must be routable before the client
     // can send a key for them.
+    let mut repo_view_pushed = false;
+    let mut repo_quit = false;
     {
         let mut view_repos = shared
             .view_repos
@@ -1301,16 +1406,26 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
             match effect {
                 Effect::OpenView { descriptor } | Effect::PushView { descriptor } => {
                     view_repos.insert(descriptor.id.clone(), repo.to_string());
+                    repo_view_pushed = true;
                 }
                 Effect::PopView { view_id } => {
                     view_repos.remove(view_id);
                 }
                 Effect::Quit => {
                     view_repos.retain(|_, owner| owner != repo);
+                    repo_quit = true;
                 }
                 _ => {}
             }
         }
+    }
+    // The watcher lifecycle rides the same effects: a new view arms the
+    // watcher (idempotent), quitting the last view of the repo stops it.
+    if repo_view_pushed {
+        shared.ensure_watcher(repo);
+    }
+    if repo_quit {
+        shared.stop_watcher_if_idle(repo);
     }
 
     for (render, keymap) in outcome.opened {

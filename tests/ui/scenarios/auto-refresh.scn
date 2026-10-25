@@ -1,0 +1,13 @@
+# R-3.5 auto-refresh: the server-side watcher refreshes the status screen
+# when the repository changes outside Neovim (§3.16 async runner, §12 R-3.5).
+#
+# Each `sh:` change happens between waits; the watcher must refresh the status
+# view so the screen reflects the change without any client refresh key.
+fixture: modified-two-files
+---
+wait screen contains "+line3 CHANGED"
+# Modify a tracked file outside Neovim; the new diff appears automatically.
+sh: sed -i 's/line3 CHANGED/line3 WATCHED/' f.txt
+wait screen contains "+line3 WATCHED"
+expect screen not-contains "+line3 CHANGED"
+snapshot: after-refresh

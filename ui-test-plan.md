@@ -229,6 +229,8 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 
 `goto "<text>"` moves the cursor to the first character of the first buffer line containing the quoted text (a literal match, no regex). It fails when the text is absent. It is an RPC call rather than a key press, so it neither appears in the trace nor contributes to a `latency` measurement; scenarios use it to name a target instead of counting motion keys.
 
+`sh: <command>` runs a POSIX shell command in the fixture repo with the deterministic Git environment, between key batches. Scenarios use it to change the repository outside Neovim (the `auto-refresh` watcher test modifies a tracked file this way). A non-zero exit is a scenario error, not a screen expectation.
+
 `latency` always reports the measured key-to-idle time. Budgets are multiplied by `UI_BUDGET_SCALE`, and an over-budget measurement only fails the run when `UI_STRICT_LATENCY=1`; otherwise it is informational.
 
 ---

@@ -26,6 +26,10 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   hunks and diff lines. Never blank — shows `Working tree clean` when clean.
 - **Staging**: whole file, whole hunk, or a selected range of lines — and the
   symmetric unstage operations — all through `view/invoke`.
+- **Auto-refresh**: a file watcher watches the worktree (ignoring noisy `.git`
+  internals) and refreshes open status views when tracked files or the index
+  change, so changes made outside Neovim appear without `g r`. Events are
+  debounced; while `index.lock` exists the refresh is deferred and retried.
 - **Text mode**: `common.toggle-text-mode` (`ctrl+t`) turns the view into plain
   editable text. Keys stop being forwarded, refreshes are queued, and leaving
   text mode restores the server's text in one full render. Edits are never sent
