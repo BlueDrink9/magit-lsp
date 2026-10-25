@@ -88,6 +88,7 @@ class ComboResult:
     screen: str = ""
     profile: str = ""
     size: str = ""
+    startup: bool = False
 
 
 @dataclass
@@ -793,6 +794,15 @@ def _run_combo(
         run = driver.start(
             scenario.fixture, size=size, profile=profile, extra_env=scenario.env
         )
+    except driver.StartupError as error:
+        return ComboResult(
+            ok=False,
+            reason=f"startup: {error}",
+            screen="",
+            profile=profile,
+            size=size,
+            startup=True,
+        )
     except driver.DriverError as error:
         return ComboResult(
             ok=False, reason=str(error), screen="", profile=profile, size=size
@@ -904,6 +914,11 @@ def _run_combo(
 
 def _report_failure(scenario: Scenario, result: ComboResult) -> None:
     label = f"{scenario.name} [{result.profile} {result.size}]"
+    if result.startup:
+        print(f"--- {label} STARTUP FAILED (harness/socket, not scenario behaviour)")
+        print(result.reason)
+        print()
+        return
     print(f"--- {label} FAILED")
     if result.reason:
         print(f"expect: {result.reason}")
@@ -917,12 +932,24 @@ def _print_table(rows: list[Row]) -> None:
     headers = ("RESULT", "SCENARIO", "PROFILE", "SIZE", "REASON")
     widths = [len(header) for header in headers]
     for row in rows:
-        values = (row.result, row.scenario, row.profile, row.size, row.reason)
+        values = (
+            row.result,
+            row.scenario,
+            row.profile,
+            row.size,
+            " ".join(str(row.reason).split()),
+        )
         for index, value in enumerate(values):
             widths[index] = max(widths[index], len(str(value)))
     print("  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)))
     for row in rows:
-        values = (row.result, row.scenario, row.profile, row.size, row.reason)
+        values = (
+            row.result,
+            row.scenario,
+            row.profile,
+            row.size,
+            " ".join(str(row.reason).split()),
+        )
         print("  ".join(str(value).ljust(widths[index]) for index, value in enumerate(values)))
 
 

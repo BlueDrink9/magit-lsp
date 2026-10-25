@@ -1640,10 +1640,13 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
 
 ### 11.3 UI harness review and bugfix
 
-- [ ] **[P1] Diagnose Neovim harness startup/socket failure** (`scripts/ui`, `scripts/ui_lib/`)
+- [x] **[P1] Diagnose Neovim harness startup/socket failure** (`scripts/ui`, `scripts/ui_lib/`)
   - **Problem:** Neovim does not open the expected `build/ui/runs/.../nvim.sock` socket.
   - **Change:** diagnose process startup, socket path creation, permissions and connection ordering. Keep harness startup/socket diagnosis separate from scenario behavior: a scenario assertion failure is not evidence of socket failure, and a socket failure is not a scenario behavior regression.
   - **Done when:** the harness reports a clear startup/socket outcome and can connect to the expected socket; scenario behavior is independently tested by `make ui-test`.
+  - **Done (2026-10-26):** root cause found: the socket path was 74 bytes (limit 107) and its permissions were fine; the failure was the launcher command. `_nvim_command` put the whole inherited environment (≈19 KB in the Nix development shell) on the `tmux respawn-pane` command line, so tmux failed before Neovim started with `command too long`. `start` now writes `launch-nvim.sh` (cleared env, stderr to `nvim.stderr`, status to `nvim.exit`) and tmux runs only the short script, preserving the environment exactly. Plain `scripts/ui start` now works without the `env -i HOME=… PATH=…` workaround.
+  - **Diagnostics:** `scripts/ui_lib/startup.py` reports socket path and byte length against the 107-byte Unix limit, existence/type/mode, pane liveness, recorded exit status, one bounded connect probe and the stderr tail. `driver.StartupError` is raised for startup/socket failures; scenario rows set `ComboResult.startup` and print `STARTUP FAILED (harness/socket, not scenario behaviour)` instead of an `expect:` failure. An overlong socket path is rejected before tmux starts.
+  - **Evidence:** an injected fake `nvim` (exit 3, stderr `fake nvim failed`) produced: `socket … (74 bytes, limit 107); missing`, `nvim pane: exited`, `nvim exit status: 3`, `connect probe: not attempted: no socket to contact`, `nvim stderr (tail): fake nvim failed`; no orphan tmux session remained. `make ui-unit` passed 164 tests (new `tests/ui/test_startup.py` plus launcher/report/startup-label cases in `test_driver.py`/`test_scenario.py`); `make ui-test` passed 25 PASS / 0 XFAIL / 0 FAIL without `env -i`; `make test` passed the full Rust suite, 53 Neovim cases, 23 VSCode tests and 164 generated keybindings. `ui-test-plan.md` §A.1.1 documents the launcher and report.
 
 ---
 

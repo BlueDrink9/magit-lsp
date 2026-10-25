@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -708,6 +710,49 @@ class MarkdownTest(unittest.TestCase):
         self.assertIn("## tour — standard 100x30", text)
         self.assertIn("### status", text)
         self.assertIn("line one", text)
+
+
+class StartupReportingTest(unittest.TestCase):
+    def test_startup_failure_is_labelled_separately(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                "fixture: clean\n---\nkeys: q\n", "startup-failure.scn"
+            )
+        )
+        result = scenario.ComboResult(
+            ok=False,
+            reason="startup: socket: missing",
+            profile="vim",
+            size="100x30",
+            startup=True,
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            scenario._report_failure(parsed, result)
+        text = output.getvalue()
+        self.assertIn("STARTUP FAILED", text)
+        self.assertIn("not scenario behaviour", text)
+        self.assertNotIn("expect:", text)
+
+    def test_scenario_failure_keeps_the_expectation_label(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp(
+                "fixture: clean\n---\nkeys: q\n", "behaviour-failure.scn"
+            )
+        )
+        result = scenario.ComboResult(
+            ok=False,
+            reason="statement 1: screen contains 'x'",
+            profile="vim",
+            size="100x30",
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            scenario._report_failure(parsed, result)
+        text = output.getvalue()
+        self.assertIn("FAILED", text)
+        self.assertNotIn("STARTUP FAILED", text)
+        self.assertIn("expect:", text)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import base64
 import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,7 +15,27 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ui_lib import driver  # noqa: E402
+from ui_lib import driver, startup  # noqa: E402
+
+
+def make_run(directory: str) -> driver.Run:
+    """Build an unstarted `Run` rooted at `directory`."""
+    base = Path(directory)
+    return driver.Run(
+        id="test-run",
+        fixture="clean",
+        profile="vim",
+        cols=100,
+        rows=30,
+        color="ansi",
+        directory=str(base),
+        repo=str(base / "repo"),
+        home=str(base / "home"),
+        socket=str(base / "nvim.sock"),
+        trace=str(base / "trace.jsonl"),
+        tmux="magit-ui-test-run",
+    )
+
 
 
 class DocumentTest(unittest.TestCase):
@@ -139,6 +160,133 @@ class KeyNameTest(unittest.TestCase):
         for token in ("$", "g", "=", "A", "Alice", "2"):
             with self.subTest(token=token):
                 self.assertFalse(driver.is_key_name(token))
+
+
+class LauncherTest(unittest.TestCase):
+    def test_environment_stays_out_of_the_tmux_command(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            env = {"PATH": "/usr/bin:/bin", "BIG": "x" * 10000}
+            script = driver._launcher_script(run, env)
+            text = script.read_text(encoding="utf-8")
+            mode = script.stat().st_mode & 0o777
+            command = driver._launcher_command(run)
+        self.assertIn("env -i", text)
+        self.assertIn("BIG=" + "x" * 10000, text)
+        self.assertIn("--listen", text)
+        self.assertIn(str(run.socket_path), text)
+        self.assertIn("nvim.exit", text)
+        self.assertIn("nvim.stderr", text)
+        self.assertIn('exit "$status"', text)
+        self.assertEqual(mode, 0o600)
+        self.assertLess(len(command), 512)
+        self.assertNotIn("BIG", command)
+        self.assertNotIn(str(run.repo_path), command)
+
+
+class StartupReportTest(unittest.TestCase):
+    def test_report_combines_socket_exit_stderr_and_connect(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            Path(driver._launcher_path(run)).write_text(
+                "#!/bin/sh\n", encoding="utf-8"
+            )
+            socket = startup.SocketState(
+                path=str(run.socket_path),
+                length=len(str(run.socket_path)),
+                exists=True,
+                is_socket=True,
+                mode="0o600",
+            )
+            with (
+                patch.object(driver.startup, "inspect_socket", return_value=socket),
+                patch.object(driver, "_pane_dead", return_value=True),
+                patch.object(driver.startup, "read_exit_status", return_value=1),
+                patch.object(
+                    driver.startup, "read_tail", return_value=["boom", "detail"]
+                ),
+                patch.object(
+                    driver.startup,
+                    "connect_probe",
+                    return_value=startup.ConnectState(
+                        True, False, "E247: no server"
+                    ),
+                ),
+            ):
+                report = driver.startup_report(run)
+        self.assertIn("is a socket; mode 0o600", report)
+        self.assertIn("nvim pane: exited", report)
+        self.assertIn("nvim exit status: 1", report)
+        self.assertIn("connect probe: failed: E247: no server", report)
+        self.assertIn("  boom", report)
+        self.assertIn("tmux launcher command:", report)
+
+    def test_non_socket_skips_the_connect_probe(self) -> None:
+        socket = startup.SocketState(
+            path="/tmp/nvim.sock",
+            length=14,
+            exists=True,
+            is_socket=False,
+            mode="0o644",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            with (
+                patch.object(driver.startup, "inspect_socket", return_value=socket),
+                patch.object(driver, "_pane_dead", return_value=False),
+                patch.object(driver.startup, "read_exit_status", return_value=None),
+                patch.object(driver.startup, "read_tail", return_value=[]),
+                patch.object(driver.startup, "connect_probe") as probe,
+            ):
+                report = driver.startup_report(run)
+        probe.assert_not_called()
+        self.assertIn("not attempted: no socket to contact", report)
+
+
+class WaitSocketTest(unittest.TestCase):
+    def test_pane_death_is_a_startup_error_with_the_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            with (
+                patch.object(driver, "_pane_dead", return_value=True),
+                patch.object(driver, "startup_report", return_value="REPORT"),
+                patch.object(driver.time, "sleep"),
+            ):
+                with self.assertRaises(driver.StartupError) as caught:
+                    driver._wait_for_socket(run)
+        self.assertIn("RPC socket", str(caught.exception))
+        self.assertIn("REPORT", str(caught.exception))
+
+    def test_timeout_is_a_startup_error_with_the_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            with patch.object(driver, "startup_report", return_value="REPORT"):
+                with self.assertRaises(driver.StartupError) as caught:
+                    driver._wait_for_socket(run, timeout_ms=0)
+        self.assertIn("within 0 ms", str(caught.exception))
+        self.assertIn("REPORT", str(caught.exception))
+
+
+class StartPathTest(unittest.TestCase):
+    def test_overlong_socket_path_is_rejected_before_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            state = startup.SocketState(
+                path=str(run_dir / "nvim.sock"),
+                length=startup.SOCKET_PATH_LIMIT + 1,
+            )
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build"),
+                patch.object(driver.startup, "inspect_socket", return_value=state),
+                patch.object(driver, "_tmux") as tmux,
+                patch.object(driver, "_cleanup"),
+            ):
+                with self.assertRaises(driver.StartupError) as caught:
+                    driver.start("clean")
+        self.assertIn("too long", str(caught.exception))
+        tmux.assert_not_called()
 
 
 if __name__ == "__main__":

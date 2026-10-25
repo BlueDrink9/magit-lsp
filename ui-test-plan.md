@@ -151,6 +151,23 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 
 tmux settings for the dedicated server: `set -g escape-time 0`, `set -g status off`, `set -g default-terminal xterm-256color`. Create the session with `-x <cols> -y <rows>` so the screen size is fixed.
 
+### A.1.1 Startup and socket diagnosis
+
+`start` writes `launch-nvim.sh` into the run directory and asks tmux to run
+only that short script. The script starts Neovim with the cleared environment,
+redirects Neovim's stderr to `nvim.stderr` and records its exit status in
+`nvim.exit`. This matters in Nix development shells: putting the multi-kilobyte
+environment directly on the `tmux respawn-pane` command line fails with
+"command too long" before Neovim starts.
+
+A failure to start Neovim or reach its RPC socket raises a startup error whose
+report names the socket path and its byte length (Unix limit 107 bytes), whether
+the path exists and is a socket, its permission bits, whether the pane or
+Neovim exited, the recorded exit status, a bounded connect probe and the tail of
+Neovim's stderr. Scenario runs print these as `STARTUP FAILED`, separately from
+scenario `expect:` failures: a startup problem is never reported as a behaviour
+regression, and a failed scenario assertion is never called a socket failure.
+
 ### A.2 `snapshot()` JSON
 
 ```json
