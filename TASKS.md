@@ -2059,10 +2059,15 @@ Completed P1 review work (historical tracking, not new verification):
     - `tests/parity.rs::every_menu_item_has_a_parity_row` compares the exact sorted set of `(menu, key)` tuples derived from the definitions (including the `?` dispatch row) against `parity::rows()`, and the registry check is renamed `every_action_matches_the_registry_and_the_menu_status`.
   - **Evidence:** the ticket's verification command (`cargo test --test git_backend --test manifest --test keys_protocol --test text_mode --test parity --test commit_preflight && cargo test --lib patch && make test`) exited 0: 38/15/10/4/5/5 integration tests, 16 `patch` unit tests, then `make test` with 52 Neovim cases and 23 VSCode tests plus the keybindings drift check.
 
-- [ ] **[P2] Remove process-global env mutation from tests** (`tests/config.rs:91-92`, `tests/runner.rs:37-82`, `tests/process_log.rs:22`)
+- [x] **[P2] Remove process-global env mutation from tests** (`tests/config.rs:91-92`, `tests/runner.rs:37-82`, `tests/process_log.rs:22`)
   - **Problem:** `set_var("HOME"/…)` and `set_var("PATH", …)` in a multithreaded test binary race with other tests; the process log is global.
   - **Change:** run those cases through the CLI/stdio server with an explicit env, or guard with `serial_test`. For the process log, filter by a unique `cwd` (as `runner.rs` does) and drop the lock.
   - **Done when:** `grep -rn "set_var" tests/` only matches `tests/common/mod.rs`'s once-guarded init.
+  - **Done (2026-10-25):** no test binary mutates its own environment any more.
+    - `tests/config.rs` already ran its `HOME`/`XDG_CONFIG_HOME` cases in a re-executed child with `Command::env`, so it needed no change.
+    - `tests/runner.rs` keeps the fake `git` script free of the process env: it reads its start marker from `MAGIT_LSP_FAKE_GIT_MARKER`, and both cancellation cases re-execute themselves alone in a child whose `PATH` (fake first) is set only on `Command::env`. `PATH_LOCK` and the `Drop` PATH restore are gone.
+    - `tests/process_log.rs` drops the `LOCK`: the two read-only cases no longer clear the ring, and the stage case finds its record by unique `cwd` plus `add -u` args and then its `process-log:record:<id>` node instead of by rendered position. The destructive `process-log.clear` case runs alone in a re-executed child, which keeps "clear empties the view" exact while the other cases share the log.
+  - **Evidence:** the ticket's `cargo test --test config --test runner --test process_log && ! grep -rn "set_var" tests/ | grep -v tests/common/mod.rs` exited 0, and `make test` exited 0 with 52 Neovim cases, 23 VSCode tests and 164 keybindings; the two fake-git suites were also run five times in a row without a failure.
 
 - [ ] **[P3] Make UI latency budgets informational and avoid blind key counts** (`tests/ui/scenarios/latency-menu-open.scn:12-32`)
   - **Problem:** hard wall-clock budgets (`<= 100ms/80ms/400ms`) fail on slow CI; `j ×10 Right ×4` finds a diff line by count.

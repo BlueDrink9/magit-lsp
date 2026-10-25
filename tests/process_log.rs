@@ -9,21 +9,11 @@ use magit_lsp::protocol::{Cursor, Effect};
 use magit_lsp::runner;
 use magit_lsp::view::{Placement, ViewKind};
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
-
-/// The process log is process-global, so tests that inspect it run one at a time.
-static LOCK: Mutex<()> = Mutex::new(());
-
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+use tempfile::TempDir;
 
 #[test]
 fn opens_by_kind_and_by_command() {
-    let _guard = lock();
-    runner::global_log().clear();
-
     let (tmp, _repo) = init_repo();
     let mut test = TestSession::new(tmp.path().to_string_lossy(), Profile::Vim);
 
@@ -59,14 +49,12 @@ fn opens_by_kind_and_by_command() {
 
 #[test]
 fn a_stage_shows_its_real_git_arguments_and_copy_value_yields_the_command() {
-    let _guard = lock();
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
     let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
     test.ack();
-    runner::global_log().clear();
 
     let (descriptor, _render) = test.open_via_command("open.process-log");
     test.ack();
@@ -80,8 +68,23 @@ fn a_stage_shows_its_real_git_arguments_and_copy_value_yields_the_command() {
     test.ack();
 
     // The record node records its exact command; the cursor target comes from
-    // the node, never from parsing the rendered record line.
-    let line = test.goto_copy("git add -u");
+    // the node, never from parsing the rendered record line. The log is shared
+    // with other tests in this binary, so the record is identified by its
+    // unique cwd and arguments rather than by position.
+    let cwd = tmp.path().display().to_string();
+    let record = runner::global_log()
+        .iter()
+        .into_iter()
+        .rev()
+        .find(|record| {
+            record.cwd == cwd && record.args == vec!["add".to_string(), "-u".to_string()]
+        })
+        .expect("the stage is recorded");
+    let tree = test.tree_of(&descriptor.id).clone();
+    let line = tree
+        .node(&format!("process-log:record:{}", record.id))
+        .expect("the stage has a record node")
+        .start_line;
     let copied = test.invoke_at("common.copy-value", Cursor { line, column: 0 });
     assert_eq!(
         copied.effects,
@@ -93,10 +96,23 @@ fn a_stage_shows_its_real_git_arguments_and_copy_value_yields_the_command() {
 
 #[test]
 fn record_nodes_are_stable_and_clear_empties_the_view() {
-    let _guard = lock();
-    runner::global_log().clear();
+    // Clearing the ring is process-global and destructive, so this case runs
+    // alone in a child: the other process-log cases share the same log.
+    const CHILD: &str = "MAGIT_LSP_PROCESS_LOG_CLEAR_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "record_nodes_are_stable_and_clear_empties_the_view"])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+
+    let repo = TempDir::new().unwrap();
+    let cwd = repo.path().display().to_string();
     let id = runner::global_log().record(
-        Path::new("/repo"),
+        Path::new(&cwd),
         &["status", "--porcelain"],
         1,
         Duration::from_millis(3),
@@ -104,7 +120,7 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
         b"fatal: not a git repository",
     );
 
-    let mut test = TestSession::new("/repo", Profile::Vim);
+    let mut test = TestSession::new(&cwd, Profile::Vim);
     test.open_view("pl", ViewKind::ProcessLog, Placement::Main, WIDE_VIEWPORT);
 
     let node_id = format!("process-log:record:{id}");

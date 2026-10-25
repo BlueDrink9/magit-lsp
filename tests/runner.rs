@@ -12,29 +12,26 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
-use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-/// `PATH` is process-global, so only one fake-git case may run at a time.
-static PATH_LOCK: Mutex<()> = Mutex::new(());
+/// Set in the re-executed child so it runs the test body instead of spawning.
+const CHILD_ENV: &str = "MAGIT_LSP_FAKE_GIT_CHILD";
+/// The start marker the fake `git` writes, handed to the child.
+const MARKER_ENV: &str = "MAGIT_LSP_FAKE_GIT_MARKER";
 
-fn path_lock() -> std::sync::MutexGuard<'static, ()> {
-    PATH_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Put a fake `git` first on `PATH`; it delegates everything to the real Git
-/// except `add`, which signals its start and then sleeps until it is killed.
+/// A fake `git` for a child process's `PATH`; it delegates everything to the
+/// real Git except `add -u`, which signals its start and then sleeps until
+/// killed.
 struct FakeGit {
     _dir: TempDir,
-    previous_path: Option<OsString>,
+    /// `PATH` value putting the fake first, passed with `Command::env`.
+    path: OsString,
 }
 
 impl FakeGit {
-    fn install(marker: &Path) -> Self {
+    fn new() -> Self {
         let real_git = real_git_path();
         let dir = TempDir::new().expect("fake git tempdir");
         let script = dir.path().join("git");
@@ -42,12 +39,11 @@ impl FakeGit {
             &script,
             format!(
                 "#!/bin/sh\n\
-                 if [ \"$1\" = \"add\" ]; then\n\
-                   printf 'started\\n' > '{}'\n\
+                 if [ \"$1\" = \"add\" ] && [ \"$2\" = \"-u\" ]; then\n\
+                   printf 'started\\n' > \"${{{MARKER_ENV}}}\"\n\
                    exec sleep 30\n\
                  fi\n\
                  exec '{}' \"$@\"\n",
-                marker.display(),
                 real_git.display()
             ),
         )
@@ -58,27 +54,44 @@ impl FakeGit {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&script, permissions).expect("chmod fake git");
 
-        let previous_path = std::env::var_os("PATH");
         let mut paths = vec![dir.path().to_path_buf()];
-        if let Some(path) = &previous_path {
-            paths.extend(std::env::split_paths(path));
+        if let Some(path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&path));
         }
-        std::env::set_var("PATH", std::env::join_paths(paths).expect("join PATH"));
 
         Self {
             _dir: dir,
-            previous_path,
+            path: std::env::join_paths(paths).expect("join PATH"),
         }
     }
 }
 
-impl Drop for FakeGit {
-    fn drop(&mut self) {
-        match &self.previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-    }
+/// Run `test` alone in a child process whose `PATH` starts with a fake `git`.
+///
+/// The environment lives on the child's `Command`, so the multithreaded test
+/// binary never mutates its own `PATH`.
+fn run_with_fake_git(test: &str) {
+    let fake = FakeGit::new();
+    let markers = TempDir::new().expect("marker tempdir");
+    let marker = markers.path().join("started");
+    let status = Command::new(std::env::current_exe().expect("current test binary"))
+        .args(["--exact", test])
+        .env(CHILD_ENV, "1")
+        .env(MARKER_ENV, &marker)
+        .env("PATH", &fake.path)
+        .status()
+        .expect("spawn the fake-git child");
+    assert!(status.success(), "the fake-git child for {test} failed");
+}
+
+/// Whether this process was re-executed by [`run_with_fake_git`].
+fn in_fake_git_child() -> bool {
+    std::env::var_os(CHILD_ENV).is_some()
+}
+
+/// The marker path the fake `git` writes when it starts.
+fn marker_path() -> PathBuf {
+    PathBuf::from(std::env::var_os(MARKER_ENV).expect("the marker env is set by the parent"))
 }
 
 fn real_git_path() -> PathBuf {
@@ -170,13 +183,15 @@ fn capacity_evicts_the_oldest_and_ids_strictly_increase() {
 
 #[test]
 fn cancelling_a_slow_child_returns_early_with_a_failed_record() {
-    let _lock = path_lock();
+    if !in_fake_git_child() {
+        run_with_fake_git("cancelling_a_slow_child_returns_early_with_a_failed_record");
+        return;
+    }
     let (fixture, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let marker = fixture.path().join("fake-git-started");
-    let _fake = FakeGit::install(&marker);
+    let marker = marker_path();
     let root = fixture.path().to_path_buf();
 
     let handle = CancelHandle::new();
@@ -219,13 +234,15 @@ fn cancelling_a_slow_child_returns_early_with_a_failed_record() {
 
 #[test]
 fn a_read_completes_while_a_slow_mutation_runs() {
-    let _lock = path_lock();
+    if !in_fake_git_child() {
+        run_with_fake_git("a_read_completes_while_a_slow_mutation_runs");
+        return;
+    }
     let (fixture, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let marker = fixture.path().join("fake-git-started");
-    let _fake = FakeGit::install(&marker);
+    let marker = marker_path();
     let root = fixture.path().to_path_buf();
 
     let handle = CancelHandle::new();
