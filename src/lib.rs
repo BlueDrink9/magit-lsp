@@ -14,6 +14,7 @@ pub mod keyhandler;
 pub mod keymap;
 pub mod keys;
 pub mod logging;
+pub mod log_view;
 pub mod manifest;
 pub mod menu;
 pub mod menus;

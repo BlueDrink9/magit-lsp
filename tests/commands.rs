@@ -181,6 +181,8 @@ fn the_registry_lists_every_named_command_once() {
         Scope::Common,
         Scope::Status,
         Scope::Select,
+        Scope::Log,
+        Scope::LogSelect,
         Scope::Menu,
         Scope::CommitMessage,
         Scope::ProcessLog,
@@ -190,6 +192,17 @@ fn the_registry_lists_every_named_command_once() {
     .map(|&scope| registry().by_scope(scope).count())
     .sum();
     assert_eq!(by_scope, seen.len());
+
+    for id in ["log.load-more"] {
+        let command = registry().get(id).expect("registered");
+        assert_eq!(command.scope, Scope::Log, "{id}");
+        assert_eq!(command.status, CommandStatus::Implemented, "{id}");
+    }
+    for id in ["log.current", "log.select-and-copy"] {
+        let command = registry().get(id).expect("registered");
+        assert_eq!(command.scope, Scope::MenuAction, "{id}");
+        assert_eq!(command.status, CommandStatus::Implemented, "{id}");
+    }
 
     // The status scope (§5.2) consists of the `status.*` actions and every
     // `open.*` opener except the dispatch menu (§5.1). Assert the exact

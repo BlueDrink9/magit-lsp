@@ -18,13 +18,20 @@ pub fn definition() -> MenuDef {
                     option("=s", "--since=", "Limit to commits since", Reader::Date),
                     option("=u", "--until=", "Limit to commits until", Reader::Date),
                     option("=g", "--grep=", "Search commit messages", Reader::Text),
+                    option("=S", "-S", "Search for string changes", Reader::Text),
+                    option("=G", "-G", "Search for regex changes", Reader::Text),
+                    option("=f", "--", "Limit to path", Reader::Path),
                     switch("-i", "--regexp-ignore-case", "Search case-insensitive"),
                     switch("-I", "--invert-grep", "Invert search pattern"),
                     option("=M", "--merges", "Only merges", Reader::Choice),
                     option("=m", "--no-merges", "Omit merges", Reader::Choice),
                     option("=p", "--first-parent", "First parent", Reader::Choice),
                     switch("-D", "--simplify-by-decoration", "Simplify by decoration"),
-                    switch("-f", "--follow", "Follow renames when showing single-file log"),
+                    switch(
+                        "-f",
+                        "--follow",
+                        "Follow renames when showing single-file log",
+                    ),
                     switch("-r", "--reverse", "Reverse order"),
                     switch("-g", "--graph", "Show graph"),
                     switch("-c", "--color", "Show graph in color"),
@@ -38,16 +45,11 @@ pub fn definition() -> MenuDef {
             group(
                 "Log",
                 vec![
-                    action(
-                        "l",
-                        "log.current",
-                        "current",
-                        "magit-log-current",
-                        "R-5.1",
-                    ),
+                    action("l", "log.current", "current", "magit-log-current", ""),
                     action("o", "log.other", "other", "magit-log-other", "R-5.1"),
                     action("h", "log.head", "HEAD", "magit-log-head", "R-5.1"),
                     action("u", "log.related", "related", "magit-log-related", "R-5.1"),
+                    action("c", "log.select-and-copy", "Select and copy commit ID", "magit-log-select", ""),
                 ],
             ),
             group(
@@ -115,13 +117,7 @@ pub fn definition() -> MenuDef {
                         "magit-reflog-other",
                         "R-5.1",
                     ),
-                    action(
-                        "H",
-                        "log.reflog-head",
-                        "HEAD",
-                        "magit-reflog-head",
-                        "R-5.1",
-                    ),
+                    action("H", "log.reflog-head", "HEAD", "magit-reflog-head", "R-5.1"),
                 ],
             ),
             group(
@@ -145,7 +141,13 @@ pub fn definition() -> MenuDef {
             ),
             group(
                 "Other",
-                vec![action("s", "log.shortlog", "shortlog", "magit-shortlog", "R-5.1")],
+                vec![action(
+                    "s",
+                    "log.shortlog",
+                    "shortlog",
+                    "magit-shortlog",
+                    "R-5.1",
+                )],
             ),
         ],
     }

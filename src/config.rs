@@ -22,6 +22,8 @@ pub const CONFIG_ENV: &str = "MAGIT_LSP_CONFIG";
 pub const VIEW_SCOPES: &[&str] = &[
     "common",
     "status",
+    "log",
+    "log.select",
     "select",
     "menu",
     "commit-message",

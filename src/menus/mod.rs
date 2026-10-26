@@ -144,12 +144,33 @@ pub fn build(def: &MenuDef) -> Menu {
         });
     }
 
-    Menu {
+    let mut menu = Menu {
         id: def.id.to_string(),
         title: def.title.to_string(),
         groups,
         saved_args: crate::menu::Args::default(),
+    };
+    if def.id == "log" {
+        for group in &mut menu.groups {
+            for item in &mut group.items {
+                match item {
+                    Item::Switch { key, on, status, .. } if key == "-g" || key == "-d" => {
+                        *on = true;
+                        *status = MenuStatus::Implemented;
+                    }
+                    Item::Option { key, status, .. } if key != "=n" && key != "=a" && key != "=s" && key != "=g" && key != "=S" && key != "=G" && key != "=f" => {
+                        *status = MenuStatus::Planned { roadmap_id: "R-5.3".to_string() };
+                    }
+                    Item::Switch { key, status, .. } if key != "-g" && key != "-d" => {
+                        *status = MenuStatus::Planned { roadmap_id: "R-5.3".to_string() };
+                    }
+                    _ => {}
+                }
+            }
+        }
+        menu.save_args();
     }
+    menu
 }
 
 fn item(def: &ItemDef) -> Item {

@@ -5,6 +5,7 @@
 //! can create the matching buffer.
 
 use crate::menu::Menu;
+use crate::log_view::CommitSelection;
 use crate::tree::Tree;
 use crate::Result;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -14,6 +15,8 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ViewKind {
     Status,
+    /// The server-rendered Git commit history.
+    Log,
     /// The read-only log of finished Git invocations.
     ProcessLog,
     /// A menu (Magit transient), stored by its wire name, e.g. `menu.commit`.
@@ -27,6 +30,7 @@ impl ViewKind {
     pub fn as_str(&self) -> &str {
         match self {
             ViewKind::Status => "status",
+            ViewKind::Log => "log",
             ViewKind::ProcessLog => "process-log",
             ViewKind::Menu(name) => name,
             ViewKind::Other(name) => name,
@@ -64,6 +68,7 @@ impl<'de> Deserialize<'de> for ViewKind {
         let name = String::deserialize(deserializer)?;
         Ok(match name.as_str() {
             "status" => ViewKind::Status,
+            "log" => ViewKind::Log,
             "process-log" => ViewKind::ProcessLog,
             other if other.starts_with("menu.") => ViewKind::Menu(other.to_string()),
             _ => ViewKind::Other(name),
@@ -214,6 +219,21 @@ pub trait View: Send {
     /// The menu model for server-side key handling and argument changes.
     fn menu_mut(&mut self) -> Option<&mut Menu> {
         None
+    }
+
+    /// Selection settings attached to this view, if any.
+    fn commit_selection(&self) -> Option<&CommitSelection> {
+        None
+    }
+
+    /// Selected commit IDs in view order, optionally using the cursor commit.
+    fn selected_commits(&self, _cursor_oid: Option<&str>) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Toggle a mark for a commit identified by its full object ID.
+    fn toggle_commit_mark(&mut self, _oid: &str) -> bool {
+        false
     }
 
     /// Apply a visibility command to the node at `line` of `tree`.

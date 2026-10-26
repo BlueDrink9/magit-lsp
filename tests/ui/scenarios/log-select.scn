@@ -1,0 +1,33 @@
+# Copy the older commit through the server-owned CopyCommits selection log.
+fixture: log-history
+---
+sh: nvim --server ../nvim.sock --remote-expr "setreg('\"','sentinel')"
+keys standard: l
+keys vim: g l
+wait screen contains "Log"
+keys standard: c
+keys vim: c
+wait screen contains "Select"
+snapshot: select-log
+expect screen contains "old searchable subject"
+keys: / "old searchable subject" Enter
+wait
+expect screen not-contains "Pattern not found"
+keys: Enter
+wait
+expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: test "$(nvim --server ../nvim.sock --remote-expr "getreg('\"')")" = "$(git rev-parse HEAD~2)"
+sh: test -z "$(git status --porcelain)"
+sh: nvim --server ../nvim.sock --remote-expr "setreg('\"','sentinel')"
+keys standard: l
+keys vim: g l
+wait screen contains "Log"
+keys standard: c
+keys vim: c
+wait screen contains "Select"
+keys: Escape
+wait
+expect view_stack.count == 1
+sh: test "$(nvim --server ../nvim.sock --remote-expr "getreg('\"')")" = sentinel
+sh: test -z "$(git status --porcelain)"

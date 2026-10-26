@@ -8,8 +8,9 @@
 use crate::dispatch;
 use crate::editor::{self, Reply};
 use crate::errors;
-use crate::git::GitRepo;
+use crate::git::{GitLogOptions, GitRepo};
 use crate::keymap::Keymap;
+use crate::log_view::CommitSelection;
 use crate::menu::Menu;
 use crate::patch::FileLayout;
 use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, Selection, ViewPromptParams};
@@ -28,6 +29,8 @@ pub enum Scope {
     Common,
     Status,
     Select,
+    Log,
+    LogSelect,
     Menu,
     CommitMessage,
     /// The read-only process log.
@@ -44,6 +47,8 @@ impl Scope {
             Scope::Common => "common",
             Scope::Status => "status",
             Scope::Select => "select",
+            Scope::Log => "log",
+            Scope::LogSelect => "log.select",
             Scope::Menu => "menu",
             Scope::CommitMessage => "commit-message",
             Scope::ProcessLog => "process-log",
@@ -61,6 +66,9 @@ impl Scope {
         match self {
             Scope::Common => true,
             Scope::Menu => view_scope == "menu" || view_scope.starts_with("menu."),
+            Scope::Log if view_scope == "log.select" => true,
+            Scope::Select if view_scope == "log.select" => true,
+            Scope::LogSelect if view_scope == "log.select" => true,
             Scope::MenuAction => !view_scope.starts_with("menu"),
             other => other.as_str() == view_scope,
         }
@@ -93,6 +101,24 @@ pub struct Command {
     pub run: RunFn,
 }
 
+/// The operation requested for a commit selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionOperation {
+    /// Copy the selected commits' object IDs.
+    CopyCommits,
+}
+
+/// Request to open a commit-selection view for a typed operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionRequest {
+    /// Filters and presentation settings for the selection log.
+    pub options: GitLogOptions,
+    /// Settings controlling the selection view.
+    pub settings: CommitSelection,
+    /// Operation that consumes the selected commits.
+    pub operation: SelectionOperation,
+}
+
 /// What a handler asks the session to do after it runs.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CommandOutcome {
@@ -106,6 +132,12 @@ pub struct CommandOutcome {
     pub open_menu: Option<Menu>,
     /// Push a non-menu view (with its placement) above the current one.
     pub open_view: Option<(ViewKind, Placement)>,
+    /// Arguments used to construct the pushed view.
+    pub open_args: Option<serde_json::Value>,
+    /// Open a commit-selection view for an operation.
+    pub open_selection: Option<SelectionRequest>,
+    /// Selected commit IDs returned by a selection operation.
+    pub selected_commits: Option<Vec<String>>,
     /// Close the current view and return to the previous one.
     pub pop: bool,
     /// Spawn `git commit` on a detached worker once this command returns; the
@@ -494,6 +526,27 @@ fn build() -> Registry {
         },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
+        Command {
+            id: "log.current",
+            scope: Scope::MenuAction,
+            doc: "Show the current log",
+            status: CommandStatus::Implemented,
+            run: open_current_log,
+        },
+        Command {
+            id: "log.load-more",
+            scope: Scope::Log,
+            doc: "Load more commits",
+            status: CommandStatus::Implemented,
+            run: log_load_more,
+        },
+        Command {
+            id: "log.select-and-copy",
+            scope: Scope::MenuAction,
+            doc: "Select commits and copy their object IDs",
+            status: CommandStatus::Implemented,
+            run: select_and_copy,
+        },
         menu("open.diff", "Open the diff menu", open_diff),
         menu("open.fetch", "Open the fetch menu", open_fetch),
         menu("open.pull", "Open the pull menu", open_pull),
@@ -546,18 +599,20 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: clear_process_log,
         },
-        planned(
-            "select.toggle-mark",
-            Scope::Select,
-            "Toggle the mark on the thing at point",
-            "R-5.1",
-        ),
-        planned(
-            "select.enter-rev",
-            Scope::Select,
-            "Enter a revision by hand",
-            "R-5.1",
-        ),
+        Command {
+            id: "select.toggle-mark",
+            scope: Scope::Select,
+            doc: "Toggle the mark on the commit at point",
+            status: CommandStatus::Implemented,
+            run: toggle_commit_mark,
+        },
+        Command {
+            id: "select.enter-rev",
+            scope: Scope::Select,
+            doc: "Enter a revision by hand",
+            status: CommandStatus::Implemented,
+            run: enter_revision,
+        },
         Command {
             id: "menu.save-args",
             scope: Scope::Menu,
@@ -624,6 +679,17 @@ fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         refresh: true,
         ..Default::default()
     })
+}
+
+fn log_load_more(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if let Err(err) = ctx.view.load_more() {
+        if let Some(effect) = Effect::from_error(&err) {
+            ctx.extend(vec![effect]);
+        } else {
+            return Err(err);
+        }
+    }
+    Ok(CommandOutcome::default())
 }
 
 /// Open a menu by name; the session creates the view and pushes it.
@@ -717,6 +783,96 @@ fn open_process_log(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         open_view: Some((ViewKind::ProcessLog, Placement::Main)),
         ..Default::default()
     })
+}
+
+/// Open the current repository's server-rendered commit log.
+fn open_current_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    // The menu arguments are interpreted by the log view using its typed
+    // options contract.
+    Ok(CommandOutcome {
+        open_view: Some((ViewKind::Log, Placement::Main)),
+        open_args: ctx.args.cloned(),
+        ..Default::default()
+    })
+}
+
+/// Push a commit-selection log used to copy one or more commit IDs.
+fn select_and_copy(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let args = ctx.args.and_then(Value::as_object);
+    let string_arg = |name: &str, default: &str| {
+        args.and_then(|args| args.get(name)).and_then(Value::as_str).unwrap_or(default).to_string()
+    };
+    let bool_arg = |name: &str, default: bool| {
+        args.and_then(|args| args.get(name)).and_then(Value::as_bool).unwrap_or(default)
+    };
+    Ok(CommandOutcome {
+        open_selection: Some(SelectionRequest {
+            options: crate::session::log_options_from_args(ctx.args)?,
+            settings: CommitSelection {
+                purpose: string_arg("purpose", "copy commits"),
+                prompt: string_arg("prompt", "Select commit(s) to copy"),
+                multi: bool_arg("multi", false),
+                allow_free_text: bool_arg("allowFreeText", false),
+            },
+            operation: SelectionOperation::CopyCommits,
+        }),
+        ..Default::default()
+    })
+}
+
+/// Toggle a commit mark using its full identity in the acknowledged tree.
+fn toggle_commit_mark(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let Some(tree) = ctx.view.acked_tree() else {
+        ctx.info("Wait for the log view to render before selecting a commit");
+        return Ok(CommandOutcome::default());
+    };
+    let oid = ctx.cursor.and_then(|cursor| {
+        tree.line_nodes.get(cursor.line).and_then(|line| tree.node(&line.node))
+            .filter(|node| node.kind == NodeKind::Commit).and_then(|node| node.commit.clone())
+    });
+    if oid.as_deref().is_some_and(|oid| ctx.view.toggle_commit_mark(oid)) {
+        return Ok(CommandOutcome { refresh: false, ..Default::default() });
+    }
+    ctx.info("Place the cursor on a selectable commit to mark it");
+    Ok(CommandOutcome::default())
+}
+
+/// Prompt for a revision and return its validated full commit object ID.
+fn enter_revision(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if !ctx.view.commit_selection().is_some_and(|selection| selection.allow_free_text) {
+        ctx.info("Free-text revisions are not available for this selection");
+        return Ok(CommandOutcome::default());
+    }
+    let prompt = ViewPromptParams {
+        prompt_id: String::new(),
+        kind: PromptKind::Text,
+        title: "Enter a commit revision".to_string(),
+        detail: None,
+        yes_label: None,
+        no_label: None,
+        destructive: None,
+        default: None,
+        placeholder: Some("Revision".to_string()),
+        secret: None,
+        items: None,
+        allow_custom: None,
+        preselected: None,
+        min: None,
+        max: None,
+    };
+    let Some(revision) = ctx.ui.text(&prompt)? else { return Ok(CommandOutcome::default()); };
+    if revision.trim().is_empty() {
+        ctx.info("Enter a valid commit revision");
+        return Ok(CommandOutcome::default());
+    }
+    let oid = match GitRepo::open(ctx.repo_path).and_then(|repo| repo.resolve_commit(revision.trim())) {
+        Ok(oid) => oid,
+        Err(_) => {
+            ctx.info(format!("Invalid commit revision: {}", revision.trim()));
+            return Ok(CommandOutcome::default());
+        }
+    };
+    Ok(CommandOutcome { selected_commits: Some(vec![oid]), ..Default::default() })
 }
 
 /// Drop every record from the process log and re-render the view.
@@ -845,6 +1001,21 @@ fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Confirm answers the pending editor bridge edit, if the invocation names one.
 fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    if ctx.view.commit_selection().is_some() {
+        let Some(tree) = ctx.view.acked_tree() else {
+            ctx.info("Wait for the log view to render before selecting a commit");
+            return Ok(CommandOutcome::default());
+        };
+        let cursor_oid = ctx.cursor.and_then(|cursor| tree.line_nodes.get(cursor.line)
+            .and_then(|line| tree.node(&line.node)).filter(|node| node.kind == NodeKind::Commit)
+            .and_then(|node| node.commit.as_deref()));
+        let selected = ctx.view.selected_commits(cursor_oid);
+        if selected.is_empty() {
+            ctx.info("Place the cursor on a commit to confirm the selection");
+            return Ok(CommandOutcome::default());
+        }
+        return Ok(CommandOutcome { selected_commits: Some(selected), ..Default::default() });
+    }
     let Some(edit_id) = ctx.edit_id() else {
         ctx.info("Nothing to confirm");
         return Ok(CommandOutcome::default());
@@ -869,6 +1040,9 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             pop: true,
             ..Default::default()
         });
+    }
+    if ctx.view.commit_selection().is_some() {
+        return Ok(CommandOutcome { pop: true, ..Default::default() });
     }
     if ctx.selection.is_some() {
         let key = ctx.key.clone().unwrap_or_else(|| "Escape".to_string());

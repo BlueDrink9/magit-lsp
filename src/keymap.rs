@@ -88,17 +88,35 @@ impl Keymap {
 
         let user_scope = config.keys.scopes.get(scope).unwrap_or(&empty);
         let profile_scope = profile_keys.scopes.get(scope).unwrap_or(&empty);
+        let inherited_user = if scope == "log.select" {
+            config.keys.scopes.get("select").unwrap_or(&empty)
+        } else {
+            &empty
+        };
+        let inherited_profile = if scope == "log.select" {
+            profile_keys.scopes.get("select").unwrap_or(&empty)
+        } else {
+            &empty
+        };
         let user_common = config.keys.scopes.get("common").unwrap_or(&empty);
         let profile_common = profile_keys.scopes.get("common").unwrap_or(&empty);
 
-        // The scope's own `unbind` list removes profile bindings for this scope.
-        let unbind = &user_scope.unbind;
+        // Scope unbinds remove profile bindings in both shipped profiles and
+        // user configuration.
+        let unbind: Vec<_> = user_scope
+            .unbind
+            .iter()
+            .chain(profile_scope.unbind.iter())
+            .cloned()
+            .collect();
 
         let levels = [
             declarations(scope, user_scope, 0, &[])?,
-            declarations(scope, profile_scope, 1, unbind)?,
-            declarations("common", user_common, 2, &[])?,
-            declarations("common", profile_common, 3, unbind)?,
+            declarations(scope, profile_scope, 1, &unbind)?,
+            declarations("select", inherited_user, 2, &[])?,
+            declarations("select", inherited_profile, 3, &unbind)?,
+            declarations("common", user_common, 4, &[])?,
+            declarations("common", profile_common, 5, &unbind)?,
         ];
 
         let candidates: Vec<&Command> = registry

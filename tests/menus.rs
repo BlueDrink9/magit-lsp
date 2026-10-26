@@ -208,7 +208,15 @@ fn definition_actions() -> Vec<AuditAction> {
 
 #[test]
 fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
-    let reference = parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
+    let mut reference = parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
+    // This project action has no Magit key-audit row; it mirrors Magit's
+    // selectable log operation and is independently registered here.
+    reference.push(AuditAction {
+        menu: "log".to_string(),
+        key: "c".to_string(),
+        magit_command: "magit-log-select".to_string(),
+        local_command: "log.select-and-copy".to_string(),
+    });
     let expected = definition_actions();
     validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
     let aliases = [
@@ -383,6 +391,22 @@ fn menu_item_keys_are_unique_and_every_menu_reaches_dispatch() {
 }
 
 #[test]
+fn log_argument_statuses_and_select_copy_action_are_exact() {
+    let menu = magit_lsp::menus::named("log").expect("log menu");
+    for item in menu.groups.iter().flat_map(|group| &group.items) {
+        let key = item.key();
+        let implemented = matches!(key, "=n" | "=a" | "=s" | "=g" | "=S" | "=G" | "=f" | "-g" | "-d");
+        if key.starts_with('=') || key.starts_with('-') {
+            assert_eq!(matches!(item.status(), MenuStatus::Implemented), implemented, "{key}");
+            if matches!(key, "-g" | "-d") {
+                assert!(matches!(item, Item::Switch { on: true, .. }), "{key} defaults on");
+            }
+        }
+    }
+    assert!(matches!(menu.item("c"), Some(Item::Action { command, label, status: MenuStatus::Implemented, .. }) if command == "log.select-and-copy" && label == "Select and copy commit ID"));
+}
+
+#[test]
 fn every_menu_renders_all_of_its_action_keys() {
     let mut all: Vec<(String, Menu)> = magit_lsp::menus::all()
         .iter()
@@ -480,4 +504,3 @@ fn columns(tree: &magit_lsp::tree::Tree) -> usize {
     }
     per_line.into_values().max().unwrap_or(0)
 }
-

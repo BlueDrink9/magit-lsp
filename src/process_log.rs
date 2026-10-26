@@ -175,6 +175,7 @@ fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -
         line_index: None,
         new_line: None,
         copy: None,
+        commit: None,
         children: Vec::new(),
     }
 }

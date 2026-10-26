@@ -66,6 +66,12 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   files and conflicts show a plain-language summary and
   actionable hint; raw output remains available as detail when no specific
   explanation applies.
+- **Log and commit selection**: from status, `l l` (`standard`) or `g l l`
+  (`vim`) opens the current-branch log. The log uses the editor's native
+  navigation and search, loads older commits with `+`, and supports log-menu
+  filters. In the log menu, `c` opens a select-and-copy picker; use `Enter` to
+  confirm and copy the selected commit ID, or `Escape`/`q` to cancel and return
+  without copying. Selection supports the configured multi-selection controls.
 
 ## Requirements
 
@@ -706,6 +712,9 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 | `-` | `=s` | `-` | Implemented | log |
 | `-` | `=u` | `-` | Implemented | log |
 | `-` | `=g` | `-` | Implemented | log |
+| `-` | `=S` | `-` | Implemented | log |
+| `-` | `=G` | `-` | Implemented | log |
+| `-` | `=f` | `-` | Implemented | log |
 | `-` | `-i` | `-` | Implemented | log |
 | `-` | `-I` | `-` | Implemented | log |
 | `-` | `=M` | `-` | Implemented | log |
@@ -721,10 +730,11 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 | `-` | `-h` | `-` | Implemented | log |
 | `-` | `-p` | `-` | Implemented | log |
 | `-` | `-s` | `-` | Implemented | log |
-| `magit-log-current` | `l l` | `log.current` | Planned R-5.1 | log |
+| `magit-log-current` | `l l` | `log.current` | Implemented | log |
 | `magit-log-other` | `l o` | `log.other` | Planned R-5.1 | log |
 | `magit-log-head` | `l h` | `log.head` | Planned R-5.1 | log |
 | `magit-log-related` | `l u` | `log.related` | Planned R-5.1 | log |
+| `magit-log-select` | `l c` | `log.select-and-copy` | Implemented | log |
 | `magit-log-branches` | `l L` | `log.local-branches` | Planned R-5.1 | log |
 | `magit-log-all-branches` | `l b` | `log.all-branches` | Planned R-5.1 | log |
 | `magit-log-all` | `l a` | `log.all-references` | Planned R-5.1 | log |

@@ -88,6 +88,8 @@ pub enum NodeKind {
     /// A line inside a hunk; the client knows this kind as `line`.
     Line,
     Blank,
+    /// A selectable Git commit.
+    Commit,
 }
 
 /// One element of a view tree. Lines are 0-based and inclusive.
@@ -116,6 +118,9 @@ pub struct Node {
     /// Exact text `common.copy-value` yields for this node, if it is copyable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy: Option<String>,
+    /// Full commit object ID for structured commit selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
     /// Ids of the child nodes, in document order.
     pub children: Vec<NodeId>,
 }
@@ -367,6 +372,7 @@ impl Tree {
     fn copy_node(&self, line: usize) -> Option<String> {
         let node = self.node(self.line_nodes.get(line)?.node.as_str())?;
         match node.kind {
+            NodeKind::Commit => node.commit.clone(),
             NodeKind::File => node.path.clone(),
             NodeKind::Hunk => node.copy.clone(),
             NodeKind::Line => Some(node.label.clone()),
@@ -380,6 +386,7 @@ impl Tree {
     fn selected_line(&self, line: usize) -> Option<String> {
         let node = self.node(self.line_nodes.get(line)?.node.as_str())?;
         match node.kind {
+            NodeKind::Commit => node.commit.clone(),
             NodeKind::Line => Some(format!("{}{}", node.marker.unwrap_or(' '), node.label)),
             NodeKind::Hunk => node.copy.clone(),
             NodeKind::File => node.path.clone(),

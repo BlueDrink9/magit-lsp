@@ -5,7 +5,10 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, Command, CommandStatus, Scope};
+use crate::commands::{self, Command, CommandStatus, Scope, SelectionOperation};
+use crate::git::GitLogOptions;
+use crate::log_view::LogView;
+use crate::log_view::CommitSelection;
 use crate::diff_text;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
@@ -25,9 +28,19 @@ use crate::{Error, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::path::PathBuf;
 
 /// The command that leaves or enters text mode in every scope.
 const TOGGLE_TEXT_MODE: &str = "common.toggle-text-mode";
+
+fn unsupported_menu_item(status: MenuStatus, label: &str) -> Option<InvokeResult> {
+    let message = match status {
+        MenuStatus::Planned { roadmap_id } => format!("Not implemented yet: {label} (roadmap {roadmap_id})"),
+        MenuStatus::Unavailable { reason } => reason,
+        MenuStatus::Implemented => return None,
+    };
+    Some(InvokeResult { effects: vec![Effect::message(MessageLevel::Info, message)], ..InvokeResult::empty() })
+}
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
 pub fn status_uri(repo_path: &str) -> String {
@@ -83,6 +96,26 @@ impl OpenView {
     /// The menu model for server-side key handling.
     pub fn menu_mut(&mut self) -> Option<&mut Menu> {
         self.view.menu_mut()
+    }
+
+    /// Selection settings attached to this view, if any.
+    pub fn commit_selection(&self) -> Option<&CommitSelection> {
+        self.view.commit_selection()
+    }
+
+    /// Selected commit IDs in view order, optionally using the cursor commit.
+    pub fn selected_commits(&self, cursor_oid: Option<&str>) -> Vec<String> {
+        self.view.selected_commits(cursor_oid)
+    }
+
+    /// Toggle a mark for a commit identified by its full object ID.
+    pub fn toggle_commit_mark(&mut self, oid: &str) -> bool {
+        self.view.toggle_commit_mark(oid)
+    }
+
+    /// Load the next cached page for a paginated view.
+    pub(crate) fn load_more(&mut self) -> Result<()> {
+        self.view.load_more()
     }
 
     /// Whether this view is a menu.
@@ -285,6 +318,12 @@ pub struct Session {
     keymaps: Arc<BTreeMap<String, Keymap>>,
     /// The next prompt id handed to a prompt request.
     next_prompt: u64,
+    pending_selections: BTreeMap<String, PendingSelection>,
+}
+
+struct PendingSelection {
+    caller_id: String,
+    operation: SelectionOperation,
 }
 
 /// What a `view/invoke` produced: effects plus the render that follows it.
@@ -320,6 +359,7 @@ impl Session {
             views: ViewStack::new(),
             keymaps: Arc::new(BTreeMap::new()),
             next_prompt: 0,
+            pending_selections: BTreeMap::new(),
         }
     }
 
@@ -453,6 +493,8 @@ impl Session {
     /// Close a view; closing one the client already closed is a no-op.
     pub fn close(&mut self, view_id: &str) -> Result<()> {
         self.views.remove(view_id);
+        self.pending_selections.remove(view_id);
+        self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
         Ok(())
     }
 
@@ -573,7 +615,13 @@ impl Session {
             if cursor_moved {
                 view.pending.clear();
             }
-            keyhandler::resolve(keymap.as_ref(), &mut view.pending, &params.key, mode, capture)?
+            keyhandler::resolve(
+                keymap.as_ref(),
+                &mut view.pending,
+                &params.key,
+                mode,
+                capture,
+            )?
         };
 
         match resolution {
@@ -664,9 +712,7 @@ impl Session {
                 Ok(result)
             }
             MenuResolution::Unbound { chord } => Ok(unbound(&chord)),
-            MenuResolution::Complete(key) => {
-                self.menu_complete(&params.view_id, &key, params, ui)
-            }
+            MenuResolution::Complete(key) => self.menu_complete(&params.view_id, &key, params, ui),
         }
     }
 
@@ -695,7 +741,8 @@ impl Session {
             .and_then(|view| view.menu())
             .and_then(|menu| menu.item(key).cloned());
         match item {
-            Some(crate::menu::Item::Switch { .. }) => {
+            Some(crate::menu::Item::Switch { status, label, .. }) => {
+                if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
                 let toggled = self
                     .views
                     .get_mut(view_id)
@@ -712,13 +759,12 @@ impl Session {
                 reader,
                 label,
                 flag,
+                status,
                 ..
             }) => {
+                if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
                 if value.is_some() {
-                    if let Some(menu) = self
-                        .views
-                        .get_mut(view_id)
-                        .and_then(|view| view.menu_mut())
+                    if let Some(menu) = self.views.get_mut(view_id).and_then(|view| view.menu_mut())
                     {
                         menu.set_option(key, None);
                     }
@@ -741,11 +787,7 @@ impl Session {
                         ..InvokeResult::empty()
                     });
                 };
-                if let Some(menu) = self
-                    .views
-                    .get_mut(view_id)
-                    .and_then(|view| view.menu_mut())
-                {
+                if let Some(menu) = self.views.get_mut(view_id).and_then(|view| view.menu_mut()) {
                     menu.set_option(key, Some(value));
                 }
                 self.menu_rerender(view_id, params.cursor)
@@ -858,13 +900,15 @@ impl Session {
                     .get(view_id)
                     .map(|view| view.descriptor().scope.as_str().to_string())
                     .unwrap_or_default();
+                let menu_args = self.views.get(view_id).and_then(|view| view.menu()).map(|menu| menu.args());
+                let serialized_args = menu_args.as_ref().and_then(|args| serde_json::to_value(args).ok());
                 if registered.scope.matches(&scope) {
                     return self.run_command(
                         view_id,
                         registered.id,
                         Some(params.cursor),
                         params.selection,
-                        None,
+                        serialized_args.as_ref(),
                         Some(key.to_string()),
                         ui,
                     );
@@ -908,7 +952,7 @@ impl Session {
                     registered.id,
                     None,
                     None,
-                    None,
+                    serialized_args.as_ref(),
                     Some(key.to_string()),
                     ui,
                 )?;
@@ -938,13 +982,17 @@ impl Session {
     /// Remove a view and return focus to the one below it.
     fn pop_view(&mut self, view_id: &str) -> Result<InvokeResult> {
         self.views.remove(view_id);
+        self.pending_selections.remove(view_id);
+        self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
         let mut effects = vec![Effect::PopView {
             view_id: view_id.to_string(),
         }];
         let keymap = match self.views.iter().last() {
             Some(previous) => {
                 let id = previous.descriptor().id.clone();
-                effects.push(Effect::FocusView { view_id: id.clone() });
+                effects.push(Effect::FocusView {
+                    view_id: id.clone(),
+                });
                 self.keymap_notice(&id)
             }
             None => None,
@@ -983,8 +1031,9 @@ impl Session {
         parent_id: &str,
         kind: ViewKind,
         placement: Placement,
+        args: Option<&Value>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        let view = create_view(&self.repo_path, &kind, None, &self.keymaps)?;
+        let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
         self.push_view(parent_id, kind, placement, view)
     }
 
@@ -1156,6 +1205,8 @@ impl Session {
             if outcome.pop
                 || outcome.open_menu.is_some()
                 || outcome.open_view.is_some()
+                || outcome.open_selection.is_some()
+                || outcome.selected_commits.is_some()
                 || outcome.commit
             {
                 (effects, outcome, None)
@@ -1168,7 +1219,14 @@ impl Session {
                     }
                     Some(ViewMode::Interactive) => Some(view.leave_text_mode(cursor)?),
                     None => Some(if outcome.refresh {
-                        view.refresh_and_render(cursor)?
+                        match view.refresh_and_render(cursor) {
+                            Ok(render) => render,
+                            Err(err) if command.id == "common.refresh" && view.descriptor().kind == ViewKind::Log => {
+                                let effect = Effect::from_error(&err).unwrap_or_else(|| Effect::message(MessageLevel::Error, err.to_string()));
+                                return Ok(InvokeResult { effects: vec![effect], ..InvokeResult::empty() });
+                            }
+                            Err(err) => return Err(err),
+                        }
                     } else {
                         view.render(cursor, outcome.cursor)?
                     }),
@@ -1180,10 +1238,19 @@ impl Session {
         // Nested `common.quit` returns to the existing parent. Only quitting
         // the root view clears the whole session.
         if effects.iter().any(|effect| matches!(effect, Effect::Quit)) {
+            if let Some(pending) = self.pending_selections.remove(view_id) {
+                self.views.remove(view_id);
+                return Ok(InvokeResult {
+                    effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: pending.caller_id.clone() }],
+                    keymap: self.keymap_notice(&pending.caller_id),
+                    ..InvokeResult::empty()
+                });
+            }
             if self.views.previous_of(view_id).is_some() {
                 return self.pop_view(view_id);
             }
             self.views.clear();
+            self.pending_selections.clear();
             return Ok(InvokeResult {
                 effects,
                 ..InvokeResult::empty()
@@ -1192,11 +1259,65 @@ impl Session {
 
         let mode_changed = outcome.mode.is_some();
         if outcome.pop {
+            if let Some(pending) = self.pending_selections.remove(view_id) {
+                self.views.remove(view_id);
+                let mut effects = vec![Effect::PopView { view_id: view_id.to_string() }];
+                effects.push(Effect::FocusView { view_id: pending.caller_id.clone() });
+                return Ok(InvokeResult { effects, keymap: self.keymap_notice(&pending.caller_id), ..InvokeResult::empty() });
+            }
             let mut result = self.pop_view(view_id)?;
             let mut all = effects;
             all.extend(result.effects);
             result.effects = all;
             return Ok(result);
+        }
+
+        if let Some(request) = outcome.open_selection {
+            let view = match LogView::new(
+                PathBuf::from(&self.repo_path),
+                request.options,
+                Some(request.settings),
+            ) {
+                Ok(view) => Box::new(view),
+                Err(err) => {
+                    if let Some(effect) = Effect::from_error(&err) {
+                        return Ok(InvokeResult { effects: [effects, vec![effect]].concat(), ..InvokeResult::empty() });
+                    }
+                    return Err(err);
+                }
+            };
+            let (descriptor, mut render) = self.push_view(view_id, ViewKind::Log, Placement::Main, view)?;
+            if let Some(node) = self.views.get(&descriptor.id).and_then(|view| view.tree().nodes.iter().find(|node| node.kind == NodeKind::Commit)) {
+                render.cursor = Some(Cursor { line: node.start_line, column: 0 });
+            }
+            self.pending_selections.insert(descriptor.id.clone(), PendingSelection { caller_id: view_id.to_string(), operation: request.operation });
+            let mut all = effects;
+            all.push(Effect::PushView { descriptor });
+            let keymap = self.keymap_notice(&render.view_id);
+            return Ok(InvokeResult { effects: all, render: None, keymap: None, opened: vec![(render, keymap)], commit: None });
+        }
+
+        if let Some(commits) = outcome.selected_commits {
+            let allow_free_text = self.views.get(view_id).and_then(|view| view.commit_selection()).is_some_and(|selection| selection.allow_free_text);
+            let loaded = |oid: &str| self.views.get(view_id).is_some_and(|view| view.tree().nodes.iter().any(|node| node.kind == NodeKind::Commit && node.commit.as_deref() == Some(oid)));
+            let valid = if !commits.is_empty() && commits.iter().all(|oid| loaded(oid)) {
+                Some(commits)
+            } else if allow_free_text {
+                let repo = crate::git::GitRepo::open(&self.repo_path)?;
+                let resolved: Result<Vec<String>> = commits.iter().map(|oid| repo.resolve_commit(oid)).collect();
+                resolved.ok().filter(|resolved| !resolved.is_empty() && resolved.iter().zip(&commits).all(|(resolved, original)| resolved == original))
+            } else {
+                None
+            };
+            if let (Some(pending), Some(valid)) = (self.pending_selections.get(view_id), valid) {
+                let caller = pending.caller_id.clone();
+                if pending.operation == SelectionOperation::CopyCommits {
+                    self.pending_selections.remove(view_id);
+                    self.views.remove(view_id);
+                    return Ok(InvokeResult { effects: vec![Effect::Clipboard { text: valid.join("\n") }, Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }], keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
+                }
+            }
+            return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Info, "No valid commits were selected")], ..InvokeResult::empty() });
         }
 
         if let Some(menu) = outcome.open_menu {
@@ -1230,7 +1351,15 @@ impl Session {
         }
 
         if let Some((kind, placement)) = outcome.open_view {
-            let (descriptor, render) = self.push_kind(view_id, kind, placement)?;
+            let is_log = kind == ViewKind::Log;
+            let (descriptor, render) = match self.push_kind(view_id, kind, placement, outcome.open_args.as_ref()) {
+                Ok(opened) => opened,
+                Err(err) if is_log => {
+                    let effect = Effect::from_error(&err).unwrap_or_else(|| Effect::message(MessageLevel::Error, err.to_string()));
+                    return Ok(InvokeResult { effects: [effects, vec![effect]].concat(), ..InvokeResult::empty() });
+                }
+                Err(err) => return Err(err),
+            };
             let mut all = effects;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
@@ -1351,10 +1480,7 @@ impl Session {
     /// Returns `None` while that view is in text mode: §3.4 gives positional
     /// requests no meaning when the client's text may differ from the server's.
     pub fn acked_tree_for_uri(&self, uri: &str) -> Option<Tree> {
-        let view = self
-            .views
-            .iter()
-            .find(|view| view.descriptor.uri == uri)?;
+        let view = self.views.iter().find(|view| view.descriptor.uri == uri)?;
         if view.mode() == ViewMode::Text {
             return None;
         }
@@ -1466,6 +1592,21 @@ fn create_view(
 ) -> Result<Box<dyn View>> {
     match kind {
         ViewKind::Status => Ok(Box::new(StatusView::open(repo_path)?)),
+        ViewKind::Log => {
+            let options = match args {
+                Some(args) => {
+                    if args.get("options").is_some() || args.get("switches").is_some() {
+                        log_options_from_args(Some(args))?
+                    } else { serde_json::from_value::<crate::git::GitLogOptions>(args.clone())? }
+                }
+                None => crate::git::GitLogOptions::default(),
+            };
+            Ok(Box::new(crate::log_view::LogView::new(
+                repo_path.into(),
+                options,
+                None,
+            )?))
+        }
         ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
         ViewKind::Menu(name) => {
             let name = name.trim_start_matches("menu.");
@@ -1485,10 +1626,38 @@ fn create_view(
     }
 }
 
+/// Convert menu arguments or a typed log-options payload into Git query options.
+pub(crate) fn log_options_from_args(args: Option<&Value>) -> Result<GitLogOptions> {
+    let Some(args) = args else { return Ok(GitLogOptions::default()) };
+    if args.get("options").is_none() && args.get("switches").is_none() {
+        let mut log_args = args.clone();
+        if let Some(object) = log_args.as_object_mut() {
+            for key in ["purpose", "prompt", "multi", "allowFreeText"] { object.remove(key); }
+        }
+        return Ok(serde_json::from_value(log_args)?);
+    }
+    let values: crate::menu::Args = serde_json::from_value(args.clone())?;
+    let mut options = GitLogOptions::default();
+    for (key, value) in values.options {
+        match key.as_str() {
+            "=n" => options.page_size = value.parse().ok().filter(|size| *size > 0)
+                .ok_or_else(|| Error::new("Log page size must be a positive integer."))?,
+            "=a" => options.author = Some(value), "=s" => options.since = Some(value),
+            "=g" => options.grep = Some(value), "=S" => options.pickaxe = Some(value),
+            "=G" => options.pickaxe_regex = Some(value), "=f" => options.paths.push(value),
+            _ => return Err(Error::new(format!("Unsupported log option: {key}"))),
+        }
+    }
+    options.graph = values.switches.iter().any(|s| s == "-g");
+    options.decorate = values.switches.iter().any(|s| s == "-d");
+    Ok(options)
+}
+
 /// A URI unique to one view, so positional requests resolve the right tree.
 fn view_uri(repo_path: &str, kind: &ViewKind, id: &str) -> String {
     match kind {
         ViewKind::Status => status_uri(repo_path),
+        ViewKind::Log => format!("magit://log/{id}"),
         other => format!("magit://{}/{}", other.as_str(), id),
     }
 }

@@ -72,10 +72,18 @@ apply = ["a"]
 "open.run" = ["!"]
 "open.process-log" = ["$"]
 
+[keys.log]
+"log.load-more" = ["Plus"]
+unbind = ["/", "?", "n", "p"]
+
+[keys."log.select"]
+"log.load-more" = ["Plus"]
+unbind = ["/", "?", "n", "p"]
+
 [keys.select]
 confirm = ["Enter"]
 toggle-mark = ["Space"]
-enter-rev = ["/"]
+enter-rev = ["i"]
 cancel = ["Escape", "ctrl+c"]
 
 [keys.menu]

@@ -61,6 +61,7 @@ FIXTURES = (
     "unborn",
     "in-progress-rebase",
     "in-progress-cherry-pick",
+    "log-history",
 )
 
 
@@ -234,6 +235,15 @@ def _in_progress_cherry_pick(repo: Path, env: dict[str, str]) -> None:
         raise RuntimeError("cherry-pick fixture left no cherry-pick state")
 
 
+def _log_history(repo: Path, env: dict[str, str]) -> None:
+    """Create a decorated three-commit history for log UI scenarios."""
+    commit(repo, env, "old searchable subject", {"f.txt": "old\n"})
+    commit(repo, env, "middle graph subject", {"f.txt": "middle\n"})
+    commit(repo, env, "latest decorated subject", {"f.txt": "latest\n"})
+    git(repo, env, "branch", "topic")
+    git(repo, env, "tag", "v1", "HEAD~1")
+
+
 _BUILDERS = {
     "clean": _clean,
     "modified-two-files": _modified_two_files,
@@ -245,6 +255,7 @@ _BUILDERS = {
     "unborn": _unborn,
     "in-progress-rebase": _in_progress_rebase,
     "in-progress-cherry-pick": _in_progress_cherry_pick,
+    "log-history": _log_history,
 }
 
 

@@ -972,7 +972,7 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 | --- | --- | --- |
 | `common.confirm` | `Enter` | `Enter` |
 | `select.toggle-mark` (multi) | `Space` | `Space` |
-| `select.enter-rev` | `/` | `i` |
+| `select.enter-rev` | `i` | `i` |
 | `common.cancel` | `Escape`, `ctrl+c` | `Escape`, `ctrl+c` |
 
 ### 5.4 Menu scopes (`menu.*`)
@@ -1342,7 +1342,7 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 
 ### Phase 4 — Read views
 
-- [ ] R-5.1 **First feature to implement: log (graph, decorations, filters,
+- [x] R-5.1 **First feature to implement: log (graph, decorations, filters,
       lazy loading) and reusable select mode** (§3.7). Implement the
       server-rendered log with visible selection purpose, cursor
       and structured commit identity; confirm/cancel; native editor navigation
@@ -1362,6 +1362,12 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       commit/rebase mutation support.
       *UI:* add scenario `log-view`: `l l` opens the log, the screen shows the
       commit subject, `q` returns to status.
+       R-5.1 correctness findings are tracked in the [R-5.1 review](#r-51-logselect-review).
+       Verification: `make test`, `make ui-unit`, `make ui-test`, `make ui-tour`,
+       and `git diff --check` passed. UI evidence inspected for `log-view` and
+       `log-select` across standard/vim at 100x30 and 80x24: decorated subjects,
+       graph/ref labels and selection purpose render; generated `build/ui/tour.md`
+       reviewed. Test sessions stopped; no orphan `magit-lsp` process found.
 - [ ] R-5.2 Revision view; Diff view (ranges, args).
       *UI:* add scenario `revision-view`: from the log, `d` on a commit shows
       its diff and `q` returns to the log.
@@ -1716,6 +1722,50 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
 ---
 
 ## 12. Review backlog
+
+### R-5.1 log/select review
+
+- [x] **[P1] Return readable log-open failures without desynchronizing the view stack** (`src/session.rs:934-958,1268-1273,1338-1340,1574-1599`)
+  - **Problem:** Log creation and argument validation use `?` outside the command error-to-effect handling. Entering an invalid `=n` value or an invalid grep regex and choosing `l` therefore produces a request error, not a readable message effect. The menu has already been removed server-side, but its pop effects are lost with the error.
+  - **Why it matters:** Correctness and the command-effects contract; the client can retain a menu that no longer exists on the server.
+  - **Change:** Handle expected argument/Git failures for `log.current` and selection-log creation as successful `InvokeResult`s containing readable `Effect::Message`s (use the existing Git failure mapper). Make failed menu-triggered opens transactional: preserve the menu and its arguments for correction, or deliver all necessary pop/focus effects with the failure. Cover log refresh failures in the command path too; `log.load-more` already maps Git errors.
+  - **Done when:** Real `view/key`/`view/invoke` tests exercise invalid menu page size and invalid grep regex, assert a successful message-effect response, no new log, and matching client/server view stacks; a valid retry works. Do not substitute a direct `open_with_args().unwrap_err()` test.
+  - **Constraints:** Keep internal programming faults as request errors; do not alter unrelated commands or implement later log variants.
+
+- [x] **[P1] Require acknowledged identity before positional selection actions** (`src/commands.rs:824-829,999-1004`)
+  - **Problem:** Confirm and toggle-mark fall back to the latest server tree when no tree has been acknowledged. If the picker renders v1, refreshes to a differently ordered v2 before the initial acknowledgement, and receives a cursor still addressing v1, these handlers can copy or mark the new occupant of that row.
+  - **Why it matters:** Correctness: commit selection must use the client's acknowledged structured identity, never guess from a newer row layout.
+  - **Change:** For positional confirm/toggle-mark, require `acked_tree()` and return a readable retry/resync message when it is absent. Continue resolving a stale acknowledged tree by full OID and reject an OID no longer loaded, rather than using its former row in the current tree.
+  - **Done when:** Selection tests cover both an unacknowledged initial picker followed by a reordered refresh (no clipboard/mark side effect) and an acknowledged old tree followed by an unacknowledged reordered refresh (select the old structured OID, or refuse if it disappeared). Exercise both key and invoke entry points.
+  - **Constraints:** Keep this fix scoped to log/select handlers; do not redesign the general acknowledgement protocol.
+
+- [x] **[P1] Make the implemented path filter reachable through real menu keys** (`src/menus/log.rs:23,28`, `src/keyhandler.rs:70-89`)
+  - **Problem:** The new `=path` option cannot be typed one key at a time: `=` then `p` completes the existing planned `=p` first-parent item. The menu matcher also does not concatenate the remaining `a`, `t`, `h` characters, so no native client can reach the advertised path filter.
+  - **Why it matters:** Correctness: a filter marked Implemented is inaccessible in the actual menu workflow.
+  - **Change:** Assign the path filter a free, supported two-step option key, update its translation in `create_view`, implemented-option allowlist, tests and generated snapshots. Prefer this over adding a new ambiguous multi-character flag grammar.
+  - **Done when:** A session/UI test opens the log menu, sends individual canonical key steps to the path option, answers its prompt, opens `log.current`, and verifies only commits touching the literal selected path appear.
+  - **Constraints:** Preserve the planned first-parent key and literal-path semantics; do not implement R-5.3 options as part of this fix.
+
+- [x] **[P1] Apply log-menu filters to the selection action** (`src/commands.rs:800-820`, `src/session.rs:1268-1273`)
+  - **Problem:** The log menu passes its active options to `log.select-and-copy`, but that handler ignores them and selection creation always queries default `GitLogOptions`. An active author/message/path/page-size filter or disabled graph/decorations silently disappears when choosing the implemented selection action instead of `l`.
+  - **Why it matters:** Correctness: the supported menu arguments and preview do not describe the selection log that opens.
+  - **Change:** Carry typed log options in `SelectionRequest` and initialize `LogView` with those options. Share the existing menu-argument-to-log-options conversion with `log.current`, while retaining direct invocation's selection settings (`purpose`, `prompt`, `multi`, `allowFreeText`).
+  - **Done when:** A real menu-key test sets a supported filter and toggles graph/decorations, chooses `c`, and verifies the picker honors those settings and still returns the selected full OID to its caller. Existing direct-invocation selection tests pass.
+  - **Constraints:** No client-side filtering, new selection consumer, or later-phase mutation implementation.
+
+- [x] **[P1] Emit log token ranges in bytes before LSP conversion** (`src/log_view.rs:268-298`, `src/semantic_tokens.rs:123-135`)
+  - **Problem:** `commit_node` calculates author/date positions and lengths with `.chars().count()`, but the shared semantic-token encoder interprets those fields as UTF-8 byte offsets before converting them to UTF-16. Non-ASCII subjects, ref names or authors shift or truncate the emitted highlight ranges.
+  - **Why it matters:** Correctness: the new log renderer violates the existing token-coordinate contract for ordinary Unicode commit metadata.
+  - **Change:** Calculate all log `Token.start`/`length` values from UTF-8 byte lengths of the actual rendered segments; let the existing encoder perform the only UTF-16 conversion. Add deterministic renderer/encoder coverage with non-ASCII decorations, subject and author, including a supplementary-plane character.
+  - **Done when:** Tests assert the decoded semantic ranges select the exact hash, decorations, full author and full date from the rendered row, in both graph and multi-selection rendering.
+  - **Constraints:** Do not change the shared token representation/encoder or implement R-5.4 links/hover.
+
+- [x] **[P1] Disable color in the machine-readable Git log query** (`src/git.rs:227-242,284-316`)
+  - **Problem:** The new query does not override Git color configuration. With `color.ui=always` or `color.log=always`, graph output contains ANSI escape sequences; the parser's first-hex-digit heuristic then sees digits in those escapes instead of the full OID and discards commit records or renders escape bytes.
+  - **Why it matters:** Correctness: supported user Git configuration can make a nonempty repository appear to have no selectable commits.
+  - **Change:** Explicitly request no color for this structured `git log` invocation rather than stripping ANSI sequences or weakening OID validation. Add backend coverage with forced-color Git configuration and a branching/merge graph.
+  - **Done when:** Forced-color and ordinary queries return the same full commit OIDs and ordered graph rows; rendered text contains no ANSI escapes.
+  - **Constraints:** Override presentation only for this machine-readable query; do not modify user/repository configuration or unrelated Git commands.
 
 <!-- Retained for existing links to the former unnumbered heading. -->
 <a id="review"></a>

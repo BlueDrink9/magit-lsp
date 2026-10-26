@@ -43,7 +43,8 @@ pub struct Status {
 }
 
 /// Filters and presentation options for a Git log query.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct GitLogOptions {
     /// Maximum commits returned per page.
     pub page_size: usize,
@@ -65,6 +66,12 @@ pub struct GitLogOptions {
     pub paths: Vec<String>,
     /// Starting revision; defaults to HEAD.
     pub revision: Option<String>,
+}
+
+impl Default for GitLogOptions {
+    fn default() -> Self {
+        Self { page_size: 100, graph: true, decorate: true, author: None, since: None, grep: None, pickaxe: None, pickaxe_regex: None, paths: Vec::new(), revision: None }
+    }
 }
 
 /// One commit returned by [`GitRepo::log`].
@@ -217,7 +224,7 @@ impl GitRepo {
         let query_limit = size
             .checked_add(1)
             .ok_or_else(|| Error::new("log page size is too large"))?;
-        let mut args: Vec<String> = vec!["log".into(), "--topo-order".into()];
+        let mut args: Vec<String> = vec!["log".into(), "--topo-order".into(), "--no-color".into()];
         if options.graph {
             args.push("--graph".into());
         }

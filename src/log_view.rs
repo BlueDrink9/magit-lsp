@@ -265,7 +265,7 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
     commit_node.copy = Some(c.oid.clone());
     tree.nodes.push(commit_node);
     // The rendered prefix has a separator between the mark and the hash.
-    let hash_start = c.graph_prefix.chars().count() + mark.chars().count() + 1;
+    let hash_start = c.graph_prefix.len() + mark.len() + 1;
     tree.tokens.push(Token {
         line: n,
         start: hash_start,
@@ -278,24 +278,24 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
         tree.tokens.push(Token {
             line: n,
             start,
-            length: decorations.chars().count(),
+            length: decorations.len(),
             token_type: "magit.ref".into(),
             modifiers: Vec::new(),
         });
     }
-    let author_start = prefix.chars().count() + c.subject.chars().count() + 2;
-    let date_start = author_start + c.author.chars().count() + 2;
+    let author_start = prefix.len() + c.subject.len() + 2;
+    let date_start = author_start + c.author.len() + 2;
     tree.tokens.push(Token {
         line: n,
         start: author_start,
-        length: c.author.chars().count(),
+        length: c.author.len(),
         token_type: "magit.author".into(),
         modifiers: Vec::new(),
     });
     tree.tokens.push(Token {
         line: n,
         start: date_start,
-        length: c.date.chars().count(),
+        length: c.date.len(),
         token_type: "magit.date".into(),
         modifiers: Vec::new(),
     });

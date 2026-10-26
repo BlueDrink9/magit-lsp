@@ -50,6 +50,7 @@ class FixtureTest(unittest.TestCase):
                 "unborn",
                 "in-progress-rebase",
                 "in-progress-cherry-pick",
+                "log-history",
             },
         )
 
@@ -83,6 +84,12 @@ class FixtureTest(unittest.TestCase):
 
     def test_clean_has_no_changes(self) -> None:
         repo, env = self.build("clean")
+        self.assertEqual(entries(status(repo, env)), [])
+
+    def test_log_history_has_commits_and_decorations(self) -> None:
+        repo, env = self.build("log-history")
+        self.assertEqual(fixtures.git(repo, env, "rev-list", "--count", "HEAD").stdout.strip(), "3")
+        self.assertEqual(fixtures.git(repo, env, "tag", "--list").stdout.strip(), "v1")
         self.assertEqual(entries(status(repo, env)), [])
 
     def test_modified_two_files(self) -> None:
