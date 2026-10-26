@@ -91,7 +91,7 @@ Use these words exactly. Do not invent synonyms.
 | **Select mode** | A view (usually a log) opened to let the user pick commits; confirm returns them to a waiting command (§3.7) |
 | **Editor bridge** | The mechanism that lets Git's "open an editor" calls (commit message, rebase todo) open inside the user's own editor window (§3.10) |
 | **Process log** | A view listing every Git invocation with arguments, exit code, duration and output |
-| **Text mode** | A view mode in which the buffer is plain editable text with no server key handling, so the user can select/copy freely (§3.14) |
+| **Text mode** | A view mode with no ordinary Magit key capture: Neovim retains its existing editable buffer behavior; VSCode browses its read-only virtual document with native editor keys and queued refreshes (§3.14) |
 | **Semantic token** | LSP's standard way for a server to label ranges of text with a *type* (and modifiers) so the client colours them using the user's theme |
 | **Parity** | Having the same operation available as Magit |
 
@@ -696,18 +696,32 @@ Diff context size is a setting (`diff.context`, default 3) passed as `-U<n>` to
 
 `common.toggle-text-mode` (bound in every scope, including text mode itself).
 - **Enter:** server sets `mode = text`; sends a `view/keymap` containing only
-  the toggle binding; the client makes the buffer modifiable, restores undo
-  (`undolevels` back to the user's value), and stops forwarding keys. The
-  server stops answering position-based requests for the view and **queues**
-  refreshes (does not render them).
-- **Edits** in text mode are never parsed and never synced to the server model.
+  the toggle binding to dynamic clients. The server stops answering
+  position-based requests for the view and **queues** refreshes (does not
+  render them). Static clients receive a reliable mode/context notification
+  for entry through invoke, key, menu or setMode.
+- **Neovim:** preserve its existing editable text behavior: make the buffer
+  modifiable, restore undo (`undolevels` back to the user's value), and stop
+  forwarding keys. **Edits** are never parsed or synced to the server model.
+- **VSCode:** retain the read-only virtual document and use native browsing
+  (navigation, search, selection and copy). Disable all ordinary Magit
+  capture/shortcut overrides, including mirrored fold-key overrides, while in
+  text mode; retain the explicit return toggle/command. The document remains
+  read-only.
 - **Exit:** the server re-renders the current tree (with queued refreshes
-  applied) as a full replace; the client replaces the buffer, resets
+  applied) as a full replace. Neovim replaces the buffer, resets
   `modified=false` and sets `undolevels=-1` before replacing so the user
-  cannot undo into stale content.
+  cannot undo into stale content; VSCode refreshes its read-only virtual
+  document and restores ordinary Magit bindings.
 - Complementary first-class commands avoid needing text mode for common
   copies: `common.copy-value` (hash for a commit, path for a file, diff text
-  for a hunk/selection) returning a `clipboard` effect.
+  for a hunk/selection) returning a `clipboard` effect. Yank/copy values are
+  server-owned structured-tree/content operations, never client parsing of
+  rendered text. Whole-hunk, single-line and visual-selection yanks return raw
+  code source: remove exactly the structural leading diff marker (`+`, `-`, or
+  context space), preserve actual code/indentation and literal `+`/`-`
+  characters and line order, and exclude hunk/file headers and no-newline
+  annotations. They do not mutate Git or reconstruct old/new file contents.
 
 ### 3.15 Highlighting and theme integration
 
@@ -1070,6 +1084,13 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Review (highest priority; grouped by stated priority)
 
+**Active review sprint:** Work only from [`REVIEW_REPORT.md`](./REVIEW_REPORT.md)
+for the current technical-debt review. Its dated reconciliation below supersedes
+this older roadmap backlog for sprint scheduling; do not start unrelated unchecked
+items here. Preserve that report's acceptance gates and do-not-touch constraints.
+Prioritize A01–A12, A18, A19, A29, A33 and A34 before deletion work. A22/A23
+remain withdrawn. Do not duplicate the report's 32-task ledger in this index.
+
 - **P0:** none remaining for the VSCode review: R-VS-2, R-VS-3, R-VS-4 and
   R-VS-5 (§12) all have recorded regression/real-client evidence; R-VS-3's F5
   limitation and R-VS-4's actual theme measurements are explicit.
@@ -1424,9 +1445,34 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
       split shows the `gitcommit` buffer and the staged diff; confirm closes
       it and the status screen shows a clean tree.
-- [ ] R-4.3 Status "Recent commits" section.
-      *UI:* add scenario `recent-commits`: the status screen shows a "Recent
-      commits" section with a commit subject; `Enter` visits the revision.
+- [ ] R-4.3 Status history sections: **Unpushed** and **Pushed**.
+      Keep history as server-owned structured commit nodes with full OIDs;
+      reuse section folding/navigation and integrate Enter-to-view with R-5.2's
+      revision view. Clients display the rendered history verbatim and never
+      reconstruct or parse Git history. This task owns both history sections;
+      R-6.4 owns its independent Unpulled section and status header lines, not
+      Unpushed.
+
+      Unpushed is initially expanded, showing the newest 20 commits, with any
+      older entries in a folded `More` group loaded lazily when expanded.
+      Pushed is initially folded whenever a status view is newly opened; when
+      expanded it is bounded and lazy-loaded. Preserve each section's user fold
+      choice across refreshes (do not forcibly refold it). Classify against a
+      resolved remote-tracking baseline: honor the configured push target when
+      present, otherwise the upstream, and use that baseline consistently for
+      both sections. Do not fetch implicitly or claim pushed/unpushed state
+      without a resolvable baseline. With no upstream/baseline, detached HEAD,
+      or an unborn repository, show a clearly labelled recent-history fallback
+      as appropriate rather than asserting push state.
+
+      *Tests:* cover baseline classification (including configured push target
+      versus upstream), more than 20 commits and lazy `More`, default folding
+      for newly opened views, preservation of both fold choices over refresh,
+      and missing-baseline/detached/unborn fallback behavior. Verify structured
+      full-OID commit identity and Enter integration with R-5.2.
+      *UI:* add real-UI evidence for both sections, expanding `More` and Pushed,
+      and opening a revision with Enter then returning to status; assert the
+      rendered screen at each step.
 
 ### Phase 6 — Branches, remotes, stash
 
@@ -1435,7 +1481,10 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
 - [ ] R-6.2 Fetch/pull/push menus (`--force-with-lease`, `--set-upstream`,
       `--dry-run`, `--prune`, pull `--rebase`/`--ff-only`) with progress and askpass.
 - [ ] R-6.3 Remote and tag menus; reset menu; checkout file from revision.
-- [ ] R-6.4 Status: Unpulled/Unpushed sections; header lines.
+- [ ] R-6.4 Status: Unpulled section and header lines (Head, Merge, Push,
+      Tag). Unpushed history section ownership and its baseline classification
+      belong to R-4.3; coordinate the shared status-screen integration without
+      duplicating that work.
 - [ ] R-6.5 Stash menu (stash, snapshot, apply, pop, drop, branch), list and
       show views, Stashes section.
 
@@ -1745,12 +1794,21 @@ requirements live in R-VS-1 (§7); current resolution evidence is in §12.
   - **Done (2026-10-26):** root cause found: the socket path was 74 bytes (limit 107) and its permissions were fine; the failure was the launcher command. `_nvim_command` put the whole inherited environment (≈19 KB in the Nix development shell) on the `tmux respawn-pane` command line, so tmux failed before Neovim started with `command too long`. `start` now writes `launch-nvim.sh` (cleared env, stderr to `nvim.stderr`, status to `nvim.exit`) and tmux runs only the short script, preserving the environment exactly. Plain `scripts/ui start` now works without the `env -i HOME=… PATH=…` workaround.
   - **Diagnostics:** `scripts/ui_lib/startup.py` reports socket path and byte length against the 107-byte Unix limit, existence/type/mode, pane liveness, recorded exit status, one bounded connect probe and the stderr tail. `driver.StartupError` is raised for startup/socket failures; scenario rows set `ComboResult.startup` and print `STARTUP FAILED (harness/socket, not scenario behaviour)` instead of an `expect:` failure. An overlong socket path is rejected before tmux starts.
   - **Evidence:** an injected fake `nvim` (exit 3, stderr `fake nvim failed`) produced: `socket … (74 bytes, limit 107); missing`, `nvim pane: exited`, `nvim exit status: 3`, `connect probe: not attempted: no socket to contact`, `nvim stderr (tail): fake nvim failed`; no orphan tmux session remained. `make ui-unit` passed 164 tests (new `tests/ui/test_startup.py` plus launcher/report/startup-label cases in `test_driver.py`/`test_scenario.py`); `make ui-test` passed 25 PASS / 0 XFAIL / 0 FAIL without `env -i`; `make test` passed the full Rust suite, 53 Neovim cases, 23 VSCode tests and 164 generated keybindings. `ui-test-plan.md` §A.1.1 documents the launcher and report.
+  - [x] **Scoped diagnostic follow-up:** PTY reproduction confirmed that an RPC helper launched with terminal stdin and without `--headless` enters the TUI, emits terminal control queries, and routes the remote-expression result to stderr. All RPC helper invocations now use `--headless` and stdin from `/dev/null`; the actual tmux Neovim remains interactive. Failure-only reports retain the last idle result and bounded client busy/view/message state. The readiness condition is unchanged.
+  - [x] **Scenario shell follow-up:** Direct scenario RPC expressions use `nvim --headless`; `sh:` steps use `/dev/null` stdin and convert expected nonzero exits, timeouts and launch errors into per-combination failures while stopping the run and continuing the matrix.
 
 ---
 
 ## 12. Review backlog
 
 ### R-5.1 log/select review
+
+- [ ] **[P1] Return raw source for structured diff yanks** (`src/commands.rs`; `src/tree.rs`; public copy/invoke seam)
+  - **Problem:** Diff copy must yield code rather than rendered patch decoration, with exact structural identity even for literal marker characters.
+  - **Why it matters:** Copying whole hunks, lines and visual selections should produce usable source without parsing display text or changing repository state.
+  - **Change:** Implement whole-hunk, single-line and visual-selection raw-source yanks as server-owned structured-tree/content operations returning clipboard effects. Strip exactly one structural leading diff marker (`+`, `-`, or context space); preserve remaining code, indentation, literal `+`/`-` characters and line order; exclude file/hunk headers and no-newline annotations. Do not reconstruct old/new file semantics or add bindings beyond existing profile bindings.
+  - **Done when:** Rust tests exercise the public command/request seam for added, removed and context lines, literal marker characters, indentation, multiple lines, and excluded metadata; none mutates Git. A scripted real-UI scenario verifies whole-hunk, single-line and visual-selection copy output.
+  - **Constraints:** No client parsing of rendered text; use structured nodes/content. Never mutate Git. No new keybindings.
 
 - [x] **[P1] Return readable log-open failures without desynchronizing the view stack** (`src/session.rs:934-958,1268-1273,1338-1340,1574-1599`)
   - **Problem:** Log creation and argument validation use `?` outside the command error-to-effect handling. Entering an invalid `=n` value or an invalid grep regex and choosing `l` therefore produces a request error, not a readable message effect. The menu has already been removed server-side, but its pop effects are lost with the error.
@@ -2291,6 +2349,8 @@ review-time findings must be rechecked against source before implementation.
 
 ### Documentation maintenance (this ticket)
 
+- [x] Reconcile the active technical-debt review in `REVIEW_REPORT.md` and
+  direct the sprint there without duplicating its task ledger.
 - [x] Consolidate completed history and VSCode resolution notes; preserve the
   unresolved task inventory, priorities, dependencies, acceptance gates and user
   annotations. Verify links/references and `git diff --check && make test`.

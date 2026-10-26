@@ -48,9 +48,9 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 5. Visual actions reconstruct old document coordinates using fresh diffs.
 6. Prompt waits hold the global session mutex, creating a reader-loop deadlock path.
 7. VSCode has quit, edit-focus, selection-boundary and menu-activation seam gaps.
-8. Runtime Git-version diagnosis can be deleted while keeping floor/latest CI.
+8. Keep below-soft-floor warnings on Git errors; delete multi-version test scaffolding while keeping floor/latest CI.
 9. Dead APIs, repeated manifest metadata and duplicate render paths offer independent reductions.
-10. Propose **32 tasks, estimated net −1,808 LOC**; no implementation is authorized by this report.
+10. Propose **32 tasks, estimated net −1,508 LOC**; no implementation is authorized by this report.
 
 ### Do not touch
 
@@ -62,6 +62,7 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 - Deliberate Planned menu entries.
 - Independent upstream Magit key audit: an external oracle, not redundant runtime data.
 - Floor/latest Git CI coverage.
+- User-visible warnings when a Git command fails and the installed Git is below the 2.30.8 soft floor; this is advisory, never a version gate.
 - Already-open review tasks: reuse their ownership rather than creating parallel implementations.
 
 ### Proposed order
@@ -80,7 +81,6 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 - The omitted Step 2 is interpreted as the supplied metrics, not an invented review phase.
 - Editor-native window placement/sizing, fold translation and structured-menu-to-QuickPick formatting are permitted glue. Canonical grammar, navigation targets, command-key interpretation and menu transitions belong to the server.
 - Existing tasks already cover Lua async requests/debug isolation, visit handling, highlight metadata, fake-Git extraction, test overlap, snapshots, source-text cursor lookup, mutation ordering, environment isolation and UI latency. This report does not replace them.
-- The reviewer could not write `REVIEW_REPORT.md` under its standing write restriction. The orchestrator persisted its findings and amendments; no source implementation or worker task was dispatched.
 - Shell restrictions prevented the reviewer's initial bulk scan; its follow-up used read/grep tools to complete the command-ID and typed-field inventories. Python LSP was unavailable, so Python inventory used source declarations.
 - Named functions are inventoried; anonymous callbacks inherit their enclosing operation's classification. Arbitrary JSON `args` has no finite leaf schema: declared fields and interpreted argument keys are inventoried instead.
 - LOC estimates are not measured savings and include generated-data changes for A15/A29. Already-open backlog savings are excluded.
@@ -89,7 +89,7 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 
 ### Decisions needed
 
-1. **VSCode text mode:** disable the currently broken offering now (recommended A29), or authorize a writable native-document adapter as a larger feature. These are alternative scopes.
+1. **VSCode text mode:** retain the read-only virtual document and provide native browsing/text mode (A29); do not build a writable adapter. Neovim's existing editable text mode remains unchanged.
 2. **Completed R-2.3 versus still-Planned common commands:** retain the §5.1 bindings, but decide whether the four navigation/cycle operations need a new open implementation ticket or a corrected historical milestone. Do not silently delete them.
 
 ### Task ledger
@@ -108,7 +108,7 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 | A10 | P1 | merge | +35 |
 | A11 | P1 | simplify | +20 |
 | A12 | P1 | merge | −15 |
-| A13 | P2 | delete | −380 |
+| A13 | P2 | delete | −200 |
 | A14 | P2 | delete | −135 |
 | A15 | P2 | delete | −700 |
 | A16 | P2 | delete | −160 |
@@ -122,13 +122,13 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 | A26 | P2 | delete | −60 |
 | A27 | P2 | delete | −100 |
 | A28 | P2 | keep-with-reason | +20 |
-| A29 | P1 | delete | −80 |
+| A29 | P1 | simplify | +40 |
 | A30 | P2 | simplify | −20 |
 | A31 | P2 | simplify | −20 |
 | A32 | P2 | simplify | −60 |
 | A33 | P1 | move-to-server | +35 |
 | A34 | P1 | simplify | +15 |
-| **Total** | | | **−1,808** |
+| **Total** | | | **−1,508** |
 
 A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
 
@@ -141,14 +141,45 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
 
 | Category | Count | Estimated net LOC |
 |---|---:|---:|
-| delete | 8 | −1,670 |
+| delete | 7 | −1,410 |
 | merge | 6 | −105 |
-| simplify | 15 | −63 |
+| simplify | 16 | −23 |
 | move-to-server | 2 | +10 |
 | keep-with-reason | 1 | +20 |
-| **Total** | **32** | **−1,808** |
+| **Total** | **32** | **−1,508** |
 
 ### Proposed tasks — not dispatched
+
+### Reconciliation — 2026-10-27
+
+This ledger records the review's state against the concurrent history and current
+source, not task completion inferred from commit subjects. Historical baseline
+metrics above remain collection-time evidence, not current verification. Recheck
+each task's complete acceptance gate before implementation; the priority work is
+A01–A12, A18, A19, A29, A33 and A34, before deletions.
+
+**Already addressed in part / assumptions stale:** A19's shared named key
+vectors already exist (`tests/data/keys.json`); this does not establish shared
+prompt/render vectors or false-default behavior. A29's log view and reusable
+commit selection consumers now exist; this does not establish native read-only
+VSCode browsing and queued-refresh behavior. A01–A34 preconditions and line
+references must be revalidated. Discard is implemented (`status.discard` and
+Git dispatch), contrary to older roadmap assumptions; A31's test-parameterization
+work may still remain. The defensive-boundary principle is already stated in
+AGENTS.md, but that does not settle each concrete boundary finding.
+
+**Still open pending full acceptance evidence:** A01–A12, A18, A19, A29, A33
+and A34 remain prioritized and unchecked. In particular, partial consumers,
+shared key fixtures, or an implementation commit do not satisfy their gates.
+Other tasks remain unchecked until their source preconditions are revalidated.
+The history includes log-view/select work (d5da635 and related commits),
+confirmed discard (3b175f2), and key-vector work; these are evidence pointers,
+not completion claims. A22/A23 remain withdrawn. Do not touch the explicit
+exclusions above, and preserve existing ownership.
+
+**Verification distinction:** baseline test metrics are historical. A later
+successful command is evidence only for the exact code and cases it ran; UI,
+client, and real-Git acceptance gates still require their stated verification.
 
 - [ ] **[P0] A01 — Establish a private editor-bridge socket directory** (`src/editor.rs:359–375`)
   - **Problem:** Predictable `/tmp/magit-lsp-<pid>` is adopted with `create_dir_all`, without establishing ownership/privacy; an existing socket is removed. Under permissive umask another local user can reach askpass.
@@ -306,18 +337,18 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P2] A13 — Delete runtime Git-version diagnosis** (`src/git.rs:675–765,860–880`; `tests/git_version.rs`)
-  - **Problem:** Git failures can spawn a version probe, reader thread, timeout loop and comparison solely for a second warning.
-  - **Why it matters:** Soft-floor policy explicitly rejects runtime version detection.
-  - **Change:** Delete detector/parser/callers and multi-version simulation tests. Move the genuine normal/piped stderr regression into general error coverage.
-  - **Done when:** Runtime operations never probe `git --version`; failures retain original stderr/warnings.
-  - **Constraints:** Keep documented 2.30.8 floor and integrity-pinned floor/latest CI.
+- [ ] **[P2] A13 — Delete multi-version test scaffolding; retain soft-floor warnings** (`src/git.rs`; `src/errors.rs`; `tests/git_version.rs`; `tests/errors.rs`; existing Git-error effect boundary)
+  - **Problem:** A dedicated fake-Git version harness and version matrices add test volume, but the below-floor warning is deliberate user-facing behavior, not dead runtime code.
+  - **Why it matters:** Reduce test scaffolding without losing useful diagnosis when Git fails on an older installation.
+  - **Change:** Retain the best-effort version probe, parser/comparison and failure-path callers needed to warn when installed Git is below 2.30.8. Ensure the warning reaches the user through a readable message effect, not only tracing/server stderr, while preserving the original Git failure and stderr. Delete the dedicated multi-version simulation harness and version-scenario matrices, including redundant parser/version tables. Move the genuine normal/piped stderr regression into general error coverage. Any retained warning-contract test must use a lightweight fake version response (stubbed process output or shared fake-Git support), never download, build or require an actual old Git binary. Do not add an elaborate warning suite or replacement multi-version runner.
+  - **Done when:** A Git failure below the soft floor shows the original error plus an advisory warning naming the installed version and 2.30.8 recommendation. Successful commands do not trigger diagnosis; at/above-floor or unavailable/unparseable probe results add no below-floor warning. No dedicated multi-version test harness remains.
+  - **Constraints:** Never block commands based on version. Keep diagnosis bounded, non-recursive and unable to mask the original failure. Keep documented 2.30.8 soft floor and integrity-pinned floor/latest CI; removing simulated version tests does not remove that CI coverage.
   - **Category:** delete
-  - **Net LOC:** −380
-  - **Risk:** low — diagnostics only.
+  - **Net LOC:** −200, revised estimate retaining runtime diagnosis and focused contract coverage.
+  - **Risk:** low — preserve advisory behavior and original failure details.
   - **Verify:** `cargo test --test errors --test git_backend --test patch_cases`; `scripts/test_recommended_git.sh`; `make test`
   - **Parallel:** A24, A21
-  - **Behaviour lost:** Older-than-recommendation warning.
+  - **Behaviour lost:** none; only dedicated multi-version test infrastructure and redundant scenario coverage are removed.
 
 - [ ] **[P2] A14 — Delete unconsumed production facades** (`src/runner.rs:358–386`; `src/commands.rs:128–130,160–164`; `src/tree.rs:195–211`; `src/patch.rs:6–12,60–75,133–170`; `src/menu.rs:116–118`)
   - **Problem:** No production consumers found for `Runner`, `CommandCtx.cancel`, `Document`, `LineKind`/`Hunk::kind`/`is_change`, three `FileLayout` patch convenience methods, or `Group.columns`.
@@ -489,18 +520,18 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
   - **Behaviour lost:** none.
   - **Keep-for:** R-3.1/§3.6; R-5.1; R-5.3; R-4.3; R-5.5; R-3.6; R-3.7; recorded §§3.2, 3.8–3.11, 3.15, 3.18, 4.1, 5.1. The notes explain which are decisions rather than open items.
 
-- [ ] **[P1] A29 — Stop offering nonfunctional VSCode text mode** (`src/session.rs:1163–1174,1246–1249`; `clients/vscode/extension.js:74–82`; `src/manifest.rs:198–208`; initialization capability types)
-  - **Problem:** Entry sends only a keymap change, which static JS does not receive; content-provider documents are read-only anyway.
-  - **Why it matters:** Server/client modes diverge behind an advertised editable feature.
-  - **Change:** Pending the user decision, declare text-mode support at initialization and refuse unsupported transitions at the server boundary for invoke/key/menu/setMode. Neovim declares support. Suppress unsupported effective dispatch/keymap presentation and generated VSCode bindings.
-  - **Done when:** No alternate route silently enters unsupported mode; Neovim remains unchanged.
-  - **Constraints:** No partial writable filesystem adapter; regenerate static data; do not execute both alternative feature scopes.
-  - **Category:** delete
-  - **Net LOC:** −80, including generated entries and added boundary plumbing.
-  - **Risk:** medium — removes a misleading offering.
-  - **Verify:** `cargo test --test manifest --test text_mode`; `make vscode-test`; `make test`
+- [ ] **[P1] A29 — Make VSCode text mode native read-only browsing** (`src/session.rs:1163–1174,1246–1249`; `clients/vscode/extension.js:74–82`; `clients/vscode/lib/context.js`; `clients/vscode/lib/views.js`; `clients/vscode/lib/requests.js`; `src/manifest.rs:198–208`; initialization capability types)
+  - **Problem:** The existing VSCode document is a read-only virtual document; static clients may miss the entry mode update, while Magit capture and mirrored fold overrides prevent normal editor browsing.
+  - **Why it matters:** Users need native navigation, search, selection and copy in the rendered view without a false editable-mode promise or losing stable selection during queued refreshes.
+  - **Change:** Keep the server-owned read-only VSCode virtual document. Deliver reliable mode/context notifications for static clients across invoke/key/menu/setMode. While in text mode disable all ordinary Magit capture and shortcut overrides, including mirrored fold overrides, but retain an explicit return toggle/command. Native editor navigation/search/selection/copy operate on unchanged rendered text; queue refreshes while browsing and apply them normally on return. Neovim behavior is unchanged.
+  - **Done when:** No entry path leaves server/client mode divergent; real VSCode UI verifies native navigation, search, select/copy, stable selection while refreshes queue, and toggle-back applies queued refreshes normally.
+  - **Constraints:** No editable mode, scratch-copy feature, new file type or writable filesystem adapter. Do not change Neovim behavior.
+  - **Category:** simplify
+  - **Net LOC:** +40 (provisional; notification/context and key suppression may outweigh removed overrides).
+  - **Risk:** medium — mode and static keybinding boundary.
+  - **Verify:** `cargo test --test manifest --test text_mode`; `make vscode-test`; actual VSCode UI navigation/search/select/copy and toggle-back with queued refresh; `make test`
   - **Parallel:** serial
-  - **Behaviour lost:** Broken VSCode text-mode offering, not working editing behavior.
+  - **Behaviour lost:** None of the working functionality.
 
 - [ ] **[P2] A30 — Parameterize the three unstage-hunk resolver cases** (`tests/dispatch.rs:161–192`)
   - **Problem:** Three equality bodies differ only in target.
@@ -546,7 +577,7 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
   - **Why it matters:** Selecting an action can trigger a different menu/action.
   - **Change:** Server supplies activation steps from its existing interpretation: `-a` → two steps, `g l` → two steps, `ctrl+t` → one step. Forward verbatim on acceptance; `routeTyped` remains for actual typed text.
   - **Done when:** Requests for flags, spaced chords and modifier/named keys exactly match intended steps.
-  - **Constraints:** No JS grammar/special command IDs; preserve Planned actions and A29's unsupported-mode boundary.
+  - **Constraints:** No JS grammar/special command IDs; preserve Planned actions and A29's read-only native browsing mode.
   - **Category:** move-to-server
   - **Net LOC:** +35
   - **Risk:** medium — menu wire metadata/activation.
@@ -557,13 +588,13 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
 - [ ] **[P1] A34 — Convert VSCode selections to inclusive rows correctly** (`clients/vscode/extension.js:984–1000`)
   - **Problem:** Exclusive editor selection end rows are sent directly as inclusive protocol rows, including an unselected row when ending at column zero.
   - **Why it matters:** Stage/unstage can include an extra changed line.
-  - **Change:** Use ordered native start/end; subtract one end row for nonempty multiline selections ending at column zero; preserve active cursor separately.
-  - **Done when:** Forward/reverse column-zero ends exclude the next row; other selections retain their rows.
+  - **Change:** Use ordered native start/end; convert the exclusive end to an inclusive protocol row, subtracting one for nonempty multiline selections ending at column zero; preserve the active cursor separately.
+  - **Done when:** Thorough boundary regressions exercise forward and reverse equivalent selections; column-zero exclusive ends versus nonzero ends; single-line and empty/caret selections under existing intended semantics; first/last document rows and EOF with and without a final newline. Cover representative addition, deletion, context, and hunk-edge selections with adjacent unselected changed lines. Assert exact outgoing inclusive rows and preserved active cursor through registered command/dispatcher paths. Distinguish fast client request-shape checks from real-Git end-to-end stage and unstage checks: compare exact staged/unstaged diffs or index/worktree contents and prove neighboring boundary lines remain untouched, not merely that requests or operations succeed.
   - **Constraints:** Native boundary fix only; keep server inclusive contract; test registered dispatcher rather than exporting a test helper.
   - **Category:** simplify
-  - **Net LOC:** +15
-  - **Risk:** low — explicit boundary conversion.
-  - **Verify:** `make vscode-test`
+  - **Net LOC:** +15 (provisional implementation estimate; excludes expanded regression coverage).
+  - **Risk:** moderate — exclusive/inclusive boundaries interact with selection direction, cursor position, EOF, and patch application; request-shape checks alone cannot establish staging correctness.
+  - **Verify:** `make vscode-test`; actual VSCode integration coverage through registered dispatch; `npm --prefix clients/vscode run test:integration`; `cargo test --test views --test git_backend --test patch_cases`; full `make test`.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
@@ -639,7 +670,7 @@ An absence of an ID literal in a client is **not** an unused consumer when `G` a
 | common.next-sibling | C:416 | B(common) | G | G | R, Planned registry loop | Planned; §5.1 decision |
 | common.prev-sibling | C:422 | B(common) | G | G | R, Planned registry loop | Planned; §5.1 decision |
 | common.parent-section | C:428 | B(common) | G | G | R, Planned registry loop | Planned; §5.1 decision |
-| common.toggle-text-mode | C:434 | B(common), D | G | G | R, text_mode, Lua | I; broken JS offering A29 |
+| common.toggle-text-mode | C:434 | B(common), D | G | G | R, text_mode, Lua | I; native VSCode browsing A29 |
 | common.copy-value | C:441 | B(common), D | G | G | R, text_mode, process_log, Lua | I |
 | common.visit | C:448 | B(status), D | Local visit exception | G | R, keymap, navigation/client tests | Planned server action; existing R-NV-4 |
 | status.stage | C:358 | B(status), D | G | G | R, views, keys, dispatch | I |
