@@ -133,7 +133,7 @@ fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
 /// read responsiveness. Run it with
 /// `cargo test --test server_async -- --ignored`.
 #[test]
-#[ignore = "BUG-READ-1: invoke_view holds the sessions mutex across Git, so a read stalls behind a mutation blocked inside real Git (TASKS.md §7 Bugfix)"]
+#[ignore = "BUG-READ-1"]
 fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");

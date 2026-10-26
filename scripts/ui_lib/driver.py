@@ -232,9 +232,12 @@ def snapshot(run: Run) -> dict:
         raise DriverError(f"invalid state from Neovim: {output!r}") from error
 
 
-def state_json(run: Run) -> str:
-    """Pretty JSON for `ui state` and timeout reports."""
-    return json.dumps(snapshot(run), indent=2)
+def state_json(run: Run, indent: int | None = 2) -> str:
+    """Serialize state; pretty by default, compact when `indent=None`."""
+    options = {"indent": indent}
+    if indent is None:
+        options["separators"] = (",", ":")
+    return json.dumps(snapshot(run), **options)
 
 
 def idle(run: Run) -> bool:

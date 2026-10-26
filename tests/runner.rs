@@ -28,9 +28,14 @@ fn run_with_fake_git(test: &str) {
         .env(CHILD_ENV, "1")
         .env(MARKER_ENV, &marker)
         .env("PATH", &fake.path)
-        .status()
+        .output()
         .expect("spawn the fake-git child");
-    assert!(status.success(), "the fake-git child for {test} failed");
+    assert!(
+        status.status.success(),
+        "the fake-git child for {test} failed: {}{}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
 }
 
 /// Whether this process was re-executed by [`run_with_fake_git`].

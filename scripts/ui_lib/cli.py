@@ -15,7 +15,7 @@ USAGE = """Usage:
   scripts/ui state [--run <id>]
   scripts/ui trace [N] [--run <id>]
   scripts/ui stop [--run <id>]
-  scripts/ui run <scenario>... [--markdown <path>]
+  scripts/ui run [-v] <scenario>... [--markdown <path>]
 
 Fixtures: clean, modified-two-files, staged-one-file, staged-and-unstaged,
           staged-failing-hook, untracked, unborn, in-progress-rebase,
@@ -116,7 +116,7 @@ def _wait(args: list[str]) -> int:
         return 0
     print(f"timed out after {timeout_ms} ms", file=sys.stderr)
     try:
-        print(driver.state_json(run), file=sys.stderr)
+        print(driver.state_json(run, indent=None), file=sys.stderr)
     except driver.DriverError as error:
         print(str(error), file=sys.stderr)
     return 2
@@ -171,13 +171,17 @@ def _stop(args: list[str]) -> int:
 
 
 def _run(args: list[str]) -> int:
+    verbose = os.environ.get("UI_VERBOSE", "").strip().lower() not in ("", "0", "false", "no")
+    if "-v" in args or "--verbose" in args:
+        verbose = True
+        args = [arg for arg in args if arg not in ("-v", "--verbose")]
     markdown, args = _take_value(args, "--markdown")
     if not args:
         raise driver.DriverError("`run` needs at least one scenario file")
     for arg in args:
         if arg.startswith("-"):
             raise driver.DriverError(f"unknown option `{arg}`")
-    return scenario.run(args, markdown=markdown)
+    return scenario.run(args, markdown=markdown, verbose=verbose)
 
 
 _COMMANDS = {

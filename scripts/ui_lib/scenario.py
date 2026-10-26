@@ -29,10 +29,15 @@ DEFAULT_PROFILE = "standard"
 SECONDARY_PROFILE = "vim"
 STYLE_MODES = ("dim", "bold", "coloured", "plain")
 WAIT_TIMEOUT_MS = 2000
+SHELL_TIMEOUT_S = 30
 
 
 class ScenarioError(RuntimeError):
     """A scenario file could not be parsed."""
+
+
+class ShellStepError(ScenarioError):
+    """A scenario shell statement failed, timed out or could not launch."""
 
 
 @dataclass
@@ -62,6 +67,7 @@ class Statement:
     text: str | None = None
     profile: str | None = None
     command: str | None = None
+    line: int = 0
 
 
 @dataclass
@@ -370,7 +376,9 @@ def parse_scenario(path: Path) -> Scenario:
                 raise ScenarioError(f"{where}: unknown header `{key}`")
             header[key] = value
         else:
-            statements.append(parse_statement(line, where))
+            statement = parse_statement(line, where)
+            statement.line = number
+            statements.append(statement)
 
     if not seen_separator:
         raise ScenarioError(f"{path.name}: missing `---` separator")
@@ -747,6 +755,8 @@ def combinations(scenario: Scenario) -> list[tuple[str, str]]:
 
 def classify(xfail: str | None, results: list[ComboResult]) -> str:
     """PASS / FAIL / XFAIL for a scenario from its combination results."""
+    if any(result.startup for result in results):
+        return "FAIL"
     if xfail:
         if any(not result.ok for result in results):
             return "XFAIL"
@@ -795,23 +805,47 @@ def _run_shell(run: driver.Run, command: str, where: int) -> None:
     """Run `command` in the fixture repo with the deterministic Git env.
 
     Scenarios use this to change the repository outside Neovim (the
-    auto-refresh watcher test modifies a tracked file this way). A failure is
-    a scenario error, not a screen expectation.
+    auto-refresh watcher test modifies a tracked file this way). Failures carry
+    their statement and command so one combination can fail without aborting
+    later profile/size combinations.
     """
-    result = subprocess.run(
-        command,
-        shell=True,
-        cwd=run.repo_path,
-        env=fixtures.determinism_env(run.home_path),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        raise ScenarioError(
-            f"statement {where}: `sh:` failed ({result.returncode}): "
-            f"{result.stderr.strip() or result.stdout.strip()}"
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=run.repo_path,
+            env=fixtures.determinism_env(run.home_path),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=SHELL_TIMEOUT_S,
         )
+    except subprocess.TimeoutExpired as error:
+        detail = _shell_output(error.stderr or error.stdout)
+        suffix = f": {detail}" if detail else ""
+        raise ShellStepError(
+            f"statement {where}: `sh: {command}` timed out after "
+            f"{SHELL_TIMEOUT_S}s{suffix}"
+        ) from error
+    except OSError as error:
+        raise ShellStepError(
+            f"statement {where}: could not run `sh: {command}`: {error}"
+        ) from error
+    if result.returncode != 0:
+        detail = _shell_output(result.stderr or result.stdout)
+        suffix = f": {detail}" if detail else ""
+        raise ShellStepError(
+            f"statement {where}: `sh: {command}` failed "
+            f"(exit {result.returncode}){suffix}"
+        )
+
+
+def _shell_output(output: str | bytes | None) -> str:
+    """Normalize and cap untrusted shell output in a failed-step report."""
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    detail = " ".join((output or "").split())
+    return detail if len(detail) <= 1000 else detail[:997] + "..."
 
 
 def _run_combo(
@@ -819,6 +853,7 @@ def _run_combo(
     size: str,
     profile: str,
     snapshots: list[tuple[str, str, str, str, str]],
+    verbose: bool = False,
 ) -> ComboResult:
     try:
         run = driver.start(
@@ -880,7 +915,20 @@ def _run_combo(
             elif statement.kind == "document":
                 documents[statement.name or ""] = driver.document(run)
             elif statement.kind == "sh":
-                _run_shell(run, statement.command or "", where=number)
+                try:
+                    _run_shell(run, statement.command or "", where=number)
+                except ShellStepError as error:
+                    try:
+                        screen = driver.capture(run)
+                    except driver.DriverError as capture_error:
+                        screen = f"(screen unavailable: {capture_error})"
+                    return ComboResult(
+                        ok=False,
+                        reason=str(error),
+                        screen=screen,
+                        profile=profile,
+                        size=size,
+                    )
             elif statement.kind == "goto":
                 try:
                     driver.goto_text(run, statement.text or "")
@@ -916,15 +964,16 @@ def _run_combo(
                 except driver.DriverError as error:
                     ok, actual = False, str(error)
                 if expectation.kind == "latency":
-                    print(
-                        f"{scenario.name} [{profile} {size}] "
-                        f"{format_expectation(expectation)}: {actual}"
-                    )
+                    if ok and (verbose or "over budget" in actual):
+                        print(
+                            f"{scenario.name} [{profile} {size}] "
+                            f"{format_expectation(expectation)}: {actual}"
+                        )
                 if not ok:
                     return ComboResult(
                         ok=False,
                         reason=(
-                            f"statement {number}: "
+                            f"{scenario.path.name}:{statement.line}: "
                             f"{format_expectation(expectation)}: {actual}"
                         ),
                         screen=driver.capture(run),
@@ -944,23 +993,51 @@ def _run_combo(
         driver.stop(run)
 
 
-def _report_failure(scenario: Scenario, result: ComboResult) -> None:
+def _trim_screen(screen: str) -> str:
+    """Trim right whitespace from rows and discard trailing blank rows."""
+    rows = [row.rstrip() for row in screen.splitlines()]
+    while rows and not rows[-1]:
+        rows.pop()
+    return "\n".join(rows)
+
+
+def _save_failure_screen(scenario: Scenario, result: ComboResult) -> Path:
+    """Save a failed combination's screen under its scenario artefacts."""
+    path = BUILD_UI / scenario.name / f"{result.profile}-{result.size}" / "failure.screen"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_trim_screen(result.screen) + "\n", encoding="utf-8")
+    return path
+
+
+def _report_failure(
+    scenario: Scenario,
+    result: ComboResult,
+    show_screen: bool = True,
+    show_reason: bool = True,
+) -> None:
     label = f"{scenario.name} [{result.profile} {result.size}]"
+    path = _save_failure_screen(scenario, result)
     if result.startup:
         print(f"--- {label} STARTUP FAILED (harness/socket, not scenario behaviour)")
-        print(result.reason)
+        if show_reason:
+            print(result.reason)
+        print(f"screen artifact: {path}")
         print()
         return
     print(f"--- {label} FAILED")
-    if result.reason:
+    if result.reason and show_reason:
         print(f"expect: {result.reason}")
-    if result.screen:
+    if show_screen and result.screen:
         print("screen:")
-        print(result.screen)
+        print(_trim_screen(result.screen))
+    print(f"screen artifact: {path}")
     print()
 
 
-def _print_table(rows: list[Row]) -> None:
+def _print_table(rows: list[Row], verbose: bool = False) -> None:
+    rows = [row for row in rows if verbose or row.result != "PASS"]
+    if not rows:
+        return
     headers = ("RESULT", "SCENARIO", "PROFILE", "SIZE", "REASON")
     widths = [len(header) for header in headers]
     for row in rows:
@@ -969,7 +1046,7 @@ def _print_table(rows: list[Row]) -> None:
             row.scenario,
             row.profile,
             row.size,
-            " ".join(str(row.reason).split()),
+            (" ".join(str(row.reason).split()))[:100],
         )
         for index, value in enumerate(values):
             widths[index] = max(widths[index], len(str(value)))
@@ -980,7 +1057,7 @@ def _print_table(rows: list[Row]) -> None:
             row.scenario,
             row.profile,
             row.size,
-            " ".join(str(row.reason).split()),
+            (" ".join(str(row.reason).split()))[:100],
         )
         print("  ".join(str(value).ljust(widths[index]) for index, value in enumerate(values)))
 
@@ -1015,7 +1092,7 @@ def expand_paths(paths: Iterable[str]) -> list[Path]:
     return expanded
 
 
-def run(paths: Iterable[str], markdown: str | None = None) -> int:
+def run(paths: Iterable[str], markdown: str | None = None, verbose: bool = False) -> int:
     """Run every scenario and print the result table; return the exit code."""
     driver.check_tools()
     files = expand_paths(paths)
@@ -1025,6 +1102,7 @@ def run(paths: Iterable[str], markdown: str | None = None) -> int:
 
     snapshots: list[tuple[str, str, str, str, str]] = []
     rows: list[Row] = []
+    reported: set[str] = set()
     for path in files:
         try:
             scenario = parse_scenario(path)
@@ -1034,20 +1112,31 @@ def run(paths: Iterable[str], markdown: str | None = None) -> int:
             continue
 
         results: list[ComboResult] = []
+        reported_reasons: set[str] = set()
         for size, profile in combinations(scenario):
-            result = _run_combo(scenario, size, profile, snapshots)
+            result = _run_combo(scenario, size, profile, snapshots, verbose=verbose)
             results.append(result)
             if not result.ok:
-                _report_failure(scenario, result)
+                _save_failure_screen(scenario, result)
+                if not scenario.xfail or verbose or result.startup:
+                    show_reason = result.reason not in reported_reasons
+                    _report_failure(
+                        scenario,
+                        result,
+                        show_screen=scenario.name not in reported,
+                        show_reason=show_reason,
+                    )
+                    reported_reasons.add(result.reason)
+                    reported.add(scenario.name)
 
         outcome = classify(scenario.xfail, results)
         failures = [result for result in results if not result.ok]
-        if outcome == "FAIL" and scenario.xfail:
+        if outcome == "FAIL" and scenario.xfail and all(result.ok for result in results):
             reason = "XPASS: remove the xfail tag"
             print(f"--- {scenario.name} FAILED: {reason}")
-        elif failures:
+        elif failures and outcome != "XFAIL":
             first = failures[0]
-            reason = f"[{first.profile} {first.size}] {first.reason}"
+            reason = f"[{first.profile} {first.size}] details above"
         else:
             reason = ""
         rows.append(
@@ -1060,15 +1149,14 @@ def run(paths: Iterable[str], markdown: str | None = None) -> int:
             )
         )
 
-    _print_table(rows)
+    _print_table(rows, verbose=verbose)
     failures = sum(1 for row in rows if row.result == "FAIL")
     xfails = sum(1 for row in rows if row.result == "XFAIL")
     passes = sum(1 for row in rows if row.result == "PASS")
-    print()
-    print(f"Summary: {passes} PASS, {xfails} XFAIL, {failures} FAIL")
-
     if markdown:
         _write_markdown(Path(markdown), snapshots)
         print(f"tour written to {markdown}")
+
+    print(f"Summary: {passes} PASS, {xfails} XFAIL, {failures} FAIL")
 
     return 1 if failures else 0

@@ -101,11 +101,19 @@ fn record_nodes_are_stable_and_clear_empties_the_view() {
     const CHILD: &str = "MAGIT_LSP_PROCESS_LOG_CLEAR_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "record_nodes_are_stable_and_clear_empties_the_view"])
+            .args([
+                "--exact",
+                "record_nodes_are_stable_and_clear_empties_the_view",
+            ])
             .env(CHILD, "1")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            status.status.success(),
+            "child output: {}{}",
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
         return;
     }
 

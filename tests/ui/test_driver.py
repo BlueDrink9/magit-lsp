@@ -68,6 +68,15 @@ class DocumentTest(unittest.TestCase):
         self.assertIn("vim.json.encode", driver._DOCUMENT_EXPR)
 
 
+class StateJsonTest(unittest.TestCase):
+    def test_pretty_by_default_and_compact_when_indent_is_none(self) -> None:
+        with patch.object(driver, "snapshot", return_value={"a": 1, "b": [2]}):
+            pretty = driver.state_json(object())
+            compact = driver.state_json(object(), indent=None)
+        self.assertIn("\n", pretty)
+        self.assertEqual(compact, '{"a":1,"b":[2]}')
+
+
 class GotoTest(unittest.TestCase):
     def test_sends_the_literal_text_and_sets_the_cursor(self) -> None:
         with patch.object(driver, "_expr", return_value="1") as expression:

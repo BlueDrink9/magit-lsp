@@ -91,9 +91,14 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
             .env("HOME", home.path())
             .env("MAGIT_LSP_TEST_INCLUDE", env_dir.path().join("env.toml"))
             .env_remove("XDG_CONFIG_HOME")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            status.status.success(),
+            "child output: {}{}",
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
         return;
     }
 
@@ -139,9 +144,14 @@ fn xdg_config_home_sets_the_default_config_path() {
             .env("XDG_CONFIG_HOME", config_home.path())
             .env("HOME", home.path())
             .env_remove("MAGIT_LSP_CONFIG")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            status.status.success(),
+            "child output: {}{}",
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr)
+        );
         return;
     }
     let expected = Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap())

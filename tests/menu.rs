@@ -426,7 +426,7 @@ fn pressing_a_set_option_again_clears_it_without_prompting() {
         .build();
     let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
     test.ack();
-    let (descriptor, _render) = test.open_via_command("open.commit");
+    let (_descriptor, _render) = test.open_via_command("open.commit");
     test.ack();
 
     // Set `=A` with one queued text reply.

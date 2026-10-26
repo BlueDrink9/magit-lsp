@@ -5,10 +5,12 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.dont_write_bytecode = True
@@ -108,6 +110,12 @@ class ParserTest(unittest.TestCase):
         self.assertIsNone(parsed.xfail)
         self.assertEqual(parsed.env, {})
         self.assertEqual(parsed.name, "defaults")
+
+    def test_statement_retains_source_line(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\n\nexpect screen contains 'x'\n", "line.scn")
+        )
+        self.assertEqual(parsed.statements[0].line, 4)
 
     def test_missing_fixture_is_rejected(self) -> None:
         with self.assertRaises(scenario.ScenarioError):
@@ -696,6 +704,12 @@ class ClassifyTest(unittest.TestCase):
             scenario.classify(None, [scenario.ComboResult(False)]), "FAIL"
         )
 
+    def test_startup_failure_with_xfail_is_fail(self) -> None:
+        self.assertEqual(
+            scenario.classify("bug-1", [scenario.ComboResult(False, startup=True)]),
+            "FAIL",
+        )
+
 
 class MarkdownTest(unittest.TestCase):
     def test_write_markdown(self) -> None:
@@ -712,7 +726,199 @@ class MarkdownTest(unittest.TestCase):
         self.assertIn("line one", text)
 
 
+class ShellStepTest(unittest.TestCase):
+    def test_shell_step_disables_terminal_input(self) -> None:
+        directory = tempfile.mkdtemp()
+        run = SimpleNamespace(
+            repo_path=Path(directory), home_path=Path(directory) / "home"
+        )
+        result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch.object(scenario.subprocess, "run", return_value=result) as shell:
+            scenario._run_shell(run, "true", where=3)
+        self.assertIs(shell.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertTrue(shell.call_args.kwargs["shell"])
+
+    def test_shell_failures_keep_statement_command_and_error(self) -> None:
+        directory = tempfile.mkdtemp()
+        run = SimpleNamespace(
+            repo_path=Path(directory), home_path=Path(directory) / "home"
+        )
+        failures = (
+            (
+                subprocess.CompletedProcess(
+                    [], 1, stdout="", stderr="register mismatch"
+                ),
+                "failed (exit 1): register mismatch",
+            ),
+            (
+                subprocess.TimeoutExpired("sleep 1", 30, stderr=b"still running"),
+                "timed out after 30s: still running",
+            ),
+            (OSError("shell unavailable"), "could not run"),
+        )
+        for error, detail in failures:
+            with self.subTest(detail=detail):
+                patcher = patch.object(
+                    scenario.subprocess,
+                    "run",
+                    side_effect=error if isinstance(error, BaseException) else None,
+                    return_value=None if isinstance(error, BaseException) else error,
+                )
+                with patcher:
+                    with self.assertRaises(scenario.ShellStepError) as caught:
+                        scenario._run_shell(run, "test-register", where=17)
+                self.assertIn("statement 17", str(caught.exception))
+                self.assertIn("test-register", str(caught.exception))
+                self.assertIn(detail, str(caught.exception))
+
+    def test_shell_failure_is_reported_and_later_combinations_run(self) -> None:
+        path = write_temp("fixture: clean\n---\nsh: check-register\n", "shell-fail.scn")
+        directory = tempfile.mkdtemp()
+        run = driver.Run(
+            id="shell-fail",
+            fixture="clean",
+            profile="standard",
+            cols=100,
+            rows=30,
+            color="ansi",
+            directory=directory,
+            repo=str(Path(directory) / "repo"),
+            home=str(Path(directory) / "home"),
+            socket=str(Path(directory) / "nvim.sock"),
+            trace=str(Path(directory) / "trace.jsonl"),
+            tmux="shell-fail",
+        )
+        shell_results = iter(
+            [
+                subprocess.CompletedProcess(
+                    [], 1, stdout="", stderr="register mismatch"
+                ),
+                subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ]
+        )
+        output = io.StringIO()
+        with (
+            patch.object(scenario.driver, "start", return_value=run) as start,
+            patch.object(scenario.driver, "stop") as stop,
+            patch.object(scenario, "_clear_command_line"),
+            patch.object(scenario.driver, "capture", return_value="live screen"),
+            patch.object(
+                scenario.subprocess,
+                "run",
+                side_effect=lambda *a, **kw: next(shell_results),
+            ) as shell,
+            contextlib.redirect_stdout(output),
+        ):
+            code = scenario.run([str(path)])
+        text = output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "statement 1: `sh: check-register` failed (exit 1): register mismatch",
+            text,
+        )
+        self.assertIn("live screen", text)
+        self.assertIn("Summary: 0 PASS, 0 XFAIL, 1 FAIL", text)
+        self.assertEqual(start.call_count, 4)
+        self.assertEqual(stop.call_count, 4)
+        self.assertEqual(shell.call_count, 4)
+
+    def test_all_scenario_rpc_helpers_are_headless(self) -> None:
+        for path in sorted((ROOT / "tests/ui/scenarios").glob("*.scn")):
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if "--remote-expr" in line and "nvim " in line:
+                    with self.subTest(path=path.name, line=number):
+                        self.assertIn("nvim --headless --server", line)
+
+
 class StartupReportingTest(unittest.TestCase):
+    def test_four_combo_failure_reports_reason_once_and_keeps_all_artifacts(self) -> None:
+        path = write_temp("fixture: clean\n---\n", "four-fail.scn")
+        combos = [("100x30", "standard"), ("100x30", "vim"),
+                  ("80x24", "standard"), ("80x24", "vim")]
+        failure = scenario.ComboResult(
+            ok=False, reason="case.scn:4: expect screen contains 'missing': absent",
+            screen="trimmed failure screen", profile="", size="",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            def fail(scenario_arg, size, profile, snapshots, verbose=False):
+                return scenario.ComboResult(
+                    **{**failure.__dict__, "profile": profile, "size": size}
+                )
+            output = io.StringIO()
+            with (
+                patch.object(scenario, "BUILD_UI", Path(directory)),
+                patch.object(scenario, "combinations", return_value=combos),
+                patch.object(scenario, "_run_combo", side_effect=fail),
+                patch.object(scenario.driver, "check_tools"),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(scenario.run([str(path)]), 1)
+            text = output.getvalue()
+            self.assertEqual(text.count(failure.reason), 1)
+            self.assertEqual(text.count("trimmed failure screen"), 1)
+            for size, profile in combos:
+                self.assertIn(
+                    str(Path(directory) / f"four-fail/{profile}-{size}/failure.screen"),
+                    text,
+                )
+            self.assertEqual(
+                len(list((Path(directory) / "four-fail").glob("*/failure.screen"))),
+                4,
+            )
+
+    def test_distinct_combo_causes_are_each_reported_once(self) -> None:
+        path = write_temp("fixture: clean\n---\n", "distinct-fail.scn")
+        combos = [("100x30", "standard"), ("100x30", "vim"),
+                  ("80x24", "standard"), ("80x24", "vim")]
+        reasons = ["case.scn:4: first cause", "case.scn:7: second cause",
+                   "case.scn:4: first cause", "case.scn:7: second cause"]
+        failures = iter(reasons)
+        def fail(scenario_arg, size, profile, snapshots, verbose=False):
+            return scenario.ComboResult(
+                ok=False, reason=next(failures), screen="one visible screen",
+                profile=profile, size=size,
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with (
+                patch.object(scenario, "BUILD_UI", Path(directory)),
+                patch.object(scenario, "combinations", return_value=combos),
+                patch.object(scenario, "_run_combo", side_effect=fail),
+                patch.object(scenario.driver, "check_tools"),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(scenario.run([str(path)]), 1)
+            text = output.getvalue()
+            self.assertEqual(text.count(reasons[0]), 1)
+            self.assertEqual(text.count(reasons[1]), 1)
+            self.assertEqual(text.count("one visible screen"), 1)
+            for size, profile in combos:
+                self.assertIn(
+                    str(Path(directory) / f"distinct-fail/{profile}-{size}/failure.screen"),
+                    text,
+                )
+
+    def test_expectation_failure_uses_scenario_source_location(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\n\nexpect screen contains 'x'\n", "case.scn")
+        )
+        output = SimpleNamespace(repo_path=Path("/tmp"), home_path=Path("/tmp"))
+        with (
+            patch.object(scenario.driver, "start", return_value=output),
+            patch.object(scenario, "_clear_command_line"),
+            patch.object(scenario.driver, "capture", return_value="actual"),
+            patch.object(scenario.driver, "snapshot", return_value={}),
+            patch.object(scenario.driver, "read_trace", return_value=[]),
+            patch.object(scenario, "evaluate", return_value=(False, "missing x")),
+            patch.object(scenario.driver, "stop"),
+        ):
+            result = scenario._run_combo(parsed, "100x30", "standard", [])
+        self.assertIn("case.scn:4: expect screen contains", result.reason)
+
     def test_startup_failure_is_labelled_separately(self) -> None:
         parsed = scenario.parse_scenario(
             write_temp(
@@ -733,6 +939,29 @@ class StartupReportingTest(unittest.TestCase):
         self.assertIn("STARTUP FAILED", text)
         self.assertIn("not scenario behaviour", text)
         self.assertNotIn("expect:", text)
+
+    def test_quiet_xfail_saves_screen_without_reporting_it(self) -> None:
+        path = write_temp("fixture: clean\nxfail: known\n---\n", "quiet-xfail.scn")
+        result = scenario.ComboResult(
+            ok=False, reason="failure detail", screen="screen row   \n   \n",
+            profile="standard", size="100x30",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with (
+                patch.object(scenario, "BUILD_UI", Path(directory)),
+                patch.object(scenario, "combinations", return_value=[("100x30", "standard")]),
+                patch.object(scenario, "_run_combo", return_value=result),
+                patch.object(scenario.driver, "check_tools"),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(scenario.run([str(path)]), 0)
+            artifact = Path(directory) / "quiet-xfail/standard-100x30/failure.screen"
+            self.assertEqual(artifact.read_text(encoding="utf-8"), "screen row\n")
+            text = output.getvalue()
+            self.assertNotIn("screen row", text)
+            self.assertNotIn("failure detail", text)
+            self.assertIn("Summary: 0 PASS, 1 XFAIL, 0 FAIL", text)
 
     def test_scenario_failure_keeps_the_expectation_label(self) -> None:
         parsed = scenario.parse_scenario(

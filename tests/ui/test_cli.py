@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -83,6 +85,19 @@ class MainTest(unittest.TestCase):
 
     def test_unknown_command(self) -> None:
         self.assertEqual(cli.main(["nope"]), 2)
+
+    def test_run_verbose_flags_and_environment_forward(self) -> None:
+        for args, env, expected in ((["-v", "case.scn"], {}, True),
+                                    (["--verbose", "case.scn"], {}, True),
+                                    (["case.scn"], {"UI_VERBOSE": "1"}, True),
+                                    (["case.scn"], {}, False)):
+            with (
+                self.subTest(args=args, env=env),
+                patch.dict(os.environ, env, clear=False),
+                patch.object(cli.scenario, "run", return_value=0) as run,
+            ):
+                self.assertEqual(cli._run(args), 0)
+                self.assertEqual(run.call_args.kwargs["verbose"], expected)
 
 
 if __name__ == "__main__":
