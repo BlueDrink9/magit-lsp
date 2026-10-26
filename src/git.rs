@@ -42,6 +42,70 @@ pub struct Status {
     pub untracked: Vec<FileEntry>,
 }
 
+/// Filters and presentation options for a Git log query.
+#[derive(Debug, Clone, Default)]
+pub struct GitLogOptions {
+    /// Maximum commits returned per page.
+    pub page_size: usize,
+    /// Include Git's graph ordering (the record identities remain full OIDs).
+    pub graph: bool,
+    /// Include ref decorations.
+    pub decorate: bool,
+    /// Restrict author name/email.
+    pub author: Option<String>,
+    /// Restrict commits since this Git date expression.
+    pub since: Option<String>,
+    /// Restrict commit messages using Git's grep expression.
+    pub grep: Option<String>,
+    /// Pickaxe string search (-S).
+    pub pickaxe: Option<String>,
+    /// Pickaxe regex search (-G).
+    pub pickaxe_regex: Option<String>,
+    /// Restrict changes to these literal paths.
+    pub paths: Vec<String>,
+    /// Starting revision; defaults to HEAD.
+    pub revision: Option<String>,
+}
+
+/// One commit returned by [`GitRepo::log`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCommit {
+    /// Full object ID.
+    pub oid: String,
+    /// Full parent object IDs.
+    pub parents: Vec<String>,
+    /// Commit subject.
+    pub subject: String,
+    /// Author name and email display string.
+    pub author: String,
+    /// Author date as an ISO-8601 string.
+    pub date: String,
+    /// Ref decorations, if requested.
+    pub decorations: Vec<String>,
+    /// Graph connector prefix emitted for this commit, empty when graph mode is off.
+    pub graph_prefix: String,
+}
+
+/// A page of commits and whether another page exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitLogPage {
+    /// Commits in Git's traversal order.
+    pub commits: Vec<GitCommit>,
+    /// True when at least one further matching commit exists.
+    pub has_more: bool,
+    /// Connector-only rows emitted by Git in graph mode.
+    pub rows: Vec<GitLogRow>,
+}
+
+/// An ordered row in a Git log page's graph output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitLogRow {
+    /// The commit at this row, identified by its full object ID.
+    Commit(String),
+    /// A connector-only graph row emitted between commits.
+    Connector(String),
+}
+
 impl Status {
     /// An empty status, used when a path cannot be opened as a repository.
     pub fn empty(repo_path: impl Into<String>) -> Self {
@@ -140,6 +204,145 @@ impl GitRepo {
     /// The repository's working-tree root.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Return a coherent page of log records; filtering values are individual
+    /// argv entries and paths are separated from revisions by `--`.
+    pub fn log(&self, options: &GitLogOptions) -> Result<GitLogPage> {
+        let size = if options.page_size == 0 {
+            100
+        } else {
+            options.page_size
+        };
+        let query_limit = size
+            .checked_add(1)
+            .ok_or_else(|| Error::new("log page size is too large"))?;
+        let mut args: Vec<String> = vec!["log".into(), "--topo-order".into()];
+        if options.graph {
+            args.push("--graph".into());
+        }
+        if options.decorate {
+            args.push("--decorate=short".into());
+        } else {
+            args.push("--no-decorate".into());
+        }
+        args.extend(["--format=%H%x00%P%x00%s%x00%an <%ae>%x00%aI%x00%D".into()]);
+        args.extend(["-n".into(), query_limit.to_string()]);
+        for (flag, value) in [
+            ("--author", options.author.as_ref()),
+            ("--since", options.since.as_ref()),
+            ("--grep", options.grep.as_ref()),
+            ("-S", options.pickaxe.as_ref()),
+            ("-G", options.pickaxe_regex.as_ref()),
+        ] {
+            if let Some(value) = value {
+                args.push(if flag == "-S" || flag == "-G" {
+                    format!("{flag}{value}")
+                } else {
+                    format!("{flag}={value}")
+                });
+            }
+        }
+        let revision = options.revision.as_deref().unwrap_or("HEAD");
+        if options.revision.is_none()
+            && self
+                .run(&["rev-parse", "--verify", "HEAD^{commit}"])
+                .is_err()
+        {
+            let missing_head =
+                self.run(&["symbolic-ref", "-q", "HEAD"])
+                    .ok()
+                    .is_some_and(|reference| {
+                        self.run(&["show-ref", "--verify", "--quiet", reference.trim()])
+                            .is_err()
+                    });
+            if !missing_head {
+                return Err(self
+                    .run(&["rev-parse", "--verify", "HEAD^{commit}"])
+                    .unwrap_err());
+            }
+            return Ok(GitLogPage {
+                commits: Vec::new(),
+                has_more: false,
+                rows: Vec::new(),
+            });
+        }
+        args.push("--end-of-options".into());
+        args.push(revision.to_string());
+        if !options.paths.is_empty() {
+            args.push("--".into());
+            args.extend(options.paths.iter().map(|path| format!(":(literal){path}")));
+        }
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let raw = self.run(&refs)?;
+        let mut commits = Vec::new();
+        let mut rows = Vec::new();
+        for line in raw.lines() {
+            let oid_start = line
+                .find(|c: char| c.is_ascii_hexdigit())
+                .unwrap_or(line.len());
+            let graph_prefix = &line[..oid_start];
+            let fields: Vec<_> = line[oid_start..].split('\0').collect();
+            if fields.len() < 6
+                || fields[0].len() < 40
+                || !fields[0].bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                if options.graph && !line.trim().is_empty() {
+                    rows.push(GitLogRow::Connector(line.to_string()));
+                }
+                continue;
+            }
+            commits.push(GitCommit {
+                oid: fields[0].to_string(),
+                parents: fields[1].split_whitespace().map(str::to_string).collect(),
+                subject: fields[2].to_string(),
+                author: fields[3].to_string(),
+                date: fields[4].to_string(),
+                decorations: if options.decorate {
+                    fields[5]
+                        .split(", ")
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+                graph_prefix: graph_prefix.to_string(),
+            });
+            rows.push(GitLogRow::Commit(fields[0].to_string()));
+        }
+        let mut seen = std::collections::HashSet::new();
+        commits.retain(|commit| seen.insert(commit.oid.clone()));
+        let has_more = commits.len() > size;
+        let retained: std::collections::HashSet<_> =
+            commits.iter().take(size).map(|c| c.oid.clone()).collect();
+        commits.truncate(size);
+        rows.retain(|row| match row {
+            GitLogRow::Commit(oid) => retained.contains(oid),
+            GitLogRow::Connector(_) => true,
+        });
+        if let Some(last) = rows
+            .iter()
+            .rposition(|row| matches!(row, GitLogRow::Commit(_)))
+        {
+            rows.truncate(last + 1);
+        }
+        Ok(GitLogPage {
+            commits,
+            has_more,
+            rows,
+        })
+    }
+
+    /// Resolve a revision expression to its full commit object ID.
+    pub fn resolve_commit(&self, revision: &str) -> Result<String> {
+        let value = self.run(&[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{revision}^{{commit}}"),
+        ])?;
+        Ok(value.trim().to_string())
     }
 
     /// Compute the full status with every file's diff hunks.
