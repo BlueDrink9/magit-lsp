@@ -53,19 +53,36 @@ impl LogView {
     }
 
     /// Selection settings attached to this view, if it is awaiting a commit.
-    pub fn selection(&self) -> Option<&CommitSelection> { self.selection.as_ref() }
+    pub fn selection(&self) -> Option<&CommitSelection> {
+        self.selection.as_ref()
+    }
 
     /// Selected full object IDs in log traversal order.
     pub fn selected_commits(&self, cursor_oid: Option<&str>) -> Vec<String> {
         if self.selection.as_ref().is_some_and(|s| s.multi) && !self.marked.is_empty() {
-            return self.page.commits.iter().filter(|c| self.marked.contains(&c.oid)).map(|c| c.oid.clone()).collect();
+            return self
+                .page
+                .commits
+                .iter()
+                .filter(|c| self.marked.contains(&c.oid))
+                .map(|c| c.oid.clone())
+                .collect();
         }
-        cursor_oid.filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid)).map(|oid| vec![oid.to_string()]).unwrap_or_default()
+        cursor_oid
+            .filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid))
+            .map(|oid| vec![oid.to_string()])
+            .unwrap_or_default()
     }
 
     /// Toggle a mark by full object ID; returns false for an unloaded commit.
     pub fn toggle_mark(&mut self, oid: &str) -> bool {
-        if !self.selection.as_ref().is_some_and(|selection| selection.multi) { return false; }
+        if !self
+            .selection
+            .as_ref()
+            .is_some_and(|selection| selection.multi)
+        {
+            return false;
+        }
         if !self.page.commits.iter().any(|commit| commit.oid == oid) {
             return false;
         }
@@ -84,14 +101,28 @@ impl View for LogView {
         "Log".to_string()
     }
     fn scope(&self) -> Scope {
-        Scope::new(if self.selection.is_some() { "log.select" } else { "log" })
+        Scope::new(if self.selection.is_some() {
+            "log.select"
+        } else {
+            "log"
+        })
+    }
+    fn commit_selection(&self) -> Option<&CommitSelection> {
+        self.selection()
+    }
+    fn selected_commits(&self, cursor_oid: Option<&str>) -> Vec<String> {
+        LogView::selected_commits(self, cursor_oid)
+    }
+    fn toggle_commit_mark(&mut self, oid: &str) -> bool {
+        self.toggle_mark(oid)
     }
     fn render(&mut self, _ctx: &Ctx<'_>) -> Tree {
         render(&self.page, self.selection.as_ref(), &self.marked)
     }
     fn on_refresh(&mut self) -> Result<()> {
         self.page = self.repo.log(&self.options)?;
-        self.marked.retain(|oid| self.page.commits.iter().any(|commit| &commit.oid == oid));
+        self.marked
+            .retain(|oid| self.page.commits.iter().any(|commit| &commit.oid == oid));
         Ok(())
     }
     fn load_more(&mut self) -> Result<()> {
@@ -105,7 +136,8 @@ impl View for LogView {
         };
         self.options.page_size = self.options.page_size.saturating_add(100);
         self.page = self.repo.log(&self.options)?;
-        self.marked.retain(|oid| self.page.commits.iter().any(|commit| &commit.oid == oid));
+        self.marked
+            .retain(|oid| self.page.commits.iter().any(|commit| &commit.oid == oid));
         Ok(())
     }
 }
@@ -159,11 +191,17 @@ fn render(
                 let index = tree.lines.len() - 1;
                 let id = format!("log:graph:{index}");
                 tree.line_nodes.push(line(&id, NodeKind::Blank));
-                tree.nodes.push(node(&id, NodeKind::Blank, text.clone(), None, index));
+                tree.nodes
+                    .push(node(&id, NodeKind::Blank, text.clone(), None, index));
             }
             GitLogRow::Commit(oid) => {
                 if let Some(commit) = lookup.get(oid.as_str()) {
-                    commit_node(&mut tree, commit, selection.is_some_and(|s| s.multi), marked.contains(oid));
+                    commit_node(
+                        &mut tree,
+                        commit,
+                        selection.is_some_and(|s| s.multi),
+                        marked.contains(oid),
+                    );
                 }
             }
         }
@@ -172,7 +210,13 @@ fn render(
         tree.lines.push("(no commits)".into());
         let n = tree.lines.len() - 1;
         tree.line_nodes.push(line("log:empty", NodeKind::Message));
-        tree.nodes.push(node("log:empty", NodeKind::Message, "(no commits)", None, n));
+        tree.nodes.push(node(
+            "log:empty",
+            NodeKind::Message,
+            "(no commits)",
+            None,
+            n,
+        ));
     }
     if page.has_more {
         let n = tree.lines.len();
@@ -192,7 +236,15 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
     } else {
         format!(" ({})", c.decorations.join(", "))
     };
-    let mark = if show_marks { if marked { "[x] " } else { "[ ] " } } else { "" };
+    let mark = if show_marks {
+        if marked {
+            "[x] "
+        } else {
+            "[ ] "
+        }
+    } else {
+        ""
+    };
     let prefix = format!(
         "{}{} {}{} ",
         c.graph_prefix,
@@ -212,7 +264,8 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
     );
     commit_node.copy = Some(c.oid.clone());
     tree.nodes.push(commit_node);
-    let hash_start = c.graph_prefix.chars().count() + mark.chars().count();
+    // The rendered prefix has a separator between the mark and the hash.
+    let hash_start = c.graph_prefix.chars().count() + mark.chars().count() + 1;
     tree.tokens.push(Token {
         line: n,
         start: hash_start,
@@ -222,12 +275,30 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
     });
     if !decorations.is_empty() {
         let start = hash_start + 8.min(c.oid.len());
-        tree.tokens.push(Token { line: n, start, length: decorations.chars().count(), token_type: "magit.ref".into(), modifiers: Vec::new() });
+        tree.tokens.push(Token {
+            line: n,
+            start,
+            length: decorations.chars().count(),
+            token_type: "magit.ref".into(),
+            modifiers: Vec::new(),
+        });
     }
-    let author_start = text.find(&c.author).unwrap_or(0);
-    let date_start = text.rfind(&c.date).unwrap_or(0);
-    tree.tokens.push(Token { line: n, start: text[..author_start].chars().count(), length: c.author.chars().count(), token_type: "magit.author".into(), modifiers: Vec::new() });
-    tree.tokens.push(Token { line: n, start: text[..date_start].chars().count(), length: c.date.chars().count(), token_type: "magit.date".into(), modifiers: Vec::new() });
+    let author_start = prefix.chars().count() + c.subject.chars().count() + 2;
+    let date_start = author_start + c.author.chars().count() + 2;
+    tree.tokens.push(Token {
+        line: n,
+        start: author_start,
+        length: c.author.chars().count(),
+        token_type: "magit.author".into(),
+        modifiers: Vec::new(),
+    });
+    tree.tokens.push(Token {
+        line: n,
+        start: date_start,
+        length: c.date.chars().count(),
+        token_type: "magit.date".into(),
+        modifiers: Vec::new(),
+    });
 }
 fn line(id: &str, kind: NodeKind) -> crate::tree::LineNode {
     crate::tree::LineNode {
