@@ -75,10 +75,16 @@ Start in these components:
   `Effect::Message`s with a readable summary (and optional hint/detail), not
   JSON-RPC errors. See TASKS.md IMM-3, §3.5 and `src/errors.rs`.
 - Run `make test` before finishing and ensure no orphan `magit-lsp` processes.
+- Validate protocol input, user configuration and Git output at their boundaries. Once internal values are validated, trust their invariants: do not reparse canonical keys, invent fallback command statuses, reconstruct displayed selections from fresh diffs, or maintain alternate production paths solely for tests. Keep recovery where failure is genuinely external: lost render acknowledgements, editor buffer lifetime, Git failures and client disconnects.
 
 ## Verification
 
 - `make test` runs Rust and Neovim integration tests.
+- During development, prefer the narrowest relevant check: for example,
+  `make test-rust FILTER="--test menu"` or
+  `make test-file FILE=tests/<file>.lua`. Rerun only failed cases while
+  diagnosing; use `V=1` only when the default compact output is insufficient.
+  Before finishing, still run the required full `make test`.
 - `make ui-unit` tests the real-UI harness; `make ui-test` runs scripted real-UI
   scenarios; `make ui-tour` writes `build/ui/tour.md`.
 - Snapshot tests use `expect_file!` with one update command:
@@ -88,7 +94,10 @@ Start in these components:
   README parity block in place, preserving surrounding prose.
 - User-visible changes are not done until a scripted real-UI scenario drives
   the real Neovim UI and its screen output is checked. Follow inspect → act →
-  inspect: `scripts/ui start <fixture>`, inspect with `screen`/`state`, act with
-  `scripts/ui keys <key>…`, use `scripts/ui wait` (polls idle; never sleep),
-  inspect again, and always `scripts/ui stop`. See `ui-test-plan.md` §A and
-  TASKS.md §8.8. Run/read the UI tour at the end of a phase.
+  inspect: `scripts/ui start <fixture>`, inspect with `scripts/ui screen` and/or
+  `scripts/ui state`, act with `scripts/ui keys <key>…`, use `scripts/ui wait`
+  (polls idle; never sleep), inspect again, and always `scripts/ui stop`. Use
+  plain `scripts/ui screen`, not `--ansi`. See `ui-test-plan.md` §A and TASKS.md
+  §8.8. At the end of a phase, run `make ui-tour` and inspect only relevant
+  headings/excerpts in `build/ui/tour.md`; never read the entire file. Read a
+  scenario's `failure.screen` only if its inline screen output is insufficient.
