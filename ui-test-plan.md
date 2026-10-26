@@ -168,6 +168,23 @@ Neovim's stderr. Scenario runs print these as `STARTUP FAILED`, separately from
 scenario `expect:` failures: a startup problem is never reported as a behaviour
 regression, and a failed scenario assertion is never called a socket failure.
 
+When the socket exists but the startup idle gate does not pass, the error says
+that RPC answered but idle readiness was not reached. It includes the last idle
+expression outcome (false, remote-expression error with exit code, timeout, or
+unexpected output) and bounded stdout/stderr. Failure-only diagnostics also
+report readable client work counts, view render/ack versions and recent Neovim
+messages. These extra probes run only after startup fails; successful startup
+polling remains unchanged. A successful trivial RPC connect probe is not treated
+as proof that the client's idle expression succeeded.
+
+RPC helper processes are invoked with `--headless` and `/dev/null` stdin. This
+is separate from the actual Neovim UI, which remains interactive in tmux. With a
+PTY attached, a plain `nvim --server … --remote-expr …` helper can start a TUI,
+emit terminal-control queries and send the expression result to stderr; captured
+output then misclassifies a valid `true` as unexpected and terminal responses
+may be consumed by the shell. The headless invocation keeps expression output on
+stdout and prevents helper-side terminal reads/probes.
+
 ### A.2 `snapshot()` JSON
 
 ```json
@@ -229,7 +246,7 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 
 `goto "<text>"` moves the cursor to the first character of the first buffer line containing the quoted text (a literal match, no regex). It fails when the text is absent. It is an RPC call rather than a key press, so it neither appears in the trace nor contributes to a `latency` measurement; scenarios use it to name a target instead of counting motion keys.
 
-`sh: <command>` runs a POSIX shell command in the fixture repo with the deterministic Git environment, between key batches. Scenarios use it to change the repository outside Neovim (the `auto-refresh` watcher test modifies a tracked file this way). A non-zero exit is a scenario error, not a screen expectation.
+`sh: <command>` runs a POSIX shell command in the fixture repo with the deterministic Git environment and `/dev/null` stdin, between key batches. Scenarios use it to change the repository outside Neovim (the `auto-refresh` watcher test modifies a tracked file this way); any direct Neovim RPC command must include `--headless`. A failed, timed-out or unlaunchable shell step is reported with its statement number, command and bounded detail as a failed combination; remaining size/profile combinations still run, and that run is always stopped.
 
 `latency` always reports the measured key-to-idle time. Budgets are multiplied by `UI_BUDGET_SCALE`, and an over-budget measurement only fails the run when `UI_STRICT_LATENCY=1`; otherwise it is informational.
 

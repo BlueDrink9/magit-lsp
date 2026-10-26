@@ -19,6 +19,7 @@ from pathlib import Path
 # so the usable path is at most 107 bytes. Neovim fails to bind a longer path.
 SOCKET_PATH_LIMIT = 107
 STDERR_TAIL_LINES = 20
+DIAGNOSTIC_TEXT_LIMIT = 400
 
 
 @dataclass(frozen=True)
@@ -67,8 +68,50 @@ class ConnectState:
     def summary(self) -> str:
         """One-line description used in startup reports."""
         if not self.attempted:
-            return f"not attempted: {self.detail}"
-        return "connected" if self.ok else f"failed: {self.detail}"
+            return f"not attempted: {_bounded(self.detail)}"
+        return "connected" if self.ok else f"failed: {_bounded(self.detail)}"
+
+
+@dataclass(frozen=True)
+class IdleProbe:
+    """The last bounded result of the driver's Neovim idle expression."""
+
+    outcome: str
+    returncode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    detail: str = ""
+
+    def summary(self) -> str:
+        """Describe the idle outcome with bounded stdout/stderr evidence."""
+        labels = {
+            "true": "returned true",
+            "false": "returned false",
+            "error": (
+                f"remote-expression error (exit code {self.returncode})"
+                if self.returncode is not None
+                else "remote-expression could not run"
+            ),
+            "timeout": f"remote-expression timed out{': ' + self.detail if self.detail else ''}",
+            "unexpected": "returned unexpected output",
+            "unavailable": "not attempted",
+        }
+        lines = [f"idle readiness: {labels.get(self.outcome, self.outcome)}"]
+        if self.stdout:
+            lines.append(f"  stdout: {_bounded(self.stdout)}")
+        if self.stderr:
+            lines.append(f"  stderr: {_bounded(self.stderr)}")
+        if self.detail and self.outcome not in ("timeout",):
+            lines.append(f"  detail: {_bounded(self.detail)}")
+        return "\n".join(lines)
+
+
+def _bounded(text: str) -> str:
+    """Collapse control whitespace and cap an untrusted diagnostic string."""
+    value = " ".join(text.split())
+    if len(value) > DIAGNOSTIC_TEXT_LIMIT:
+        return value[: DIAGNOSTIC_TEXT_LIMIT - 3] + "..."
+    return value
 
 
 def inspect_socket(path: Path) -> SocketState:
@@ -124,11 +167,20 @@ def connect_probe(
     This is intentionally independent of the driver's `_expr`: a startup report
     must still work when the driver's normal connection path is what failed.
     """
-    command = [nvim or shutil.which("nvim") or "nvim", "--server", str(socket)]
+    command = [
+        nvim or shutil.which("nvim") or "nvim",
+        "--headless",
+        "--server",
+        str(socket),
+    ]
     command += ["--remote-expr", "1"]
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, timeout=timeout
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return ConnectState(
@@ -154,6 +206,8 @@ def format_report(
     exit_status: int | None,
     stderr: list[str],
     tmux_command_bytes: int | None = None,
+    idle_probe: IdleProbe | None = None,
+    client_state: list[str] | None = None,
 ) -> str:
     """Render the startup/socket outcome as a multi-line diagnostic block.
 
@@ -173,9 +227,13 @@ def format_report(
     if tmux_command_bytes is not None:
         lines.append(f"tmux launcher command: {tmux_command_bytes} bytes")
     lines.append(f"connect probe: {connect.summary()}")
+    if idle_probe is not None:
+        lines.extend(idle_probe.summary().splitlines())
+    if client_state:
+        lines.extend(client_state)
     if stderr:
         lines.append("nvim stderr (tail):")
-        lines.extend(f"  {line}" for line in stderr)
+        lines.extend(f"  {_bounded(line)}" for line in stderr)
     else:
         lines.append("nvim stderr (tail): empty")
     return "\n".join(lines)

@@ -178,7 +178,8 @@ def _tmux(run: Run, *args: str, check: bool = True) -> subprocess.CompletedProce
 
 def _nvim(run: Run, *args: str, timeout: float = 5.0) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["nvim", "--server", run.socket, *args],
+        ["nvim", "--headless", "--server", run.socket, *args],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -199,6 +200,18 @@ _SNAPSHOT_EXPR = (
     'luaeval(\'vim.json.encode(require("magit-lsp.debug").snapshot())\')'
 )
 _IDLE_EXPR = 'luaeval(\'require("magit-lsp.debug").idle()\')'
+_STARTUP_DEBUG_EXPR = (
+    "luaeval('vim.json.encode((function(d) "
+    "local views = {}; for _, id in ipairs(d.order) do "
+    "local v = d.views[id]; views[#views + 1] = {id = id, kind = v.kind, "
+    "version = v.version, acked = v.acked}; end; "
+    "local progress = 0; for _ in pairs(d.state.progress) do "
+    "progress = progress + 1; end; "
+    "return {state = {requests = d.state.requests, queued = d.state.queued, "
+    "prompts = d.state.prompts, scheduled = d.state.scheduled, "
+    'progress = progress}, views = views, messages = vim.fn.execute("messages")}; '
+    "end)(require(\"magit-lsp.debug\")))')"
+)
 # `vim.ui.input` uses the `@` command-line type and `vim.ui.select`/`inputlist`
 # the `-` textlist type; both mean a prompt is waiting for the user.
 _PROMPT_EXPR = "getcmdtype()"
@@ -242,8 +255,97 @@ def state_json(run: Run, indent: int | None = 2) -> str:
 
 def idle(run: Run) -> bool:
     """Poll the client's `debug.idle()`."""
-    output = _expr(run, _IDLE_EXPR, timeout=2.0)
-    return output in ("true", "1")
+    return _idle_probe(run).outcome == "true"
+
+
+def _idle_probe(run: Run) -> startup.IdleProbe:
+    """Run one bounded idle expression and preserve its complete outcome."""
+    try:
+        result = _nvim(run, "--remote-expr", _IDLE_EXPR, timeout=2.0)
+    except subprocess.TimeoutExpired as error:
+        return startup.IdleProbe(
+            "timeout",
+            stdout=_decode_output(error.stdout),
+            stderr=_decode_output(error.stderr),
+            detail="after 2s",
+        )
+    except OSError as error:
+        return startup.IdleProbe("error", detail=str(error))
+    stdout = result.stdout.strip()
+    stderr = result.stderr.strip()
+    if result.returncode != 0:
+        return startup.IdleProbe("error", result.returncode, stdout, stderr)
+    if stdout in ("true", "1"):
+        return startup.IdleProbe("true", result.returncode, stdout, stderr)
+    if stdout in ("false", "0"):
+        return startup.IdleProbe("false", result.returncode, stdout, stderr)
+    return startup.IdleProbe("unexpected", result.returncode, stdout, stderr)
+
+
+def _decode_output(output: str | bytes | None) -> str:
+    """Normalize `TimeoutExpired` output for bounded diagnostic reporting."""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output or ""
+
+
+def _client_startup_state(run: Run) -> list[str]:
+    """Read and format bounded client busy state after startup has failed."""
+    try:
+        result = _nvim(run, "--remote-expr", _STARTUP_DEBUG_EXPR, timeout=2.0)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [f"client debug state: unavailable ({_safe_text(error)})"]
+    if result.returncode != 0:
+        detail = _safe_text(result.stderr or result.stdout)
+        return [
+            "client debug state: unavailable"
+            + (f" (exit code {result.returncode}: {detail})" if detail else "")
+        ]
+    if len(result.stdout) > 16000:
+        return ["client debug state: unavailable (diagnostic response exceeded limit)"]
+    try:
+        data = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        return ["client debug state: unavailable (invalid diagnostic response)"]
+    state = data.get("state", {}) if isinstance(data, dict) else {}
+    progress = state.get("progress", 0)
+    lines = [
+        "client work: "
+        + ", ".join(
+            f"{name}={state.get(name, 0)}"
+            for name in ("requests", "queued", "prompts", "scheduled")
+        )
+        + f", progress={progress}"
+    ]
+    views = data.get("views", [])
+    if views:
+        details = []
+        for view in views[:8]:
+            details.append(
+                f"{_safe_text(view.get('id', '?'))} "
+                f"({_safe_text(view.get('kind', '?'))}): "
+                f"version={view.get('version', 'unset')}, "
+                f"acked={view.get('acked', 'unset')}"
+            )
+        lines.append("views: " + "; ".join(details))
+        if len(views) > 8:
+            lines.append(f"views: … {len(views) - 8} more omitted")
+    messages = data.get("messages", "")
+    if isinstance(messages, str) and messages.strip():
+        lines.append("recent Neovim messages:")
+        lines.extend(
+            f"  {_safe_text(message)}"
+            for message in messages.splitlines()[-5:]
+            if message.strip()
+        )
+    return lines
+
+
+def _safe_text(value: object, limit: int = 400) -> str:
+    """Collapse untrusted diagnostic text and cap its displayed length."""
+    printable = "".join(char if char.isprintable() else " " for char in str(value))
+    text = " ".join(printable.split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def document(run: Run) -> str:
@@ -461,18 +563,28 @@ def _pane_dead(run: Run) -> bool:
 
 def _wait_for_socket(run: Run, timeout_ms: int = SOCKET_TIMEOUT_MS) -> None:
     deadline = time.monotonic() + timeout_ms / 1000
+    last_probe: startup.IdleProbe | None = None
     while time.monotonic() < deadline:
-        if run.socket_path.exists() and idle(run):
-            return
+        if run.socket_path.exists():
+            last_probe = _idle_probe(run)
+            if last_probe.outcome == "true":
+                return
         if _pane_dead(run):
             raise StartupError(
-                "Neovim exited before its RPC socket answered:\n"
-                f"{startup_report(run)}"
+                "Neovim exited before startup readiness was reached:\n"
+                f"{startup_report(run, idle_probe=last_probe)}"
             )
         time.sleep(0.025)
+    socket = startup.inspect_socket(run.socket_path)
+    if socket.exists and socket.is_socket:
+        reason = (
+            "Neovim RPC socket answered, but idle readiness was not reached "
+            f"within {timeout_ms} ms"
+        )
+    else:
+        reason = f"Neovim did not establish RPC/idle readiness within {timeout_ms} ms"
     raise StartupError(
-        f"Neovim did not open its RPC socket within {timeout_ms} ms:\n"
-        f"{startup_report(run)}"
+        f"{reason}:\n{startup_report(run, idle_probe=last_probe)}"
     )
 
 
@@ -582,7 +694,9 @@ def _launcher_command(run: Run) -> str:
     return shlex.join([_shell(), str(_launcher_path(run))])
 
 
-def startup_report(run: Run) -> str:
+def startup_report(
+    run: Run, *, idle_probe: startup.IdleProbe | None = None
+) -> str:
     """Describe why Neovim or its RPC socket did not come up.
 
     Observations are collected independently: socket stat, pane liveness,
@@ -610,6 +724,8 @@ def startup_report(run: Run) -> str:
         exit_status=exit_status,
         stderr=stderr,
         tmux_command_bytes=tmux_command_bytes,
+        idle_probe=idle_probe,
+        client_state=_client_startup_state(run) if idle_probe is not None else None,
     )
 
 

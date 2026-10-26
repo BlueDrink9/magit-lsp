@@ -111,8 +111,11 @@ class ReadExitStatusTest(unittest.TestCase):
 class ConnectProbeTest(unittest.TestCase):
     def test_successful_probe(self) -> None:
         result = subprocess.CompletedProcess([], 0, stdout="1\n", stderr="")
-        with patch.object(startup.subprocess, "run", return_value=result):
+        with patch.object(startup.subprocess, "run", return_value=result) as run:
             state = startup.connect_probe(Path("/tmp/sock"))
+        command = run.call_args.args[0]
+        self.assertIn("--headless", command)
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertTrue(state.attempted)
         self.assertTrue(state.ok)
         self.assertIn("connected", state.summary())
@@ -172,6 +175,66 @@ class FormatReportTest(unittest.TestCase):
         self.assertIn("connect probe: failed: E247: no server", report)
         self.assertIn("  boom", report)
         self.assertIn("  detail", report)
+
+    def test_report_distinguishes_rpc_connection_from_idle_readiness(self) -> None:
+        report = startup.format_report(
+            socket=startup.SocketState(
+                path="/tmp/nvim.sock",
+                length=14,
+                exists=True,
+                is_socket=True,
+                mode="0o600",
+            ),
+            connect=startup.ConnectState(True, True, ""),
+            pane_dead=False,
+            exit_status=None,
+            stderr=[],
+            idle_probe=startup.IdleProbe("false", 0, "false"),
+            client_state=[
+                "client work: requests=0, queued=1, prompts=0, scheduled=0, progress=0",
+                "views: status (status): version=2, acked=1",
+                "recent Neovim messages:",
+                "  startup warning",
+            ],
+        )
+        self.assertIn("connect probe: connected", report)
+        self.assertIn("idle readiness: returned false", report)
+        self.assertIn("stdout: false", report)
+        self.assertIn("queued=1", report)
+        self.assertIn("version=2, acked=1", report)
+        self.assertIn("startup warning", report)
+        self.assertNotIn("{", report)
+
+    def test_report_includes_bounded_idle_error_output(self) -> None:
+        report = startup.format_report(
+            socket=startup.SocketState(path="/tmp/nvim.sock", length=14),
+            connect=startup.ConnectState(True, True, ""),
+            pane_dead=False,
+            exit_status=None,
+            stderr=[],
+            idle_probe=startup.IdleProbe(
+                "error", 2, "", "Lua: E5108: debug unavailable" + "x" * 800
+            ),
+        )
+        self.assertIn("remote-expression error (exit code 2)", report)
+        self.assertIn("stderr: Lua: E5108: debug unavailable", report)
+        self.assertLess(len(report), 700)
+
+    def test_report_identifies_unexpected_idle_output_and_timeout(self) -> None:
+        for probe, expected in (
+            (startup.IdleProbe("unexpected", 0, "maybe"), "unexpected output"),
+            (startup.IdleProbe("timeout", detail="after 2s"), "timed out: after 2s"),
+        ):
+            with self.subTest(expected=expected):
+                report = startup.format_report(
+                    socket=startup.SocketState(path="/tmp/nvim.sock", length=14),
+                    connect=startup.ConnectState(True, True, ""),
+                    pane_dead=False,
+                    exit_status=None,
+                    stderr=[],
+                    idle_probe=probe,
+                )
+                self.assertIn(expected, report)
 
     def test_report_without_socket_or_stderr(self) -> None:
         report = startup.format_report(

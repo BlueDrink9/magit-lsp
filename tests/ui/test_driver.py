@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
+import os
+import pty
 import re
+import select
+import shutil
+import subprocess
 import sys
 import tempfile
+import termios
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -323,6 +331,83 @@ class StartupReportTest(unittest.TestCase):
 
 
 class WaitSocketTest(unittest.TestCase):
+    def test_idle_probe_preserves_false_and_unexpected_results(self) -> None:
+        for stdout, outcome in (("false\n", "false"), ("wat\n", "unexpected")):
+            with self.subTest(stdout=stdout):
+                result = subprocess.CompletedProcess(
+                    [], 0, stdout=stdout, stderr=""
+                )
+                with patch.object(driver, "_nvim", return_value=result):
+                    probe = driver._idle_probe(object())
+                self.assertEqual(probe.outcome, outcome)
+                self.assertEqual(probe.stdout, stdout.strip())
+
+    def test_idle_probe_preserves_remote_expression_error(self) -> None:
+        result = subprocess.CompletedProcess(
+            [], 2, stdout="", stderr="Lua: E5108: debug unavailable\n"
+        )
+        with patch.object(driver, "_nvim", return_value=result):
+            probe = driver._idle_probe(object())
+        self.assertEqual(probe.outcome, "error")
+        self.assertEqual(probe.returncode, 2)
+        self.assertIn("debug unavailable", probe.stderr)
+
+    def test_idle_probe_preserves_rpc_timeout(self) -> None:
+        timeout = subprocess.TimeoutExpired([], 2.0, output=b"", stderr=b"late")
+        with patch.object(driver, "_nvim", side_effect=timeout):
+            probe = driver._idle_probe(object())
+        self.assertEqual(probe.outcome, "timeout")
+        self.assertEqual(probe.stderr, "late")
+
+    def test_startup_state_is_formatted_as_readable_bounded_fields(self) -> None:
+        payload = {
+            "state": {
+                "requests": 2,
+                "queued": 1,
+                "prompts": 0,
+                "scheduled": 3,
+                "progress": 1,
+            },
+            "views": [{"id": "v1", "kind": "status", "version": 4, "acked": 3}],
+            "messages": "recent warning\n",
+        }
+        result = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps(payload), stderr=""
+        )
+        with patch.object(driver, "_nvim", return_value=result):
+            lines = driver._client_startup_state(object())
+        report = "\n".join(lines)
+        self.assertIn("requests=2, queued=1, prompts=0, scheduled=3, progress=1", report)
+        self.assertIn("version=4, acked=3", report)
+        self.assertIn("recent warning", report)
+        self.assertNotIn("{", report)
+
+    def test_timeout_report_keeps_last_false_idle_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            run.socket_path.touch()
+            probe = startup.IdleProbe("false", 0, "false")
+            socket = startup.SocketState(
+                str(run.socket_path), len(str(run.socket_path)), True, True
+            )
+            with (
+                patch.object(driver, "_idle_probe", return_value=probe),
+                patch.object(driver, "_pane_dead", return_value=False),
+                patch.object(driver.startup, "inspect_socket", return_value=socket),
+                patch.object(
+                    driver.time, "monotonic", side_effect=[0.0, 0.0, 2.0]
+                ),
+                patch.object(driver.time, "sleep"),
+                patch.object(
+                    driver, "startup_report", side_effect=lambda run, **kw: kw["idle_probe"].summary()
+                ) as report,
+            ):
+                with self.assertRaises(driver.StartupError) as caught:
+                    driver._wait_for_socket(run, timeout_ms=1000)
+        self.assertIn("socket answered, but idle readiness", str(caught.exception))
+        self.assertIn("returned false", str(caught.exception))
+        self.assertIs(report.call_args.kwargs["idle_probe"], probe)
+
     def test_pane_death_is_a_startup_error_with_the_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run = make_run(directory)
@@ -333,7 +418,7 @@ class WaitSocketTest(unittest.TestCase):
             ):
                 with self.assertRaises(driver.StartupError) as caught:
                     driver._wait_for_socket(run)
-        self.assertIn("RPC socket", str(caught.exception))
+        self.assertIn("startup readiness", str(caught.exception))
         self.assertIn("REPORT", str(caught.exception))
 
     def test_timeout_is_a_startup_error_with_the_report(self) -> None:
@@ -344,6 +429,114 @@ class WaitSocketTest(unittest.TestCase):
                     driver._wait_for_socket(run, timeout_ms=0)
         self.assertIn("within 0 ms", str(caught.exception))
         self.assertIn("REPORT", str(caught.exception))
+
+
+class NvimHelperCommandTest(unittest.TestCase):
+    def test_rpc_helper_is_headless_and_has_no_terminal_input(self) -> None:
+        result = subprocess.CompletedProcess([], 0, stdout="1", stderr="")
+        with patch.object(driver.subprocess, "run", return_value=result) as run:
+            driver._nvim(make_run("/tmp"), "--remote-expr", "1")
+        self.assertIn("--headless", run.call_args.args[0])
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+
+@unittest.skipUnless(
+    shutil.which("nvim") and hasattr(termios, "TIOCSCTTY"),
+    "requires Neovim and PTYs",
+)
+class RpcHelperTtyTest(unittest.TestCase):
+    def test_helpers_do_not_enter_tui_or_leak_terminal_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            socket = base / "nvim.sock"
+            trace = base / "trace.jsonl"
+            env = os.environ.copy()
+            env.update({"MAGIT_LSP_TRACE": str(trace), "TERM": "xterm-256color"})
+            server = subprocess.Popen(
+                ["nvim", "--headless", "--listen", str(socket), "-u", str(driver.MINIMAL_INIT)],
+                cwd=ROOT,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            master = slave = None
+            try:
+                deadline = time.monotonic() + 5
+                while not socket.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(socket.exists(), "Neovim test RPC server did not start")
+
+                # A real terminal on stdin/stdout reproduces the former helper's TUI path.
+                master, slave = pty.openpty()
+
+                def attach_controlling_terminal() -> None:
+                    os.setsid()
+                    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+                old = subprocess.Popen(
+                    [
+                        "nvim",
+                        "--server",
+                        str(socket),
+                        "--remote-expr",
+                        "luaeval('true')",
+                    ],
+                    stdin=slave,
+                    stdout=slave,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    preexec_fn=attach_controlling_terminal,
+                    close_fds=True,
+                )
+                try:
+                    old_stderr = old.communicate(timeout=5)[1]
+                except subprocess.TimeoutExpired:
+                    old.kill()
+                    old.communicate(timeout=2)
+                    raise
+                self.assertEqual(old.returncode, 0)
+                self.assertEqual(old_stderr.strip(), b"true")
+                terminal_chunks = []
+                while select.select([master], [], [], 0.05)[0]:
+                    terminal_chunks.append(os.read(master, 8192))
+                terminal_traffic = b"".join(terminal_chunks)
+                self.assertIn(b"\x1b[", terminal_traffic)
+
+                run = make_run(directory)
+                result = driver._nvim(
+                    run, "--remote-expr", "luaeval('true')"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "true")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(driver._idle_probe(run).outcome, "true")
+                self.assertTrue(
+                    any(
+                        "client work:" in line
+                        for line in driver._client_startup_state(run)
+                    )
+                )
+                self.assertTrue(startup.connect_probe(socket).ok)
+                failure = driver._nvim(
+                    run,
+                    "--remote-expr",
+                    "luaeval('error(\"injected RPC error\")')",
+                )
+                self.assertNotEqual(failure.returncode, 0)
+                self.assertIn("injected RPC error", failure.stderr)
+                self.assertFalse(select.select([master], [], [], 0.1)[0])
+            finally:
+                if master is not None:
+                    os.close(master)
+                if slave is not None:
+                    os.close(slave)
+                server.terminate()
+                try:
+                    server.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.communicate(timeout=2)
 
 
 class StartPathTest(unittest.TestCase):
