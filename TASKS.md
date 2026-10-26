@@ -352,6 +352,16 @@ prompt. The client displays server-rendered text verbatim and forwards input.
   No client Git, filtering, or commit-selection implementation is required.
 - The same pattern selects a branch (refs view), a stash, or files.
 
+**Proposed Enter/o scheme (not approved or implemented):** In a plain log,
+`common.confirm`/Enter would open the structured commit under the cursor. In a
+commit picker, Enter would remain the primary action and select/confirm the
+commit. A proposed `o` action in commit-bearing log, select, and rebase views
+would open a read-only commit inspection view without selecting a commit or
+mutating the pending operation. `q` would return to the originating picker or
+rebase view with its cursor, marks, and pending operation intact. This proposal
+does not apply to status, where `o` opens submodules. Use terminal-portable
+keys; do not depend on `ctrl+Enter`.
+
 ### 3.8 Key notation
 
 No formal standard exists for *textual* shortcut strings. The W3C UI Events
@@ -1368,9 +1378,18 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
        `log-select` across standard/vim at 100x30 and 80x24: decorated subjects,
        graph/ref labels and selection purpose render; generated `build/ui/tour.md`
        reviewed. Test sessions stopped; no orphan `magit-lsp` process found.
-- [ ] R-5.2 Revision view; Diff view (ranges, args).
-      *UI:* add scenario `revision-view`: from the log, `d` on a commit shows
-      its diff and `q` returns to the log.
+- [ ] R-5.2 Revision view; Diff view (ranges, args). In a plain log,
+       `common.confirm`/Enter opens the structured commit under the cursor in
+       the revision view. In select mode Enter selects as usual; the proposed
+       `o` inspection action opens a read-only commit view without selecting or
+       mutating, and `q` restores the originating picker/rebase view including
+       cursor, marks, and pending operation. These are proposed keys/behaviour,
+       not approved or implemented; keep keys terminal-portable and independent
+       of `ctrl+Enter`.
+       *Tests:* cover the structured confirmed commit, plus session and UI
+       restoration of cursor, marks, and pending operation after inspection.
+       *UI:* add scenario `revision-view`: from the log, `d` on a commit shows
+       its diff and `q` returns to the log.
 - [ ] R-5.3 Refs view; file-at-revision virtual docs; log variants.
       *UI:* add scenario `refs-view`: `y` opens refs, the screen lists branch
       and tag names, `q` returns to status.
@@ -1379,7 +1398,15 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       targets resolve (assert the style in the `.screen` dump).
 - [ ] R-5.5 Diff-argument menus applied across views.
       *UI:* add scenario `diff-args`: toggling `-w` in the diff menu re-renders
-      the status diff without whitespace-only hunks.
+       the status diff without whitespace-only hunks.
+- [ ] R-5.6 Log colourisation. Add server-owned semantic styling metadata for
+       commit hashes, branch/tag decorations, headings, author/date, and graph
+       elements where appropriate. Keep styling independent from links/hover
+       (R-5.4), whose existing scope remains hashes/refs and their targets; do
+       not recover style by parsing rendered client text.
+       *Tests:* verify semantic spans in both UTF-8 byte and UTF-16 code-unit
+       coordinates, including non-ASCII text. *UI:* assert the rendered log's
+       colours for these elements in a real-UI scenario.
 
 ### Phase 5 — Commit flow
 
