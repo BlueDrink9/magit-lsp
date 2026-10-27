@@ -5,6 +5,7 @@ use magit_lsp::dispatch::{self, Command, LineRange, NodeKind, Resolution};
 use magit_lsp::errors;
 use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::protocol::{Effect, MessageLevel};
+use rstest::rstest;
 
 fn message_text(resolution: &Resolution) -> &str {
     match resolution {
@@ -71,32 +72,13 @@ fn stage_file_header_stages_file() {
     );
 }
 
-#[test]
-fn stage_hunk_header_stages_hunk() {
+#[rstest]
+#[case::stage_hunk_header_stages_hunk(hunk_target())]
+#[case::stage_changed_line_stages_whole_hunk(diff_line_target(true))]
+#[case::stage_context_line_stages_whole_hunk(diff_line_target(false))]
+fn stage_hunk_cases_stage_whole_hunk(#[case] target: NodeKind) {
     assert_eq!(
-        dispatch::resolve(Command::Stage, hunk_target(), None),
-        Resolution::StageHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn stage_changed_line_stages_whole_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Stage, diff_line_target(true), None),
-        Resolution::StageHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn stage_context_line_stages_whole_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Stage, diff_line_target(false), None),
+        dispatch::resolve(Command::Stage, target, None),
         Resolution::StageHunk {
             path: "f.txt".to_string(),
             hunk_id: "h0".to_string()

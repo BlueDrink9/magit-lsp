@@ -3,6 +3,7 @@
 mod common;
 
 use common::*;
+use rstest::rstest;
 
 fn status_paths(status: &magit_lsp::git::Status, staged: bool) -> Vec<String> {
     let files = if staged {
@@ -19,34 +20,11 @@ fn untracked_paths(status: &magit_lsp::git::Status) -> Vec<String> {
     paths
 }
 
-#[test]
-fn status_reports_path_with_spaces() {
-    let (tmp, repo) = RepoFixture::new()
-        .commit("init", [("a b.txt", TEN_LINES)])
-        .build();
-    write(&tmp.path().join("a b.txt"), &standard_changes());
-
-    let status = repo.status().expect("status");
-    assert_eq!(status_paths(&status, false), vec!["a b.txt"]);
-    assert_eq!(status.unstaged[0].hunks.len(), 1);
-}
-
-#[test]
-fn status_reports_path_with_quote_and_backslash() {
-    let path = "a\"b\\c.txt";
-    let (tmp, repo) = RepoFixture::new()
-        .commit("init", [(path, TEN_LINES)])
-        .build();
-    write(&tmp.path().join(path), &standard_changes());
-
-    let status = repo.status().expect("status");
-    assert_eq!(status_paths(&status, false), vec![path]);
-    assert_eq!(status.unstaged[0].hunks.len(), 1);
-}
-
-#[test]
-fn status_reports_unicode_path() {
-    let path = "héllo wörld/日本.txt";
+#[rstest]
+#[case::status_reports_path_with_spaces("a b.txt")]
+#[case::status_reports_path_with_quote_and_backslash("a\"b\\c.txt")]
+#[case::status_reports_unicode_path("héllo wörld/日本.txt")]
+fn status_reports_unusual_path(#[case] path: &str) {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [(path, TEN_LINES)])
         .build();

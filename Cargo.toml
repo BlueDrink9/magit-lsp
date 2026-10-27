@@ -27,6 +27,7 @@ toml_edit = "0.25"
 expect-test = "1"
 tempfile = "3"
 proptest = "1"
+rstest = "0.26"
 
 # Keep `target/` small: full debug info and incremental artifacts need far more
 # disk than the test cycle benefits from.
