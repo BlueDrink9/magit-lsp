@@ -7,6 +7,7 @@ const render = require('../lib/render');
 const menu = require('../lib/menu');
 const foldkeys = require('../lib/foldkeys');
 const prompt = require('../lib/prompt');
+const edit = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
@@ -289,6 +290,11 @@ test('one generic dispatcher carries every contributed action binding', () => {
   const contributions = require('../package.json').contributes;
   const clientCommands = contributions.commands.map((entry) => entry.command).sort();
   assert.deepEqual(clientCommands, [
+    'magit.cancelEdit',
+    'magit.closeEdit',
+    'magit.confirmEdit',
+    'magit.historyNext',
+    'magit.historyPrev',
     'magit.invoke',
     'magit.key',
     'magit.mirrorFoldShortcuts',
@@ -307,6 +313,18 @@ test('one generic dispatcher carries every contributed action binding', () => {
     assert.match(binding.args.command, /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/);
     assert(!clientCommands.includes(binding.args.command), binding.key);
   }
+});
+
+test('managed draft effects accept only the exact full-sync announcement', () => {
+  const effect = { type: 'editDocument', mode: 'managedDraft', runId: 'run-1',
+    uri: 'magit-commit://run-1/message', version: 1, text: 'exact\r\n', kind: 'commit-message' };
+  assert(edit.isEditEffect(effect));
+  for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'realFile' },
+    { ...effect, uri: 'magit-commit://other/message' }, { ...effect, version: 2 },
+    { ...effect, requestId: 4 }]) assert(!edit.isEditEffect(invalid));
+  assert.equal(edit.editingContext(effect)['magit.active'], false, 'native typing is not a view keymap');
+  assert.equal(edit.draftAction('common.quit'), 'close');
+  assert.equal(edit.historyCommand(edit.draftAction('commit-message.history-prev')), 'commit-message.history-prev');
 });
 
 const KEYBINDINGS_JSONC = `[

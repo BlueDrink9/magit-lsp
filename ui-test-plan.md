@@ -79,6 +79,22 @@ inspect → act → inspect and always stopping owned UI:
 - VSCode native e2e (R-EDIT-5, `clients/vscode/test/e2e/suite.js`): same barriers,
   close-intent distinctions, recovery, history, status read-only and no implicit
   commit on save; scripted widget integration is not native evidence.
+  The writable `magit-commit` provider sends one explicit full-sync stream,
+  independent of VSCode's native document-version counter. Use native Ctrl+S to
+  checkpoint; use **Magit: Confirm Commit Draft**, **Magit: Abort Commit Draft**,
+  **Magit: Close Commit Draft (Saved Checkpoint)** and **Magit: Previous/Next
+  Commit Message** in the command palette or editor-title actions. The explicit
+  close command classifies intent before teardown and offers a native
+  Save/Discard/Cancel picker when dirty. VSCode exposes no reliable pre-close
+  intent for its ordinary tab X/Ctrl+W, shutdown, or API disposal: those ambiguous
+  closes abort, never confirm. Focus loss does neither. Printable text and native
+  editing keys are not captured by the status-view keymap. History temporarily
+  gates native mutation, checks document identity/version and reconciles any API
+  edit race without overwriting local text. The native suite retains save,
+  history, version-error, dirty-close, abort and disconnect screenshots plus
+  `r-edit-5-evidence.json` / `r-edit-5-disconnect.json`; inspect fresh artifacts,
+  not historical real-file A07 evidence. Process/progress-end ordering remains
+  server-owned; tests wait independently for actual Git state and progress end.
 - Adversarial process cases belong to Rust real-Git R-EDIT-2/A11 tests, not a
   UI-only claim: cancel in pre-hook/editor/commit-msg/finalizing, finish-v-cancel,
   inherited pipes after normal exit, bounded drain and TERM-resistant child,
@@ -91,6 +107,24 @@ inspect → act → inspect and always stopping owned UI:
   final group KILL before reap, no signals after reap), adversarial process cases
   and both clients' native cutover evidence. Linux `/proc` latency evidence is not
   macOS validation. Windows remains separate feasibility work (R-EDIT-7).
+
+R-EDIT-2 cooperative-hook refinement uses `commit-owned-cancel.scn` (current
+real-file editor, not managed drafts). Inspect the committing snapshot, select
+the unique live `Git` / `commit` progress token from client-held metadata, cancel
+that token, then retain the fresh plain `cancellation-feedback.screen` showing
+the final Git outcome. Before any idle/state RPC, use terminal capture to dismiss
+only an observed hit-enter prompt; do not send Enter or q blindly into status
+mappings or open `:messages`. After idle, assert bounded notification history
+contains `Cancelling…` and the final readable Git failure, plus one begin/report/end
+for the actual token; retain those notifications in `cancel.trace.jsonl`.
+Inspect the fresh `cancelled.screen` for staged changes and `next-commit.screen`
+for the subsequent successful commit, with unchanged-HEAD and hook-TERM checks.
+Client trace records cancellation intent with the actual token. The default
+native idle deadline is unchanged; resistant/stopped hooks,
+separate prompt-intent timing and escalation safety belong to Rust/stdio tests.
+Never reuse older cancelled/next-commit artifacts after a failed run; the scenario
+runner stops each owned native session even on failure. Verification attempts
+and remaining R-EDIT-2 obligations are recorded in TASKS.md.
 
 The Linux R-EDIT-2 acceptance ledger in TASKS.md maps each phase/race and process
 adversary to its Rust/stdio test. Finalizing cancellation includes a real

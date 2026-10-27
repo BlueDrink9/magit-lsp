@@ -53,6 +53,11 @@ module.exports = async function testStatusOpenLifecycle() {
         return { dispose() {} };
       },
       onDidCloseTextDocument: (callback) => { closeDocument = callback; return { dispose() {} }; },
+      onDidChangeTextDocument: () => ({ dispose() {} }),
+      registerFileSystemProvider: (scheme, provider) => {
+        providers.set(scheme, provider);
+        return { dispose() {} };
+      },
       openTextDocument: async (uri) => {
         if (uri.scheme !== 'magit') {
           fileOpened = true;
@@ -80,6 +85,7 @@ module.exports = async function testStatusOpenLifecycle() {
       visibleTextEditors: [],
       tabGroups: {
         get all() { return [{ tabs: tabs.map((document) => ({ input: { uri: document.uri } })) }]; },
+        onDidChangeTabs: () => ({ dispose() {} }),
         async close(closing) {
           for (const tab of closing) {
             const index = tabs.findIndex((document) => document.uri.toString() === tab.input.uri.toString());

@@ -7,7 +7,8 @@ const vscode = require('vscode');
 const { LanguageClient } = require('vscode-languageclient/node');
 
 /** Requests this test records as evidence; notifications are not captured. */
-const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open']);
+const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open',
+  'draft/save', 'draft/finish', 'draft/history']);
 
 /**
  * Resolve after `milliseconds`, only used to let a native widget mount.
@@ -63,6 +64,24 @@ async function run() {
   assert(evidence, 'MAGIT_VSCODE_EVIDENCE must name the isolated evidence directory');
   const extension = vscode.extensions.getExtension('magit-lsp.magit-lsp');
   const requests = [];
+  const draftNotes = [];
+  const draftErrors = [];
+  const progressEvents = [];
+  const sendNotification = LanguageClient.prototype.sendNotification;
+  LanguageClient.prototype.sendNotification = function (method, params, ...rest) {
+    const name = typeof method === 'string' ? method : method.method;
+    if (params?.textDocument?.uri?.startsWith('magit-commit:') || name === 'window/workDoneProgress/cancel') {
+      draftNotes.push({ method: name, params });
+    }
+    return sendNotification.call(this, method, params, ...rest);
+  };
+  const onProgress = LanguageClient.prototype.onProgress;
+  LanguageClient.prototype.onProgress = function (type, token, handler) {
+    return onProgress.call(this, type, token, (value) => {
+      progressEvents.push({ token, value });
+      return handler(value);
+    });
+  };
   /** Server semantic-token pulls, kept separate from Magit view traffic. */
   const semanticRequests = [];
   const openedViews = [];
@@ -111,6 +130,10 @@ async function run() {
   };
   const onNotification = LanguageClient.prototype.onNotification;
   LanguageClient.prototype.onNotification = function (method, handler, ...rest) {
+    if (method === 'draft/error') return onNotification.call(this, method, (params) => {
+      draftErrors.push(params);
+      return handler(params);
+    }, ...rest);
     if (method !== 'view/render') {
       return onNotification.call(this, method, handler, ...rest);
     }
@@ -949,7 +972,15 @@ async function run() {
     const key = async (name) => {
       // Re-activating an already active Chromium window can move focus away
       // from its find textarea back into the editor's native edit context.
-      if (execFileSync('xdotool', ['getactivewindow']).toString().trim() !== windowId) {
+      let active;
+      try {
+        active = execFileSync('xdotool', ['getactivewindow']).toString().trim();
+      } catch {
+        // The window manager may momentarily report no active window at all;
+        // that is not proof the isolated window is active, so activate below.
+        active = '';
+      }
+      if (active !== windowId) {
         execFileSync('xdotool', ['windowactivate', '--sync', windowId]);
       }
       assert.equal(execFileSync('xdotool', ['getactivewindow']).toString().trim(), windowId);
@@ -1234,7 +1265,8 @@ async function run() {
       .filter((command) => command.startsWith('magit.')).sort();
     assert(registeredCommands.includes('magit.invoke'), 'generic dispatcher is not registered');
     assert.deepEqual(registeredMagitCommands, [
-      'magit.cancelEdit', 'magit.confirmEdit', 'magit.invoke', 'magit.key',
+      'magit.cancelEdit', 'magit.closeEdit', 'magit.confirmEdit',
+      'magit.historyNext', 'magit.historyPrev', 'magit.invoke', 'magit.key',
       'magit.mirrorFoldShortcuts', 'magit.open',
     ], 'per-action VSCode command registrations exist');
     const contributed = extension.packageJSON.contributes;
@@ -1578,42 +1610,111 @@ async function run() {
     );
     const actionRestored = stagedNames() === '';
 
-    // A07: the server's real Git bridge opens a writable message file. Exercise
-    // generated command IDs, never a client-owned key/chord interpretation.
-    const invokeGeneratedEditCommand = async (command) => {
-      const binding = contributed.keybindings.find((entry) =>
-        entry.args?.command === command
-          && entry.when.includes("magit.scope == 'commit-message'"));
-      assert(binding, `generated edit binding for ${command}`);
-      await vscode.commands.executeCommand(binding.command, binding.args);
-      return binding;
+    // R-EDIT-5: native writable managed drafts against the real server. Native
+    // typing/save and the command palette/title actions classify intent before
+    // teardown; raw workbench tab close remains ambiguous and must never finish.
+    const { store: draftStore } = require(`${extension.extensionPath}/lib/store`);
+    const gitDraft = (...args) => execFileSync('git', ['-C', repo, ...args]);
+    gitDraft('config', 'user.name', 'Test');
+    gitDraft('config', 'user.email', 'test@example.com');
+    const head = () => gitDraft('rev-parse', 'HEAD').toString().trim();
+    const subject = () => gitDraft('log', '-1', '--format=%s').toString().trim();
+    const progressIdle = () => waitFor(() => {
+      const active = new Map();
+      for (const { token, value } of progressEvents) active.set(token, value.kind);
+      return [...active.values()].every((kind) => kind === 'end');
+    }, 'native commit progress ended');
+    const palette = async (title) => {
+      await key('ctrl+shift+p');
+      await waitFor(() => quickInputState().visible, 'native command palette');
+      await type(title);
+      await waitFor(() => quickInputState().text?.includes(title), `palette ${title}`);
+      await key('Return');
+      await waitFor(() => !quickInputState().visible, `palette command ${title} accepted`);
     };
+    let draftProbe = 0;
     const startBridgeEdit = async () => {
+      await progressIdle();
       fs.writeFileSync(path.join(repo, 'tracked.txt'), `bridge edit probe ${Date.now()}\n`);
       await focusStatus();
-      execFileSync('git', ['-C', repo, 'add', 'tracked.txt']);
+      gitDraft('add', 'tracked.txt');
       assert(stagedNames().length > 0, 'stage bridge edit fixture');
+      const prior = new Set(draftStore.drafts.keys());
       await vscode.commands.executeCommand('magit.invoke', { command: 'commit.create' });
-      await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'file'
-        && vscode.window.activeTextEditor.document.languageId === 'git-commit',
-      'real bridge commit message editor');
+      await waitFor(() => [...draftStore.drafts.values()].some((draft) => !prior.has(draft.runId)
+        && draft.attached && vscode.window.activeTextEditor?.document.uri.toString() === draft.effect.uri),
+      'native managed commit message editor');
+      const draft = [...draftStore.drafts.values()].find((record) => !prior.has(record.runId));
+      const opens = draftNotes.filter((note) => note.method === 'textDocument/didOpen'
+        && note.params.textDocument.uri === draft.effect.uri);
+      assert.equal(opens.length, 1, 'one explicit didOpen, not automatic LSP attachment');
+      assert.deepEqual(opens[0].params.textDocument, { uri: draft.effect.uri, languageId: 'gitcommit',
+        version: 1, text: draft.effect.text });
+      assert.equal(draft.document.getText(), draft.effect.text);
+      assert.equal(draft.document.languageId, 'git-commit');
+      assert.equal(draft.document.uri.scheme, 'magit-commit');
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      await waitFor(() => observe().editorFocused, 'native draft editor focus');
+      draftProbe += 1;
       return vscode.window.activeTextEditor;
     };
+    const replaceDraft = async (target, text) => {
+      const end = target.document.positionAt(target.document.getText().length);
+      assert(await target.edit((builder) => builder.replace(new vscode.Range(new vscode.Position(0, 0), end), text)));
+    };
+    const draftFor = (target) => draftStore.drafts.get(target.document.uri.authority);
+    const cases = [];
     const bridgeEditor = await startBridgeEdit();
-    const commitMessage = `A07 native bridge ${Date.now()}`;
-    const messageRange = new vscode.Range(0, 0, bridgeEditor.document.lineCount, 0);
-    await bridgeEditor.edit((builder) => builder.replace(messageRange, `${commitMessage}\n`));
-    assert(bridgeEditor.document.isDirty, 'bridge message is unsaved before confirmation');
-    shot('a07-edit-before-confirm.png');
-    const editConfirmBinding = await invokeGeneratedEditCommand('common.confirm');
-    await waitFor(() => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
-      .toString().trim() === commitMessage, 'saved bridge message committed');
-    assert.equal(bridgeEditor.document.getText().trim(), commitMessage,
-      'confirm saved the bridge edit before answering the server');
-    const editConfirmShot = shot('a07-edit-confirmed.png');
+    const commitMessage = `native managed draft ${Date.now()}`;
+    const beforeSave = head();
+    await replaceDraft(bridgeEditor, '');
+    await type(commitMessage);
+    await waitFor(() => bridgeEditor.document.getText() === commitMessage, 'native draft typing (including g/q)');
+    await key('ctrl+s');
+    await waitFor(() => !bridgeEditor.document.isDirty && draftFor(bridgeEditor).savedText === commitMessage,
+      'native save checkpoint stays editing');
+    assert.equal(head(), beforeSave);
+    assert.equal(vscode.window.activeTextEditor.document, bridgeEditor.document);
+    shot('r-edit-5-save-stays-editing.png');
+    await palette('Magit: Close Commit Draft (Saved Checkpoint)');
+    await progressIdle();
+    assert.equal(subject(), commitMessage);
+    cases.push({ name: 'native-save-normal-close', message: commitMessage, head: head() });
 
-    // Keep another bridge edit open while status has focus. Status actions must
-    // route by the active document, not a stale last-edit fallback.
+    let historyEditor = await startBridgeEdit();
+    const unsent = 'native exact unsent\n\nbody ü\n';
+    await replaceDraft(historyEditor, unsent);
+    const base = draftFor(historyEditor).version;
+    await palette('Magit: Previous Commit Message');
+    await waitFor(() => historyEditor.document.getText() === commitMessage, 'native previous history');
+    shot('r-edit-5-history-previous.png');
+    await palette('Magit: Next Commit Message');
+    await waitFor(() => historyEditor.document.getText() === unsent, 'native current draft restored');
+    await palette('Magit: Next Commit Message');
+    await waitFor(() => draftFor(historyEditor).version >= base + 3, 'native no-op next adopted version');
+    assert.equal(historyEditor.document.getText(), unsent);
+    const record = draftFor(historyEditor);
+    const checkpointBefore = record.savedVersion;
+    assert.equal(checkpointBefore, 1, 'history never checkpoints');
+    const uriHistory = record.uri.toString();
+    await draftStore.client.sendNotification('textDocument/didChange', {
+      textDocument: { uri: uriHistory, version: record.version }, contentChanges: [{ text: 'stale update' }],
+    });
+    await waitFor(() => record.syncError && draftErrors.some((error) => error.uri === uriHistory), 'native readable version error');
+    assert.equal(historyEditor.document.getText(), unsent);
+    shot('r-edit-5-version-error-preserves-text.png');
+    assert(await historyEditor.document.save(), 'native retry checkpoint succeeds');
+    assert.equal(record.syncError, undefined);
+    assert.equal(head(), cases[0].head, 'sync error/retry did not finish');
+    await replaceDraft(historyEditor, 'native explicit confirm\n');
+    await palette('Magit: Confirm Commit Draft');
+    await progressIdle();
+    assert.equal(subject(), 'native explicit confirm');
+    cases.push({ name: 'history-restore-no-op-version-recovery-confirm', head: head(),
+      errors: draftErrors.slice(), unsent });
+    shot('r-edit-5-confirmed.png');
+
+    // The draft can remain open while status commands go to the status view.
     const outstandingEditor = await startBridgeEdit();
     await focusStatus();
     const statusDispatchBefore = requests.length;
@@ -1622,33 +1723,94 @@ async function run() {
       request.method === 'view/invoke' && request.params.command === 'common.refresh'),
     'status dispatch while bridge edit remains open');
     assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
-    assert.equal(outstandingEditor.document.uri.scheme, 'file', 'bridge edit tab remains open');
+    assert.equal(outstandingEditor.document.uri.scheme, 'magit-commit', 'managed draft tab remains open');
     await vscode.window.showTextDocument(outstandingEditor.document, { preserveFocus: false });
-    const editCancelBinding = await invokeGeneratedEditCommand('common.cancel');
+    const cancelHead = head();
+    await palette('Magit: Abort Commit Draft');
+    await progressIdle();
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
       'cancel returns focus to status');
-    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B']).toString().trim(),
-      commitMessage, 'cancel did not create a commit');
-    const editCancelShot = shot('a07-edit-cancelled.png');
+    assert.equal(head(), cancelHead, 'explicit abort did not create a commit');
+    shot('r-edit-5-aborted.png');
+
+    for (const choice of ['Save', 'Discard changes']) {
+      const target = await startBridgeEdit();
+      const saved = `native saved ${draftProbe}\n`;
+      await replaceDraft(target, saved);
+      assert(await target.document.save());
+      const savedVersion = draftFor(target).savedVersion;
+      await replaceDraft(target, `native unsaved ${draftProbe}\n`);
+      const oldHead = head();
+      const index = gitDraft('show', ':tracked.txt');
+      const worktree = fs.readFileSync(path.join(repo, 'tracked.txt'));
+      // Use the registered explicit-close command while testing the actual
+      // native Save/Discard/Cancel picker, never scripted widget answers.
+      const cancelled = vscode.commands.executeCommand('magit.closeEdit');
+      await waitFor(() => quickInputState().text?.includes('Close commit draft'), 'dirty native close prompt');
+      // A freshly shown picker can briefly lack DOM focus, so the physical
+      // Escape/Return would land in the editor instead of the picker. Wait for
+      // the picker to own focus before sending the native key.
+      await waitFor(() => {
+        const qs = quickInputState();
+        return qs.visible && !observe().editorFocused;
+      }, 'dirty native close prompt focused');
+      await key('Escape');
+      await cancelled;
+      assert.equal(head(), oldHead);
+      assert(draftFor(target), 'Cancel keeps draft/run open');
+      const closing = vscode.commands.executeCommand('magit.closeEdit');
+      await waitFor(() => quickInputState().text?.includes('Close commit draft'), 'dirty native close prompt again');
+      await waitFor(() => {
+        const qs = quickInputState();
+        return qs.visible && !observe().editorFocused;
+      }, 'dirty native close prompt focused again');
+      if (choice === 'Discard changes') await key('Down');
+      shot(`r-edit-5-dirty-${choice.split(' ')[0].toLowerCase()}.png`);
+      await key('Return');
+      await closing;
+      await progressIdle();
+      assert.equal(subject(), (choice === 'Save' ? `native unsaved ${draftProbe}` : saved.trim()));
+      assert.deepEqual(gitDraft('show', ':tracked.txt'), index);
+      assert.deepEqual(fs.readFileSync(path.join(repo, 'tracked.txt')), worktree);
+      cases.push({ name: `dirty-close-${choice}`, savedVersion, selectedMessage: subject(), head: head() });
+    }
+
     const closeEditor = await startBridgeEdit();
+    const ambiguousHead = head();
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
       'closing bridge editor cancels and restores status');
-    assert(closeEditor.document.uri.scheme === 'file', 'closed bridge editor was a real file');
-    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B']).toString().trim(),
-      commitMessage, 'closing the bridge editor did not create a commit');
-    const editCloseShot = shot('a07-edit-closed.png');
+    await progressIdle();
+    assert.equal(closeEditor.document.uri.scheme, 'magit-commit');
+    assert.equal(head(), ambiguousHead, 'ambiguous workbench close never confirms');
+    cases.push({ name: 'ambiguous-tab-close-cancels', head: head() });
+
+    const progressEditor = await startBridgeEdit();
+    const progressHead = head();
+    const token = progressEvents.filter((event) => event.value.kind === 'begin'
+      && event.value.message === 'commit').at(-1).token;
+    await draftStore.client.sendNotification('window/workDoneProgress/cancel', { token });
+    await waitFor(() => progressEvents.some((event) => event.token === token && event.value.kind === 'end'),
+      'native commit progress cancellation');
+    assert.equal(head(), progressHead);
+    await vscode.commands.executeCommand('magit.cancelEdit');
+    assert.equal(progressEditor.document.uri.scheme, 'magit-commit');
+    cases.push({ name: 'progress-cancel', token, head: head() });
+    assert.equal(editor.document.uri.scheme, 'magit', 'status remains the read-only content provider');
+    fs.writeFileSync(`${evidence}/r-edit-5-evidence.json`, JSON.stringify({
+      gate: 'R-EDIT-5', cases, requests: requests.filter((request) => request.method.startsWith('draft/')),
+      notes: draftNotes, progress: progressEvents,
+      closeIntent: 'Native command palette/editor-title close action confirms; raw tab X/Ctrl+W is ambiguous and aborts.',
+    }, null, 2));
     fs.writeFileSync(`${evidence}/a07-evidence.json`, JSON.stringify({
-      gate: 'A07',
-      generatedConfirm: editConfirmBinding.args.command,
-      generatedCancel: editCancelBinding.args.command,
+      gate: 'A07', adapter: 'managedDraft',
       confirmedMessage: commitMessage,
-      saveBeforeConfirm: true,
+      saveOnlyCheckpoints: true,
       statusCommandWithOpenEdit: 'common.refresh',
       statusCommandReachedServer: true,
       cancelCreatedNoCommit: true,
       closeCreatedNoCommit: true,
-      screenshots: ['a07-edit-before-confirm.png', editConfirmShot, editCancelShot, editCloseShot],
+      closeIntent: 'explicit normal-close versus ambiguous tab teardown',
     }, null, 2));
     fs.writeFileSync(`${evidence}/r-vs-3-evidence.json`, JSON.stringify({
       gate: 'R-VS-3',
@@ -1720,6 +1882,25 @@ async function run() {
     }, null, 2));
     shot('screen.png');
     await verifyQuitReopen();
+    // Last: real native disconnect with an active dirty draft. Do not restart
+    // the language client or infer finish from the extension/window lifetime.
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'native disconnect probe\n');
+    gitDraft('add', 'tracked.txt');
+    await vscode.commands.executeCommand('magit.invoke', { command: 'commit.create' });
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'magit-commit', 'native disconnect draft');
+    const disconnectEditor = vscode.window.activeTextEditor;
+    const disconnectDraft = draftFor(disconnectEditor);
+    await waitFor(() => disconnectDraft.attached, 'native disconnect attachment');
+    await replaceDraft(disconnectEditor, 'retain native disconnected text\n');
+    const disconnectHead = head();
+    await require(`${extension.extensionPath}/extension.js`).deactivate();
+    assert.equal(head(), disconnectHead);
+    assert.equal(disconnectEditor.document.getText(), 'retain native disconnected text\n');
+    assert(disconnectDraft.disconnected);
+    shot('r-edit-5-disconnected-text-retained.png');
+    fs.writeFileSync(`${evidence}/r-edit-5-disconnect.json`, JSON.stringify({
+      head: disconnectHead, text: disconnectEditor.document.getText(), disconnected: true,
+    }, null, 2));
     console.log(
       'PASS real VSCode R-VS-2 first open/reopen/refresh, '
       + 'R-VS-3 generic dispatcher with physical default fold/refresh and a '
@@ -1761,7 +1942,9 @@ async function run() {
   } finally {
     LanguageClient.prototype.sendRequest = sendRequest;
     LanguageClient.prototype.onNotification = onNotification;
-    await extension.exports.deactivate();
+    LanguageClient.prototype.sendNotification = sendNotification;
+    LanguageClient.prototype.onProgress = onProgress;
+    await require(`${extension.extensionPath}/extension.js`).deactivate();
   }
 }
 

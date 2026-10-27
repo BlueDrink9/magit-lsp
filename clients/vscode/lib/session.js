@@ -5,6 +5,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 
 const commands = require('./commands');
 const edits = require('./edits');
+const drafts = require('./drafts');
 const effects = require('./effects');
 const requests = require('./requests');
 const semantic = require('./semantic');
@@ -74,18 +75,42 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('magit.open', commands.openStatus),
     vscode.commands.registerCommand('magit.key', commands.pressCommand),
-    vscode.commands.registerCommand('magit.invoke', commands.invokeCommand),
+     vscode.commands.registerCommand('magit.invoke', async (args) => {
+       if (drafts.current()) return drafts.handleInvoke(args);
+       return commands.invokeCommand(args);
+     }),
     vscode.commands.registerCommand('magit.confirmEdit', edits.confirmEditCommand),
-    vscode.commands.registerCommand('magit.cancelEdit', edits.cancelEditCommand),
+     vscode.commands.registerCommand('magit.cancelEdit', edits.cancelEditCommand),
+     vscode.commands.registerCommand('magit.closeEdit', () => {
+       const draft = drafts.current();
+       if (draft) return drafts.close(draft);
+     }),
+     vscode.commands.registerCommand('magit.historyPrev', () => {
+       const draft = drafts.current();
+       if (draft) return drafts.history(draft, 'commit-message.history-prev');
+     }),
+     vscode.commands.registerCommand('magit.historyNext', () => {
+       const draft = drafts.current();
+       if (draft) return drafts.history(draft, 'commit-message.history-next');
+     }),
     vscode.commands.registerCommand('magit.mirrorFoldShortcuts', commands.mirrorFoldShortcuts),
-    vscode.workspace.onDidCloseTextDocument(edits.onDocumentClosed),
+     vscode.workspace.onDidCloseTextDocument(edits.onDocumentClosed),
+     vscode.workspace.onDidChangeTextDocument(drafts.onChanged),
     vscode.window.onDidChangeActiveTextEditor(edits.onActiveEditorChanged)
-  );
+   );
+
+   drafts.setup(context);
 
   store.client = createClient();
   const client = store.client;
   client.onNotification('view/render', requests.applyRender);
-  client.onNotification('view/prompt', requests.handlePrompt);
+   client.onNotification('view/prompt', requests.handlePrompt);
+   client.onNotification('draft/error', drafts.onError);
+   // The explicit full-sync stream excludes the draft scheme from the language
+   // client's automatic document selector, avoiding duplicate native versions.
+   if (client.onDidChangeState) context.subscriptions.push(client.onDidChangeState((event) => {
+     if (event.newState === 1) drafts.disconnect('the server disconnected; copy your text before reopening');
+   }));
   client.onNotification('view/effects', (params) => {
     void effects.applyEffects(params && params.effects, store.activeViewId);
   });
@@ -108,6 +133,8 @@ function activate(context) {
  * Stop the language client when the extension deactivates.
  */
 async function deactivate() {
+  store.disposing = true;
+  drafts.disconnect('the editor session is closing; copy your text before reopening');
   if (store.client) {
     await store.client.stop();
     store.client = undefined;

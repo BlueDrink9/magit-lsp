@@ -14,6 +14,7 @@ const fs = require('node:fs');
 const state = {
   commands: new Map(),
   providers: new Map(),
+  fileProviders: new Map(),
   documents: new Map(),
   editors: [],
   activeEditor: undefined,
@@ -27,6 +28,7 @@ const state = {
   inputAnswers: [],
   informationAnswer: undefined,
   closeHandlers: [],
+  changeHandlers: [],
   activeEditorHandlers: [],
   workspaceFolder: undefined,
   configuration: {},
@@ -124,6 +126,13 @@ class Range {
   }
 }
 
+/** Whole-document edits used by managed-draft history. */
+class WorkspaceEdit {
+  constructor() { this.edits = []; }
+  /** Record a native replacement. */
+  replace(uri, range, text) { this.edits.push({ uri, range, text }); }
+}
+
 /** The semantic-token legend the server declares. */
 class SemanticTokensLegend {
   /** @param {string[]} tokenTypes @param {string[]} tokenModifiers */
@@ -162,8 +171,11 @@ function providerText(uri) {
  */
 function makeDocument(uri, content) {
   const lines = () => content.split('\n');
-  return {
+  const document = {
     uri,
+    version: 1,
+    isDirty: false,
+    isClosed: false,
     languageId: 'plaintext',
     getText: () => content,
     get lineCount() {
@@ -173,9 +185,21 @@ function makeDocument(uri, content) {
       return { text: lines()[line] || '' };
     },
     async save() {
+      const provider = state.fileProviders.get(uri.scheme);
+      if (provider) await provider.writeFile(uri, Buffer.from(content), {});
+      this.isDirty = false;
+      return true;
+    },
+    replaceText(text) {
+      if (state.providers.has(uri.scheme)) return false;
+      content = text;
+      this.version += 1;
+      this.isDirty = true;
+      for (const handler of state.changeHandlers) handler({ document, contentChanges: [{ text }] });
       return true;
     },
   };
+  return document;
 }
 
 /**
@@ -190,6 +214,13 @@ function makeDocument(uri, content) {
  */
 function openDocument(uri, content) {
   const key = uri.toString();
+  if (state.fileProviders.has(uri.scheme)) {
+    const existing = state.documents.get(key);
+    if (existing && !existing.isClosed) return existing;
+    const document = makeDocument(uri, Buffer.from(state.fileProviders.get(uri.scheme).readFile(uri)).toString());
+    state.documents.set(key, document);
+    return document;
+  }
   if (state.providers.has(uri.scheme)) {
     const text = providerText(uri);
     const document = makeDocument(uri, text);
@@ -225,6 +256,11 @@ function editorFor(document) {
       document,
       selection: new Selection(position, position),
       revealRange() {},
+      async edit(callback) {
+        let text;
+        callback({ replace(range, replacement) { text = replacement; } });
+        return document.replaceText(text);
+      },
     };
     state.editors.push(editor);
   }
@@ -292,10 +328,17 @@ const vscode = {
   Position,
   Selection,
   Range,
+  WorkspaceEdit,
   SemanticTokensLegend,
   SemanticTokens,
   QuickPickItemKind: { Separator: -1, Default: 0 },
   TextEditorRevealType: { InCenterIfOutsideViewport: 0 },
+  FileType: { File: 1 },
+  FileChangeType: { Changed: 1 },
+  FileSystemError: {
+    FileNotFound: () => new Error('Draft not found'),
+    NoPermissions: (text) => new Error(text),
+  },
 
   workspace: {
     get workspaceFolders() {
@@ -318,6 +361,21 @@ const vscode = {
     registerTextDocumentContentProvider(scheme, provider) {
       state.providers.set(scheme, provider);
       return { dispose() {} };
+    },
+    registerFileSystemProvider(scheme, provider) {
+      state.fileProviders.set(scheme, provider);
+      return { dispose() {} };
+    },
+    onDidChangeTextDocument(handler) {
+      state.changeHandlers.push(handler);
+      return { dispose() {} };
+    },
+    async applyEdit(edit) {
+      for (const replacement of edit.edits) {
+        const document = state.documents.get(replacement.uri.toString());
+        if (!document || document.isClosed || !document.replaceText(replacement.text)) return false;
+      }
+      return true;
     },
     onDidCloseTextDocument(handler) {
       state.closeHandlers.push(handler);
@@ -354,6 +412,16 @@ const vscode = {
       if (name === 'setContext') {
         state.contextValues.set(args[0], args[1]);
       }
+      if (name === 'workbench.action.files.revert') {
+        const uri = args[0] || state.activeEditor?.document.uri;
+        const document = state.documents.get(uri.toString());
+        const provider = state.fileProviders.get(uri.scheme);
+        if (document && provider) {
+          document.replaceText(Buffer.from(provider.readFile(uri)).toString());
+          document.isDirty = false;
+        }
+      }
+      if (state.commands.has(name)) return state.commands.get(name)(...args);
     },
   },
 
@@ -370,7 +438,13 @@ const vscode = {
           tabs: [{ input: { uri: editor.document.uri } }],
         }));
       },
-      async close() {
+      /** Managed drafts watch tab changes to catch raw tab close teardown. */
+      onDidChangeTabs: new EventEmitter().event,
+      async close(tabs) {
+        for (const tab of Array.isArray(tabs) ? tabs : [tabs]) {
+          const document = state.documents.get(tab.input.uri.toString());
+          if (document) await vscode.__test.closeDocument(document);
+        }
         return true;
       },
     },
@@ -431,6 +505,7 @@ const vscode = {
     reset() {
       state.commands.clear();
       state.providers.clear();
+      state.fileProviders.clear();
       state.documents.clear();
       state.editors.length = 0;
       state.activeEditor = undefined;
@@ -444,6 +519,7 @@ const vscode = {
       state.inputAnswers.length = 0;
       state.informationAnswer = undefined;
       state.closeHandlers.length = 0;
+      state.changeHandlers.length = 0;
       state.activeEditorHandlers.length = 0;
       state.workspaceFolder = undefined;
       state.configuration = {};
@@ -502,6 +578,8 @@ const vscode = {
     },
     /** Simulate the user closing a document. @param {object} document */
     async closeDocument(document) {
+      document.isClosed = true;
+      state.editors = state.editors.filter((editor) => editor.document !== document);
       for (const handler of state.closeHandlers) await handler(document);
     },
   },

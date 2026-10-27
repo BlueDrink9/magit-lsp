@@ -319,27 +319,138 @@ async function run() {
       assert(binding, `generated binding for ${command}`);
       await commands.get(binding.command)(binding.args);
     };
-    git(repo, ['add', 'tracked.txt']);
-    await commands.get('magit.invoke')({ command: 'commit.create' });
-    await waitFor(() => vscode.__test.activeEditor?.document.uri.scheme === 'file'
-      && vscode.__test.activeEditor.document.languageId === 'git-commit', 'bridge edit document');
-    const editDocument = vscode.__test.activeEditor.document;
-    const commitMessage = `integration bridge ${Date.now()}`;
-    fs.writeFileSync(editDocument.uri.fsPath, `${commitMessage}\n`);
-    await invokeGenerated('common.confirm');
-    await waitFor(() => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
-      .toString().trim() === commitMessage, 'confirmed bridge commit');
+    const { store: draftStore } = require('../lib/store');
+    const progress = new Map();
+    client.onNotification('$/progress', ({ token, value }) => progress.set(token, value.kind));
+    const head = () => execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString();
+    const subject = () => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%s']).toString().trim();
+    const idle = () => waitFor(() => [...progress.values()].every((kind) => kind === 'end'), 'commit progress end');
+    let probe = 0;
+    const startDraft = async () => {
+      await idle();
+      await vscode.window.showTextDocument(statusEditor.document);
+      fs.writeFileSync(path.join(repo, 'tracked.txt'), `managed probe ${++probe}\n`);
+      git(repo, ['add', 'tracked.txt']);
+      const before = new Set(draftStore.drafts.keys());
+      await commands.get('magit.invoke')({ command: 'commit.create' });
+      await waitFor(() => [...draftStore.drafts.values()].some((draft) =>
+        !before.has(draft.runId) && draft.attached), 'attached managed draft');
+      const draft = [...draftStore.drafts.values()].find((record) => !before.has(record.runId));
+      assert.equal(draft.document.uri.scheme, 'magit-commit');
+      assert.equal(draft.document.languageId, 'git-commit');
+      const opens = client.notes.filter((note) => note.method === 'textDocument/didOpen'
+        && note.params.textDocument.uri === draft.effect.uri);
+      assert.equal(opens.length, 1);
+      assert.deepEqual(opens[0].params.textDocument, { uri: draft.effect.uri,
+        languageId: 'gitcommit', version: 1, text: draft.effect.text });
+      assert.equal(draft.document.getText(), draft.effect.text);
+      assert.equal(vscode.__test.contextValues.get('magit.active'), false, 'native typing is not captured');
+      return draft;
+    };
+    const unchangedIndex = () => execFileSync('git', ['-C', repo, 'show', ':tracked.txt']);
+    let draft = await startDraft();
+    const commitMessage = `integration managed ${Date.now()}`;
+    const beforeSave = head();
+    draft.document.replaceText(`${commitMessage}\n`);
+    assert(await draft.document.save());
+    assert.equal(head(), beforeSave, 'save only checkpoints');
+    assert(draftStore.drafts.has(draft.runId), 'save stays editing');
+    const savedVersion = draft.savedVersion;
+    await commands.get('magit.closeEdit')();
+    await idle();
+    assert.equal(subject(), commitMessage, 'normal close commits saved checkpoint');
+    assert(client.requests.some((request) => request.method === 'draft/finish'
+      && request.params.version === savedVersion && request.params.reason === 'normal-close'));
 
-    fs.writeFileSync(path.join(repo, 'tracked.txt'), `cancel probe ${Date.now()}\n`);
-    git(repo, ['add', 'tracked.txt']);
-    await commands.get('magit.invoke')({ command: 'commit.create' });
-    await waitFor(() => vscode.__test.activeEditor?.document.uri.scheme === 'file'
-      && vscode.__test.activeEditor.document.languageId === 'git-commit', 'second bridge edit');
-    await invokeGenerated('common.cancel');
-    await waitFor(() => require('../lib/store').store.edits.size === 0,
-      'cancelled bridge edit is removed');
-    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
-      .toString().trim(), commitMessage, 'cancelled bridge edit did not commit');
+    draft = await startDraft();
+    const unsent = 'exact unsent message\n\nbody ü\n';
+    draft.document.replaceText(unsent);
+    await invokeGenerated('commit-message.history-prev');
+    assert.equal(draft.document.getText(), `${commitMessage}\n`);
+    const afterRecall = draft.version;
+    const changesAfterRecall = client.notes.filter((note) => note.method === 'textDocument/didChange').length;
+    await draft.queue;
+    assert.equal(client.notes.filter((note) => note.method === 'textDocument/didChange').length,
+      changesAfterRecall, 'history replacement does not echo');
+    await invokeGenerated('commit-message.history-next');
+    assert.equal(draft.document.getText(), unsent, 'next restores exact current unsent draft');
+    assert.equal(draft.version, afterRecall + 1);
+    await invokeGenerated('commit-message.history-next');
+    assert.equal(draft.document.getText(), unsent, 'next at newest is a no-op replacement');
+
+    // A raced API edit must win over the recalled replacement, including an
+    // edit-and-undo back to identical text with a newer native version.
+    const sendRequest = client.sendRequest.bind(client);
+    client.sendRequest = async (method, params) => {
+      const result = await sendRequest(method, params);
+      if (method === 'draft/history') draft.document.replaceText('raced local text\n');
+      return result;
+    };
+    await invokeGenerated('commit-message.history-prev');
+    client.sendRequest = sendRequest;
+    assert.equal(draft.document.getText(), 'raced local text\n');
+    assert.equal(client.notes.at(-1).params.textDocument.version, draft.version);
+    assert.equal(client.notes.at(-1).params.contentChanges[0].text, 'raced local text\n');
+
+    const finishCount = client.requests.filter((request) => request.method === 'draft/finish').length;
+    client.sendNotification('textDocument/didChange', { textDocument: { uri: draft.effect.uri,
+      version: draft.version }, contentChanges: [{ text: 'stale text must not replace native text' }] });
+    await waitFor(() => draft.syncError, 'readable version error');
+    assert.equal(draft.document.getText(), 'raced local text\n', 'sync errors retain native text');
+    assert.equal(client.requests.filter((request) => request.method === 'draft/finish').length, finishCount);
+    await assert.rejects(sendRequest('draft/save', { runId: draft.runId, uri: draft.effect.uri,
+      version: draft.version, text: 'not a second text channel' }));
+    await draft.document.save();
+    assert.equal(draft.syncError, undefined, 'retry resynchronizes above the rejected version');
+    draft.document.replaceText('explicit confirmed text\n');
+    await invokeGenerated('common.confirm');
+    await idle();
+    assert.equal(subject(), 'explicit confirmed text');
+
+    // Dirty close Cancel retains the run; Discard selects the old checkpoint.
+    draft = await startDraft();
+    draft.document.replaceText('saved discard checkpoint\n');
+    await draft.document.save();
+    draft.document.replaceText('hidden unsaved changes\n');
+    const oldHead = head();
+    const oldIndex = unchangedIndex();
+    const oldWork = fs.readFileSync(path.join(repo, 'tracked.txt'));
+    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'cancel'));
+    await commands.get('magit.closeEdit')();
+    assert(draftStore.drafts.has(draft.runId));
+    assert.equal(head(), oldHead);
+    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'discard'));
+    await commands.get('magit.closeEdit')();
+    await idle();
+    assert.equal(subject(), 'saved discard checkpoint');
+    assert.deepEqual(unchangedIndex(), oldIndex);
+    assert.deepEqual(fs.readFileSync(path.join(repo, 'tracked.txt')), oldWork);
+
+    draft = await startDraft();
+    draft.document.replaceText('dirty save close\n');
+    vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'save'));
+    await commands.get('magit.closeEdit')();
+    await idle();
+    assert.equal(subject(), 'dirty save close');
+
+    for (const action of ['abort', 'ambiguous-close', 'progress-cancel']) {
+      draft = await startDraft();
+      const priorHead = head();
+      const priorIndex = unchangedIndex();
+      if (action === 'abort') await invokeGenerated('common.cancel');
+      if (action === 'ambiguous-close') await vscode.__test.closeDocument(draft.document);
+      if (action === 'progress-cancel') {
+        const token = [...progress].find(([, kind]) => kind === 'begin')[0];
+        client.sendNotification('window/workDoneProgress/cancel', { token });
+      }
+      await idle();
+      assert.equal(head(), priorHead, action);
+      assert.deepEqual(unchangedIndex(), priorIndex, action);
+      if (draftStore.drafts.has(draft.runId)) await commands.get('magit.cancelEdit')();
+    }
+    const synced = client.notes.filter((note) => note.method === 'textDocument/didChange');
+    assert(synced.every((note) => note.params.contentChanges.length === 1
+      && Object.keys(note.params.contentChanges[0]).join() === 'text'));
 
     // The displayed text is always the server's last render; never recomposed.
     assert.match(statusEditor.document.getText(), /Unstaged changes/);
@@ -364,6 +475,21 @@ async function run() {
     await waitFor(() => store.views.size === 1, 'reopened repository view');
     fs.rmSync(secondRepo, { recursive: true, force: true });
     await require('./selection-integration').checkGitSelections({ vscode, commands, client });
+    // A disconnected owner cannot finish or restart against a new connection;
+    // server shutdown aborts the pending helper, while native text is retained.
+    vscode.__test.setWorkspaceFolder(repo);
+    await commands.get('magit.open')();
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'disconnect draft probe\n');
+    git(repo, ['add', 'tracked.txt']);
+    await commands.get('magit.invoke')({ command: 'commit.create' });
+    await waitFor(() => [...draftStore.drafts.values()].some((record) => record.attached), 'disconnect draft');
+    const disconnected = [...draftStore.drafts.values()].find((record) => record.attached);
+    disconnected.document.replaceText('retain disconnected text\n');
+    const disconnectHead = head();
+    await extension.deactivate();
+    assert.equal(head(), disconnectHead, 'disconnect cancels the pending commit');
+    assert.equal(disconnected.document.getText(), 'retain disconnected text\n');
+    assert(disconnected.disconnected);
   } finally {
     await extension.deactivate();
   }

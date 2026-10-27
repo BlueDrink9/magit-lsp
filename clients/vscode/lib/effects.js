@@ -2,7 +2,7 @@
 
 const vscode = require('vscode');
 
-const edits = require('./edits');
+const drafts = require('./drafts');
 const views = require('./views');
 const { store } = require('./store');
 
@@ -109,7 +109,7 @@ async function applyEffects(effectList, originViewId) {
         break;
       }
       case 'editDocument':
-        await edits.openEdit(effect);
+        await drafts.open(effect, rootId || originViewId);
         break;
       default:
         store.output.appendLine(`unknown effect: ${effect.type}`);

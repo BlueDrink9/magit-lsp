@@ -119,6 +119,33 @@
     ],
     "commands": [
       {
+        "command": "magit.confirmEdit",
+        "title": "Magit: Confirm Commit Draft",
+        "enablement": "resourceScheme == magit-commit",
+        "icon": "$(check)"
+      },
+      {
+        "command": "magit.cancelEdit",
+        "title": "Magit: Abort Commit Draft",
+        "enablement": "resourceScheme == magit-commit"
+      },
+      {
+        "command": "magit.closeEdit",
+        "title": "Magit: Close Commit Draft (Saved Checkpoint)",
+        "enablement": "resourceScheme == magit-commit",
+        "icon": "$(close)"
+      },
+      {
+        "command": "magit.historyPrev",
+        "title": "Magit: Previous Commit Message",
+        "enablement": "resourceScheme == magit-commit"
+      },
+      {
+        "command": "magit.historyNext",
+        "title": "Magit: Next Commit Message",
+        "enablement": "resourceScheme == magit-commit"
+      },
+      {
         "command": "magit.open",
         "title": "Open Status",
         "category": "Magit"
@@ -141,6 +168,32 @@
         "category": "Magit"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "magit.confirmEdit",
+          "when": "resourceScheme == magit-commit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "magit.closeEdit",
+          "when": "resourceScheme == magit-commit",
+          "group": "navigation@2"
+        },
+        {
+          "command": "magit.cancelEdit",
+          "when": "resourceScheme == magit-commit"
+        },
+        {
+          "command": "magit.historyPrev",
+          "when": "resourceScheme == magit-commit"
+        },
+        {
+          "command": "magit.historyNext",
+          "when": "resourceScheme == magit-commit"
+        }
+      ]
+    },
     "keybindings": [
       {
         "key": "f5",

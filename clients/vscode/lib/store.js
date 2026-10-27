@@ -35,7 +35,7 @@ const store = {
   quickPickViewId: undefined,
 
   /** @type {string|undefined} */
-  activeEditId: undefined,
+  activeDraftId: undefined,
 
   /** All views the server opened in this window, keyed by view id. */
   views: new Map(),
@@ -49,11 +49,14 @@ const store = {
   /** Repository path -> in-flight status open, including its first render. */
   statusOpens: new Map(),
 
-  /** Git-owned edit documents, keyed by edit id. */
-  edits: new Map(),
+  /** Managed draft documents, keyed by the opaque server run id. */
+  drafts: new Map(),
 
-  /** URI string -> edit id, so a closed document can cancel its edit. */
-  editUris: new Map(),
+  /** Managed URI -> run id; document teardown is detach, never confirmation. */
+  draftUris: new Map(),
+
+  /** Shutdown blocks draft barriers before native editor teardown begins. */
+  disposing: false,
 };
 
 module.exports = { SCHEME, store };
