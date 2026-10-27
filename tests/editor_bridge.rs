@@ -165,6 +165,99 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
         .build()
 }
 
+#[cfg(unix)]
+#[test]
+fn bridge_directory_is_private_with_permissive_umask() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().expect("private temp root");
+    let root = tmp.path().to_string_lossy().into_owned();
+    let mut server = TestServer::spawn_with_umask(&[("TMPDIR", &root)], "000");
+    server.recv_timeout = Duration::from_secs(20);
+    let initialized = server.initialize(json!({}));
+    assert!(initialized["result"]["capabilities"].is_object());
+    let socket = server.socket_path();
+    let dir = PathBuf::from(&root).join(format!("magit-lsp-{}", server.pid()));
+    assert_eq!(socket, dir.join("editor.sock"));
+    assert_eq!(
+        std::fs::metadata(&dir)
+            .expect("bridge dir")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    let output = answer_askpass(&mut server, &socket, ASKPASS_QUESTION, ASKPASS_ANSWER);
+    assert_helper_kept_the_answer(&output, ASKPASS_ANSWER);
+    server.shutdown_and_exit();
+    let (exit, log) = server.finish_with_stderr(Duration::from_secs(20));
+    assert!(exit.success());
+    assert_log_kept_the_answer("stderr", &log, ASKPASS_ANSWER);
+}
+
+#[cfg(unix)]
+#[test]
+fn bridge_refuses_preexisting_directory_and_symlink() {
+    use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt};
+    use std::os::unix::net::UnixListener;
+
+    for attack in ["directory", "socket", "symlink"] {
+        let tmp = TempDir::new().expect("private temp root");
+        let root = tmp.path().to_string_lossy().into_owned();
+        // The shell blocks before exec. Prepare a real foreign socket in Rust,
+        // then release the same PID into the normal server startup path.
+        let mut server = TestServer::spawn_prepared(&[("TMPDIR", &root)], "read -r ready");
+        let path = tmp.path().join(format!("magit-lsp-{}", server.pid()));
+        let target = if attack == "symlink" {
+            tmp.path().join("foreign")
+        } else {
+            path.clone()
+        };
+        std::fs::create_dir(&target).expect("foreign directory");
+        std::fs::write(target.join("keep"), b"sentinel").expect("foreign sentinel");
+        let foreign_socket = if attack != "directory" {
+            Some(UnixListener::bind(target.join("editor.sock")).expect("foreign socket"))
+        } else {
+            None
+        };
+        if attack == "symlink" {
+            symlink(&target, &path).expect("foreign symlink");
+        }
+        let original_dir = std::fs::symlink_metadata(&path).expect("original directory entry");
+        let original_socket = foreign_socket
+            .as_ref()
+            .map(|_| std::fs::metadata(target.join("editor.sock")).expect("original socket"));
+
+        server.send_raw(b"ready\n");
+        let initialized = server.initialize(json!({}));
+        assert!(initialized["result"]["capabilities"].is_object());
+        server.shutdown_and_exit();
+        let (exit, log) = server.finish_with_stderr(Duration::from_secs(20));
+        // Bridge refusal is nonfatal: the LSP server remains usable.
+        assert!(exit.success());
+        assert!(log.contains("editor bridge unavailable"), "{attack}: {log}");
+        assert!(log.contains("cannot exclusively create the editor bridge directory"));
+        assert!(!log.contains("editor bridge listening"));
+        let preserved_dir = std::fs::symlink_metadata(&path).expect("foreign entry remains");
+        assert_eq!(preserved_dir.ino(), original_dir.ino());
+        assert_eq!(preserved_dir.file_type(), original_dir.file_type());
+        if attack == "symlink" {
+            assert_eq!(std::fs::read_link(&path).expect("symlink remains"), target);
+        }
+        assert_eq!(
+            std::fs::read(target.join("keep")).expect("sentinel remains"),
+            b"sentinel"
+        );
+        if let Some(original_socket) = original_socket {
+            let preserved = std::fs::metadata(target.join("editor.sock")).expect("socket remains");
+            assert!(preserved.file_type().is_socket());
+            assert_eq!(preserved.ino(), original_socket.ino());
+        } else {
+            assert!(!target.join("editor.sock").exists());
+        }
+        drop(foreign_socket);
+    }
+}
+
 #[test]
 fn a_commit_is_created_from_the_typed_message() {
     let (tmp, _repo) = staged_repo();
@@ -414,9 +507,9 @@ fn wait_for_edit_processes(edit_id: &str, socket: &Path) -> OwnedEdit {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let processes = edit_processes(edit_id, socket).expect("/proc inspection");
-        let has_git = processes
-            .iter()
-            .any(|process| process.command.contains(" commit ") || process.command.ends_with(" commit"));
+        let has_git = processes.iter().any(|process| {
+            process.command.contains(" commit ") || process.command.ends_with(" commit")
+        });
         let has_helper = processes
             .iter()
             .any(|process| process.command.contains("--editor-helper"));
@@ -534,12 +627,7 @@ fn socket_path_in_log(path: &Path) -> PathBuf {
 }
 
 /// Ask Git's question through the bridge and return the helper's output.
-fn answer_askpass(
-    server: &mut TestServer,
-    socket: &Path,
-    question: &str,
-    answer: &str,
-) -> Output {
+fn answer_askpass(server: &mut TestServer, socket: &Path, question: &str, answer: &str) -> Output {
     let helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
         .arg("--askpass")
         .arg(question)

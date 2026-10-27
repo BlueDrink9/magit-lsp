@@ -207,6 +207,14 @@ pub enum ViewInvokeRequest {}
 pub struct ViewInvokeParams {
     pub view_id: String,
     pub command: String,
+    /// Displayed render version; required for commands consuming cursor/selection.
+    /// Only the current or last acknowledged tree is retained. Other versions
+    /// (including an omitted version) produce a readable stale-view refusal.
+    /// Commit selection (`common.confirm` in a selection view and
+    /// `select.toggle-mark`) requires the exact acknowledged version.
+    /// Non-positional commands ignore this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,7 +238,8 @@ pub enum ViewKeyRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct ViewKeyParams {
     pub view_id: String,
-    /// The version the client's cursor and selection were taken from.
+    /// Displayed render version for positional commands, with the same retained
+    /// tree policy as `view/invoke`. Non-positional/menu keys ignore it.
     pub version: u64,
     /// One canonical key step, e.g. `s`, `g`, `ctrl+c` (§3.8).
     pub key: String,

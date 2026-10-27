@@ -63,6 +63,7 @@ async function invoke(viewId, command, args, info) {
   const params = {
     viewId,
     command,
+    version: state.version,
     cursor: info.cursor,
   };
   if (info.selection) {

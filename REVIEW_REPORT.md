@@ -168,7 +168,7 @@ Git dispatch), contrary to older roadmap assumptions; A31's test-parameterizatio
 work may still remain. The defensive-boundary principle is already stated in
 AGENTS.md, but that does not settle each concrete boundary finding.
 
-**Still open pending full acceptance evidence:** A01–A12, A18, A19, A29, A33
+**Still open pending full acceptance evidence:** A02–A12, A18, A19, A29, A33
 and A34 remain prioritized and unchecked. In particular, partial consumers,
 shared key fixtures, or an implementation commit do not satisfy their gates.
 Other tasks remain unchecked until their source preconditions are revalidated.
@@ -181,11 +181,13 @@ exclusions above, and preserve existing ownership.
 successful command is evidence only for the exact code and cases it ran; UI,
 client, and real-Git acceptance gates still require their stated verification.
 
-- [ ] **[P0] A01 — Establish a private editor-bridge socket directory** (`src/editor.rs:359–375`)
+- [x] **[P0] A01 — Establish a private editor-bridge socket directory** (`src/editor.rs:359–375`)
   - **Problem:** Predictable `/tmp/magit-lsp-<pid>` is adopted with `create_dir_all`, without establishing ownership/privacy; an existing socket is removed. Under permissive umask another local user can reach askpass.
   - **Why it matters:** Security; askpass answers are returned to the connecting peer.
   - **Change:** Exclusively create a mode-0700 directory; reject pre-existing/symlinked directories. Bind inside it and clean up only owned resources.
   - **Done when:** Permissive-umask and pre-created-directory/symlink tests protect the actual bridge boundary.
+  - **Acceptance evidence (2026-10-27):** `cargo test --test editor_bridge && make test && git diff --check` exited 0 on the single verification attempt: all 9 bridge tests passed; full gate reported `ok: build`, `rust`, `lua`, `vscode`, and `keybindings`. A child-only umask of 000 still produces a 0700 directory containing the logged, live socket; an askpass round trip succeeds without logging its answer. A child-shell stdin barrier before exec lets tests install a foreign directory, actual Unix socket, or directory symlink before normal startup. Initialize and shutdown succeed while the bridge logs exclusive-create refusal and never logs a listening socket. Directory-entry type/inode, symlink target, socket type/inode, and sentinel contents survive shutdown. Ordinary commit, cancel, askpass, credential-log, and client-disconnect tests remain green. All launch variants share one pipe/log transport constructor; no production test hooks.
+  - **Cleanup review:** Failure before exclusive directory creation touches no foreign resources. Bind failure removes only the newly owned empty directory; thread-spawn failure removes its owned socket and directory. Listener-thread return also removes owned resources, but the process-lifetime accept loop does not normally return at shutdown, so this is not a claim of normal-exit filesystem cleanup. The new tests reclaim their isolated temporary roots after bounded server exit and closing the foreign listener. Post-gate process inspection found no remaining `magit-lsp` server/helper processes; the disconnect test also verifies its owned Git/editor children exit naturally.
   - **Constraints:** No credentials in logs; no network service.
   - **Category:** simplify
   - **Net LOC:** +30
@@ -194,11 +196,12 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A02 — Enforce the positional request version** (`src/session.rs:545–601`; `src/protocol.rs:224–233`)
+- [x] **[P1] A02 — Enforce the positional request version** (`src/session.rs:545–601`; `src/protocol.rs:224–233`)
   - **Problem:** `ViewKeyParams.version` has no production reader; existing stale-key tests do not cover an old request arriving after a newer acknowledgement.
   - **Why it matters:** An old cursor row can target a different change.
   - **Change:** Resolve against the request-version tree, or refuse with a readable stale-view message. Apply a consistent positional-invoke policy rather than substituting the newest ack.
   - **Done when:** A v1 action submitted after v2 acknowledgement cannot stage the new occupant of its old row.
+  - **Evidence:** Positional key/invoke dispatch binds the exact current/acked tree or warns; commit confirmation/marking requires the exact ack. `acked_tree()` remains the actual snapshot. Both clients transmit displayed invoke versions. Regressions prove replacement-row index safety, current/unacked versus acked identity, missing/future/discarded versions, acknowledged-only selection, and ungated menu/non-positional actions. `cargo test --test views --test keys_protocol --test navigation --test log_selection && make test && git diff --check` passed (40 targeted tests; Rust, Neovim, VSCode, keybindings). Real UI: `visit-file.scn` and `commit-menu-shows-actions.scn` both passed; inspected `build/ui/visit-file/visit-file.screen` and `build/ui/commit-menu-shows-actions/commit-menu.screen`.
   - **Constraints:** Stable node identities; no unbounded tree history.
   - **Category:** simplify
   - **Net LOC:** +25

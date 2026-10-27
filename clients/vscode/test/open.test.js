@@ -199,6 +199,7 @@ module.exports = async function testStatusOpenLifecycle() {
   assert.deepEqual(requests.at(-1), {
     method: 'view/invoke', params: {
       viewId: 'status-1', command: 'arbitrary.command', args: { value: 42 },
+      version: refreshedVersion,
       cursor: { line: 0, column: 0 },
     },
   });
@@ -208,7 +209,7 @@ module.exports = async function testStatusOpenLifecycle() {
     await commands.get('magit.invoke')({ command });
     assert.deepEqual(requests.at(-1), {
       method: 'view/invoke', params: {
-        viewId: 'status-1', command, cursor: { line: 0, column: 0 },
+        viewId: 'status-1', command, version: refreshedVersion, cursor: { line: 0, column: 0 },
       },
     });
   }

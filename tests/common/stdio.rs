@@ -32,7 +32,10 @@ impl TestServer {
     }
     /// Spawn the real binary with logging on stderr and optional extra env vars.
     pub fn spawn(extra_env: &[(&str, &str)]) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_magit-lsp"));
+        Self::from_command(Command::new(env!("CARGO_BIN_EXE_magit-lsp")), extra_env)
+    }
+
+    fn from_command(mut command: Command, extra_env: &[(&str, &str)]) -> Self {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -63,6 +66,29 @@ impl TestServer {
             stderr: log,
             stderr_reader: Some(stderr_reader),
         }
+    }
+
+    /// Spawn the real server with a child-only umask before exec.
+    pub fn spawn_with_umask(extra_env: &[(&str, &str)], umask: &str) -> Self {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("umask \"$1\"; shift; exec \"$@\"")
+            .arg("magit-lsp-test")
+            .arg(umask)
+            .arg(env!("CARGO_BIN_EXE_magit-lsp"));
+        Self::from_command(command, extra_env)
+    }
+
+    /// Spawn the server after child-only shell setup, retaining the shell's PID.
+    pub fn spawn_prepared(extra_env: &[(&str, &str)], setup: &str) -> Self {
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!("set -e; {setup}; exec \"$1\""))
+            .arg("magit-lsp-test")
+            .arg(env!("CARGO_BIN_EXE_magit-lsp"));
+        Self::from_command(command, extra_env)
     }
 
     /// Return the server process ID.

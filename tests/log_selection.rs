@@ -131,10 +131,13 @@ fn multi_selection_copies_marked_full_oids_in_log_order_and_restores_caller() {
         .filter(|node| node.commit.as_deref().is_some_and(|oid| expected.contains(&oid.to_string())))
         .map(|node| (node.start_line, node.commit.clone().unwrap()))
         .collect();
+    let version = test.acked_version().expect("acknowledged coordinates");
     for (line, _) in &lines {
-        test.invoke_at("select.toggle-mark", magit_lsp::protocol::Cursor { line: *line, column: 0 });
+        test.invoke_at_version("select.toggle-mark", version,
+            Some(magit_lsp::protocol::Cursor { line: *line, column: 0 }), None, None);
     }
-    let result = test.invoke_at("common.confirm", magit_lsp::protocol::Cursor { line: lines[0].0, column: 0 });
+    let result = test.invoke_at_version("common.confirm", version,
+        Some(magit_lsp::protocol::Cursor { line: lines[0].0, column: 0 }), None, None);
     let ordered: Vec<_> = lines.iter().map(|(_, oid)| oid.clone()).collect();
     assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Clipboard { text } if text == &ordered.join("\n"))));
     assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker_id)));
@@ -202,15 +205,80 @@ fn acknowledged_selection_identity_survives_reordered_unacked_refresh() {
         test.invoke("log.select-and-copy");
         test.ack();
         let line = test.acked_tree().nodes.iter().find(|n| n.commit.as_deref() == Some(&expected)).unwrap().start_line;
+        let version = test.acked_version().expect("acknowledged coordinates");
         test.goto(line);
         add_new_head(&tmp);
         test.refresh();
         let result = if via_key {
-            test.press_at_version("Enter", test.version())
+            test.press_at_version("Enter", version)
         } else {
-            test.invoke_at("common.confirm", magit_lsp::protocol::Cursor { line, column: 0 })
+            test.invoke_at_version("common.confirm", version,
+                Some(magit_lsp::protocol::Cursor { line, column: 0 }), None, None)
         };
         assert!(result.effects.iter().any(|e| matches!(e, Effect::Clipboard { text } if text == &expected)), "via_key={via_key}, effects={:?}", result.effects);
+    }
+}
+
+#[test]
+fn selection_rejects_current_unacked_and_discarded_ack_versions() {
+    use magit_lsp::errors;
+    use magit_lsp::protocol::Cursor;
+
+    for via_key in [false, true] {
+        for acknowledge_new in [false, true] {
+            let (tmp, _repo) = RepoFixture::new()
+                .commit("old", [("f.txt", "old\n")])
+                .commit("new", [("f.txt", "new\n")])
+                .build();
+            let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+            test.ack();
+            test.invoke_args("log.select-and-copy", json!({"multi": true}));
+            test.ack();
+            let picker = test.view_id().to_string();
+            let version = test.acked_version().expect("acknowledged coordinates");
+            let snapshot = test.acked_tree().clone();
+            let node = snapshot.nodes.iter().find(|node| node.commit.is_some()).unwrap();
+            let line = node.start_line;
+            let old_oid = node.commit.clone();
+            test.goto(line);
+            add_new_head(&tmp);
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let index = tmp.git(&["ls-files", "--stage"]);
+            test.refresh().expect("reordered render");
+            let replacement = test.tree().line_nodes[line].node.clone();
+            assert_ne!(test.tree().node(&replacement).unwrap().commit, old_oid);
+            assert_eq!(test.session().views().get(&picker).unwrap().acked_tree(), Some(&snapshot));
+            let request_version = if acknowledge_new {
+                test.ack();
+                version // Old coordinates cannot bind to a newer ack.
+            } else {
+                test.version() // Even exact current coordinates need an ack here.
+            };
+            let ack_snapshot = test.acked_tree().clone();
+            for (command, key) in [("select.toggle-mark", "Space"), ("common.confirm", "Enter")] {
+                let result = if via_key {
+                    test.press_at_version(key, request_version)
+                } else {
+                    test.invoke_at_version(command, request_version,
+                        Some(Cursor { line, column: 0 }), None, None)
+                };
+                assert_eq!(message_texts(&result.effects), vec![errors::STALE_VIEW]);
+                assert!(result.render.is_none());
+                let view = test.session().views().get(&picker).expect("picker remains open");
+                assert!(view.selected_commits(None).is_empty(), "refused mark must not mutate selection");
+                assert_eq!(view.acked_tree(), Some(&ack_snapshot));
+                assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+                assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
+                assert_eq!(tmp.git(&["status", "--short"]), "");
+            }
+            // Selection scope alone must not gate non-positional actions.
+            let refreshed = test.invoke_at_version("common.refresh", 0,
+                Some(Cursor { line, column: 0 }), None, None);
+            assert!(refreshed.effects.is_empty());
+            assert!(refreshed.render.is_some());
+            let cancelled = test.press_at_version("Escape", 0);
+            assert!(cancelled.effects.iter().any(|effect| matches!(effect, Effect::PopView { .. })));
+        }
     }
 }
 

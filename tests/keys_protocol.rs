@@ -261,6 +261,39 @@ fn a_stale_version_resolves_by_identity_not_by_line_index() {
 }
 
 #[test]
+fn non_positional_keys_and_menu_options_ignore_obsolete_render_versions() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    test.refresh().expect("advance render");
+    test.ack();
+    let prefix = test.press_at_version("g", initial.version);
+    assert!(prefix.effects.is_empty());
+    let refresh = test.press_at_version("r", initial.version);
+    assert!(refresh.effects.is_empty(), "{:?}", refresh.effects);
+    assert!(refresh.render.is_some());
+    let menu = test.press_at_version("c", 0);
+    assert!(menu.effects.iter().any(|effect| matches!(effect, Effect::PushView { .. })));
+    test.ack();
+    let pending = test.press_at_version("-", u64::MAX);
+    assert!(pending.effects.is_empty(), "{:?}", pending.effects);
+    assert!(pending.render.is_some());
+    test.ack();
+    let switched = test.press_at_version("a", 0);
+    assert!(switched.effects.is_empty(), "{:?}", switched.effects);
+    assert!(switched.render.is_some());
+    let cancelled = test.press_at_version("Escape", 0);
+    assert!(cancelled.effects.iter().any(|effect| matches!(effect, Effect::PopView { .. })));
+    let refreshed = test.invoke_at_version("common.refresh", u64::MAX,
+        Some(Cursor { line: 0, column: 0 }), None, None);
+    assert!(refreshed.effects.is_empty());
+    assert!(refreshed.render.is_some());
+    assert_eq!(tmp.git(&["status", "--short"]), "");
+}
+
+#[test]
 fn view_keymap_notices_follow_the_profile_and_config_reloads() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

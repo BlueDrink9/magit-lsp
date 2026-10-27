@@ -822,7 +822,7 @@ fn select_and_copy(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Toggle a commit mark using its full identity in the acknowledged tree.
 fn toggle_commit_mark(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let Some(tree) = ctx.view.acked_tree() else {
+    let Some(tree) = ctx.view.command_source_tree() else {
         ctx.info("Wait for the log view to render before selecting a commit");
         return Ok(CommandOutcome::default());
     };
@@ -953,11 +953,11 @@ fn toggle_text_mode(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     })
 }
 
-/// Copy the value at point as a clipboard effect, from the acked tree.
+/// Copy the value at point as a clipboard effect, from the request-bound tree.
 fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     let source = ctx
         .view
-        .acked_tree()
+        .command_source_tree()
         .cloned()
         .unwrap_or_else(|| ctx.view.tree().clone());
     let selection = ctx
@@ -972,7 +972,7 @@ fn copy_value(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Visit the worktree file at point.
 ///
-/// Resolution is server-owned: the acked tree maps the cursor's line to a file
+/// Resolution is server-owned: the request tree maps the cursor's line to a file
 /// and new-side line, and the client only opens the resulting location.
 fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     let Some(cursor) = ctx.cursor else {
@@ -981,7 +981,7 @@ fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     };
     let source = ctx
         .view
-        .acked_tree()
+        .command_source_tree()
         .cloned()
         .unwrap_or_else(|| ctx.view.tree().clone());
     let Some(location) = source.definition(
@@ -1002,7 +1002,7 @@ fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 /// Confirm answers the pending editor bridge edit, if the invocation names one.
 fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     if ctx.view.commit_selection().is_some() {
-        let Some(tree) = ctx.view.acked_tree() else {
+        let Some(tree) = ctx.view.command_source_tree() else {
             ctx.info("Wait for the log view to render before selecting a commit");
             return Ok(CommandOutcome::default());
         };
@@ -1061,10 +1061,10 @@ fn apply_visibility(
     ctx: &mut CommandCtx<'_>,
     command: VisibilityCommand,
 ) -> Result<CommandOutcome> {
-    // Resolve against the acked tree, like every other action.
+    // Positional commands use their bound source; global visibility uses the ack.
     let source = ctx
         .view
-        .acked_tree()
+        .command_source_tree()
         .cloned()
         .unwrap_or_else(|| ctx.view.tree().clone());
     ctx.view
@@ -1189,7 +1189,7 @@ fn unstage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 /// The cursor line of the next or previous section header.
 fn section_cursor(view: &OpenView, cursor: Option<Cursor>, forward: bool) -> Option<Cursor> {
     let cursor = cursor?;
-    let source = view.acked_tree().unwrap_or_else(|| view.tree());
+    let source = view.command_source_tree().unwrap_or_else(|| view.tree());
     let sections: Vec<&Node> = source
         .nodes
         .iter()
@@ -1224,9 +1224,9 @@ fn stage_or_unstage_at(
     selection: Option<dispatch::LineRange>,
     ui: &dyn crate::ui::PromptUi,
 ) -> Result<Vec<Effect>> {
-    // Resolve against the last tree the client acknowledged; actions are
-    // addressed by the node there, never by index in whatever is current.
-    let source = view.acked_tree().unwrap_or_else(|| view.tree());
+    // Resolve against the exact request tree; actions are addressed by its
+    // node identities, never by index in a different retained render.
+    let source = view.command_source_tree().unwrap_or_else(|| view.tree());
 
     let resolution = if let Some(range) = selection {
         // A visual selection wins over the node under the cursor (IMM-2).

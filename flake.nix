@@ -1,5 +1,5 @@
 {
-  description = "magit-lsp development shell with Rust, Lua and Node LSP servers";
+  description = "magit-lsp development shell with Rust, Lua, Node and Python LSP servers";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   # inputs.jscpd.url = "github:kucherenko/jscpd";
@@ -35,6 +35,7 @@
               neovim
               nodejs
               python3
+              pyright
               rust-analyzer
               rustc
               rustfmt
@@ -49,6 +50,7 @@
               echo "  rust-analyzer:            $(command -v rust-analyzer)"
               echo "  lua-language-server:      $(command -v lua-language-server)"
               echo "  typescript-language-server: $(command -v typescript-language-server)"
+              echo "  pyright-langserver:       $(command -v pyright-langserver)"
             '';
           };
         });

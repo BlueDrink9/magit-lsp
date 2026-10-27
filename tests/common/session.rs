@@ -588,6 +588,7 @@ impl TestSession {
                 &ViewInvokeParams {
                     view_id: view,
                     command: command.to_string(),
+                    version: None,
                     args: None,
                     cursor: None,
                     selection: None,
@@ -605,6 +606,7 @@ impl TestSession {
         let result = self.session.invoke(&ViewInvokeParams {
             view_id: view,
             command: command.to_string(),
+            version: None,
             args: None,
             cursor: None,
             selection: None,
@@ -621,12 +623,26 @@ impl TestSession {
         selection: Option<Selection>,
         args: Option<Value>,
     ) -> InvokeResult {
+        let version = self.version();
+        self.invoke_at_version(command, version, cursor, selection, args)
+    }
+
+    /// Invoke using coordinates from an explicitly observed render version.
+    pub fn invoke_at_version(
+        &mut self,
+        command: &str,
+        version: u64,
+        cursor: Option<Cursor>,
+        selection: Option<Selection>,
+        args: Option<Value>,
+    ) -> InvokeResult {
         let view = self.view.clone();
         let result = self
             .session
             .invoke(&ViewInvokeParams {
                 view_id: view,
                 command: command.to_string(),
+                version: Some(version),
                 args,
                 cursor,
                 selection,

@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 pub const HUNK_CHANGED: &str =
     "That hunk changed since it was displayed. The view has been refreshed.";
 
+/// Shown when positional input refers to a render the server no longer retains.
+pub const STALE_VIEW: &str = "This view is stale; please retry on the current view.";
+
 /// A Git failure explained in terms a user can act on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

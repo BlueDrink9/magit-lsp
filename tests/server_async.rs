@@ -460,6 +460,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         "params": {
             "viewId": view_id,
             "command": "status.stage",
+            "version": 1,
             "cursor": {"line": line, "column": 0},
         },
     }));

@@ -37,6 +37,34 @@ fn file_uri(root: &str, path: &str) -> String {
 }
 
 #[test]
+fn visit_uses_the_requested_render_and_refuses_a_discarded_version() {
+    use magit_lsp::config::Profile;
+    use magit_lsp::protocol::{Cursor, Effect};
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    write(&tmp.path().join("b.txt"), "original\n");
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("untracked", "b.txt");
+    write(&tmp.path().join("a.txt"), "inserted\n");
+    test.refresh().expect("unacked render");
+    assert_eq!(test.tree().line_nodes[line].path.as_deref(), Some("a.txt"));
+    let cursor = Cursor { line, column: 0 };
+    let root = tmp.path().to_string_lossy();
+    for (version, path) in [(test.version(), "a.txt"), (initial.version, "b.txt")] {
+        let result = test.invoke_at_version("common.visit", version, Some(cursor), None, None);
+        assert_eq!(result.effects, vec![Effect::VisitFile {
+            uri: file_uri(&root, path), line: 0, column: 0,
+        }]);
+    }
+    test.ack();
+    let refused = test.invoke_at_version("common.visit", initial.version, Some(cursor), None, None);
+    assert_eq!(message_texts(&refused.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    assert_eq!(tmp.git(&["diff", "--cached"]), "");
+}
+
+#[test]
 fn definition_targets_the_new_side_of_the_worktree_file() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

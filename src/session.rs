@@ -54,6 +54,8 @@ pub struct OpenView {
     tree: Tree,
     version: u64,
     acked: Option<Tree>,
+    /// A bounded dispatch-only clone; never changes the acknowledgement snapshot.
+    request_tree: Option<Tree>,
     acked_version: Option<u64>,
     /// Chord steps collected for this view since the last complete match.
     pending: PendingChord,
@@ -156,6 +158,12 @@ impl OpenView {
     /// The tree of the last acknowledged version, if any.
     pub fn acked_tree(&self) -> Option<&Tree> {
         self.acked.as_ref()
+    }
+
+    /// The exact request tree while dispatching a positional command; otherwise
+    /// the acknowledged snapshot used by non-positional visibility commands.
+    pub(crate) fn command_source_tree(&self) -> Option<&Tree> {
+        self.request_tree.as_ref().or(self.acked.as_ref())
     }
 
     /// Apply a visibility command, resolving against the caller's tree.
@@ -480,6 +488,7 @@ impl Session {
             tree,
             version,
             acked: None,
+            request_tree: None,
             acked_version: None,
             pending: PendingChord::default(),
             menu_pending: Vec::new(),
@@ -561,9 +570,10 @@ impl Session {
         params: &ViewInvokeParams,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        self.run_command(
+        self.run_versioned_command(
             &params.view_id,
             &params.command,
+            params.version,
             params.cursor,
             params.selection,
             params.args.as_ref(),
@@ -577,7 +587,7 @@ impl Session {
     ///
     /// Cursor and selection come from the request, so the command path is
     /// identical to `view/invoke`; the node is resolved by identity against the
-    /// acked tree, never by a raw line index. Menus use their own two-step
+    /// exact request-version tree, never a newer ack. Menus use their own two-step
     /// matcher instead of the profile keymap.
     pub fn key(&mut self, params: &ViewKeyParams) -> Result<InvokeResult> {
         self.key_ui(params, &crate::ui::NullUi)
@@ -626,9 +636,10 @@ impl Session {
 
         match resolution {
             Resolution::Pending => Ok(InvokeResult::empty()),
-            Resolution::Run { command, chord } => self.run_command(
+            Resolution::Run { command, chord } => self.run_versioned_command(
                 &params.view_id,
                 &command,
+                Some(params.version),
                 Some(params.cursor),
                 params.selection,
                 None,
@@ -903,9 +914,10 @@ impl Session {
                 let menu_args = self.views.get(view_id).and_then(|view| view.menu()).map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().and_then(|args| serde_json::to_value(args).ok());
                 if registered.scope.matches(&scope) {
-                    return self.run_command(
+                    return self.run_versioned_command(
                         view_id,
                         registered.id,
+                        Some(params.version),
                         Some(params.cursor),
                         params.selection,
                         serialized_args.as_ref(),
@@ -1092,6 +1104,7 @@ impl Session {
             tree,
             version,
             acked: None,
+            request_tree: None,
             acked_version: None,
             pending: PendingChord::default(),
             menu_pending: Vec::new(),
@@ -1100,6 +1113,55 @@ impl Session {
             dirty: false,
         });
         Ok((descriptor, render))
+    }
+
+    /// Bind positional input to its exact retained tree, never a newer ack.
+    fn run_versioned_command(
+        &mut self,
+        view_id: &str,
+        command_id: &str,
+        version: Option<u64>,
+        cursor: Option<Cursor>,
+        selection: Option<Selection>,
+        args: Option<&Value>,
+        key: Option<String>,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
+        let view = self.views.get_mut(view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        // These handlers consume document coordinates. Menu keys, refresh,
+        // edit confirmation and other non-positional actions need no tree.
+        let requires_ack = command_id == "select.toggle-mark"
+            || (command_id == "common.confirm" && view.commit_selection().is_some());
+        let positional = requires_ack || matches!(command_id,
+            "status.stage" | "status.unstage" | "status.discard"
+            | "common.copy-value" | "common.visit"
+            | "common.toggle-section" | "common.show-section" | "common.hide-section"
+            | "common.next-section" | "common.prev-section");
+        // Commit selection intentionally waits for an acknowledgement. Other
+        // positional actions may address the exact current, initially unacked
+        // render, but neither policy substitutes a different retained version.
+        if positional && (requires_ack || cursor.is_some() || selection.is_some())
+            && view.mode() != ViewMode::Text
+        {
+            let source = match version {
+                Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
+                Some(version) if !requires_ack && version == view.version => Some(&view.tree),
+                _ => None,
+            };
+            let Some(source) = source else {
+                return Ok(InvokeResult {
+                    effects: vec![Effect::message(MessageLevel::Warn, crate::errors::STALE_VIEW)],
+                    ..InvokeResult::empty()
+                });
+            };
+            view.request_tree = Some(source.clone());
+        }
+        let result = self.run_command(view_id, command_id, cursor, selection, args, key, ui);
+        if let Some(view) = self.views.get_mut(view_id) {
+            view.request_tree = None;
+        }
+        result
     }
 
     /// The single execution path shared by `view/invoke` and `view/key`.

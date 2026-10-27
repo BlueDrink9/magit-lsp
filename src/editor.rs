@@ -358,20 +358,39 @@ fn absolute(file: &str) -> Result<PathBuf> {
 
 #[cfg(unix)]
 fn bind_listener(emitter: EffectEmitter, askpass: AskpassPrompt) -> Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::net::UnixListener;
 
     let dir = std::env::temp_dir().join(format!("magit-lsp-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|error| {
-        Error::new(format!("cannot create the editor bridge directory: {error}"))
+    let mut builder = std::fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder.create(&dir).map_err(|error| {
+        Error::new(format!(
+            "cannot exclusively create the editor bridge directory: {error}"
+        ))
     })?;
     let path = dir.join("editor.sock");
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)
-        .map_err(|error| Error::new(format!("cannot bind the editor bridge: {error}")))?;
+    let listener = match UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            let _ = std::fs::remove_dir(&dir);
+            return Err(Error::new(format!("cannot bind the editor bridge: {error}")));
+        }
+    };
+    let cleanup_path = path.clone();
+    let cleanup_dir = dir.clone();
     std::thread::Builder::new()
         .name("magit-lsp-editor".to_string())
-        .spawn(move || accept_loop(listener, emitter, askpass))
-        .map_err(|error| Error::new(format!("cannot start the editor bridge: {error}")))?;
+        .spawn(move || {
+            accept_loop(listener, emitter, askpass);
+            let _ = std::fs::remove_file(cleanup_path);
+            let _ = std::fs::remove_dir(cleanup_dir);
+        })
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_dir(&dir);
+            Error::new(format!("cannot start the editor bridge: {error}"))
+        })?;
     Ok(path)
 }
 

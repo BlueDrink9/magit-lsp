@@ -944,6 +944,7 @@ function M.invoke(command, opts, id)
     params = {
       viewId = view.id,
       command = command,
+      version = view.version or 0,
       cursor = cursor,
       selection = selection,
       args = opts.args,

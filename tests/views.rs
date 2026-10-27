@@ -214,6 +214,107 @@ fn a_stale_key_cannot_stage_the_new_node_at_the_old_row() {
 }
 
 #[test]
+fn positional_requests_after_a_newer_ack_never_stage_the_replacement_row() {
+    for invoke in [false, true] {
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("base.txt", "base\n")])
+            .build();
+        write(&tmp.path().join("a.txt"), "old target\n");
+        let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let row = test.goto_file("untracked", "a.txt");
+        std::fs::remove_file(tmp.path().join("a.txt")).expect("remove old target");
+        write(&tmp.path().join("b.txt"), "replacement\n");
+        test.refresh().expect("v2");
+        test.ack();
+        assert_eq!(test.tree().line_nodes[row].path.as_deref(), Some("b.txt"));
+        let cursor = Cursor { line: row, column: 0 };
+        test.set_cursor(cursor);
+        let outcome = if invoke {
+            test.invoke_at_version("status.stage", initial.version, Some(cursor), None, None)
+        } else {
+            test.press_at_version("s", initial.version)
+        };
+        assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
+        assert!(outcome.render.is_none());
+        assert_eq!(cached_diff(tmp.path()), "");
+        assert_eq!(tmp.git(&["ls-files", "--stage"]),
+            format!("100644 {} 0\tbase.txt\n", tmp.git(&["rev-parse", "HEAD:base.txt"]).trim()));
+        assert_eq!(tmp.git(&["status", "--short"]), "?? b.txt\n");
+        assert_eq!(std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(), "replacement\n");
+    }
+}
+
+#[test]
+fn newer_unacked_renders_use_the_requested_tree_not_the_newest_ack() {
+    for invoke in [false, true] {
+        for use_acked in [false, true] {
+            let (tmp, _repo) = RepoFixture::new()
+                .commit("init", [("base.txt", "base\n")])
+                .build();
+            write(&tmp.path().join("b.txt"), "original\n");
+            let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+            test.ack();
+            let row = test.goto_file("untracked", "b.txt");
+            write(&tmp.path().join("a.txt"), "inserted\n");
+            test.refresh().expect("new unacked render");
+            assert_eq!(test.tree().line_nodes[row].path.as_deref(), Some("a.txt"));
+            let version = if use_acked { initial.version } else { test.version() };
+            let cursor = Cursor { line: row, column: 0 };
+            test.set_cursor(cursor);
+            let outcome = if invoke {
+                test.invoke_at_version("status.stage", version, Some(cursor), None, None)
+            } else {
+                test.press_at_version("s", version)
+            };
+            assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
+            let (staged, untracked, contents) = if use_acked {
+                ("b.txt", "a.txt", "original\n")
+            } else {
+                ("a.txt", "b.txt", "inserted\n")
+            };
+            assert_eq!(tmp.git(&["diff", "--cached", "--name-only"]), format!("{staged}\n"));
+            assert_eq!(tmp.git(&["show", &format!(":{staged}")]), contents);
+            assert_eq!(tmp.git(&["status", "--short"]), format!("A  {staged}\n?? {untracked}\n"));
+        }
+    }
+}
+
+#[test]
+fn positional_requests_require_a_known_version_including_before_the_first_ack() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    write(&tmp.path().join("a.txt"), "unstaged\n");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let line = test.goto_file("untracked", "a.txt");
+    let cursor = Cursor { line, column: 0 };
+    for ack in [false, true] {
+        if ack { test.ack(); }
+        for version in [0, test.version() + 1, u64::MAX] {
+            for invoke in [false, true] {
+                let outcome = if invoke {
+                    test.invoke_at_version("status.stage", version, Some(cursor),
+                        Some(Selection { start_line: line, end_line: line }), None)
+                } else {
+                    test.press_at_version("s", version)
+                };
+                assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
+                assert!(outcome.render.is_none());
+            }
+        }
+        let view_id = test.view_id().to_string();
+        let outcome = test.session_mut().invoke(&magit_lsp::protocol::ViewInvokeParams {
+            view_id, command: "status.stage".into(), version: None, args: None,
+            cursor: Some(cursor), selection: None,
+        }).expect("missing version refusal");
+        assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
+        assert_eq!(cached_diff(tmp.path()), "");
+        assert_eq!(tmp.git(&["status", "--short"]), "?? a.txt\n");
+    }
+}
+
+#[test]
 fn a_visual_selection_stages_only_the_lines_it_covers() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
