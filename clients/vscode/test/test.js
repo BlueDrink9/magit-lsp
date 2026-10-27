@@ -173,6 +173,25 @@ test('typed characters become canonical key steps', () => {
   assert.deepEqual(menu.routeTyped(undefined), []);
 });
 
+test('QuickPick rows preserve server activation steps for every canonical shape', () => {
+  const cases = [
+    ['-a', ['-', 'a']], ['=A', ['=', 'A']], ['g l', ['g', 'l']],
+    ['ctrl+t', ['ctrl+t']], ['Enter', ['Enter']], ['G', ['G']], ['Plus', ['Plus']],
+  ];
+  for (const [key, activationSteps] of cases) {
+    const item = { kind: 'action', key, activationSteps, label: 'Planned',
+      status: { status: 'planned', roadmapId: 'R-4.1' } };
+    const row = menu.quickPickItems({ groups: [{ title: 'Actions', items: [item] }] })[1];
+    assert.equal(row.key, key);
+    assert.equal(row.activationSteps, activationSteps, 'no client parsing or conversion');
+    assert.equal(row.status, 'planned');
+    assert.equal(row.roadmapId, 'R-4.1');
+  }
+  assert.deepEqual(menu.routeTyped('ctrl+t'), ['c', 't', 'r', 'l', 'Plus', 't']);
+  assert.deepEqual(menu.routeTyped('g l'), ['g', 'Space', 'l']);
+  assert.deepEqual(menu.routeTyped('Enter'), ['E', 'n', 't', 'e', 'r']);
+});
+
 // lib/foldkeys.js ----------------------------------------------------------
 
 test('generated and mirrored bindings require editor focus and exclude widgets', () => {

@@ -112,7 +112,37 @@ impl Item {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Group {
     pub title: String,
+    #[serde(serialize_with = "serialize_items")]
     pub items: Vec<Item>,
+}
+
+fn serialize_items<S: serde::Serializer>(items: &[Item], serializer: S) -> Result<S::Ok, S::Error> {
+    #[derive(Serialize)]
+    struct SerializedItem<'a> {
+        #[serde(flatten)]
+        item: &'a Item,
+        #[serde(rename = "activationSteps")]
+        activation_steps: Vec<String>,
+    }
+    items
+        .iter()
+        .map(|item| SerializedItem {
+            item,
+            activation_steps: menu_key_steps(item.key()),
+        })
+        .collect::<Vec<_>>()
+        .serialize(serializer)
+}
+
+/// Interpret one validated canonical menu key as the steps clients must send.
+fn menu_key_steps(key: &str) -> Vec<String> {
+    if key.starts_with('-') || key.starts_with('=') {
+        let (_, suffix) = key.split_at(1);
+        if suffix.chars().count() == 1 {
+            return vec![key[..1].to_string(), suffix.to_string()];
+        }
+    }
+    key.split(' ').map(str::to_string).collect()
 }
 
 /// A saved set of switches and option values.

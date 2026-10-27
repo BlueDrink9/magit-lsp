@@ -11,6 +11,26 @@ use magit_lsp::keys::KeyChord;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection};
 
 #[test]
+fn serialized_activation_keeps_menu_prefix_error_and_close_semantics() {
+    let menu = magit_lsp::menus::named("commit").unwrap();
+    let wire = serde_json::to_value(&menu).unwrap();
+    let row = wire["groups"].as_array().unwrap().iter()
+        .flat_map(|group| group["items"].as_array().unwrap())
+        .find(|item| item["key"] == "-a").unwrap();
+    let steps = row["activationSteps"].as_array().unwrap();
+    let keys = vec!["-a".to_string()];
+    let mut pending = Vec::new();
+    assert_eq!(keyhandler::resolve_menu(&mut pending, steps[0].as_str().unwrap(), &keys), MenuResolution::Pending);
+    assert_eq!(keyhandler::resolve_menu(&mut pending, "x", &keys), MenuResolution::Unbound { chord: "-x".into() });
+    assert_eq!(pending, vec!["-"]);
+    assert_eq!(keyhandler::resolve_menu(&mut pending, steps[1].as_str().unwrap(), &keys), MenuResolution::Complete("-a".into()));
+    assert!(pending.is_empty());
+    keyhandler::resolve_menu(&mut pending, steps[0].as_str().unwrap(), &keys);
+    assert_eq!(keyhandler::resolve_menu(&mut pending, "Escape", &keys), MenuResolution::Pop);
+    assert!(pending.is_empty());
+}
+
+#[test]
 fn key_s_stages_the_hunk_like_invoke() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

@@ -18,6 +18,47 @@ fn actions(menu: &Menu) -> Vec<&Item> {
         .collect()
 }
 
+#[test]
+fn every_built_menu_serializes_activation_steps_that_agree_with_the_resolver() {
+    use magit_lsp::keyhandler::{resolve_menu, MenuResolution};
+    for (name, menu) in menus() {
+        let wire = serde_json::to_value(&menu).unwrap();
+        let restored: Menu = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(restored, menu, "{name}");
+        let keys: Vec<_> = menu
+            .groups
+            .iter()
+            .flat_map(|group| &group.items)
+            .map(|item| item.key().to_string())
+            .collect();
+        for row in wire["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["items"].as_array().unwrap())
+        {
+            let key = row["key"].as_str().unwrap();
+            let steps = row["activationSteps"].as_array().unwrap();
+            assert!(!steps.is_empty(), "{name}: {key}");
+            let mut pending = Vec::new();
+            for (index, step) in steps.iter().enumerate() {
+                let result = resolve_menu(&mut pending, step.as_str().unwrap(), &keys);
+                assert_eq!(
+                    result,
+                    // Literal prefix rows retain the resolver's existing
+                    // prefix precedence, even when dispatch lists one.
+                    if index + 1 == steps.len() && !matches!(key, "-" | "=") {
+                        MenuResolution::Complete(key.into())
+                    } else {
+                        MenuResolution::Pending
+                    },
+                    "{name}: {key}, step {index}"
+                );
+            }
+        }
+    }
+}
+
 fn planned_actions(menu: &Menu) -> Vec<&Item> {
     actions(menu)
         .into_iter()

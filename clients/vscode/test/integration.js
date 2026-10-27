@@ -212,6 +212,9 @@ async function run() {
       'commit menu QuickPick'
     );
     const menu = vscode.__test.lastQuickPick;
+    const initialMenuState = require('../lib/store').store.views.get(
+      require('../lib/store').store.quickPickViewId
+    );
     assert.match(menu.title, /Commit/);
     menu.select(menu.items.find((item) => item.key === 'c'));
 
@@ -233,27 +236,66 @@ async function run() {
       'the menu row was forwarded as a canonical key, not a client command'
     );
 
-    // Queued menu input stops only when the server's close effect removes the
-    // view; the first key is an ordinary action, not a local pop key.
-    const { queueSteps } = require('../lib/menus');
+    // Exercise real showMenu accept handlers on live menu views. Synthetic
+    // structured rows cover canonical shapes absent from the standard profile;
+    // their keys still travel through requests.press to the real server.
+    const { updateQuickPick } = require('../lib/menus');
     const viewStore = require('../lib/store').store;
-    const queuedState = { id: 'queue-regression', pressQueue: Promise.resolve() };
-    viewStore.views.set(queuedState.id, queuedState);
-    const requests = require('../lib/requests');
-    const originalPress = requests.press;
-    const pressed = [];
-    requests.press = async (id, key) => {
-      pressed.push(key);
-      if (key === 'c') viewStore.views.delete(id); // simulated applied close effect
-    };
-    try {
-      queueSteps(queuedState, ['c', 'x']);
-      await queuedState.pressQueue;
-      assert.deepEqual(pressed, ['c']);
-    } finally {
-      requests.press = originalPress;
-      viewStore.views.delete(queuedState.id);
+    await initialMenuState.pressQueue;
+    const keyRequestsSince = (start, id) => client.requests.slice(start)
+      .filter((request) => request.method === 'view/key' && request.params.viewId === id)
+      .map((request) => request.params.key);
+    const activationCases = [
+      ['-a', ['-', 'a']], ['=A', ['=', 'A']], ['g l', ['g', 'l']],
+      ['ctrl+t', ['ctrl+t']], ['Enter', ['Enter']], ['G', ['G']], ['Plus', ['Plus']],
+    ];
+    for (const [key, activationSteps] of activationCases) {
+      await commands.get('magit.invoke')({ command: 'open.commit' });
+      await waitFor(() => viewStore.views.get(viewStore.quickPickViewId)?.quickPick,
+        `live menu for ${key}`);
+      const state = viewStore.views.get(viewStore.quickPickViewId);
+      assert(state?.quickPick, `live showMenu widget for ${key}`);
+      state.menu = { ...state.menu, groups: [{ title: 'Activation regression', items: [{
+        kind: 'action', key, activationSteps, label: 'Planned activation',
+        status: { status: 'planned', roadmapId: 'R-4.1' },
+      }] }] };
+      updateQuickPick(state);
+      const row = state.quickPick.items.find((item) => item.key === key);
+      assert.equal(row.status, 'planned');
+      assert.deepEqual(row.activationSteps, activationSteps);
+      const start = client.requests.length;
+      state.quickPick.select(row);
+      await state.pressQueue;
+      assert.deepEqual(keyRequestsSince(start, state.id), activationSteps, key);
+      state.quickPick.value = 'q';
+      await state.pressQueue;
+      assert.equal(viewStore.views.has(state.id), false, 'real server close applied');
     }
+
+    await commands.get('magit.invoke')({ command: 'open.commit' });
+    await waitFor(() => viewStore.views.get(viewStore.quickPickViewId)?.quickPick,
+      'live typed-input menu');
+    const typedState = viewStore.views.get(viewStore.quickPickViewId);
+    const typedStart = client.requests.length;
+    typedState.quickPick.value = 'g l+G';
+    await typedState.pressQueue;
+    assert.deepEqual(keyRequestsSince(typedStart, typedState.id), ['g', 'Space', 'l', 'Plus', 'G']);
+    assert.equal(typedState.quickPick.value, '', 'typed input is still cleared');
+
+    // Acceptance queues stop after an actual server close, including later
+    // accept events queued before that close has arrived.
+    typedState.menu = { ...typedState.menu, groups: [{ title: 'Close regression', items: [{
+      kind: 'action', key: 'q x', activationSteps: ['q', 'x'], label: 'Close then tail',
+      status: { status: 'implemented' },
+    }] }] };
+    updateQuickPick(typedState);
+    const closeStart = client.requests.length;
+    const closingPick = typedState.quickPick;
+    closingPick.select(closingPick.items.find((item) => item.key === 'q x'));
+    closingPick.select(closingPick.items.find((item) => item.key === 'q x'));
+    await typedState.pressQueue;
+    assert.deepEqual(keyRequestsSince(closeStart, typedState.id), ['q']);
+    assert.equal(viewStore.views.has(typedState.id), false);
 
     // The real prompt handler must interpret the first displayed row as No
     // when the server's default is false (including destructive prompts).

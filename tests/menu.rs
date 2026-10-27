@@ -20,6 +20,95 @@ fn menu_switch(test: &TestSession, view: &str, key: &str) -> bool {
     }
 }
 
+#[test]
+fn structured_menu_roundtrips_with_server_activation_steps() {
+    use magit_lsp::menu::{Args, Group, Item, Reader};
+    let cases = [
+        ("-a", vec!["-", "a"]),
+        ("=A", vec!["=", "A"]),
+        ("g l", vec!["g", "l"]),
+        ("ctrl+t", vec!["ctrl+t"]),
+        ("Enter", vec!["Enter"]),
+        ("G", vec!["G"]),
+        ("Plus", vec!["Plus"]),
+    ];
+    let mut items = vec![
+        Item::Switch {
+            key: "-a".into(),
+            flag: "--all".into(),
+            label: "All".into(),
+            on: false,
+            status: MenuStatus::Implemented,
+        },
+        Item::Option {
+            key: "=A".into(),
+            flag: "--author=".into(),
+            label: "Author".into(),
+            value: None,
+            reader: Reader::Text,
+            status: MenuStatus::Implemented,
+        },
+    ];
+    items.extend(cases[2..].iter().map(|(key, _)| Item::Action {
+        key: (*key).into(),
+        command: "commit.extend".into(),
+        label: "Planned action".into(),
+        status: MenuStatus::Planned {
+            roadmap_id: "R-4.1".into(),
+        },
+    }));
+    let menu = Menu {
+        id: "activation".into(),
+        title: "Activation".into(),
+        groups: vec![Group {
+            title: "Items".into(),
+            items,
+        }],
+        saved_args: Args::default(),
+    };
+    let wire = serde_json::to_value(&menu).unwrap();
+    let restored: Menu = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        restored, menu,
+        "activation metadata must not become stored item state"
+    );
+    assert_eq!(serde_json::to_value(&restored).unwrap(), wire);
+    let keys: Vec<_> = restored.groups[0]
+        .items
+        .iter()
+        .map(|item| item.key().to_string())
+        .collect();
+    for (row, (key, steps)) in wire["groups"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(cases)
+    {
+        assert_eq!(row["key"], key);
+        assert_eq!(row["activationSteps"], serde_json::json!(steps));
+        let mut pending = Vec::new();
+        for (index, step) in row["activationSteps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let result =
+                magit_lsp::keyhandler::resolve_menu(&mut pending, step.as_str().unwrap(), &keys);
+            assert_eq!(
+                result,
+                if index + 1 == steps.len() {
+                    magit_lsp::keyhandler::MenuResolution::Complete(key.into())
+                } else {
+                    magit_lsp::keyhandler::MenuResolution::Pending
+                },
+                "{key}: step {index}"
+            );
+        }
+        assert!(pending.is_empty());
+    }
+}
+
 fn preview_line(render: &ViewRender) -> Option<String> {
     let menu = render.menu.as_ref()?;
     Some(menu.preview())
