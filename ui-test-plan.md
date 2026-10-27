@@ -92,6 +92,24 @@ inspect → act → inspect and always stopping owned UI:
   and both clients' native cutover evidence. Linux `/proc` latency evidence is not
   macOS validation. Windows remains separate feasibility work (R-EDIT-7).
 
+The Linux R-EDIT-2 acceptance ledger in TASKS.md maps each phase/race and process
+adversary to its Rust/stdio test. Finalizing cancellation includes a real
+post-commit hook: cancellation cannot undo an already recorded commit, so the
+server reports success with an interrupted-hook advisory. Ordinary/linked-worktree
+lock-warning probes leave supplied gitdir/common-dir/ref locks byte-for-byte
+untouched; stalled probes have an independent readonly deadline. Production
+`owned_process` trace events and owned unit assertions establish non-reaping
+observation, TERM/CONT, grace, KILL-before-reap and no signals after reap. These
+are current real-file runner evidence, not R-EDIT-6 managed-draft/native cutover
+or macOS/Windows acceptance.
+
+The final Linux acceptance gate passed on 2026-10-28: focused Rust, this native
+scenario (all four variants), full `make test` and `git diff --check`. TASKS.md
+records the terminal log path, counts and criterion-to-test mapping, and checks
+R-EDIT-2 for Linux only. The earlier shell-budget timeout was not accepted as a
+passing gate; no native deadline was increased. Post-gate inspection found no
+owned server/editor/hook/UI survivors.
+
 The supervised 2026-10-28 run passed standard/vim at 100x30 and 80x24; its fresh
 plain screens and `cancel.trace.jsonl` in each variant directory show final
 failure feedback, retained staged changes, and the next successful commit. The
