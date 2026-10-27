@@ -140,32 +140,13 @@ fn unstage_file_header_unstages_file() {
     );
 }
 
-#[test]
-fn unstage_hunk_header_unstages_hunk() {
+#[rstest]
+#[case::unstage_hunk_header_unstages_hunk(hunk_target())]
+#[case::unstage_changed_line_unstages_whole_hunk(diff_line_target(true))]
+#[case::unstage_context_line_unstages_whole_hunk(diff_line_target(false))]
+fn unstage_hunk_cases_unstage_whole_hunk(#[case] target: NodeKind) {
     assert_eq!(
-        dispatch::resolve(Command::Unstage, hunk_target(), None),
-        Resolution::UnstageHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn unstage_changed_line_unstages_whole_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Unstage, diff_line_target(true), None),
-        Resolution::UnstageHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn unstage_context_line_unstages_whole_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Unstage, diff_line_target(false), None),
+        dispatch::resolve(Command::Unstage, target, None),
         Resolution::UnstageHunk {
             path: "f.txt".to_string(),
             hunk_id: "h0".to_string()

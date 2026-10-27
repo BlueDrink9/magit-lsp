@@ -599,7 +599,7 @@ decision.
   - **Behaviour lost:** None of the working functionality.
   - **Acceptance evidence (2026-10-27):** Exact final gate `make test && make vscode-test && scripts/ui run tests/ui/scenarios/text-mode-roundtrip.scn && git diff --check` passed. `/tmp/opencode/vscode-review-04pmBr/a29-evidence.json` records metadata-only same-version entry, invoke/key/menu/setMode coverage, native selection/copy/navigation, queued refresh selection stability and applied replacement on exit, and capture=true with zero suppressed requests. Inspected real UI screenshots `a29-before.png`, `a29-during.png`, `a29-queued.png`, `a29-after.png`, and `a29-capture.png`; full gate retains Neovim semantics. A11 remains deferred as previously recorded.
 
-- [ ] **[P2] A30 — Parameterize the three unstage-hunk resolver cases** (`tests/dispatch.rs:161–192`)
+- [x] **[P2] A30 — Parameterize the three unstage-hunk resolver cases** (`tests/dispatch.rs:161–192`)
   - **Problem:** Three equality bodies differ only in target.
   - **Why it matters:** DRY.
   - **Change:** Do after: **Parameterize the three stage-hunk resolver cases**. One `rstest` body; named cases `unstage_hunk_header_unstages_hunk`, `unstage_changed_line_unstages_whole_hunk`, `unstage_context_line_unstages_whole_hunk`.
@@ -611,6 +611,7 @@ decision.
   - **Verify:** `cargo test --test dispatch`
   - **Parallel:** serial
   - **Behaviour lost:** none.
+  - **Acceptance evidence (2026-10-27):** Replaced the three identical equality bodies with one synchronous `rstest` body and retained all three named cases and the complete `UnstageHunk` path/content-ID assertion. `cargo test --test dispatch && git diff --check` passed.
 
 - [ ] **[P2] A31 — Parameterize the three discard-hunk resolver cases** (`tests/dispatch.rs:255–289`)
   - **Problem:** Three equality bodies differ only in target.
