@@ -701,14 +701,14 @@ not comment stripping or semantic parsing. A retention overflow warning is a
 user-facing warning effect, separate from successful submission. The draft's
 independent 1 MiB input limit normally rejects such overflow earlier.
 
-- [x] **R-EDIT-8 — Server-owned commit-message history ring (server seam verified
-  2026-10-28).** `cargo test --test editor_drafts --test editor_bridge --test commands
-  --test manifest --test parity && git diff --check` passed: production stdio
-  isolation, failed-commit recall, exact dedup/count/byte eviction, exclusions,
-  unsent restoration/clamping and rejected identities/versions without implicit
-  save/finish. Manifest snapshots updated with the canonical snapshot command.
-  Native adapter/UI acceptance remains R-EDIT-4/5/6; no full `make test` or native
-  migration claimed here.
+**Server acceptance verified (2026-10-28).** The focused R-EDIT-8 command
+`cargo test --test editor_drafts --test editor_bridge --test commands --test manifest --test parity && git diff --check`
+passed (72 tests). Evidence: `/tmp/opencode/r-edit-8-verification.log`.
+Core and production stdio coverage verifies repository isolation, ordering/exact
+deduplication, count/UTF-8 byte eviction and overflow, eligibility exclusions,
+failed-commit recall, unsent restoration/clamping and exact identity/version
+rejection without implicit save/finish. Native history acceptance remains pending
+under R-EDIT-4/5/6; this verifies the server seam only.
 
 **Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
 owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
@@ -1844,6 +1844,8 @@ deferred.
       selection/confirm/cancel evidence.
       **Verify:** focused Rust state tests and native scenarios in both clients;
       full regression gate at milestone boundary.
+
+- [x] **R-EDIT-8 — Server-owned commit-message history ring**
 
 - [ ] R-4.1 Commit menu: commit, extend, amend, reword, fixup, squash, augment,
       instant fixup/squash, alter; switches `--all`, `--allow-empty`,
