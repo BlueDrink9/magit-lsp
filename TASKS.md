@@ -668,9 +668,11 @@ contained. Never broad-kill, delete locks, or kill normal-exit daemons.
 
 Portability gate: `setsid` and `waitid(...WNOWAIT)` are Unix interfaces with
 platform-specific availability/semantics; Linux implementation and real-Git
-tests are required before R-EDIT-2 acceptance. macOS WNOWAIT behavior remains
-unverified and is a gate; investigate kqueue exit observation only if required,
-not as an implemented alternative. Rust
+tests are required before Linux R-EDIT-2 acceptance and R-EDIT-6 client cutover.
+macOS group/WNOWAIT/reap behavior remains unverified and belongs to the separate,
+later R-EDIT-9 CI/platform acceptance ticket, not a Linux acceptance dependency.
+Retain the full-grace fallback on macOS; it is not validation. Investigate kqueue
+exit observation only if required, not as an implemented alternative. Rust
 `Child::try_wait` reaps on observed exit, so cannot precede a possible group
 signal; use non-reaping waitid observation plus sole final reap or gate platform.
 Windows lacks this Unix group/waitid scheme; named-pipe ACL and suspended
@@ -735,7 +737,9 @@ readonly lock observation uses the actual linked-worktree gitdir and common-dir
 where applicable and is advisory only; warn forced cancellation may leave
 locks. Exclude probes from mutation cancellation/optional writes. BUG-READ-1
 global Git locking stays deferred. Current bridge is Unix-only: Linux real
-validation and macOS group/reaping validation required. Windows named pipe,
+validation is required for Linux acceptance; macOS group/reaping validation is
+deferred to R-EDIT-9 without blocking Linux cutover or claiming macOS support
+validated. Windows named pipe,
 restrictive ACL and atomic suspended Job assignment is a separate feasibility
 gate, not a claimed guarantee.
 
@@ -1595,7 +1599,10 @@ realFile behavior remains until coordinated cutover. User-reported Linux Git
 10 pass/1 fail, cancellation observed during hook, no progress end/error before
 timeout. No implementation was verified at that decision; the scoped Linux
 refinement evidence below does not complete the phase, and macOS remains
-unverified. R-4.2 remains
+unverified. Linux acceptance/cutover does not depend on macOS execution; later
+macOS CI/platform acceptance is owned by R-EDIT-9, with the full-grace fallback
+retained and no validation claimed. Windows remains separately deferred in
+R-EDIT-7. R-4.2 remains
 staged diff/trailers/lint owner, integrates the R-EDIT-8 ring (not a second
 history implementation), and depends on this phase.
 
@@ -1606,13 +1613,13 @@ history implementation), and depends on this phase.
   - **Verify:** documentation/interface review and targeted platform-design feasibility review (not a claimed platform test); choose full/incremental sync, bounds, and history count/UTF-8 byte-cap overflow policy here (never silently truncate a message).
 - [ ] **R-EDIT-2 — Own runs and safely cancel Git children**
   - **Paths:** `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/editor.rs`, `src/protocol.rs`, `tests/editor_bridge.rs`.
-  - **Depends on:** R-EDIT-1.
+  - **Depends on:** R-EDIT-1; Linux acceptance does not depend on R-EDIT-9/macOS execution.
   - **Done when:** sole Child owner arbitrates nonblocking cancellation/reap; pre-hook, editor-active, commit-msg, finalizing and completed outcomes truthful (cancel-before-commit aborts; completed commit reports success); bounded drain, no detached indefinite readers, no normal-exit daemon killed to drain, one progress end/release.
-  - **Verify:** `cargo test --test editor_bridge --test server_async`; real-Git foreground/background hooks, each cancellation phase, inherited pipes after normal exit, TERM-resistant escalation, exact HEAD/index/worktree, subsequent commit without manual lock cleanup, lock warning, no foreign kill.
+  - **Verify:** `cargo test --test editor_bridge --test server_async` on Linux; real-Git foreground/background hooks, each cancellation phase, inherited pipes after normal exit, TERM-resistant escalation, exact HEAD/index/worktree, subsequent commit without manual lock cleanup, lock warning, no foreign kill. macOS runner/group/WNOWAIT/reap evidence is deferred to R-EDIT-9, not required for this Linux acceptance.
     4. Supervised native modal-handling refinement: PASS, `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`, all four profile/size combinations; focused Rust checks also passed. Removed `:messages` and blind Enter/q; retained final-feedback snapshots before terminal-only conditional hit-enter dismissal, then checked bounded notification history and one begin/report/end for the actual `Git`/`commit` token. Fresh artifacts (local filesystem clock 2026-10-28 08:12:38–46) were inspected under `build/ui/commit-owned-cancel/{standard,vim}-{100x30,80x24}/`: `committing.screen` shows `Committing…`, `cancellation-feedback.screen` shows the readable Git failure, `cancelled.screen` retains staged changes, and `next-commit.screen` shows `Committed: After progress cancellation` with a clean tree. Each `cancel.trace.jsonl` records the unique token `magit-lsp/mutation/3`, one cancellation lifecycle, the notification check and scenario completion. Scenario assertions also passed unchanged HEAD, hook TERM and the subsequent commit without lock cleanup. Per-run intent→report / intent→end: standard-100x30 **0.677 / 40.852 ms**, vim-100x30 **0.891 / 36.696 ms**, standard-80x24 **0.644 / 28.587 ms**, vim-80x24 **0.711 / 29.166 ms**. These are client-trace progress timings, not key-to-idle or universal deadlines. The following full `make test` FAILED only at `tests/test_magit_lsp.lua:518` (visual-line staging, cached diff empty); exact Lua output is preserved in `build/test-logs/lua.VDSuAF` (55 cases, 1 failure). Subsequent `git diff --check` passed and the orchestrator found no owned process survivors. No production fast-path, grace or deadline changes were made in this retry.
     5. Final adviser-guided synchronization correction: the old completion predicate matched `+NEW line` already present in the initial **unstaged** hunk, so it could read Git before native `V`, `s` finished. Wait instead for `HELPERS.find_line('+', 'NEW line', 'staged') ~= nil`, whose section range comes from server `documentSymbol`, then assert the existing settled `HELPERS.wait_idle()`. Native input and the exact cached `+NEW line`, absent cached `line3 CHANGED`, and remaining-worktree assertions are unchanged. No sleeps, timeout inflation, version-only predicate or product changes.
        - [x] Single authorized final gate: `make test-file FILE=tests/test_magit_lsp.lua && make test && git diff --check` exited **0 on its only attempt**: focused Lua, full Rust/Lua/VSCode/keybindings and whitespace checks all passed. Output is retained in `/tmp/opencode/r-edit-2-final-4qi85mqn/verification.log`. The fresh four-variant screens/traces from attempt 4 were re-inspected without rerunning unrelated UI. Post-gate process audit found no owned server/editor/hook/UI survivors; pre-existing unrelated hooks, editor and tmux processes were untouched. All pre-existing work outside the three ticket files was byte-for-byte preserved.
-  - **Remaining R-EDIT-2 gaps:** canonical pre-hook/editor-active/commit-msg/finalizing/completed outcomes and finish-v-cancel races; complete adversarial foreground/background/inherited-pipe/TERM-resistant coverage with exactly-once release and exact HEAD/index/worktree checks; lock-warning and no-foreign-kill obligations; macOS group/reap validation. Windows feasibility is separate R-EDIT-7 work. This cooperative Linux refinement and a passing regression gate do not complete R-EDIT-2, the managed-draft adapters or Phase 3E.
+  - **Remaining R-EDIT-2 gaps (Linux acceptance):** canonical pre-hook/editor-active/commit-msg/finalizing/completed outcomes and finish-v-cancel races; complete adversarial foreground/background/inherited-pipe/TERM-resistant coverage with exactly-once release and exact HEAD/index/worktree checks; lock-warning and no-foreign-kill obligations. macOS group/WNOWAIT/reap validation is separately deferred to R-EDIT-9; Windows feasibility is separate R-EDIT-7 work. This cooperative Linux refinement and a passing regression gate do not complete R-EDIT-2, the managed-draft adapters or Phase 3E.
 - [ ] **R-EDIT-3 — Versioned draft and validated writeback**
   - **Candidate paths:** `src/editor.rs`, `src/protocol.rs`, `src/server.rs`, `src/session.rs` (edit dispatch), `src/git.rs`, `tests/editor_bridge.rs`; not an exhaustive rewrite list.
   - **Depends on:** R-EDIT-2.
@@ -1635,9 +1642,16 @@ history implementation), and depends on this phase.
   - **Verify:** `make vscode-test`; extend `clients/vscode/test/integration.js` for real-server/scripted-widget integration (`npm --prefix clients/vscode run test:integration`), and `clients/vscode/test/e2e/suite.js` for actual native VSCode confirm/cancel/progress/close/version-error and history recall/return-to-current-draft scenarios (`npm --prefix clients/vscode run test:e2e`). The former is not native-client evidence.
 - [ ] **A11 / R-EDIT-6 — Migrate A11 and adversarial cutover**
   - **Candidate paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/session.rs` (dispatch), `src/protocol.rs`, `lua/magit-lsp/edit.lua` and relevant init/view/buffer attachment/capabilities from R-EDIT-4, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` if needed, `tests/editor_bridge.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
-  - **Depends on:** R-EDIT-2…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner.
+- [ ] **R-EDIT-9 — macOS CI/platform acceptance (deferred, not Linux release blocker)**
+  - [x] Documentation-only acceptance split (2026-10-28): Linux gates and native guidance defer macOS execution here; R-EDIT-2 remains unchecked and no macOS validation is claimed.
+  - **Candidate paths:** CI workflow configuration, `src/runner.rs`, `src/runner/owned.rs`, `tests/runner.rs`, `tests/runner_hooks.rs`, `tests/editor_bridge.rs`, `tests/server_async.rs`, `TASKS.md`, `ui-test-plan.md`; choose concrete CI paths when this later task starts.
+  - **Depends on:** R-EDIT-1 design and Linux R-EDIT-2 acceptance; R-EDIT-6 for managed-draft native cutover acceptance on macOS. No reverse dependency from Linux R-EDIT-2/R-EDIT-6. Intended for a later macOS CI runner; unavailable local macOS execution is not a Linux blocker. Windows remains R-EDIT-7.
+  - **Done when:** retained macOS CI artifacts identify runner image, macOS/architecture, Rust/Git versions and exact commands/results; real-Git tests prove pre-exec session/group ownership, non-reaping WNOWAIT exit observation with PID/PGID pinned through full TERM/CONT grace and final group KILL, sole final reap and no signals after reap. Cover leader-exits/TERM-resistant descendant, stopped member, exit-before-cancel/no signal, normal-exit daemon survival, inherited-pipe bounded drain, exactly-once release, unchanged HEAD/index/worktree on abort, subsequent commit without lock cleanup, lock warning and no foreign kills. Trace observation → cancellation → TERM/CONT → full grace → KILL → reap; retain native evidence for both clients before claiming macOS cutover acceptance. Full-grace fallback stays; Linux `/proc` latency evidence is not macOS evidence. Until these gates pass, macOS remains explicitly unverified.
+  - **Verify:** on the macOS CI runner, `cargo test --test runner --test runner_hooks --test editor_bridge --test server_async`, plus the R-EDIT-6 native acceptance commands for macOS client cutover; retain process traces, runner metadata and native artifacts. This is a future verification requirement, not an execution claim.
+
+  - **Depends on:** Linux R-EDIT-2 acceptance, R-EDIT-3…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner. R-EDIT-9/macOS execution is not a Linux client-cutover dependency.
   - **Done when:** remove realFile commit-message compatibility at cutover; Git keeps hooks/cleanup. Native acceptance covers save-stays-editing, normal close commits exactly saved message, dirty Save/Discard/Cancel, no hidden changes submitted, explicit abort versus close, disconnect across phases, stale/terminal cleanup without commits, and failed close recovery. Also cover pre-hook/editor-active/commit-msg/finalizing and finish-v-cancel (cancel before commit aborts; completed commit reports reality), stale/late/version/multi-root, exact HEAD/index/worktree and neighboring content, inherited pipes/bounded drain, TERM resistance, subsequent commit/no lock cleanup, lock warning/no foreign kills; preserve askpass/A29/text mode and document limits. Extend integration.js and native e2e/suite.js at the paths above; scripted widgets alone do not meet native acceptance. R-EDIT-8 verifies two-root ring ordering/dedup/eviction and current-draft restoration.
-  - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour`; inspect relevant tour excerpts. Linux real-Git required; macOS group/reap is unverified gate. No timeout inflation.
+  - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour` on Linux; inspect relevant tour excerpts. Linux real-Git and both clients' native evidence are required; macOS remains unverified under later R-EDIT-9 and does not block Linux acceptance/cutover. No timeout inflation.
 - [ ] **R-EDIT-7 — Windows feasibility (deferred, not Unix release blocker)**
   - **Paths:** `src/editor.rs`, `src/runner.rs`, `src/protocol.rs`, `TASKS.md`.
   - **Depends on:** R-EDIT-1 design; separate from Unix cutover.
@@ -1724,8 +1738,9 @@ deferred.
 - [ ] R-4.2 Commit-message view over the editor bridge: staged-diff companion
       view, trailers, lint diagnostics, confirm/cancel/close. Server message-ring
       ownership is R-EDIT-8, not this task; this task integrates the history view.
-      **Depends on:** Phase 3E Unix managed-draft cutover and acceptance
-      (R-EDIT-1…R-EDIT-6); the separate Windows feasibility gate R-EDIT-7 is deferred.
+      **Depends on:** Phase 3E Linux managed-draft cutover and acceptance
+      (R-EDIT-1…R-EDIT-6 and R-EDIT-8); macOS CI acceptance R-EDIT-9 and Windows
+      feasibility R-EDIT-7 are separately deferred, not Linux blockers.
       *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
       split shows the `gitcommit` buffer and the staged diff; confirm closes
       it and the status screen shows a clean tree.

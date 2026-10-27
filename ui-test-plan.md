@@ -83,8 +83,14 @@ inspect → act → inspect and always stopping owned UI:
   UI-only claim: cancel in pre-hook/editor/commit-msg/finalizing, finish-v-cancel,
   inherited pipes after normal exit, bounded drain and TERM-resistant child,
   subsequent commit without lock cleanup, and no foreign process kill. Linux is
-  required; macOS remains an unverified group/reap gate and Windows is separate
-  feasibility work (R-EDIT-7).
+  required for R-EDIT-2 and R-EDIT-6 acceptance/cutover, including both clients'
+  native evidence; unavailable macOS execution does not block Linux acceptance.
+  macOS remains unverified, with its full-grace fallback retained. Separate later
+  macOS CI/platform acceptance (R-EDIT-9) requires identified runner/OS/toolchain,
+  real-Git group/session, non-reaping WNOWAIT and sole-reap traces (full grace,
+  final group KILL before reap, no signals after reap), adversarial process cases
+  and both clients' native cutover evidence. Linux `/proc` latency evidence is not
+  macOS validation. Windows remains separate feasibility work (R-EDIT-7).
 
 The supervised 2026-10-28 run passed standard/vim at 100x30 and 80x24; its fresh
 plain screens and `cancel.trace.jsonl` in each variant directory show final
