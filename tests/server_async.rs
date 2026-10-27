@@ -76,6 +76,106 @@ fn shutdown_and_exit(server: &mut TestServer) {
     server.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
 }
 
+/// User-close requests must remove nested views from routing and parent order.
+#[test]
+fn nested_user_close_and_reopen_does_not_retain_views_or_parents() {
+    let (tmp, _repo) = init_repo();
+    let (other_tmp, _other_repo) = init_repo();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let root = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let other = open_view(&mut server, 3, &repo_param(other_tmp.path()));
+    let mut request_id = 10;
+    let mut previous_process = None;
+    let mut previous_menu = None;
+    for _ in 0..3 {
+        let mut parent = root.clone();
+        let mut nested = Vec::new();
+        for command in ["open.process-log", "open.dispatch"] {
+            request_id += 1;
+            server.send(json!({"jsonrpc": "2.0", "id": request_id,
+                "method": "view/invoke", "params": {"viewId": parent, "command": command}}));
+            let response = server.response_with_id(request_id);
+            let descriptor = response["result"]["effects"]
+                .as_array()
+                .expect("effects")
+                .iter()
+                .find(|effect| effect["type"] == "pushView")
+                .expect("nested push")["descriptor"]
+                .clone();
+            parent = descriptor["id"].as_str().expect("nested id").to_string();
+            nested.push(parent.clone());
+            assert_eq!(server.recv()["method"], "view/render");
+            assert_eq!(server.recv()["method"], "view/keymap");
+        }
+        if let Some(previous) = &previous_process {
+            assert_eq!(&nested[0], previous, "closed process id must be reusable");
+            assert_eq!(
+                Some(&nested[1]),
+                previous_menu.as_ref(),
+                "closed menu id must be reusable"
+            );
+        }
+        previous_process = Some(nested[0].clone());
+        previous_menu = Some(nested[1].clone());
+        // User closes the deepest view; reopening it must return to the live
+        // process parent, not an orphan left in the server's stack.
+        for id in nested.iter().rev() {
+            request_id += 1;
+            server.send(json!({"jsonrpc": "2.0", "id": request_id,
+                "method": "view/close", "params": {"viewId": id}}));
+            let closed = server.response_with_id(request_id);
+            assert_eq!(closed["result"], Value::Null, "{closed}");
+            assert!(closed.get("error").is_none(), "{closed}");
+            request_id += 1;
+            server.send(json!({"jsonrpc": "2.0", "id": request_id,
+                "method": "view/resync", "params": {"viewId": id}}));
+            let stale = server.response_with_id(request_id);
+            assert!(
+                stale["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("unknown view"),
+                "{stale}"
+            );
+        }
+        // A normal server-driven pop after reopening must focus the root,
+        // proving the removed nested entries no longer affect parent routing.
+        request_id += 1;
+        server.send(json!({"jsonrpc": "2.0", "id": request_id,
+            "method": "view/invoke", "params": {"viewId": root, "command": "open.process-log"}}));
+        let opened = server.response_with_id(request_id);
+        let id = opened["result"]["effects"][0]["descriptor"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(id, nested[0]);
+        assert_eq!(server.recv()["method"], "view/render");
+        assert_eq!(server.recv()["method"], "view/keymap");
+        request_id += 1;
+        server.send(json!({"jsonrpc": "2.0", "id": request_id,
+            "method": "view/invoke", "params": {"viewId": id, "command": "common.quit"}}));
+        let popped = server.response_with_id(request_id);
+        assert!(
+            popped["result"]["effects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|effect| effect["type"] == "focusView" && effect["viewId"] == root),
+            "{popped}"
+        );
+        for live in [&root, &other] {
+            request_id += 1;
+            server.send(json!({"jsonrpc": "2.0", "id": request_id,
+                "method": "view/resync", "params": {"viewId": live}}));
+            let response = server.response_with_id(request_id);
+            assert_eq!(response["result"]["viewId"], *live, "{response}");
+        }
+    }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 fn process_exists(pid: u32) -> bool {
     let output = Command::new("ps")
         .args(["-o", "pid=", "-p", &pid.to_string()])

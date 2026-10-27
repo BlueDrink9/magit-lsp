@@ -16,6 +16,9 @@ module.exports = async function testStatusOpenLifecycle() {
   let fileOpened = false;
   const renderPayloads = [];
   const requests = [];
+  const warnings = [];
+  const output = [];
+  let closeFailure = false;
 
   class Uri {
     constructor({ scheme, authority = '', path = '' }) {
@@ -64,14 +67,14 @@ module.exports = async function testStatusOpenLifecycle() {
       },
     },
     window: {
-      createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
+      createOutputChannel: () => ({ appendLine(text) { output.push(text); }, dispose() {} }),
       onDidChangeActiveTextEditor: () => ({ dispose() {} }),
       showTextDocument: async (document) => {
         tabs.push(document);
         return { document, selection: { isEmpty: true } };
       },
       showErrorMessage: (text) => { throw new Error(text); },
-      showWarningMessage: () => {},
+      showWarningMessage: (text) => { warnings.push(text); },
       showInformationMessage: () => {},
       visibleTextEditors: [],
       tabGroups: { all: [] },
@@ -102,6 +105,10 @@ module.exports = async function testStatusOpenLifecycle() {
     stop() { return Promise.resolve(); }
     async sendRequest(method, params) {
       requests.push({ method, params });
+      if (method === 'view/close') {
+        if (closeFailure) throw new Error('disconnected');
+        return null;
+      }
       if (method === 'view/invoke') return {};
       assert.equal(method, 'view/open');
       openCount += 1;
@@ -125,7 +132,7 @@ module.exports = async function testStatusOpenLifecycle() {
       queueMicrotask(() => notifications.get('view/render')(payload));
       return descriptor;
     }
-    sendNotification() {}
+    sendNotification(method) { assert.notEqual(method, 'view/close'); }
   }
 
   const originalLoad = Module._load;
@@ -241,5 +248,42 @@ module.exports = async function testStatusOpenLifecycle() {
   assert(!commands.has('magit.refresh'));
   assert(!commands.has('magit.toggle-fold'));
 
+  // Drive the actual workspace close callback, not an isolated send helper.
+  const { store } = require('../lib/store');
+  const closeRequests = () => requests.filter((request) => request.method === 'view/close');
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    const document = tabs.at(-1);
+    const count = closeRequests().length;
+    await closeDocument(document);
+    await closeDocument(document);
+    assert.equal(closeRequests().length, count + 1, 'one request per user close');
+    assert.deepEqual(closeRequests().at(-1).params, { viewId: 'status-1' });
+    assert.equal(store.views.size, 0);
+    assert.equal(store.uriToView.size, 0);
+    await commands.get('magit.open')();
+    assert.equal(store.views.size, 1);
+  }
+  // Server effects remove local state before a later document-close event.
+  const serverClosedDocument = tabs.at(-1);
+  const beforeServerClose = closeRequests().length;
+  notifications.get('view/effects')({ effects: [{ type: 'popView', viewId: 'status-1' }] });
+  await closeDocument(serverClosedDocument);
+  assert.equal(closeRequests().length, beforeServerClose, 'server close must not echo');
+
+  await commands.get('magit.open')();
+  closeFailure = true;
+  await closeDocument(tabs.at(-1));
+  assert.equal(store.views.size, 0, 'failure must not resurrect local state');
+  assert.equal(output.at(-1), 'view/close failed: disconnected');
+  assert.equal(warnings.at(-1), 'magit-lsp: disconnected');
+  closeFailure = false;
+  await commands.get('magit.open')();
+  const client = store.client;
+  store.client = undefined;
+  const beforeDisconnect = closeRequests().length;
+  await closeDocument(tabs.at(-1));
+  assert.equal(closeRequests().length, beforeDisconnect);
+  assert.equal(store.views.size, 0);
+  store.client = client;
   await extension.deactivate();
 };

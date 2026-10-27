@@ -224,12 +224,14 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A04 — Make client close messages reach the server** (`lua/magit-lsp/view.lua:537–558`; `clients/vscode/extension.js:1009–1030`; `src/server.rs:661–697`)
+- [x] **[P1] A04 — Make client close messages reach the server** (`lua/magit-lsp/view.lua:537–558`; `clients/vscode/extension.js:1009–1030`; `src/server.rs:661–697`)
   - **Problem:** Clients send `view/close` notifications; the server handles requests only.
   - **Why it matters:** Closed views remain in server stacks/routing state.
   - **Change:** Use the existing request contract asynchronously in both clients; add client-seam coverage.
   - **Done when:** Repeated open/user-close cycles leave no stale view or parent-stack entry.
   - **Constraints:** No dual wire forms as compatibility shims.
+  - **Implementation evidence (2026-10-27):** Both adapters now send asynchronous `view/close` requests using the existing server handler. Neovim uses its tracked per-client FIFO; VSCode awaits readiness, guards a disconnected/replaced client, and reports rejection without restoring closed state. Client-seam regressions cover repeated user closes, server-close suppression, failure/disconnect and independent client identity; existing edit cancellation is unchanged. `tests/server_async.rs::nested_user_close_and_reopen_does_not_retain_views_or_parents` drives nested open/close requests over real stdio, rejects resync of closed ids, checks id reuse and parent focus, and preserves a second repository. `tests/ui/scenarios/close-reopen-views.scn` uses text mode only to access native `:bwipeout!`, then reopens nested views and checks server-driven pops return to status. A user wipe of a main view also restores its hidden parent on the tracked event loop, after Neovim finishes replacing the wiped buffer.
+  - **Verification evidence:** Final exact gate `make test && make ui-test && make vscode-test && git diff --check` exited **0** (Rust, all 54 Neovim cases, VSCode and keybinding checks, all 33 UI scenarios). Standalone `scripts/ui run tests/ui/scenarios/close-reopen-views.scn` exited **0**, covering standard/vim at 100x30 and 80x24. Inspected the real UI before/after a user wipe, and inspected saved nested, closed and reopened screens; all four final status screens show `Unstaged changes (2)`. Artifacts: `build/ui/close-reopen-views/{standard,vim}-{100x30,80x24}/{nested-before-close,user-closed-menu,user-closed-process,reopened-nested,returned-to-status}.screen`. All owned UI sessions stopped; no running `magit-lsp` processes remained. Earlier gate attempts exited **2**: an overstrict new stub rejected `view/resize`; the new UI scenario exposed missing main-parent restoration; an additional split-window unit assertion did not match native command behavior and was removed in favor of the passing real-UI regression. The stub and restoration were corrected before the final green gate.
   - **Category:** simplify
   - **Net LOC:** +15
   - **Risk:** low — existing handler reused.

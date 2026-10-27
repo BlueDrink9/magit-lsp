@@ -1,0 +1,57 @@
+# User buffer wipes (not common.quit) must reach the server request handler.
+# Repeated nested reopen/pop returns to the live parent and then status.
+fixture: modified-two-files
+---
+wait
+expect view_stack.count == 1
+keys standard: $
+keys vim: g $
+wait screen contains "Process log"
+keys standard: ?
+keys vim: g ?
+wait screen contains "Transient and dwim commands"
+expect view_stack.count == 3
+snapshot: nested-before-close
+keys: C-t
+wait
+keys: :bwipeout! Enter
+wait
+expect view_stack.count == 2
+expect windows.floating == 0
+expect screen contains "Process log"
+snapshot: user-closed-menu
+keys standard: ?
+keys vim: g ?
+wait screen contains "Transient and dwim commands"
+expect view_stack.count == 3
+keys: C-t
+wait
+keys: :bwipeout! Enter
+wait
+expect view_stack.count == 2
+expect screen contains "Process log"
+keys: C-t
+wait
+keys: :bwipeout! Enter
+wait
+expect view_stack.count == 1
+expect screen contains "Unstaged changes"
+snapshot: user-closed-process
+keys standard: $
+keys vim: g $
+wait screen contains "Process log"
+expect view_stack.count == 2
+keys standard: ?
+keys vim: g ?
+wait screen contains "Transient and dwim commands"
+expect view_stack.count == 3
+snapshot: reopened-nested
+keys: q
+wait
+expect view_stack.count == 2
+expect screen contains "Process log"
+keys: q
+wait
+expect view_stack.count == 1
+expect screen contains "Unstaged changes"
+snapshot: returned-to-status

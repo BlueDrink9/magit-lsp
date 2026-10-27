@@ -2516,6 +2516,10 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
           end
         end,
         request = function(_, method, params, callback)
+          if method == 'view/close' then
+            callback(nil, vim.NIL)
+            return true
+          end
           assert(method == 'view/resync')
           RESYNCS[#RESYNCS + 1] = { client_id = id, callback = callback }
         end,
@@ -2599,6 +2603,62 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
     { 202, 'same', 1 },
   })
   MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
+end
+
+T['user wipe requests close once per client and server close never echoes'] = function()
+  child.lua([[
+    local view = require('magit-lsp.view')
+    local requests = require('magit-lsp.requests')
+    local debug_api = require('magit-lsp.debug')
+    CLOSES, WARNINGS = {}, {}
+    local clients = {}
+    local fail = false
+    for _, id in ipairs({ 101, 202 }) do
+      clients[id] = {
+        initialized = true,
+        request = function(_, method, params, callback)
+          assert(method == 'view/close')
+          CLOSES[#CLOSES + 1] = { id, params.viewId }
+          vim.schedule(function()
+            callback(fail and { message = 'disconnected' } or nil, vim.NIL)
+          end)
+          return true
+        end,
+        notify = function(_, method) assert(method ~= 'view/close', 'close must be a request') end,
+      }
+    end
+    vim.lsp.get_client_by_id = function(id) return clients[id] end
+    vim.lsp.buf_is_attached = function() return true end
+    vim.notify = function(text) WARNINGS[#WARNINGS + 1] = text end
+    view.configure({})
+    local function open(id)
+      return view.open({ id = 'nested', kind = 'process-log',
+        uri = 'magit://test/' .. id, placement = 'side', mode = 'interactive' },
+        { client_id = id })
+    end
+    local other = open(202)
+    for _ = 1, 3 do
+      local current = open(101)
+      vim.api.nvim_buf_delete(current.buf, { force = true })
+      assert(vim.wait(1000, function() return requests.pending(101) == 0 end, 10))
+      assert(view.views[current.key] == nil and view.views[other.key] == other)
+    end
+    local server_closed = open(101)
+    view.close(server_closed.key, true)
+    assert(#CLOSES == 3)
+    fail = true
+    vim.api.nvim_buf_delete(other.buf, { force = true })
+    assert(vim.wait(1000, function() return requests.pending(202) == 0 end, 10))
+    local disconnected = open(101)
+    clients[101] = nil
+    vim.api.nvim_buf_delete(disconnected.buf, { force = true })
+    CLEAN_CLOSE = vim.wait(1000, function() return #view.order == 0 and debug_api.idle() end, 10)
+  ]])
+  MiniTest.expect.equality(child.lua_get('CLOSES'), {
+    { 101, 'nested' }, { 101, 'nested' }, { 101, 'nested' }, { 202, 'nested' },
+  })
+  MiniTest.expect.equality(child.lua_get('WARNINGS'), { 'magit-lsp view close failed: disconnected' })
+  MiniTest.expect.equality(child.lua_get('CLEAN_CLOSE'), true)
 end
 
 return T

@@ -158,7 +158,7 @@ async function closeEdit(state) {
 }
 
 /**
- * Tell the server when the user closes a view's document.
+ * Request server cleanup asynchronously when the user closes a view's document.
  *
  * @param {vscode.TextDocument} document
  */
@@ -182,8 +182,14 @@ async function onDocumentClosed(document) {
   await views.closeView(viewId, false);
   const client = store.client;
   if (client) {
-    await store.clientReady;
-    client.sendNotification('view/close', { viewId });
+    try {
+      await store.clientReady;
+      if (store.client !== client) return;
+      await client.sendRequest('view/close', { viewId });
+    } catch (error) {
+      store.output.appendLine(`view/close failed: ${message(error)}`);
+      vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);
+    }
   }
 }
 

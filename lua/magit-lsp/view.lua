@@ -581,9 +581,28 @@ local function on_wiped(key)
   end
   local c = client(view.client_id)
   if c then
-    c:notify('view/close', { viewId = view.id })
+    -- Use the tracked request queue: the server does not handle close notifications.
+    M.request(view.buf, view.client_id, 'view/close', { viewId = view.id }, function(_, err)
+      if err then
+        vim.notify('magit-lsp view close failed: ' .. error_message(err), vim.log.levels.WARN)
+      end
+    end)
   end
-  focus_previous(view)
+  -- BufWipeout runs before Neovim chooses the replacement buffer. Restore a
+  -- hidden main-view parent afterwards, just as a server-driven pop does.
+  hooks.schedule(function()
+    local previous = view.previous and M.views[view.previous]
+    if view.placement == 'main' and previous
+      and vim.api.nvim_buf_is_valid(previous.buf)
+      and view.win and vim.api.nvim_win_is_valid(view.win)
+      and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
+      vim.api.nvim_win_set_buf(view.win, previous.buf)
+      previous.win = view.win
+      M.focus(previous.key)
+    else
+      focus_previous(view)
+    end
+  end)
 end
 
 --- Open (or focus) the window for a server descriptor.
