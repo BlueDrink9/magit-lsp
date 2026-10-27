@@ -627,7 +627,7 @@ decision.
   - **Behaviour lost:** none.
   - **Acceptance evidence (2026-10-27):** Replaced the three identical equality bodies with one synchronous `rstest` body and retained all three named cases and the complete `DiscardHunk` path/content-ID assertion. `cargo test --test dispatch && git diff --check` passed.
 
-- [ ] **[P2] A32 — Remove repeated canonical-key validation from Lua** (`lua/magit-lsp/keys.lua:70–127,171–207`; `lua/magit-lsp/keymap.lua:122–125`)
+- [x] **[P2] A32 — Remove repeated canonical-key validation from Lua** (`lua/magit-lsp/keys.lua:70–127,171–207`; `lua/magit-lsp/keymap.lua:122–125`)
   - **Problem:** Lua duplicates canonical grammar validation and repeatedly parses already-validated server keys.
   - **Why it matters:** Boundary duplication.
   - **Change:** Keep canonical-to-native translation, split validated chords without another validator pass, avoid duplicate parsing and delete Rust-owned rejection-rule tests.

@@ -168,7 +168,7 @@ local function step_to_lhs(step)
   return '<' .. table.concat(letters, '-') .. '-' .. name .. '>'
 end
 
---- Split a canonical chord into its step strings, or nil when it is invalid.
+--- Split a canonical chord into its server-provided step strings.
 ---@param chord string
 ---@return string[]|nil
 function M.steps(chord)
@@ -178,12 +178,6 @@ function M.steps(chord)
   local steps = split_ws(chord)
   if #steps == 0 then
     return nil
-  end
-  for _, step in ipairs(steps) do
-    local parsed, err = parse_step(step)
-    if not parsed then
-      return nil, err
-    end
   end
   return steps
 end
@@ -205,7 +199,7 @@ function M.to_lhs(chord)
     end
     out[#out + 1] = lhs
   end
-  return table.concat(out)
+  return table.concat(out), steps
 end
 
 --- Turn a Neovim special-key body such as `C-S-c` or `CR` into canonical.

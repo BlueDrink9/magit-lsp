@@ -110,8 +110,7 @@ function M.apply(bufnr, notice, handlers, opts)
     local local_fn = opts.commands and opts.commands[binding.command]
     if local_fn or not opts.only_commands then
       for _, chord in ipairs(binding.keys or {}) do
-        local lhs = keys.to_lhs(chord)
-        local steps = keys.steps(chord)
+        local lhs, steps = keys.to_lhs(chord)
         if lhs and steps then
           for _, mode in ipairs(binding.modes or { 'normal', 'visual' }) do
             local nvim_mode = mode == 'visual' and 'x' or 'n'

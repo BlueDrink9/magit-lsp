@@ -41,13 +41,6 @@ T['chord steps are exposed for the server'] = function()
   MiniTest.expect.equality(keys.steps('ctrl+k ctrl+s'), { 'ctrl+k', 'ctrl+s' })
   MiniTest.expect.equality(keys.steps('s'), { 's' })
   MiniTest.expect.equality(keys.steps(''), nil)
-  MiniTest.expect.equality(keys.steps('shift+s'), nil)
-end
-
-T['invalid canonical keys are rejected'] = function()
-  for _, canonical in ipairs(FIXTURE.invalidCanonical) do
-    MiniTest.expect.equality(keys.to_lhs(canonical), nil, canonical)
-  end
 end
 
 T['invalid Neovim lhs are rejected'] = function()
