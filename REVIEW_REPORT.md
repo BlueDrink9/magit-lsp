@@ -210,11 +210,12 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A03 — Normalize selections against displayed identities** (`src/commands.rs:1013–1073,1086–1133`; `src/patch.rs:109–123`)
+- [x] **[P1] A03 — Normalize selections against displayed identities** (`src/commands.rs:1013–1073,1086–1133`; `src/patch.rs:109–123`)
   - **Problem:** Selection handling assigns fresh diffs consecutive rows starting at an old file header; external edits/collapsed hunks invalidate those coordinates.
   - **Why it matters:** Visual actions can stage lines other than those selected.
   - **Change:** Resolve displayed tree selections into file/hunk identities and hunk-line offsets. Refresh Git only to verify/re-resolve identities; reject changed content rather than reconstructing old rows from fresh diffs.
   - **Done when:** External edits before a selection and selection below a collapsed hunk preserve the selected identities.
+  - **Evidence (2026-10-27):** Request-tree section/path/content-hunk identities and `line_index` offsets now determine selection operations before fresh Git verification; all selected identities are checked before mutation. Real-Git view tests cover stage/unstage, external preceding edits, collapsed preceding hunks, retained acknowledged sources and changed-content refusal, with exact index/worktree assertions. The required `cargo test --test views --test git_backend --test visibility --test patch_cases && make test && git diff --check` passed. `scripts/ui run tests/ui/scenarios/visual-selection-identities.scn` passed for Vim at 100x30 and 80x24; inspected `build/ui/visual-selection-identities/vim-{100x30,80x24}/{exact-line-staged,exact-line-unstaged}.screen`. Owned manual and scripted UI sessions were stopped. Whole-file selections without displayed hunk identities conservatively refuse rather than guessing hidden content.
   - **Constraints:** Keep patch proptests; no text parsing or positional hunk IDs.
   - **Category:** simplify
   - **Net LOC:** +60

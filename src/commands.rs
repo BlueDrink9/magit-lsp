@@ -12,7 +12,7 @@ use crate::git::{GitLogOptions, GitRepo};
 use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::menu::Menu;
-use crate::patch::FileLayout;
+use crate::patch::{FileLayout, SelectionOp};
 use crate::protocol::{Cursor, Effect, MessageLevel, PromptKind, Selection, ViewPromptParams};
 use crate::session::{re_resolve, OpenView};
 use crate::tree::{Node, NodeKind, Tree};
@@ -1318,18 +1318,15 @@ fn stage_or_unstage_at(
             return Ok(Vec::new());
         }
     }
-    let layouts = match &resolution {
-        dispatch::Resolution::Selection { start, end, .. }
-        | dispatch::Resolution::DiscardSelection { start, end } => layouts_for_selection(
-            &repo,
-            source,
-            *start,
-            *end,
-            command == dispatch::Command::Unstage,
-        )?,
-        _ => Vec::new(),
-    };
-    dispatch::execute(&repo, &resolution, &layouts)
+    match &resolution {
+        dispatch::Resolution::Selection { start, end, reverse } => {
+            execute_displayed_selection(&repo, source, *start, *end, *reverse, false)
+        }
+        dispatch::Resolution::DiscardSelection { start, end } => {
+            execute_displayed_selection(&repo, source, *start, *end, false, true)
+        }
+        _ => dispatch::execute(&repo, &resolution, &[]),
+    }
 }
 
 /// Run a whole-section operation against `repo_path`.
@@ -1338,58 +1335,71 @@ fn run_resolution(repo_path: &str, resolution: dispatch::Resolution) -> Result<V
     dispatch::execute(&repo, &resolution, &[])
 }
 
-/// Parse the file layouts a document-line selection spans.
-///
-/// Only files in the section the command acts on are diffed, so staging a
-/// selection in the unstaged section never reads the index side.
-fn layouts_for_selection(
-    repo: &GitRepo,
-    tree: &Tree,
-    start: u32,
-    end: u32,
-    staged: bool,
-) -> Result<Vec<FileLayout>> {
-    let (start, end) = if start <= end {
-        (start, end)
-    } else {
-        (end, start)
-    };
-    let section = tree
-        .line_nodes
-        .get(start as usize)
-        .or_else(|| tree.line_nodes.get(end as usize))
-        .and_then(|line| line.section.as_deref());
-    let Some(section) = section else {
-        return Ok(Vec::new());
-    };
-    if section != if staged { "staged" } else { "unstaged" } {
-        return Ok(Vec::new());
+/// Resolve displayed coordinates before reading Git; fresh diffs only supply
+/// current patch coordinates for the selected content identities.
+fn execute_displayed_selection(
+    repo: &GitRepo, tree: &Tree, start: u32, end: u32, staged: bool, discard: bool,
+) -> Result<Vec<Effect>> {
+    let (start, end) = (start.min(end) as usize, start.max(end) as usize);
+    let section = if staged { "staged" } else { "unstaged" };
+    // Preserve the selection's originating-section rule.
+    if tree.line_nodes.get(start).or_else(|| tree.line_nodes.get(end))
+        .and_then(|line| line.section.as_deref()) != Some(section) {
+        return Ok(vec![Effect::message(MessageLevel::Info, crate::patch::NO_CHANGED_LINES)]);
     }
-
+    let selected = |node: &Node| start <= node.start_line && node.start_line <= end;
+    let mut ops = Vec::new();
     let mut layouts = Vec::new();
-    for node in tree
-        .nodes
-        .iter()
-        .filter(|node| node.kind == NodeKind::File && node.section.as_deref() == Some(section))
-    {
-        let first = node.start_line as u32;
-        let last = node.end_line as u32;
-        if end < first || start > last {
-            continue;
-        }
-        let Some(path) = node.path.as_deref() else {
-            continue;
-        };
-        let diff = if staged {
-            repo.diff_staged(path)?
+    for file in tree.nodes.iter().filter(|node| node.kind == NodeKind::File
+        && node.section.as_deref() == Some(section)) {
+        if end < file.start_line || start > file.end_line { continue; }
+        let Some(path) = file.path.as_deref() else { continue; };
+        let hunks: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Hunk
+            && node.section.as_deref() == Some(section) && node.path.as_deref() == Some(path)).collect();
+        let first_op = ops.len();
+        if selected(file) {
+            ops.push(SelectionOp::WholeFile { path: path.into() });
         } else {
-            repo.diff_unstaged(path)?
-        };
-        if let Some(layout) = FileLayout::from_diff(&diff, node.start_line as u32) {
-            layouts.push(layout);
+            for hunk in &hunks {
+                let Some(id) = hunk.hunk_id.as_deref() else { continue; };
+                if selected(hunk) {
+                    ops.push(SelectionOp::WholeHunk { path: path.into(), hunk_id: id.into() });
+                } else {
+                    let lines: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Line
+                        && node.section.as_deref() == Some(section) && node.path.as_deref() == Some(path)
+                        && node.hunk_id.as_deref() == Some(id) && selected(node)
+                        && matches!(node.marker, Some('+') | Some('-')))
+                        .filter_map(|node| node.line_index).collect();
+                    if !lines.is_empty() {
+                        ops.push(SelectionOp::Lines { path: path.into(), hunk_id: id.into(), lines });
+                    }
+                }
+            }
         }
+        if ops.len() == first_op { continue; }
+        let diff = if staged { repo.diff_staged(path)? } else { repo.diff_unstaged(path)? };
+        // Layout rows are deliberately unused: operations already contain the
+        // request tree's identities and line_index offsets, not fresh rows.
+        let Some(layout) = FileLayout::from_diff(&diff, 0) else {
+            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+        };
+        let unchanged = ops[first_op..].iter().all(|op| match op {
+            SelectionOp::WholeFile { .. } => {
+                hunks.len() == layout.hunks.len() && hunks.iter().zip(&layout.hunks)
+                    .all(|(old, new)| old.hunk_id.as_deref() == Some(new.hunk.id.as_str()))
+            }
+            SelectionOp::WholeHunk { hunk_id, .. } | SelectionOp::Lines { hunk_id, .. } =>
+                layout.hunks.iter().any(|h| &h.hunk.id == hunk_id),
+        });
+        if !unchanged {
+            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+        }
+        layouts.push(layout);
     }
-    Ok(layouts)
+    // Validate every selected identity before mutating any file.
+    let result = if discard { repo.discard_selection_ops(&layouts, &ops) }
+        else { repo.apply_selection_ops(&layouts, &ops, staged) };
+    errors::effects_for_result(result)
 }
 
 fn dispatch_target(node: &Node) -> dispatch::NodeKind {

@@ -14,6 +14,8 @@ current facts.
 Rename, delete, and reshape protocol methods, config keys and Lua APIs freely.
 Delete the old thing; do not leave shims.
 
+- [x] **Review A03 — Normalize selections against displayed identities:** implemented and verified; acceptance evidence is recorded in `REVIEW_REPORT.md` under A03.
+
 ## Contents
 
 0. Decisions already made

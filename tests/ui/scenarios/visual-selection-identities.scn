@@ -1,0 +1,33 @@
+# A03: real visual selections below a collapsed preceding hunk.
+fixture: clean
+profile: vim
+profile-only: true
+---
+wait
+sh: seq 1 40 | sed 's/^/line/' > f.txt; git add f.txt; git commit -qm 'selection base'; sed -i '3aEARLY' f.txt; sed -i '/^line33$/aSELECTED\nNEIGHBOR' f.txt
+wait screen contains "Unstaged changes (1)"
+goto "@@"
+keys: Tab
+wait
+expect screen not-contains "+EARLY"
+snapshot: preceding-hunk-collapsed
+goto "+SELECTED"
+keys: V s Escape
+wait
+expect screen contains "Staged changes (1)"
+sh: git show :f.txt | grep -qx SELECTED; ! git show :f.txt | grep -Eq 'EARLY|NEIGHBOR'; grep -qx EARLY f.txt; grep -qx NEIGHBOR f.txt
+snapshot: exact-line-staged
+sh: git add f.txt
+keys: G
+wait screen contains "Unstaged changes (0)"
+goto "@@"
+keys: Tab
+wait
+expect screen not-contains "+EARLY"
+goto "+SELECTED"
+keys: V u Escape
+wait
+goto "Unstaged changes"
+expect screen contains "Unstaged changes (1)"
+sh: ! git show :f.txt | grep -qx SELECTED; git show :f.txt | grep -qx EARLY; git show :f.txt | grep -qx NEIGHBOR; grep -qx SELECTED f.txt
+snapshot: exact-line-unstaged

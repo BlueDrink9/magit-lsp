@@ -342,6 +342,55 @@ fn a_visual_selection_stages_only_the_lines_it_covers() {
 }
 
 #[test]
+fn visual_selections_keep_displayed_identities_across_external_edits_and_collapsed_hunks() {
+    let base: String = (1..=40).map(|n| format!("line{n}\n")).collect();
+    let displayed = base.replace("line3\n", "line3\nEARLY\n")
+        .replace("line33\n", "line33\nSELECTED\nNEIGHBOR\n");
+    for reverse in [false, true] {
+        for collapsed in [false, true] {
+            for changed in [false, true] {
+                let (tmp, _repo) = RepoFixture::new()
+                    .commit("init", [("f.txt", base.as_str())])
+                    .modify("f.txt", &displayed).build();
+                if reverse { tmp.git(&["add", "f.txt"]); }
+                let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+                test.ack();
+                if collapsed {
+                    let hunk = test.tree().nodes.iter().find(|node|
+                        node.kind == magit_lsp::tree::NodeKind::Hunk).unwrap().start_line;
+                    test.invoke_at("common.toggle-section", Cursor { line: hunk, column: 0 });
+                    test.ack();
+                }
+                let line = test.goto_text("f.txt", "SELECTED");
+                let version = test.version();
+                let external = displayed.replace("EARLY\n", "EARLY\nEXTERNAL\n")
+                    .replace("SELECTED\n", if changed { "ALTERED\n" } else { "SELECTED\n" });
+                write(&tmp.path().join("f.txt"), &external);
+                if reverse { tmp.git(&["add", "f.txt"]); }
+                let index_before = tmp.git(&["show", ":f.txt"]);
+                // Retain the acknowledged source while a newer render is outstanding.
+                test.refresh();
+                let outcome = test.invoke_at_version(
+                    if reverse { "status.unstage" } else { "status.stage" },
+                    version, Some(Cursor { line, column: 0 }),
+                    Some(Selection { start_line: line, end_line: line }), None,
+                );
+                if changed {
+                    assert_eq!(message_texts(&outcome.effects), vec![errors::HUNK_CHANGED]);
+                    assert_eq!(tmp.git(&["show", ":f.txt"]), index_before);
+                } else {
+                    assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
+                    let expected = if reverse { external.replace("SELECTED\n", "") }
+                        else { base.replace("line33\n", "line33\nSELECTED\n") };
+                    assert_eq!(tmp.git(&["show", ":f.txt"]), expected);
+                }
+                assert_eq!(std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(), external);
+            }
+        }
+    }
+}
+
+#[test]
 fn stage_all_and_unstage_all_run_through_the_view() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

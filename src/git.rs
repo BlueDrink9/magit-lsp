@@ -569,6 +569,12 @@ impl GitRepo {
         let Selection::Ops(ops) = patch::normalise_selection(files, start, end) else {
             return Ok(false);
         };
+        self.discard_selection_ops(files, &ops)
+    }
+
+    /// Discard identity-resolved operations using verified fresh diffs.
+    pub fn discard_selection_ops(&self, files: &[FileLayout], ops: &[SelectionOp]) -> Result<bool> {
+        if ops.is_empty() { return Ok(false); }
         for file in files {
             let file_ops: Vec<&SelectionOp> =
                 ops.iter().filter(|op| op.path() == file.path).collect();
@@ -670,6 +676,12 @@ impl GitRepo {
             return Ok(false);
         };
 
+        self.apply_selection_ops(files, &ops, reverse)
+    }
+
+    /// Apply identity-resolved operations using verified fresh diffs.
+    pub fn apply_selection_ops(&self, files: &[FileLayout], ops: &[SelectionOp], reverse: bool) -> Result<bool> {
+        if ops.is_empty() { return Ok(false); }
         for file in files {
             let file_ops: Vec<&SelectionOp> = ops
                 .iter()
