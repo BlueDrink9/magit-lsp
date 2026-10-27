@@ -57,15 +57,14 @@ pub enum Effect {
         line: u32,
         column: u32,
     },
-    /// Open a Git-owned file in the client's own editor and keep the operation
-    /// that spawned Git waiting until `common.confirm`/`common.cancel` answers
-    /// with the same `edit_id`. The metadata is selected by the server: `scope`
-    /// is the keymap/command scope for the edit, and the current bridge edits
-    /// real files only.
+    /// Open a managed commit draft; only full-sync LSP notifications carry edits.
+    /// Save checkpoints without releasing Git; versioned finish writes it back.
     EditDocument {
-        #[serde(rename = "editId")]
-        edit_id: String,
-        path: String,
+        #[serde(rename = "runId")]
+        run_id: String,
+        uri: String,
+        text: String,
+        version: i32,
         kind: String,
         title: String,
         mode: EditDocumentMode,
@@ -74,17 +73,14 @@ pub enum Effect {
 }
 
 /// How an editor-bridge document is edited.
-///
-/// The bridge currently supports Git-owned real files; virtual edit documents
-/// require a separate implementation before adding another mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditDocumentMode {
-    /// keep-for: TASKS §3.10 bridge contract; clients currently assume real-file mode.
-    RealFile,
+    /// Server-owned mutable document, never an editable Git filesystem path.
+    ManagedDraft,
 }
 
-/// Managed-draft finish intent (§3.10); not yet dispatched on the production wire.
+/// Managed-draft finish intent (§3.10).
 /// LSP didClose is detach only and never supplies either intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -93,6 +89,44 @@ pub enum DraftFinishReason {
     Confirm,
     /// Native Save/Discard selected the saved checkpoint, possibly older than live.
     NormalClose,
+}
+
+/// Exact applied full-sync checkpoint requested by `draft/save` (no text).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftSaveParams {
+    /// Server-issued run, not a repository or owner supplied by the client.
+    pub run_id: String,
+    /// Exact opaque document URI announced for this run.
+    pub uri: String,
+    /// Exact applied live version to checkpoint.
+    pub version: i32,
+}
+
+/// Selected checkpoint and native intent requested by `draft/finish` (no text).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftFinishParams {
+    /// Server-issued run identity.
+    pub run_id: String,
+    /// Exact opaque document URI.
+    pub uri: String,
+    /// Selected saved version, not necessarily the newest live version on close.
+    pub version: i32,
+    /// Explicit confirm or positively classified user close.
+    pub reason: DraftFinishReason,
+}
+
+/// Correlated JSON-RPC result, acknowledged only after checkpoint/write succeeds.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
+pub enum DraftResponse {
+    /// The exact applied live snapshot is now saved; Git remains pending.
+    #[serde(rename = "draft/checkpointed")]
+    Checkpointed { run_id: String, uri: String, version: i32 },
+    /// The selected saved snapshot was written and the helper released.
+    #[serde(rename = "draft/finished")]
+    Finished { run_id: String, uri: String, version: i32 },
 }
 
 impl Effect {

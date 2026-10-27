@@ -2,13 +2,13 @@
 //!
 //! Git cannot open an editor itself: it runs a helper process, which joins the
 //! server over a Unix socket, forwards the file Git wants edited, and blocks
-//! until the client answers `common.confirm` or `common.cancel`. All state
+//! until a validated `draft/finish` or cancellation. All state
 //! stays here in the server; the helper only connects, forwards and exits.
 //!
 //! Three parties share [`EditRegistry`] through a process-global map keyed by
-//! `editId`: the worker that spawns Git (creates the entry), the socket
+//! opaque run: the worker that spawns Git (creates the entry), the socket
 //! listener (takes the reply receiver, sends `editDocument`, answers the
-//! helper) and the confirm/cancel command handlers (send the reply).
+//! helper) and the ordered draft/cancel handlers (validate and send the reply).
 
 use crate::git::GitRepo;
 use crate::protocol::{EditDocumentMode, Effect};
@@ -17,10 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock};
 
-/// Managed commit-draft core; wire dispatch and client cutover are separate.
+/// Managed commit-draft state and validated writeback.
 #[cfg(unix)]
 pub mod draft;
 
@@ -28,6 +27,8 @@ pub mod draft;
 pub const SOCKET_ENV: &str = "MAGIT_LSP_SOCKET";
 /// Environment variable carrying the pending edit id to Git and the helper.
 pub const EDIT_ID_ENV: &str = "MAGIT_LSP_EDIT_ID";
+/// Private one-shot credential inherited by the spawned Git editor helper.
+pub const HELPER_TOKEN_ENV: &str = "MAGIT_LSP_HELPER_TOKEN";
 /// The kind the helper reports for Git's commit message file.
 pub const COMMIT_MESSAGE_KIND: &str = "commit-message";
 
@@ -36,6 +37,7 @@ pub const COMMIT_MESSAGE_KIND: &str = "commit-message";
 #[serde(rename_all = "camelCase")]
 struct EditHello {
     edit_id: String,
+    token: String,
     path: String,
     kind: String,
 }
@@ -77,48 +79,95 @@ struct EditEntry {
     replies: std_mpsc::Sender<Reply>,
     /// Taken by the listener once the helper joins, then blocked on.
     waiting: Option<std_mpsc::Receiver<Reply>>,
+    #[cfg(unix)]
+    draft: draft::Draft,
+    owner: String,
+    completed: std_mpsc::Receiver<bool>,
+    completion: std_mpsc::Sender<bool>,
 }
 
 /// The process-global map of edits Git is waiting on.
 pub struct EditRegistry {
     entries: Mutex<HashMap<String, EditEntry>>,
-    next_id: AtomicU64,
 }
 
 impl EditRegistry {
     fn new() -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(0),
         }
     }
 
-    /// Register a pending edit for `repo_path` and return its id.
-    pub fn create(&self, repo_path: &str) -> String {
-        let next = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        let edit_id = format!("e{next}");
+    /// Allocate a draft before Git, bound to a trusted connection and repository.
+    #[cfg(unix)]
+    pub fn create(&self, repo_path: &str, owner: &str) -> Result<String> {
+        let repo = GitRepo::open(repo_path)?;
+        let draft = draft::Draft::new(&repo, owner)?;
+        let edit_id = draft.run_id().to_string();
         let (replies, waiting) = std_mpsc::channel();
+        let (completion, completed) = std_mpsc::channel();
         self.lock().insert(
             edit_id.clone(),
             EditEntry {
                 repo_path: repo_path.to_string(),
                 replies,
                 waiting: Some(waiting),
+                draft,
+                owner: owner.to_string(),
+                completed, completion,
             },
         );
-        edit_id
+        Ok(edit_id)
     }
 
-    /// The owning repository plus the reply receiver, once the helper joins.
-    pub fn take_waiter(&self, edit_id: &str) -> Option<(String, std_mpsc::Receiver<Reply>)> {
+    /// Managed drafts require the Unix helper/validated file-descriptor boundary.
+    #[cfg(not(unix))]
+    pub fn create(&self, _repo_path: &str, _owner: &str) -> Result<String> {
+        Err(Error::new("managed commit drafts require Unix"))
+    }
+
+    /// Apply an operation under the registry's sole lifecycle lock. Repository
+    /// and owner come from trusted server state, never client parameters.
+    #[cfg(unix)]
+    pub(crate) fn apply<T>(
+        &self, owner: &str, run_id: &str, uri: &str,
+        action: impl FnOnce(&mut draft::Draft, draft::DraftContext<'_>) -> Result<T>,
+    ) -> Result<T> {
         let mut entries = self.lock();
-        let entry = entries.get_mut(edit_id)?;
-        let waiting = entry.waiting.take()?;
-        Some((entry.repo_path.clone(), waiting))
+        let entry = entries.get_mut(run_id).ok_or_else(|| Error::new("Commit draft run is not pending"))?;
+        let repository = entry.draft.repository().to_path_buf();
+        let result = action(&mut entry.draft, draft::DraftContext { owner, run_id, uri, repository: &repository })?;
+        if entry.draft.is_terminal() {
+            let entry = entries.remove(run_id).unwrap();
+            entry.replies.send(Reply::Ok).map_err(|_| Error::new("Commit draft helper disconnected"))?;
+            drop(entries);
+            if entry.completed.recv_timeout(std::time::Duration::from_secs(2)) != Ok(true) {
+                return Err(Error::new("Commit draft helper did not accept completion"));
+            }
+        }
+        Ok(result)
     }
 
-    /// Answer a pending edit and drop it; `false` when no such edit is pending.
+    /// Resolve the exact issued URI on this connection for standard LSP sync.
+    #[cfg(unix)]
+    pub fn run_for_uri(&self, owner: &str, uri: &str) -> Result<String> {
+        self.lock().iter().find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
+            .map(|(id, _)| id.clone()).ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
+    }
+
+    /// Private credential for Git's environment; never exposed on the LSP wire.
+    fn helper_token(&self, edit_id: &str) -> Result<String> {
+        #[cfg(unix)]
+        if let Some(entry) = self.lock().get(edit_id) {
+            return Ok(entry.draft.helper_token().to_string());
+        }
+        Err(Error::new("Commit draft run is not pending"))
+    }
+
+    /// Abort and drop a pending run. Unvalidated `Ok` release is always rejected.
     pub fn resolve(&self, edit_id: &str, reply: Reply) -> bool {
+        // Successful release is possible only through validated draft.finish.
+        if reply == Reply::Ok { return false; }
         let entry = self.lock().remove(edit_id);
         match entry {
             Some(entry) => {
@@ -192,12 +241,14 @@ pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<crate::gi
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
+    let token = registry().helper_token(edit_id)?;
     let env = [
         ("GIT_EDITOR", editor.as_str()),
         ("EDITOR", editor.as_str()),
         ("VISUAL", editor.as_str()),
         (SOCKET_ENV, socket.as_ref()),
         (EDIT_ID_ENV, edit_id),
+        (HELPER_TOKEN_ENV, token.as_str()),
     ];
     repo.commit(&[], &env)
 }
@@ -291,6 +342,7 @@ fn unix_helper(file: &str) -> Result<bool> {
         .map_err(|error| Error::new(format!("cannot connect to the editor bridge: {error}")))?;
     let hello = EditHello {
         edit_id,
+        token: std::env::var(HELPER_TOKEN_ENV).map_err(|_| Error::new("editor helper credential is not set"))?,
         path: path.to_string_lossy().into_owned(),
         kind: COMMIT_MESSAGE_KIND.to_string(),
     };
@@ -462,25 +514,51 @@ fn handle_edit(
     emitter: EffectEmitter,
     hello: EditHello,
 ) -> Result<()> {
-    let Some((repo_path, replies)) = registry().take_waiter(&hello.edit_id) else {
-        // An edit nobody started (a stale helper, or a restarted server) must
-        // fail fast instead of blocking Git forever.
-        return write_reply(stream, false, None);
+    let (replies, completion) = {
+        let mut entries = registry().lock();
+        let Some(entry) = entries.get_mut(&hello.edit_id) else {
+            return write_reply(stream, false, None);
+        };
+        let uri = entry.draft.uri().to_string();
+        let repository = entry.draft.repository().to_path_buf();
+        let context = draft::DraftContext {
+            owner: &entry.owner, run_id: &hello.edit_id, uri: &uri, repository: &repository,
+        };
+        if entry.draft.accept_helper(context, &hello.token, &hello.kind, Path::new(&hello.path)).is_err() {
+            return write_reply(stream, false, None);
+        }
+        let Some(replies) = entry.waiting.take() else {
+            return write_reply(stream, false, None);
+        };
+        tracing::debug!(edit_id = %hello.edit_id, repo = %entry.repo_path, "editor bridge: edit");
+        let metadata = edit_document_metadata(&hello.kind);
+        emitter(vec![Effect::EditDocument {
+            run_id: hello.edit_id.clone(), uri,
+            text: entry.draft.initial().unwrap().to_string(), version: 1,
+            kind: hello.kind, title: metadata.title.to_string(),
+            mode: EditDocumentMode::ManagedDraft, scope: metadata.scope.to_string(),
+        }]);
+        (replies, entry.completion.clone())
     };
-    tracing::debug!(edit_id = %hello.edit_id, repo = %repo_path, "editor bridge: edit");
-    let metadata = edit_document_metadata(&hello.kind);
-    emitter(vec![Effect::EditDocument {
-        edit_id: hello.edit_id.clone(),
-        path: hello.path,
-        kind: hello.kind,
-        title: metadata.title.to_string(),
-        mode: EditDocumentMode::RealFile,
-        scope: metadata.scope.to_string(),
-    }]);
-
-    let reply = replies.recv().unwrap_or(Reply::Abort);
-    registry().remove(&hello.edit_id);
-    write_reply(stream, reply == Reply::Ok, None)
+    let reply = loop {
+        match replies.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(reply) => break reply,
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => break Reply::Abort,
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                use std::os::fd::AsRawFd;
+                let mut byte = 0u8;
+                // SAFETY: the live socket and one-byte writable buffer are valid.
+                let received = unsafe { libc::recv(stream.as_raw_fd(), (&mut byte as *mut u8).cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
+                if received == 0 || (received < 0 && !matches!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted)) {
+                    registry().resolve(&hello.edit_id, Reply::Abort);
+                    break Reply::Abort;
+                }
+            }
+        }
+    };
+    let result = write_reply(stream, reply == Reply::Ok, None);
+    let _ = completion.send(result.is_ok());
+    result
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

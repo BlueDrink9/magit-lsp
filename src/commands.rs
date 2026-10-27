@@ -301,9 +301,9 @@ impl<'a> CommandCtx<'a> {
             .unwrap_or(false)
     }
 
-    /// The pending edit a confirm/cancel invocation refers to.
-    pub fn edit_id(&self) -> Option<&str> {
-        self.args?.get("editId")?.as_str()
+    /// The opaque managed run a confirm/cancel invocation refers to.
+    pub fn draft_run_id(&self) -> Option<&str> {
+        self.args?.get("runId")?.as_str()
     }
 
     /// Take the collected effects, consuming the context.
@@ -1069,7 +1069,7 @@ fn visit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome::default())
 }
 
-/// Confirm answers the pending editor bridge edit, if the invocation names one.
+/// Confirm a commit selection; managed drafts require versioned save/finish.
 fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     if ctx.view.commit_selection().is_some() {
         let Some(tree) = ctx.view.command_source_tree() else {
@@ -1086,21 +1086,18 @@ fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         }
         return Ok(CommandOutcome { selected_commits: Some(selected), ..Default::default() });
     }
-    let Some(edit_id) = ctx.edit_id() else {
+    if ctx.draft_run_id().is_none() {
         ctx.info("Nothing to confirm");
         return Ok(CommandOutcome::default());
-    };
-    if editor::registry().resolve(edit_id, Reply::Ok) {
-        return Ok(CommandOutcome::default());
     }
-    ctx.info("Nothing to confirm");
+    ctx.info("Use draft/save and draft/finish with the exact commit draft version");
     Ok(CommandOutcome::default())
 }
 
 /// Cancel closes a menu, aborts a pending editor bridge edit, falls through
 /// when the user has a visual selection, and is a quiet no-op otherwise.
 fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    if let Some(edit_id) = ctx.edit_id() {
+    if let Some(edit_id) = ctx.draft_run_id() {
         if editor::registry().resolve(edit_id, Reply::Abort) {
             return Ok(CommandOutcome::default());
         }

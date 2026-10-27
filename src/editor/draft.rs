@@ -1,10 +1,10 @@
-//! Bounded server-owned commit drafts, ready for registry/connection dispatch.
+//! Bounded server-owned commit drafts used by the production editor registry.
 //!
 //! The caller must serialize this object with the run's sole lifecycle owner,
 //! derive `owner`/`repository` from the authenticated connection, and forward a
-//! returned terminal reply to the helper. No existing realFile dispatch uses this
-//! core yet. Text travels only through full-sync didOpen/didChange; save and
-//! finish carry versions, not text. Errors never include message bodies/tokens.
+//! returned terminal reply to the helper. Text travels only through full-sync
+//! didOpen/didChange; save and finish carry versions, not text. Errors never
+//! include message bodies/tokens.
 
 use super::{Reply, COMMIT_MESSAGE_KIND};
 use crate::git::GitRepo;

@@ -105,6 +105,8 @@ impl Default for ClientCaps {
 /// Server state shared by concurrent request handlers.
 #[derive(Clone)]
 struct Shared {
+    /// Trusted identity allocated for this transport, never read from client JSON.
+    draft_owner: Arc<String>,
     repo_locks: RepoLocks,
     /// Open views per repository root.
     sessions: Arc<Mutex<HashMap<String, Session>>>,
@@ -148,7 +150,9 @@ impl Shared {
         startup_error: Option<String>,
         sender: mpsc::UnboundedSender<Message>,
     ) -> Self {
+        static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
         Self {
+            draft_owner: Arc::new(format!("connection-{}", NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed))),
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             view_repos: Arc::new(Mutex::new(HashMap::new())),
@@ -715,14 +719,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // their own bindings and ignore it.
                 if dynamic_delivery(&client) {
                     for effect in &effects {
-                        if let Effect::EditDocument { edit_id, kind, .. } = effect {
+                        if let Effect::EditDocument { run_id, kind, .. } = effect {
                             let config = configs
                                 .lock()
                                 .unwrap_or_else(|p| p.into_inner())
-                                .get(edit_id)
+                                .get(run_id)
                                 .cloned();
                             if let Some(keymap) =
-                                config.and_then(|config| edit_keymap(&config, edit_id, kind))
+                                config.and_then(|config| edit_keymap(&config, run_id, kind))
                             {
                                 let _ = sender.send(Message::Notification(Notification::new(
                                     VIEW_KEYMAP.to_string(),
@@ -829,6 +833,25 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let _ = sender.send(Message::Response(Response::new_err(request.id, ErrorCode::InvalidRequest as i32, "server is shutting down".to_string())));
                     continue;
                 }
+                // Draft barriers and full-sync notifications execute on the
+                // reader's ordered lane, never in unordered request tasks.
+                if matches!(request.method.as_str(), "draft/save" | "draft/finish") {
+                    let response = match draft_request(&shared, &request) {
+                        Ok(result) => Response::new_ok(request.id, result),
+                        Err(error) => {
+                            let mut response = Response::new_err(request.id, ErrorCode::InvalidParams as i32, error.to_string());
+                            if let Err(error) = &mut response.response_result {
+                                error.data = Some(serde_json::json!({
+                                    "runId": request.params.get("runId"), "uri": request.params.get("uri"),
+                                    "version": request.params.get("version"), "recoverable": true,
+                                }));
+                            }
+                            response
+                        }
+                    };
+                    let _ = sender.send(Message::Response(response));
+                    continue;
+                }
                 tracing::debug!(method = %request.method, "request");
                 let turn = mutation_repo_path(&shared, &request.method, &request.params)
                     .map(|repo_path| shared.reserve_mutation(repo_path));
@@ -870,6 +893,17 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // The client aborts the mutation running under this token.
                 "window/workDoneProgress/cancel" => {
                     shared.cancel_progress(&notification.params);
+                }
+                "textDocument/didOpen" | "textDocument/didChange" | "textDocument/didClose" => {
+                    let uri = notification.params.pointer("/textDocument/uri").and_then(Value::as_str).unwrap_or("");
+                    if uri.starts_with("magit-commit:") {
+                        if let Err(error) = draft_notification(&shared, &notification) {
+                            let _ = sender.send(Message::Notification(Notification::new("draft/error".to_string(), serde_json::json!({
+                                "uri": uri, "version": notification.params.pointer("/textDocument/version"),
+                                "method": notification.method, "message": error.to_string(), "recoverable": true,
+                            }))));
+                        }
+                    }
                 }
                 // The server owns the document; other client notifications are
                 // not needed to keep view state in sync.
@@ -1078,6 +1112,74 @@ async fn dispatch_response(
             Vec::new(),
         ),
     }
+}
+
+/// Checkpoint/finish on the receive-order lane; JSON-RPC ids correlate results.
+#[cfg(unix)]
+fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
+    let response = match request.method.as_str() {
+        "draft/save" => {
+            let p: DraftSaveParams = from_params(request.params.clone())?;
+            let version = editor::registry().apply(&shared.draft_owner, &p.run_id, &p.uri,
+                |draft, context| draft.save(context, p.version))?;
+            DraftResponse::Checkpointed { run_id: p.run_id, uri: p.uri, version }
+        }
+        "draft/finish" => {
+            let p: DraftFinishParams = from_params(request.params.clone())?;
+            editor::registry().apply(&shared.draft_owner, &p.run_id, &p.uri,
+                |draft, context| draft.finish(context, p.version, p.reason))?;
+            DraftResponse::Finished { run_id: p.run_id, uri: p.uri, version: p.version }
+        }
+        _ => return Err(Error::new("Unknown commit draft request")),
+    };
+    serde_json::to_value(response).map_err(|error| Error::new(error.to_string()))
+}
+
+/// Apply only standard full-sync LSP text; close detaches without confirming.
+#[cfg(unix)]
+fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
+    use lsp_types::{DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams};
+    if shared.closing.load(Ordering::SeqCst) { return Err(Error::new("Server is shutting down")); }
+    match notification.method.as_str() {
+        "textDocument/didOpen" => {
+            let p: DidOpenTextDocumentParams = from_params(notification.params.clone())?;
+            let doc = p.text_document;
+            let uri = doc.uri.as_str();
+            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
+            editor::registry().apply(&shared.draft_owner, &run, uri,
+                |draft, context| draft.did_open(context, doc.version, doc.text.as_bytes()))
+        }
+        "textDocument/didChange" => {
+            let p: DidChangeTextDocumentParams = from_params(notification.params.clone())?;
+            if p.content_changes.len() != 1 || p.content_changes[0].range.is_some() || p.content_changes[0].range_length.is_some() {
+                return Err(Error::new("Commit drafts require exactly one full-sync text change"));
+            }
+            let uri = p.text_document.uri.as_str();
+            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
+            editor::registry().apply(&shared.draft_owner, &run, uri,
+                |draft, context| draft.did_change(context, p.text_document.version, p.content_changes[0].text.as_bytes()))
+        }
+        "textDocument/didClose" => {
+            let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
+            let uri = p.text_document.uri.as_str();
+            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
+            editor::registry().apply(&shared.draft_owner, &run, uri,
+                |draft, context| draft.did_close(context))
+        }
+        _ => Err(Error::new("Unknown commit draft notification")),
+    }
+}
+
+/// Reject managed drafts on platforms without the validated helper boundary.
+#[cfg(not(unix))]
+fn draft_request(_shared: &Shared, _request: &Request) -> Result<Value> {
+    Err(Error::new("managed commit drafts require Unix"))
+}
+
+/// Reject managed draft sync on platforms without Unix support.
+#[cfg(not(unix))]
+fn draft_notification(_shared: &Shared, _notification: &Notification) -> Result<()> {
+    Err(Error::new("managed commit drafts require Unix"))
 }
 
 /// Apply a client notification that changes session state.
@@ -1636,7 +1738,13 @@ fn spawn_commit(shared: Shared, repo: String) {
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
-    let edit_id = editor::registry().create(&repo);
+    let edit_id = match editor::registry().create(&repo, &shared.draft_owner) {
+        Ok(id) => id,
+        Err(error) => {
+            let _ = sender.send(show_message(1, format!("Cannot open commit draft: {error}")));
+            return;
+        }
+    };
     shared
         .edit_configs
         .lock()
@@ -1756,6 +1864,10 @@ fn capabilities() -> Result<Value> {
     // server advertises the window features it drives so thin clients can
     // enable them without a second handshake.
     if let Some(object) = capabilities.as_object_mut() {
+        object.insert(
+            "textDocumentSync".to_string(),
+            serde_json::json!({ "openClose": true, "change": 1 }),
+        );
         object.insert(
             "window".to_string(),
             serde_json::json!({ "workDoneProgress": true }),
@@ -1888,6 +2000,8 @@ mod commit_tests {
     #[test]
     fn commit_edit_releases_registry_and_repository_config_together() {
         let tmp = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git").args(["init", "-q"])
+            .current_dir(tmp.path()).status().unwrap().success());
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "").unwrap();
         let config = Arc::new(
@@ -1898,7 +2012,7 @@ mod commit_tests {
             .unwrap(),
         );
         let retained = Arc::downgrade(&config);
-        let id = editor::registry().create(tmp.path().to_str().unwrap());
+        let id = editor::registry().create(tmp.path().to_str().unwrap(), "test-connection").unwrap();
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
         let edit = CommitEdit {
             id: id.clone(),

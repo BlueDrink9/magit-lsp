@@ -14,6 +14,52 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+#[test]
+fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_input() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", "initial\n")])
+        .staged_file("f.txt", "staged\n").build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let mut response = false;
+    let mut edit = None;
+    while !response || edit.is_none() {
+        let message = server.recv();
+        if message["id"] == 4 { response = true; }
+        if message["method"] == "view/effects" {
+            edit = message["params"]["effects"].as_array().unwrap().iter()
+                .find(|e| e["type"] == "editDocument").cloned().or(edit);
+        }
+    }
+    let edit = edit.unwrap();
+    let messages = [
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":7},"contentChanges":[{"text":"Saved but never confirmed\n"}]}}),
+        json!({"jsonrpc":"2.0","id":10,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":7}}),
+    ];
+    server.send_raw(&messages.into_iter().flat_map(frame).collect::<Vec<_>>());
+    assert_eq!(server.response_with_id(10)["result"]["version"], 7);
+    let messages = [
+        json!({"jsonrpc":"2.0","id":19,"method":"shutdown","params":null}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":8},"contentChanges":[{"text":"Too late\n"}]}}),
+        json!({"jsonrpc":"2.0","id":20,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":8}}),
+        json!({"jsonrpc":"2.0","id":21,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":7,"reason":"normal-close"}}),
+    ];
+    server.send_raw(&messages.into_iter().flat_map(frame).collect::<Vec<_>>());
+    assert_eq!(server.response_with_id(19)["result"], Value::Null);
+    assert!(server.response_with_id(20)["error"].is_object());
+    assert!(server.response_with_id(21)["error"].is_object());
+    assert!(server.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == edit["uri"] && n["params"]["version"] == 8));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+    assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
+    server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 /// Open a status view and consume its initial render and keymap pushes.
 fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     server.send(open_view_message(id, repo));

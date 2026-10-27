@@ -1,5 +1,5 @@
 //! The editor bridge end to end (R-3.4): a real `git commit` waits for the
-//! client to edit Git's message file, then continues or aborts.
+//! client to synchronize/checkpoint a managed draft, then continues or aborts.
 
 mod common;
 
@@ -113,6 +113,36 @@ fn invoke(server: &mut TestServer, id: i64, view_id: &str, command: &str, args: 
             "args": args,
         },
     }));
+    server.response_with_id(id)
+}
+
+/// Attach to the exact announced template, then synchronize the edited message.
+fn sync_draft(server: &mut TestServer, edit: &Value, text: &str) {
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}
+    }}));
+    change_draft(server, edit, 2, text);
+}
+
+/// Send the sole supported full-sync text channel.
+fn change_draft(server: &mut TestServer, edit: &Value, version: i32, text: &str) {
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":edit["uri"],"version":version},"contentChanges":[{"text":text}]
+    }}));
+}
+
+/// Checkpoint and finish using correlated exact-version requests, never a file.
+fn finish_draft(server: &mut TestServer, id: i64, edit: &Value) -> Value {
+    let saved = draft_request(server, id + 1000, "draft/save", edit, 2, None);
+    assert_eq!(saved["result"]["type"], "draft/checkpointed", "{saved}");
+    draft_request(server, id, "draft/finish", edit, 2, Some("confirm"))
+}
+
+/// Issue a typed draft barrier without any message text or owner/repository.
+fn draft_request(server: &mut TestServer, id: i64, method: &str, edit: &Value, version: i32, reason: Option<&str>) -> Value {
+    let mut params = json!({"runId":edit["runId"],"uri":edit["uri"],"version":version});
+    if let Some(reason) = reason { params["reason"] = json!(reason); }
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
     server.response_with_id(id)
 }
 
@@ -350,27 +380,17 @@ fn a_commit_is_created_from_the_typed_message() {
     let _menu = invoke(&mut server, 3, &status, "open.commit", json!(null));
 
     let edit = start_commit(&mut server, &status);
-    let edit_id = edit["editId"].as_str().expect("edit id").to_string();
-    let path = edit["path"].as_str().expect("edit path");
+    assert!(edit["runId"].is_string());
+    assert!(edit.get("editId").is_none());
+    assert!(edit.get("path").is_none());
+    assert!(edit["uri"].as_str().unwrap().starts_with("magit-commit://"));
     assert_eq!(edit["kind"], json!("commit-message"), "{edit}");
     assert_eq!(edit["title"], json!("Commit message"), "{edit}");
-    assert_eq!(edit["mode"], json!("realFile"), "{edit}");
+    assert_eq!(edit["mode"], json!("managedDraft"), "{edit}");
     assert_eq!(edit["scope"], json!("commit-message"), "{edit}");
-    write(Path::new(path), "Bridge commit message\n");
-
-    let confirmed = invoke(
-        &mut server,
-        5,
-        &status,
-        "common.confirm",
-        json!({"editId": edit_id}),
-    );
-    assert!(
-        confirmed["result"]["effects"]
-            .as_array()
-            .is_some_and(|effects| effects.is_empty()),
-        "confirm reports nothing: {confirmed}"
-    );
+    sync_draft(&mut server, &edit, "Bridge commit message\n");
+    let confirmed = finish_draft(&mut server, 5, &edit);
+    assert_eq!(confirmed["result"]["type"], "draft/finished", "{confirmed}");
 
     wait_for_commit(&tmp, "Bridge commit message");
     assert_eq!(
@@ -382,6 +402,262 @@ fn a_commit_is_created_from_the_typed_message() {
     server.shutdown_and_exit();
     let exit = server.finish(Duration::from_secs(20));
     assert!(exit.success(), "server exited: {exit:?}");
+}
+
+#[test]
+fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
+    let (tmp, _) = staged_repo();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let target = tmp.path().join(".git/COMMIT_EDITMSG");
+    let mut server = TestServer::spawn(&[]);
+    let initialized = server.initialize(json!({}));
+    assert_eq!(initialized["result"]["capabilities"]["textDocumentSync"], json!({"openClose":true,"change":1}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let edit = start_commit(&mut server, &status);
+    assert_eq!(edit["version"], 1);
+    assert_eq!(read(&target), edit["text"].as_str().unwrap());
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":2,"text":edit["text"]}
+    }}));
+    sync_draft(&mut server, &edit, "Earlier live\n");
+    change_draft(&mut server, &edit, 9, "Chosen checkpoint\n\n# preserved comment\n");
+    let unapplied = draft_request(&mut server, 10, "draft/save", &edit, 8, None);
+    assert_eq!(unapplied["error"]["data"], json!({"runId":edit["runId"],"uri":edit["uri"],"version":8,"recoverable":true}));
+    let saved = draft_request(&mut server, 11, "draft/save", &edit, 9, None);
+    assert_eq!(saved["result"], json!({"type":"draft/checkpointed","runId":edit["runId"],"uri":edit["uri"],"version":9}));
+    // Save and the old common.confirm route cannot release Git or write its file.
+    let bypass = invoke(&mut server, 12, &status, "common.confirm", json!({"runId":edit["runId"]}));
+    assert!(!bypass["result"]["effects"].as_array().unwrap().is_empty());
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(read(&target), edit["text"].as_str().unwrap());
+
+    for version in [8, 9] { change_draft(&mut server, &edit, version, "Invalid stale text\n"); }
+    change_draft(&mut server, &edit, 10, &"x".repeat(magit_lsp::editor::draft::MAX_DRAFT_BYTES + 1));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":edit["uri"],"version":10},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"Not full sync"}]
+    }}));
+    assert!(draft_request(&mut server, 13, "draft/save", &edit, 10, None)["error"].is_object());
+    let mut wrong = edit.clone();
+    wrong["runId"] = json!("wrong-run");
+    assert!(draft_request(&mut server, 14, "draft/save", &wrong, 9, None)["error"].is_object());
+    wrong = edit.clone();
+    wrong["uri"] = json!("magit-commit://wrong-run/message");
+    assert!(draft_request(&mut server, 15, "draft/save", &wrong, 9, None)["error"].is_object());
+    // Barrier payloads are not a second text channel.
+    server.send(json!({"jsonrpc":"2.0","id":16,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":9,"text":"Forbidden"}}));
+    assert!(server.response_with_id(16)["error"].is_object());
+
+    change_draft(&mut server, &edit, 11, "Unsaved newer text must not land\n");
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":11,"text":"Unsaved newer text must not land\n"}
+    }}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
+    assert!(draft_request(&mut server, 17, "draft/finish", &edit, 9, Some("confirm"))["error"].is_object());
+    assert!(draft_request(&mut server, 18, "draft/finish", &edit, 8, Some("normal-close"))["error"].is_object());
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "detach is not close intent");
+    let closed = draft_request(&mut server, 19, "draft/finish", &edit, 9, Some("normal-close"));
+    assert_eq!(closed["result"], json!({"type":"draft/finished","runId":edit["runId"],"uri":edit["uri"],"version":9}));
+    wait_for_commit(&tmp, "Chosen checkpoint");
+    assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
+    assert!(draft_request(&mut server, 20, "draft/finish", &edit, 9, Some("normal-close"))["error"].is_object());
+    change_draft(&mut server, &edit, 12, "Late terminal text\n");
+    assert!(draft_request(&mut server, 21, "draft/save", &edit, 12, None)["error"].is_object());
+    let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "draft/error").collect();
+    assert_eq!(errors.len(), 6, "wrong-open, stale, duplicate, oversized, range and terminal errors: {errors:?}");
+    assert!(errors.iter().all(|n| n["params"]["uri"] == edit["uri"] && n["params"]["recoverable"] == true));
+    assert!(errors.iter().any(|n| n["params"]["version"] == 10));
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_draft_stdio_failed_write_retains_helper_and_selected_checkpoint() {
+    use std::os::unix::fs::symlink;
+    let (tmp, _) = staged_repo();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let target = tmp.path().join(".git/COMMIT_EDITMSG");
+    let held = tmp.path().join(".git/held-message");
+    let neighbor = tmp.path().join("neighbor.txt");
+    write(&neighbor, "Neighbor must survive\n");
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let edit = start_commit(&mut server, &status);
+    sync_draft(&mut server, &edit, "Recovered checkpoint\n");
+    assert!(draft_request(&mut server, 10, "draft/save", &edit, 2, None)["error"].is_null());
+    std::fs::rename(&target, &held).unwrap();
+    symlink(&neighbor, &target).unwrap();
+    let failed = draft_request(&mut server, 11, "draft/finish", &edit, 2, Some("confirm"));
+    assert_eq!(failed["error"]["data"]["recoverable"], true);
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(read(&neighbor), "Neighbor must survive\n");
+    assert_eq!(read(&held), edit["text"].as_str().unwrap());
+    std::fs::remove_file(&target).unwrap();
+    std::fs::rename(&held, &target).unwrap();
+    let retried = draft_request(&mut server, 12, "draft/finish", &edit, 2, Some("confirm"));
+    assert_eq!(retried["result"]["type"], "draft/finished", "{retried}");
+    wait_for_commit(&tmp, "Recovered checkpoint");
+    assert_eq!(read(&neighbor), "Neighbor must survive\n");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_draft_stdio_normal_close_selects_initial_template_without_save() {
+    use std::os::unix::fs::PermissionsExt;
+    let (tmp, _) = staged_repo();
+    let hook = tmp.path().join(".git/hooks/prepare-commit-msg");
+    write(&hook, "#!/bin/sh\nprintf 'Prepared initial message\\n# comment\\n' > \"$1\"\n");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let edit = start_commit(&mut server, &status);
+    assert!(edit["text"].as_str().unwrap().starts_with("Prepared initial message\n"));
+    sync_draft(&mut server, &edit, "Discard this unsaved message\n");
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
+    let closed = draft_request(&mut server, 10, "draft/finish", &edit, 1, Some("normal-close"));
+    assert_eq!(closed["result"]["version"], 1, "{closed}");
+    wait_for_commit(&tmp, "Prepared initial message");
+    assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
+    let (first, _) = staged_repo();
+    let (second, _) = staged_repo();
+    let first_head = first.git(&["rev-parse", "HEAD"]);
+    let second_head = second.git(&["rev-parse", "HEAD"]);
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status_a = open_status(&mut server, 2, &json!(first.path().to_string_lossy()));
+    let status_b = open_status(&mut server, 3, &json!(second.path().to_string_lossy()));
+    let a = start_commit(&mut server, &status_a);
+    let b = start_commit(&mut server, &status_b);
+    assert_ne!(a["runId"], b["runId"]);
+    assert_ne!(a["uri"], b["uri"]);
+    sync_draft(&mut server, &a, "First repository\n");
+    sync_draft(&mut server, &b, "Second repository\n");
+    let mut crossed = a.clone();
+    crossed["uri"] = b["uri"].clone();
+    assert!(draft_request(&mut server, 10, "draft/save", &crossed, 2, None)["error"].is_object());
+    assert!(draft_request(&mut server, 11, "draft/finish", &crossed, 1, Some("normal-close"))["error"].is_object());
+    let mut foreign = TestServer::spawn(&[]);
+    foreign.initialize(json!({}));
+    change_draft(&mut foreign, &a, 99, "Foreign connection\n");
+    assert!(draft_request(&mut foreign, 10, "draft/save", &a, 2, None)["error"].is_object());
+    assert!(draft_request(&mut foreign, 11, "draft/finish", &a, 1, Some("normal-close"))["error"].is_object());
+    assert!(foreign.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == a["uri"]));
+    foreign.shutdown_and_exit();
+    assert!(foreign.finish(Duration::from_secs(10)).success());
+    assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
+    assert_eq!(second.git(&["rev-parse", "HEAD"]), second_head);
+    assert!(finish_draft(&mut server, 12, &b)["error"].is_null());
+    wait_for_commit(&second, "Second repository");
+    assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
+    assert!(finish_draft(&mut server, 13, &a)["error"].is_null());
+    wait_for_commit(&first, "First repository");
+    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), "First repository\n");
+    assert_eq!(read(&second.path().join(".git/COMMIT_EDITMSG")), "Second repository\n");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_draft_stdio_linked_worktree_writes_only_actual_gitdir() {
+    let (main, _) = staged_repo();
+    let main_head = main.git(&["rev-parse", "HEAD"]);
+    let main_message = read(&main.path().join(".git/COMMIT_EDITMSG"));
+    let linked_parent = TempDir::new().unwrap();
+    let linked = linked_parent.path().join("linked");
+    main.git(&["worktree", "add", "-b", "draft-linked", linked.to_str().unwrap()]);
+    write(&linked.join("f.txt"), "Linked staged content\n");
+    git(&linked, &["add", "f.txt"]);
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(linked.to_string_lossy()));
+    let edit = start_commit(&mut server, &status);
+    sync_draft(&mut server, &edit, "Linked worktree message\n");
+    assert_eq!(finish_draft(&mut server, 10, &edit)["result"]["type"], "draft/finished");
+    let actual = magit_lsp::git::GitRepo::open(&linked).unwrap().commit_message_path().unwrap();
+    assert!(linked.join(".git").is_file());
+    assert_ne!(actual, main.path().join(".git/COMMIT_EDITMSG"));
+    assert_eq!(read(&actual), "Linked worktree message\n");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+    assert_eq!(git(&linked, &["log", "-1", "--format=%B"]).trim(), "Linked worktree message");
+    assert_eq!(main.git(&["rev-parse", "HEAD"]), main_head);
+    assert_eq!(read(&main.path().join(".git/COMMIT_EDITMSG")), main_message);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_draft_production_helper_rejects_spoofs_and_duplicate_join() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::{fs::PermissionsExt, net::UnixStream};
+    let (tmp, _) = staged_repo();
+    let (other, _) = staged_repo();
+    let neighbor = tmp.path().join(".git/neighbor");
+    write(&neighbor, "Protected neighbor\n");
+    let hook = tmp.path().join(".git/hooks/pre-commit");
+    write(&hook, "#!/bin/sh\nprintf '%s' \"$MAGIT_LSP_EDIT_ID\" > .git/test-run\nprintf '%s' \"$MAGIT_LSP_HELPER_TOKEN\" > .git/test-token\ntouch .git/test-ready\nwhile ! test -e .git/test-release; do sleep 0.01; done\n");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let socket = server.socket_path();
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !tmp.path().join(".git/test-ready").exists() {
+        assert!(Instant::now() < deadline, "pre-commit helper test did not start");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let run = read(&tmp.path().join(".git/test-run"));
+    let token = read(&tmp.path().join(".git/test-token"));
+    let hello = json!({"editId":run,"token":token,"kind":"commit-message","path":tmp.path().join(".git/COMMIT_EDITMSG")});
+    let rejected = |value: &Value| {
+        let mut stream = UnixStream::connect(&socket).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        writeln!(stream, "{value}").unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["ok"], false);
+    };
+    for (key, value) in [
+        ("editId", json!("wrong-run")), ("token", json!("wrong-token")),
+        ("kind", json!("merge-message")), ("path", json!(neighbor)),
+        ("path", json!(other.path().join(".git/COMMIT_EDITMSG"))),
+    ] {
+        let mut invalid = hello.clone();
+        invalid[key] = value;
+        rejected(&invalid);
+    }
+    write(&tmp.path().join(".git/test-release"), "release\n");
+    let mut response = false;
+    let mut edit = None;
+    while !response || edit.is_none() {
+        let message = server.recv();
+        if message["id"] == 4 { response = true; }
+        if let Some(found) = edit_document(&message) { edit = Some(found); }
+    }
+    let edit = edit.unwrap();
+    assert_eq!(edit["runId"], run);
+    assert!(!edit.to_string().contains(&token), "private helper token leaked in announcement");
+    rejected(&hello); // one-shot credential cannot join a second socket
+    sync_draft(&mut server, &edit, "Validated real helper\n");
+    assert_eq!(finish_draft(&mut server, 10, &edit)["result"]["type"], "draft/finished");
+    wait_for_commit(&tmp, "Validated real helper");
+    assert_eq!(read(&neighbor), "Protected neighbor\n");
+    server.shutdown_and_exit();
+    let (exit, log) = server.finish_with_stderr(Duration::from_secs(10));
+    assert!(exit.success());
+    assert!(!log.contains(&token), "private helper token leaked in logs");
 }
 
 #[test]
@@ -401,9 +677,8 @@ fn a_cancel_creates_no_commit() {
     let _menu = invoke(&mut server, 3, &status, "open.commit", json!(null));
 
     let edit = start_commit(&mut server, &status);
-    let edit_id = edit["editId"].as_str().expect("edit id").to_string();
-    let path = edit["path"].as_str().expect("edit path");
-    write(Path::new(path), "Should not land\n");
+    let edit_id = edit["runId"].as_str().expect("run id").to_string();
+    sync_draft(&mut server, &edit, "Should not land\n");
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -412,7 +687,7 @@ fn a_cancel_creates_no_commit() {
         "params": {
             "viewId": status,
             "command": "common.cancel",
-            "args": {"editId": edit_id},
+            "args": {"runId": edit_id},
         },
     }));
 
@@ -487,9 +762,8 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
         if let Some(found) = edit_document(&message) { edit = Some(found); }
     }
     let edit = edit.unwrap();
-    let edit_id = edit["editId"].as_str().unwrap().to_string();
-    let path = edit["path"].as_str().unwrap();
-    write(Path::new(path), "Must not commit\n");
+    let edit_id = edit["runId"].as_str().unwrap().to_string();
+    sync_draft(&mut server, &edit, "Must not commit\n");
     let socket = server.socket_path();
     let mut owned = wait_for_edit_processes(&edit_id, &socket);
     server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token.unwrap()}}));
@@ -505,7 +779,7 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     }
     owned.finished();
     assert_eq!(ends, 1, "progress must end exactly once");
-    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"editId":edit_id}}}));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"runId":edit_id}}}));
     let late = server.response_with_id(5);
     assert!(late["error"].is_object() || late["result"]["effects"].as_array().is_some_and(|e| !e.is_empty()), "late confirm must be rejected: {late}");
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
@@ -514,9 +788,9 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     assert_eq!(read(&tmp.path().join("f.txt")), worktree);
 
     let edit = start_commit(&mut server, &status);
-    write(Path::new(edit["path"].as_str().unwrap()), "Follow-up commit\n");
-    let confirmed = invoke(&mut server, 6, &status, "common.confirm", json!({"editId": edit["editId"]}));
-    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()));
+    sync_draft(&mut server, &edit, "Follow-up commit\n");
+    let confirmed = finish_draft(&mut server, 6, &edit);
+    assert_eq!(confirmed["result"]["type"], "draft/finished", "{confirmed}");
     wait_for_commit(&tmp, "Follow-up commit");
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -553,11 +827,10 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
         if let Some(found) = edit_document(&message) { edit = Some(found); }
     }
     let edit = edit.unwrap();
-    let edit_id = edit["editId"].as_str().unwrap().to_string();
-    write(Path::new(edit["path"].as_str().unwrap()), "Must not commit\n");
-    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"editId":edit_id}}}));
-    let confirmed = server.response_with_id(5);
-    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()), "message confirmation: {confirmed}");
+    let edit_id = edit["runId"].as_str().unwrap().to_string();
+    sync_draft(&mut server, &edit, "Must not commit\n");
+    let confirmed = finish_draft(&mut server, 5, &edit);
+    assert_eq!(confirmed["result"]["type"], "draft/finished", "{confirmed}");
     let socket = server.socket_path();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !ready.exists() { assert!(Instant::now() < deadline, "commit-msg hook did not become ready"); thread::sleep(Duration::from_millis(20)); }
@@ -585,9 +858,9 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     while Path::new(&format!("/proc/{child}/stat")).exists() { assert!(Instant::now() < deadline, "hook descendant survived cancellation"); thread::sleep(Duration::from_millis(20)); }
     std::fs::remove_file(&hook).expect("remove blocking commit-msg hook");
     let edit = start_commit(&mut server, &status);
-    write(Path::new(edit["path"].as_str().unwrap()), "Follow-up commit\n");
-    let confirmed = invoke(&mut server, 6, &status, "common.confirm", json!({"editId": edit["editId"]}));
-    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()));
+    sync_draft(&mut server, &edit, "Follow-up commit\n");
+    let confirmed = finish_draft(&mut server, 6, &edit);
+    assert_eq!(confirmed["result"]["type"], "draft/finished", "{confirmed}");
     wait_for_commit(&tmp, "Follow-up commit");
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
@@ -601,12 +874,94 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let (tmp, _repo) = staged_repo();
     let before = tmp.git(&["rev-parse", "HEAD"]);
     let cancel = magit_lsp::runner::CancelHandle::new();
+    let run = magit_lsp::editor::registry().create(tmp.path().to_str().unwrap(), "early-test").unwrap();
     cancel.cancel();
     let error = magit_lsp::runner::with_cancel(Some(cancel), || {
-        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), "early", &tmp.path().join("unused.sock"))
+        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), &run, &tmp.path().join("unused.sock"))
     }).expect_err("the pre-cancelled commit must fail");
+    magit_lsp::editor::registry().remove(&run);
     assert_eq!(error.git.expect("a structured Git failure").subcommand, "commit");
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for finalizing in [true, false] {
+        let (tmp, _) = staged_repo();
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let tree = tmp.git(&["write-tree"]);
+        let worktree = read(&tmp.path().join("f.txt"));
+        let ready = tmp.path().join(".git/post-ready");
+        let hook = tmp.path().join(".git/hooks/post-commit");
+        if finalizing {
+            write(&hook, &format!("#!/bin/sh\ntouch '{}'\nwhile :; do sleep 0.02; done\n", ready.display()));
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut server = TestServer::spawn(&[]);
+        server.initialize(json!({}));
+        let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+        server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+        let mut token = None;
+        let mut edit = None;
+        while token.is_none() || edit.is_none() {
+            let message = server.recv();
+            if message["method"] == "$/progress" && message["params"]["value"]["kind"] == "begin" {
+                token = Some(message["params"]["token"].clone());
+            }
+            if let Some(found) = edit_document(&message) { edit = Some(found); }
+        }
+        let token = token.unwrap();
+        let edit = edit.unwrap();
+        sync_draft(&mut server, &edit, "Recorded before cancel\n");
+        let confirmed = finish_draft(&mut server, 5, &edit);
+        assert!(confirmed.get("error").is_none(), "{confirmed}");
+        let mut observed = std::mem::take(&mut server.notifications);
+        if finalizing {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !ready.exists() {
+                assert!(Instant::now() < deadline, "post-commit did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+            server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+        }
+        while !observed.iter().any(|m| m["method"] == "$/progress" && m["params"]["token"] == token && m["params"]["value"]["kind"] == "end") {
+            observed.push(server.recv());
+        }
+        // End is terminal: repeated confirms and cancellation cannot resurrect
+        // the edit or its progress, nor overwrite the successful outcome.
+        server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+        let late = draft_request(&mut server, 6, "draft/finish", &edit, 2, Some("confirm"));
+        assert!(late["error"].is_object(), "ended edit accepted a duplicate finish: {late}");
+        server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/resync","params":{"viewId":status}}));
+        assert!(server.response_with_id(7).get("error").is_none());
+        observed.extend(std::mem::take(&mut server.notifications));
+        observed.extend(server.drain_notifications());
+        let progress: Vec<_> = observed.iter().filter(|m| m["method"] == "$/progress" && m["params"]["token"] == token).collect();
+        assert_eq!(progress.iter().filter(|m| m["params"]["value"]["kind"] == "end").count(), 1);
+        assert_eq!(progress.iter().filter(|m| m["params"]["value"]["kind"] == "report").count(), usize::from(finalizing));
+        let effects: Vec<_> = observed.iter().filter(|m| m["method"] == "view/effects")
+            .flat_map(|m| m["params"]["effects"].as_array().into_iter().flatten()).collect();
+        assert_eq!(effects.iter().filter(|e| e["text"].as_str().is_some_and(|s| s.starts_with("Committed:"))).count(), 1, "exactly one truthful completion: {effects:?}");
+        assert!(!effects.iter().any(|e| e["level"] == "error"), "recorded commit reported failure: {effects:?}");
+        assert_eq!(tmp.git(&["rev-parse", "HEAD^"]), head);
+        assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), tree);
+        assert_eq!(tmp.git(&["write-tree"]), tree);
+        assert!(tmp.git(&["diff", "--cached", "--binary"]).is_empty());
+        assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+        if finalizing { std::fs::remove_file(hook).unwrap(); }
+        write(&tmp.path().join("f.txt"), "Follow-up\n");
+        tmp.git(&["add", "f.txt"]);
+        let next = start_commit(&mut server, &status);
+        sync_draft(&mut server, &next, "Follow-up commit\n");
+        assert!(finish_draft(&mut server, 8, &next).get("error").is_none());
+        wait_for_commit(&tmp, "Follow-up commit");
+        server.shutdown_and_exit();
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
 }
 
 /// The processes holding a pending edit: Git's commit and its editor helper.
@@ -773,9 +1128,9 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let _menu = invoke(&mut server, 3, &status, "open.commit", json!(null));
 
     let edit = start_commit(&mut server, &status);
-    let edit_id = edit["editId"].as_str().expect("edit id").to_string();
-    let path = edit["path"].as_str().expect("edit path");
-    write(Path::new(path), "Never confirmed\n");
+    let edit_id = edit["runId"].as_str().expect("run id").to_string();
+    sync_draft(&mut server, &edit, "Never confirmed\n");
+    assert_eq!(draft_request(&mut server, 5, "draft/save", &edit, 2, None)["result"]["type"], "draft/checkpointed");
 
     let mut owned = wait_for_edit_processes(&edit_id, &socket);
     assert!(
