@@ -27,6 +27,7 @@
     "test:e2e": "node test/e2e/run.mjs"
   },
   "dependencies": {
+    "jsonc-parser": "^3.3.1",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {

@@ -380,6 +380,54 @@ fn a_collapsed_file_is_not_diffed_until_it_is_expanded() {
 }
 
 #[test]
+fn collapsed_section_does_not_diff_expanded_child_files_until_reopened() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES), ("g.txt", TEN_LINES)])
+        .modify("f.txt", standard_changes())
+        .modify("g.txt", standard_changes())
+        .build();
+    let f_path = tmp.path().join("f.txt");
+    let g_path = tmp.path().join("g.txt");
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let section = test.goto_section("unstaged");
+    let collapsed = toggle(
+        &mut test,
+        "common.toggle-section",
+        Some(Cursor { line: section, column: 0 }),
+        None,
+    );
+    assert!(collapsed.render.is_some());
+    test.ack();
+    assert!(test.tree().node("unstaged/f.txt").is_none());
+    let before_f = diff_invocation_count(&f_path);
+    let before_g = diff_invocation_count(&g_path);
+
+    let refreshed = toggle(&mut test, "common.refresh", None, None);
+    assert!(refreshed.render.is_some());
+    test.ack();
+    assert_eq!(diff_invocation_count(&f_path), before_f);
+    assert_eq!(diff_invocation_count(&g_path), before_g);
+
+    let section = test.goto_section("unstaged");
+    let opened = toggle(
+        &mut test,
+        "common.show-section",
+        Some(Cursor { line: section, column: 0 }),
+        Some(false),
+    );
+    assert!(opened.render.is_some());
+    test.ack();
+    assert_eq!(diff_invocation_count(&f_path), before_f + 1);
+    assert_eq!(diff_invocation_count(&g_path), before_g + 1);
+
+    toggle(&mut test, "common.more-detail", None, None);
+    assert_eq!(diff_invocation_count(&f_path), before_f + 1);
+    assert_eq!(diff_invocation_count(&g_path), before_g + 1);
+}
+
+#[test]
 fn next_and_prev_section_move_the_cursor_between_headers() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

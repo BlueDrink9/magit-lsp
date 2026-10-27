@@ -40,9 +40,11 @@ pub const TOKEN_TYPES: &[&str] = &[
 ];
 
 /// Token modifiers, in legend bit order.
+/// keep-for: TASKS §3.15; selected is produced by log selection, while planned/disabled and bold retain recorded presentation uses (R-5.3).
 pub const TOKEN_MODIFIERS: &[&str] = &["staged", "selected", "planned", "disabled", "bold"];
 
 /// Suggested theme group per token type, in [`TOKEN_TYPES`] order.
+/// keep-for: TASKS §3.15 recorded type-to-theme contract; Lua consumes these suggestions dynamically.
 ///
 /// Clients link `@lsp.type.<token_type>.<filetype>` to these groups, so a new
 /// token type needs no client change. The names are colourscheme groups except

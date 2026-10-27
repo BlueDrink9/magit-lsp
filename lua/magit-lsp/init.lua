@@ -221,21 +221,11 @@ end
 
 --- Move the cursor to the next/previous symbol of `kind` (`dir` is 1 or -1).
 ---
---- The symbol outline is fetched asynchronously; the cursor moves when it
---- arrives, and a later key never waits for it.
+--- Navigation is resolved by the server against its structured rendered view.
 ---@param kind string `section`, `file` or `hunk`
 ---@param dir integer 1 or -1
 function M.jump(kind, dir)
-  local record = target_record()
-  if not record then
-    return
-  end
-  M.symbols(function(symbols)
-    if not symbols then
-      return
-    end
-    view.jump(record, symbols, kind, dir)
-  end)
+  return M.invoke('common.jump', { args = { kind = kind, dir = dir } })
 end
 
 --- Open the detail of the last error in a scratch split.

@@ -133,26 +133,32 @@ impl KeysConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffSettings {
     pub context: u32,
+    /// keep-for: TASKS §3.18 configuration schema; currently parsed but not applied (R-5.5).
     pub whitespace: Option<String>,
 }
 
 /// Section ordering and initial visibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionSettings {
+    /// keep-for: TASKS §3.18 typed layering decision; currently inactive.
     pub order: Option<Vec<String>>,
+    /// keep-for: TASKS §3.18 typed layering decision; currently inactive.
     pub default_visibility: Option<String>,
 }
 
 /// UI behaviour settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiSettings {
+    /// keep-for: TASKS §3.18 config schema; discard execution is implemented (R-3.6); setting currently inactive.
     pub confirm_discard: bool,
 }
 
 /// Log view defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogSettings {
+    /// keep-for: TASKS §3.18 config schema; parsed but currently not applied (R-5.1).
     pub default_args: Vec<String>,
+    /// keep-for: TASKS §3.18 config schema; parsed but currently not applied (R-5.1).
     pub margin: Option<u32>,
 }
 

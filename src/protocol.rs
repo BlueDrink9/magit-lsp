@@ -26,6 +26,7 @@ pub enum Effect {
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
         #[serde(rename = "processLogId", skip_serializing_if = "Option::is_none")]
+        /// keep-for: TASKS §3.5/IMM-3 recorded optional process-log link; current constructors leave it None.
         process_log_id: Option<u64>,
     },
     /// The key is not bound here; perform its normal editor behaviour.
@@ -33,6 +34,7 @@ pub enum Effect {
     /// Put `text` on the system clipboard.
     Clipboard { text: String },
     /// Create a window/buffer/panel and show it.
+    /// keep-for: TASKS §3.5 recorded effect contract; shared server handling also supports PushView.
     OpenView { descriptor: ViewDescriptor },
     /// As `OpenView`, remembering the previous view so `PopView` returns.
     PushView { descriptor: ViewDescriptor },
@@ -78,6 +80,7 @@ pub enum Effect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditDocumentMode {
+    /// keep-for: TASKS §3.10 bridge contract; clients currently assume real-file mode.
     RealFile,
 }
 

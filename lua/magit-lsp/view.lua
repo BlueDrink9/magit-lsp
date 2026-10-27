@@ -1065,43 +1065,6 @@ function M.resize(id)
   end
 end
 
-local function collect_symbol_lines(symbols, kind, lines)
-  for _, symbol in ipairs(symbols or {}) do
-    if symbol.kind == kind then
-      lines[#lines + 1] = symbol.range.start.line + 1
-    end
-    collect_symbol_lines(symbol.children, kind, lines)
-  end
-end
-
---- Move within a view using server-owned document symbols, never rendered text.
----@param record table
----@param symbols table[]
----@param kind string section, file or hunk
----@param dir integer 1 or -1
----@return integer|nil line, string|nil err
-function M.jump(record, symbols, kind, dir)
-  local wanted = ({ section = 3, file = 1, hunk = 6 })[kind]
-  if not wanted then
-    return nil, 'unknown symbol kind: ' .. tostring(kind)
-  end
-  local lines = {}
-  collect_symbol_lines(symbols, wanted, lines)
-  table.sort(lines, function(a, b) return dir > 0 and a < b or dir < 0 and a > b end)
-  local win = record and vim.fn.bufwinid(record.buf) or -1
-  if win == -1 then
-    return nil, 'no view window'
-  end
-  local current = vim.api.nvim_win_get_cursor(win)[1]
-  for _, line in ipairs(lines) do
-    if (line - current) * dir > 0 then
-      vim.api.nvim_win_set_cursor(win, { line, 0 })
-      return line
-    end
-  end
-  return nil, 'no ' .. kind .. ' symbol'
-end
-
 --- Install window resize and owned-client shutdown hooks once at client setup.
 ---@param sessions table<string, table>
 function M.setup_lifecycle(sessions)

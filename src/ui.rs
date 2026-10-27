@@ -24,6 +24,7 @@ pub trait PromptUi {
     fn choice(&self, request: &ViewPromptParams) -> Result<Option<PromptChoiceAnswer>>;
 
     /// Pick zero or more items by id.
+    /// keep-for: TASKS §3.6/R-3.1 generic prompt-kind contract; no current command emits this kind.
     fn multi_choice(&self, request: &ViewPromptParams) -> Result<Option<Vec<String>>>;
 }
 

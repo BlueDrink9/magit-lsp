@@ -155,6 +155,7 @@ pub struct ViewDescriptor {
     pub mode: ViewMode,
     pub scope: Scope,
     pub capture: bool,
+    /// keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view.
     pub viewport: Viewport,
 }
 
@@ -254,6 +255,7 @@ pub trait View: Send {
     }
 
     /// Extend a lazy view by one page, when the kind supports it.
+    /// keep-for: TASKS §3.2 view contract; LogView implements page extension (TASKS §7 R-5.1).
     fn load_more(&mut self) -> Result<()> {
         Ok(())
     }

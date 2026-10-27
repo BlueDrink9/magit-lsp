@@ -65,6 +65,86 @@ fn visit_uses_the_requested_render_and_refuses_a_discarded_version() {
 }
 
 #[test]
+fn jump_uses_structured_headers_and_exact_render_version() {
+    use magit_lsp::config::Profile;
+    use magit_lsp::protocol::Cursor;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES), ("g.txt", TEN_LINES)])
+        .modify_standard()
+        .modify("g.txt", standard_changes())
+        .build();
+    for profile in [Profile::Standard, Profile::Vim] {
+        let (mut test, _) = TestSession::open_status(&tmp, profile);
+        let tree = test.tree().clone();
+        for (kind, node_kind) in [("section", NodeKind::Section), ("file", NodeKind::File), ("hunk", NodeKind::Hunk)] {
+            let headers: Vec<_> = tree.line_nodes.iter().enumerate()
+                .filter(|(line, owner)| owner.kind == node_kind && tree.node(&owner.node).expect("node").start_line == *line)
+                .map(|(line, _)| line).collect();
+            assert!(headers.len() >= 2, "fixture needs multiple {kind} targets");
+            for from in [0, tree.lines.len() - 1].into_iter().chain(headers.iter().copied()) {
+                for dir in [1, -1] {
+                    let expected = if dir == 1 { headers.iter().copied().find(|line| *line > from) }
+                        else { headers.iter().rev().copied().find(|line| *line < from) }.unwrap_or(from);
+                    // Each invoke renders a new version; send the version actually displayed.
+                    test.ack();
+                    let result = test.invoke_at_version("common.jump", test.version(),
+                        Some(Cursor { line: from, column: 0 }), None,
+                        Some(json!({"kind": kind, "dir": dir})));
+                    assert!(message_texts(&result.effects).is_empty(), "{kind} {dir}");
+                    assert_eq!(result.render.expect("jump render").cursor.expect("cursor").line, expected, "{kind} {dir} from {from}");
+                }
+            }
+        }
+        for (args, message) in [
+            (json!({"kind":"bogus","dir":1}), "Jump kind must be section, file or hunk"),
+            (json!({"kind":"hunk","dir":0}), "Jump direction must be 1 or -1"),
+            (json!({"kind":"file","dir":2}), "Jump direction must be 1 or -1"),
+            (json!({"kind":"section","dir":"-1"}), "Jump direction must be 1 or -1"),
+            (json!({}), "Jump kind must be section, file or hunk"),
+        ] {
+            test.ack();
+            let result = test.invoke_at_version("common.jump", test.version(), Some(Cursor { line: 0, column: 0 }), None, Some(args));
+            assert_eq!(message_texts(&result.effects), vec![message]);
+        }
+    }
+}
+
+#[test]
+fn jump_uses_retained_render_until_ack_then_refuses_it() {
+    use magit_lsp::config::Profile;
+    use magit_lsp::protocol::Cursor;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
+    write(&tmp.path().join("b.txt"), "original\n");
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Standard);
+    test.ack();
+    let old_file = test.goto_file("untracked", "b.txt");
+    let old_tree = test.tree().clone();
+    write(&tmp.path().join("a.txt"), "new\n");
+    test.refresh().expect("unacked render");
+    let new_tree = test.tree().clone();
+    let new_file = line_of(&new_tree, "b.txt", NodeKind::File, None, None);
+    assert_ne!(old_file, new_file);
+    let args = Some(json!({"kind":"file","dir":1}));
+    let old_cursor = line_of(&old_tree, "b.txt", NodeKind::File, None, None).saturating_sub(1);
+    let new_cursor = line_of(&new_tree, "a.txt", NodeKind::File, None, None);
+    let new_target = test.invoke_at_version("common.jump", test.version(),
+        Some(Cursor { line: new_cursor, column: 0 }), None, args.clone());
+    let old_target = test.invoke_at_version("common.jump", initial.version,
+        Some(Cursor { line: old_cursor, column: 0 }), None, args.clone());
+    let old_target = old_target.render.expect("old render").cursor.expect("old cursor").line;
+    let new_target = new_target.render.expect("new render").cursor.expect("new cursor").line;
+    assert_eq!(old_target, old_file, "retained old tree strictly advances to its file");
+    assert_eq!(new_target, new_file, "strict next from the shifted a file targets b");
+    assert_ne!(old_target, new_target);
+    test.ack();
+    let stale = test.invoke_at_version("common.jump", initial.version,
+        Some(Cursor { line: old_file, column: 0 }), None, args);
+    assert_eq!(message_texts(&stale.effects), vec![magit_lsp::errors::STALE_VIEW]);
+}
+
+#[test]
 fn definition_targets_the_new_side_of_the_worktree_file() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

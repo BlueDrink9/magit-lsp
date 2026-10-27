@@ -27,6 +27,7 @@ pub struct UserError {
     pub command: Option<String>,
     /// Reserved link to a captured process log.
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// keep-for: TASKS §3.5/IMM-3 optional process-log link and R-3.7 integration; currently no error producer sets it.
     pub process_log_id: Option<u64>,
 }
 

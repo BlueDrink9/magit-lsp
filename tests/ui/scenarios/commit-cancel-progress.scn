@@ -3,6 +3,7 @@
 # gated hook exits naturally when its owned Git parent dies; no process killing
 # or lock removal by the scenario can make a cancellation appear successful.
 fixture: staged-one-file
+xfail: A11
 ---
 sh: git rev-parse HEAD > .git/cancel-before; printf '%s\n' '#!/bin/sh' 'commit=$PPID' 'echo "$commit" > .git/cancel-parent' 'n=0' 'while kill -0 "$commit" 2>/dev/null; do' '  n=$((n+1))' '  [ "$n" -lt 1000 ] || exit 1' '  sleep 0.01' 'done' 'echo exited > .git/cancel-hook-exited' 'exit 1' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
 keys: c

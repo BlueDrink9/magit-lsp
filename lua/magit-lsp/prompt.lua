@@ -72,8 +72,9 @@ end
 local function ask_confirm(client_id, params)
   local yes = params.yesLabel or 'Yes'
   -- A destructive question focuses "No" first.
-  local labels = params.destructive and { params.noLabel or 'No', yes }
-    or { yes, params.noLabel or 'No' }
+  local no = params.noLabel or 'No'
+  local labels = (params.destructive or params.default == false) and { no, yes }
+    or { yes, no }
   vim.ui.select(labels, { prompt = params.title }, function(choice)
     if choice == nil then
       finish(client_id, params, true)

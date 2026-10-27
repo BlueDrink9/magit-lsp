@@ -1,136 +1,8 @@
 'use strict';
 
-/**
- * Remove `//` and `/* ... *\/` comments from a JSONC string.
- *
- * Comment characters inside strings are left alone, and every removed
- * character becomes a space (newlines are kept) so offsets do not move.
- *
- * @param {string} text
- * @returns {string}
- */
-function stripJsonComments(text) {
-  if (typeof text !== 'string') {
-    return '';
-  }
-
-  let out = '';
-  let inString = false;
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    const next = text[index + 1];
-
-    if (lineComment) {
-      if (character === '\n') {
-        lineComment = false;
-        out += character;
-      } else {
-        out += ' ';
-      }
-      continue;
-    }
-
-    if (blockComment) {
-      if (character === '*' && next === '/') {
-        blockComment = false;
-        out += '  ';
-        index += 1;
-      } else {
-        out += character === '\n' ? '\n' : ' ';
-      }
-      continue;
-    }
-
-    if (inString) {
-      out += character;
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-      out += character;
-      continue;
-    }
-
-    if (character === '/' && next === '/') {
-      lineComment = true;
-      out += '  ';
-      index += 1;
-      continue;
-    }
-
-    if (character === '/' && next === '*') {
-      blockComment = true;
-      out += '  ';
-      index += 1;
-      continue;
-    }
-
-    out += character;
-  }
-
-  return out;
-}
+const jsonc = require('jsonc-parser');
 
 /**
- * Remove trailing commas before `}` or `]`, which JSONC permits.
- *
- * @param {string} text
- * @returns {string}
- */
-function stripTrailingCommas(text) {
-  let out = '';
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-
-    if (inString) {
-      out += character;
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-      out += character;
-      continue;
-    }
-
-    if (character === ',') {
-      let lookahead = index + 1;
-      while (lookahead < text.length && /\s/.test(text[lookahead])) {
-        lookahead += 1;
-      }
-      if (text[lookahead] === '}' || text[lookahead] === ']') {
-        continue;
-      }
-    }
-
-    out += character;
-  }
-
-  return out;
-}
-
 /**
  * Parse a `keybindings.json` string, accepting comments and trailing commas.
  *
@@ -138,7 +10,14 @@ function stripTrailingCommas(text) {
  * @returns {object[]}
  */
 function parseJsonc(text) {
-  return JSON.parse(stripTrailingCommas(stripJsonComments(text)));
+  const errors = [];
+  const value = jsonc.parse(text, errors, { allowTrailingComma: true, disallowComments: false });
+  if (errors.length) {
+    const error = errors[0];
+    const line = text.slice(0, error.offset).split('\n').length;
+    throw new Error(`Invalid JSONC at line ${line}, offset ${error.offset}: ${jsonc.printParseErrorCode(error.error)}`);
+  }
+  return value;
 }
 
 /**
@@ -195,7 +74,7 @@ function mapFoldKeys(input) {
       key: entry.key,
       command: 'magit.invoke',
       args: { command: target.command },
-      when: 'magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
+      when: 'magit.active && !magit.textMode && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
     };
     if (target.args) {
       result.args.args = target.args;
@@ -231,8 +110,6 @@ for (let level = 1; level <= 7; level += 1) {
 }
 
 module.exports = {
-  stripJsonComments,
-  stripTrailingCommas,
   parseJsonc,
   mapFoldCommand,
   mapFoldKeys,

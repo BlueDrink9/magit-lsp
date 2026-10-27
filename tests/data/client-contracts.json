@@ -1,0 +1,24 @@
+{
+  "renders": [
+    {"name":"full-verbatim","initialLines":["old"],"initialVersion":4,"render":{"viewId":"v1","version":5,"text":["  alpha","λ",""],"mode":"interactive"},"expectedLines":["  alpha","λ",""],"expectedVersion":5,"outcome":"ack"},
+    {"name":"full-wins-over-edits","initialLines":["old"],"initialVersion":1,"render":{"viewId":"v1","version":2,"text":["full"],"baseVersion":0,"edits":[{"startLine":0,"endLine":1,"lines":["edit"]}],"mode":"interactive"},"expectedLines":["full"],"expectedVersion":2,"outcome":"ack"},
+    {"name":"bottom-up-edits","initialLines":["a","b","c","d"],"initialVersion":7,"render":{"viewId":"v1","version":8,"baseVersion":7,"edits":[{"startLine":1,"endLine":3,"lines":["B"]},{"startLine":3,"endLine":4,"lines":["D","E"]}],"mode":"interactive"},"expectedLines":["a","B","D","E"],"expectedVersion":8,"outcome":"ack"},
+    {"name":"stale-base-resync","initialLines":["a","b"],"initialVersion":6,"render":{"viewId":"v1","version":9,"baseVersion":7,"edits":[{"startLine":0,"endLine":1,"lines":["stale"]}],"mode":"interactive"},"expectedLines":["a","b"],"expectedVersion":6,"outcome":"resync"}
+  ],
+  "prompts": [
+    {"name":"confirm-absent-default","params":{"promptId":"confirm-absent","kind":"confirm","title":"Continue?"},"response":"no","answer":{"cancelled":false,"value":false},"focus":["Yes","No"]},
+    {"name":"confirm-default-true","params":{"promptId":"confirm-true","kind":"confirm","title":"Continue?","default":true},"response":"yes","answer":{"cancelled":false,"value":true},"focus":["Yes","No"]},
+    {"name":"confirm-default-false","params":{"promptId":"confirm-false","kind":"confirm","title":"Continue?","default":false},"response":"no","answer":{"cancelled":false,"value":false},"focus":["No","Yes"]},
+    {"name":"confirm-destructive","params":{"promptId":"confirm-destructive","kind":"confirm","title":"Delete?","default":true,"destructive":true},"response":"no","answer":{"cancelled":false,"value":false},"focus":["No","Yes"]},
+    {"name":"confirm-cancel","params":{"promptId":"confirm-cancel","kind":"confirm","title":"Continue?"},"response":null,"answer":{"cancelled":true}},
+    {"name":"text-default-empty","params":{"promptId":"text","kind":"text","title":"Name?","default":"seed"},"response":"","answer":{"cancelled":false,"value":""}},
+    {"name":"text-cancel","params":{"promptId":"text-cancel","kind":"text","title":"Name?"},"response":null,"answer":{"cancelled":true}},
+    {"name":"choice-fixed","params":{"promptId":"choice","kind":"choice","title":"Base?","items":[{"id":"head","label":"HEAD"},{"id":"branch","label":"Branch"}]},"response":"branch","answer":{"cancelled":false,"value":{"id":"branch"}}},
+    {"name":"choice-cancel","params":{"promptId":"choice-cancel","kind":"choice","title":"Base?","items":[{"id":"head","label":"HEAD"}]},"response":null,"answer":{"cancelled":true}},
+    {"name":"choice-custom","params":{"promptId":"custom","kind":"choice","title":"Base?","allowCustom":true,"items":[{"id":"head","label":"HEAD"}]},"response":"__custom__","customResponse":"wip","answer":{"cancelled":false,"value":{"custom":"wip"}}},
+    {"name":"choice-custom-cancel","params":{"promptId":"custom-cancel","kind":"choice","title":"Base?","allowCustom":true,"items":[{"id":"head","label":"HEAD"}]},"response":"__custom__","customResponse":null,"answer":{"cancelled":true}},
+    {"name":"multi-selection","params":{"promptId":"multi","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"},{"id":"b","label":"B"}]},"response":["a","b"],"answer":{"cancelled":false,"value":{"ids":["a","b"]}}},
+    {"name":"multi-empty","params":{"promptId":"multi-empty","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"}]},"response":[],"answer":{"cancelled":false,"value":{"ids":[]}}},
+    {"name":"multi-cancel","params":{"promptId":"multi-cancel","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"}]},"response":null,"answer":{"cancelled":true}}
+  ]
+}

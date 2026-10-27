@@ -461,6 +461,7 @@ fn build() -> Registry {
             run: detail_level_4,
         },
         Command {
+            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
             id: "common.next-section",
             scope: Scope::Common,
             doc: "Move to the next section",
@@ -473,6 +474,14 @@ fn build() -> Registry {
             doc: "Move to the previous section",
             status: CommandStatus::Implemented,
             run: prev_section,
+        },
+        Command {
+            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
+            id: "common.jump",
+            scope: Scope::Common,
+            doc: "Move to the next or previous visible section, file or hunk",
+            status: CommandStatus::Implemented,
+            run: jump,
         },
         Command {
             id: "status.stage",
@@ -527,12 +536,14 @@ fn build() -> Registry {
             run: quit,
         },
         planned(
+            // keep-for: TASKS §5.1 retained binding; planned cycle implementation requires roadmap disposition.
             "common.cycle-visibility",
             Scope::Common,
             "Cycle the visibility of every section",
             "R-2.3",
         ),
         planned(
+            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
             "common.next-sibling",
             Scope::Common,
             "Move to the next sibling",
@@ -1190,6 +1201,30 @@ fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         cursor: section_cursor(ctx.view, ctx.cursor, false),
         ..Default::default()
     })
+}
+
+/// Move to a visible structured header of the requested kind.
+fn jump(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let args = ctx.args.and_then(Value::as_object);
+    let kind = args.and_then(|args| args.get("kind")).and_then(Value::as_str);
+    let dir = args.and_then(|args| args.get("dir")).and_then(Value::as_i64);
+    let Some(kind) = kind.filter(|kind| matches!(*kind, "section" | "file" | "hunk")) else {
+        ctx.info("Jump kind must be section, file or hunk");
+        return Ok(CommandOutcome::default());
+    };
+    let Some(dir) = dir.filter(|dir| *dir == 1 || *dir == -1) else {
+        ctx.info("Jump direction must be 1 or -1");
+        return Ok(CommandOutcome::default());
+    };
+    let wanted = match kind { "section" => NodeKind::Section, "file" => NodeKind::File, _ => NodeKind::Hunk };
+    let Some(cursor) = ctx.cursor else { return Ok(CommandOutcome::default()); };
+    let source = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    let lines: Vec<usize> = source.line_nodes.iter().enumerate().filter_map(|(line, owner)| {
+        (owner.kind == wanted && source.node(&owner.node).is_some_and(|node| node.start_line == line)).then_some(line)
+    }).collect();
+    let target = if dir > 0 { lines.into_iter().find(|line| *line > cursor.line) }
+        else { lines.into_iter().rev().find(|line| *line < cursor.line) };
+    Ok(CommandOutcome { cursor: target.map(|line| Cursor { line, column: 0 }), ..Default::default() })
 }
 
 fn stage(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

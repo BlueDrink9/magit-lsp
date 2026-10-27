@@ -151,7 +151,7 @@ impl OpenView {
         if std::mem::take(&mut self.dirty) {
             self.view.on_refresh()?;
         }
-        self.render_full(cursor)
+        self.render_with_delivery(cursor, None, RenderDelivery::Full)
     }
 
     /// The tree of the last acknowledged version, if any.
@@ -188,13 +188,13 @@ impl OpenView {
     /// Re-read the backing state, then render and diff against the last tree.
     fn refresh_and_render(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
         self.view.on_refresh()?;
-        self.render(cursor, None)
+        self.render_with_delivery(cursor, None, RenderDelivery::Acknowledged)
     }
     /// Render without touching the repository, diffing against the last tree.
     ///
     /// `forced` replaces the identity-based successor cursor; section
     /// navigation uses it to move somewhere the old node cannot describe.
-    fn render(&mut self, cursor: Option<Cursor>, forced: Option<Cursor>) -> Result<ViewRender> {
+    fn render_with_delivery(&mut self, cursor: Option<Cursor>, forced: Option<Cursor>, delivery: RenderDelivery) -> Result<ViewRender> {
         let old = self.tree.clone();
         let old_version = self.version;
         let pending = self.menu_pending.clone();
@@ -209,7 +209,7 @@ impl OpenView {
             forced.or_else(|| cursor.map(|cursor| successor_cursor(&old, &tree, cursor)));
         // Edits are only safe when the client holds exactly the previous
         // version; otherwise fall back to a full replace.
-        let base_version = (self.acked_version == Some(old_version)).then_some(old_version);
+        let base_version = (delivery == RenderDelivery::Acknowledged && self.acked_version == Some(old_version)).then_some(old_version);
         let (text, edits) = match base_version {
             Some(_) => (None, Some(diff_text::line_edits(&old.lines, &tree.lines))),
             None => (Some(tree.lines.clone()), None),
@@ -230,31 +230,37 @@ impl OpenView {
         })
     }
 
-    /// Render the current tree as a full text replace.
-    fn render_full(&mut self, cursor: Option<Cursor>) -> Result<ViewRender> {
-        let old = self.tree.clone();
-        let pending = self.menu_pending.clone();
-        let mut tree = self.view.render(&Ctx {
-            viewport: self.descriptor.viewport,
-            pending: &pending,
-        });
-        let version = self.version + 1;
-        tree.version = version;
-        let successor = cursor.map(|cursor| successor_cursor(&old, &tree, cursor));
-        self.tree = tree;
-        self.version = version;
-        Ok(ViewRender {
-            view_id: self.descriptor.id.clone(),
-            version,
-            base_version: None,
-            text: Some(self.tree.lines.clone()),
-            edits: None,
-            cursor: successor,
-            mode: self.mode,
-            pending: self.pending(),
-            menu: self.view.menu(),
-        })
-    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RenderDelivery { Acknowledged, Full }
+
+fn initialize_open_view(
+    repo_path: &str,
+    id: String,
+    kind: ViewKind,
+    placement: Placement,
+    viewport: Viewport,
+    mut view: Box<dyn View>,
+) -> (ViewDescriptor, ViewRender, OpenView) {
+    let mut tree = view.render(&Ctx { viewport, pending: &[] });
+    let version = 1;
+    tree.version = version;
+    let descriptor = ViewDescriptor {
+        id: id.clone(), kind: view.kind(), uri: view_uri(repo_path, &kind, &id),
+        title: view.title(), placement, mode: view.mode(), scope: view.scope(),
+        capture: view.capture(), viewport,
+    };
+    let render = ViewRender {
+        view_id: id, version, base_version: None, text: Some(tree.lines.clone()),
+        edits: None, cursor: None, mode: descriptor.mode, pending: String::new(), menu: view.menu(),
+    };
+    let open_view = OpenView {
+        descriptor: descriptor.clone(), view, tree, version, acked: None, request_tree: None,
+        acked_version: None, pending: PendingChord::default(), menu_pending: Vec::new(),
+        key_cursor: None, mode: descriptor.mode, dirty: false,
+    };
+    (descriptor, render, open_view)
 }
 
 /// The stack of views open in one session, most recent last.
@@ -481,50 +487,9 @@ impl Session {
             return Err(Error::new(format!("view already open: {id}")));
         }
 
-        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
-        let mut tree = view.render(&Ctx {
-            viewport,
-            pending: &[],
-        });
-        let version = 1;
-        tree.version = version;
-
-        let descriptor = ViewDescriptor {
-            id: id.clone(),
-            kind: view.kind(),
-            uri: view_uri(&self.repo_path, &kind, &id),
-            title: view.title(),
-            placement,
-            mode: view.mode(),
-            scope: view.scope(),
-            capture: view.capture(),
-            viewport,
-        };
-        let render = ViewRender {
-            view_id: id.clone(),
-            version,
-            base_version: None,
-            text: Some(tree.lines.clone()),
-            edits: None,
-            cursor: None,
-            mode: descriptor.mode,
-            pending: String::new(),
-            menu: view.menu(),
-        };
-        self.views.push(OpenView {
-            descriptor: descriptor.clone(),
-            view,
-            tree,
-            version,
-            acked: None,
-            request_tree: None,
-            acked_version: None,
-            pending: PendingChord::default(),
-            menu_pending: Vec::new(),
-            key_cursor: None,
-            mode: descriptor.mode,
-            dirty: false,
-        });
+        let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let (descriptor, render, open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        self.views.push(open_view);
         Ok((descriptor, render))
     }
 
@@ -563,7 +528,7 @@ impl Session {
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
         view.descriptor.viewport = viewport;
         if view.is_menu() {
-            Ok(Some(view.render(None, None)?))
+            Ok(Some(view.render_with_delivery(None, None, RenderDelivery::Acknowledged)?))
         } else {
             Ok(None)
         }
@@ -1136,7 +1101,7 @@ impl Session {
         self.views
             .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?
-            .render(cursor, None)
+            .render_with_delivery(cursor, None, RenderDelivery::Acknowledged)
     }
 
     /// Push a menu above `parent_id` and return its descriptor and first render.
@@ -1168,7 +1133,7 @@ impl Session {
         parent_id: &str,
         kind: ViewKind,
         placement: Placement,
-        mut view: Box<dyn View>,
+        view: Box<dyn View>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
         let viewport = self
             .views
@@ -1183,48 +1148,8 @@ impl Session {
             suffix += 1;
         }
 
-        let mut tree = view.render(&Ctx {
-            viewport,
-            pending: &[],
-        });
-        let version = 1;
-        tree.version = version;
-        let descriptor = ViewDescriptor {
-            id: id.clone(),
-            kind: view.kind(),
-            uri: view_uri(&self.repo_path, &kind, &id),
-            title: view.title(),
-            placement,
-            mode: view.mode(),
-            scope: view.scope(),
-            capture: view.capture(),
-            viewport,
-        };
-        let render = ViewRender {
-            view_id: id.clone(),
-            version,
-            base_version: None,
-            text: Some(tree.lines.clone()),
-            edits: None,
-            cursor: None,
-            mode: descriptor.mode,
-            pending: String::new(),
-            menu: view.menu(),
-        };
-        self.views.push(OpenView {
-            descriptor: descriptor.clone(),
-            view,
-            tree,
-            version,
-            acked: None,
-            request_tree: None,
-            acked_version: None,
-            pending: PendingChord::default(),
-            menu_pending: Vec::new(),
-            key_cursor: None,
-            mode: descriptor.mode,
-            dirty: false,
-        });
+        let (descriptor, render, open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        self.views.push(open_view);
         Ok((descriptor, render))
     }
 
@@ -1251,7 +1176,7 @@ impl Session {
             "status.stage" | "status.unstage" | "status.discard"
             | "common.copy-value" | "common.visit"
             | "common.toggle-section" | "common.show-section" | "common.hide-section"
-            | "common.next-section" | "common.prev-section");
+            | "common.next-section" | "common.prev-section" | "common.jump");
         // Commit selection intentionally waits for an acknowledgement. Other
         // positional actions may address the exact current, initially unacked
         // render, but neither policy substitutes a different retained version.
@@ -1382,7 +1307,17 @@ impl Session {
                 let render = match mode_change {
                     Some(ViewMode::Text) => {
                         view.enter_text_mode();
-                        None
+                        Some(ViewRender {
+                            view_id: view.descriptor.id.clone(),
+                            version: view.version,
+                            base_version: None,
+                            text: None,
+                            edits: None,
+                            cursor: None,
+                            mode: view.mode,
+                            pending: view.pending(),
+                            menu: view.view.menu(),
+                        })
                     }
                     Some(ViewMode::Interactive) => Some(view.leave_text_mode(cursor)?),
                     None => Some(if outcome.refresh {
@@ -1395,7 +1330,7 @@ impl Session {
                             Err(err) => return Err(err),
                         }
                     } else {
-                        view.render(cursor, outcome.cursor)?
+                        view.render_with_delivery(cursor, outcome.cursor, RenderDelivery::Acknowledged)?
                     }),
                 };
                 render

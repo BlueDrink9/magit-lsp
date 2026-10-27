@@ -161,6 +161,44 @@ async function run() {
       'acknowledged the render caused by the key press'
     );
 
+    // Static mode is a metadata-only transition: it must not invalidate the
+    // virtual document or disturb the user's selection.
+    const statusState = require('../lib/store').store.views.get('v1');
+    const selection = new vscode.Selection(new vscode.Position(0, 0), new vscode.Position(0, 3));
+    statusEditor.selection = selection;
+    const linesBeforeStatic = statusState.lines;
+    const versionBeforeStatic = statusState.version;
+    let documentsChangedCount = 0;
+    const documentsChangedSubscription = require('../lib/store').store.documentsChanged.event(() => {
+      documentsChangedCount += 1;
+    });
+    const changedBeforeStatic = client.notes.filter((note) => note.method === 'view/rendered').length;
+    await commands.get('magit.invoke')({ command: 'common.toggle-text-mode' });
+    await waitFor(() => vscode.__test.contextValues.get('magit.textMode') === true,
+      'text-mode context');
+    assert.equal(vscode.__test.contextValues.get('magit.textMode'), true);
+    assert.equal(statusEditor.selection, selection);
+    assert.equal(statusState.lines, linesBeforeStatic);
+    assert.equal(statusState.version, versionBeforeStatic);
+    assert.equal(documentsChangedCount, 0);
+    assert.equal(client.notes.filter((note) => note.method === 'view/rendered').length, changedBeforeStatic + 1);
+    assert.equal(client.notes.at(-1).method, 'view/rendered');
+    assert.equal(client.notes.at(-1).params.version, versionBeforeStatic);
+
+    // Refreshes queued while static are applied as a full server render on
+    // return to interactive mode.
+    fs.writeFileSync(path.join(repo, 'queued.txt'), 'queued\n');
+    await commands.get('magit.key')({ key: 'g' });
+    assert.equal(statusState.lines, linesBeforeStatic);
+    assert.equal(statusEditor.selection, selection);
+    await commands.get('magit.invoke')({ command: 'common.toggle-text-mode' });
+    await waitFor(() => vscode.__test.contextValues.get('magit.textMode') === false,
+      'interactive-mode context');
+    await waitFor(() => /queued\.txt/.test(statusEditor.document.getText()), 'queued refresh after static mode');
+    assert.equal(vscode.__test.contextValues.get('magit.textMode'), false);
+    assert.notEqual(statusState.lines, linesBeforeStatic);
+    documentsChangedSubscription.dispose();
+
     // 3. A server menu becomes a QuickPick; selecting a row sends its key.
     let promptItems;
     vscode.__test.setQuickPickAnswer((items) => {
@@ -194,6 +232,39 @@ async function run() {
         && request.params.key === 'c'),
       'the menu row was forwarded as a canonical key, not a client command'
     );
+
+    // Queued menu input stops only when the server's close effect removes the
+    // view; the first key is an ordinary action, not a local pop key.
+    const { queueSteps } = require('../lib/menus');
+    const viewStore = require('../lib/store').store;
+    const queuedState = { id: 'queue-regression', pressQueue: Promise.resolve() };
+    viewStore.views.set(queuedState.id, queuedState);
+    const requests = require('../lib/requests');
+    const originalPress = requests.press;
+    const pressed = [];
+    requests.press = async (id, key) => {
+      pressed.push(key);
+      if (key === 'c') viewStore.views.delete(id); // simulated applied close effect
+    };
+    try {
+      queueSteps(queuedState, ['c', 'x']);
+      await queuedState.pressQueue;
+      assert.deepEqual(pressed, ['c']);
+    } finally {
+      requests.press = originalPress;
+      viewStore.views.delete(queuedState.id);
+    }
+
+    // The real prompt handler must interpret the first displayed row as No
+    // when the server's default is false (including destructive prompts).
+    const { promptFor } = require('../lib/requests');
+    vscode.__test.setQuickPickAnswer((items) => items[0]);
+    for (const vector of require('../../../tests/data/client-contracts.json').prompts
+      .filter((item) => item.name === 'confirm-default-false'
+        || item.name === 'confirm-destructive')) {
+      const result = await promptFor(vector.params);
+      assert.deepEqual(result, vector.answer, vector.name);
+    }
 
     // Exercise the actual editor bridge through the registered dispatcher and
     // generated binding payloads rather than simulating profile key chords.

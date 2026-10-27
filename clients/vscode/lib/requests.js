@@ -105,8 +105,8 @@ function applyRender(params) {
     return;
   }
 
-  state.lines = result.lines;
   if (result.status === 'full' || result.status === 'edits') {
+    state.lines = result.lines;
     state.version = result.version;
     if (state.resolveFirstRender) {
       state.resolveFirstRender();
@@ -123,7 +123,9 @@ function applyRender(params) {
     state.cursor = params.cursor;
   }
 
-  store.documentsChanged.fire(state.uri);
+  if (result.status === 'full' || result.status === 'edits') {
+    store.documentsChanged.fire(state.uri);
+  }
   if (state.menu || views.isMenuKind(state.descriptor.kind)) {
     menus.updateQuickPick(state);
   }

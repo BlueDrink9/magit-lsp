@@ -49,7 +49,9 @@ impl StatusView {
     /// Render the visible tree, loading hunks only for expanded files.
     fn render_tree(&mut self) -> Tree {
         for (section, path) in self.file_keys() {
-            if section == "untracked" || !self.visibility.is_expanded(&format!("{section}/{path}"))
+            if section == "untracked"
+                || !self.visibility.is_expanded(&format!("section:{section}"))
+                || !self.visibility.is_expanded(&format!("{section}/{path}"))
             {
                 continue;
             }
@@ -76,26 +78,13 @@ impl StatusView {
         let status = &self.status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
-        let repo = &self.repo;
         build_with(status, visibility, |section, file| {
             if section == "untracked" {
                 return Vec::new();
             }
             let staged = section == "staged";
             let key = (file.path.clone(), staged);
-            if let Some(cached) = hunks.get(&key) {
-                return cached.clone();
-            }
-            // A failed diff stays an empty body; the refresh path reports it.
-            let loaded = match repo.file_hunks(&file.path, staged) {
-                Ok(hunks) => hunks,
-                Err(error) => {
-                    tracing::warn!(path = %file.path, %error, "failed to load file body");
-                    Vec::new()
-                }
-            };
-            hunks.insert(key, loaded.clone());
-            loaded
+            hunks.get(&key).cloned().unwrap_or_default()
         })
     }
 

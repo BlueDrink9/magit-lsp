@@ -1,0 +1,35 @@
+# Server-owned navigation through the real Neovim client and live LSP server.
+fixture: modified-two-files
+---
+wait
+expect screen contains "Unstaged changes"
+goto "Head"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"section\",1) end) or 1')"
+wait
+expect cursor on "Staged changes"
+snapshot: section-forward
+goto "Unstaged changes"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"section\",-1) end) or 1')"
+wait
+expect cursor on "Staged changes"
+snapshot: section-backward
+goto "Head"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"file\",1) end) or 1')"
+wait
+expect cursor on "  M f.txt"
+snapshot: file-forward
+goto "M g.txt"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"file\",-1) end) or 1')"
+wait
+expect cursor on "  M f.txt"
+snapshot: file-backward
+goto "Head"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"hunk\",1) end) or 1')"
+wait
+expect cursor on "    @@ -1,10 +1,10 @@"
+snapshot: hunk-forward
+goto "@@ -1,5 +1,5 @@"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() require(\"magit-lsp\").jump(\"hunk\",-1) end) or 1')"
+wait
+expect cursor on "    @@ -1,10 +1,10 @@"
+snapshot: hunk-backward

@@ -60,6 +60,7 @@ pub struct Binding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Keymap {
+    /// keep-for: TASKS §3.9 complete keymap-payload decision; retained metadata despite no functional client reader.
     pub scope: String,
     pub bindings: Vec<Binding>,
 }

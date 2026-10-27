@@ -7,6 +7,8 @@ const render = require('../lib/render');
 const menu = require('../lib/menu');
 const foldkeys = require('../lib/foldkeys');
 const prompt = require('../lib/prompt');
+const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
+const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
 let passed = 0;
@@ -73,57 +75,14 @@ test('no descriptor means inactive', () => {
 
 // lib/render.js ------------------------------------------------------------
 
-test('full text replaces the buffer and advances the version', () => {
-  const result = render.applyRender(['old'], 4, {
-    viewId: 'v1',
-    version: 5,
-    text: ['a', 'b'],
-    mode: 'interactive',
+for (const vector of renderVectors) {
+  test(`render contract: ${vector.name}`, () => {
+    const result = render.applyRender(vector.initialLines, vector.initialVersion, vector.render);
+    assert.deepEqual(result.lines, vector.expectedLines);
+    assert.equal(result.version, vector.expectedVersion);
+    assert.equal(result.status, vector.outcome === 'resync' ? 'resync' : vector.render.text ? 'full' : vector.render.edits ? 'edits' : 'none');
   });
-  assert.deepEqual(result.lines, ['a', 'b']);
-  assert.equal(result.version, 5);
-  assert.equal(result.mode, 'interactive');
-  assert.equal(result.status, 'full');
-});
-
-test('line edits apply bottom-up when the base version matches', () => {
-  const result = render.applyRender(['a', 'b', 'c', 'd'], 7, {
-    viewId: 'v1',
-    version: 8,
-    baseVersion: 7,
-    edits: [
-      { startLine: 1, endLine: 3, lines: ['B'] },
-      { startLine: 3, endLine: 4, lines: ['D', 'E'] },
-    ],
-    mode: 'interactive',
-  });
-  assert.deepEqual(result.lines, ['a', 'B', 'D', 'E']);
-  assert.equal(result.version, 8);
-  assert.equal(result.status, 'edits');
-});
-
-test('a stale base version asks for a resync instead of patching', () => {
-  const result = render.applyRender(['a', 'b'], 6, {
-    viewId: 'v1',
-    version: 9,
-    baseVersion: 7,
-    edits: [{ startLine: 0, endLine: 1, lines: ['stale'] }],
-    mode: 'interactive',
-  });
-  assert.deepEqual(result.lines, ['a', 'b']);
-  assert.equal(result.version, 6);
-  assert.equal(result.status, 'resync');
-});
-
-test('a render with neither text nor edits leaves the buffer alone', () => {
-  const result = render.applyRender(['a'], 3, {
-    viewId: 'v1',
-    version: 4,
-    mode: 'interactive',
-  });
-  assert.deepEqual(result.lines, ['a']);
-  assert.equal(result.status, 'none');
-});
+}
 
 // lib/menu.js --------------------------------------------------------------
 
@@ -212,19 +171,6 @@ test('typed characters become canonical key steps', () => {
   assert.deepEqual(menu.routeTyped(' '), ['Space']);
   assert.deepEqual(menu.routeTyped('+'), ['Plus']);
   assert.deepEqual(menu.routeTyped(undefined), []);
-});
-
-test('only the newly typed suffix is forwarded when input coalesces', () => {
-  assert.equal(menu.typedDelta('', 'c'), 'c');
-  assert.equal(menu.typedDelta('c', 'ca'), 'a');
-  assert.equal(menu.typedDelta('c', ''), '');
-});
-
-test('pop keys are recognised', () => {
-  assert.equal(menu.isPopKey('Escape'), true);
-  assert.equal(menu.isPopKey('ctrl+c'), true);
-  assert.equal(menu.isPopKey('q'), true);
-  assert.equal(menu.isPopKey('c'), false);
 });
 
 // lib/foldkeys.js ----------------------------------------------------------
@@ -366,6 +312,12 @@ test('JSONC comments and trailing commas are stripped', () => {
   assert.equal(parsed[5].command, 'editor.foldRecursively');
 });
 
+test('JSONC parser preserves comment-like escaped strings and rejects malformed input', () => {
+  const parsed = foldkeys.parseJsonc('[{"key":"x\\\"//text","command":"editor.fold","note":"/* text */",},]');
+  assert.equal(parsed[0].key, 'x"//text');
+  assert.throws(() => foldkeys.parseJsonc('[{"command":]'), /Invalid JSONC.*line/);
+});
+
 test('native fold shortcuts map to magit.invoke entries', () => {
   const entries = foldkeys.mapFoldKeys(KEYBINDINGS_JSONC);
   assert.equal(entries.length, 5);
@@ -374,7 +326,7 @@ test('native fold shortcuts map to magit.invoke entries', () => {
     key: 'ctrl+shift+[',
     command: 'magit.invoke',
     args: { command: 'common.hide-section' },
-    when: 'magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
+    when: 'magit.active && !magit.textMode && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible',
   });
   assert.equal(entries[1].args.command, 'common.show-section');
   assert.equal(entries[2].args.command, 'common.toggle-section');
@@ -399,76 +351,31 @@ test('fold levels become detail changes', () => {
 
 // lib/prompt.js ------------------------------------------------------------
 
-test('confirm rows use the labels and put No first when destructive', () => {
-  assert.deepEqual(prompt.promptItems({ kind: 'confirm', title: 'Delete?' }), [
-    { id: 'yes', label: 'Yes' },
-    { id: 'no', label: 'No' },
-  ]);
-  assert.deepEqual(
-    prompt.promptItems({
-      kind: 'confirm',
-      title: 'Delete?',
-      destructive: true,
-      yesLabel: 'Delete',
-      noLabel: 'Keep',
-    }),
-    [
-      { id: 'no', label: 'Keep' },
-      { id: 'yes', label: 'Delete' },
-    ]
-  );
-});
-
-test('choice rows keep item metadata and add a custom row only when allowed', () => {
-  const params = {
-    kind: 'choice',
-    title: 'Style',
-    items: [{ id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' }],
-  };
-  assert.deepEqual(prompt.promptItems(params), [
-    { id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' },
-  ]);
-  assert.deepEqual(prompt.promptItems({ ...params, allowCustom: true }), [
-    { id: 'rebase', label: 'Rebase', description: 'rewrite', detail: 'more' },
-    { id: prompt.CUSTOM_ID, label: 'Enter custom value…' },
-  ]);
-  assert.deepEqual(prompt.promptItems(undefined), []);
-});
-
-test('answers use the shape the server expects', () => {
-  assert.deepEqual(prompt.answerFor({ kind: 'confirm' }, { id: 'yes' }), {
-    cancelled: false,
-    value: true,
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'confirm' }, { id: 'no' }), {
-    cancelled: false,
-    value: false,
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'text' }, 'Alice'), {
-    cancelled: false,
-    value: 'Alice',
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'choice' }, { id: 'rebase' }), {
-    cancelled: false,
-    value: { id: 'rebase' },
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'choice', allowCustom: true }, { id: prompt.CUSTOM_ID }), {
-    cancelled: false,
-    custom: true,
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'multiChoice' }, [{ id: 'a' }, { id: 'b' }]), {
-    cancelled: false,
-    value: { ids: ['a', 'b'] },
-  });
-  assert.deepEqual(prompt.answerFor({ kind: 'text' }, undefined), { cancelled: true });
-});
-
-test('a cancelled custom choice cancels the whole prompt', () => {
-  assert.deepEqual(prompt.customChoice('main'), {
-    cancelled: false,
-    value: { custom: 'main' },
-  });
-  assert.deepEqual(prompt.customChoice(undefined), { cancelled: true });
+test('shared prompt vectors preserve protocol answer semantics', () => {
+  for (const vector of promptVectors) {
+    const params = vector.params;
+    let answer;
+    if (params.kind === 'confirm') {
+      const items = prompt.promptItems(params);
+      if (vector.focus) {
+        assert.deepEqual(items.map((item) => item.label), vector.focus, vector.name);
+      }
+      answer = prompt.answerFor(params, vector.response === null
+        ? undefined : { id: vector.response });
+    } else if (params.kind === 'text') {
+      answer = prompt.answerFor(params, vector.response);
+    } else if (params.kind === 'choice') {
+      answer = vector.response === '__custom__'
+        ? prompt.customChoice(vector.customResponse)
+        : prompt.answerFor(params, vector.response === null
+          ? undefined : { id: vector.response });
+    } else {
+      answer = vector.response === null
+        ? { cancelled: true }
+        : prompt.answerFor(params, vector.response.map((id) => ({ id })));
+    }
+    assert.deepEqual(answer, vector.answer, vector.name);
+  }
 });
 
 // summary ------------------------------------------------------------------

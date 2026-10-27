@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 pub enum Reader {
     Text,
     Choice,
+    /// keep-for: TASKS §3.11 reader schema (Phase-2/R-2.7); metadata retained, not a specialized executor.
     Path,
     Ref,
     Commit,

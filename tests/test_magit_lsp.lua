@@ -89,7 +89,7 @@ local function setup_child(opts)
       end,
       --- The server's outline for the focused view, never rendered text.
       --- Positions come from `textDocument/documentSymbol`; the product client
-      --- is asynchronous, so the test fetches synchronously itself.
+      --- The outline is requested from the server for native editor navigation.
       ---@return table[]
       symbols = function()
         local record = require('magit-lsp.view').current()
@@ -816,7 +816,7 @@ T['write is a no-op and keeps the buffer unmodified'] = function()
   )
 end
 
-T['navigation jumps follow document symbols'] = function()
+T['navigation jumps use server-owned structured headers'] = function()
   setup_child()
   local symbols = child.lua_get([[
     (function()
@@ -1514,190 +1514,46 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
     end
   ]])
 
+  local fixture = vim.json.decode(table.concat(vim.fn.readfile('tests/data/client-contracts.json'), '\n'))
+  local scenarios = {}
+  for _, vector in ipairs(fixture.prompts) do
+    local scenario = { name = vector.name, params = vector.params, want = vim.deepcopy(vector.answer) }
+    scenario.want.promptId = vector.params.promptId
+    if vector.response == vim.NIL then
+      scenario.selectAnswers = {}
+    elseif vector.params.kind == 'confirm' then
+      scenario.selectAnswers = { (vector.focus and vector.focus[1] or 'Yes') == 'Yes' and (vector.response == 'yes' and 1 or 2) or (vector.response == 'yes' and 2 or 1) }
+    elseif vector.params.kind == 'choice' then
+      scenario.selectAnswers = { vector.response }
+      if vector.response == '__custom__' then
+        scenario.inputAnswer = vector.customResponse ~= vim.NIL and vector.customResponse or nil
+        scenario.want_input = { prompt = vector.params.title }
+      end
+    elseif vector.params.kind == 'multiChoice' then
+      scenario.selectAnswers = {}
+      for _, id in ipairs(vector.response) do scenario.selectAnswers[#scenario.selectAnswers + 1] = id end
+      scenario.selectAnswers[#scenario.selectAnswers + 1] = '__done__'
+    else
+      scenario.inputAnswer = vector.response ~= vim.NIL and vector.response or nil
+      scenario.want_input = { prompt = vector.params.title, default = vector.params.default }
+      if vector.params.default == nil then scenario.want_input.default = nil end
+    end
+    if vector.focus then scenario.want_focus = vector.focus end
+    scenarios[#scenarios + 1] = scenario
+  end
   local multi_items = {
-    { id = 'a', label = 'a' },
-    { id = 'b', label = 'b', description = 'desc b' },
-    { id = 'c', label = 'c' },
+    { id = 'a', label = 'a' }, { id = 'b', label = 'b', description = 'desc b' }, { id = 'c', label = 'c' },
   }
-  local scenarios = {
-    {
-      name = 'text success',
-      params = { promptId = 'p-text-ok', kind = 'text', title = 'Author name?', default = 'seed' },
-      inputAnswer = 'Alice',
-      want = { promptId = 'p-text-ok', cancelled = false, value = 'Alice' },
-      want_input = { prompt = 'Author name?', default = 'seed' },
-    },
-    {
-      name = 'text empty answer',
-      params = { promptId = 'p-text-empty', kind = 'text', title = 'Name?' },
-      inputAnswer = '',
-      want = { promptId = 'p-text-empty', cancelled = false, value = '' },
-      want_input = { prompt = 'Name?' },
-    },
-    {
-      name = 'text cancel',
-      params = { promptId = 'p-text-cancel', kind = 'text', title = 'Name?' },
-      want = { promptId = 'p-text-cancel', cancelled = true, value = nil },
-      want_input = { prompt = 'Name?' },
-    },
-    {
-      name = 'confirm yes',
-      params = { promptId = 'p-confirm-yes', kind = 'confirm', title = 'Delete branch feature/x?' },
-      selectAnswers = { 1 },
-      want = { promptId = 'p-confirm-yes', cancelled = false, value = true },
-      want_select_items = { 'Yes', 'No' },
-    },
-    {
-      name = 'confirm no',
-      params = { promptId = 'p-confirm-no', kind = 'confirm', title = 'Delete branch feature/x?' },
-      selectAnswers = { 2 },
-      want = { promptId = 'p-confirm-no', cancelled = false, value = false },
-    },
-    {
-      name = 'confirm cancel',
-      params = { promptId = 'p-confirm-cancel', kind = 'confirm', title = 'Delete branch feature/x?' },
-      want = { promptId = 'p-confirm-cancel', cancelled = true, value = nil },
-    },
-    {
-      name = 'confirm destructive focuses No first',
-      params = {
-        promptId = 'p-confirm-destructive',
-        kind = 'confirm',
-        title = 'Drop the stash?',
-        yesLabel = 'Keep it',
-        noLabel = 'Drop it',
-        destructive = true,
-      },
-      selectAnswers = { 1 },
-      want = { promptId = 'p-confirm-destructive', cancelled = false, value = false },
-      want_select_items = { 'Drop it', 'Keep it' },
-    },
-    {
-      name = 'choice answers a fixed id',
-      params = {
-        promptId = 'p-choice',
-        kind = 'choice',
-        title = 'Which base?',
-        items = {
-          { id = 'head', label = 'HEAD' },
-          { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
-        },
-      },
-      selectAnswers = { 'branch-x' },
-      want = { promptId = 'p-choice', cancelled = false, value = { id = 'branch-x' } },
-      want_select_items = {
-        { id = 'head', label = 'HEAD' },
-        { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
-      },
-      want_select_formatted = { 'HEAD', 'branch x — 2 commits ahead' },
-    },
-    {
-      name = 'choice cancel',
-      params = {
-        promptId = 'p-choice-cancel',
-        kind = 'choice',
-        title = 'Which base?',
-        items = {
-          { id = 'head', label = 'HEAD' },
-          { id = 'branch-x', label = 'branch x', description = '2 commits ahead' },
-        },
-      },
-      want = { promptId = 'p-choice-cancel', cancelled = true, value = nil },
-    },
-    {
-      name = 'choice with allowCustom types a custom value',
-      params = {
-        promptId = 'p-choice-custom',
-        kind = 'choice',
-        title = 'Which base?',
-        allowCustom = true,
-        items = { { id = 'head', label = 'HEAD' } },
-      },
-      selectAnswers = { '__custom__' },
-      inputAnswer = 'refs/heads/wip',
-      want = { promptId = 'p-choice-custom', cancelled = false, value = { custom = 'refs/heads/wip' } },
-      want_input = { prompt = 'Which base?' },
-      want_select_items = {
-        { id = 'head', label = 'HEAD' },
-        { id = '__custom__', label = 'Enter custom value…' },
-      },
-    },
-    {
-      name = 'choice with allowCustom can cancel the custom input',
-      params = {
-        promptId = 'p-choice-custom-cancel',
-        kind = 'choice',
-        title = 'Which base?',
-        allowCustom = true,
-        items = { { id = 'head', label = 'HEAD' } },
-      },
-      selectAnswers = { '__custom__' },
-      want = { promptId = 'p-choice-custom-cancel', cancelled = true, value = nil },
-      want_input = { prompt = 'Which base?' },
-    },
-    {
-      name = 'multiChoice toggles preselected items and answers Done',
-      params = {
-        promptId = 'p-multi',
-        kind = 'multiChoice',
-        title = 'Pick branches',
-        items = multi_items,
-        preselected = { 'a' },
-      },
-      selectAnswers = { 'b', 'a', '__done__' },
-      want = { promptId = 'p-multi', cancelled = false, value = { ids = { 'b' } } },
-      want_select_steps = {
-        { '[x] a', '[ ] b — desc b', '[ ] c', 'Done' },
-        { '[x] a', '[x] b — desc b', '[ ] c', 'Done' },
-        { '[ ] a', '[x] b — desc b', '[ ] c', 'Done' },
-      },
-    },
-    {
-      name = 'multiChoice answers an empty selection',
-      params = {
-        promptId = 'p-multi-empty',
-        kind = 'multiChoice',
-        title = 'Pick branches',
-        items = { { id = 'a', label = 'a' } },
-      },
-      selectAnswers = { '__done__' },
-      want = { promptId = 'p-multi-empty', cancelled = false, value = { ids = {} } },
-    },
-    {
-      name = 'multiChoice cancel',
-      params = {
-        promptId = 'p-multi-cancel',
-        kind = 'multiChoice',
-        title = 'Pick branches',
-        items = { { id = 'a', label = 'a' } },
-      },
-      want = { promptId = 'p-multi-cancel', cancelled = true, value = nil },
-    },
-    {
-      name = 'secret success',
-      params = { promptId = 'p-secret-ok', kind = 'text', title = 'SSH passphrase', secret = true },
-      secretAnswer = 'correct horse battery',
-      secret = 'correct horse battery',
-      want = { promptId = 'p-secret-ok', cancelled = false, value = '<redacted>' },
-      want_secret_titles = { 'SSH passphrase' },
-      want_no_input = true,
-    },
-    {
-      name = 'secret empty answer cancels',
-      params = { promptId = 'p-secret-empty', kind = 'text', title = 'SSH passphrase', secret = true },
-      secretAnswer = '',
-      want = { promptId = 'p-secret-empty', cancelled = true, value = nil },
-      want_secret_titles = { 'SSH passphrase' },
-      want_no_input = true,
-    },
-    {
-      name = 'secret cancel',
-      params = { promptId = 'p-secret-cancel', kind = 'text', title = 'SSH passphrase', secret = true },
-      want = { promptId = 'p-secret-cancel', cancelled = true, value = nil },
-      want_secret_titles = { 'SSH passphrase' },
-      want_no_input = true,
-    },
+  scenarios[#scenarios + 1] = {
+    name = 'multiChoice renders and toggles checklist',
+    params = { promptId = 'local-multi', kind = 'multiChoice', title = 'Pick branches', items = multi_items, preselected = { 'a' } },
+    selectAnswers = { 'b', 'a', '__done__' },
+    want = { promptId = 'local-multi', cancelled = false, value = { ids = { 'b' } } },
+    want_select_steps = { { '[x] a', '[ ] b — desc b', '[ ] c', 'Done' }, { '[x] a', '[x] b — desc b', '[ ] c', 'Done' }, { '[ ] a', '[x] b — desc b', '[ ] c', 'Done' } },
   }
+  scenarios[#scenarios + 1] = { name = 'secret success', params = { promptId = 'p-secret-ok', kind = 'text', title = 'SSH passphrase', secret = true }, secretAnswer = 'correct horse battery', secret = 'correct horse battery', want = { promptId = 'p-secret-ok', cancelled = false, value = '<redacted>' }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
+  scenarios[#scenarios + 1] = { name = 'secret empty answer cancels', params = { promptId = 'p-secret-empty', kind = 'text', title = 'SSH passphrase', secret = true }, secretAnswer = '', want = { promptId = 'p-secret-empty', cancelled = true, value = nil }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
+  scenarios[#scenarios + 1] = { name = 'secret cancel', params = { promptId = 'p-secret-cancel', kind = 'text', title = 'SSH passphrase', secret = true }, want = { promptId = 'p-secret-cancel', cancelled = true, value = nil }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
 
   for _, scenario in ipairs(scenarios) do
     local label = scenario.name
@@ -1760,6 +1616,13 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
           scenario.params.title,
           label .. ': the select prompt'
         )
+      end
+      if scenario.want_focus then
+        local labels = {}
+        for _, item in ipairs(result.calls.select[1].items) do
+          labels[#labels + 1] = type(item) == 'table' and item.label or item
+        end
+        MiniTest.expect.equality(labels, scenario.want_focus, label .. ': focus label order')
       end
       if scenario.want_select_formatted then
         MiniTest.expect.equality(
@@ -2650,6 +2513,56 @@ T['descriptor queues, deferred renders and resync preserve client identity and t
     { 202, 'same', 1 },
   })
   MiniTest.expect.equality(child.lua_get('INDEPENDENT_CLOSE and CLEAN'), true)
+end
+
+T['shared render vectors apply through the Lua view adapter'] = function()
+  local fixture = vim.json.decode(table.concat(vim.fn.readfile('tests/data/client-contracts.json'), '\n'))
+  child.lua(string.format('VECTORS = %s', vim.inspect(fixture.renders)))
+  local results = child.lua([[
+    VIEW = require('magit-lsp.view')
+    ACKS, RESYNCS = {}, {}
+    local client = {
+      initialized = true,
+      notify = function(_, method, params)
+        if method == 'view/rendered' then ACKS[#ACKS + 1] = params.version end
+      end,
+      request = function(_, method, params, callback)
+        assert(method == 'view/resync')
+        RESYNCS[#RESYNCS + 1] = params.viewId
+      end,
+    }
+    vim.lsp.get_client_by_id = function() return client end
+    vim.lsp.buf_is_attached = function() return true end
+    vim.lsp.semantic_tokens.force_refresh = function() end
+    VIEW.configure({})
+    local result = {}
+    for _, vector in ipairs(VECTORS) do
+      local id = vector.render.viewId
+      VIEW.apply_render({ viewId = id, version = vector.initialVersion,
+        mode = 'interactive', text = vector.initialLines }, 303)
+      local view = VIEW.open({ id = id, kind = 'contract-test', uri = 'magit://test/' .. vector.name,
+        placement = 'main', mode = 'interactive' }, { client_id = 303 })
+      ACKS, RESYNCS = {}, {}
+      VIEW.apply_render(vector.render, 303)
+      VIEW.flush_acks(303)
+      result[#result + 1] = { lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false),
+        version = view.version, ack = ACKS[#ACKS], resync = RESYNCS[1] }
+      VIEW.close(view.key, true)
+    end
+    return result
+  ]])
+  for index, vector in ipairs(fixture.renders) do
+    local result = results[index]
+    MiniTest.expect.equality(result.lines, vector.expectedLines, vector.name .. ': buffer lines')
+    MiniTest.expect.equality(result.version, vector.expectedVersion, vector.name .. ': view version')
+    if vector.outcome == 'ack' then
+      MiniTest.expect.equality(result.ack, vector.render.version, vector.name .. ': ACK')
+      MiniTest.expect.equality(result.resync, nil, vector.name .. ': no resync')
+    else
+      MiniTest.expect.equality(result.ack, nil, vector.name .. ': no ACK')
+      MiniTest.expect.equality(result.resync, vector.render.viewId, vector.name .. ': resync')
+    end
+  end
 end
 
 T['user wipe requests close once per client and server close never echoes'] = function()

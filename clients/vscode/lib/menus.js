@@ -133,7 +133,7 @@ function queueSteps(state, steps) {
           return;
         }
         await requests.press(state.id, step, { cursor: { line: 0, column: 0 } });
-        if (menu.isPopKey(step)) {
+        if (!store.views.has(state.id)) {
           return;
         }
       }

@@ -28,6 +28,7 @@ const EXPECTED: &[&str] = &[
     "common.detail-level-4",
     "common.next-section",
     "common.prev-section",
+    "common.jump",
     "common.next-sibling",
     "common.prev-sibling",
     "common.parent-section",

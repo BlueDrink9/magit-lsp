@@ -164,6 +164,16 @@
               "status": "implemented"
             },
             {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
+              "status": "implemented"
+            },
+            {
               "command": "common.cancel",
               "keys": [
                 "Escape",
@@ -444,6 +454,16 @@
                 "visual"
               ],
               "label": "Move to the previous section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
               "status": "implemented"
             },
             {
@@ -1121,6 +1141,16 @@
               "status": "implemented"
             },
             {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
+              "status": "implemented"
+            },
+            {
               "command": "common.cancel",
               "keys": [
                 "Escape",
@@ -1407,6 +1437,16 @@
                 "visual"
               ],
               "label": "Move to the previous section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
               "status": "implemented"
             },
             {
@@ -1727,6 +1767,16 @@
               "status": "implemented"
             },
             {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
+              "status": "implemented"
+            },
+            {
               "command": "common.cancel",
               "keys": [
                 "Escape",
@@ -2034,6 +2084,16 @@
               "status": "implemented"
             },
             {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
+              "status": "implemented"
+            },
+            {
               "command": "common.cancel",
               "keys": [
                 "Escape",
@@ -2338,6 +2398,16 @@
                 "visual"
               ],
               "label": "Move to the previous section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
               "status": "implemented"
             },
             {
@@ -2652,6 +2722,16 @@
                 "visual"
               ],
               "label": "Move to the previous section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
               "status": "implemented"
             },
             {

@@ -16,6 +16,7 @@ M.OVERRIDES = {}
 --- Modifier groups are applied above the type, so they should only add
 --- attributes (or a background) and never replace a type's foreground.
 M.MODIFIER_LINKS = {
+  -- keep-for: TASKS §3.15 recorded modifier styling; selected is used by log selection, remaining links support planned/ref presentation (R-5.3).
   staged = 'Bold',
   selected = 'Visual',
   planned = 'Comment',

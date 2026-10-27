@@ -24,7 +24,7 @@ function promptItems(params) {
     const yes = { id: 'yes', label: params.yesLabel || 'Yes' };
     const no = { id: 'no', label: params.noLabel || 'No' };
     // A destructive question focuses "No" first.
-    return params.destructive ? [no, yes] : [yes, no];
+    return (params.destructive || params.default === false) ? [no, yes] : [yes, no];
   }
 
   const items = (params.items || []).map((item) => ({

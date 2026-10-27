@@ -1,0 +1,16 @@
+# Protocol-adapter UI only: real prompt.handle/vim.ui.select, fake originating
+# client transport; this does not exercise server prompt behavior.
+fixture: modified-two-files
+---
+wait
+expect screen contains "Unstaged changes"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.schedule(function() dofile(\"../../../../../tests/ui/confirm_default.lua\") end) or 1')"
+wait prompt
+expect screen matches /1: No[\s\S]*2: Yes/
+snapshot: no-first
+keys: 1 Enter
+wait screen contains "False default declined"
+expect screen contains "False default declined"
+snapshot: declined
+keys: Enter
+wait

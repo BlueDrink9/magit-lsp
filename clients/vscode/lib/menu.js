@@ -9,20 +9,6 @@
  * @param {object|string|undefined} status
  * @returns {{kind: string, roadmapId?: string, reason?: string}}
  */
-function statusInfo(status) {
-  if (typeof status === 'string') {
-    return { kind: status };
-  }
-  if (status && typeof status === 'object') {
-    return {
-      kind: status.status || 'implemented',
-      roadmapId: status.roadmapId,
-      reason: status.reason,
-    };
-  }
-  return { kind: 'implemented' };
-}
-
 /**
  * The one-line description for a QuickPick row.
  *
@@ -40,10 +26,8 @@ function describeItem(item, status) {
   } else if (item.kind === 'option' && item.value !== undefined && item.value !== null) {
     parts.push(item.value);
   }
-  if (status.kind === 'planned') {
+  if (status.status === 'planned') {
     parts.push(status.roadmapId ? `planned ${status.roadmapId}` : 'planned');
-  } else if (status.kind === 'unavailable') {
-    parts.push(status.reason || 'unavailable');
   }
   return parts.join(' · ');
 }
@@ -55,16 +39,16 @@ function describeItem(item, status) {
  * @returns {object}
  */
 function quickPickItem(item) {
-  const status = statusInfo(item.status);
+  const status = item.status;
   return {
     kind: 'item',
     label: `${item.key}  ${item.label}`,
     description: describeItem(item, status),
     key: item.key,
     itemKind: item.kind,
-    status: status.kind,
+    status: status.status,
     roadmapId: status.roadmapId,
-    reason: status.reason,
+    reason: undefined,
     on: item.kind === 'switch' ? Boolean(item.on) : undefined,
     value: item.kind === 'option' ? item.value : undefined,
     flag: item.flag,
@@ -134,16 +118,6 @@ function routeTyped(value) {
  * @param {string} current
  * @returns {string}
  */
-function typedDelta(previous, current) {
-  if (!current) {
-    return '';
-  }
-  if (previous && current.startsWith(previous)) {
-    return current.slice(previous.length);
-  }
-  return current;
-}
-
 /**
  * Whether a key closes the menu. The server owns this rule; this helper lets
  * the QuickPick stop forwarding after a pop key.
@@ -151,17 +125,10 @@ function typedDelta(previous, current) {
  * @param {string} key
  * @returns {boolean}
  */
-function isPopKey(key) {
-  return key === 'Escape' || key === 'ctrl+c' || key === 'q';
-}
-
 module.exports = {
   quickPickItems,
   quickPickItem,
   describeItem,
-  statusInfo,
   routeTyped,
-  typedDelta,
   charToKey,
-  isPopKey,
 };
