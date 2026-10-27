@@ -1,10 +1,12 @@
-//! Managed-draft core checks, independent of the not-yet-cut-over realFile wire.
+//! Managed-draft core checks, including server-owned history navigation.
 #![cfg(unix)]
 
 use magit_lsp::editor::draft::{Draft, DraftContext, MAX_DRAFT_BYTES};
 use magit_lsp::editor::{Reply, COMMIT_MESSAGE_KIND};
 use magit_lsp::git::GitRepo;
 use magit_lsp::protocol::DraftFinishReason::{Confirm, NormalClose};
+use magit_lsp::editor::history::{History, MAX_HISTORY_BYTES, MAX_HISTORY_ENTRIES};
+use magit_lsp::protocol::DraftHistoryCommand::{Next, Previous};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -107,6 +109,122 @@ fn snapshots(draft: &Draft) -> (String, i32, String, i32, String, bool) {
         draft.saved().unwrap().text().into(),
         draft.is_terminal(),
     )
+}
+
+#[test]
+fn history_count_order_exact_dedup_and_unsent_restore_clamp() {
+    let fixture = Fixture::new();
+    let (mut draft, access) = fixture.opened();
+    let mut history = History::default();
+    for i in 0..MAX_HISTORY_ENTRIES + 2 {
+        let text = format!("message {i}\n# exact comment\n");
+        history.retain(&text, TEMPLATE).unwrap();
+        history.retain(&text, TEMPLATE).unwrap();
+    }
+    draft.did_change(access.context(), 2, b"unsent exact\r\n").unwrap();
+    draft.save(access.context(), 2).unwrap();
+    let saved = draft.saved().unwrap().text().to_string();
+    let mut version = 2;
+    for i in (2..MAX_HISTORY_ENTRIES + 2).rev() {
+        let snapshot = draft.history(access.context(), version, Previous, &history).unwrap();
+        version += 1;
+        assert_eq!(snapshot.version(), version);
+        assert_eq!(snapshot.text(), format!("message {i}\n# exact comment\n"));
+    }
+    assert_eq!(draft.history(access.context(), version, Previous, &history).unwrap().text(), "message 2\n# exact comment\n");
+    version += 1;
+    // Browsing is a snapshot, so concurrent eviction cannot move its cursor.
+    history.retain("new submission", TEMPLATE).unwrap();
+    for i in 3..MAX_HISTORY_ENTRIES + 2 {
+        assert_eq!(draft.history(access.context(), version, Next, &history).unwrap().text(), format!("message {i}\n# exact comment\n"));
+        version += 1;
+    }
+    for _ in 0..2 {
+        assert_eq!(draft.history(access.context(), version, Next, &history).unwrap().text(), "unsent exact\r\n");
+        version += 1;
+    }
+    assert_eq!(draft.saved().unwrap().text(), saved);
+    assert_eq!(draft.saved().unwrap().version(), 2);
+    assert!(!draft.is_terminal());
+    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
+    assert_eq!(draft.history(access.context(), version, Previous, &history).unwrap().text(), "new submission");
+}
+
+#[test]
+fn history_utf8_aggregate_eviction_overflow_and_eligibility_are_exact() {
+    let fixture = Fixture::new();
+    let (mut draft, access) = fixture.opened();
+    let mut history = History::default();
+    let first = "🦀".repeat(MAX_HISTORY_BYTES / 8);
+    let second = "é".repeat(MAX_HISTORY_BYTES / 4);
+    history.retain(&first, TEMPLATE).unwrap();
+    history.retain(&second, TEMPLATE).unwrap();
+    assert!(history.retain(&"🦀".repeat(MAX_HISTORY_BYTES / 4 + 1), TEMPLATE)
+        .unwrap_err().to_string().contains("not retained"));
+    assert_eq!(draft.history(access.context(), 1, Previous, &history).unwrap().text(), second);
+    assert_eq!(draft.history(access.context(), 2, Previous, &history).unwrap().text(), first);
+    // One byte over aggregate evicts only the oldest, without character truncation.
+    history.retain("x", TEMPLATE).unwrap();
+    let (mut fresh, context) = fixture.opened();
+    assert_eq!(fresh.history(context.context(), 1, Previous, &history).unwrap().text(), "x");
+    assert_eq!(fresh.history(context.context(), 2, Previous, &history).unwrap().text(), second);
+    assert_eq!(fresh.history(context.context(), 3, Previous, &history).unwrap().text(), second);
+    let mut history = History::default();
+    history.retain("", TEMPLATE).unwrap();
+    history.retain(TEMPLATE, TEMPLATE).unwrap();
+    let (mut fresh, context) = fixture.opened();
+    assert_eq!(fresh.history(context.context(), 1, Previous, &history).unwrap().text(), TEMPLATE);
+    // No semantic stripping: changed whitespace/comments and nonconsecutive duplicates count.
+    for text in ["# comment only\n", " ", "# comment only\n"] {
+        history.retain(text, TEMPLATE).unwrap();
+    }
+    for (version, text) in [(2, "# comment only\n"), (3, " "), (4, "# comment only\n")] {
+        assert_eq!(fresh.history(context.context(), version, Previous, &history).unwrap().text(), text);
+    }
+    let mut full = History::default();
+    let limit = "é".repeat(MAX_HISTORY_BYTES / 2);
+    full.retain(&limit, TEMPLATE).unwrap();
+    let (mut fresh, context) = fixture.opened();
+    assert_eq!(fresh.history(context.context(), 1, Previous, &full).unwrap().text(), limit);
+}
+
+#[test]
+fn history_rejects_identity_base_detached_terminal_and_exhaustion_before_navigation() {
+    let fixture = Fixture::new();
+    let other = Fixture::new();
+    let (mut draft, access) = fixture.opened();
+    let mut history = History::default();
+    history.retain("older", TEMPLATE).unwrap();
+    history.retain("newer", TEMPLATE).unwrap();
+    draft.did_change(access.context(), 7, b"unsent").unwrap();
+    let before = snapshots(&draft);
+    for wrong in [
+        DraftContext { owner: "wrong", ..access.context() },
+        DraftContext { run_id: "wrong", ..access.context() },
+        DraftContext { uri: "wrong", ..access.context() },
+        DraftContext { repository: other.repo.root(), ..access.context() },
+    ] {
+        for command in [Previous, Next] {
+            assert!(draft.history(wrong, 7, command, &history).is_err());
+            assert_eq!(snapshots(&draft), before);
+        }
+    }
+    for version in [1, 6, 8, i32::MAX] {
+        assert!(draft.history(access.context(), version, Previous, &history).is_err());
+        assert_eq!(snapshots(&draft), before);
+    }
+    draft.did_close(access.context()).unwrap();
+    assert!(draft.history(access.context(), 7, Previous, &history).is_err());
+    draft.did_open(access.context(), 7, b"unsent").unwrap();
+    assert_eq!(draft.history(access.context(), 7, Previous, &history).unwrap().text(), "newer");
+    assert!(draft.history(access.context(), 7, Previous, &history).is_err());
+    assert_eq!(draft.history(access.context(), 8, Next, &history).unwrap().text(), "unsent");
+    draft.did_change(access.context(), i32::MAX, b"last").unwrap();
+    let before = snapshots(&draft);
+    assert!(draft.history(access.context(), i32::MAX, Previous, &history).is_err());
+    assert_eq!(snapshots(&draft), before);
+    draft.abort(access.context()).unwrap();
+    assert!(draft.history(access.context(), i32::MAX, Previous, &history).is_err());
 }
 
 #[test]

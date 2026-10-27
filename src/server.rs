@@ -835,7 +835,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 // Draft barriers and full-sync notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
-                if matches!(request.method.as_str(), "draft/save" | "draft/finish") {
+                if matches!(request.method.as_str(), "draft/save" | "draft/finish" | "draft/history") {
                     let response = match draft_request(&shared, &request) {
                         Ok(result) => Response::new_ok(request.id, result),
                         Err(error) => {
@@ -1114,7 +1114,7 @@ async fn dispatch_response(
     }
 }
 
-/// Checkpoint/finish on the receive-order lane; JSON-RPC ids correlate results.
+/// Draft barriers on the receive-order lane; JSON-RPC ids correlate results.
 #[cfg(unix)]
 fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
     let response = match request.method.as_str() {
@@ -1126,9 +1126,18 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
         }
         "draft/finish" => {
             let p: DraftFinishParams = from_params(request.params.clone())?;
-            editor::registry().apply(&shared.draft_owner, &p.run_id, &p.uri,
-                |draft, context| draft.finish(context, p.version, p.reason))?;
+            if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
+                let _ = shared.sender.send(Message::Notification(Notification::new(
+                    VIEW_EFFECTS.to_string(), ViewEffectsParams {
+                        effects: vec![Effect::message(MessageLevel::Warn, warning)],
+                    },
+                )));
+            }
             DraftResponse::Finished { run_id: p.run_id, uri: p.uri, version: p.version }
+        }
+        "draft/history" => {
+            let p: DraftHistoryParams = from_params(request.params.clone())?;
+            editor::registry().history(&shared.draft_owner, &p)?
         }
         _ => return Err(Error::new("Unknown commit draft request")),
     };

@@ -725,18 +725,20 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: reset_menu_args,
         },
-        planned(
-            "commit-message.history-prev",
-            Scope::CommitMessage,
-            "Recall the previous commit message",
-            "R-4.2",
-        ),
-        planned(
-            "commit-message.history-next",
-            Scope::CommitMessage,
-            "Recall the next commit message",
-            "R-4.2",
-        ),
+        Command {
+            id: "commit-message.history-prev",
+            scope: Scope::CommitMessage,
+            doc: "Recall the previous commit message",
+            status: CommandStatus::Implemented,
+            run: draft_history,
+        },
+        Command {
+            id: "commit-message.history-next",
+            scope: Scope::CommitMessage,
+            doc: "Recall the next commit message",
+            status: CommandStatus::Implemented,
+            run: draft_history,
+        },
         planned(
             "commit-message.add-signoff",
             Scope::CommitMessage,
@@ -1091,6 +1093,12 @@ fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         return Ok(CommandOutcome::default());
     }
     ctx.info("Use draft/save and draft/finish with the exact commit draft version");
+    Ok(CommandOutcome::default())
+}
+
+/// History commands use the authenticated, receive-ordered draft barrier.
+fn draft_history(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ctx.info("Use draft/history with the command and exact commit draft version");
     Ok(CommandOutcome::default())
 }
 

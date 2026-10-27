@@ -23,6 +23,9 @@ use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock};
 #[cfg(unix)]
 pub mod draft;
 
+/// Bounded per-repository commit-message history, independent of Git log.
+pub mod history;
+
 /// Environment variable carrying the bridge socket path to Git and the helper.
 pub const SOCKET_ENV: &str = "MAGIT_LSP_SOCKET";
 /// Environment variable carrying the pending edit id to Git and the helper.
@@ -89,12 +92,14 @@ struct EditEntry {
 /// The process-global map of edits Git is waiting on.
 pub struct EditRegistry {
     entries: Mutex<HashMap<String, EditEntry>>,
+    history: Mutex<HashMap<PathBuf, history::History>>,
 }
 
 impl EditRegistry {
     fn new() -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
+            history: Mutex::new(HashMap::new()),
         }
     }
 
@@ -153,6 +158,34 @@ impl EditRegistry {
     pub fn run_for_uri(&self, owner: &str, uri: &str) -> Result<String> {
         self.lock().iter().find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
             .map(|(id, _)| id.clone()).ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
+    }
+
+    /// Recall under the lifecycle lock; validation precedes all navigation changes.
+    #[cfg(unix)]
+    pub(crate) fn history(&self, owner: &str, p: &crate::protocol::DraftHistoryParams) -> Result<crate::protocol::DraftResponse> {
+        self.apply(owner, &p.run_id, &p.uri, |draft, context| {
+            let histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
+            let empty = history::History::default();
+            let history = histories.get(context.repository).unwrap_or(&empty);
+            let snapshot = draft.history(context, p.version, p.command, history)?;
+            Ok(crate::protocol::DraftResponse::Replaced {
+                run_id: p.run_id.clone(), uri: p.uri.clone(), base_version: p.version,
+                version: snapshot.version(), text: snapshot.text().to_string(),
+            })
+        })
+    }
+
+    /// Retain only a validated submitted checkpoint, before Git's eventual result.
+    /// A retention warning never converts a successful submission into an abort.
+    #[cfg(unix)]
+    pub(crate) fn finish(&self, owner: &str, p: &crate::protocol::DraftFinishParams) -> Result<Option<String>> {
+        self.apply(owner, &p.run_id, &p.uri, |draft, context| {
+            draft.finish(context, p.version, p.reason)?;
+            let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
+            Ok(histories.entry(context.repository.to_path_buf()).or_default()
+                .retain(draft.saved().unwrap().text(), draft.initial().unwrap())
+                .err().map(|error| error.to_string()))
+        })
     }
 
     /// Private credential for Git's environment; never exposed on the LSP wire.

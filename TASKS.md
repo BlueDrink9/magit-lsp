@@ -659,6 +659,57 @@ entry larger than the cap with a visible warning; never truncate or silently
 drop it. Otherwise evict oldest until both limits hold; exact consecutive dedup.
 Existing eligibility/recall rules above remain canonical.
 
+**Stable R-EDIT-8 history contract (both native adapters).** Route the existing
+keymap commands `commit-message.history-prev` / `commit-message.history-next`
+through a JSON-RPC request `draft/history` with
+`{runId, uri, version, command:<exact command ID>}`. `version` names the exact
+applied live base after flushing full sync. No text, owner, path, repository or
+other fields are accepted. Like save/finish, history runs on the ordered receive
+lane and validates the authenticated owner, run, exact URI, attached state and
+base version before changing either live text or navigation. Errors use the
+same readable/recoverable correlated error contract as save/finish.
+
+The result is `{type:"draft/replaced", runId, uri, baseVersion, version, text}`.
+It is an editable server-owned replacement, **already applied** to live state;
+`version = baseVersion + 1` for every accepted request, including empty-history
+and clamped recalls. Integer exhaustion rejects atomically. Saved text/version,
+Git's file and helper state are unchanged: history never saves or finishes.
+The first previous captures the unsent live text plus a bounded browsing snapshot
+of that repository's ring. Subsequent edits to recalled text do not replace this
+unsent snapshot. Next at newest restores it and ends browsing; another next is a
+no-op replacement. A new previous starts a fresh browsing snapshot, so eviction
+or submissions during browsing cannot shift its order.
+
+Adapters must serialize history with native edits and save/finish: flush pending
+didChange, pin owner/run/URI/base, and gate native mutation while awaiting the
+response. Apply the exact text only to that still-matching buffer/base, suppress
+the replacement's native didChange echo, and adopt the returned version in the
+draft sync tracker. Later user edits use full sync strictly above that version
+(native editor version counters may be mapped by the adapter). There is no
+custom text acknowledgement or second client-to-server text channel. Never apply
+a response to a closed/reused buffer or overwrite newer local edits. If native
+mutation nevertheless raced the response, preserve local text, do not apply the
+replacement, and reconcile it through full-sync didChange at a version greater
+than both the local and returned version before allowing another barrier. A
+terminal/closed run is not resurrected. Adapters perform no ring/eligibility or
+navigation policy; direct unversioned `view/invoke` cannot recall history.
+
+Only successfully written, selected finish checkpoints feed retention (including
+normal-close and Git failures after helper release), never live/autosaved or
+aborted text. Empty means zero bytes; template-only means exact initial equality,
+not comment stripping or semantic parsing. A retention overflow warning is a
+user-facing warning effect, separate from successful submission. The draft's
+independent 1 MiB input limit normally rejects such overflow earlier.
+
+- [x] **R-EDIT-8 — Server-owned commit-message history ring (server seam verified
+  2026-10-28).** `cargo test --test editor_drafts --test editor_bridge --test commands
+  --test manifest --test parity && git diff --check` passed: production stdio
+  isolation, failed-commit recall, exact dedup/count/byte eviction, exclusions,
+  unsent restoration/clamping and rejected identities/versions without implicit
+  save/finish. Manifest snapshots updated with the canonical snapshot command.
+  Native adapter/UI acceptance remains R-EDIT-4/5/6; no full `make test` or native
+  migration claimed here.
+
 **Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
 owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
 completion channels; handlers only enqueue idempotent cancellation. A valid

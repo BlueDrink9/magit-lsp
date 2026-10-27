@@ -2580,7 +2580,7 @@
                 "normal"
               ],
               "label": "Recall the previous commit message",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "commit-message.history-next",
@@ -2591,7 +2591,7 @@
                 "normal"
               ],
               "label": "Recall the next commit message",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "commit-message.add-signoff",

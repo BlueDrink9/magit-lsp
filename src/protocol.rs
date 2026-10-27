@@ -117,6 +117,31 @@ pub struct DraftFinishParams {
     pub reason: DraftFinishReason,
 }
 
+/// Existing server command IDs accepted by the versioned history barrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum DraftHistoryCommand {
+    /// Recall older submissions, preserving the unsent draft on first previous.
+    #[serde(rename = "commit-message.history-prev")]
+    Previous,
+    /// Recall newer submissions, then restore the preserved unsent draft.
+    #[serde(rename = "commit-message.history-next")]
+    Next,
+}
+
+/// `draft/history` names an exact applied base; no client text or history policy.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftHistoryParams {
+    /// Server-issued run identity, authenticated against the owning connection.
+    pub run_id: String,
+    /// Exact issued managed-draft URI.
+    pub uri: String,
+    /// Applied live base version after flushing full sync.
+    pub version: i32,
+    /// Server command from the draft's keymap.
+    pub command: DraftHistoryCommand,
+}
+
 /// Correlated JSON-RPC result, acknowledged only after checkpoint/write succeeds.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
@@ -127,6 +152,11 @@ pub enum DraftResponse {
     /// The selected saved snapshot was written and the helper released.
     #[serde(rename = "draft/finished")]
     Finished { run_id: String, uri: String, version: i32 },
+    /// Live text already replaced on the server, saved checkpoint unchanged.
+    /// Apply only to the matching base, suppress its didChange echo, then resume
+    /// full sync strictly above `version`; serialize editing while awaiting it.
+    #[serde(rename = "draft/replaced")]
+    Replaced { run_id: String, uri: String, base_version: i32, version: i32, text: String },
 }
 
 impl Effect {

@@ -50,13 +50,16 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   listed as `Planned` and reports its roadmap item. `Escape`, `ctrl+c` or `q`
   closes the menu; `ctrl+s`/`ctrl+r` save/reset the current arguments.
 - **Commit message editor**: `c c` with a staged change starts `git commit`
-  through the editor bridge (§3.10). Git's `COMMIT_EDITMSG` opens in the same
-  instance as a bottom split with the `gitcommit` filetype, so ordinary editor
-  plugins keep working while the status view stays live (a pending edit never
-  freezes Neovim). The status view's confirm key (`ctrl+Enter` in `standard`,
-  `Z Z` in `vim`) saves the file and answers Git; the edit scope's cancel key
-  or closing the window aborts and reports why. Credential prompts from Git
-  (SSH passphrases, HTTPS tokens) go through the same bridge.
+  through the editor bridge (§3.10). The server now owns versioned managed
+  drafts: saving checkpoints only; explicit finish or normal user close submits
+  the selected saved checkpoint, while explicit abort cancels. Native Neovim
+  and VSCode adapters are still pending migration (R-EDIT-4/5/6); native commit
+  editing is not currently claimed working. The server's in-memory history keeps
+  up to 50 submitted messages / 1 MiB per repository, including failed commits,
+  with previous/next recall and unsent-draft restoration; recall never saves or
+  commits. Adapter authors should use the versioned `draft/history` replacement
+  contract in `TASKS.md` §3.10, not client-owned history. Credential prompts from
+  Git (SSH passphrases, HTTPS tokens) still go through the same bridge.
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
 - **Foldable** sections and files: the server owns visibility, and the client
   mirrors Neovim's fold keys to server commands.
