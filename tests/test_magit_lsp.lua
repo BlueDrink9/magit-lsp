@@ -511,8 +511,9 @@ T['staging a visual line range stages only those lines'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, 'V', 's')
 
-  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.has_line('    +NEW line') end)")
+  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.find_line('+', 'NEW line', 'staged') ~= nil end)")
   MiniTest.expect.equality(staged, true)
+  MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
 
   local cached = git_out({ 'diff', '--cached', '-U3', '--', 'f.txt' })
   MiniTest.expect.equality(cached:find('+NEW line', 1, true) ~= nil, true, cached)

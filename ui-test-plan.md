@@ -86,6 +86,23 @@ inspect → act → inspect and always stopping owned UI:
   required; macOS remains an unverified group/reap gate and Windows is separate
   feasibility work (R-EDIT-7).
 
+The supervised 2026-10-28 run passed standard/vim at 100x30 and 80x24; its fresh
+plain screens and `cancel.trace.jsonl` in each variant directory show final
+failure feedback, retained staged changes, and the next successful commit. The
+single token has one begin/report/end and both feedback notifications. Observed
+intent-to-report / intent-to-end times were respectively 0.677 / 40.852 ms,
+0.891 / 36.696 ms, 0.644 / 28.587 ms, and 0.711 / 29.166 ms in that variant order;
+these are progress timings, not key-to-idle bounds. Historical failed native runs
+remain in the attempt ledger, not evidence against these fresh completed runs.
+The following full regression failed the visual-line staging test's pre-existing
+unstaged-line completion predicate (`build/test-logs/lua.VDSuAF`); the final
+supervised correction waits for the server-symbol-scoped staged line and settled
+idle, preserving native input and all exact Git assertions. Its one authorized
+`make test-file FILE=tests/test_magit_lsp.lua && make test && git diff --check`
+gate passed without retry, and the process audit found no owned survivors.
+No unrelated UI was rerun; all canonical process/race/lock-warning and platform
+gaps listed in TASKS.md remain open, so this is not phase completion.
+
 ## Phase U1 — Bug fixes (each against its scenario)
 
 For every bug: **(a)** confirm the failing scenario fails for the stated reason, **(b)** fix, **(c)** remove the `xfail` tag, **(d)** run `make test` and `make ui-test`.
