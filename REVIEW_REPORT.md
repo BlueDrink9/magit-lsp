@@ -522,7 +522,7 @@ decision.
   - **Parallel:** A13, A16, A21
   - **Behaviour lost:** none.
 
-- [ ] **[P2] A25 — Move navigation policy out of Lua** (`lua/magit-lsp/view.lua:1005–1039`; `lua/magit-lsp/init.lua:220–229`; `src/commands.rs:972–1000`)
+- [x] **[P2] A25 — Move navigation policy out of Lua** (`lua/magit-lsp/view.lua:1005–1039`; `lua/magit-lsp/init.lua:220–229`; `src/commands.rs:972–1000`)
   - **Problem:** Lua sorts/classifies symbols and chooses targets; server separately implements section navigation.
   - **Why it matters:** Duplicate domain policy across boundary.
   - **Change:** Server tree navigation over node kinds returns cursor through normal outcome; `M.jump` becomes a thin invocation; delete local traversal/sorting.
@@ -532,6 +532,7 @@ decision.
   - **Net LOC:** −25
   - **Risk:** medium — cursor semantics.
   - **Verify:** `cargo test --test visibility --test navigation`; `make test-lua`; `make ui-test` with navigation coverage.
+  - **Acceptance evidence (2026-10-27):** `common.jump` resolves visible section/file/hunk headers from the exact request-bound server tree; Lua only invokes it, with local symbol traversal/sorting removed and native document-symbol outline retained. Regressions cover both profiles, strict next/previous (including unchanged no-wrap boundaries), exact invalid-argument diagnostics using current displayed versions, retained versus current render targets, and stale rejection after acknowledgement. The original parameter-loop failure was fixture reuse of an unacknowledged version after subsequent invokes advanced the render; corrected the fixture lifecycle without weakening stale protection or forcing no-target cursor coordinates. Exact gate `cargo test --test navigation --test visibility --test commands && make test-lua && make test && scripts/ui run tests/ui/scenarios/navigation.scn && make ui-test && git diff --check` exited 0: 21 focused Rust tests; Lua; full Rust/Lua/VSCode/keybindings; navigation scenario `1 PASS, 0 XFAIL, 0 FAIL`; full UI suite `ok: ui-test`. An earlier run timed out at 120 seconds during the full UI suite; the successful rerun had no command timeout. Inspected all 24 plain saved screens at `build/ui/navigation/{standard,vim}-{100x30,80x24}/{section,file,hunk}-{forward,backward}.screen`: section jumps land on `Staged changes (0)` (row 3), file jumps on `M f.txt` (row 6), and hunk jumps on `@@ -1,10 +1,10 @@` (row 7), in both directions. Native outline regressions passed. The runner stopped its successful sessions; explicitly stopped the earlier timeout's remaining owned session `20261027-082039-67e778` with `scripts/ui stop --run`; final process check found no magit-lsp or owned UI processes. A11 ignore/xfail policy unchanged.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
