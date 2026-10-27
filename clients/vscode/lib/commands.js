@@ -33,8 +33,10 @@ function editorInfo() {
   return {
     cursor,
     selection: {
-      startLine: Math.min(selection.anchor.line, selection.active.line),
-      endLine: Math.max(selection.anchor.line, selection.active.line),
+      startLine: selection.start.line,
+      endLine: selection.end.line > selection.start.line && selection.end.character === 0
+        ? selection.end.line - 1
+        : selection.end.line,
     },
   };
 }
@@ -235,7 +237,6 @@ function keybindingsPath() {
   );
 }
 
-exports.editorInfo = editorInfo;
 exports.openStatus = openStatus;
 exports.viewport = viewport;
 exports.pressCommand = pressCommand;

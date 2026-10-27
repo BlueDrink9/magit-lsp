@@ -229,6 +229,7 @@ gate: `git diff --check` and required scoped diff/search review.
   - **Verify:** `cargo test --test views --test keys_protocol --test navigation`; `make test`
   - **Parallel:** serial
   - **Behaviour lost:** none.
+  - **Progress (2026-10-27):** Production inclusive-row conversion retained. Registered key/invoke request-shape checks now intercept only `view/key` and `view/invoke`, use a non-menu key, and cover forward/reverse and same-line ranges plus caret omission. This is partial client-side evidence only; native VSCode acceptance and real-Git stage/unstage boundary checks remain outstanding. A34 remains unchecked.
 
 - [x] **[P1] A03 — Normalize selections against displayed identities** (`src/commands.rs:1013–1073,1086–1133`; `src/patch.rs:109–123`)
   - **Problem:** Selection handling assigns fresh diffs consecutive rows starting at an old file header; external edits/collapsed hunks invalidate those coordinates.

@@ -107,6 +107,10 @@ class Selection {
   constructor(anchor, active) {
     this.anchor = anchor;
     this.active = active;
+    const ordered = (left, right) => left.line < right.line
+      || (left.line === right.line && left.character <= right.character);
+    this.start = ordered(anchor, active) ? anchor : active;
+    this.end = ordered(anchor, active) ? active : anchor;
     this.isEmpty = anchor.line === active.line && anchor.character === active.character;
   }
 }

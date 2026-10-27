@@ -161,6 +161,64 @@ async function run() {
       'acknowledged the render caused by the key press'
     );
 
+    // Isolate request-shape checks from server/Git behavior. Keep the real
+    // registered commands and editor state, but intercept only these requests.
+    const originalSendRequest = client.sendRequest.bind(client);
+    const shapeRequests = [];
+    client.sendRequest = (method, params) => {
+      if (method === 'view/key' || method === 'view/invoke') {
+        shapeRequests.push({ method, params: JSON.parse(JSON.stringify(params)) });
+        return Promise.resolve({ effects: [] });
+      }
+      return originalSendRequest(method, params);
+    };
+
+    // Native editor ranges are exclusive; both registered dispatchers must
+    // report server-inclusive rows while retaining the active cursor.
+    const boundaryCases = [
+      { name: 'forward column-zero end', anchor: [2, 1], active: [4, 0], rows: [2, 3] },
+      { name: 'reverse column-zero end', anchor: [4, 0], active: [2, 1], rows: [2, 3] },
+      { name: 'forward nonzero end', anchor: [2, 1], active: [4, 2], rows: [2, 4] },
+      { name: 'reverse nonzero end', anchor: [4, 2], active: [2, 1], rows: [2, 4] },
+      { name: 'same line partial', anchor: [2, 4], active: [2, 1], rows: [2, 2] },
+      { name: 'same line reverse', anchor: [2, 1], active: [2, 4], rows: [2, 2] },
+      { name: 'first row', anchor: [0, 0], active: [1, 0], rows: [0, 0] },
+      { name: 'last row', anchor: [3, 0], active: [4, 1], rows: [3, 4] },
+      { name: 'empty caret', anchor: [4, 0], active: [4, 0], rows: null },
+    ];
+    for (const testCase of boundaryCases) {
+      statusEditor.selection = new vscode.Selection(
+        new vscode.Position(...testCase.anchor), new vscode.Position(...testCase.active));
+      const before = client.requests.length;
+      await commands.get('magit.key')({ key: 'x' });
+      let request = shapeRequests.slice(-1)[0];
+      assert(request, `${testCase.name}: key request`);
+      if (testCase.rows) {
+        assert.deepEqual([request.params.selection.startLine, request.params.selection.endLine],
+          testCase.rows, `${testCase.name}: rows`);
+      } else {
+        assert.equal(Object.hasOwn(request.params, 'selection'), false, `${testCase.name}: omitted selection`);
+      }
+      assert.deepEqual(request.params.cursor, { line: testCase.active[0], column: testCase.active[1] });
+      assert.equal(request.params.editorMode, testCase.rows ? 'visual' : 'normal');
+
+      statusEditor.selection = new vscode.Selection(
+        new vscode.Position(...testCase.anchor), new vscode.Position(...testCase.active));
+      const invokeBefore = client.requests.length;
+      await commands.get('magit.invoke')({ command: 'common.refresh' });
+      request = shapeRequests.slice(-1)[0];
+      assert(request, `${testCase.name}: invoke request`);
+      if (testCase.rows) {
+        assert.deepEqual([request.params.selection.startLine, request.params.selection.endLine],
+          testCase.rows, `${testCase.name}: invoke rows`);
+      } else {
+        assert.equal(Object.hasOwn(request.params, 'selection'), false,
+          `${testCase.name}: invoke omitted selection`);
+      }
+      assert.deepEqual(request.params.cursor, { line: testCase.active[0], column: testCase.active[1] });
+    }
+    client.sendRequest = originalSendRequest;
+
     // Static mode is a metadata-only transition: it must not invalidate the
     // virtual document or disturb the user's selection.
     const statusState = require('../lib/store').store.views.get('v1');
