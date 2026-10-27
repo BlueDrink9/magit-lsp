@@ -11,10 +11,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+mod owned;
+pub use owned::{run_owned, OwnedOutcome, OwnedOutput};
 
 /// How many finished invocations the global log keeps.
 pub const DEFAULT_CAPACITY: usize = 256;
@@ -233,11 +235,10 @@ pub fn trace_current(event: &str, detail: Value) {
 
 #[derive(Debug, Default)]
 struct CancelState {
-    child: Mutex<Option<u32>>,
     cancelled: AtomicBool,
 }
 
-/// A handle that can kill the one child the current request is running.
+/// A handle that enqueues cancellation intent for the current operation.
 ///
 /// Clones share the same state, so the server can stash one while the blocking
 /// command thread registers the spawned child.
@@ -252,13 +253,9 @@ impl CancelHandle {
         Self::default()
     }
 
-    /// Mark the request cancelled and kill the child if one is running.
+    /// Mark the request cancelled; the process owner observes and handles it.
     pub fn cancel(&self) {
         self.state.cancelled.store(true, Ordering::SeqCst);
-        let pid = *self.lock_child();
-        if let Some(pid) = pid {
-            kill(pid);
-        }
     }
 
     /// Whether [`Self::cancel`] has been called.
@@ -266,69 +263,8 @@ impl CancelHandle {
         self.state.cancelled.load(Ordering::SeqCst)
     }
 
-    /// Register the child that [`Self::cancel`] should kill.
-    ///
-    /// Cancellation is consumed by the first child it kills: a later Git
-    /// invocation in the same request (for example the status read that
-    /// explains a failed mutation) runs normally. Returns `false` when the
-    /// request was already cancelled; the child has then been killed and the
-    /// caller should simply reap it.
-    pub fn register_child(&self, child: &mut Child) -> bool {
-        let pid = child.id();
-        if self.is_cancelled() {
-            kill(pid);
-            self.state.cancelled.store(false, Ordering::SeqCst);
-            return false;
-        }
-        *self.lock_child() = Some(pid);
-        // A cancel may have slipped in before the pid was stored.
-        if self.is_cancelled() {
-            kill(pid);
-            self.state.cancelled.store(false, Ordering::SeqCst);
-            return false;
-        }
-        true
-    }
-
-    /// Forget the child once it has been reaped.
-    ///
-    /// This also ends the cancellation: the request keeps running so it can
-    /// report the failure with a fresh status read.
-    pub fn clear_child(&self) {
-        *self.lock_child() = None;
-        self.state.cancelled.store(false, Ordering::SeqCst);
-    }
-
-    fn lock_child(&self) -> std::sync::MutexGuard<'_, Option<u32>> {
-        self.state
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-}
-
-/// Kill `pid` with SIGKILL.
-///
-/// The standard library has no portable kill-by-pid, and the `libc` crate is
-/// not a dependency, so use the platform utility. Every target the server
-/// supports ships one.
-fn kill(pid: u32) {
-    #[cfg(unix)]
-    {
-        for program in ["kill", "/bin/kill", "/usr/bin/kill"] {
-            let status = Command::new(program)
-                .args(["-KILL", &pid.to_string()])
-                .status();
-            if status.is_ok_and(|status| status.success()) {
-                return;
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status();
+    pub(super) fn take_cancelled(&self) -> bool {
+        self.state.cancelled.swap(false, Ordering::SeqCst)
     }
 }
 

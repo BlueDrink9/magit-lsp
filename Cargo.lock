@@ -409,6 +409,7 @@ name = "magit-lsp"
 version = "0.1.0"
 dependencies = [
  "expect-test",
+ "libc",
  "lsp-server",
  "lsp-types",
  "notify",

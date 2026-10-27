@@ -111,12 +111,20 @@ fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
         if trusted {
             // A forced reload must update both aliases of the first root,
             // without leaking that root's bindings into the second session.
-            std::fs::write(first.path().join(".magit-lsp.toml"), "[keys.status]\nstage = [\"X\"]\n").unwrap();
-            server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}));
+            std::fs::write(
+                first.path().join(".magit-lsp.toml"),
+                "[keys.status]\nstage = [\"X\"]\n",
+            )
+            .unwrap();
+            server.send(
+                json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}),
+            );
             let mut seen = std::collections::HashSet::new();
             while seen.len() < 3 {
                 let notice = server.recv();
-                if notice["method"] != "view/keymap" { continue; }
+                if notice["method"] != "view/keymap" {
+                    continue;
+                }
                 let view = notice["params"]["viewId"].as_str().unwrap();
                 let expected = if view == views[1] { "Z" } else { "X" };
                 assert_stage_binding(&notice, expected);
@@ -124,19 +132,36 @@ fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
             }
             server.notifications.clear();
             std::fs::write(first.path().join(".magit-lsp.toml"), "not valid toml").unwrap();
-            std::fs::write(second.path().join(".magit-lsp.toml"), "[keys.status]\nstage = [\"Y\"]\n").unwrap();
-            server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}));
+            std::fs::write(
+                second.path().join(".magit-lsp.toml"),
+                "[keys.status]\nstage = [\"Y\"]\n",
+            )
+            .unwrap();
+            server.send(
+                json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}),
+            );
             server.send(json!({"jsonrpc":"2.0", "id":10, "method":"view/resync", "params":{"viewId":views[0]}}));
             assert!(server.response_with_id(10).get("error").is_none());
             server.drain_notifications();
-            assert!(server.notifications.iter().any(|notice| {
-                notice["method"] == "window/showMessage"
-                    && notice["params"]["message"].as_str().is_some_and(|text| text.contains(".magit-lsp.toml"))
-            }), "missing readable configuration error: {:?}", server.notifications);
+            assert!(
+                server.notifications.iter().any(|notice| {
+                    notice["method"] == "window/showMessage"
+                        && notice["params"]["message"]
+                            .as_str()
+                            .is_some_and(|text| text.contains(".magit-lsp.toml"))
+                }),
+                "missing readable configuration error: {:?}",
+                server.notifications
+            );
             for view in &views {
-                let notice = server.notifications.iter().rev().find(|notice| {
-                    notice["method"] == "view/keymap" && notice["params"]["viewId"] == *view
-                }).expect("reloaded root keymap");
+                let notice = server
+                    .notifications
+                    .iter()
+                    .rev()
+                    .find(|notice| {
+                        notice["method"] == "view/keymap" && notice["params"]["viewId"] == *view
+                    })
+                    .expect("reloaded root keymap");
                 assert_stage_binding(notice, if *view == views[1] { "Y" } else { "X" });
             }
         }
@@ -146,8 +171,12 @@ fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
 
 fn assert_stage_binding(notice: &Value, expected: &str) {
     assert_eq!(notice["method"], "view/keymap", "{notice}");
-    let binding = notice["params"]["bindings"].as_array().unwrap().iter()
-        .find(|binding| binding["command"] == "status.stage").expect("stage binding");
+    let binding = notice["params"]["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|binding| binding["command"] == "status.stage")
+        .expect("stage binding");
     assert_eq!(binding["keys"], json!([expected]), "{notice}");
 }
 
@@ -365,11 +394,14 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
         "the read answered only after the gate was released, after {answered_at:?}"
     );
     assert_eq!(
-        read["result"]["viewId"], json!(view_id),
+        read["result"]["viewId"],
+        json!(view_id),
         "the read response must carry the resynced view: {read}"
     );
     assert!(
-        read["result"]["text"].as_array().is_some_and(|text| !text.is_empty()),
+        read["result"]["text"]
+            .as_array()
+            .is_some_and(|text| !text.is_empty()),
         "the resync must carry the full text: {read}"
     );
 
@@ -1090,7 +1122,10 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
     server.send(json!({"jsonrpc":"2.0", "id":40, "method":"view/resync",
         "params":{"viewId":menu_id}}));
     let resized = server.response_with_id(40);
-    assert!(resized["result"]["version"].as_u64().unwrap() > 2, "{resized}");
+    assert!(
+        resized["result"]["version"].as_u64().unwrap() > 2,
+        "{resized}"
+    );
 
     let (other_tmp, _other_repo) = init_repo();
     let other = open_view(&mut server, 41, &repo_param(other_tmp.path()));
@@ -1100,12 +1135,19 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
     server.send(json!({"jsonrpc":"2.0", "id":43, "method":"view/invoke",
         "params":{"viewId":view_id, "command":"status.stage-all"}}));
     let refused = server.response_with_id(43);
-    assert!(refused["result"]["effects"][0]["text"].as_str().unwrap().contains("pending prompt"), "{refused}");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("pending prompt"),
+        "{refused}"
+    );
 
     server.send(json!({"jsonrpc":"2.0", "id":44, "method":"view/invoke",
         "params":{"viewId":menu_id, "command":"common.refresh"}}));
     assert!(server.response_with_id(44).get("error").is_none());
-    assert_eq!(server.recv()["method"], "view/render");
+    let render = server.recv();
+    assert_eq!(render["method"], "view/render");
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -1226,7 +1268,10 @@ fn a_config_reload_repushes_the_view_keymap() {
 #[test]
 fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
     for mode in ["cancel", "changed", "closed"] {
-        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
         let mut server = TestServer::spawn(&[]);
         server.initialize(json!({}));
         server.send(open_view_message(2, &repo_param(tmp.path())));
@@ -1240,22 +1285,39 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
             "params":{"viewId":view,"command":"status.discard","version":1,"cursor":{"line":line,"column":0}}}));
         let prompt = loop {
             let message = server.recv();
-            if message["method"] == "view/prompt" { break message; }
-            assert_ne!(message["id"], 3, "discard finished without prompting: {message}");
+            if message["method"] == "view/prompt" {
+                break message;
+            }
+            assert_ne!(
+                message["id"], 3,
+                "discard finished without prompting: {message}"
+            );
         };
         server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view,"version":1}}));
         server.send(json!({"jsonrpc":"2.0", "method":"view/resize", "params":{"viewId":view,"cols":60,"rows":24}}));
-        server.send(json!({"jsonrpc":"2.0", "id":4, "method":"view/resync", "params":{"viewId":view}}));
-        assert!(server.response_with_id(4)["result"]["version"].as_u64().unwrap() >= 1);
+        server.send(
+            json!({"jsonrpc":"2.0", "id":4, "method":"view/resync", "params":{"viewId":view}}),
+        );
+        assert!(
+            server.response_with_id(4)["result"]["version"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
         server.send(json!({"jsonrpc":"2.0", "id":5, "method":"view/key",
             "params":{"viewId":view,"version":1,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
         let refused = server.response_with_id(5);
-        assert!(refused["result"]["effects"][0]["text"].as_str().unwrap().contains("pending prompt"));
+        assert!(refused["result"]["effects"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("pending prompt"));
         if mode == "changed" {
             std::fs::write(tmp.path().join("f.txt"), "external replacement\n").unwrap();
         }
         if mode == "closed" {
-            server.send(json!({"jsonrpc":"2.0", "id":6, "method":"view/close", "params":{"viewId":view}}));
+            server.send(
+                json!({"jsonrpc":"2.0", "id":6, "method":"view/close", "params":{"viewId":view}}),
+            );
             assert!(server.response_with_id(6).get("error").is_none());
         }
         let before = std::fs::read(tmp.path().join("f.txt")).unwrap();
@@ -1265,10 +1327,20 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
         let mut completed = false;
         while !answered || !completed {
             let message = server.recv();
-            if message["id"] == 7 { answered = true; assert!(message.get("error").is_none(), "{message}"); }
-            if message["id"] == 3 { completed = true; assert!(message.get("error").is_none(), "{message}"); }
+            if message["id"] == 7 {
+                answered = true;
+                assert!(message.get("error").is_none(), "{message}");
+            }
+            if message["id"] == 3 {
+                completed = true;
+                assert!(message.get("error").is_none(), "{message}");
+            }
         }
-        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), before, "{mode}");
+        assert_eq!(
+            std::fs::read(tmp.path().join("f.txt")).unwrap(),
+            before,
+            "{mode}"
+        );
         assert!(tmp.git(&["diff", "--cached"]).is_empty(), "{mode}");
         shutdown_and_exit(&mut server);
         assert!(server.finish(Duration::from_secs(10)).success());
@@ -1278,7 +1350,10 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
 #[test]
 fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
     for mode in ["disconnect", "shutdown", "exit"] {
-        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
         let mut server = TestServer::spawn(&[]);
         server.initialize(json!({}));
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
@@ -1286,7 +1361,9 @@ fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
             "params":{"viewId":view,"command":"commit.create"}}));
         loop {
             let message = server.recv();
-            if message["method"] == "view/prompt" { break; }
+            if message["method"] == "view/prompt" {
+                break;
+            }
             assert_ne!(message["id"], 3, "{message}");
         }
         match mode {
@@ -1296,9 +1373,100 @@ fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
             _ => unreachable!(),
         }
         let status = server.finish(Duration::from_secs(10));
-        assert_eq!(status.code(), Some(if mode == "exit" { 1 } else { 0 }), "{mode}");
+        assert_eq!(
+            status.code(),
+            Some(if mode == "exit" { 1 } else { 0 }),
+            "{mode}"
+        );
         assert_eq!(tmp.git(&["status", "--porcelain"]), " M f.txt\n", "{mode}");
     }
+}
+
+#[test]
+fn a12_selection_stage_reports_index_lock_as_successful_error_effect() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let file = tmp.path().join("f.txt");
+    let before_worktree = std::fs::read(&file).unwrap();
+    let before_index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().unwrap().to_string();
+    let uri = opened["result"]["uri"].as_str().unwrap().to_string();
+    let render = server.recv();
+    assert_eq!(render["method"], "view/render");
+    let version = render["params"]["version"]
+        .as_u64()
+        .expect("initial render version");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    // The changed-line symbol range comes from the server's structured outline,
+    // not by interpreting rendered text.
+    let (start_line, end_line) = first_hunk_range(&mut server, &uri);
+    write(&tmp.path().join(".git/index.lock"), "");
+
+    server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
+        "params":{"viewId":view,"command":"status.stage","version":version,
+        "cursor":{"line":start_line,"column":0},
+        "selection":{"startLine":start_line,"endLine":end_line}}}));
+    let response = server.response_with_id(3);
+    assert!(
+        response.get("error").is_none(),
+        "Git failure is a result: {response}"
+    );
+    let effect = &response["result"]["effects"][0];
+    assert_eq!(effect["level"], "error", "{response}");
+    let message = effect["text"].as_str().expect("readable error message");
+    assert!(message.contains("Another Git process"), "{response}");
+    assert!(
+        effect["hint"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("index.lock")),
+        "{response}"
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before_worktree);
+    assert_eq!(
+        std::fs::read(tmp.path().join(".git/index")).unwrap(),
+        before_index
+    );
+
+    server.send(json!({"jsonrpc":"2.0", "id":4, "method":"view/invoke",
+        "params":{"command":"status.stage"}}));
+    let malformed = server.response_with_id(4);
+    assert!(
+        malformed.get("error").is_some(),
+        "invalid protocol request must error: {malformed}"
+    );
+    shutdown_and_exit(&mut server);
+    let (status, stderr) = server.finish_with_stderr(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {stderr}");
+    assert!(stderr.contains("git failed"), "stderr: {stderr}");
+}
+
+/// Resolve the first hunk's complete range from the server-provided outline.
+fn first_hunk_range(server: &mut TestServer, uri: &str) -> (u64, u64) {
+    server.send(json!({"jsonrpc":"2.0", "id":91,
+        "method":"textDocument/documentSymbol",
+        "params":{"textDocument":{"uri":uri}}}));
+    let response = server.response_with_id(91);
+    let symbols: Vec<lsp_types::DocumentSymbol> =
+        serde_json::from_value(response["result"].clone()).expect("document symbols");
+    fn search(symbols: &[lsp_types::DocumentSymbol]) -> Option<(u64, u64)> {
+        symbols.iter().find_map(|symbol| {
+            if symbol.kind == lsp_types::SymbolKind::METHOD {
+                Some((
+                    u64::from(symbol.range.start.line),
+                    u64::from(symbol.range.end.line),
+                ))
+            } else {
+                symbol.children.as_deref().and_then(search)
+            }
+        })
+    }
+    search(&symbols).expect("changed-line symbol")
 }
 
 fn spawn_with_env(env: &[(String, String)]) -> TestServer {

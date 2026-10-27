@@ -61,6 +61,31 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
 
 ---
 
+## Phase 3E — Managed commit draft native acceptance (design mapping)
+
+Canonical protocol and bounds are in `TASKS.md` §3.10; this section does not
+claim the planned draft protocol or adapters are implemented. Keep the existing
+`commit-cancel-progress.scn` realFile evidence historical until coordinated
+cutover. At cutover, extend that scenario and add focused native cases, using
+inspect → act → inspect and always stopping owned UI:
+
+- Neovim real UI (R-EDIT-4): Save/checkpoint leaves editor/run active; explicit
+  confirm flushes exact version; normal close confirms saved checkpoint; dirty
+  Save/Discard/Cancel distinguishes latest unsaved text; `didClose` without
+  native intent does not confirm; explicit abort and disconnect cancel; stale
+  version/owner and terminal late response do not write/commit; failed close
+  recovers text. Verify Git message, HEAD/index/worktree, and progress terminal
+  state. R-EDIT-8 history-prev/next recalls and restores the current unsent draft.
+- VSCode native e2e (R-EDIT-5, `clients/vscode/test/e2e/suite.js`): same barriers,
+  close-intent distinctions, recovery, history, status read-only and no implicit
+  commit on save; scripted widget integration is not native evidence.
+- Adversarial process cases belong to Rust real-Git R-EDIT-2/A11 tests, not a
+  UI-only claim: cancel in pre-hook/editor/commit-msg/finalizing, finish-v-cancel,
+  inherited pipes after normal exit, bounded drain and TERM-resistant child,
+  subsequent commit without lock cleanup, and no foreign process kill. Linux is
+  required; macOS remains an unverified group/reap gate and Windows is separate
+  feasibility work (R-EDIT-7).
+
 ## Phase U1 — Bug fixes (each against its scenario)
 
 For every bug: **(a)** confirm the failing scenario fails for the stated reason, **(b)** fix, **(c)** remove the `xfail` tag, **(d)** run `make test` and `make ui-test`.

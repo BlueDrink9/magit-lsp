@@ -223,3 +223,33 @@ fn a_read_completes_while_a_slow_mutation_runs() {
     let result = worker.join().expect("worker thread");
     assert!(result.is_err(), "the cancelled stage must fail");
 }
+
+#[test]
+fn cancellation_after_exit_does_not_cancel_the_next_command() {
+    let markers = TempDir::new().expect("marker tempdir");
+    let marker = markers.path().join("ready");
+    let handle = CancelHandle::new();
+    let canceller_handle = handle.clone();
+    let canceller_marker = marker.clone();
+    let canceller = thread::spawn(move || {
+        wait_for_start(&canceller_marker);
+        thread::sleep(Duration::from_millis(50));
+        canceller_handle.cancel();
+    });
+
+    runner::with_cancel(Some(handle), || {
+        let first = runner::run_owned(
+            Command::new("sh").arg("-c").arg(format!("touch {}; exit 0", marker.display())),
+            None,
+        )
+        .expect("first command");
+        assert!(first.status.expect("exit status").success());
+        assert!(!first.outcome.cancelled);
+
+        let second = runner::run_owned(Command::new("sh").arg("-c").arg("exit 0"), None)
+            .expect("second command");
+        assert!(second.status.expect("exit status").success());
+        assert!(!second.outcome.cancelled);
+    });
+    canceller.join().expect("canceller thread");
+}

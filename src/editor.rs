@@ -184,7 +184,7 @@ pub fn socket_path() -> Option<&'static Path> {
 /// Run `git commit` with the helper as its editor and return the committed
 /// message, read back from `git log -1 --format=%B`. Repository discovery is
 /// not a cancellation target; only the commit inherits the caller's handle.
-pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<String> {
+pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<crate::git::CommitOutcome> {
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
@@ -279,13 +279,12 @@ fn unix_helper(file: &str) -> Result<bool> {
 
     let socket = std::env::var_os(SOCKET_ENV)
         .ok_or_else(|| Error::new(format!("{SOCKET_ENV} is not set")))?;
-    let edit_id = std::env::var(EDIT_ID_ENV)
-        .map_err(|_| Error::new(format!("{EDIT_ID_ENV} is not set")))?;
+    let edit_id =
+        std::env::var(EDIT_ID_ENV).map_err(|_| Error::new(format!("{EDIT_ID_ENV} is not set")))?;
     let path = absolute(file)?;
 
-    let mut stream = UnixStream::connect(Path::new(&socket)).map_err(|error| {
-        Error::new(format!("cannot connect to the editor bridge: {error}"))
-    })?;
+    let mut stream = UnixStream::connect(Path::new(&socket))
+        .map_err(|error| Error::new(format!("cannot connect to the editor bridge: {error}")))?;
     let hello = EditHello {
         edit_id,
         path: path.to_string_lossy().into_owned(),
@@ -315,9 +314,8 @@ fn unix_askpass(prompt: &str) -> Result<Option<String>> {
 
     let socket = std::env::var_os(SOCKET_ENV)
         .ok_or_else(|| Error::new(format!("{SOCKET_ENV} is not set")))?;
-    let mut stream = UnixStream::connect(Path::new(&socket)).map_err(|error| {
-        Error::new(format!("cannot connect to the askpass bridge: {error}"))
-    })?;
+    let mut stream = UnixStream::connect(Path::new(&socket))
+        .map_err(|error| Error::new(format!("cannot connect to the askpass bridge: {error}")))?;
     let hello = AskpassHello {
         prompt: prompt.to_string(),
     };
@@ -375,7 +373,9 @@ fn bind_listener(emitter: EffectEmitter, askpass: AskpassPrompt) -> Result<PathB
         Ok(listener) => listener,
         Err(error) => {
             let _ = std::fs::remove_dir(&dir);
-            return Err(Error::new(format!("cannot bind the editor bridge: {error}")));
+            return Err(Error::new(format!(
+                "cannot bind the editor bridge: {error}"
+            )));
         }
     };
     let cleanup_path = path.clone();

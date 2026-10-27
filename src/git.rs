@@ -114,6 +114,15 @@ pub struct GitLogPage {
     pub rows: Vec<GitLogRow>,
 }
 
+/// A commit that exited successfully, with any diagnostic from bounded output or message reading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOutcome {
+    /// Commit message read back from HEAD, when available.
+    pub message: Option<String>,
+    /// Non-fatal output or message-read diagnostic.
+    pub warning: Option<String>,
+}
+
 /// An ordered row in a Git log page's graph output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitLogRow {
@@ -924,9 +933,6 @@ impl GitRepo {
             failure.warning = warn_if_git_is_below_recommendation(&self.root, &[], &status);
             return Err(Error::git(failure));
         }
-        if out.outcome.cancelled {
-            return Err(Error::new("git apply was cancelled after completing successfully"));
-        }
         if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
             return Err(Error::new("git apply completed with incomplete process output"));
         }
@@ -943,23 +949,32 @@ impl GitRepo {
     /// Run `git commit` with extra environment variables and return the
     /// committed message as read back by `git log -1 --format=%B`. Only the
     /// mutation inherits cancellation, not the subsequent message read.
-    pub fn commit(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
+    pub fn commit(&self, args: &[&str], env: &[(&str, &str)]) -> Result<CommitOutcome> {
         let mut commit_args = vec!["commit"];
         commit_args.extend_from_slice(args);
-        self.run_with_env(&commit_args, env)?;
-        Ok(
-            runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]))?
-                .trim_end()
-                .to_string(),
-        )
+        let started = Instant::now();
+        let refs: Vec<_> = commit_args.iter().copied().collect();
+        let mut command = git_command(&self.root, &refs, Stdio::null(), env);
+        let out = runner::run_owned(&mut command, None).map_err(|e| Error::new(format!("failed to run git: {e}")))?;
+        let Some(status) = out.status else { return Err(Error::new("git commit was cancelled; process reap is incomplete")); };
+        log_finished(&self.root, &refs, status, started.elapsed(), &out.stdout, &out.stderr);
+        if !status.success() {
+            let mut failure = GitFailure::from_output(&refs, status, &out.stderr);
+            failure.warning = warn_if_git_is_below_recommendation(&self.root, env, &status);
+            return Err(Error::git(failure));
+        }
+        let mut warning = (out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete)
+            .then(|| "git commit completed, but process output was incomplete".to_string());
+        let read = runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]));
+        let message = match read {
+            Ok(message) => Some(message.trim_end().to_string()),
+            Err(error) => { warning = Some(format!("{}; commit message could not be read: {error}", warning.unwrap_or_else(|| "commit succeeded".into()))); None }
+        };
+        Ok(CommitOutcome { message, warning })
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {
         Self::command_in(&self.root, args)
-    }
-
-    fn run_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
-        Self::command_in_with_env(&self.root, args, env)
     }
 
     fn command_in(cwd: &Path, args: &[&str]) -> Result<String> {
@@ -980,9 +995,6 @@ impl GitRepo {
             let mut failure = GitFailure::from_output(args, status, &out.stderr);
             failure.warning = warn_if_git_is_below_recommendation(cwd, env, &status);
             return Err(Error::git(failure));
-        }
-        if out.outcome.cancelled {
-            return Err(Error::new("git command was cancelled after completing successfully"));
         }
         if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
             return Err(Error::new("git command completed with incomplete output"));

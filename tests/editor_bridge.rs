@@ -174,6 +174,67 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
         .build()
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
+    use std::os::unix::fs::PermissionsExt;
+
+    fn start_time(pid: i32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+    }
+    fn live(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok().and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
+                !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
+            })).unwrap_or(false)
+    }
+
+    let (tmp, _repo) = staged_repo();
+    let marker = tmp.path().join(".git/hook-ready");
+    let pidfile = tmp.path().join(".git/hook-pid");
+    let hook = tmp.path().join(".git/hooks/pre-commit");
+    write(&hook, &format!("#!/bin/sh\nsh -c 'trap \"\" TERM; echo $$ > \"$1\"; touch \"$2\"; exec sleep 60' sh '{}' '{}' </dev/null >/dev/null 2>&1 &\nwait\n", pidfile.display(), marker.display()));
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+    let tree = tmp.git(&["write-tree"]);
+    let patch = tmp.git(&["diff", "--cached", "--binary"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    server.initialize(json!({}));
+    let repo = json!(tmp.path().to_string_lossy());
+    let status = open_status(&mut server, 2, &repo);
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "pre-commit readiness marker missing");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let pid: i32 = read(&pidfile).trim().parse().unwrap();
+    let identity = start_time(pid).expect("hook descendant identity");
+    struct Cleanup(i32, u64);
+    impl Drop for Cleanup { fn drop(&mut self) { if start_time_for_cleanup(self.0) == Some(self.1) && process_live_for_cleanup(self.0) { unsafe { libc::kill(self.0, libc::SIGKILL); } } } }
+    fn start_time_for_cleanup(pid:i32)->Option<u64>{ let s=std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?; s.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok() }
+    fn process_live_for_cleanup(pid:i32)->bool{ std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|s|s.rsplit_once(')').map(|(_,t)|!matches!(t.trim_start().chars().next(),Some('Z'|'X')))).unwrap_or(false) }
+    let _owned = Cleanup(pid, identity);
+    server.close_stdin();
+    let exit = server.finish(Duration::from_secs(8));
+    assert!(exit.success(), "server exited: {exit:?}");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while live(pid) && Instant::now() < deadline { thread::sleep(Duration::from_millis(10)); }
+    assert!(!live(pid), "owned hook descendant survived EOF");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+    assert_eq!(tmp.git(&["write-tree"]), tree);
+    assert_eq!(tmp.git(&["diff", "--cached", "--binary"]), patch);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+    std::fs::remove_file(hook).unwrap();
+    tmp.git(&["commit", "-m", "follow-up"]);
+}
+
 #[cfg(unix)]
 #[test]
 fn bridge_directory_is_private_with_permissive_umask() {
@@ -401,14 +462,135 @@ fn a_cancel_creates_no_commit() {
     assert!(exit.success(), "server exited: {exit:?}");
 }
 
-/// A11 cancellation acceptance is deferred after the progress cancellation
-/// regression timed out waiting for completion. Keep an explicit failing
-/// placeholder so running ignored tests cannot report this as a pass.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "A11: progress cancellation regression deferred; timed out waiting for completion"]
-fn progress_cancel_kills_the_commit_and_releases_its_edit() {
-    todo!("restore end-to-end coverage after the A11 cancellation regression is fixed");
+fn r_edit_2_progress_cancel_during_editor_releases_once() {
+    let (tmp, _repo) = staged_repo();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+    let tree = tmp.git(&["write-tree"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+    let repo = json!(tmp.path().to_string_lossy());
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &repo);
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let mut token = None;
+    let mut edit = None;
+    while token.is_none() || edit.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("begin") {
+            token = Some(message["params"]["token"].clone());
+        }
+        if let Some(found) = edit_document(&message) { edit = Some(found); }
+    }
+    let edit = edit.unwrap();
+    let edit_id = edit["editId"].as_str().unwrap().to_string();
+    let path = edit["path"].as_str().unwrap();
+    write(Path::new(path), "Must not commit\n");
+    let socket = server.socket_path();
+    let mut owned = wait_for_edit_processes(&edit_id, &socket);
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token.unwrap()}}));
+
+    let mut ends = 0;
+    let mut failed = false;
+    while !failed || ends == 0 {
+        let message = server.recv();
+        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("end") { ends += 1; }
+        if message["method"] == json!("view/effects") {
+            failed |= message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|e| e["type"] == json!("message") && e["level"] == json!("error") && e["text"].as_str().is_some_and(|s| !s.is_empty())));
+        }
+    }
+    owned.finished();
+    assert_eq!(ends, 1, "progress must end exactly once");
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"editId":edit_id}}}));
+    let late = server.response_with_id(5);
+    assert!(late["error"].is_object() || late["result"]["effects"].as_array().is_some_and(|e| !e.is_empty()), "late confirm must be rejected: {late}");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+    assert_eq!(tmp.git(&["write-tree"]), tree);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+
+    let edit = start_commit(&mut server, &status);
+    write(Path::new(edit["path"].as_str().unwrap()), "Follow-up commit\n");
+    let confirmed = invoke(&mut server, 6, &status, "common.confirm", json!({"editId": edit["editId"]}));
+    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()));
+    wait_for_commit(&tmp, "Follow-up commit");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn r_edit_2_progress_cancel_during_commit_msg_hook() {
+    let (tmp, _repo) = staged_repo();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+    let tree = tmp.git(&["write-tree"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+    let ready = tmp.path().join("hook.ready");
+    let child_pid = tmp.path().join("hook-child.pid");
+    let hook = tmp.path().join(".git/hooks/commit-msg");
+    std::fs::write(&hook, format!(
+        "#!/bin/sh\ntrap '' TERM\n(sleep 1000) &\necho $! > '{}'\necho ready > '{}'\nwait\n",
+        child_pid.display(), ready.display()
+    )).expect("write commit-msg hook");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let repo = json!(tmp.path().to_string_lossy());
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &repo);
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let mut token = None;
+    let mut edit = None;
+    while token.is_none() || edit.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("begin") { token = Some(message["params"]["token"].clone()); }
+        if let Some(found) = edit_document(&message) { edit = Some(found); }
+    }
+    let edit = edit.unwrap();
+    let edit_id = edit["editId"].as_str().unwrap().to_string();
+    write(Path::new(edit["path"].as_str().unwrap()), "Must not commit\n");
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"editId":edit_id}}}));
+    let confirmed = server.response_with_id(5);
+    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()), "message confirmation: {confirmed}");
+    let socket = server.socket_path();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() { assert!(Instant::now() < deadline, "commit-msg hook did not become ready"); thread::sleep(Duration::from_millis(20)); }
+    let processes = edit_processes(&edit_id, &socket).expect("/proc inspection");
+    assert!(!processes.is_empty(), "commit processes carry edit identity");
+    let mut owned = OwnedEdit { edit_id: edit_id.clone(), socket: socket.clone(), pids: processes.into_iter().map(|p| p.pid).collect() };
+    let child: u32 = read(&child_pid).trim().parse().expect("hook child pid");
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token.unwrap()}}));
+    let mut ends = 0;
+    let mut failed = false;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !failed || ends == 0 {
+        assert!(Instant::now() < deadline, "cancellation did not finish promptly");
+        let message = server.recv();
+        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("end") { ends += 1; }
+        if message["method"] == json!("view/effects") { failed |= message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|e| e["type"] == json!("message") && e["level"] == json!("error") && e["text"].as_str().is_some_and(|s| !s.is_empty()))); }
+    }
+    owned.finished();
+    assert_eq!(ends, 1, "progress ends exactly once");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+    assert_eq!(tmp.git(&["write-tree"]), tree);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Path::new(&format!("/proc/{child}/stat")).exists() { assert!(Instant::now() < deadline, "hook descendant survived cancellation"); thread::sleep(Duration::from_millis(20)); }
+    std::fs::remove_file(&hook).expect("remove blocking commit-msg hook");
+    let edit = start_commit(&mut server, &status);
+    write(Path::new(edit["path"].as_str().unwrap()), "Follow-up commit\n");
+    let confirmed = invoke(&mut server, 6, &status, "common.confirm", json!({"editId": edit["editId"]}));
+    assert!(confirmed["result"]["effects"].as_array().is_some_and(|e| e.is_empty()));
+    wait_for_commit(&tmp, "Follow-up commit");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 /// An early cancellation survives repository discovery and targets the actual

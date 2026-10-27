@@ -1,6 +1,6 @@
-use crate::errors;
 use crate::config::{ConfigService, LoadOptions};
 use crate::editor;
+use crate::errors;
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -9,7 +9,7 @@ use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
 use crate::view::{ViewMode, Viewport};
-use crate::watcher::{RepoWatcher, Refresh, WatcherConfig};
+use crate::watcher::{Refresh, RepoWatcher, WatcherConfig};
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::request::Request as LspRequest;
@@ -126,13 +126,20 @@ struct Shared {
     prompts: Arc<PromptBridge>,
     /// Running mutations keyed by their progress token, so a client cancel can
     /// kill the child on the blocking worker thread.
-    progress: Arc<Mutex<HashMap<String, CancelHandle>>>,
+    progress: Arc<Mutex<HashMap<String, ProgressRun>>>,
+    closing: Arc<AtomicBool>,
+    progress_changed: Arc<Notify>,
     /// Global progress-token counter.
     next_progress: Arc<AtomicU64>,
     /// Per-repository mutation tickets, allocated in request order.
     mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
     /// Running repository watchers, keyed by repository root.
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
+}
+
+struct ProgressRun {
+    cancel: CancelHandle,
+    edit_id: Option<String>,
 }
 
 impl Shared {
@@ -153,6 +160,8 @@ impl Shared {
             sender: sender.clone(),
             prompts: Arc::new(PromptBridge::new(&sender)),
             progress: Arc::new(Mutex::new(HashMap::new())),
+            closing: Arc::new(AtomicBool::new(false)),
+            progress_changed: Arc::new(Notify::new()),
             next_progress: Arc::new(AtomicU64::new(0)),
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
@@ -279,19 +288,25 @@ impl Shared {
     ///
     /// The standard handshake is a `window/workDoneProgress/create` request for
     /// the token, then `$/progress` with `begin`; `end` is sent when the
-    /// mutation finishes. The returned handle kills the child on cancel.
+    /// mutation finishes. The returned handle enqueues cancellation for the
+    /// child on cancel.
     fn begin_progress(
         &self,
         sender: &mpsc::UnboundedSender<Message>,
         command: &str,
+        edit_id: Option<String>,
     ) -> (String, CancelHandle) {
         let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
         let token = format!("magit-lsp/mutation/{next}");
         let handle = CancelHandle::new();
-        self.progress
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(token.clone(), handle.clone());
+        let mut progress = self.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let closing = self.closing.load(Ordering::SeqCst);
+        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone() });
+        drop(progress);
+        if closing {
+            handle.cancel();
+            if let Some(edit_id) = edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
+        }
         let _ = sender.send(Message::Request(Request::new(
             RequestId::from(format!("workDoneProgress/{next}")),
             "window/workDoneProgress/create".to_string(),
@@ -313,10 +328,35 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(token);
+        self.progress_changed.notify_waiters();
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({ "token": token, "value": { "kind": "end" } }),
         )));
+    }
+
+    /// Stop new work and cancel every operation that can wait on the client.
+    fn terminal_cleanup(&self) {
+        let runs = {
+            let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+            self.closing.store(true, Ordering::SeqCst);
+            progress.values().map(|run| ProgressRun { cancel: run.cancel.clone(), edit_id: run.edit_id.clone() }).collect::<Vec<_>>()
+        };
+        for run in runs {
+            run.cancel.cancel();
+            if let Some(edit_id) = run.edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
+        }
+        editor::registry().abort_all();
+        self.prompts.close();
+    }
+
+    /// Wait until each progress-owning worker has run its terminal release.
+    async fn wait_progress(&self) {
+        loop {
+            let notified = self.progress_changed.notified();
+            if self.progress.lock().unwrap_or_else(|p| p.into_inner()).is_empty() { return; }
+            notified.await;
+        }
     }
 
     /// Cancel the mutation running under a `window/workDoneProgress/cancel`.
@@ -324,14 +364,17 @@ impl Shared {
         let Some(token) = params.get("token").and_then(progress_token) else {
             return;
         };
-        let handle = self
+        let run = self
             .progress
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&token)
-            .cloned();
-        if let Some(handle) = handle {
-            handle.cancel();
+            .map(|run| ProgressRun { cancel: run.cancel.clone(), edit_id: run.edit_id.clone() });
+        if let Some(run) = run {
+            run.cancel.cancel();
+            if let Some(edit_id) = run.edit_id {
+                editor::registry().resolve(&edit_id, editor::Reply::Abort);
+            }
         }
     }
 
@@ -454,7 +497,9 @@ impl PromptBridge {
         let (tx, rx) = std_mpsc::channel();
         {
             let mut pending = self.lock();
-            if self.closed.load(Ordering::SeqCst) { return None; }
+            if self.closed.load(Ordering::SeqCst) {
+                return None;
+            }
             pending.insert(prompt_id.clone(), tx);
         }
 
@@ -471,26 +516,25 @@ impl PromptBridge {
         let cancel = runner::current_cancel();
         let answer = if sent {
             loop {
-                if cancel.as_ref().is_some_and(|handle| handle.is_cancelled()) { break None; }
+                if cancel.as_ref().is_some_and(|handle| handle.is_cancelled()) {
+                    break None;
+                }
                 match rx.recv_timeout(std::time::Duration::from_millis(50)) {
                     Ok(answer) => break Some(answer),
                     Err(std_mpsc::RecvTimeoutError::Disconnected) => break None,
                     Err(std_mpsc::RecvTimeoutError::Timeout) => {}
                 }
             }
-        } else { None };
+        } else {
+            None
+        };
 
         self.lock().remove(&prompt_id);
         answer
     }
 
     /// Deliver an answer to the waiting question.
-    fn respond(
-        &self,
-        prompt_id: &str,
-        cancelled: bool,
-        value: Option<PromptValue>,
-    ) -> Result<()> {
+    fn respond(&self, prompt_id: &str, cancelled: bool, value: Option<PromptValue>) -> Result<()> {
         let sender = self
             .lock()
             .remove(prompt_id)
@@ -540,9 +584,7 @@ impl PromptUi for ServerUi {
     fn confirm(&self, request: &ViewPromptParams) -> Result<Option<bool>> {
         match self.ask(request)? {
             Some(PromptValue::Bool(value)) => Ok(Some(value)),
-            Some(other) => Err(Error::new(format!(
-                "expected a bool answer, got {other:?}"
-            ))),
+            Some(other) => Err(Error::new(format!("expected a bool answer, got {other:?}"))),
             None => Ok(None),
         }
     }
@@ -550,9 +592,7 @@ impl PromptUi for ServerUi {
     fn text(&self, request: &ViewPromptParams) -> Result<Option<String>> {
         match self.ask(request)? {
             Some(PromptValue::Text(value)) => Ok(Some(value)),
-            Some(other) => Err(Error::new(format!(
-                "expected a text answer, got {other:?}"
-            ))),
+            Some(other) => Err(Error::new(format!("expected a text answer, got {other:?}"))),
             None => Ok(None),
         }
     }
@@ -588,7 +628,12 @@ fn refresh_view_keymaps(shared: &Shared, sender: &mpsc::UnboundedSender<Message>
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     for (root, session) in sessions.iter_mut() {
-        session.set_keymaps(shared.config.for_repository(std::path::Path::new(root)).keymaps());
+        session.set_keymaps(
+            shared
+                .config
+                .for_repository(std::path::Path::new(root))
+                .keymaps(),
+        );
         let ids: Vec<String> = session
             .views()
             .iter()
@@ -671,8 +716,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 if dynamic_delivery(&client) {
                     for effect in &effects {
                         if let Effect::EditDocument { edit_id, kind, .. } = effect {
-                            let config = configs.lock().unwrap_or_else(|p| p.into_inner()).get(edit_id).cloned();
-                            if let Some(keymap) = config.and_then(|config| edit_keymap(&config, edit_id, kind)) {
+                            let config = configs
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .get(edit_id)
+                                .cloned();
+                            if let Some(keymap) =
+                                config.and_then(|config| edit_keymap(&config, edit_id, kind))
+                            {
                                 let _ = sender.send(Message::Notification(Notification::new(
                                     VIEW_KEYMAP.to_string(),
                                     keymap,
@@ -756,6 +807,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
 
     let mut handlers = JoinSet::new();
     let mut shutdown_requested = false;
+    let mut read_error = None;
 
     tracing::debug!("magit-lsp listening on stdio");
 
@@ -764,12 +816,17 @@ async fn serve(options: ServerOptions) -> Result<i32> {
             Ok(Some(Message::Request(request))) => {
                 if request.method == "shutdown" {
                     shutdown_requested = true;
-                    shared.prompts.close();
+                    shared.terminal_cleanup();
                     // Earlier requests must finish (and answer) before the
                     // shutdown response, even if the client pipelined them.
                     while handlers.join_next().await.is_some() {}
+                    shared.wait_progress().await;
                     let response = Response::new_ok(request.id, Value::Null);
                     let _ = sender.send(Message::Response(response));
+                    continue;
+                }
+                if shared.closing.load(Ordering::SeqCst) {
+                    let _ = sender.send(Message::Response(Response::new_err(request.id, ErrorCode::InvalidRequest as i32, "server is shutting down".to_string())));
                     continue;
                 }
                 tracing::debug!(method = %request.method, "request");
@@ -787,8 +844,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     // The client is going away: a pending edit can never be
                     // answered, so abort it and let the worker (and Git)
                     // finish instead of hanging (§3.10 step 7).
-                    editor::registry().abort_all();
-                    shared.prompts.close();
+                    shared.terminal_cleanup();
                     break if shutdown_requested { 0 } else { 1 };
                 }
                 // Acks and resizes update session state; they never answer.
@@ -804,8 +860,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         .await
                         .unwrap_or_default();
                     for error in outcome.errors {
-                        let _ =
-                            sender.send(show_message(1, format!("magit-lsp config: {error}")));
+                        let _ = sender.send(show_message(1, format!("magit-lsp config: {error}")));
                     }
                     // Failed roots retain their last good maps; successful
                     // roots must still receive their independently reloaded maps.
@@ -825,13 +880,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // The client disconnected without a goodbye: every pending
                 // edit must abort so Git never hangs (§3.10 step 7), and the
                 // commit worker can then finish and release the writer.
-                editor::registry().abort_all();
-                shared.prompts.close();
+                shared.terminal_cleanup();
                 break 0;
             }
             Err(error) => {
-                shared.prompts.close();
-                return Err(Error::new(format!("failed to read LSP message: {error}")));
+                shared.terminal_cleanup();
+                read_error = Some(Error::new(format!("failed to read LSP message: {error}")));
+                break 0;
             }
         }
     };
@@ -840,8 +895,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     // responses are already on the writer channel.
     watcher.abort();
     let _ = watcher.await;
-    handlers.abort_all();
     while handlers.join_next().await.is_some() {}
+    shared.wait_progress().await;
     // `Shared` also holds a sender clone, so it must go before the writer
     // channel can close.
     drop(shared);
@@ -852,6 +907,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         Ok(Err(error)) => return Err(Error::from(error)),
         Err(error) => return Err(Error::new(error.to_string())),
     }
+    if let Some(error) = read_error { return Err(error); }
     Ok(exit_code)
 }
 
@@ -909,7 +965,7 @@ async fn handle_request(
                 serde_json::json!({ "method": method }),
             );
         }
-        let (token, cancel) = shared.begin_progress(&sender, &method);
+        let (token, cancel) = shared.begin_progress(&sender, &method, None);
         let outcome = dispatch_response(request, &shared, Some(cancel), trace_id).await;
         shared.end_progress(&sender, &token);
         if trace_id > 0 {
@@ -951,11 +1007,7 @@ async fn handle_request(
                         .get("viewId")
                         .and_then(Value::as_str)
                         .unwrap_or("");
-                    runner::trace(
-                        trace_id,
-                        "render_sent",
-                        serde_json::json!({ "view": view }),
-                    );
+                    runner::trace(trace_id, "render_sent", serde_json::json!({ "view": view }));
                 }
             }
         }
@@ -1260,7 +1312,11 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .repo_path()
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
-    let repo = crate::git::GitRepo::open(&repo)?.root().canonicalize()?.to_string_lossy().into_owned();
+    let repo = crate::git::GitRepo::open(&repo)?
+        .root()
+        .canonicalize()?
+        .to_string_lossy()
+        .into_owned();
     let id = shared.next_view_id();
     let config = shared.config.for_repository(std::path::Path::new(&repo));
     let keymaps = config.keymaps();
@@ -1357,7 +1413,10 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let keymaps = shared.config.for_repository(std::path::Path::new(&repo)).keymaps();
+    let keymaps = shared
+        .config
+        .for_repository(std::path::Path::new(&repo))
+        .keymaps();
     let mut sessions = shared
         .sessions
         .lock()
@@ -1387,11 +1446,20 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
             Execution::Done(result) => return Ok(result),
             Execution::Prompt(request) => {
                 let answer = crate::ui::answer(&ServerUi::new(shared), &request);
-                let mut sessions = shared.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                let session = sessions.get_mut(repo).ok_or_else(|| Error::new("Prompt session closed"))?;
+                let mut sessions = shared
+                    .sessions
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let session = sessions
+                    .get_mut(repo)
+                    .ok_or_else(|| Error::new("Prompt session closed"))?;
                 match answer {
                     Ok(answer) => {
-                        let answer = if shared.prompts.closed.load(Ordering::SeqCst) { None } else { answer };
+                        let answer = if shared.prompts.closed.load(Ordering::SeqCst) {
+                            None
+                        } else {
+                            answer
+                        };
                         step = session.resume_prompt(&request.prompt_id, answer)?;
                     }
                     Err(error) => {
@@ -1426,7 +1494,7 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 /// Turn a command outcome into its response plus render/keymap notifications.
 fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
     let mut notifications = Vec::new();
-    if outcome.commit.is_some() {
+    if outcome.commit.is_some() && !shared.closing.load(Ordering::SeqCst) {
         // Git must not run while this request still holds any session or repo
         // lock: it waits for the user to edit and confirm.
         spawn_commit(shared.clone(), repo.to_string());
@@ -1510,11 +1578,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
 ///
 /// Only kinds with a registry scope get one; the server still owns the keys,
 /// so a client never hard-codes confirm/cancel.
-fn edit_keymap(
-    config: &ConfigService,
-    edit_id: &str,
-    kind: &str,
-) -> Option<ViewKeymapParams> {
+fn edit_keymap(config: &ConfigService, edit_id: &str, kind: &str) -> Option<ViewKeymapParams> {
     let scope = match kind {
         editor::COMMIT_MESSAGE_KIND | "merge-message" | "tag-message" => "commit-message",
         _ => return None,
@@ -1556,7 +1620,10 @@ struct CommitEdit {
 impl Drop for CommitEdit {
     fn drop(&mut self) {
         editor::registry().remove(&self.id);
-        self.configs.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+        self.configs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.id);
     }
 }
 
@@ -1569,7 +1636,20 @@ fn spawn_commit(shared: Shared, repo: String) {
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
-    let (token, cancel) = shared.begin_progress(&sender, "commit");
+    let edit_id = editor::registry().create(&repo);
+    shared
+        .edit_configs
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(
+            edit_id.clone(),
+            shared.config.for_repository(std::path::Path::new(&repo)),
+        );
+    let edit = CommitEdit {
+        id: edit_id.clone(),
+        configs: shared.edit_configs.clone(),
+    };
+    let (token, cancel) = shared.begin_progress(&sender, "commit", Some(edit_id));
     let progress = ProgressEnd {
         shared: shared.clone(),
         token,
@@ -1578,11 +1658,6 @@ fn spawn_commit(shared: Shared, repo: String) {
         .name("magit-lsp-commit".to_string())
         .spawn(move || {
             let _progress = progress;
-            let edit_id = editor::registry().create(&repo);
-            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
-                edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
-            );
-            let edit = CommitEdit { id: edit_id, configs: shared.edit_configs.clone() };
             let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
                 Some(socket) => editor::commit(&repo, &edit.id, socket),
                 None => Err(Error::new("the editor bridge is not running")),
@@ -1593,8 +1668,8 @@ fn spawn_commit(shared: Shared, repo: String) {
 
             let mut messages = Vec::new();
             match result {
-                Ok(message) => {
-                    let renders: Vec<ViewRender> = {
+                Ok(outcome) => {
+                    let renders: Vec<ViewRender> = if shared.closing.load(Ordering::SeqCst) { Vec::new() } else {
                         let mut sessions = shared
                             .sessions
                             .lock()
@@ -1615,16 +1690,18 @@ fn spawn_commit(shared: Shared, repo: String) {
                         Message::Notification(Notification::new(VIEW_RENDER.to_string(), render))
                     }));
                     // Replace the "Committing…" feedback with the outcome.
-                    let subject = message.lines().next().unwrap_or("").trim().to_string();
+                    let subject = outcome.message.as_deref().unwrap_or("").lines().next().unwrap_or("").trim().to_string();
                     let text = if subject.is_empty() {
                         "Committed".to_string()
                     } else {
                         format!("Committed: {subject}")
                     };
+                    let mut effects = vec![Effect::message(MessageLevel::Info, text)];
+                    if let Some(warning) = outcome.warning { effects.push(Effect::message(MessageLevel::Warn, warning)); }
                     messages.push(Message::Notification(Notification::new(
                         VIEW_EFFECTS.to_string(),
                         ViewEffectsParams {
-                            effects: vec![Effect::message(MessageLevel::Info, text)],
+                            effects,
                         },
                     )));
                 }
@@ -1723,9 +1800,18 @@ fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<S
     // Prompting work retains its ordering turn, but new commands must reach
     // the session's readable refusal rather than queue behind human input.
     if matches!(method, ViewKeyRequest::METHOD | ViewInvokeRequest::METHOD) {
-        if let Some(repo) = params.get("viewId").and_then(Value::as_str).and_then(|id| shared.repo_for_view(id)) {
-            let sessions = shared.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            if sessions.get(&repo).is_some_and(Session::has_pending_prompt) { return None; }
+        if let Some(repo) = params
+            .get("viewId")
+            .and_then(Value::as_str)
+            .and_then(|id| shared.repo_for_view(id))
+        {
+            let sessions = shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if sessions.get(&repo).is_some_and(Session::has_pending_prompt) {
+                return None;
+            }
         }
     }
     // Keys run any command, so serialise every key press with its repo's views.
@@ -1804,17 +1890,27 @@ mod commit_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "").unwrap();
-        let config = Arc::new(ConfigService::load(LoadOptions {
-            config_path: Some(path), ..Default::default()
-        }).unwrap());
+        let config = Arc::new(
+            ConfigService::load(LoadOptions {
+                config_path: Some(path),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
         let retained = Arc::downgrade(&config);
         let id = editor::registry().create(tmp.path().to_str().unwrap());
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
-        let edit = CommitEdit { id: id.clone(), configs: configs.clone() };
+        let edit = CommitEdit {
+            id: id.clone(),
+            configs: configs.clone(),
+        };
         assert!(retained.upgrade().is_some());
         drop(edit);
         assert!(configs.lock().unwrap().is_empty());
-        assert!(retained.upgrade().is_none(), "the edit retained its repository config");
+        assert!(
+            retained.upgrade().is_none(),
+            "the edit retained its repository config"
+        );
         assert!(!editor::registry().resolve(&id, editor::Reply::Ok));
     }
 }

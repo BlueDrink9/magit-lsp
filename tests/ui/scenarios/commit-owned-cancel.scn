@@ -1,0 +1,36 @@
+# R-EDIT-2: cancel a real commit while its owned pre-commit hook is waiting.
+# The hook records TERM and readiness; cancellation uses the observed native token.
+fixture: staged-one-file
+---
+sh: git rev-parse HEAD > .git/cancel-before; printf '%s\n' '#!/bin/sh' 'trap '\''echo terminated > .git/cancel-terminated; exit 1'\'' TERM' 'echo ready > .git/cancel-ready' 'while :; do sleep 0.02; done' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+keys: c
+wait
+keys: c
+wait screen contains "Committing"
+snapshot: committing
+keys: ":lua assert(vim.wait(2000,function() local n=0; for _ in pairs(require('magit-lsp.debug').state.progress) do n=n+1 end; return vim.fn.filereadable('.git/cancel-ready')==1 and n==1 end,10)); local v=assert(require('magit-lsp.view').current()); local t=assert(next(require('magit-lsp.debug').state.progress)); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
+wait
+expect screen not-contains "Committing"
+expect screen contains "Staged changes (1)"
+keys: ":messages" Enter
+wait
+expect screen contains "git commit"
+snapshot: cancelled
+keys: q
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/cancel-before)" && test -f .git/cancel-terminated
+sh: rm .git/hooks/pre-commit
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: i After
+keys: " progress cancellation"
+keys: Escape
+keys standard: C-Enter
+keys vim: Z Z
+wait screen contains "Committed"
+wait
+expect screen contains "Staged changes (0)"
+expect screen not-contains "Committing"
+snapshot: next-commit
+sh: test "$(git log -1 --format=%s)" = 'After progress cancellation'

@@ -372,7 +372,7 @@ implementation work is moved to Phase 3E; A12 is next independent active review
 work. The redesign phase is not automatically started by recording this
 decision.
 
-- [ ] **[P1] A12 — Test Git failures through the real dispatch path** (`src/server.rs:1202–1265,1461–1489`; `src/dispatch.rs:204–216`)
+- [x] **[P1] A12 — Test Git failures through the real dispatch path** (`src/server.rs:1202–1265,1461–1489`; `src/dispatch.rs:204–216`)
   - **Problem:** Test-only callers exercise production `server::mutation`, while real selection dispatch bypasses its readable-effect behavior with `?`.
   - **Why it matters:** Tests validate a second implementation instead of the runtime contract.
   - **Change:** Route real selection/command Git failures through readable effects; migrate five helper callers to Session/stdio seams, then delete the helper.
@@ -384,6 +384,7 @@ decision.
   - **Verify:** `cargo test --test errors --test dispatch --test views --test server_async`; `make test`
   - **Parallel:** serial
   - **Behaviour lost:** none.
+  - **Acceptance evidence (2026-10-28):** Exact gate `cargo test --test errors --test dispatch --test views --test server_async && make test && scripts/ui run tests/ui/scenarios/git-error-readable.scn && git diff --check && ! rg 'server::mutation|pub fn mutation<' src tests` passed. Focused Rust suites passed (errors 14, dispatch 42, views 14, server_async 20 passed/1 existing ignored); full `make test` passed build, Rust, Lua, VSCode, and keybindings; focused UI scenario reported `1 PASS, 0 XFAIL, 0 FAIL`. Inspected plain screen `build/ui/git-error-readable/standard-100x30/readable-git-error.screen`: the readable `git commit` failure is displayed while the staged status remains visible. `git diff --check` passed and the forbidden mutation search found no matches. A11 remains deferred to Phase 3E and unchecked.
 
 - [x] **[P2] A13 — Delete multi-version test scaffolding; retain soft-floor warnings** (`src/git.rs`; `src/errors.rs`; `tests/git_version.rs`; `tests/errors.rs`; existing Git-error effect boundary)
   - **Problem:** A dedicated fake-Git version harness and version matrices add test volume, but the below-floor warning is deliberate user-facing behavior, not dead runtime code.

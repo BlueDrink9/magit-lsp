@@ -588,6 +588,102 @@ Validate owner, run, version, helper target and canonical expected Git path/kind
 write exact draft to that validated path before helper `ok`. Failures retain
 draft/helper pending. Git owns cleanup and hook ordering.
 
+**R-EDIT-1 interface decisions (design only; no wire change until cutover).**
+Use one standard LSP full-sync document: `didOpen` version 1 carries the initial
+Git template; each `didChange` carries complete text and a strictly greater
+integer version. Accept only the authenticated connection/session owning the
+run, matching opaque `runId` and URI; reject stale, duplicate, wrong-owner and
+terminal-run updates without changing state. Versions may skip. Ordered LSP
+delivery plus the monotone check arbitrates arrival. Save/confirm names its exact
+version and waits for that version to apply; checkpoint acknowledgement follows
+copying that live version as the saved snapshot. `didClose` only detaches and is
+never close intent. Bound live UTF-8 text and saved checkpoint independently to
+1 MiB; reject oversized updates atomically, retain last accepted state, and
+surface recoverable error. Never truncate. Confirm/normal close writes exact
+checkpoint, not later unacknowledged changes.
+
+Proposed request/ack order: client sends `draft/save {runId, uri, version,
+requestId}` after native save flush; server replies `draft/checkpointed {runId,
+uri, version, requestId}` only after matching full sync is applied and snapshot
+copied. Finish is `draft/finish {runId, uri, version, requestId,
+reason:"confirm"|"normal-close"}`; normal-close carries the checkpoint selected
+by Save/Discard. Server validates owner/run/version, writes checkpoint, then
+sends `draft/finished {runId, uri, version, requestId}` after helper success.
+Errors correlate by requestId and leave run pending. These are proposed project
+methods, alongside standard LSP notifications, not a second text channel.
+Neovim BufUnload/BufDelete and VSCode document-close alone cannot distinguish
+user close from detach/window shutdown. Adapters must track explicit close intent
+before teardown; ambiguity cancels/recovery and never confirms. Validate this
+native API feasibility in R-EDIT-4/5; LSP didClose is never intent.
+
+Validate helper kind `commit-message`, one-shot token, run, repository, owner,
+and canonical expected Git `COMMIT_EDITMSG` target (actual gitdir for
+linked-worktrees); reject symlink/non-regular target and any other path. These
+checks do not prevent same-user inherited-environment spoofing by nested hooks.
+Lifecycle arbitration is serialized by the sole Child owner: active editor,
+finalizing, terminal. Abort/progress cancel/EOF/disconnect/shutdown cancel every
+nonterminal phase. Native owner/run-scoped user-close intent is distinct from
+`didClose`, focus loss, reattach or editor shutdown. Dirty native close Save
+confirms the acknowledged checkpoint; Discard confirms prior checkpoint
+(initially template); Cancel leaves buffer/run open. Explicit confirm flushes,
+awaits applied version, checkpoints, validates/writes exact snapshot, then helper
+success. Child owner arbitrates finish versus cancel: pre-completion cancellation
+aborts; observed completed Git exit reports actual result. Terminal cleanup is
+idempotent and late responses rejected. Failed write/finish keeps helper/draft
+pending and reopens/recovery-copies if buffer closed. Drafts are in-memory and
+do not survive server crash; native recovery is best effort.
+
+R-EDIT-8 ring limits: default 50 entries and 1 MiB aggregate UTF-8 payload per
+canonical repository, in memory for server lifetime. Reject retention of an
+entry larger than the cap with a visible warning; never truncate or silently
+drop it. Otherwise evict oldest until both limits hold; exact consecutive dedup.
+Existing eligibility/recall rules above remain canonical.
+
+**Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
+owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
+completion channels; handlers only enqueue idempotent cancellation. Start Git in
+a new session/process group before exec (child-side spawn setup, not racy
+post-spawn `setpgid`). No controlling tty: piped stdout/stderr, null stdin unless
+the invocation requires otherwise. Concurrent readers retain at most 4 MiB per
+stream, continue draining/discarding after cap, and flag truncation. Reader drain
+deadline is 2 seconds after leader exit/terminal cancellation. When the owner
+dequeues cancel, it first observes leader status with
+`waitid(P_PID, pid, WEXITED|WNOHANG|WNOWAIT)`. If already exited, exit wins and
+no signal is sent. Otherwise cancellation linearizes: abort a connected helper,
+send TERM to the group, and send CONT to the group so stopped members can
+process termination. Retain the unreaped leader for the full 2-second TERM
+grace, then send exactly one group KILL even if the leader exited during that
+grace. Reap only after KILL, using bounded observation; if KILL is not reaped within a further 2 seconds,
+transfer the still-owned Child handle to a process-lifetime reaper task that only
+waits/reaps; report cancellation incomplete and retain ownership until reap.
+The retained unreaped leader pins PID/PGID identity: no other waiter, `try_wait`,
+`waitpid(-1)`, or SIGCHLD auto-reap disposition is permitted. Never signal after
+final reap. Exit observation is distinct from pipe EOF. On normal leader exit,
+never signal to force inherited-pipe EOF; allow the 2-second drain deadline,
+report incomplete drain, finalize.
+Readers must support cancellation/parent-pipe close, bounded data and deadline,
+not detached indefinitely-blocked threads. Crash cannot run this reaper or
+guarantee child cleanup. Nested hooks share group; `setsid` escapees cannot be
+contained. Never broad-kill, delete locks, or kill normal-exit daemons.
+
+Portability gate: `setsid` and `waitid(...WNOWAIT)` are Unix interfaces with
+platform-specific availability/semantics; Linux implementation and real-Git
+tests are required before R-EDIT-2 acceptance. macOS WNOWAIT behavior remains
+unverified and is a gate; investigate kqueue exit observation only if required,
+not as an implemented alternative. Rust
+`Child::try_wait` reaps on observed exit, so cannot precede a possible group
+signal; use non-reaping waitid observation plus sole final reap or gate platform.
+Windows lacks this Unix group/waitid scheme; named-pipe ACL and suspended
+creation/atomic Job assignment require independent R-EDIT-7 feasibility and
+validation. Numeric limits are proposed defaults, not current behavior.
+Minimum adversarial acceptance for R-EDIT-2/A11: leader exits on TERM while a
+TERM-resistant descendant remains, and the group still receives KILL after the
+full grace; stopped member receives CONT then terminates; exit-before-cancel
+produces no signal; normal-exit daemon survives pipe-drain timeout; trace proves
+initial WNOWAIT observation → cancel linearization → TERM/CONT → full grace →
+KILL → final reap, with no signal after reap. These are required tests, not
+claims of platform execution.
+
 Explicit abort, progress cancel, client disconnect/EOF/shutdown always cancel
 the run at any phase; they are not normal buffer close. Normal user close of the
 commit buffer completes the helper as a successful native COMMIT_EDITMSG editor
@@ -1501,10 +1597,10 @@ timeout. No implementation verified; macOS remains unverified. R-4.2 remains
 staged diff/trailers/lint owner, integrates the R-EDIT-8 ring (not a second
 history implementation), and depends on this phase.
 
-- [ ] **R-EDIT-1 — Specify lifecycle and process feasibility**
+- [x] **R-EDIT-1 — Specify lifecycle and process feasibility**
   - **Paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, `tests/editor_bridge.rs`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`.
   - **Depends on:** none.
-  - **Done when:** lifecycle/races, auth/path, draft sync/version/size bounds, native adapters, process group/tty/reap/output and crash/nested-hook/escapee limitations specified; Linux/macOS validation and Windows feasibility explicit. Specify native close-intent classification separately from LSP didClose (which is not confirmation), and synchronization ordering versus save-checkpoint acknowledgement.
+  - **Done when:** lifecycle/races, auth/path, draft sync/version/size bounds, native adapters, process group/tty/reap/output and crash/nested-hook/escapee limitations specified; Linux/macOS validation and Windows feasibility explicit. Specify native close-intent classification separately from LSP didClose (which is not confirmation), and synchronization ordering versus save-checkpoint acknowledgement. Contract is in §3.10; native acceptance maps to R-EDIT-4/5/A11 and process adversarial tests to R-EDIT-2/A11. Design review only; no implementation or platform execution claimed.
   - **Verify:** documentation/interface review and targeted platform-design feasibility review (not a claimed platform test); choose full/incremental sync, bounds, and history count/UTF-8 byte-cap overflow policy here (never silently truncate a message).
 - [ ] **R-EDIT-2 — Own runs and safely cancel Git children**
   - **Paths:** `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/editor.rs`, `src/protocol.rs`, `tests/editor_bridge.rs`.

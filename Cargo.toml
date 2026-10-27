@@ -12,6 +12,7 @@ name = "magit-lsp"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 lsp-server = "0.10"
 lsp-types = "0.97"
 notify = "8.2"
