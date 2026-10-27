@@ -310,7 +310,7 @@ fn disappeared_displayed_file_returns_a_readable_refusal() {
         panic!("expected a message effect, got {:?}", outcome.effects[0]);
     };
     assert_eq!(*level, MessageLevel::Warn);
-    assert_eq!(text, "The requested file is no longer available to Git.");
+    assert_eq!(text, magit_lsp::errors::HUNK_CHANGED);
     assert!(detail.is_none());
     let status = GitRepo::open(tmp.path()).expect("open repo").status().expect("status");
     assert!(status.staged.is_empty());

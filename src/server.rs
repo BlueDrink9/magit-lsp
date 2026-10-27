@@ -1,7 +1,6 @@
 use crate::errors;
 use crate::config::{ConfigService, LoadOptions};
 use crate::editor;
-use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -1645,36 +1644,6 @@ fn spawn_commit(shared: Shared, repo: String) {
         });
     if let Err(error) = worker {
         tracing::warn!(%error, "failed to start the commit worker");
-    }
-}
-
-/// Run a mutation for `repo_path`, reporting Git failures as message effects.
-///
-/// A failed Git command still produces a successful result with the current
-/// status; only internal faults become JSON-RPC errors.
-pub fn mutation<F>(repo_path: &str, op: F) -> Result<(git::Status, Vec<Effect>)>
-where
-    F: FnOnce(&GitRepo) -> Result<bool>,
-{
-    let repo = match GitRepo::open(repo_path) {
-        Ok(repo) => repo,
-        Err(err) => {
-            let effect = Effect::from_error(&err).ok_or(err)?;
-            return Ok((git::Status::empty(repo_path), vec![effect]));
-        }
-    };
-
-    let effects = errors::effects_for_result(op(&repo))?;
-    match repo.status() {
-        Ok(status) => Ok((status, effects)),
-        Err(err) => match Effect::from_error(&err) {
-            Some(effect) => {
-                let mut effects = effects;
-                effects.push(effect);
-                Ok((git::Status::empty(repo_path), effects))
-            }
-            None => Err(err),
-        },
     }
 }
 
