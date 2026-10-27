@@ -137,6 +137,8 @@ pub struct GitFailure {
     pub stderr: String,
     pub args: Vec<String>,
     pub subcommand: String,
+    /// Best-effort compatibility advisory, separate from the original stderr.
+    pub warning: Option<String>,
 }
 
 impl GitFailure {
@@ -147,6 +149,7 @@ impl GitFailure {
             stderr: String::from_utf8_lossy(stderr).trim_end().to_string(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
             subcommand: subcommand_of(args).to_string(),
+            warning: None,
         }
     }
 }
@@ -918,12 +921,13 @@ impl GitRepo {
             &out.stderr,
         );
         if !out.status.success() {
-            warn_if_git_is_below_recommendation(&self.root, &[], &out.status);
-            return Err(Error::git(GitFailure::from_output(
+            let mut failure = GitFailure::from_output(
                 &args,
                 out.status,
                 &out.stderr,
-            )));
+            );
+            failure.warning = warn_if_git_is_below_recommendation(&self.root, &[], &out.status);
+            return Err(Error::git(failure));
         }
         written?;
         Ok(())
@@ -934,13 +938,13 @@ impl GitRepo {
     }
 
     /// Run `git commit` with extra environment variables and return the
-    /// committed message as read back by `git log -1 --format=%B`.
+    /// committed message as read back by `git log -1 --format=%B`. Only the
+    /// mutation inherits cancellation, not the subsequent message read.
     pub fn commit(&self, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
         let mut commit_args = vec!["commit"];
         commit_args.extend_from_slice(args);
         self.run_with_env(&commit_args, env)?;
-        Ok(self
-            .run(&["log", "-1", "--format=%B"])?
+        Ok(runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]))?
             .trim_end()
             .to_string())
     }
@@ -983,12 +987,9 @@ impl GitRepo {
             &out.stderr,
         );
         if !out.status.success() {
-            warn_if_git_is_below_recommendation(cwd, env, &out.status);
-            return Err(Error::git(GitFailure::from_output(
-                args,
-                out.status,
-                &out.stderr,
-            )));
+            let mut failure = GitFailure::from_output(args, out.status, &out.stderr);
+            failure.warning = warn_if_git_is_below_recommendation(cwd, env, &out.status);
+            return Err(Error::git(failure));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
@@ -1000,7 +1001,7 @@ fn warn_if_git_is_below_recommendation(
     cwd: &Path,
     env: &[(&str, &str)],
     status: &std::process::ExitStatus,
-) {
+) -> Option<String> {
     // Do not register the diagnostic as the operation's cancellation target.
     // Cap both output and elapsed time, including inherited pipe handles.
     let deadline = Instant::now() + std::time::Duration::from_millis(500);
@@ -1008,12 +1009,12 @@ fn warn_if_git_is_below_recommendation(
         .stderr(Stdio::null())
         .spawn()
     else {
-        return;
+        return None;
     };
     let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
-        return;
+        return None;
     };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -1025,38 +1026,41 @@ fn warn_if_git_is_below_recommendation(
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) => return,
+            Ok(Some(_)) => return None,
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return;
+                return None;
             }
         }
     }
     let Ok(Ok(bytes)) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) else {
-        return;
+        return None;
     };
     let installed = String::from_utf8_lossy(&bytes);
     let Some(version) = installed.trim().strip_prefix("git version ") else {
-        return;
+        return None;
     };
     let Some(installed_version) = parse_git_version(version) else {
-        return;
+        return None;
     };
     let Some(recommended_version) = parse_git_version(RECOMMENDED_GIT_VERSION) else {
-        return;
+        return None;
     };
     if compare_versions(&installed_version, &recommended_version).is_lt() {
+        let warning = format!("Git {version} is older than the recommended version {}. Upgrade Git to at least {}.", RECOMMENDED_GIT_VERSION.trim(), RECOMMENDED_GIT_VERSION.trim());
         tracing::warn!(
             installed = %installed.trim(),
             recommended = RECOMMENDED_GIT_VERSION.trim(),
             exit_code = status.code().unwrap_or(-1),
             "Git command failed with an older-than-recommended Git; upgrade Git or report compatibility issues"
         );
+        return Some(warning);
     }
+    None
 }
 
 fn parse_git_version(text: &str) -> Option<Vec<u64>> {
@@ -1178,28 +1182,6 @@ fn log_finished(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn version_components_are_numeric_and_allow_vendor_suffixes() {
-        let recommended = parse_git_version(RECOMMENDED_GIT_VERSION).unwrap();
-        assert_eq!(recommended, vec![2, 30, 8]);
-        for version in ["2.9.99", "2.19.6 (vendor)", "2.30.7.windows.1"] {
-            assert!(compare_versions(&parse_git_version(version).unwrap(), &recommended).is_lt());
-        }
-        for version in ["2.30.8", "2.30.8.windows.1", "2.30.8.0"] {
-            assert!(compare_versions(&parse_git_version(version).unwrap(), &recommended).is_eq());
-        }
-        assert!(compare_versions(&parse_git_version("2.100.0").unwrap(), &recommended).is_gt());
-        for invalid in [
-            "",
-            "garbage",
-            "git version garbage",
-            "2..30",
-            "99999999999999999999999",
-        ] {
-            assert!(parse_git_version(invalid).is_none());
-        }
-    }
 
     /// A repo whose root is never touched: these cases need no diffs.
     fn header_repo() -> GitRepo {

@@ -52,10 +52,6 @@ pub struct Binding {
     pub modes: Vec<EditorMode>,
     /// Short label for menus and help.
     pub label: String,
-    /// Longer description.
-    pub doc: String,
-    /// The command family, e.g. `status` or `open`.
-    pub group: String,
     /// `implemented`, `planned` or `unavailable`.
     pub status: String,
 }
@@ -198,13 +194,6 @@ impl Keymap {
                 keys: keys.iter().map(KeyChord::to_canonical).collect(),
                 modes: decl.spec.modes.clone(),
                 label: command.doc.to_string(),
-                doc: command.doc.to_string(),
-                group: command
-                    .id
-                    .split('.')
-                    .next()
-                    .unwrap_or(command.id)
-                    .to_string(),
                 status: status_name(command.status).to_string(),
             });
         }
@@ -330,7 +319,6 @@ fn status_name(status: CommandStatus) -> &'static str {
     match status {
         CommandStatus::Implemented => "implemented",
         CommandStatus::Planned { .. } => "planned",
-        CommandStatus::Unavailable { .. } => "unavailable",
     }
 }
 

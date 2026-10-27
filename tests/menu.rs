@@ -817,12 +817,6 @@ fn the_registry_exposes_open_commit_and_the_menu_commands() {
                     roadmap_id: roadmap_id.to_string()
                 }
             ),
-            CommandStatus::Unavailable { reason } => assert_eq!(
-                item.status(),
-                &MenuStatus::Unavailable {
-                    reason: reason.to_string()
-                }
-            ),
         }
     }
 }

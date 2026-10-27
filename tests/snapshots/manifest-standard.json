@@ -17,10 +17,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -32,10 +29,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -45,10 +39,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -58,10 +49,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -71,10 +59,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -84,10 +69,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -97,10 +79,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -110,10 +89,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -125,10 +101,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -140,10 +113,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -155,10 +125,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -170,10 +137,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -185,10 +149,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -200,10 +161,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -216,10 +174,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -231,10 +186,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -246,10 +198,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -261,10 +210,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "common"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -276,10 +222,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "common"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -291,10 +234,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "common"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -306,10 +246,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "common"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -321,10 +258,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -336,10 +270,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -351,10 +282,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "common"
+              "status": "implemented"
             }
           ]
         },
@@ -372,10 +300,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -387,10 +312,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -400,10 +322,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -413,10 +332,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -426,10 +342,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -439,10 +352,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -452,10 +362,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -465,10 +372,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -480,10 +384,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -495,10 +396,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -510,10 +408,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -525,10 +420,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -540,10 +432,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -555,10 +444,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.stage",
@@ -570,10 +456,7 @@
                 "visual"
               ],
               "label": "Stage the change at point",
-              "doc": "Stage the change at point",
-              "group": "status",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.unstage",
@@ -585,10 +468,7 @@
                 "visual"
               ],
               "label": "Unstage the change at point",
-              "doc": "Unstage the change at point",
-              "group": "status",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.stage-all",
@@ -600,10 +480,7 @@
                 "visual"
               ],
               "label": "Stage all unstaged changes",
-              "doc": "Stage all unstaged changes",
-              "group": "status",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.unstage-all",
@@ -615,10 +492,7 @@
                 "visual"
               ],
               "label": "Unstage all staged changes",
-              "doc": "Unstage all staged changes",
-              "group": "status",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -631,10 +505,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -644,10 +515,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -659,10 +527,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -674,10 +539,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -689,10 +551,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -704,10 +563,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -719,10 +575,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -734,10 +587,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -749,10 +599,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "common.visit",
@@ -764,10 +611,7 @@
                 "visual"
               ],
               "label": "Visit the thing at point",
-              "doc": "Visit the thing at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.discard",
@@ -779,10 +623,7 @@
                 "visual"
               ],
               "label": "Discard the change at point",
-              "doc": "Discard the change at point",
-              "group": "status",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "status.reverse",
@@ -794,10 +635,7 @@
                 "visual"
               ],
               "label": "Reverse-apply the change at point",
-              "doc": "Reverse-apply the change at point",
-              "group": "status",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "status.apply",
@@ -809,10 +647,7 @@
                 "visual"
               ],
               "label": "Apply the change at point",
-              "doc": "Apply the change at point",
-              "group": "status",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "open.dispatch",
@@ -825,10 +660,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.commit",
@@ -840,10 +672,7 @@
                 "visual"
               ],
               "label": "Open the commit menu",
-              "doc": "Open the commit menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.branch",
@@ -855,10 +684,7 @@
                 "visual"
               ],
               "label": "Open the branch menu",
-              "doc": "Open the branch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.log",
@@ -870,10 +696,7 @@
                 "visual"
               ],
               "label": "Open the log menu",
-              "doc": "Open the log menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.diff",
@@ -885,10 +708,7 @@
                 "visual"
               ],
               "label": "Open the diff menu",
-              "doc": "Open the diff menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.fetch",
@@ -900,10 +720,7 @@
                 "visual"
               ],
               "label": "Open the fetch menu",
-              "doc": "Open the fetch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.pull",
@@ -915,10 +732,7 @@
                 "visual"
               ],
               "label": "Open the pull menu",
-              "doc": "Open the pull menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.push",
@@ -930,10 +744,7 @@
                 "visual"
               ],
               "label": "Open the push menu",
-              "doc": "Open the push menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.merge",
@@ -945,10 +756,7 @@
                 "visual"
               ],
               "label": "Open the merge menu",
-              "doc": "Open the merge menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.rebase",
@@ -960,10 +768,7 @@
                 "visual"
               ],
               "label": "Open the rebase menu",
-              "doc": "Open the rebase menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.stash",
@@ -975,10 +780,7 @@
                 "visual"
               ],
               "label": "Open the stash menu",
-              "doc": "Open the stash menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.tag",
@@ -990,10 +792,7 @@
                 "visual"
               ],
               "label": "Open the tag menu",
-              "doc": "Open the tag menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.reset",
@@ -1005,10 +804,7 @@
                 "visual"
               ],
               "label": "Open the reset menu",
-              "doc": "Open the reset menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.revert",
@@ -1020,10 +816,7 @@
                 "visual"
               ],
               "label": "Open the revert menu",
-              "doc": "Open the revert menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.cherry-pick",
@@ -1035,10 +828,7 @@
                 "visual"
               ],
               "label": "Open the cherry-pick menu",
-              "doc": "Open the cherry-pick menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.bisect",
@@ -1050,10 +840,7 @@
                 "visual"
               ],
               "label": "Open the bisect menu",
-              "doc": "Open the bisect menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.remote",
@@ -1065,10 +852,7 @@
                 "visual"
               ],
               "label": "Open the remote menu",
-              "doc": "Open the remote menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.submodule",
@@ -1080,10 +864,7 @@
                 "visual"
               ],
               "label": "Open the submodule menu",
-              "doc": "Open the submodule menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.worktree",
@@ -1095,10 +876,7 @@
                 "visual"
               ],
               "label": "Open the worktree menu",
-              "doc": "Open the worktree menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.ignore",
@@ -1110,10 +888,7 @@
                 "visual"
               ],
               "label": "Open the ignore menu",
-              "doc": "Open the ignore menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.patch-apply",
@@ -1125,10 +900,7 @@
                 "visual"
               ],
               "label": "Open the apply-patches menu",
-              "doc": "Open the apply-patches menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.patch-create",
@@ -1140,10 +912,7 @@
                 "visual"
               ],
               "label": "Open the format-patches menu",
-              "doc": "Open the format-patches menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             },
             {
               "command": "open.refs",
@@ -1155,10 +924,7 @@
                 "visual"
               ],
               "label": "Open the refs view",
-              "doc": "Open the refs view",
-              "group": "open",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "open.cherries",
@@ -1170,10 +936,7 @@
                 "visual"
               ],
               "label": "Open the cherry view",
-              "doc": "Open the cherry view",
-              "group": "open",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "open.run",
@@ -1185,10 +948,7 @@
                 "visual"
               ],
               "label": "Run a Git command",
-              "doc": "Run a Git command",
-              "group": "open",
-              "status": "planned",
-              "scope": "status"
+              "status": "planned"
             },
             {
               "command": "open.process-log",
@@ -1200,10 +960,7 @@
                 "visual"
               ],
               "label": "Open the process log",
-              "doc": "Open the process log",
-              "group": "open",
-              "status": "implemented",
-              "scope": "status"
+              "status": "implemented"
             }
           ]
         },
@@ -1221,10 +978,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -1236,10 +990,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -1249,10 +1000,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -1262,10 +1010,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -1275,10 +1020,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -1288,10 +1030,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -1301,10 +1040,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -1314,10 +1050,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -1329,10 +1062,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -1344,10 +1074,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -1359,10 +1086,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -1374,10 +1098,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -1387,10 +1108,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -1400,10 +1118,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -1416,10 +1131,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -1431,10 +1143,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -1446,10 +1155,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -1461,10 +1167,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "log"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -1476,10 +1179,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "log"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -1491,10 +1191,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "log"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -1506,10 +1203,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "log"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -1521,10 +1215,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -1536,10 +1227,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -1549,10 +1237,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             },
             {
               "command": "log.load-more",
@@ -1564,10 +1249,7 @@
                 "visual"
               ],
               "label": "Load more commits",
-              "doc": "Load more commits",
-              "group": "log",
-              "status": "implemented",
-              "scope": "log"
+              "status": "implemented"
             }
           ]
         },
@@ -1585,10 +1267,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -1600,10 +1279,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -1613,10 +1289,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -1626,10 +1299,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -1639,10 +1309,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -1652,10 +1319,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -1665,10 +1329,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -1678,10 +1339,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -1693,10 +1351,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -1708,10 +1363,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -1723,10 +1375,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -1738,10 +1387,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -1751,10 +1397,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -1764,10 +1407,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -1780,10 +1420,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -1795,10 +1432,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -1810,10 +1444,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -1825,10 +1456,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "log.select"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -1840,10 +1468,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "log.select"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -1855,10 +1480,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "log.select"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -1870,10 +1492,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "log.select"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -1885,10 +1504,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -1900,10 +1516,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -1913,10 +1526,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "log.load-more",
@@ -1928,10 +1538,7 @@
                 "visual"
               ],
               "label": "Load more commits",
-              "doc": "Load more commits",
-              "group": "log",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "select.toggle-mark",
@@ -1943,10 +1550,7 @@
                 "visual"
               ],
               "label": "Toggle the mark on the commit at point",
-              "doc": "Toggle the mark on the commit at point",
-              "group": "select",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             },
             {
               "command": "select.enter-rev",
@@ -1958,10 +1562,7 @@
                 "visual"
               ],
               "label": "Enter a revision by hand",
-              "doc": "Enter a revision by hand",
-              "group": "select",
-              "status": "implemented",
-              "scope": "log.select"
+              "status": "implemented"
             }
           ]
         },
@@ -1979,10 +1580,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -1994,10 +1592,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -2007,10 +1602,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -2020,10 +1612,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -2033,10 +1622,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -2046,10 +1632,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -2059,10 +1642,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -2072,10 +1652,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -2087,10 +1664,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -2102,10 +1676,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -2117,10 +1688,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -2132,10 +1700,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -2147,10 +1712,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -2162,10 +1724,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -2178,10 +1737,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -2193,10 +1749,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -2208,10 +1761,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -2223,10 +1773,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "select"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -2238,10 +1785,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "select"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -2253,10 +1797,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "select"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -2268,10 +1809,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "select"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -2283,10 +1821,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -2298,10 +1833,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -2313,10 +1845,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "select.toggle-mark",
@@ -2328,10 +1857,7 @@
                 "visual"
               ],
               "label": "Toggle the mark on the commit at point",
-              "doc": "Toggle the mark on the commit at point",
-              "group": "select",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             },
             {
               "command": "select.enter-rev",
@@ -2343,10 +1869,7 @@
                 "visual"
               ],
               "label": "Enter a revision by hand",
-              "doc": "Enter a revision by hand",
-              "group": "select",
-              "status": "implemented",
-              "scope": "select"
+              "status": "implemented"
             }
           ]
         },
@@ -2364,10 +1887,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -2379,10 +1899,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -2392,10 +1909,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -2405,10 +1919,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -2418,10 +1929,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -2431,10 +1939,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -2444,10 +1949,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -2457,10 +1959,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -2472,10 +1971,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -2487,10 +1983,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -2502,10 +1995,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -2517,10 +2007,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -2532,10 +2019,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -2547,10 +2031,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -2563,10 +2044,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -2578,10 +2056,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -2593,10 +2068,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -2608,10 +2080,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "menu"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -2623,10 +2092,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "menu"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -2638,10 +2104,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "menu"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -2653,10 +2116,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "menu"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -2668,10 +2128,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -2683,10 +2140,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -2698,10 +2152,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "menu.save-args",
@@ -2713,10 +2164,7 @@
                 "visual"
               ],
               "label": "Save the menu arguments",
-              "doc": "Save the menu arguments",
-              "group": "menu",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             },
             {
               "command": "menu.reset-args",
@@ -2728,10 +2176,7 @@
                 "visual"
               ],
               "label": "Reset the menu arguments",
-              "doc": "Reset the menu arguments",
-              "group": "menu",
-              "status": "implemented",
-              "scope": "menu"
+              "status": "implemented"
             }
           ]
         },
@@ -2749,10 +2194,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -2764,10 +2206,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -2777,10 +2216,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -2790,10 +2226,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -2803,10 +2236,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -2816,10 +2246,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -2829,10 +2256,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -2842,10 +2266,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -2857,10 +2278,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -2872,10 +2290,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -2887,10 +2302,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -2902,10 +2314,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -2917,10 +2326,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -2932,10 +2338,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -2947,10 +2350,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -2962,10 +2362,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -2977,10 +2374,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -2992,10 +2386,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -3005,10 +2396,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -3018,10 +2406,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -3033,10 +2418,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -3048,10 +2430,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -3063,10 +2442,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -3078,10 +2454,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "commit-message"
+              "status": "implemented"
             },
             {
               "command": "commit-message.history-prev",
@@ -3093,10 +2466,7 @@
                 "visual"
               ],
               "label": "Recall the previous commit message",
-              "doc": "Recall the previous commit message",
-              "group": "commit-message",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "commit-message.history-next",
@@ -3108,10 +2478,7 @@
                 "visual"
               ],
               "label": "Recall the next commit message",
-              "doc": "Recall the next commit message",
-              "group": "commit-message",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             },
             {
               "command": "commit-message.add-signoff",
@@ -3123,10 +2490,7 @@
                 "visual"
               ],
               "label": "Add a Signed-off-by trailer",
-              "doc": "Add a Signed-off-by trailer",
-              "group": "commit-message",
-              "status": "planned",
-              "scope": "commit-message"
+              "status": "planned"
             }
           ]
         },
@@ -3144,10 +2508,7 @@
                 "visual"
               ],
               "label": "Refresh the view",
-              "doc": "Refresh the view",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-section",
@@ -3159,10 +2520,7 @@
                 "visual"
               ],
               "label": "Fold or unfold the section at point",
-              "doc": "Fold or unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.show-section",
@@ -3172,10 +2530,7 @@
                 "visual"
               ],
               "label": "Unfold the section at point",
-              "doc": "Unfold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.hide-section",
@@ -3185,10 +2540,7 @@
                 "visual"
               ],
               "label": "Fold the section at point",
-              "doc": "Fold the section at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.show-all",
@@ -3198,10 +2550,7 @@
                 "visual"
               ],
               "label": "Unfold every section",
-              "doc": "Unfold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.hide-all",
@@ -3211,10 +2560,7 @@
                 "visual"
               ],
               "label": "Fold every section",
-              "doc": "Fold every section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.more-detail",
@@ -3224,10 +2570,7 @@
                 "visual"
               ],
               "label": "Show one more level of detail",
-              "doc": "Show one more level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.less-detail",
@@ -3237,10 +2580,7 @@
                 "visual"
               ],
               "label": "Show one less level of detail",
-              "doc": "Show one less level of detail",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-1",
@@ -3252,10 +2592,7 @@
                 "visual"
               ],
               "label": "Show section headers only",
-              "doc": "Show section headers only",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-2",
@@ -3267,10 +2604,7 @@
                 "visual"
               ],
               "label": "Show section and file headers",
-              "doc": "Show section and file headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-3",
@@ -3282,10 +2616,7 @@
                 "visual"
               ],
               "label": "Show hunk headers",
-              "doc": "Show hunk headers",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.detail-level-4",
@@ -3297,10 +2628,7 @@
                 "visual"
               ],
               "label": "Show hunk bodies",
-              "doc": "Show hunk bodies",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.next-section",
@@ -3312,10 +2640,7 @@
                 "visual"
               ],
               "label": "Move to the next section",
-              "doc": "Move to the next section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.prev-section",
@@ -3327,10 +2652,7 @@
                 "visual"
               ],
               "label": "Move to the previous section",
-              "doc": "Move to the previous section",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.cancel",
@@ -3343,10 +2665,7 @@
                 "visual"
               ],
               "label": "Cancel the current operation",
-              "doc": "Cancel the current operation",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.confirm",
@@ -3358,10 +2677,7 @@
                 "visual"
               ],
               "label": "Confirm the current selection",
-              "doc": "Confirm the current selection",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.quit",
@@ -3373,10 +2689,7 @@
                 "visual"
               ],
               "label": "Close all views",
-              "doc": "Close all views",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.cycle-visibility",
@@ -3388,10 +2701,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "doc": "Cycle the visibility of every section",
-              "group": "common",
-              "status": "planned",
-              "scope": "process-log"
+              "status": "planned"
             },
             {
               "command": "common.next-sibling",
@@ -3403,10 +2713,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "doc": "Move to the next sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "process-log"
+              "status": "planned"
             },
             {
               "command": "common.prev-sibling",
@@ -3418,10 +2725,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "doc": "Move to the previous sibling",
-              "group": "common",
-              "status": "planned",
-              "scope": "process-log"
+              "status": "planned"
             },
             {
               "command": "common.parent-section",
@@ -3433,10 +2737,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "doc": "Move to the parent section",
-              "group": "common",
-              "status": "planned",
-              "scope": "process-log"
+              "status": "planned"
             },
             {
               "command": "common.toggle-text-mode",
@@ -3448,10 +2749,7 @@
                 "visual"
               ],
               "label": "Toggle text mode",
-              "doc": "Toggle text mode",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "common.copy-value",
@@ -3463,10 +2761,7 @@
                 "visual"
               ],
               "label": "Copy the value at point",
-              "doc": "Copy the value at point",
-              "group": "common",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "open.dispatch",
@@ -3478,10 +2773,7 @@
                 "visual"
               ],
               "label": "Show the dispatch menu",
-              "doc": "Show the dispatch menu",
-              "group": "open",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             },
             {
               "command": "process-log.clear",
@@ -3493,10 +2785,7 @@
                 "visual"
               ],
               "label": "Clear the process log",
-              "doc": "Clear the process log",
-              "group": "process-log",
-              "status": "implemented",
-              "scope": "process-log"
+              "status": "implemented"
             }
           ]
         }

@@ -3,14 +3,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-/// The role of a line within a hunk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LineKind {
-    Context,
-    Added,
-    Removed,
-}
-
 /// One line of a hunk, with its marker and (internal) source line numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiffLine {
@@ -57,22 +49,6 @@ impl Hunk {
         self.id = id;
     }
 
-    /// Classify a line as context, added, or removed.
-    pub fn kind(&self, line: &DiffLine) -> LineKind {
-        match line.marker {
-            '+' => LineKind::Added,
-            '-' => LineKind::Removed,
-            _ => LineKind::Context,
-        }
-    }
-
-    /// Whether the line at `index` is an addition or removal.
-    pub fn is_change(&self, index: usize) -> bool {
-        self.lines
-            .get(index)
-            .map(|l| l.marker == '+' || l.marker == '-')
-            .unwrap_or(false)
-    }
 }
 
 /// A single file's parsed diff: the raw header before the first hunk plus hunks.
@@ -130,44 +106,6 @@ impl FileLayout {
         })
     }
 
-    /// Patch text for the whole file, using the original header.
-    pub fn whole_file_patch(&self) -> String {
-        let mut out = self.header.clone();
-        for hunk in &self.hunks {
-            out.push_str(&full_hunk_patch(&hunk.hunk));
-        }
-        out
-    }
-
-    /// Patch text for one whole hunk, found by its content id.
-    pub fn whole_hunk_patch(&self, hunk_id: &str) -> Option<String> {
-        let hunk = self.hunks.iter().find(|h| h.hunk.id == hunk_id)?;
-        Some(format!("{}{}", self.header, full_hunk_patch(&hunk.hunk)))
-    }
-
-    /// Patch text for selected change lines within one hunk, found by id.
-    pub fn lines_patch(
-        &self,
-        hunk_id: &str,
-        selected: &[usize],
-        reverse: bool,
-    ) -> Option<String> {
-        let hunk = self.hunks.iter().find(|h| h.hunk.id == hunk_id)?;
-        let changes_file_kind =
-            (reverse && is_new_file(&hunk.hunk)) || (!reverse && is_deleted_file(&hunk.hunk));
-        let header = if changes_file_kind {
-            // A partial apply cannot use the `/dev/null` header from a file
-            // creation or deletion: git rejects it as a whole-file operation.
-            synthetic_file_header(&self.path, false)
-        } else {
-            self.header.clone()
-        };
-        Some(format!(
-            "{}{}",
-            header,
-            selected_hunk_patch(&hunk.hunk, selected, reverse)
-        ))
-    }
 }
 
 /// One unit of work produced by normalising a document-line selection.

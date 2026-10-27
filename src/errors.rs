@@ -128,6 +128,12 @@ impl GitFailure {
     pub fn user_error(&self) -> UserError {
         let mut user = map_git_failure(self.exit_code, &self.stderr, &self.subcommand);
         user.command = Some(format!("git {}", self.args.join(" ")));
+        if let Some(warning) = &self.warning {
+            user.hint = Some(match user.hint {
+                Some(hint) => format!("{hint} {warning}"),
+                None => warning.clone(),
+            });
+        }
         user
     }
 }

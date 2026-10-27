@@ -197,24 +197,6 @@ pub struct Tree {
     pub links: Vec<Link>,
 }
 
-/// The wire form of a rendered view: text, version and per-line node info.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Document {
-    pub text: Vec<String>,
-    pub version: u64,
-    pub nodes: Vec<LineNode>,
-}
-
-impl From<&Tree> for Document {
-    fn from(tree: &Tree) -> Self {
-        Self {
-            text: tree.lines.clone(),
-            version: tree.version,
-            nodes: tree.line_nodes.clone(),
-        }
-    }
-}
-
 impl Tree {
     /// Find a node by its stable id.
     pub fn node(&self, id: &str) -> Option<&Node> {

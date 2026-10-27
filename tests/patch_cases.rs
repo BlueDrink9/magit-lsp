@@ -143,8 +143,6 @@ fn mode_change_only_stages_and_unstages_whole_file() {
         "{}",
         layout.header
     );
-    assert_eq!(layout.whole_file_patch(), layout.header);
-
     repo.stage_file("f.txt").expect("stage mode change");
     assert_eq!(index_mode(tmp.path(), "f.txt"), "100755");
     assert_eq!(index_text(tmp.path(), "f.txt"), TEN_LINES);
@@ -181,15 +179,6 @@ fn mode_and_content_change_keeps_mode_lines_in_hunk_headers() {
         layout.header
     );
     let hunk_id = layout.hunks[0].hunk.id.clone();
-    let whole = layout.whole_hunk_patch(&hunk_id).expect("hunk patch");
-    assert!(whole.contains("old mode 100644"), "got: {whole}");
-    assert!(whole.contains("new mode 100755"), "got: {whole}");
-    let lines = layout
-        .lines_patch(&hunk_id, &[2, 3], false)
-        .expect("lines patch");
-    assert!(lines.contains("old mode 100644"), "got: {lines}");
-    assert!(lines.contains("new mode 100755"), "got: {lines}");
-
     repo.stage_lines("f.txt", &hunk_id, 2, 3)
         .expect("stage lines");
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "f.txt"]);

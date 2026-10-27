@@ -354,33 +354,3 @@ pub fn with_cancel<T>(handle: Option<CancelHandle>, f: impl FnOnce() -> T) -> T 
     let _restore = Restore(previous);
     f()
 }
-
-/// A per-request runner: the cancellation handle plus a no-op default.
-#[derive(Debug, Clone, Default)]
-pub struct Runner {
-    cancel: Option<CancelHandle>,
-}
-
-impl Runner {
-    /// A runner that cannot be cancelled; the default for existing call sites.
-    pub fn detached() -> Self {
-        Self::default()
-    }
-
-    /// A runner whose child can be killed through `cancel`.
-    pub fn with_cancel(cancel: CancelHandle) -> Self {
-        Self {
-            cancel: Some(cancel),
-        }
-    }
-
-    /// The handle this runner installs, if any.
-    pub fn cancel_handle(&self) -> Option<CancelHandle> {
-        self.cancel.clone()
-    }
-
-    /// Run `f` with this runner's handle installed on the current thread.
-    pub fn run<T>(&self, f: impl FnOnce() -> T) -> T {
-        with_cancel(self.cancel.clone(), f)
-    }
-}

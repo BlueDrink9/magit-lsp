@@ -6,7 +6,7 @@
 
 use crate::commands;
 use crate::config::{self, Config, ConfigError, Profile};
-use crate::keymap::{command_for_key, EditorMode, Keymap};
+use crate::keymap::{command_for_key, Binding, EditorMode, Keymap};
 use crate::keys::KeyChord;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -46,26 +46,12 @@ impl Format {
     }
 }
 
-/// One resolved binding in the manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ManifestBinding {
-    pub command: String,
-    pub keys: Vec<String>,
-    pub modes: Vec<EditorMode>,
-    pub label: String,
-    pub doc: String,
-    pub group: String,
-    pub status: String,
-    pub scope: String,
-}
-
 /// The bindings of one scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScopeManifest {
     pub scope: String,
-    pub bindings: Vec<ManifestBinding>,
+    pub bindings: Vec<Binding>,
 }
 
 /// One profile's scopes.
@@ -92,20 +78,7 @@ pub fn build(profiles: &[Profile], config: &Config) -> Result<Manifest, ConfigEr
         let mut scopes = Vec::new();
         for scope in config::VIEW_SCOPES {
             let keymap = Keymap::resolve(scope, *profile, &merged)?;
-            let bindings = keymap
-                .bindings()
-                .iter()
-                .map(|binding| ManifestBinding {
-                    command: binding.command.clone(),
-                    keys: binding.keys.clone(),
-                    modes: binding.modes.clone(),
-                    label: binding.label.clone(),
-                    doc: binding.doc.clone(),
-                    group: binding.group.clone(),
-                    status: binding.status.clone(),
-                    scope: scope.to_string(),
-                })
-                .collect();
+            let bindings = keymap.bindings().to_vec();
             scopes.push(ScopeManifest {
                 scope: scope.to_string(),
                 bindings,
@@ -175,7 +148,6 @@ pub struct VscodeEntry {
     /// The canonical server command passed to `magit.invoke` as `args.command`.
     pub binding: String,
     /// The canonical step or chord passed as `args.key`.
-    pub arg_key: String,
     pub when: String,
 }
 
@@ -192,7 +164,6 @@ pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
                         scope: scope.scope.clone(),
                         key: chord.to_vscode(),
                         binding: binding.command.clone(),
-                        arg_key: key.clone(),
                         when: when_clause(&scope.scope, false),
                     });
                     // Text mode keeps exactly the toggle command bound. Capture
@@ -203,7 +174,6 @@ pub fn vscode_entries(manifest: &Manifest) -> Vec<VscodeEntry> {
                             scope: scope.scope.clone(),
                             key: chord.to_vscode(),
                             binding: binding.command.clone(),
-                            arg_key: key.clone(),
                             when: when_clause(&scope.scope, true),
                         });
                     }
@@ -423,7 +393,7 @@ pub fn markdown(manifest: &Manifest) -> String {
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
-                let doc = binding.doc.replace('|', "\\|");
+                let doc = binding.label.replace('|', "\\|");
                 out.push_str(&format!(
                     "| `{}` | {} | {} | {} |\n",
                     binding.command, keys, binding.status, doc

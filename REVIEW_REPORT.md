@@ -67,8 +67,8 @@ Source: `build/review/metrics.txt`, collected before the review. These are basel
 
 ### Proposed order
 
-1. Resolve correctness/security seams A01–A12, A18, A19, A29, A33 and A34.
-2. Establish a passing baseline, preserving investigation of the existing Lua and Clippy failures.
+1. A01–A10 are complete with recorded evidence. Resolve remaining correctness/security seams A12 (next), A18, A19, A29, A33 and A34 before deletions. A11 is incomplete with sole acceptance ownership in Phase 3E (A11 / R-EDIT-6), deferred from this sprint; neither that implementation nor A12 is launched by this plan. R-EDIT-8 plans server-owned history before cutover; no implementation is authorized.
+2. Establish a passing baseline only after preserving investigation of existing Lua/Clippy failures; the A11 verification attempt is failed/non-green, not full-gate evidence.
 3. Perform independent deletions A13–A16 and A27.
 4. Merge duplicate paths A17–A19, coordinating overlaps with the first group.
 5. Add `rstest` once in A20; then A21, A30 and A31. Cases and runtime are retained.
@@ -148,15 +148,17 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
 | keep-with-reason | 1 | +20 |
 | **Total** | **32** | **−1,508** |
 
-### Proposed tasks — not dispatched
+### Historical proposed task ledger (collection-time counts/LOC, not current dispatch status)
 
 ### Reconciliation — 2026-10-27
 
 This ledger records the review's state against the concurrent history and current
 source, not task completion inferred from commit subjects. Historical baseline
 metrics above remain collection-time evidence, not current verification. Recheck
-each task's complete acceptance gate before implementation; the priority work is
-A01–A12, A18, A19, A29, A33 and A34, before deletions.
+each remaining task's complete acceptance gate before implementation; current
+priority work is A12 (next), A18, A19, A29, A33 and A34, before deletions.
+The original ledger/counts/LOC above remain historical estimates, not recalculated
+remaining-work totals.
 
 **Already addressed in part / assumptions stale:** A19's shared named key
 vectors already exist (`tests/data/keys.json`); this does not establish shared
@@ -168,8 +170,13 @@ Git dispatch), contrary to older roadmap assumptions; A31's test-parameterizatio
 work may still remain. The defensive-boundary principle is already stated in
 AGENTS.md, but that does not settle each concrete boundary finding.
 
-**Still open pending full acceptance evidence:** A02–A12, A18, A19, A29, A33
-and A34 remain prioritized and unchecked. In particular, partial consumers,
+**Completed:** A01–A10 are checked complete with acceptance evidence recorded
+under their task entries; they are not active review work.
+
+**Still open pending full acceptance evidence:** A12, A18, A19, A29, A33
+and A34 remain prioritized and unchecked; A11 is incomplete with sole acceptance
+ownership migrated to Phase 3E (A11 / R-EDIT-6), deferred from this sprint, with
+A12 next. Neither Phase 3E implementation nor A12 is launched here. In particular, partial consumers,
 shared key fixtures, or an implementation commit do not satisfy their gates.
 Other tasks remain unchecked until their source preconditions are revalidated.
 The history includes log-view/select work (d5da635 and related commits),
@@ -194,7 +201,20 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Risk:** medium — helper startup/security boundary.
   - **Verify:** `cargo test --test editor_bridge`; `make test`
   - **Parallel:** serial
-  - **Behaviour lost:** none.
+- **Behaviour lost:** none.
+
+**Phase 3E planning amendment (documentation only):** `TASKS.md` §§0, 3.10,
+4.1 draft contract, Phase 3E (R-EDIT-8 and R-EDIT-6 dependency/acceptance), and
+R-4.2 now distinguish current realFile behavior from planned managed-draft
+semantics. Normal user close confirms the last saved checkpoint; explicit abort,
+progress cancel and disconnect cancel. Save checkpoints do not commit, native
+Save/Discard/Cancel semantics and failed-close recovery are explicit. R-EDIT-8
+assigns bounded per-canonical-repo ring ownership, with client-history policy
+forbidden, before A11/R-EDIT-6 cutover; R-4.2 keeps staged diff/trailers/lint
+and integrates, but does not reimplement, the ring.
+The review ledger's A11 entry now points to R-EDIT-8 as a dependency; no source,
+test, process, staging or implementation action was performed. Documentation
+gate: `git diff --check` and required scoped diff/search review.
 
 - [x] **[P1] A02 — Enforce the positional request version** (`src/session.rs:545–601`; `src/protocol.rs:224–233`)
   - **Problem:** `ViewKeyParams.version` has no production reader; existing stale-key tests do not cover an old request arriving after a newer acknowledgement.
@@ -328,18 +348,31 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A11 — Install the detached commit cancellation handle** (`src/server.rs:1385–1403`)
-  - **Problem:** `spawn_commit` creates `_cancel` but never installs it on the commit thread.
+- **[P1] A11 — Migration to Phase 3E managed commit drafts and cancellable Git runs** — **INCOMPLETE; failed attempt, not verified.** The original `realFile` implementation remains current until coordinated cutover. See `TASKS.md` Phase 3E, R-EDIT-1…R-EDIT-7; A11's sole implementation/acceptance ownership moves there. A12 remains the next independent active review task.
+  - **Problem:** `spawn_commit` creates `_cancel` but never installs it on the commit thread; simple handle plumbing is insufficient for correct process-tree cancellation and edit lifecycle.
   - **Why it matters:** Advertised progress cancellation cannot stop the Git child.
-  - **Change:** Carry the handle into the worker thread and run under `runner::with_cancel`; release pending edit and end progress on cancellation.
-  - **Done when:** Canceling a slow hook terminates the owned child, leaves HEAD unchanged and ends progress.
-  - **Constraints:** Never kill unrelated processes or register probes as the mutation child.
+  - **Change:** Follow the managed-draft and single Child-owner design in Phase 3E; no compatibility mode at coordinated cutover.
+  - **Done when:** R-EDIT-6 adversarial/native acceptance passes; do not infer success from cancellation observed during a hook.
+  - **Constraints:** Never kill unrelated processes or register probes as the mutation child. No timeout inflation.
   - **Category:** simplify
   - **Net LOC:** +20
   - **Risk:** medium — child lifecycle.
-  - **Verify:** `cargo test --test editor_bridge --test server_async`; `make test`
+  - **Verify:** Phase 3E final gate: Linux real-Git plus macOS process-group/reaping validation (not yet verified); native Neovim and VSCode, including `clients/vscode/test/e2e/suite.js`. Extend `clients/vscode/test/integration.js` for real-server/scripted-widget coverage, not native evidence; `make test`, `make ui-tour` and relevant tour inspection. Windows remains a separate deferred feasibility gate; current bridge is Unix-only.
   - **Parallel:** serial
   - **Behaviour lost:** none.
+
+**A11 failed verification record (2026-10-27):** `build/review/a11-final-verification.log`
+records 10 pass / 1 fail: cancellation was observed during the hook, but no
+progress end or error arrived before timeout. The end-to-end regression test
+`progress_cancel_kills_the_commit_and_releases_its_edit` is now explicitly
+ignored with a failing placeholder; default test runs do not execute its
+expensive body, and the cancellation acceptance is deferred, not verified.
+This is a proven trace, not proof of a completed/verified implementation. The
+Linux Git 2.43 reproduction was reported by the user; macOS/Windows behavior
+and related inferences are unverified. A11 is not complete and its
+implementation work is moved to Phase 3E; A12 is next independent active review
+work. The redesign phase is not automatically started by recording this
+decision.
 
 - [ ] **[P1] A12 — Test Git failures through the real dispatch path** (`src/server.rs:1202–1265,1461–1489`; `src/dispatch.rs:204–216`)
   - **Problem:** Test-only callers exercise production `server::mutation`, while real selection dispatch bypasses its readable-effect behavior with `?`.
@@ -354,7 +387,7 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P2] A13 — Delete multi-version test scaffolding; retain soft-floor warnings** (`src/git.rs`; `src/errors.rs`; `tests/git_version.rs`; `tests/errors.rs`; existing Git-error effect boundary)
+- [x] **[P2] A13 — Delete multi-version test scaffolding; retain soft-floor warnings** (`src/git.rs`; `src/errors.rs`; `tests/git_version.rs`; `tests/errors.rs`; existing Git-error effect boundary)
   - **Problem:** A dedicated fake-Git version harness and version matrices add test volume, but the below-floor warning is deliberate user-facing behavior, not dead runtime code.
   - **Why it matters:** Reduce test scaffolding without losing useful diagnosis when Git fails on an older installation.
   - **Change:** Retain the best-effort version probe, parser/comparison and failure-path callers needed to warn when installed Git is below 2.30.8. Ensure the warning reaches the user through a readable message effect, not only tracing/server stderr, while preserving the original Git failure and stderr. Delete the dedicated multi-version simulation harness and version-scenario matrices, including redundant parser/version tables. Move the genuine normal/piped stderr regression into general error coverage. Any retained warning-contract test must use a lightweight fake version response (stubbed process output or shared fake-Git support), never download, build or require an actual old Git binary. Do not add an elaborate warning suite or replacement multi-version runner.
@@ -367,7 +400,9 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** A24, A21
   - **Behaviour lost:** none; only dedicated multi-version test infrastructure and redundant scenario coverage are removed.
 
-- [ ] **[P2] A14 — Delete unconsumed production facades** (`src/runner.rs:358–386`; `src/commands.rs:128–130,160–164`; `src/tree.rs:195–211`; `src/patch.rs:6–12,60–75,133–170`; `src/menu.rs:116–118`)
+  - **Completed evidence (2026-10-27):** Exact focused/pinned-floor/full gate `cargo test --test errors --test git_backend --test patch_cases && scripts/test_recommended_git.sh && make test && git diff --check` passed, including the integrity-pinned 2.30.8 floor; the final wording-only gate `cargo test --test errors --test git_backend --test patch_cases && make test && git diff --check` also passed. Existing error coverage preserves raw stderr and verifies readable advisory delivery. Real native Vim UI was inspected at 360x30: with the owned repo's `.git/index.lock` held, `j j j j j s` produced the original “Another Git process is running...” failure and advisory naming installed 2.19.6 and recommended 2.30.8 (`build/ui/a13-git-warning.screen`). The adapter truncates long hints at ordinary widths; ordinary-width visibility was not checked. Owned session stopped; no foreign processes touched.
+
+- [x] **[P2] A14 — Delete unconsumed production facades** (`src/runner.rs:358–386`; `src/commands.rs:128–130,160–164`; `src/tree.rs:195–211`; `src/patch.rs:6–12,60–75,133–170`; `src/menu.rs:116–118`)
   - **Problem:** No production consumers found for `Runner`, `CommandCtx.cancel`, `Document`, `LineKind`/`Hunk::kind`/`is_change`, three `FileLayout` patch convenience methods, or `Group.columns`.
   - **Why it matters:** Dead surfaces and construction-only plumbing inflate code/tests.
   - **Change:** Remove these APIs/plumbing and trivial tests; retain mode/header Git quirks through real backend `patch_cases` assertions.
@@ -379,8 +414,9 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Verify:** `cargo test --lib --test patch_cases --test status_render --test runner`; `make test`
   - **Parallel:** serial
   - **Behaviour lost:** Unused convenience APIs; none in current clients.
+  - **Acceptance evidence (2026-10-27):** Removed the Runner wrapper and unused CommandCtx cancellation field/builder while retaining `CancelHandle`, `current_cancel` and `with_cancel`; removed Document conversion, line-classification helpers, FileLayout patch conveniences and Group column configuration. Mode-only and mode-plus-content quirks remain asserted through real Git stage/unstage operations and index/status inspection; patch normalization, hunk identities and regression/proptest coverage remain intact. The trivial Document construction assertion was deleted. Exact gate `cargo test --lib --test patch_cases --test status_render --test runner && make test && git diff --check` exited 0 (35 lib, 7 patch_cases, 5 runner and 9 status_render tests; full build/Rust/Lua/VSCode/keybindings gates passed). Obsolete symbol search found only retained `runner::with_cancel`.
 
-- [ ] **[P2] A15 — Remove repeated binding metadata from wire manifests** (`src/keymap.rs:178–190`; `src/manifest.rs:49–61,95–107`)
+- [x] **[P2] A15 — Remove repeated binding metadata from wire manifests** (`src/keymap.rs:178–190`; `src/manifest.rs:49–61,95–107`)
   - **Problem:** `doc` repeats `label`; unused `group` repeats command prefix; manifest bindings repeat their containing scope and wire structure.
   - **Why it matters:** Large generated-data duplication.
   - **Change:** Keep one description; delete unused group; share binding type inside `ScopeManifest`; derive scope from container. Remove `VscodeEntry.arg_key` if still unreferenced.
@@ -389,11 +425,12 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Category:** delete
   - **Net LOC:** −700, mostly generated data.
   - **Risk:** medium — intentional metadata-shape change.
+  - **Evidence:** `Binding` now carries one description (`label`); static scope manifests serialize shared bindings, with scope supplied by the containing scope; VSCode entries no longer carry internal `arg_key`. Updated manifest JSON snapshots via `UPDATE_EXPECT=1` (VSCode emitted bindings unchanged). Verified: full ticket command passed, including targeted manifest/keymap/parity/menu tests, VSCode generator check, `make test`, and `git diff --check`.
   - **Verify:** `cargo test --test manifest --test keymap`; `make test`; `node clients/vscode/scripts/gen-keybindings.mjs --check`
   - **Parallel:** serial
   - **Behaviour lost:** Redundant manifest fields only.
 
-- [ ] **[P2] A16 — Remove the hypothetical unavailable-backend state** (`src/commands.rs:77–80`; `src/menu.rs:36–37`; `src/session.rs:1347–1441`)
+- [x] **[P2] A16 — Remove the hypothetical unavailable-backend state** (`src/commands.rs:77–80`; `src/menu.rs:36–37`; `src/session.rs:1347–1441`)
   - **Problem:** `Unavailable` is constructed only by a large injected-command test, not a current backend.
   - **Why it matters:** Speculative post-Phase-5 machinery.
   - **Change:** Delete both variants, branches/conversions and injected test/seam. Keep Implemented/Planned.
@@ -405,6 +442,7 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Verify:** `cargo test --test commands --test menus --test keymap`; `make test`
   - **Parallel:** A24, A21
   - **Behaviour lost:** Hypothetical backend-unavailable responses.
+  - **Acceptance evidence (2026-10-27):** The command/menu `Unavailable` variants, conversions, dispatch branches and status documentation are absent. Removed the injected `unavailable_dispatch_tests` module and its `run_command_with` injection seam; normal registry dispatch remains. `magit.menu.disabled` remains for pending-prefix dimming (`a_pending_prefix_dims_items_that_cannot_complete_it`). Exact gate `cargo test --lib --test commands --test menus --test menu --test keymap && make test && git diff --check` exited 0; targeted suites passed (34 library, 7 commands, 9 menus, 19 menu, 18 keymap tests), and full build/Rust/Lua/VSCode/keybindings passed. No replacement hypothetical tests added.
 
 - [ ] **[P2] A17 — Construct each render and open view once** (`src/session.rs:157–216,407–450,1012–1053`)
   - **Problem:** Full/diff rendering duplicates version/tree/cursor/payload work; initial open/push duplicates view initialization.

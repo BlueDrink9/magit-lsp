@@ -9,7 +9,7 @@ use lsp_types::{Position, SymbolKind};
 use magit_lsp::git::{FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
 use magit_lsp::status_view;
-use magit_lsp::tree::{Document, NodeKind, Token, Tree};
+use magit_lsp::tree::{NodeKind, Token, Tree};
 
 fn hunk(id: &str, lines: Vec<(char, &str)>) -> Hunk {
     Hunk {
@@ -303,8 +303,6 @@ fn line_map_resolves_every_rendered_line() {
     assert_eq!(entry.text.as_deref(), Some("b"));
     assert_eq!(entry.hunk_id.as_deref(), Some("old"));
 
-    let document = Document::from(&tree);
-    assert_eq!(document.text, tree.lines);
 }
 
 #[test]

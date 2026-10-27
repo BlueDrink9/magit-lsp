@@ -33,8 +33,6 @@ pub enum MenuStatus {
         #[serde(rename = "roadmapId")]
         roadmap_id: String,
     },
-    /// The backend cannot do this; the reason is shown instead.
-    Unavailable { reason: String },
 }
 
 /// One switch, option or action of a menu.
@@ -113,9 +111,6 @@ impl Item {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Group {
     pub title: String,
-    /// Preferred column count, when a menu overrides the automatic layout.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub columns: Option<u32>,
     pub items: Vec<Item>,
 }
 
@@ -820,7 +815,6 @@ fn label_token(item: &Item) -> &'static str {
     match item.status() {
         MenuStatus::Implemented => "magit.menu.label",
         MenuStatus::Planned { .. } => "magit.menu.planned",
-        MenuStatus::Unavailable { .. } => "magit.menu.disabled",
     }
 }
 
@@ -828,7 +822,6 @@ fn status_name(status: &MenuStatus) -> String {
     match status {
         MenuStatus::Implemented => "implemented".to_string(),
         MenuStatus::Planned { roadmap_id } => format!("planned:{roadmap_id}"),
-        MenuStatus::Unavailable { .. } => "unavailable".to_string(),
     }
 }
 

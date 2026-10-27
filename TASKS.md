@@ -59,6 +59,7 @@ here. General agent working conventions and verification guidance live in
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
 | Commit selection | Selecting a commit normally pushes/focuses a server-rendered log in select mode; clients forward selection/confirm/cancel and display its text verbatim. The server resolves structured commit nodes, restores the caller on confirm/cancel, and validates optional free-form revisions. This is not a client picker or choice prompt (§3.7) |
+| Managed commit drafts (2026-10-27) | At coordinated commit-message cutover, use a server-managed per-run draft with exact owner/version write-back; save checkpoints never commit, normal user close confirms the saved checkpoint, explicit abort/disconnect cancel, and a bounded server-owned per-repository ring backs history-prev/next (§3.10, Phase 3E) |
 
 ---
 
@@ -91,7 +92,7 @@ Use these words exactly. Do not invent synonyms.
 | **Prompt** | The server asking the user one question (yes/no, text, pick one, pick many) and waiting for the answer (§3.6) |
 | **Menu** | A view of kind `menu.*` that lists switches, options and actions (Magit's "transient") (§3.11) |
 | **Select mode** | A view (usually a log) opened to let the user pick commits; confirm returns them to a waiting command (§3.7) |
-| **Editor bridge** | The mechanism that lets Git's "open an editor" calls (commit message, rebase todo) open inside the user's own editor window (§3.10) |
+| **Editor bridge** | The mechanism that lets Git's "open an editor" calls open inside the user's editor (§3.10); current commit edits are real files, managed drafts are planned |
 | **Process log** | A view listing every Git invocation with arguments, exit code, duration and output |
 | **Text mode** | A view mode with no ordinary Magit key capture: Neovim retains its existing editable buffer behavior; VSCode browses its read-only virtual document with native editor keys and queued refreshes (§3.14) |
 | **Semantic token** | LSP's standard way for a server to label ranges of text with a *type* (and modifiers) so the client colours them using the user's theme |
@@ -552,10 +553,10 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
      context key `magit.editing`; restrict the LSP documentSelector to these
      filenames so diagnostics/completion apply.
    - TUI: may spawn `$EDITOR` itself (detail deferred).
-5. **Confirm** (`common.confirm` in the editing scope): the client saves the
-   file (if `realFile`) and sends `view/invoke common.confirm`; the server
-   replies `ok` to the helper; Git continues. **Cancel** (`common.cancel`):
-   server replies `abort`. **Closing the buffer/tab without confirming = cancel.**
+5. **Current realFile implementation:** `common.confirm` saves the file and
+   invokes confirm; the server replies `ok`. Cancel/close aborts the helper.
+   This is current behavior, not the chosen commit-message target; historical
+   realFile close acceptance claims remain historical.
    Cancel currently aborts immediately; a discard-confirm prompt for a non-empty
    message is not implemented.
 6. The implemented bridge edits real Git-owned files (`mode: "realFile"`). It
@@ -563,8 +564,83 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
    are not emitted yet; in particular, virtual documents and a structured
    rebase-todo editor are not implemented. Do not send `mode: "virtual"` until
    that editor and its write-back path exist.
-7. A client disconnecting, or the helper's socket closing, aborts the edit so
-   Git never hangs.
+7. **Current behavior/limit:** client disconnect or helper socket closure aborts
+   the pending edit. This does not establish cancellation of a blocked hook or
+   inherited pipe; current progress can hang and this is not verified fixed.
+
+**Chosen planned contract — managed commit drafts (coordinated cutover, no
+compatibility mode).** Replace only real-file commit-message editing with a
+mutable server-managed per-run draft. Git still launches helper, supplies the
+template/path, runs hooks, performs cleanup/comment stripping, and owns commit;
+never substitute `git commit -F`. This is user-editable document content, not a
+writable server-rendered Tree/status/log or text-mode exception. Use an opaque
+URI such as `magit-commit://<opaque-run>/message` and exactly one sync path:
+standard LSP `didOpen`/`didChange`/`didClose`; no competing custom fallback.
+R-EDIT-1 specifies sync ordering/versioning and bounds the current live draft
+plus last saved checkpoint. Ordinary didChange syncs live text; didSave (or a
+versioned save-checkpoint acknowledgement) marks saved without another text
+channel. Neovim uses native acwrite/scratch; VSCode a writable provider, both
+thin. Save/autosave only checkpoints, never confirms/commits. Explicit
+`common.confirm` is a barrier: await applied sync, then send exact draft version
+bound to run/owner and completion checkpoint; never infer it from first status.
+Validate owner, run, version, helper target and canonical expected Git path/kind;
+write exact draft to that validated path before helper `ok`. Failures retain
+draft/helper pending. Git owns cleanup and hook ordering.
+
+Explicit abort, progress cancel, client disconnect/EOF/shutdown always cancel
+the run at any phase; they are not normal buffer close. Normal user close of the
+commit buffer completes the helper as a successful native COMMIT_EDITMSG editor
+exit. Explicit `common.confirm` saves/syncs as a barrier then finishes;
+save/autosave alone only checkpoints. For unsaved native close, honor Save /
+Discard / Cancel: Save closes/confirms the acknowledged saved checkpoint;
+Discard closes/confirms the last saved checkpoint (initially Git's template),
+not latest unsaved didChange; Cancel keeps buffer/run open. Empty/comment-only
+saved text is Git-owned failure, not explicit abort. Terminal server cleanup is
+guarded against recursive confirm/cancel; focus change, language reattach,
+transport didClose alone, or editor shutdown is not user-close intent. Bind
+normal-close intent to owner/run. If finish/version/writeback fails, retain the
+pending helper and recover/reopen the draft if its native buffer closed.
+Terminal edit-close invalidates UI idempotently. Reject late responses; state draft
+durability/crash limits: in-memory drafts do not survive server crash, and native
+recovery copies are best-effort, not guaranteed durable recovery. Opaque run ID/one-shot helper token scoped to
+owner/repository; no secret logging. A token alone cannot prevent inherited-env
+hook spoofing (same-user/nested hook limitation). Preserve askpass protection,
+A29 readonly VSCode status and Neovim text-mode semantics; do not implement other
+edit kinds incidentally. Phase 3E R-EDIT-8 owns the bounded server-side message
+ring; R-4.2 remains staged diff/trailers/lint owner and depends on this phase.
+The ring is in-memory per canonical repository for server lifetime (default
+limit 50), retaining successful nonempty submitted messages and confirmed
+messages even when Git fails, using submitted text without stripping template
+comments. Exclude template-only entries, per-keystroke/autosave drafts,
+askpass/secrets, and message-body logs. Exact consecutive deduplication and a
+UTF-8 byte bound prevent unbounded growth. Existing history-prev/history-next
+remain server commands; clients display editable replacements only after
+owner/run/version validation. First previous recall preserves the current
+unsent draft for return at newest; navigation clamps at ends (no wrap), changes
+draft only, and never saves, finishes, commits or implicitly confirms. Ring
+writeback failures and canceled-draft recovery are separate. Do not populate
+from Git log in this ticket.
+
+Run lifecycle is hooks → editor waiting → finalizing → terminal; exactly one
+completion/progress end/edit/config release. Cancellation differs from Git
+failure and empty-message. Handler nonblocking-sends intent to sole Child owner;
+graceful helper abort first when connected, then bounded TERM/KILL escalation;
+late helper aborts immediately. One owner
+arbitrates cancel/reap, never signals after reap/identity release; exit status is
+separate from pipe EOF. Avoid try_wait/reap then group-kill races. Unix owned
+group/session, documented controlling-tty choice, bounded TERM then KILL (INT
+optional only), bounded bytes/output truncation error and finite drains on
+normal exit/cancel, with pipe deadlines and no indefinitely blocked reader threads.
+Do not kill normal-exit daemons to drain; escaped setsid
+children are not contained, bound escaped-pipe cleanup; unreapable child goes to
+owned reaper honestly. Never delete locks or broad-kill process names. Bounded
+readonly lock observation uses the actual linked-worktree gitdir and common-dir
+where applicable and is advisory only; warn forced cancellation may leave
+locks. Exclude probes from mutation cancellation/optional writes. BUG-READ-1
+global Git locking stays deferred. Current bridge is Unix-only: Linux real
+validation and macOS group/reaping validation required. Windows named pipe,
+restrictive ACL and atomic suspended Job assignment is a separate feasibility
+gate, not a claimed guarantee.
 
 **Askpass:** `GIT_ASKPASS` and `SSH_ASKPASS` point at the same helper (with
 `--askpass`). The server turns the request into a `text` prompt with
@@ -880,6 +956,27 @@ replacements land.
 | `view/prompt` (request) | See §3.6; returns `{cancelled, value?}` |
 | standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
 
+**PLANNED — Phase 3E draft wire contract (not implemented).** The current
+`editDocument` effect still carries `editId`, Git-owned `path`, `kind`, `title`,
+`mode: "realFile"` and `scope` (§3.10; `src/protocol.rs`). At coordinated
+commit-message cutover only, replace that path-based edit with open-draft carrying
+`runId`, opaque draft URI (`magit-commit://<opaque-run>/message`), initial version
+and initial text. Standard LSP `textDocument/didOpen`, `didChange`, `didClose`
+are the sole synchronization path; R-EDIT-1 resolves sync ordering/version and
+size bounds, retaining live draft plus last-saved checkpoint. Save/autosave
+checkpoints never commit. Explicit confirm carries
+`runId` and exact `draftVersion`, bound to the authenticated owning client/session;
+the barrier waits for applied sync, validates owner/run/version/target, and writes
+that exact text to the validated helper target before helper `ok`. Write/version
+failure leaves draft/helper pending. Normal user close confirms the last saved
+checkpoint; explicit abort/progress cancel/disconnect/EOF/shutdown cancel the
+run. Native Save/Discard/Cancel and didClose-not-intent semantics are specified
+in §3.10. Exactly-once terminal edit-close identifies run/URI and outcome,
+invalidates the editor idempotently without recursive cancel, and preserves
+modified text for native recovery subject to §3.10's crash limits. Final names
+and payload types land together in `src/protocol.rs`; no dual compatibility or
+custom competing sync path. Status views remain readonly and server-rendered.
+
 ### 4.3 Example
 
 Client presses `s` with the cursor on a `+` line in an unstaged hunk:
@@ -1057,7 +1154,7 @@ support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | 7 |
 | **Merge / conflicts** | `magit-merge` + unmerged | Unmerged section; per-conflict actions | take ours/theirs, mark resolved, open merge tool (client effect `openMergeTool`), continue, abort | 7 |
 | **Sequencer** | `A`, `V` | In-progress cherry-pick/revert | continue, skip, abort | 7 |
-| **Commit message** | with-editor buffer | Message editor (real file) + companion read-only staged diff, history ring, trailers, lint diagnostics | confirm, cancel, history prev/next, add trailer | 5 |
+| **Commit message** | with-editor buffer | Message editor (currently real file; planned managed draft) + companion read-only staged diff, server-owned history ring (R-EDIT-8), trailers, lint diagnostics | confirm, cancel, history prev/next, add trailer | 5 |
 | **Process log** | `magit-process-buffer` | Every Git invocation: args, exit code, duration, output, hook output | visit, copy command, clear | 3 |
 | **Blame** | `magit-blame` | Annotated file (hash, author, date, summary); also inlay hints/code lens in real file buffers | show commit, blame at parent, copy hash | 8 |
 | **File at revision** | `magit-find-file` | Virtual doc `magit://blob/<rev>/<path>` | diff against worktree | 4 |
@@ -1090,7 +1187,10 @@ work. Bugfix work is a distinct category, not a scenario-behavior task.
 for the current technical-debt review. Its dated reconciliation below supersedes
 this older roadmap backlog for sprint scheduling; do not start unrelated unchecked
 items here. Preserve that report's acceptance gates and do-not-touch constraints.
-Prioritize A01–A12, A18, A19, A29, A33 and A34 before deletion work. A22/A23
+Current priority work is A12 (next), A18, A19, A29, A33 and A34 before deletion
+work; A01–A10 are complete with recorded evidence. A11 is incomplete and has
+sole acceptance ownership in Phase 3E (A11 / R-EDIT-6), deferred from this sprint;
+neither Phase 3E implementation nor A12 is launched by this plan. A22/A23
 remain withdrawn. Do not duplicate the report's 32-task ledger in this index.
 
 - **P0:** none remaining for the VSCode review: R-VS-2, R-VS-3, R-VS-4 and
@@ -1373,6 +1473,65 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       `build/ui/git-error-readable/vim-80x24/readable-git-error.screen`.
       Verified with `make test && make ui-test && make ui-tour`.
 
+### Phase 3E — Managed commit drafts and cancellable Git runs (before Phase 5)
+
+Decision dated 2026-10-27. Planning does not start implementation. Current
+realFile behavior remains until coordinated cutover. User-reported Linux Git
+2.43 reproduction is distinct from proven trace `build/review/a11-final-verification.log`:
+10 pass/1 fail, cancellation observed during hook, no progress end/error before
+timeout. No implementation verified; macOS remains unverified. R-4.2 remains
+staged diff/trailers/lint owner, integrates the R-EDIT-8 ring (not a second
+history implementation), and depends on this phase.
+
+- [ ] **R-EDIT-1 — Specify lifecycle and process feasibility**
+  - **Paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, `tests/editor_bridge.rs`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`.
+  - **Depends on:** none.
+  - **Done when:** lifecycle/races, auth/path, draft sync/version/size bounds, native adapters, process group/tty/reap/output and crash/nested-hook/escapee limitations specified; Linux/macOS validation and Windows feasibility explicit. Specify native close-intent classification separately from LSP didClose (which is not confirmation), and synchronization ordering versus save-checkpoint acknowledgement.
+  - **Verify:** documentation/interface review and targeted platform-design feasibility review (not a claimed platform test); choose full/incremental sync, bounds, and history count/UTF-8 byte-cap overflow policy here (never silently truncate a message).
+- [ ] **R-EDIT-2 — Own runs and safely cancel Git children**
+  - **Paths:** `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/editor.rs`, `src/protocol.rs`, `tests/editor_bridge.rs`.
+  - **Depends on:** R-EDIT-1.
+  - **Done when:** sole Child owner arbitrates nonblocking cancellation/reap; pre-hook, editor-active, commit-msg, finalizing and completed outcomes truthful (cancel-before-commit aborts; completed commit reports success); bounded drain, no detached indefinite readers, no normal-exit daemon killed to drain, one progress end/release.
+  - **Verify:** `cargo test --test editor_bridge --test server_async`; real-Git foreground/background hooks, each cancellation phase, inherited pipes after normal exit, TERM-resistant escalation, exact HEAD/index/worktree, subsequent commit without manual lock cleanup, lock warning, no foreign kill.
+- [ ] **R-EDIT-3 — Versioned draft and validated writeback**
+  - **Candidate paths:** `src/editor.rs`, `src/protocol.rs`, `src/server.rs`, `src/session.rs` (edit dispatch), `src/git.rs`, `tests/editor_bridge.rs`; not an exhaustive rewrite list.
+  - **Depends on:** R-EDIT-2.
+  - **Done when:** opaque URI and sole standard LSP didOpen/didChange/didClose sync, exact owner/version/target/path checks and exact write-before-helper-ok; save never confirms; normal user close confirms the saved checkpoint, while explicit abort/disconnect cancel (canonical native close/dirty-save/shutdown guards in §3.10); errors retain draft/helper.
+  - **Verify:** `cargo test --test editor_bridge`; stale/late/version/write failures, multi-root, disconnect/races; exact repo and neighboring content.
+- [ ] **R-EDIT-8 — Server-owned commit-message history ring**
+  - **Candidate paths:** `src/editor.rs`, `src/protocol.rs`, `src/server.rs`, `src/session.rs`, `src/commands.rs`, `tests/editor_bridge.rs`, `tests/commands.rs`; profile binding files only if existing history-prev/history-next bindings need wiring. Do not add client history policy.
+  - **Depends on:** R-EDIT-3 for validated run/owner/version draft replacement; integrate before A11/R-EDIT-6 cutover. R-EDIT-4/5 clients only display editable server replacements.
+  - **Done when:** bounded (default 50 entries; R-EDIT-1 chooses UTF-8 byte cap and overflow policy without silent truncation) in-memory rings are isolated by canonical repo; successful nonempty submitted and confirmed messages are retained, including Git failures, with exact consecutive dedup. Template-only means unchanged exact initial-template snapshot; do not strip comments or infer message meaning. Exclude per-keystroke/autosave drafts, secrets/askpass, and body logs. Previous/next preserve unsent draft on first previous, restore it at newest, clamp without wrapping, and replace editable draft only after owner/run/version validation—never save/finish/commit. No Git-log population, persistence/config subsystem, or client-owned history.
+  - **Verify:** `cargo test --test editor_bridge --test commands`; cover two-root isolation, ordering/dedup/eviction, UTF-8 bound/overflow, unsent-draft restoration, stale owner/run/version rejection, and no implicit save/finish; native R-EDIT-4/5/A11 scenarios prove recall and return-to-current-draft. No Git-log/persistence implementation.
+- [ ] **R-EDIT-4 — Neovim draft adapter**
+  - **Candidate paths:** `lua/magit-lsp/edit.lua`, `lua/magit-lsp/init.lua`, `lua/magit-lsp/view.lua`, `lua/magit-lsp/buffer.lua` (only where sync/attachment/capabilities require), `tests/test_magit_lsp.lua`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
+  - **Depends on:** R-EDIT-3.
+  - **Done when:** native acwrite/scratch syncs versions; save checkpoints only, explicit confirm flushes, normal user close confirms the saved checkpoint, and explicit abort/disconnect cancel (§3.10 defines dirty Save/Discard/Cancel and non-user-close/shutdown guards); status/text-mode unchanged. Native history-prev/next recall and return-to-current-draft behavior is covered.
+  - **Verify:** `make test-lua`; `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn`; inspect screens/state and stop owned UI, including native history recall/return-to-current-draft behavior.
+- [ ] **R-EDIT-5 — VSCode draft adapter**
+  - **Candidate paths:** `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` (writable provider if needed), `clients/vscode/package.json`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`; not an exhaustive rewrite list.
+  - **Depends on:** R-EDIT-3.
+  - **Done when:** thin writable provider syncs exact versions; save never confirms; confirm barrier flushes; normal user close confirms the saved checkpoint, explicit abort/disconnect cancel (§3.10 defines dirty Save/Discard/Cancel and non-user-close/shutdown guards); close/recovery safe and status readonly. Native history-prev/next recall and return-to-current-draft behavior is covered.
+  - **Verify:** `make vscode-test`; extend `clients/vscode/test/integration.js` for real-server/scripted-widget integration (`npm --prefix clients/vscode run test:integration`), and `clients/vscode/test/e2e/suite.js` for actual native VSCode confirm/cancel/progress/close/version-error and history recall/return-to-current-draft scenarios (`npm --prefix clients/vscode run test:e2e`). The former is not native-client evidence.
+- [ ] **A11 / R-EDIT-6 — Migrate A11 and adversarial cutover**
+  - **Candidate paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/session.rs` (dispatch), `src/protocol.rs`, `lua/magit-lsp/edit.lua` and relevant init/view/buffer attachment/capabilities from R-EDIT-4, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` if needed, `tests/editor_bridge.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
+  - **Depends on:** R-EDIT-2…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner.
+  - **Done when:** remove realFile commit-message compatibility at cutover; Git keeps hooks/cleanup. Native acceptance covers save-stays-editing, normal close commits exactly saved message, dirty Save/Discard/Cancel, no hidden changes submitted, explicit abort versus close, disconnect across phases, stale/terminal cleanup without commits, and failed close recovery. Also cover pre-hook/editor-active/commit-msg/finalizing and finish-v-cancel (cancel before commit aborts; completed commit reports reality), stale/late/version/multi-root, exact HEAD/index/worktree and neighboring content, inherited pipes/bounded drain, TERM resistance, subsequent commit/no lock cleanup, lock warning/no foreign kills; preserve askpass/A29/text mode and document limits. Extend integration.js and native e2e/suite.js at the paths above; scripted widgets alone do not meet native acceptance. R-EDIT-8 verifies two-root ring ordering/dedup/eviction and current-draft restoration.
+  - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour`; inspect relevant tour excerpts. Linux real-Git required; macOS group/reap is unverified gate. No timeout inflation.
+- [ ] **R-EDIT-7 — Windows feasibility (deferred, not Unix release blocker)**
+  - **Paths:** `src/editor.rs`, `src/runner.rs`, `src/protocol.rs`, `TASKS.md`.
+  - **Depends on:** R-EDIT-1 design; separate from Unix cutover.
+  - **Done when:** named pipe, restrictive ACL and atomic suspended Job assignment feasibility/limitations documented; no guarantee claimed without evidence.
+  - **Verify:** explicit platform design review/go-no-go; no test command claimed.
+Shared design is canonical in §3.10. Unix owned group/session and tty decision,
+bounded TERM/KILL/output, finite drains, no indefinitely blocked detached reader,
+no signals after reap, exactly-once terminal/progress/edit/config release,
+no broad kills or lock deletion; linked-worktree gitdir/common-dir lock probes
+advisory only. Graceful helper abort precedes TERM/KILL; pipe deadlines are
+independent of child exit. Crash/native recovery limits are explicit in §3.10.
+BUG-READ-1 remains
+deferred.
+
 ### Phase 4 — Read views
 
 - [x] R-5.1 **First feature to implement: log (graph, decorations, filters,
@@ -1443,7 +1602,10 @@ The step lists (U0.x, U1.x, U2.x), the bug table and the scenario DSL live in
       the `--all` flag) and the `c c` flow; after pressing `c` the screen lists
       `Commit`, `Extend`, `Amend`, `Reword`, `Fixup`, `Squash`.
 - [ ] R-4.2 Commit-message view over the editor bridge: staged-diff companion
-      view, history ring, trailers, lint diagnostics, confirm/cancel/close.
+      view, trailers, lint diagnostics, confirm/cancel/close. Server message-ring
+      ownership is R-EDIT-8, not this task; this task integrates the history view.
+      **Depends on:** Phase 3E Unix managed-draft cutover and acceptance
+      (R-EDIT-1…R-EDIT-6); the separate Windows feasibility gate R-EDIT-7 is deferred.
       *UI:* add scenario `commit-message-view`: staged change, `c c`, a bottom
       split shows the `gitcommit` buffer and the staged diff; confirm closes
       it and the status screen shows a clean tree.

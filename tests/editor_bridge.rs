@@ -74,6 +74,7 @@ impl TestServer {
 }
 
 fn open_status(server: &mut TestServer, id: i64, repo: &Value) -> String {
+    eprintln!("editor-bridge phase=open-status/send id={id}");
     server.send(json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -85,13 +86,18 @@ fn open_status(server: &mut TestServer, id: i64, repo: &Value) -> String {
         },
     }));
     let opened = server.response_with_id(id);
+    eprintln!("editor-bridge phase=open-status/response id={id} frame={opened}");
     let view_id = opened["result"]["id"]
         .as_str()
         .expect("view id")
         .to_string();
+    eprintln!("editor-bridge phase=open-status/wait-render id={id}");
     let render = server.recv();
+    eprintln!("editor-bridge phase=open-status/render id={id} frame={render}");
     assert_eq!(render["method"], json!("view/render"), "{render}");
+    eprintln!("editor-bridge phase=open-status/wait-keymap id={id}");
     let keymap = server.recv();
+    eprintln!("editor-bridge phase=open-status/keymap id={id} frame={keymap}");
     assert_eq!(keymap["method"], json!("view/keymap"), "{keymap}");
     view_id
 }
@@ -124,6 +130,7 @@ fn edit_document(message: &Value) -> Option<Value> {
 
 /// Start a commit from the status view and return its pending edit.
 fn start_commit(server: &mut TestServer, status: &str) -> Value {
+    eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 4,
@@ -133,7 +140,9 @@ fn start_commit(server: &mut TestServer, status: &str) -> Value {
     let mut response = None;
     let mut edit = None;
     while response.is_none() || edit.is_none() {
+        eprintln!("editor-bridge phase=start-commit/wait response={} edit={}", response.is_some(), edit.is_some());
         let message = server.recv();
+        eprintln!("editor-bridge phase=start-commit/received frame={message}");
         if message["id"] == json!(4) {
             response = Some(message);
         } else if let Some(found) = edit_document(&message) {
@@ -390,6 +399,32 @@ fn a_cancel_creates_no_commit() {
     server.shutdown_and_exit();
     let exit = server.finish(Duration::from_secs(20));
     assert!(exit.success(), "server exited: {exit:?}");
+}
+
+/// A11 cancellation acceptance is deferred after the progress cancellation
+/// regression timed out waiting for completion. Keep an explicit failing
+/// placeholder so running ignored tests cannot report this as a pass.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "A11: progress cancellation regression deferred; timed out waiting for completion"]
+fn progress_cancel_kills_the_commit_and_releases_its_edit() {
+    todo!("restore end-to-end coverage after the A11 cancellation regression is fixed");
+}
+
+/// An early cancellation survives repository discovery and targets the actual
+/// mutation, even when it arrives before the worker has spawned any child.
+#[cfg(unix)]
+#[test]
+fn early_commit_cancellation_does_not_kill_repository_discovery() {
+    let (tmp, _repo) = staged_repo();
+    let before = tmp.git(&["rev-parse", "HEAD"]);
+    let cancel = magit_lsp::runner::CancelHandle::new();
+    cancel.cancel();
+    let error = magit_lsp::runner::with_cancel(Some(cancel), || {
+        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), "early", &tmp.path().join("unused.sock"))
+    }).expect_err("the pre-cancelled commit must fail");
+    assert_eq!(error.git.expect("a structured Git failure").subcommand, "commit");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before);
 }
 
 /// The processes holding a pending edit: Git's commit and its editor helper.

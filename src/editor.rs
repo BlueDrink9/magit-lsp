@@ -182,9 +182,10 @@ pub fn socket_path() -> Option<&'static Path> {
 }
 
 /// Run `git commit` with the helper as its editor and return the committed
-/// message, read back from `git log -1 --format=%B`.
+/// message, read back from `git log -1 --format=%B`. Repository discovery is
+/// not a cancellation target; only the commit inherits the caller's handle.
 pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<String> {
-    let repo = GitRepo::open(repo_path)?;
+    let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
     let env = [

@@ -124,7 +124,6 @@ pub fn build(def: &MenuDef) -> Menu {
         .iter()
         .map(|group| Group {
             title: group.title.to_string(),
-            columns: None,
             items: group.items.iter().map(item).collect(),
         })
         .collect();
@@ -134,7 +133,6 @@ pub fn build(def: &MenuDef) -> Menu {
     if def.id != "dispatch" {
         groups.push(Group {
             title: "Menu".to_string(),
-            columns: None,
             items: vec![Item::Action {
                 key: "?".to_string(),
                 command: "open.dispatch".to_string(),

@@ -52,7 +52,7 @@ fn json_matches_snapshots_and_has_the_documented_shape() {
         assert_eq!(scopes.len(), magit_lsp::config::VIEW_SCOPES.len());
         let binding = &scopes[0]["bindings"][0];
         for field in [
-            "command", "keys", "modes", "label", "doc", "group", "status", "scope",
+            "command", "keys", "modes", "label", "status",
         ] {
             assert!(binding.get(field).is_some(), "missing `{field}`: {binding}");
         }
@@ -84,7 +84,7 @@ fn vscode_matches_snapshots() {
     let entries = manifest::vscode_entries(&manifest_for(Profile::Standard));
     let stage_all = entries
         .iter()
-        .find(|entry| entry.arg_key == "S" && entry.scope == "status")
+        .find(|entry| entry.binding == "status.stage-all" && entry.key == "shift+s" && entry.scope == "status")
         .expect("status.stage-all binding");
     assert_eq!(stage_all.key, "shift+s");
 }

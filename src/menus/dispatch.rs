@@ -91,7 +91,6 @@ fn dispatch_group(
     } else {
         Some(Group {
             title: title.to_string(),
-            columns: None,
             items,
         })
     }
@@ -104,9 +103,6 @@ fn item(id: &str, label: &str, keymaps: &BTreeMap<String, Keymap>) -> Option<Ite
         CommandStatus::Implemented => MenuStatus::Implemented,
         CommandStatus::Planned { roadmap_id } => MenuStatus::Planned {
             roadmap_id: roadmap_id.to_string(),
-        },
-        CommandStatus::Unavailable { reason } => MenuStatus::Unavailable {
-            reason: reason.to_string(),
         },
     };
     Some(Item::Action {

@@ -18,7 +18,7 @@ pub struct Row {
     pub magit_key: String,
     /// Our command id (`-` for a switch or option).
     pub command: String,
-    /// `Implemented`, `Planned R-x.y` or `Unavailable`.
+    /// `Implemented` or `Planned R-x.y`.
     pub status: String,
     /// The menu that contains the item.
     pub menu: String,

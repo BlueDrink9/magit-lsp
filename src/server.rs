@@ -302,7 +302,7 @@ impl Shared {
             "$/progress".to_string(),
             serde_json::json!({
                 "token": token,
-                "value": { "kind": "begin", "title": "Git", "message": command },
+                "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true },
             }),
         )));
         (token, handle)
@@ -1548,6 +1548,19 @@ impl Drop for ProgressEnd {
     }
 }
 
+/// Own a commit's pending edit and repository-specific editor configuration.
+struct CommitEdit {
+    id: String,
+    configs: Arc<Mutex<HashMap<String, Arc<ConfigService>>>>,
+}
+
+impl Drop for CommitEdit {
+    fn drop(&mut self) {
+        editor::registry().remove(&self.id);
+        self.configs.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.id);
+    }
+}
+
 /// Run `git commit` on a detached worker and refresh the views afterwards.
 ///
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
@@ -1557,7 +1570,7 @@ fn spawn_commit(shared: Shared, repo: String) {
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
-    let (token, _cancel) = shared.begin_progress(&sender, "commit");
+    let (token, cancel) = shared.begin_progress(&sender, "commit");
     let progress = ProgressEnd {
         shared: shared.clone(),
         token,
@@ -1570,12 +1583,14 @@ fn spawn_commit(shared: Shared, repo: String) {
             shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
                 edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
             );
-            let result = match editor::socket_path() {
-                Some(socket) => editor::commit(&repo, &edit_id, socket),
+            let edit = CommitEdit { id: edit_id, configs: shared.edit_configs.clone() };
+            let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
+                Some(socket) => editor::commit(&repo, &edit.id, socket),
                 None => Err(Error::new("the editor bridge is not running")),
-            };
-            editor::registry().remove(&edit_id);
-            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).remove(&edit_id);
+            });
+            // Release both resources before any outcome or progress-end reaches
+            // the client, including when Git was killed before opening an editor.
+            drop(edit);
 
             let mut messages = Vec::new();
             match result {
@@ -1809,4 +1824,28 @@ fn error_response(id: lsp_server::RequestId, err: Error) -> Response {
 
 fn from_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T> {
     serde_json::from_value(params).map_err(|e| Error::new(e.to_string()))
+}
+
+#[cfg(test)]
+mod commit_tests {
+    use super::*;
+
+    #[test]
+    fn commit_edit_releases_registry_and_repository_config_together() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "").unwrap();
+        let config = Arc::new(ConfigService::load(LoadOptions {
+            config_path: Some(path), ..Default::default()
+        }).unwrap());
+        let retained = Arc::downgrade(&config);
+        let id = editor::registry().create(tmp.path().to_str().unwrap());
+        let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
+        let edit = CommitEdit { id: id.clone(), configs: configs.clone() };
+        assert!(retained.upgrade().is_some());
+        drop(edit);
+        assert!(configs.lock().unwrap().is_empty());
+        assert!(retained.upgrade().is_none(), "the edit retained its repository config");
+        assert!(!editor::registry().resolve(&id, editor::Reply::Ok));
+    }
 }
