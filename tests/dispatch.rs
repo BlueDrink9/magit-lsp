@@ -210,32 +210,13 @@ fn discard_file_header_resolves_to_discard_file() {
     );
 }
 
-#[test]
-fn discard_hunk_header_resolves_to_discard_hunk() {
+#[rstest]
+#[case::discard_hunk_header_needs_confirm(hunk_target())]
+#[case::discard_changed_line_needs_confirm(diff_line_target(true))]
+#[case::discard_context_line_needs_confirm(diff_line_target(false))]
+fn discard_hunk_cases_resolve_to_discard_hunk(#[case] target: NodeKind) {
     assert_eq!(
-        dispatch::resolve(Command::Discard, hunk_target(), None),
-        Resolution::DiscardHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn discard_changed_line_resolves_to_discard_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Discard, diff_line_target(true), None),
-        Resolution::DiscardHunk {
-            path: "f.txt".to_string(),
-            hunk_id: "h0".to_string()
-        }
-    );
-}
-
-#[test]
-fn discard_context_line_resolves_to_discard_hunk() {
-    assert_eq!(
-        dispatch::resolve(Command::Discard, diff_line_target(false), None),
+        dispatch::resolve(Command::Discard, target, None),
         Resolution::DiscardHunk {
             path: "f.txt".to_string(),
             hunk_id: "h0".to_string()

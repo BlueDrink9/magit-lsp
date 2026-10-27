@@ -613,18 +613,19 @@ decision.
   - **Behaviour lost:** none.
   - **Acceptance evidence (2026-10-27):** Replaced the three identical equality bodies with one synchronous `rstest` body and retained all three named cases and the complete `UnstageHunk` path/content-ID assertion. `cargo test --test dispatch && git diff --check` passed.
 
-- [ ] **[P2] A31 — Parameterize the three discard-hunk resolver cases** (`tests/dispatch.rs:255–289`)
+- [x] **[P2] A31 — Parameterize the three discard-hunk resolver cases** (`tests/dispatch.rs:255–289`)
   - **Problem:** Three equality bodies differ only in target.
   - **Why it matters:** DRY.
   - **Change:** Do after: **Parameterize the three stage-hunk resolver cases**. Named cases `discard_hunk_header_needs_confirm`, `discard_changed_line_needs_confirm`, `discard_context_line_needs_confirm` share one `rstest` body.
   - **Done when:** Three cases preserve current `DiscardHunk` expectations.
-  - **Constraints:** Preserve Planned behavior; coordinate existing interim-state cleanup; same synchronous L1 layer; runtime unchanged.
+  - **Constraints:** Preserve the current `Resolution::DiscardHunk` path/content-ID expectation (`f.txt` / `h0`); no obsolete Planned behavior or interim-state changes; same synchronous L1 layer; runtime unchanged.
   - **Category:** simplify
   - **Net LOC:** −20
   - **Risk:** low — input parameter only.
   - **Verify:** `cargo test --test dispatch`
   - **Parallel:** serial
   - **Behaviour lost:** none.
+  - **Acceptance evidence (2026-10-27):** Replaced the three identical equality bodies with one synchronous `rstest` body and retained all three named cases and the complete `DiscardHunk` path/content-ID assertion. `cargo test --test dispatch && git diff --check` passed.
 
 - [ ] **[P2] A32 — Remove repeated canonical-key validation from Lua** (`lua/magit-lsp/keys.lua:70–127,171–207`; `lua/magit-lsp/keymap.lua:122–125`)
   - **Problem:** Lua duplicates canonical grammar validation and repeatedly parses already-validated server keys.
