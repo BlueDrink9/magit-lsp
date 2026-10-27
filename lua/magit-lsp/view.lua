@@ -3,8 +3,8 @@
 --- Every server view — status, log, process log, menu — is one record keyed by
 --- its client and the server's `viewId`. Placement decides
 --- only where its buffer is shown; render, keymap, key, invoke, resync, ack and
---- buffering are kind-independent. Editors that show a real file (the editor
---- bridge) register their own placement and reuse the same lifetime code.
+--- buffering are kind-independent. Managed drafts register their own placement
+--- and explicitly own document synchronization and close intent.
 
 local buffer = require('magit-lsp.buffer')
 local keymap = require('magit-lsp.keymap')
@@ -13,7 +13,7 @@ local requests = require('magit-lsp.requests')
 
 local M = {}
 
---- Open views by composite client/view key. Real-file documents share the table.
+--- Open views by composite client/view key. Managed drafts share the table.
 ---@type table<string, table>
 M.views = {}
 
@@ -704,7 +704,7 @@ function M.open(descriptor, opts)
   return view
 end
 
---- Open a real file for an editor-bridge document.
+--- Open a managed editor-bridge document without automatic LSP attachment.
 ---
 --- The document is not a server view: it has no render stream and is excluded
 --- from the debug view stack. Placement and key handling come from the caller.
@@ -712,22 +712,24 @@ end
 ---@param spec table { placement: string, filetype: string, client_id?: integer, root?: string, base?: string, keymap_options: fun(record, notice): table, table, on_closed: fun(record)|nil }
 ---@return table|nil record
 function M.open_document(effect, spec)
-  if type(effect) ~= 'table' or not effect.editId then
+  if type(effect) ~= 'table' or not effect.runId then
     return nil
   end
   spec = spec or {}
   local client_id = spec.client_id
-  local key = view_key(client_id, effect.editId)
+  local key = view_key(client_id, effect.runId)
   local existing = M.views[key]
   if existing then
     M.focus(key)
     return existing
   end
   local record = {
-    id = effect.editId,
+    id = effect.runId,
     key = key,
     kind = effect.kind,
-    uri = effect.path,
+    uri = effect.uri,
+    version = effect.version,
+    text = effect.text,
     title = effect.title,
     placement = spec.placement,
     mode = 'interactive',
@@ -749,8 +751,6 @@ function M.open_document(effect, spec)
   if spec.filetype and record.buf then
     vim.bo[record.buf].filetype = spec.filetype
   end
-  attach(record)
-
   vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
     buffer = record.buf,
     callback = function()

@@ -1,30 +1,28 @@
-# A11: cancel the observed work-done token through the originating LSP client.
-# Native :lua is entered with real keys, not an invented harness action. The
-# gated hook exits naturally when its owned Git parent dies; no process killing
-# or lock removal by the scenario can make a cancellation appear successful.
+# Managed editor-active cancellation uses the actual work-done token, not close.
 fixture: staged-one-file
-xfail: A11
 ---
-sh: git rev-parse HEAD > .git/cancel-before; printf '%s\n' '#!/bin/sh' 'commit=$PPID' 'echo "$commit" > .git/cancel-parent' 'n=0' 'while kill -0 "$commit" 2>/dev/null; do' '  n=$((n+1))' '  [ "$n" -lt 1000 ] || exit 1' '  sleep 0.01' 'done' 'echo exited > .git/cancel-hook-exited' 'exit 1' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
-keys: c
-wait
-keys: c
-wait screen contains "Committing"
-snapshot: committing
-keys: ":lua assert(vim.wait(2000,function() return vim.fn.filereadable('.git/cancel-parent')==1 end,10)); local v=assert(require('magit-lsp.view').current()); local t=assert(next(require('magit-lsp.debug').state.progress)); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
-wait screen contains "git commit"
-wait
-expect screen not-contains "Committing"
-expect screen contains "Staged changes (1)"
-snapshot: cancelled
-sh: test "$(git rev-parse HEAD)" = "$(cat .git/cancel-before)" && test -f .git/cancel-hook-exited && ! kill -0 "$(cat .git/cancel-parent)" 2>/dev/null
-# The next commit uses the same session, bridge and index, without recovery.
-sh: rm .git/hooks/pre-commit
+sh: git rev-parse HEAD > .git/cancel-before; git write-tree > .git/cancel-index; git hash-object f.txt > .git/cancel-worktree
 keys: c
 wait
 keys: c
 wait screen contains "Please enter the commit message"
-keys: i After progress cancellation
+snapshot: editor-active
+keys: i "Never submitted"
+keys: Escape
+keys: ":lua local v=assert(require('magit-lsp.view').current()); assert(v.document and vim.bo[v.buf].buftype=='acwrite' and not vim.lsp.buf_is_attached(v.buf,v.client_id)); local t; for token,p in pairs(require('magit-lsp.debug').state.progress) do if p.title=='Git' and p.message=='commit' then assert(not t); t=token end end; assert(t); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
+wait screen contains "git commit"
+snapshot: cancellation-feedback
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait
+expect screen not-contains "Committing"
+expect screen contains "Staged changes (1)"
+snapshot: cancelled
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/cancel-before)" && test "$(git write-tree)" = "$(cat .git/cancel-index)" && test "$(git hash-object f.txt)" = "$(cat .git/cancel-worktree)"
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: i "After progress cancellation"
 keys: Escape
 keys standard: C-Enter
 keys vim: Z Z
@@ -34,3 +32,4 @@ expect screen contains "Staged changes (0)"
 expect screen not-contains "Committing"
 snapshot: next-commit
 sh: test "$(git log -1 --format=%s)" = 'After progress cancellation'
+expect no_message /E5108|Error executing lua|unexpected draft/

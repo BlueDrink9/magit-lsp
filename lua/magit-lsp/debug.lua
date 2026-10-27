@@ -30,6 +30,9 @@ M.order = {}
 --- The last 20 notifications shown to the user.
 M.notifications = {}
 
+--- The last 20 progress events, including their semantic operation metadata.
+M.progress_events = {}
+
 --- Whether the last `idle()` call found the client busy; the trace only emits
 --- an `idle` event when that changes to true, so polling does not spam it.
 local was_idle = false
@@ -100,7 +103,9 @@ function M.configure(opts)
         return
       end
       if value.kind == 'begin' then
-        M.progress_started(params.token)
+        M.progress_started(params.token, value)
+      elseif value.kind == 'report' then
+        M.progress_reported(params.token, value)
       elseif value.kind == 'end' then
         M.progress_finished(params.token)
       end
@@ -234,14 +239,40 @@ end
 
 --- Record a server progress token starting; `idle` waits for it to end.
 ---@param token string|integer
-function M.progress_started(token)
-  M.state.progress[tostring(token)] = true
+---@param value table|nil
+function M.progress_started(token, value)
+  M.state.progress[tostring(token)] = vim.deepcopy(value or {})
+  M.record_progress(token, value or { kind = 'begin' })
+end
+
+--- Retain bounded progress evidence without changing server-owned state.
+---@param token string|integer
+---@param value table
+function M.record_progress(token, value)
+  local event = vim.tbl_extend('force', vim.deepcopy(value), { token = tostring(token) })
+  M.progress_events[#M.progress_events + 1] = event
+  if #M.progress_events > 20 then
+    table.remove(M.progress_events, 1)
+  end
+  M.trace('progress', event)
+end
+
+--- Record feedback only for an operation that has not already ended.
+---@param token string|integer
+---@param value table
+function M.progress_reported(token, value)
+  local current = M.state.progress[tostring(token)]
+  if current then
+    M.state.progress[tostring(token)] = vim.tbl_extend('force', current, value)
+    M.record_progress(token, value)
+  end
 end
 
 --- Record a server progress token ending.
 ---@param token string|integer
 function M.progress_finished(token)
   M.state.progress[tostring(token)] = nil
+  M.record_progress(token, { kind = 'end' })
 end
 
 --- Record one canonical key step being sent to the server.
@@ -395,12 +426,25 @@ function M.snapshot()
   for _, id in ipairs(M.order) do
     stack[#stack + 1] = { id = id, kind = M.views[id].kind }
   end
+  local drafts = {}
+  for _, record in pairs(require('magit-lsp.view').views) do
+    if record.document and vim.api.nvim_buf_is_valid(record.buf) then
+      drafts[#drafts + 1] = {
+        runId = record.id, uri = record.uri, buffer = record.buf,
+        version = record.version, savedVersion = record.saved_version,
+        modified = vim.bo[record.buf].modified, busy = record.busy == true,
+        disconnected = record.disconnected == true, error = record.sync_error,
+      }
+    end
+  end
+  table.sort(drafts, function(a, b) return a.uri < b.uri end)
   return {
     mode = vim.fn.mode(),
     cursor = { row = cursor[1] - 1, col = cursor[2] },
     idle = M.idle(),
     windows = windows,
     view_stack = stack,
+    drafts = drafts,
     pending = (view and view.pending) or '',
     render = {
       version = (view and view.version) or 0,

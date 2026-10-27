@@ -286,6 +286,9 @@ local function configure()
   vim.lsp.handlers['view/prompt'] = function(_, result, ctx)
     prompt.handle(result, ctx and ctx.client_id)
   end
+  vim.lsp.handlers['draft/error'] = function(_, result, ctx)
+    if result then edit.on_error(result, ctx and ctx.client_id) end
+  end
   -- Detached Git work (a commit) still has to reach the user after the request
   -- that started it answered, so keep the client that produced it.
   vim.lsp.handlers['view/effects'] = function(_, result, ctx)
@@ -359,6 +362,9 @@ function M.setup(opts)
         local capabilities = result and result.capabilities
         local provider = capabilities and capabilities.semanticTokensProvider
         highlights.apply_legend(buffer.filetype, provider and provider.legend)
+      end,
+      on_exit = function()
+        vim.schedule(function() edit.disconnected(session.client_id) end)
       end,
     }, { bufnr = session.buf })
     if not session.client_id then

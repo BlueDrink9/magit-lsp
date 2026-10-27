@@ -2342,73 +2342,174 @@ T['two repositories get independent status views'] = function()
   )
 end
 
-T['real-file edit documents share identity and keymap queues without scratch-buffer semantics'] = function()
+T['managed drafts own full sync, exact bytes, checkpoints and history without auto attachment'] = function()
   setup_child()
-  child.lua(string.format([[
-    local edit = require('magit-lsp.edit')
-    local path = %q .. '/.git/COMMIT_EDITMSG'
-    vim.fn.writefile({ 'original message' }, path)
-    ANSWERS = {}
-    VIEW.invoke = function(command, opts, key)
-      ANSWERS[#ANSWERS + 1] = { command, opts.args.editId, key }
+  child.lua([[
+    EDIT = require('magit-lsp.edit')
+    SYNCS, BARRIERS, ANSWERS = {}, {}, {}
+    local client = vim.lsp.get_client_by_id(STATUS.client_id)
+    local original = client.notify
+    client.notify = function(self, method, payload)
+      if payload.textDocument and payload.textDocument.uri:match('^magit%-commit://') then
+        SYNCS[#SYNCS + 1] = { method, vim.deepcopy(payload) }
+        return true
+      end
+      return original(self, method, payload)
     end
-    local function open(id)
+    VIEW.request = function(_, _, method, payload, callback)
+      BARRIERS[#BARRIERS + 1] = { method = method, payload = payload, callback = callback }
+    end
+    VIEW.invoke = function(command, opts)
+      ANSWERS[#ANSWERS + 1] = { command, opts.args.runId }
+    end
+    OPEN_DRAFT = function(id, value)
       VIEW.apply_keymap({ viewId = id, scope = 'commit-message', mode = 'interactive',
         capture = false, bindings = {
           { command = 'common.confirm', keys = { 'Z Z' }, modes = { 'normal' } },
           { command = 'common.cancel', keys = { 'Z Q' }, modes = { 'normal' } },
+          { command = 'commit-message.history-prev', keys = { '[ m' }, modes = { 'normal' } },
         },
       }, STATUS.client_id)
-      return edit.open({ editId = id, path = path, kind = 'commit-message' },
+      return EDIT.open({ runId = id, uri = 'magit-commit://' .. id .. '/message',
+        text = value, version = 1, mode = 'managedDraft', kind = 'commit-message' },
         { client_id = STATUS.client_id, root = STATUS.root })
     end
-    DOC = open('edit-confirm')
-    local maps = {}
-    for _, map in ipairs(vim.api.nvim_buf_get_keymap(DOC.buf, 'n')) do maps[map.lhs] = true end
+    ACK = function(index, kind)
+      local b = BARRIERS[index]
+      b.callback({ type = kind, runId = b.payload.runId, uri = b.payload.uri,
+        version = b.payload.version })
+    end
+    DOC = OPEN_DRAFT('draft', 'α\n\n')
     DOCUMENT = { name = vim.api.nvim_buf_get_name(DOC.buf),
       buftype = vim.bo[DOC.buf].buftype, filetype = vim.bo[DOC.buf].filetype,
       editable = vim.bo[DOC.buf].modifiable, base = DOC.base, current = VIEW.current() == DOC,
-      maps = maps, server_views = #VIEW.order,
-      debug_views = #require('magit-lsp.debug').order,
-      pending_empty = next(VIEW.pending_keymap) == nil }
-    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'saved message' })
-    edit.confirm(DOC.key)
-    SAVED = vim.fn.readfile(path)
-    CONFIRMED = VIEW.views[DOC.key] == nil and VIEW.current() == STATUS
-    DOC = open('edit-cancel')
-    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'discard me' })
-    edit.cancel(DOC.key)
-    CANCELLED = vim.fn.readfile(path)
-    DOC = open('edit-wipe')
-    vim.api.nvim_buf_delete(DOC.buf, { force = true })
-    WIPED = VIEW.views[DOC.key] == nil
-
-    FLOAT = VIEW.open({ id = 'float-test', kind = 'unrelated-kind',
-      uri = 'magit://test/float', placement = 'float', mode = 'interactive' },
-      { client_id = STATUS.client_id, root = STATUS.root })
-    VIEW.apply_render({ viewId = FLOAT.id, version = 1, mode = 'interactive',
-      text = { 'one', '  two', 'three' } }, STATUS.client_id)
-    FLOAT_STATE = { height = vim.api.nvim_win_get_height(FLOAT.win),
-      relative = vim.api.nvim_win_get_config(FLOAT.win).relative, text = FLOAT.lines }
-    VIEW.close(FLOAT.key, true)
-  ]], repo))
+      attached = vim.lsp.buf_is_attached(DOC.buf, DOC.client_id), server_views = #VIEW.order,
+      pending_empty = next(VIEW.pending_keymap) == nil,
+      eol = vim.bo[DOC.buf].endofline, lines = vim.api.nvim_buf_get_lines(DOC.buf,0,-1,false) }
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'β', '' })
+    vim.bo[DOC.buf].endofline = false
+    vim.cmd.write()
+    SAVE_PENDING = VIEW.current() == DOC and DOC.busy and vim.bo[DOC.buf].modified
+    ACK(1, 'draft/checkpointed')
+    SAVE_STAYS = VIEW.current() == DOC and not DOC.busy and not vim.bo[DOC.buf].modified
+    EDIT.history(DOC.key, 'commit-message.history-prev')
+    BARRIERS[2].callback({ type = 'draft/replaced', runId = DOC.id, uri = DOC.uri,
+      baseVersion = 2, version = 3, text = 'recalled\n\n' })
+    HISTORY = { version = DOC.version, text = DOC.text, dirty = vim.bo[DOC.buf].modified,
+      notifications = #SYNCS }
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'finish β' })
+    EDIT.confirm(DOC.key)
+    ACK(3, 'draft/checkpointed')
+    FINISH_PENDING = VIEW.views[DOC.key] == DOC
+    ACK(4, 'draft/finished')
+    CONFIRMED = VIEW.views[DOC.key] == nil
+  ]])
   MiniTest.expect.equality(child.lua_get('DOCUMENT'), {
-    name = repo .. '/.git/COMMIT_EDITMSG', buftype = '', filetype = 'gitcommit',
+    name = 'magit-commit://draft/message', buftype = 'acwrite', filetype = 'gitcommit',
     editable = true, base = child.lua_get('STATUS.key'), current = true,
-    maps = { ZZ = true, ZQ = true }, server_views = 1, debug_views = 1, pending_empty = true,
+    attached = false, server_views = 1, pending_empty = true, eol = true, lines = { 'α', '' },
   })
-  MiniTest.expect.equality(child.lua_get('SAVED'), { 'saved message' })
-  MiniTest.expect.equality(child.lua_get('CANCELLED'), { 'saved message' })
-  MiniTest.expect.equality(child.lua_get('CONFIRMED and WIPED'), true)
-  local base = child.lua_get('STATUS.key')
-  MiniTest.expect.equality(child.lua_get('ANSWERS'), {
-    { 'common.confirm', 'edit-confirm', base },
-    { 'common.cancel', 'edit-cancel', base },
-    { 'common.cancel', 'edit-wipe', base },
+  MiniTest.expect.equality(child.lua_get('SAVE_PENDING and SAVE_STAYS and FINISH_PENDING and CONFIRMED'), true)
+  MiniTest.expect.equality(child.lua_get('HISTORY'), {
+    version = 3, text = 'recalled\n\n', dirty = true, notifications = 2,
   })
-  MiniTest.expect.equality(child.lua_get('FLOAT_STATE'), {
-    height = 3, relative = 'editor', text = { 'one', '  two', 'three' },
+  MiniTest.expect.equality(child.lua_get('SYNCS'), {
+    { 'textDocument/didOpen', { textDocument = { uri = 'magit-commit://draft/message',
+      languageId = 'gitcommit', version = 1, text = 'α\n\n' } } },
+    { 'textDocument/didChange', { textDocument = { uri = 'magit-commit://draft/message', version = 2 },
+      contentChanges = { { text = 'β\n' } } } },
+    { 'textDocument/didChange', { textDocument = { uri = 'magit-commit://draft/message', version = 4 },
+      contentChanges = { { text = 'finish β\n' } } } },
+    { 'textDocument/didClose', { textDocument = { uri = 'magit-commit://draft/message' } } },
   })
+  MiniTest.expect.equality(child.lua_get('BARRIERS[4].payload.reason'), 'confirm')
+  child.lua([[
+    vim.notify = function() end
+    BARRIERS = {}
+    DOC = OPEN_DRAFT('failed', 'initial')
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'recover β' })
+    EDIT.confirm(DOC.key)
+    BARRIERS[1].callback(nil, { message = 'checkpoint rejected' })
+    FAILED_SAVE = VIEW.current() == DOC and DOC.sync_error == 'checkpoint rejected'
+      and vim.bo[DOC.buf].modifiable and DOC.text == 'recover β' and #BARRIERS == 1
+    EDIT.save(DOC.key)
+    ACK(2, 'draft/checkpointed')
+    RETRIED_SAVE = not DOC.sync_error and DOC.saved_text == 'recover β'
+      and DOC.saved_version == 3
+    EDIT.confirm(DOC.key)
+    ACK(3, 'draft/checkpointed')
+    BARRIERS[4].callback(nil, { message = 'finish write rejected' })
+    FAILED_FINISH = VIEW.current() == DOC and DOC.sync_error == 'finish write rejected'
+      and vim.bo[DOC.buf].modifiable and DOC.text == 'recover β'
+    EDIT.cancel(DOC.key)
+
+    BARRIERS = {}
+    DOC = OPEN_DRAFT('raced-history', 'before')
+    EDIT.history(DOC.key, 'commit-message.history-prev')
+    vim.bo[DOC.buf].modifiable = true
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'newer local text' })
+    BARRIERS[1].callback({ type = 'draft/replaced', runId = DOC.id, uri = DOC.uri,
+      baseVersion = 1, version = 2, text = 'server history' })
+    HISTORY_RACE = DOC.version == 3 and DOC.text == 'newer local text'
+      and vim.api.nvim_buf_get_lines(DOC.buf, 0, -1, false)[1] == 'newer local text'
+      and SYNCS[#SYNCS][2].textDocument.version == 3
+      and SYNCS[#SYNCS][2].contentChanges[1].text == 'newer local text'
+    EDIT.confirm(DOC.key)
+    EDIT.on_error({ uri = DOC.uri, version = 3, message = 'sync rejected' }, DOC.client_id)
+    ACK(2, 'draft/checkpointed')
+    BLOCKED_FINISH = #BARRIERS == 2 and VIEW.current() == DOC
+      and DOC.sync_error == 'sync rejected' and vim.bo[DOC.buf].modifiable
+    vim.api.nvim_buf_delete(DOC.buf, { force = true })
+    AMBIGUOUS_CANCEL = ANSWERS[#ANSWERS][1] == 'common.cancel'
+      and ANSWERS[#ANSWERS][2] == 'raced-history'
+
+    DOC = OPEN_DRAFT('disconnect', 'recover disconnected')
+    EDIT.disconnected(DOC.client_id)
+    local count = #BARRIERS
+    EDIT.confirm(DOC.key)
+    DISCONNECTED = VIEW.current() == DOC and DOC.disconnected and vim.bo[DOC.buf].modifiable
+      and vim.bo[DOC.buf].modified and #BARRIERS == count
+  ]])
+  MiniTest.expect.equality(child.lua_get('FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH'), true)
+  MiniTest.expect.equality(child.lua_get('HISTORY_RACE and BLOCKED_FINISH and AMBIGUOUS_CANCEL'), true)
+  MiniTest.expect.equality(child.lua_get('DISCONNECTED'), true)
+end
+
+T['real managed commit save stays editing and normal close selects acknowledged checkpoint'] = function()
+  setup_child()
+  git_out({ 'add', 'f.txt' })
+  child.lua([[
+    EDIT = require('magit-lsp.edit')
+    VIEW.invoke('commit.create', {}, STATUS.key)
+    assert(vim.wait(5000, function() return VIEW.current().document == true end, 10))
+    DOC = VIEW.current()
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'managed β', '', 'body' })
+    vim.bo[DOC.buf].endofline = false
+    vim.cmd.write()
+    assert(vim.wait(5000, function() return not DOC.busy end, 10))
+    assert(not DOC.sync_error, DOC.sync_error)
+    SAVE_STATE = { open = VIEW.current() == DOC, modified = vim.bo[DOC.buf].modified,
+      saved = DOC.saved_text, attached = vim.lsp.buf_is_attached(DOC.buf,DOC.client_id) }
+  ]])
+  MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%s' }), 'init\n')
+  MiniTest.expect.equality(child.lua_get('SAVE_STATE'), {
+    open = true, modified = false, saved = 'managed β\n\nbody', attached = false,
+  })
+  child.lua([[
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'not submitted' })
+    vim.ui.select = function(items, _, callback)
+      assert(vim.deep_equal(items, { 'Save', 'Discard', 'Cancel' }))
+      callback('Cancel')
+    end
+    EDIT.close(DOC.key)
+    CANCEL_CLOSE = VIEW.current() == DOC and not DOC.busy and vim.bo[DOC.buf].modifiable
+    vim.ui.select = function(_, _, callback) callback('Discard') end
+    EDIT.close(DOC.key)
+    assert(vim.wait(5000, function() return VIEW.views[DOC.key] == nil end, 10))
+    assert(vim.wait(5000, function() return require('magit-lsp.debug').idle() end, 10))
+  ]])
+  MiniTest.expect.equality(child.lua_get('CANCEL_CLOSE'), true)
+  MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%B' }), 'managed β\n\nbody\n\n')
 end
 
 T['descriptor queues, deferred renders and resync preserve client identity and text mode'] = function()

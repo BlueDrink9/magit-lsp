@@ -8,21 +8,25 @@ wait
 keys: c
 wait screen contains "Committing"
 snapshot: committing
-keys: ":lua assert(vim.wait(2000,function() local n=0; for _ in pairs(require('magit-lsp.debug').state.progress) do n=n+1 end; return vim.fn.filereadable('.git/cancel-ready')==1 and n==1 end,10)); local v=assert(require('magit-lsp.view').current()); local t=assert(next(require('magit-lsp.debug').state.progress)); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
+keys: ":lua local d=require('magit-lsp.debug'); assert(vim.wait(2000,function() local n=0; for t,p in pairs(d.state.progress) do if p.title=='Git' and p.message=='commit' then n=n+1; vim.g.cancel_token=t end end; return vim.fn.filereadable('.git/cancel-ready')==1 and n==1 end,10)); local v=assert(require('magit-lsp.view').current()); d.trace('cancel_requested',{token=vim.g.cancel_token}); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=vim.g.cancel_token}))" Enter
+wait screen contains "git commit"
+snapshot: cancellation-feedback
+# Only terminal capture is safe while a hit-enter prompt blocks Neovim RPC.
+# Dismiss an observed prompt, never send Enter into normal status mappings.
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
 wait
 expect screen not-contains "Committing"
 expect screen contains "Staged changes (1)"
-keys: ":messages" Enter
-wait
-expect screen contains "git commit"
 snapshot: cancelled
-keys: q
+keys: ":lua local d=require('magit-lsp.debug'); local n={begin=0,report=0,['end']=0}; for _,e in ipairs(d.progress_events) do if e.token==vim.g.cancel_token then n[e.kind]=n[e.kind]+1; if e.kind=='report' then assert(e.message=='Cancelling…' and e.cancellable==false,'expected cancellation acknowledgement') end end end; assert(n.begin==1 and n.report==1 and n['end']==1,'expected one cancellation lifecycle'); local m=table.concat(d.notifications,'\n'); assert(m:find('Cancelling…',1,true) and m:find('`git commit` failed.',1,true),'expected cancellation feedback'); d.trace('cancel_feedback_checked',{token=vim.g.cancel_token,notifications=d.notifications})" Enter
+wait
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/cancel-before)" && test -f .git/cancel-terminated
 sh: rm .git/hooks/pre-commit
 keys: c
 wait
 keys: c
 wait screen contains "Please enter the commit message"
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r.uri:match('^magit%-commit://') and vim.bo[r.buf].buftype=='acwrite' and not vim.lsp.buf_is_attached(r.buf,r.client_id))" Enter
 keys: i After
 keys: " progress cancellation"
 keys: Escape
@@ -34,3 +38,6 @@ expect screen contains "Staged changes (0)"
 expect screen not-contains "Committing"
 snapshot: next-commit
 sh: test "$(git log -1 --format=%s)" = 'After progress cancellation'
+expect no_message /E5108|Error executing lua|expected one cancellation/
+keys: ":lua local d=require('magit-lsp.debug'); d.trace('cancel_scenario_complete',{token=vim.g.cancel_token}); local root=vim.api.nvim_get_runtime_file('lua/magit-lsp/debug.lua',false)[1]:gsub('/lua/magit%-lsp/debug.lua$',''); vim.fn.writefile(vim.fn.readfile(vim.env.MAGIT_LSP_TRACE),root..'/build/ui/commit-owned-cancel/'..vim.env.MAGIT_LSP_PROFILE..'-'..vim.o.columns..'x'..vim.o.lines..'/cancel.trace.jsonl')" Enter
+wait

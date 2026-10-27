@@ -88,7 +88,7 @@ Use these words exactly. Do not invent synonyms.
 | **Prompt** | The server asking the user one question (yes/no, text, pick one, pick many) and waiting for the answer (§3.6) |
 | **Menu** | A view of kind `menu.*` that lists switches, options and actions (Magit's "transient") (§3.11) |
 | **Select mode** | A view (usually a log) opened to let the user pick commits; confirm returns them to a waiting command (§3.7) |
-| **Editor bridge** | Git's editor helper waits on a server-managed commit draft (§3.10); native managed-draft adapters follow in R-EDIT-4/5 |
+| **Editor bridge** | Git's editor helper waits on a server-managed commit draft (§3.10); the Neovim managed-draft adapter is R-EDIT-4 and VSCode follows in R-EDIT-5 |
 | **Process log** | A view listing every Git invocation with arguments, exit code, duration and output |
 | **Text mode** | A view mode with no ordinary Magit key capture: Neovim retains its existing editable buffer behavior; VSCode browses its read-only virtual document with native editor keys and queued refreshes (§3.14) |
 | **Semantic token** | LSP's standard way for a server to label ranges of text with a *type* (and modifiers) so the client colours them using the user's theme |
@@ -544,9 +544,9 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
     The dynamic `view/keymap` uses `runId` as its `viewId`.
 4. **The client opens it in its own editor, in the same window/instance**:
     - Neovim: managed acwrite/scratch document with standard full-sync LSP
-      attachment (R-EDIT-4).
+      attachment (implemented, R-EDIT-4).
     - VSCode: writable managed provider with the same full-sync/version contract
-      (R-EDIT-5).
+      (pending, R-EDIT-5).
    - TUI: may spawn `$EDITOR` itself (detail deferred).
  5. **Server cutover:** `draft/save` checkpoints only; `draft/finish` writes the
     selected saved version before helper `ok`. `common.confirm` cannot release
@@ -554,18 +554,20 @@ messages, annotated tag messages, interactive rebase todo lists, `git commit
     `args: {runId}` and aborts. LSP `didClose` only detaches.
  6. Only managed commit-message editing is implemented. Merge/tag messages and
     `rebase-todo` are not emitted; there is no realFile fallback or capability
-    opt-in. The old native adapters are intentionally not compatible: R-EDIT-4/5
-    must migrate before native commit editing is claimed working.
+    opt-in. The old native adapters are intentionally not compatible: the
+    Neovim adapter is migrated by R-EDIT-4, R-EDIT-5 migrates VSCode and
+    R-EDIT-6 owns the final cross-client cutover.
  7. Client EOF, exit, shutdown, progress cancellation and helper socket closure
     terminate pending runs and reject late input. The registry lock serializes
     helper joining, validated writeback and terminal cleanup. R-EDIT-2 owns
     Linux process cleanup; its historical realFile native evidence is not
     managed-draft adapter evidence.
 
-**Managed commit drafts (server cutover implemented; native adapters pending,
-no compatibility mode).** Replace only real-file commit-message editing with a
-mutable server-managed per-run draft. Git still launches helper, supplies the
-template/path, runs hooks, performs cleanup/comment stripping, and owns commit;
+**Managed commit drafts (server cutover and Neovim adapter implemented; VSCode
+adapter pending, no compatibility mode).** Replace only real-file commit-message
+editing with a mutable server-managed per-run draft. Git still launches helper,
+supplies the template/path, runs hooks, performs cleanup/comment stripping, and
+owns commit;
 never substitute `git commit -F`. This is user-editable document content, not a
 writable server-rendered Tree/status/log or text-mode exception. Use an opaque
 URI such as `magit-commit://<opaque-run>/message` and exactly one sync path:
@@ -701,6 +703,22 @@ deduplication, count/UTF-8 byte eviction and overflow, eligibility exclusions,
 failed-commit recall, unsent restoration/clamping and exact identity/version
 rejection without implicit save/finish. Native history acceptance remains pending
 under R-EDIT-4/5/6; this verifies the server seam only.
+
+**Neovim adapter acceptance verified (2026-10-28).** `make test-lua`, then
+`scripts/ui run` for `commit-cancel-progress.scn`, `commit-draft-history.scn`,
+`commit-draft-close.scn` and `commit-owned-cancel.scn`, plus `git diff --check`
+passed. The managed acwrite buffer is not auto-attached; it sends one explicit
+full-sync stream (`didOpen` version 1, complete `didChange` snapshots, monotone
+versions) and uses versioned `draft/save`, `draft/finish` and `draft/history`
+barriers. Native `:write` checkpoints and stays editing; explicit confirm flushes,
+checkpoints and awaits finish; typed `:q`/`:close`/`:bd`/`:wq`/`:xit` classify
+intent before teardown, clean close confirms the saved checkpoint and dirty close
+offers Save/Discard/Cancel with acknowledged semantics. Ambiguous `BufUnload`/API
+deletion and disconnect cancel without confirming; failed checkpoint/finish keeps
+the recoverable buffer. Server-owned history recall, return-to-current-draft and
+the version/adoption rules were driven through the real managed server. Status
+readonly, A29, text mode and askpass were untouched; each owned UI run was
+inspected and stopped.
 
 **Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
 owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
@@ -1138,17 +1156,19 @@ replacements land.
 | `view/prompt` (request) | See §3.6; returns `{cancelled, value?}` |
 | standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
 
-**Phase 3E server draft wire contract (R-EDIT-3 implemented; adapters pending).**
+**Phase 3E server draft wire contract (R-EDIT-3 and Neovim R-EDIT-4 implemented;
+VSCode adapter pending).**
 `editDocument {runId,uri,text,version:1,kind,title,mode:"managedDraft",scope}`
 announces the opaque draft, never a Git-owned path. Standard LSP full-sync
 `textDocument/didOpen`, `didChange`, `didClose` are the sole text-input path.
 Versioned JSON-RPC `draft/save` checkpoints without committing; `draft/finish`
 selects the exact saved version and writes it before helper `ok`. See §3.10 for
 the stable request/result/error shapes, receive-order serialization, native
-close-intent contract and lifecycle limits. R-EDIT-4/5 still own native
-Save/Discard/Cancel, teardown classification and recovery; no native managed
-acceptance is claimed here. No realFile fallback or custom competing text sync
-exists. Status views remain readonly and server-rendered.
+close-intent contract and lifecycle limits. R-EDIT-5 still owns the VSCode
+Save/Discard/Cancel, teardown classification and recovery; R-EDIT-6 owns the
+final cross-client cutover. The Neovim native acceptance is recorded in §3.10.
+No realFile fallback or custom competing text sync exists. Status views remain
+readonly and server-rendered.
 
 ### 4.3 Example
 
@@ -1503,11 +1523,13 @@ BUG-READ-1 are not release gates.
       full regression gate at milestone boundary.
 - [x] **R-EDIT-8 — Server-owned commit-message history ring**
   Completed server-only implementation and verification are summarized in §3.10 and the completed-roadmap archive. Native history recall/return-to-current-draft remains an explicit R-EDIT-4/5/6 obligation; no client history policy.
-- [ ] **R-EDIT-4 — Neovim draft adapter**
+- [x] **R-EDIT-4 — Neovim draft adapter**
   - **Candidate paths:** `lua/magit-lsp/edit.lua`, `lua/magit-lsp/init.lua`, `lua/magit-lsp/view.lua`, `lua/magit-lsp/buffer.lua` (only where sync/attachment/capabilities require), `tests/test_magit_lsp.lua`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
   - **Depends on:** R-EDIT-3 and R-EDIT-8.
   - **Done when:** native acwrite/scratch syncs versions; save checkpoints only, explicit confirm flushes, normal user close confirms the saved checkpoint, and explicit abort/disconnect cancel (§3.10 defines dirty Save/Discard/Cancel and non-user-close/shutdown guards); status/text-mode unchanged. Native history-prev/next recall and return-to-current-draft behavior is covered.
-  - **Verify:** `make test-lua`; `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn`; inspect screens/state and stop owned UI, including native history recall/return-to-current-draft behavior.
+  - **Completed (2026-10-28):** managed URI-owned acwrite buffer with one explicit full-sync stream and monotone versions; `:write` checkpoint stays editing; explicit confirm awaits save/finish; typed native close (`:q`/`:close`/`:bd`/`:wq`/`:xit`) is classified before teardown, clean close confirms the checkpoint, dirty close prompts Save/Discard/Cancel, ambiguous unload/API deletion and disconnect cancel, and failed barriers retain a recoverable buffer. Server-owned history prev/next restores the unsent draft without echo or dirty save. Exact version/identity/owner checks and history policy remain server-owned. Status readonly/A29/text mode unchanged.
+  - **Evidence:** `make test-lua`; real native `commit-cancel-progress.scn`, `commit-draft-history.scn`, `commit-draft-close.scn` and `commit-owned-cancel.scn` screens/state/history/close inspected, owned sessions stopped; `git diff --check` clean (see §3.10).
+  - **Verify:** `make test-lua`; `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn`; `scripts/ui run tests/ui/scenarios/commit-draft-history.scn`; `scripts/ui run tests/ui/scenarios/commit-draft-close.scn`; `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`; inspect screens/state and stop owned UI, including native history recall/return-to-current-draft behavior.
 - [ ] **R-EDIT-5 — VSCode draft adapter**
   - **Candidate paths:** `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` (writable provider if needed), `clients/vscode/package.json`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`; not an exhaustive rewrite list.
   - **Depends on:** R-EDIT-3 and R-EDIT-8.
