@@ -274,6 +274,74 @@ async function run() {
     );
     const firstShot = shot('r-vs-2-first-open.png');
 
+    // Native A33 uses real commit/dispatch metadata in the owned Vim fixture.
+    if (process.env.MAGIT_VSCODE_A33_ONLY === '1') {
+      const { store } = require(`${extension.extensionPath}/lib/store`);
+      const views = require(`${extension.extensionPath}/lib/views`);
+      const key = async (name) => {
+        if (execFileSync('xdotool', ['getactivewindow']).toString().trim() !== windowId) {
+          execFileSync('xdotool', ['windowactivate', '--sync', windowId]);
+        }
+        execFileSync('xdotool', ['key', '--clearmodifiers', name]);
+      };
+      const openMenu = async (command, kind) => {
+        await vscode.window.showTextDocument(editor.document, { preview: false });
+        await vscode.commands.executeCommand('magit.invoke', { command });
+        await waitFor(() => [...store.views.values()].some((view) =>
+          view.descriptor.kind === kind && view.quickPick && view.menu), kind);
+        return [...store.views.values()].find((view) => view.descriptor.kind === kind && view.quickPick);
+      };
+      const activate = async (state, canonical, steps, name, outcome) => {
+        await waitFor(() => quickInputState().visible, `${name} QuickPick`);
+        const row = state.menu.groups.flatMap((group) => group.items).find((item) => item.key === canonical);
+        assert(row, `${name} row missing from server menu`);
+        assert.deepEqual(row.activationSteps, steps, `${name} activation metadata`);
+        // Navigate the actual native list; typing would exercise routeTyped,
+        // not acceptance. No synthetic rows or context keys are installed.
+        const items = state.quickPick.items.filter((item) => item.key);
+        const target = items.findIndex((item) => item.key === canonical);
+        await waitFor(() => state.quickPick.activeItems[0]?.key, `${name} initial selection`);
+        const initial = items.findIndex((item) => item.key === state.quickPick.activeItems[0].key);
+        assert(initial >= 0 && target >= initial, 'expected initial native selection before target');
+        for (let index = initial; index < target; index++) await key('Down');
+        await waitFor(() => state.quickPick.activeItems[0]?.key === canonical, `${name} native selection`);
+        shot(`a33-${name}-before.png`);
+        const start = requests.length;
+        await key('Return');
+        await waitFor(outcome, `${name} visible outcome`);
+        await state.pressQueue;
+        const sent = requests.slice(start).filter((request) => request.method === 'view/key');
+        assert.deepEqual(sent.map((request) => ({ viewId: request.params.viewId, key: request.params.key })),
+          steps.map((step) => ({ viewId: state.id, key: step })), `${name} exact activation requests`);
+        shot(`a33-${name}-after.png`);
+        return { row, sent, mode: state.mode, rendered: state.lines, visible: quickInputState() };
+      };
+      const cases = [];
+      const commit = await openMenu('open.commit', 'menu.commit');
+      assert.equal(commit.menu.groups.flatMap((group) => group.items).find((item) => item.key === '-a').on, false);
+      cases.push(await activate(commit, '-a', ['-', 'a'], 'flag', () =>
+        commit.menu.groups.flatMap((group) => group.items).find((item) => item.key === '-a').on === true
+        && commit.quickPick.items.some((item) => item.key === '-a' && item.description.includes('on'))));
+      await key('Escape');
+      await waitFor(() => !store.views.has(commit.id), 'commit menu closed');
+      const dispatch = await openMenu('open.dispatch', 'menu.dispatch');
+      cases.push(await activate(dispatch, 'ctrl+t', ['ctrl+t'], 'modifier', () => dispatch.mode === 'text'));
+      assert.equal(dispatch.quickPick.title, 'Dispatch');
+      await key('Escape');
+      await waitFor(() => !store.views.has(dispatch.id), 'dispatch menu closed');
+      const spaced = await openMenu('open.dispatch', 'menu.dispatch');
+      cases.push(await activate(spaced, 'g l', ['g', 'l'], 'spaced', () =>
+        [...store.views.values()].some((view) => view.descriptor.kind === 'menu.log' && view.quickPick?.title === 'Log')
+        && quickInputState().text?.includes('Log')));
+      fs.writeFileSync(`${evidence}/a33-evidence.json`, JSON.stringify({
+        gate: 'A33', profile: 'vim', cases, screenshots: ['a33-flag-before.png', 'a33-flag-after.png',
+          'a33-modifier-before.png', 'a33-modifier-after.png', 'a33-spaced-before.png', 'a33-spaced-after.png'],
+        scope: 'Native QuickPick acceptance of server commit/dispatch rows. Named, uppercase and Plus remain automated integration coverage.',
+      }, null, 2));
+      console.log('PASS native A33 QuickPick activation metadata');
+      return;
+    }
+
     // Run A29 before any unrelated widget/theme tests can leave foreign focus.
     if (process.env.MAGIT_VSCODE_A29_ONLY === '1') {
       const { store } = require(`${extension.extensionPath}/lib/store`);

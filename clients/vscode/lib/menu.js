@@ -1,15 +1,6 @@
 'use strict';
 
 /**
- * Normalise the wire `MenuStatus` into a plain descriptor.
- *
- * The server serialises the status as an internally tagged object, e.g.
- * `{"status":"implemented"}` or `{"status":"planned","roadmapId":"R-4.1"}`.
- *
- * @param {object|string|undefined} status
- * @returns {{kind: string, roadmapId?: string, reason?: string}}
- */
-/**
  * The one-line description for a QuickPick row.
  *
  * @param {object} item a menu `Item`
@@ -53,6 +44,7 @@ function quickPickItem(item) {
     value: item.kind === 'option' ? item.value : undefined,
     flag: item.flag,
     command: item.command,
+    activationSteps: item.activationSteps,
   };
 }
 
@@ -108,23 +100,6 @@ function routeTyped(value) {
   return Array.from(value).map(charToKey);
 }
 
-/**
- * The newly typed part of a QuickPick value.
- *
- * `onDidChangeValue` can coalesce fast keystrokes; when the previous value is a
- * prefix of the new one only the suffix is new.
- *
- * @param {string} previous
- * @param {string} current
- * @returns {string}
- */
-/**
- * Whether a key closes the menu. The server owns this rule; this helper lets
- * the QuickPick stop forwarding after a pop key.
- *
- * @param {string} key
- * @returns {boolean}
- */
 module.exports = {
   quickPickItems,
   quickPickItem,

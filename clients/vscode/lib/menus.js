@@ -47,7 +47,7 @@ function showMenu(state) {
   quickPick.onDidAccept(() => {
     const picked = quickPick.selectedItems && quickPick.selectedItems[0];
     if (picked && picked.key) {
-      queueSteps(state, menu.routeTyped(picked.key));
+      queueSteps(state, picked.activationSteps);
     }
   });
 
@@ -95,6 +95,7 @@ function menuItems(model) {
       detail: row.roadmapId ? `planned: ${row.roadmapId}` : row.reason,
       kind: vscode.QuickPickItemKind.Default,
       key: row.key,
+      activationSteps: row.activationSteps,
       itemKind: row.itemKind,
       status: row.status,
     };

@@ -15,15 +15,15 @@ const candidates = [process.env.MAGIT_VSCODE_BIN, '/usr/bin/codium', '/usr/bin/c
 const editor = candidates.find((candidate) => existsSync(candidate));
 if (!editor) {
   console.log('skip e2e: no `code`/`codium` binary found (set MAGIT_VSCODE_BIN to run it)');
-  process.exit(process.env.MAGIT_VSCODE_A29_ONLY === '1' ? 1 : 0);
+  process.exit(['A29', 'A33'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 if (!process.env.DISPLAY) {
   console.log('skip e2e: DISPLAY is required for the real-editor keyboard checks');
-  process.exit(process.env.MAGIT_VSCODE_A29_ONLY === '1' ? 1 : 0);
+  process.exit(['A29', 'A33'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 if (!existsSync(`${root}/target/debug/magit-lsp`)) {
   console.log('skip e2e: missing target/debug/magit-lsp; run cargo build first');
-  process.exit(process.env.MAGIT_VSCODE_A29_ONLY === '1' ? 1 : 0);
+  process.exit(['A29', 'A33'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 
 // This subprocess observes the isolated renderer; it never sets context keys or
@@ -70,6 +70,7 @@ execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@
 writeFileSync(`${repo}/tracked.txt`, 'replacement\n');
 writeFileSync(`${repo}/.vscode/settings.json`, JSON.stringify({
   'magit-lsp.serverPath': `${root}/target/debug/magit-lsp`,
+  ...(process.env.MAGIT_VSCODE_A33_ONLY === '1' ? { 'magit-lsp.profile': 'vim' } : {}),
   'security.workspace.trust.enabled': false,
   'workbench.colorTheme': 'Default Dark Modern',
   'window.zoomLevel': 0,
@@ -81,6 +82,7 @@ const env = Object.fromEntries(['HOME', 'PATH', 'DISPLAY', 'XAUTHORITY',
   .filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
 if (process.env.MAGIT_VSCODE_A06_ONLY === '1') env.MAGIT_VSCODE_A06_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A29_ONLY === '1') env.MAGIT_VSCODE_A29_ONLY = '1';
+if (process.env.MAGIT_VSCODE_A33_ONLY === '1') env.MAGIT_VSCODE_A33_ONLY = '1';
 env.MAGIT_VSCODE_EVIDENCE = directory;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
@@ -134,7 +136,9 @@ if (existsSync(`${directory}/failure.txt`)) {
 }
 // Some editor CLIs return zero even if the test host failed to start. The
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
-const evidenceReady = process.env.MAGIT_VSCODE_A29_ONLY === '1'
+const evidenceReady = process.env.MAGIT_VSCODE_A33_ONLY === '1'
+  ? existsSync(`${directory}/a33-evidence.json`)
+  : process.env.MAGIT_VSCODE_A29_ONLY === '1'
   ? existsSync(`${directory}/a29-evidence.json`)
   : process.env.MAGIT_VSCODE_A06_ONLY === '1'
   ? existsSync(`${directory}/a06-evidence.json`)
@@ -145,7 +149,9 @@ const evidenceReady = process.env.MAGIT_VSCODE_A29_ONLY === '1'
     && existsSync(`${directory}/a06-evidence.json`);
 if (!evidenceReady) {
   console.error(
-    process.env.MAGIT_VSCODE_A29_ONLY === '1'
+    process.env.MAGIT_VSCODE_A33_ONLY === '1'
+      ? 'Missing A33 evidence; see the isolated evidence directory above.'
+      : process.env.MAGIT_VSCODE_A29_ONLY === '1'
       ? 'Missing A29 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A06_ONLY === '1'
       ? 'Missing A06 evidence; see the isolated evidence directory above.'
