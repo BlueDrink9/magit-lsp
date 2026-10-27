@@ -53,8 +53,8 @@ fn text_mode_narrows_the_keymap_and_refuses_every_other_command() {
     let entered = test.invoke("common.toggle-text-mode");
     assert!(entered.effects.is_empty(), "{:?}", entered.effects);
     assert!(
-        entered.render.is_none(),
-        "entering text mode renders nothing"
+        entered.render.as_ref().is_some_and(|render| render.text.is_none() && render.edits.is_none() && render.cursor.is_none() && render.mode == ViewMode::Text),
+        "entering text mode sends metadata without content"
     );
     let keymap = entered.keymap.expect("a keymap notice");
     assert_eq!(keymap.mode, ViewMode::Text);
@@ -248,10 +248,9 @@ fn positional_requests_return_null_in_text_mode() {
     assert!(response["result"]["effects"].is_array());
 
     let notifications = server.drain_notifications();
-    assert!(
-        !notifications.iter().any(|n| n["method"] == "view/render"),
-        "entering text mode must not render"
-    );
+    let metadata = notifications.iter().find(|n| n["method"] == "view/render").expect("metadata render");
+    assert!(metadata["params"]["text"].is_null() && metadata["params"]["edits"].is_null() && metadata["params"]["cursor"].is_null());
+    assert_eq!(metadata["params"]["version"], version);
     let keymap = notifications
         .iter()
         .find(|n| n["method"] == "view/keymap")
@@ -361,5 +360,66 @@ fn positional_requests_return_null_in_text_mode() {
     server.send(json!({"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}));
     server.response_with_id(99);
     server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn static_clients_receive_mode_metadata_without_dynamic_keymaps() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
+    server.initialize(json!({"keymapDelivery": "static"}));
+    server.send(json!({"jsonrpc":"2.0","id":2,"method":"view/open","params":{"kind":"status","args":{"repo_path":tmp.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
+    let opened = server.response_with_id(2);
+    let view_id = opened["result"]["id"].as_str().unwrap().to_string();
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/resync","params":{"viewId":view_id}}));
+    let mut version = server.response_with_id(3)["result"]["version"].as_u64().unwrap();
+
+    for (id, method, params) in [
+        (4, "view/invoke", json!({"viewId":view_id,"command":"common.toggle-text-mode"})),
+        (5, "view/key", json!({"viewId":view_id,"version":version,"key":"ctrl+t","editorMode":"normal","cursor":{"line":0,"column":0}})),
+        (6, "view/setMode", json!({"viewId":view_id,"mode":"text"})),
+    ] {
+        server.notifications.clear();
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+        server.response_with_id(id);
+        let notifications = server.drain_notifications();
+        let render = notifications.iter().find(|n| n["method"] == "view/render").expect("mode metadata");
+        assert!(render["params"]["text"].is_null() && render["params"]["edits"].is_null() && render["params"]["cursor"].is_null());
+        assert_eq!(render["params"]["version"], version);
+        assert_eq!(render["params"]["mode"], "text");
+        assert!(!notifications.iter().any(|n| n["method"] == "view/keymap"), "static delivery must not send dynamic keymaps");
+        server.send(json!({"jsonrpc":"2.0","id":id+10,"method":"view/setMode","params":{"viewId":view_id,"mode":"interactive"}}));
+        server.response_with_id(id+10);
+        let exited = server.drain_notifications();
+        if let Some(render) = exited.iter().find(|n| n["method"] == "view/render") {
+            version = render["params"]["version"].as_u64().expect("exit version");
+        }
+    }
+    // Open the real dispatch menu, then invoke its advertised toggle action
+    // through the same key path used by native menu selection.
+    server.send(json!({"jsonrpc":"2.0","id":39,"method":"view/invoke","params":{"viewId":view_id,"command":"open.dispatch"}}));
+    let opened_menu = server.response_with_id(39);
+    let menu_id = opened_menu["result"]["effects"].as_array().unwrap().iter()
+        .find_map(|effect| effect["descriptor"]["id"].as_str()).expect("dispatch menu id").to_string();
+    let menu_renders = server.drain_notifications();
+    let menu_render = &menu_renders.iter().find(|n| n["method"] == "view/render" && n["params"]["viewId"] == menu_id).expect("dispatch render")["params"];
+    let toggle_key = menu_render["menu"]["groups"].as_array().unwrap().iter()
+        .flat_map(|group| group["items"].as_array().unwrap())
+        .find(|item| item["command"] == "common.toggle-text-mode").expect("advertised menu toggle")["key"].as_str().unwrap();
+    server.notifications.clear();
+    server.send(json!({"jsonrpc":"2.0","id":40,"method":"view/key","params":{"viewId":menu_id,"version":menu_render["version"],"key":toggle_key,"editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    server.response_with_id(40);
+    let menu_invocation = server.drain_notifications();
+    let entered = &menu_invocation.iter().find(|n| n["method"] == "view/render" && n["params"]["mode"] == "text").expect("menu action mode metadata")["params"];
+    assert!(entered["text"].is_null() && entered["edits"].is_null());
+    assert!(!menu_invocation.iter().any(|n| n["method"] == "view/keymap"));
+    let toggled_view = entered["viewId"].as_str().unwrap();
+    server.send(json!({"jsonrpc":"2.0","id":41,"method":"view/invoke","params":{"viewId":toggled_view,"command":"common.toggle-text-mode"}}));
+    server.response_with_id(41);
+    server.drain_notifications();
+    server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }

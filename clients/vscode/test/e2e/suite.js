@@ -133,6 +133,8 @@ async function run() {
   ], { timeout: 10000, maxBuffer: 16 * 1024 * 1024 }).toString());
   const observe = () => cdp('Runtime.evaluate', {
     expression: `({tag: document.activeElement?.tagName,
+      className: document.activeElement?.className,
+      editorFocused: Boolean(document.activeElement?.closest('.monaco-editor')),
       aria: document.activeElement?.getAttribute('aria-label'),
       value: document.activeElement?.value,
       findVisible: Boolean(document.querySelector('.find-widget.visible'))})`,
@@ -271,6 +273,132 @@ async function run() {
       'first-open status body is not in the visible editor'
     );
     const firstShot = shot('r-vs-2-first-open.png');
+
+    // Run A29 before any unrelated widget/theme tests can leave foreign focus.
+    if (process.env.MAGIT_VSCODE_A29_ONLY === '1') {
+      const { store } = require(`${extension.extensionPath}/lib/store`);
+      const views = require(`${extension.extensionPath}/lib/views`);
+      const { deriveContext } = require(`${extension.extensionPath}/lib/context`);
+      const key = async (name) => {
+        if (execFileSync('xdotool', ['getactivewindow']).toString().trim() !== windowId) {
+          execFileSync('xdotool', ['windowactivate', '--sync', windowId]);
+        }
+        execFileSync('xdotool', ['key', '--clearmodifiers', name]);
+      };
+      const selection = (target) => ({ anchor: [target.selection.anchor.line,
+        target.selection.anchor.character], active: [target.selection.active.line,
+        target.selection.active.character] });
+      const focus = async (target) => {
+        await vscode.window.showTextDocument(target.document, { preserveFocus: false });
+        await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        if (quickInputState().visible) await key('Escape');
+        await waitFor(() => !quickInputState().visible, 'no foreign quick input');
+        await waitFor(() => observe().editorFocused, 'native editor focus');
+        assert.equal(vscode.window.activeTextEditor.document.uri.toString(), target.document.uri.toString());
+      };
+      await vscode.commands.executeCommand('magit.invoke', { command: 'common.show-all' });
+      await waitFor(() => editor.document.getText().includes('+replacement'), 'expanded A29 status');
+      await focus(editor);
+      await vscode.commands.executeCommand('workbench.action.toggleKeybindingsLog');
+      await focus(editor);
+      const state = store.views.get(uri.authority);
+      const beforeText = editor.document.getText();
+      const versionBefore = renderEvents.filter((event) => event.viewId === state.id).at(-1).version;
+      const preKey = { dom: observe(), quickInput: quickInputState(), uri: uri.toString(),
+        mode: state.mode, context: deriveContext(state.descriptor, state.mode) };
+      shot('a29-before.png');
+      const start = requests.length;
+      startKeyProbe();
+      await key('ctrl+t');
+      fs.writeFileSync(`${evidence}/a29-pre-toggle.json`, JSON.stringify({ preKey,
+        keyEvents: cdp('Runtime.evaluate', { expression: 'window.__magitKeyEvents', returnByValue: true }).result.value,
+        after: observe(), quickInput: quickInputState(),
+        log: cdp('Runtime.evaluate', { expression: `document.querySelector('.output-view')?.innerText`, returnByValue: true }).result.value,
+      }, null, 2));
+      await waitFor(() => state.mode === 'text', 'physical text-mode toggle');
+      const entryKeys = stopKeyProbe();
+      const entryRender = renderEvents.filter((event) => event.viewId === state.id).at(-1);
+      assert.equal(entryRender.version, versionBefore, 'entry must be same-version metadata');
+      assert.equal(entryRender.text, undefined);
+      assert.equal(entryRender.edits, undefined);
+      const quietStart = requests.length;
+      editor.selection = new vscode.Selection(0, 0, 0, 0);
+      await key('Down');
+      await waitFor(() => editor.selection.active.line === 1, 'native arrow moves cursor');
+      const arrowSelection = selection(editor);
+      await key('ctrl+f');
+      await waitFor(() => observe().aria === 'Find', 'native Find focus');
+      execFileSync('xdotool', ['type', '--clearmodifiers', '--delay', '25', 'replacement']);
+      await waitFor(() => observe().value === 'replacement', 'native search query');
+      await key('Return');
+      await waitFor(() => editor.document.getText(editor.selection) === 'replacement', 'native search result');
+      const searchSelection = selection(editor);
+      await key('Escape');
+      await waitFor(() => !observe().findVisible, 'Find dismissed before editor copy');
+      await focus(editor);
+      await key('Home');
+      await key('shift+End');
+      await waitFor(() => editor.document.getText(editor.selection) === '+replacement', 'native editor line selection');
+      await vscode.env.clipboard.writeText('A29 clipboard sentinel');
+      await key('ctrl+c');
+      await waitFor(async () => await vscode.env.clipboard.readText() === '+replacement', 'native editor copy');
+      const copiedText = await vscode.env.clipboard.readText();
+      const selected = selection(editor);
+      shot('a29-during.png');
+      await key('ctrl+alt+bracketright');
+      await key('g');
+      await settle(300);
+      assert.equal(requests.length, quietStart, 'native browsing/ordinary/mirrored keys sent view traffic');
+      assert.equal(editor.document.getText(), beforeText);
+      assert.deepEqual(selection(editor), selected);
+      fs.writeFileSync(path.join(repo, 'tracked.txt'), 'a29 queued change\n');
+      await vscode.commands.executeCommand('magit.invoke', { command: 'common.refresh' });
+      await settle(500);
+      assert.equal(editor.document.getText(), beforeText, 'queued refresh changed rendered text');
+      assert.deepEqual(selection(editor), selected, 'queued refresh moved selection');
+      shot('a29-queued.png');
+      await key('ctrl+t');
+      await waitFor(() => state.mode === 'interactive', 'physical return toggle');
+      await waitFor(() => editor.document.getText().includes('+a29 queued change'), 'queued render applied');
+      assert.equal(editor.document.getText(), renderedLines.get(state.id).join('\n'));
+      shot('a29-after.png');
+
+      // Only menu views currently advertise capture=true (log is false too).
+      // Open the real menu's provider URI in the native editor, without a
+      // QuickPick or synthetic context, to exercise its actual capture binding.
+      const descriptor = await store.client.sendRequest('view/open', {
+        kind: 'menu.dispatch', args: { repo_path: repo }, viewport: { cols: 100, rows: 30 },
+      });
+      const logState = views.ensureView(descriptor);
+      await logState.firstRender;
+      const logEditor = await vscode.window.showTextDocument(
+        await vscode.workspace.openTextDocument(logState.uri), { preserveFocus: false });
+      assert.equal(descriptor.capture, true, 'menu must exercise capture-enabled input');
+      await focus(logEditor);
+      await key('ctrl+t');
+      await waitFor(() => logState.mode === 'text', 'capture-enabled view enters text mode');
+      const logText = logEditor.document.getText();
+      const logStart = requests.length;
+      await key('x');
+      await key('g');
+      await key('ctrl+alt+bracketright');
+      await settle(300);
+      assert.equal(requests.length, logStart, 'capture-enabled text view sent keys');
+      assert.equal(logEditor.document.getText(), logText, 'virtual document must stay read-only');
+      shot('a29-capture.png');
+      await key('ctrl+t');
+      await waitFor(() => logState.mode === 'interactive', 'capture-enabled view returns');
+      fs.writeFileSync(`${evidence}/a29-evidence.json`, JSON.stringify({
+        gate: 'A29', uri: uri.toString(), preKey, entryKeys, entryRender, versionBefore,
+        arrowSelection, searchSelection, copiedText, selected, initialText: beforeText,
+        queuedSelection: selected, finalText: editor.document.getText(),
+        requests: requests.slice(start), captureDescriptor: descriptor,
+        captureSuppressedRequests: requests.slice(logStart, -1),
+        screenshots: ['a29-before.png', 'a29-during.png', 'a29-queued.png', 'a29-after.png', 'a29-capture.png'],
+      }, null, 2));
+      console.log('PASS native A29 text-mode navigation/search/editor copy, key suppression and queued refresh');
+      return;
+    }
 
     const verifyQuitReopen = async () => {
       const { store } = require(`${extension.extensionPath}/lib/store`);

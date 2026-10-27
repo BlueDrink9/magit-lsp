@@ -1194,6 +1194,11 @@ sole acceptance ownership in Phase 3E (A11 / R-EDIT-6), deferred from this sprin
 neither Phase 3E implementation nor A12 is launched by this plan. A22/A23
 remain withdrawn. Do not duplicate the report's 32-task ledger in this index.
 
+- [x] A29 focused native verification subtask: isolated physical navigation,
+  search/editor copy, shortcut/capture suppression and queued-refresh return;
+  real dispatch-menu wire coverage. Evidence: `/tmp/opencode/vscode-review-04pmBr/a29-evidence.json`.
+  Overall A29 acceptance remains open pending the final gate/report.
+
 - **P0:** none remaining for the VSCode review: R-VS-2, R-VS-3, R-VS-4 and
   R-VS-5 (§12) all have recorded regression/real-client evidence; R-VS-3's F5
   limitation and R-VS-4's actual theme measurements are explicit.
