@@ -1174,7 +1174,14 @@ support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 ## 7. Phased roadmap
 
 Checkboxes are for tracking. IDs (`R-n.m`) are used in `Planned` messages.
-Each task ends with **Done when**. Each phase leaves `make test` green.
+Each task ends with **Done when**. Use relevant, risk-scoped checks per task;
+run full `make test` about every three completed implementation tasks and at
+phase/handoff boundaries. Full UI suites are reserved for broad UI/shared
+lifecycle changes, phase completion, or suspected regressions. Preserve explicit
+platform/security acceptance gates and report skipped or deferred checks
+truthfully. Historical task Verify command lists and recorded evidence describe
+what was required or run at that time; do not rewrite them to imply current
+policy or erase that evidence.
 
 ### Global unchecked backlog — priority order
 
@@ -1197,7 +1204,7 @@ remain withdrawn. Do not duplicate the report's 32-task ledger in this index.
 - [x] A29 focused native verification subtask: isolated physical navigation,
   search/editor copy, shortcut/capture suppression and queued-refresh return;
   real dispatch-menu wire coverage. Evidence: `/tmp/opencode/vscode-review-04pmBr/a29-evidence.json`.
-  Overall A29 acceptance remains open pending the final gate/report.
+  Overall A29 acceptance: `make test && make vscode-test && scripts/ui run tests/ui/scenarios/text-mode-roundtrip.scn && git diff --check` passed. Wire evidence records same-version entry render and invoke/key/menu/setMode coverage; native screenshots/evidence confirm unchanged selection while queued refresh applies on exit, native copy/replacement and cursor navigation, and capture-mode descriptor with no suppressed requests. Existing Neovim semantics remain covered by the full gate.
 
 - **P0:** none remaining for the VSCode review: R-VS-2, R-VS-3, R-VS-4 and
   R-VS-5 (§12) all have recorded regression/real-client evidence; R-VS-3's F5
@@ -1292,9 +1299,14 @@ For any task that changes what the user sees (`ui-test-plan.md` U2.1):
 
 - **Acceptance Criteria** must contain a visible outcome: "after pressing X
   the screen shows …".
-- **Verification Command** must include `make ui-test`.
-- The report lists the scenario files, their results and the saved `.screen`
-  paths.
+- **Verification Command** must include focused real native-UI evidence for
+  the affected client, using relevant scenario(s), not automatically the full
+  `make ui-test` suite. VSCode-only changes require VSCode native evidence;
+  unrelated Neovim runs do not satisfy that gate. Use the full UI suite only
+  for broad UI/shared lifecycle changes, phase completion, or suspected
+  regressions.
+- The report lists the scenario files, their results and saved evidence paths,
+  and explicitly identifies checks skipped or deferred.
 - A task is not done until a `.scn` scenario has driven the real UI
   (`scripts/ui`, §8.8).
 

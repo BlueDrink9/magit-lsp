@@ -154,39 +154,37 @@ A22/A23 were withdrawn after deeper inspection; IDs are not renumbered.
 
 This ledger records the review's state against the concurrent history and current
 source, not task completion inferred from commit subjects. Historical baseline
-metrics above remain collection-time evidence, not current verification. Recheck
-each remaining task's complete acceptance gate before implementation; current
-priority work is A12 (next), A18, A19, A29, A33 and A34, before deletions.
-The original ledger/counts/LOC above remain historical estimates, not recalculated
-remaining-work totals.
+metrics above remain collection-time evidence, not current verification. A13–A34
+selected actionable tasks are complete; A11 remains deferred to Phase 3E and A12
+was not started. A22/A23 were withdrawn. The original ledger/counts/LOC above
+remain historical estimates, not recalculated remaining-work totals.
 
-**Already addressed in part / assumptions stale:** A19's shared named key
-vectors already exist (`tests/data/keys.json`); this does not establish shared
-prompt/render vectors or false-default behavior. A29's log view and reusable
-commit selection consumers now exist; this does not establish native read-only
-VSCode browsing and queued-refresh behavior. A01–A34 preconditions and line
-references must be revalidated. Discard is implemented (`status.discard` and
-Git dispatch), contrary to older roadmap assumptions; A31's test-parameterization
-work may still remain. The defensive-boundary principle is already stated in
-AGENTS.md, but that does not settle each concrete boundary finding.
+**Completed:** A01–A10 and selected actionable A13–A21, A24–A34 have checked
+task entries and acceptance evidence. A18, A19, A29, A33 and A34 are complete;
+the A34 progress paragraph below is retained as historical evidence, not open
+work.
 
 **Completed:** A01–A10 are checked complete with acceptance evidence recorded
 under their task entries; they are not active review work.
 
-**Still open pending full acceptance evidence:** A12, A18, A19, A29, A33
-and A34 remain prioritized and unchecked; A11 is incomplete with sole acceptance
-ownership migrated to Phase 3E (A11 / R-EDIT-6), deferred from this sprint, with
-A12 next. Neither Phase 3E implementation nor A12 is launched here. In particular, partial consumers,
-shared key fixtures, or an implementation commit do not satisfy their gates.
-Other tasks remain unchecked until their source preconditions are revalidated.
-The history includes log-view/select work (d5da635 and related commits),
-confirmed discard (3b175f2), and key-vector work; these are evidence pointers,
-not completion claims. A22/A23 remain withdrawn. Do not touch the explicit
-exclusions above, and preserve existing ownership.
+**Deferred / untouched:** A11 is incomplete and deferred with sole acceptance
+ownership in Phase 3E (A11 / R-EDIT-6). A12 was not started. Neither Phase 3E
+implementation nor A12 is launched by this review sprint. A22/A23 remain
+withdrawn. Preserve explicit exclusions above and existing ownership.
 
 **Verification distinction:** baseline test metrics are historical. A later
 successful command is evidence only for the exact code and cases it ran; UI,
 client, and real-Git acceptance gates still require their stated verification.
+
+**Phase UI gate (2026-10-27):** The initial full gate had one failure:
+`commit-confirm` in Vim 100x30 waited at “Committing” and showed
+“`git commit` failed.” Per the gate instructions, the scenario was retried
+first; `scripts/ui run tests/ui/scenarios/commit-confirm.scn` then passed
+(1 PASS, 0 XFAIL, 0 FAIL). The subsequent `make ui-test && make ui-tour &&
+git diff --check` exited 0 (`ok: ui-test`, `ok: ui-tour`); this full suite
+includes the expected A11 XFAIL. The generated tour was inspected for the
+commit view/menu excerpts. No production changes were made for the initial
+failure; the initial failure and clean retry are both retained as evidence.
 
 - [x] **[P0] A01 — Establish a private editor-bridge socket directory** (`src/editor.rs:359–375`)
   - **Problem:** Predictable `/tmp/magit-lsp-<pid>` is adopted with `create_dir_all`, without establishing ownership/privacy; an existing socket is removed. Under permissive umask another local user can reach askpass.
