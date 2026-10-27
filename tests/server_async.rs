@@ -1006,6 +1006,32 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
         "{prompt}"
     );
 
+    // Both notifications are read BEFORE promptRespond. Previously rendered
+    // blocked the reader on session ownership and the answer was never read.
+    server.send(json!({"jsonrpc":"2.0", "method":"view/rendered",
+        "params":{"viewId":menu_id, "version":2}}));
+    server.send(json!({"jsonrpc":"2.0", "method":"view/resize",
+        "params":{"viewId":menu_id, "cols":60, "rows":24}}));
+    server.send(json!({"jsonrpc":"2.0", "id":40, "method":"view/resync",
+        "params":{"viewId":menu_id}}));
+    let resized = server.response_with_id(40);
+    assert!(resized["result"]["version"].as_u64().unwrap() > 2, "{resized}");
+
+    let (other_tmp, _other_repo) = init_repo();
+    let other = open_view(&mut server, 41, &repo_param(other_tmp.path()));
+    server.send(json!({"jsonrpc":"2.0", "id":42, "method":"view/invoke",
+        "params":{"viewId":other, "command":"status.stage-all"}}));
+    assert!(server.response_with_id(42).get("error").is_none());
+    server.send(json!({"jsonrpc":"2.0", "id":43, "method":"view/invoke",
+        "params":{"viewId":view_id, "command":"status.stage-all"}}));
+    let refused = server.response_with_id(43);
+    assert!(refused["result"]["effects"][0]["text"].as_str().unwrap().contains("pending prompt"), "{refused}");
+
+    server.send(json!({"jsonrpc":"2.0", "id":44, "method":"view/invoke",
+        "params":{"viewId":menu_id, "command":"common.refresh"}}));
+    assert!(server.response_with_id(44).get("error").is_none());
+    assert_eq!(server.recv()["method"], "view/render");
+
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 6,
@@ -1043,8 +1069,11 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
     let respond_response = respond_response.expect("view/promptRespond response");
     assert_eq!(respond_response["result"], Value::Null);
 
-    let option_render = option_render.expect("the option render");
-    let text = option_render["params"]["text"]
+    option_render.expect("the option render");
+    server.send(json!({"jsonrpc":"2.0", "id":45, "method":"view/resync",
+        "params":{"viewId":menu_id}}));
+    let option_render = server.response_with_id(45);
+    let text = option_render["result"]["text"]
         .as_array()
         .expect("full text after a fresh option");
     assert!(
@@ -1117,6 +1146,84 @@ fn a_config_reload_repushes_the_view_keymap() {
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
     assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
+fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
+    for mode in ["cancel", "changed", "closed"] {
+        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let mut server = TestServer::spawn(&[]);
+        server.initialize(json!({}));
+        server.send(open_view_message(2, &repo_param(tmp.path())));
+        let opened = server.response_with_id(2);
+        let view = opened["result"]["id"].as_str().unwrap().to_string();
+        let uri = opened["result"]["uri"].as_str().unwrap().to_string();
+        assert_eq!(server.recv()["method"], "view/render");
+        assert_eq!(server.recv()["method"], "view/keymap");
+        let line = first_hunk_line(&mut server, &uri);
+        server.send(json!({"jsonrpc":"2.0", "id":3, "method":"view/invoke",
+            "params":{"viewId":view,"command":"status.discard","version":1,"cursor":{"line":line,"column":0}}}));
+        let prompt = loop {
+            let message = server.recv();
+            if message["method"] == "view/prompt" { break message; }
+            assert_ne!(message["id"], 3, "discard finished without prompting: {message}");
+        };
+        server.send(json!({"jsonrpc":"2.0", "method":"view/rendered", "params":{"viewId":view,"version":1}}));
+        server.send(json!({"jsonrpc":"2.0", "method":"view/resize", "params":{"viewId":view,"cols":60,"rows":24}}));
+        server.send(json!({"jsonrpc":"2.0", "id":4, "method":"view/resync", "params":{"viewId":view}}));
+        assert!(server.response_with_id(4)["result"]["version"].as_u64().unwrap() >= 1);
+        server.send(json!({"jsonrpc":"2.0", "id":5, "method":"view/key",
+            "params":{"viewId":view,"version":1,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        let refused = server.response_with_id(5);
+        assert!(refused["result"]["effects"][0]["text"].as_str().unwrap().contains("pending prompt"));
+        if mode == "changed" {
+            std::fs::write(tmp.path().join("f.txt"), "external replacement\n").unwrap();
+        }
+        if mode == "closed" {
+            server.send(json!({"jsonrpc":"2.0", "id":6, "method":"view/close", "params":{"viewId":view}}));
+            assert!(server.response_with_id(6).get("error").is_none());
+        }
+        let before = std::fs::read(tmp.path().join("f.txt")).unwrap();
+        server.send(json!({"jsonrpc":"2.0", "id":7, "method":"view/promptRespond",
+            "params":{"promptId":prompt["params"]["promptId"],"cancelled":mode == "cancel","value":true}}));
+        let mut answered = false;
+        let mut completed = false;
+        while !answered || !completed {
+            let message = server.recv();
+            if message["id"] == 7 { answered = true; assert!(message.get("error").is_none(), "{message}"); }
+            if message["id"] == 3 { completed = true; assert!(message.get("error").is_none(), "{message}"); }
+        }
+        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), before, "{mode}");
+        assert!(tmp.git(&["diff", "--cached"]).is_empty(), "{mode}");
+        shutdown_and_exit(&mut server);
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
+#[test]
+fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
+    for mode in ["disconnect", "shutdown", "exit"] {
+        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let mut server = TestServer::spawn(&[]);
+        server.initialize(json!({}));
+        let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+        server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+            "params":{"viewId":view,"command":"commit.create"}}));
+        loop {
+            let message = server.recv();
+            if message["method"] == "view/prompt" { break; }
+            assert_ne!(message["id"], 3, "{message}");
+        }
+        match mode {
+            "disconnect" => server.close_stdin(),
+            "shutdown" => shutdown_and_exit(&mut server),
+            "exit" => server.send(json!({"jsonrpc":"2.0","method":"exit","params":null})),
+            _ => unreachable!(),
+        }
+        let status = server.finish(Duration::from_secs(10));
+        assert_eq!(status.code(), Some(if mode == "exit" { 1 } else { 0 }), "{mode}");
+        assert_eq!(tmp.git(&["status", "--porcelain"]), " M f.txt\n", "{mode}");
+    }
 }
 
 fn spawn_with_env(env: &[(String, String)]) -> TestServer {

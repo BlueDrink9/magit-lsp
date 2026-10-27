@@ -1,15 +1,13 @@
 //! The server-side handle commands use to ask the user a question (R-3.1).
 //!
-//! A prompt never reaches Git directly: a handler calls one of [`PromptUi`]'s
-//! methods, the transport turns it into a `view/prompt` notification and blocks
-//! for the answer, and the handler continues with a plain `Option` where `None`
-//! means the user cancelled. Tests use [`ScriptedUi`] to answer without a
-//! client and to assert the exact request each handler emitted.
+//! Handlers prepare typed continuations rather than waiting. The server drives
+//! [`PromptUi`] outside session ownership; synchronous callers drive the same
+//! start/resume path with [`ScriptedUi`]. `None` means the user cancelled.
 //!
 //! The prompt transport is a notification plus a separate `view/promptRespond`
 //! request; see TASKS.md §10 for why it deliberately differs from §3.6.
 
-use crate::protocol::{PromptChoiceAnswer, ViewPromptParams};
+use crate::protocol::{PromptChoiceAnswer, PromptKind, PromptValue, ViewPromptParams};
 use crate::{Error, Result};
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -27,6 +25,16 @@ pub trait PromptUi {
 
     /// Pick zero or more items by id.
     fn multi_choice(&self, request: &ViewPromptParams) -> Result<Option<Vec<String>>>;
+}
+
+/// Drive one prepared question, outside session ownership in the server.
+pub fn answer(ui: &dyn PromptUi, request: &ViewPromptParams) -> Result<Option<PromptValue>> {
+    match request.kind {
+        PromptKind::Confirm => Ok(ui.confirm(request)?.map(PromptValue::Bool)),
+        PromptKind::Text => Ok(ui.text(request)?.map(PromptValue::Text)),
+        PromptKind::Choice => Ok(ui.choice(request)?.map(PromptValue::Choice)),
+        PromptKind::MultiChoice => Ok(ui.multi_choice(request)?.map(|ids| PromptValue::Multi { ids })),
+    }
 }
 
 /// A UI that refuses every prompt; the default for non-interactive callers.

@@ -326,7 +326,32 @@ pub struct Session {
     keymaps: Arc<BTreeMap<String, Keymap>>,
     /// The next prompt id handed to a prompt request.
     next_prompt: u64,
+    pending_prompt: Option<PendingPrompt>,
     pending_selections: BTreeMap<String, PendingSelection>,
+}
+
+struct PendingPrompt {
+    invalidated: bool,
+    prepared: Option<InvokeResult>,
+    request: ViewPromptParams,
+    view_id: String,
+    cursor: Option<Cursor>,
+    cancel: Option<crate::runner::CancelHandle>,
+    action: SessionContinuation,
+}
+
+enum SessionContinuation {
+    Option { key: String, menu: crate::menu::Menu, cursor: Cursor },
+    Command { command_id: String, action: commands::PromptAction, effects: Vec<Effect> },
+}
+
+/// A completed operation or a question whose continuation remains session-owned.
+#[derive(Debug)]
+pub enum Execution {
+    /// Effects and renders ready for delivery.
+    Done(InvokeResult),
+    /// Wait outside session ownership, then resume with this prompt identity.
+    Prompt(ViewPromptParams),
 }
 
 struct PendingSelection {
@@ -359,6 +384,10 @@ impl InvokeResult {
     }
 }
 
+fn prompt_busy() -> InvokeResult {
+    InvokeResult { effects: vec![Effect::message(MessageLevel::Info, "Answer or cancel the pending prompt before running another command")], ..InvokeResult::empty() }
+}
+
 impl Session {
     /// Create a session for a repository root.
     pub fn new(repo_path: impl Into<String>) -> Self {
@@ -367,6 +396,7 @@ impl Session {
             views: ViewStack::new(),
             keymaps: Arc::new(BTreeMap::new()),
             next_prompt: 0,
+            pending_prompt: None,
             pending_selections: BTreeMap::new(),
         }
     }
@@ -501,6 +531,9 @@ impl Session {
 
     /// Close a view; closing one the client already closed is a no-op.
     pub fn close(&mut self, view_id: &str) -> Result<()> {
+        if let Some(pending) = self.pending_prompt.as_mut().filter(|pending| pending.view_id == view_id) {
+            pending.invalidated = true;
+        }
         self.views.remove(view_id);
         self.pending_selections.remove(view_id);
         self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
@@ -570,7 +603,17 @@ impl Session {
         params: &ViewInvokeParams,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        self.run_versioned_command(
+        let step = self.start_invoke(params)?;
+        self.drive(step, ui)
+    }
+
+    /// Prepare an invocation without waiting for user input.
+    pub fn start_invoke(&mut self, params: &ViewInvokeParams) -> Result<Execution> {
+        if self.pending_prompt.is_some() && params.command != "common.refresh" {
+            return Ok(Execution::Done(prompt_busy()));
+        }
+        let already_pending = self.pending_prompt.is_some();
+        let result = self.run_versioned_command(
             &params.view_id,
             &params.command,
             params.version,
@@ -578,8 +621,9 @@ impl Session {
             params.selection,
             params.args.as_ref(),
             None,
-            ui,
-        )
+            &crate::ui::NullUi,
+        )?;
+        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
     }
 
     /// Handle one key step: resolve it through the view's keymap and either run
@@ -595,6 +639,18 @@ impl Session {
 
     /// Handle one key step, asking the user through `ui` when the command does.
     pub fn key_ui(&mut self, params: &ViewKeyParams, ui: &dyn PromptUi) -> Result<InvokeResult> {
+        let step = self.start_key(params)?;
+        self.drive(step, ui)
+    }
+
+    /// Prepare a key operation without waiting for user input.
+    pub fn start_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
+        let already_pending = self.pending_prompt.is_some();
+        let result = self.key_start(params, &crate::ui::NullUi)?;
+        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
+    }
+
+    fn key_start(&mut self, params: &ViewKeyParams, ui: &dyn PromptUi) -> Result<InvokeResult> {
         let mode = params.editor_mode;
         let (scope, capture, cursor_moved, is_menu) = {
             let view = self
@@ -612,6 +668,7 @@ impl Session {
         };
 
         if is_menu {
+            if self.pending_prompt.is_some() { return Ok(prompt_busy()); }
             return self.menu_key(params, cursor_moved, ui);
         }
 
@@ -658,6 +715,83 @@ impl Session {
                 ..InvokeResult::empty()
             }),
         }
+    }
+
+    fn prepare_prompt(&mut self, view_id: &str, cursor: Option<Cursor>, mut request: ViewPromptParams, action: SessionContinuation) {
+        self.next_prompt += 1;
+        request.prompt_id = format!("session-prompt-{}", self.next_prompt);
+        self.pending_prompt = Some(PendingPrompt { invalidated: false, prepared: None, request, view_id: view_id.to_string(), cursor, action, cancel: crate::runner::current_cancel() });
+    }
+
+    fn execution(&mut self, result: InvokeResult) -> Execution {
+        match &mut self.pending_prompt {
+            Some(pending) => { pending.prepared = Some(result); Execution::Prompt(pending.request.clone()) },
+            None => Execution::Done(result),
+        }
+    }
+
+    /// Whether a staged operation currently owns this session's prompt slot.
+    pub fn has_pending_prompt(&self) -> bool { self.pending_prompt.is_some() }
+
+    fn drive(&mut self, mut step: Execution, ui: &dyn PromptUi) -> Result<InvokeResult> {
+        loop {
+            match step {
+                Execution::Done(result) => return Ok(result),
+                Execution::Prompt(request) => {
+                    let answer = match crate::ui::answer(ui, &request) {
+                        Ok(answer) => answer,
+                        Err(error) => {
+                            let Execution::Done(mut result) = self.resume_prompt(&request.prompt_id, None)? else { unreachable!("cancellation cannot prompt"); };
+                            result.effects.push(Effect::message(MessageLevel::Info, error.to_string()));
+                            return Ok(result);
+                        }
+                    };
+                    step = self.resume_prompt(&request.prompt_id, answer)?;
+                }
+            }
+        }
+    }
+
+    /// Resume exactly the pending operation; cancelled, closed or replaced targets do nothing.
+    pub fn resume_prompt(&mut self, prompt_id: &str, answer: Option<crate::protocol::PromptValue>) -> Result<Execution> {
+        if !self.pending_prompt.as_ref().is_some_and(|pending| pending.request.prompt_id == prompt_id) {
+            return Ok(Execution::Done(InvokeResult::empty()));
+        }
+        let pending = self.pending_prompt.take().expect("checked pending prompt");
+        if pending.invalidated || pending.cancel.as_ref().is_some_and(|cancel| cancel.is_cancelled()) || self.views.get(&pending.view_id).is_none() {
+            return Ok(Execution::Done(InvokeResult::empty()));
+        }
+        let mut result = match pending.action {
+            SessionContinuation::Option { key, menu, cursor } => {
+                if self.views.get(&pending.view_id).and_then(|view| view.menu()) != Some(menu) {
+                    return Ok(Execution::Done(InvokeResult::empty()));
+                }
+                let value = match answer {
+                    Some(crate::protocol::PromptValue::Text(text)) => Some(text),
+                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Id { id })) => Some(id),
+                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Custom { custom })) => Some(custom),
+                    None => None,
+                    _ => return Err(Error::new("Unexpected option answer")),
+                };
+                if let Some(value) = value {
+                    self.views.get_mut(&pending.view_id).and_then(|view| view.menu_mut()).expect("checked menu").set_option(&key, Some(value));
+                    self.menu_rerender(&pending.view_id, cursor)?
+                } else { InvokeResult { keymap: self.keymap_notice(&pending.view_id), ..InvokeResult::empty() } }
+            }
+            SessionContinuation::Command { command_id, action, mut effects } => {
+                let view = self.views.get_mut(&pending.view_id).expect("checked view");
+                let mut ctx = commands::CommandCtx::new(view, &self.repo_path, &self.keymaps, pending.cursor, None, None, None, &crate::ui::NullUi);
+                let outcome = commands::resume_prompt(&mut ctx, action, answer)?;
+                effects.extend(ctx.into_effects());
+                self.finish_command(&pending.view_id, &command_id, pending.cursor, effects, outcome)?
+            }
+        };
+        if let Some(mut prepared) = pending.prepared {
+            prepared.effects.extend(result.effects);
+            result.effects = prepared.effects;
+            if result.keymap.is_none() { result.keymap = prepared.keymap; }
+        }
+        Ok(self.execution(result))
     }
 
     /// Resolve a key inside a menu against its item keys and pending steps.
@@ -783,25 +917,9 @@ impl Session {
                 }
 
                 let request = self.option_prompt(&label, &flag, reader);
-                let answer = match reader {
-                    Reader::Choice => ui.choice(&request)?.map(|answer| match answer {
-                        PromptChoiceAnswer::Id { id } => id,
-                        PromptChoiceAnswer::Custom { custom } => custom,
-                    }),
-                    _ => ui.text(&request)?,
-                };
-                let Some(value) = answer else {
-                    // Cancelling leaves the option as it was, but the pending
-                    // steps were already consumed.
-                    return Ok(InvokeResult {
-                        keymap: self.keymap_notice(view_id),
-                        ..InvokeResult::empty()
-                    });
-                };
-                if let Some(menu) = self.views.get_mut(view_id).and_then(|view| view.menu_mut()) {
-                    menu.set_option(key, Some(value));
-                }
-                self.menu_rerender(view_id, params.cursor)
+                let menu = self.views.get(view_id).and_then(|view| view.menu()).expect("menu option").clone();
+                self.prepare_prompt(view_id, Some(params.cursor), request, SessionContinuation::Option { key: key.to_string(), menu, cursor: params.cursor });
+                Ok(InvokeResult::empty())
             }
             Some(crate::menu::Item::Action { .. }) => {
                 let mut result = self.menu_action(view_id, key, params, ui)?;
@@ -1127,6 +1245,7 @@ impl Session {
         key: Option<String>,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
+        if self.pending_prompt.is_some() && command_id != "common.refresh" { return Ok(prompt_busy()); }
         let view = self.views.get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
         // These handlers consume document coordinates. Menu keys, refresh,
@@ -1218,7 +1337,7 @@ impl Session {
             });
         }
 
-        let (effects, outcome, render) = {
+        let (effects, outcome) = {
             let view = self
                 .views
                 .get_mut(view_id)
@@ -1263,7 +1382,18 @@ impl Session {
             .with_cancel(crate::runner::current_cancel());
             let outcome = (command.run)(&mut ctx)?;
             let effects = ctx.into_effects();
+            (effects, outcome)
+        };
+        self.finish_command(view_id, command.id, cursor, effects, outcome)
+    }
 
+    fn finish_command(&mut self, view_id: &str, command_id: &str, cursor: Option<Cursor>, effects: Vec<Effect>, mut outcome: commands::CommandOutcome) -> Result<InvokeResult> {
+        if let Some((request, action)) = outcome.prompt.take() {
+            self.prepare_prompt(view_id, cursor, request, SessionContinuation::Command { command_id: command_id.to_string(), action, effects });
+            return Ok(InvokeResult::empty());
+        }
+        let render = {
+            let view = self.views.get_mut(view_id).ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
             if outcome.pop
                 || outcome.open_menu.is_some()
                 || outcome.open_view.is_some()
@@ -1271,7 +1401,7 @@ impl Session {
                 || outcome.selected_commits.is_some()
                 || outcome.commit
             {
-                (effects, outcome, None)
+                None
             } else {
                 let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
                 let render = match mode_change {
@@ -1283,7 +1413,7 @@ impl Session {
                     None => Some(if outcome.refresh {
                         match view.refresh_and_render(cursor) {
                             Ok(render) => render,
-                            Err(err) if command.id == "common.refresh" && view.descriptor().kind == ViewKind::Log => {
+                            Err(err) if command_id == "common.refresh" && view.descriptor().kind == ViewKind::Log => {
                                 let effect = Effect::from_error(&err).unwrap_or_else(|| Effect::message(MessageLevel::Error, err.to_string()));
                                 return Ok(InvokeResult { effects: vec![effect], ..InvokeResult::empty() });
                             }
@@ -1293,7 +1423,7 @@ impl Session {
                         view.render(cursor, outcome.cursor)?
                     }),
                 };
-                (effects, outcome, render)
+                render
             }
         };
 
@@ -1510,6 +1640,7 @@ impl Session {
         params: &ViewSetModeParams,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
+        if self.pending_prompt.is_some() { return Ok(prompt_busy()); }
         let current = self
             .views
             .get(&params.view_id)

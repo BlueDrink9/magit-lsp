@@ -12,6 +12,36 @@ use magit_lsp::config::Profile;
 use magit_lsp::protocol::{Effect, MessageLevel, PromptKind};
 use magit_lsp::session::InvokeResult;
 
+#[test]
+fn preflight_rejects_changed_head_index_or_worktree_and_closed_targets() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for change in ["head", "index", "worktree", "closed"] {
+        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        let view = test.view_id().to_string();
+        let step = test.session.start_invoke(&ViewInvokeParams {
+            view_id: view.clone(), command: "commit.create".to_string(), version: None,
+            cursor: None, selection: None, args: None,
+        }).unwrap();
+        let Execution::Prompt(prompt) = step else { panic!("expected preflight"); };
+        match change {
+            "head" => { tmp.git(&["commit", "--allow-empty", "-m", "external"]); }
+            "index" => { tmp.git(&["add", "f.txt"]); }
+            "worktree" => { std::fs::write(tmp.path().join("f.txt"), "external content\n").unwrap(); }
+            "closed" => { test.session.close(&view).unwrap(); }
+            _ => unreachable!(),
+        }
+        let before = tmp.git(&["diff", "--cached"]);
+        let worktree = std::fs::read(tmp.path().join("f.txt")).unwrap();
+        let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap() else { panic!("expected completion"); };
+        assert!(result.commit.is_none(), "{change}");
+        assert_eq!(tmp.git(&["diff", "--cached"]), before, "{change}");
+        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), worktree, "{change}");
+        assert!(!test.session.has_pending_prompt());
+    }
+}
+
 fn message_effects(outcome: &InvokeResult) -> Vec<(&MessageLevel, &str, Option<&str>)> {
     outcome
         .effects

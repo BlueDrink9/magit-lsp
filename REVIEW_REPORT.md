@@ -239,16 +239,19 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A05 — Release session ownership before waiting for prompts** (`src/server.rs:344–365,669–673,1202–1236`)
+- [x] **[P1] A05 — Release session ownership before waiting for prompts** (`src/server.rs:344–365,669–673,1202–1236`)
   - **Problem:** Prompting commands hold the global sessions mutex. An ack/resize can block the reader on that mutex before it reads the prompt response.
   - **Why it matters:** A prompt can deadlock the transport.
-  - **Change:** Split prompting flows into preparation/continuation: record the prompt and stable target, release session ownership, await, then reacquire to apply. Keep map locks out of Git/prompt lifetimes.
+  - **Change:** Split prompting flows into preparation/continuation: record the prompt and stable target, release session ownership, await, then reacquire to apply. Prompt waits hold no session-map lock; Git execution under that lock remains deferred as BUG-READ-1.
   - **Done when:** Prompt responses complete after intervening ack/resize; another repository remains serviceable.
   - **Constraints:** No timeout inflation or global queue workaround.
   - **Category:** merge
   - **Net LOC:** +80
   - **Risk:** high — command continuation ownership.
   - **Verify:** `cargo test --test server_async --test prompts --test commit_preflight`; `make test`; `make ui-test`
+  - **Implementation scope:** `Session::start_invoke` / `start_key` return typed `Execution::Done` or `Prompt`, with exactly one session-owned continuation. The server waits outside ownership, then resumes once; synchronous/ScriptedUi callers drive those same methods. Menu options (including log `=f` paths) bind the menu/options snapshot and close invalidation, not the render version. Commit preflight binds HEAD, index bytes, patches and changed-file contents; discard additionally retains its resolved operation and displayed tree. Free-text commit selection is staged as well. No command replay, closure continuation, async View rewrite or new prompt wire version.
+  - **Safety/limits:** New competing commands are refused readably; ack, resize, close and refresh remain available. Closed/cancelled/disconnected prompts cannot apply. An invalidated closed-view slot remains bounded to one until its answer/disconnect. Repository snapshots are deliberately conservative: unrelated repository changes or an index-cache rewrite can require a retry. Validation is not an atomic transaction against an external Git writer. Global-lock-over-Git/read responsiveness is **not solved** (the BUG-READ-1 test remains ignored); no registry/published-state redesign is claimed.
+  - **Completed evidence (2026-10-27):** Exact gate `cargo test --test server_async --test prompts --test commit_preflight --test views && make test && make ui-test && git diff --check` exited 0: focused suites 47 passed / 1 intentionally ignored; full Rust/Lua/VSCode/keybindings and UI gates passed. Real stdio tests interpose ack/resize/resync before answering, service/mutate a second repository, refuse competing mutations, and prove cancellation/content-change/closed-view/disconnect/shutdown safety. `scripts/ui run tests/ui/scenarios/prompt-transport-responsive.scn` passed both profiles at 100x30 and 80x24; inspected waiting and answered screens (native author prompt, then `git commit --author=Alice`) at `build/ui/prompt-transport-responsive/{standard,vim}-{100x30,80x24}/{waiting,answered}.screen`. All owned UI runs were stopped; the timed-out initial full-gate attempt's remaining run was explicitly stopped before the successful rerun.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 

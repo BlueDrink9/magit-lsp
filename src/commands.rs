@@ -1,9 +1,8 @@
 //! The command registry: every key action is a [`Command`].
 //!
-//! §3.5 makes handlers `async` with a `Ui` handle in R-3.1; until then they are
-//! plain synchronous functions. [`CommandCtx`] carries the view, repo path,
-//! cursor, selection, arguments and effects collector, and is the single place
-//! new capabilities are added so that change stays mechanical.
+//! Handlers synchronously prepare outcomes, including typed prompt actions.
+//! The session owns continuation state; only its driver waits for input.
+//! [`CommandCtx`] carries the view, repository, positional input and effects.
 
 use crate::dispatch;
 use crate::editor::{self, Reply};
@@ -120,8 +119,10 @@ pub struct SelectionRequest {
 }
 
 /// What a handler asks the session to do after it runs.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct CommandOutcome {
+    /// A prepared question and typed action; no handler waits for input.
+    pub prompt: Option<(ViewPromptParams, PromptAction)>,
     /// Re-read the backing state before rendering.
     pub refresh: bool,
     /// A cursor to move to that the old node cannot describe.
@@ -143,6 +144,106 @@ pub struct CommandOutcome {
     /// Spawn `git commit` on a detached worker once this command returns; the
     /// editor bridge keeps Git waiting until the client confirms.
     pub commit: bool,
+}
+
+/// A prepared operation resumed exactly once after the user answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptAction {
+    /// Stage the captured working tree before starting commit.
+    Commit { fingerprint: RepositoryFingerprint, untracked: bool },
+    /// Apply the captured resolution against the displayed patch identities.
+    Discard { fingerprint: RepositoryFingerprint, resolution: dispatch::Resolution, tree: Tree },
+    /// Resolve a revision for the originating selection view.
+    Revision,
+}
+
+/// Content snapshot used to reject external changes during destructive prompts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryFingerprint {
+    status: crate::git::Status,
+    contents: Vec<(String, Option<Vec<u8>>)>,
+    index: Vec<u8>,
+}
+
+impl RepositoryFingerprint {
+    /// Capture HEAD, index bytes, patches and changed file contents.
+    pub fn capture(repo: &GitRepo) -> Result<Self> {
+        let status = repo.status()?;
+        let mut contents = Vec::new();
+        for entry in status.staged.iter().chain(&status.unstaged).chain(&status.untracked) {
+            let path = repo.root().join(&entry.path);
+            let content = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    let mut bytes = vec![b'L'];
+                    bytes.extend_from_slice(std::fs::read_link(&path)?.as_os_str().as_encoded_bytes());
+                    Some(bytes)
+                }
+                Ok(metadata) if metadata.is_dir() => Some(vec![b'D']),
+                Ok(_) => {
+                    let mut bytes = vec![b'F'];
+                    bytes.extend(std::fs::read(&path)?);
+                    Some(bytes)
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error.into()),
+            };
+            contents.push((entry.path.clone(), content));
+        }
+        let dot_git = repo.root().join(".git");
+        let git_dir = if dot_git.is_file() {
+            let text = std::fs::read_to_string(&dot_git)?;
+            let path = text.trim().strip_prefix("gitdir: ").ok_or_else(|| crate::Error::new("Invalid Git directory file"))?;
+            repo.root().join(path)
+        } else { dot_git };
+        let index = match std::fs::read(git_dir.join("index")) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Self { status, contents, index })
+    }
+}
+
+/// Apply a prepared action without replaying command or coordinate resolution.
+pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Option<crate::protocol::PromptValue>) -> Result<CommandOutcome> {
+    use crate::protocol::PromptValue;
+    let Some(answer) = answer else { return Ok(CommandOutcome::default()); };
+    match action {
+        PromptAction::Commit { fingerprint, untracked } => {
+            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if RepositoryFingerprint::capture(&repo)? != fingerprint {
+                ctx.info("Repository changed while the prompt was open; try again");
+                return Ok(CommandOutcome::default());
+            }
+            ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUnstaged)?);
+            if untracked { ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUntracked)?); }
+            ctx.info("Committing…");
+            Ok(CommandOutcome { commit: true, ..Default::default() })
+        }
+        PromptAction::Discard { fingerprint, resolution, tree } => {
+            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if RepositoryFingerprint::capture(&repo)? != fingerprint {
+                ctx.info("Repository changed while the prompt was open; nothing discarded");
+                return Ok(CommandOutcome::default());
+            }
+            let effects = match resolution {
+                dispatch::Resolution::DiscardSelection { start, end } => execute_displayed_selection(&repo, &tree, start, end, false, true)?,
+                _ => dispatch::execute(&repo, &resolution, &[])?,
+            };
+            ctx.extend(effects);
+            Ok(CommandOutcome { refresh: true, ..Default::default() })
+        }
+        PromptAction::Revision => {
+            let PromptValue::Text(revision) = answer else { return Err(crate::Error::new("Expected a revision")); };
+            let oid = match GitRepo::open(ctx.repo_path).and_then(|repo| repo.resolve_commit(revision.trim())) {
+                Ok(oid) if !revision.trim().is_empty() => oid,
+                _ => { ctx.info(format!("Invalid commit revision: {}", revision.trim())); return Ok(CommandOutcome::default()); }
+            };
+            Ok(CommandOutcome { selected_commits: Some(vec![oid]), ..Default::default() })
+        }
+    }
 }
 
 /// Everything a command handler may touch, plus the effects it collected.
@@ -744,26 +845,10 @@ fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             min: None,
             max: None,
         };
-        match ctx.ui.confirm(&prompt) {
-            Ok(Some(true)) => {
-                let effects =
-                    run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUnstaged)?;
-                ctx.extend(effects);
-                if !status.untracked.is_empty() {
-                    let effects =
-                        run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUntracked)?;
-                    ctx.extend(effects);
-                }
-            }
-            // "No" and a dismissed prompt both cancel quietly.
-            Ok(_) => return Ok(CommandOutcome::default()),
-            // A non-interactive caller cannot answer; say why instead of
-            // starting a commit with nothing staged.
-            Err(error) => {
-                ctx.info(error.to_string());
-                return Ok(CommandOutcome::default());
-            }
-        }
+        return Ok(CommandOutcome { prompt: Some((prompt, PromptAction::Commit {
+            fingerprint: RepositoryFingerprint::capture(&repo)?,
+            untracked: !status.untracked.is_empty(),
+        })), ..Default::default() });
     }
     ctx.info("Committing…");
     Ok(CommandOutcome {
@@ -860,19 +945,7 @@ fn enter_revision(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         min: None,
         max: None,
     };
-    let Some(revision) = ctx.ui.text(&prompt)? else { return Ok(CommandOutcome::default()); };
-    if revision.trim().is_empty() {
-        ctx.info("Enter a valid commit revision");
-        return Ok(CommandOutcome::default());
-    }
-    let oid = match GitRepo::open(ctx.repo_path).and_then(|repo| repo.resolve_commit(revision.trim())) {
-        Ok(oid) => oid,
-        Err(_) => {
-            ctx.info(format!("Invalid commit revision: {}", revision.trim()));
-            return Ok(CommandOutcome::default());
-        }
-    };
-    Ok(CommandOutcome { selected_commits: Some(vec![oid]), ..Default::default() })
+    Ok(CommandOutcome { prompt: Some((prompt, PromptAction::Revision)), ..Default::default() })
 }
 
 /// Drop every record from the process log and re-render the view.
@@ -1153,16 +1226,16 @@ fn stage_or_unstage(
         start: selection.start_line as u32,
         end: selection.end_line as u32,
     });
-    let effects = stage_or_unstage_at(
+    let (effects, prompt) = stage_or_unstage_at(
         ctx.view,
         ctx.repo_path,
         command,
         ctx.cursor,
         selection,
-        ctx.ui,
     )?;
     ctx.extend(effects);
     Ok(CommandOutcome {
+        prompt,
         refresh: true,
         ..Default::default()
     })
@@ -1222,8 +1295,7 @@ fn stage_or_unstage_at(
     command: dispatch::Command,
     cursor: Option<Cursor>,
     selection: Option<dispatch::LineRange>,
-    ui: &dyn crate::ui::PromptUi,
-) -> Result<Vec<Effect>> {
+) -> Result<(Vec<Effect>, Option<(ViewPromptParams, PromptAction)>)> {
     // Resolve against the exact request tree; actions are addressed by its
     // node identities, never by index in a different retained render.
     let source = view.command_source_tree().unwrap_or_else(|| view.tree());
@@ -1233,20 +1305,20 @@ fn stage_or_unstage_at(
         dispatch::resolve(command, dispatch::NodeKind::Other, Some(range))
     } else {
         let Some(cursor) = cursor else {
-            return Ok(vec![Effect::message(
+            return Ok((vec![Effect::message(
                 MessageLevel::Info,
                 "Place the cursor on a change to stage or unstage.",
-            )]);
+            )], None));
         };
         let Some(node) = source
             .line_nodes
             .get(cursor.line)
             .and_then(|line| source.node(&line.node))
         else {
-            return Ok(vec![Effect::message(
+            return Ok((vec![Effect::message(
                 MessageLevel::Info,
                 "No change under the cursor.",
-            )]);
+            )], None));
         };
 
         let current = view.tree();
@@ -1258,20 +1330,20 @@ fn stage_or_unstage_at(
             match re_resolve(current, node) {
                 Some(node) => node,
                 None => {
-                    return Ok(vec![Effect::message(
+                    return Ok((vec![Effect::message(
                         MessageLevel::Warn,
                         errors::HUNK_CHANGED,
-                    )])
+                    )], None))
                 }
             }
         };
 
         // An untracked file has no index entry to remove.
         if command == dispatch::Command::Unstage && node.section.as_deref() == Some("untracked") {
-            return Ok(vec![Effect::message(
+            return Ok((vec![Effect::message(
                 MessageLevel::Info,
                 dispatch::NOTHING_TO_UNSTAGE,
-            )]);
+            )], None));
         }
 
         dispatch::resolve(command, dispatch_target(node), None)
@@ -1314,11 +1386,11 @@ fn stage_or_unstage_at(
             min: None,
             max: None,
         };
-        if ui.confirm(&prompt)? != Some(true) {
-            return Ok(Vec::new());
-        }
+        return Ok((Vec::new(), Some((prompt, PromptAction::Discard {
+            fingerprint: RepositoryFingerprint::capture(&repo)?, resolution, tree: source.clone(),
+        }))));
     }
-    match &resolution {
+    let effects = match &resolution {
         dispatch::Resolution::Selection { start, end, reverse } => {
             execute_displayed_selection(&repo, source, *start, *end, *reverse, false)
         }
@@ -1326,7 +1398,8 @@ fn stage_or_unstage_at(
             execute_displayed_selection(&repo, source, *start, *end, false, true)
         }
         _ => dispatch::execute(&repo, &resolution, &[]),
-    }
+    }?;
+    Ok((effects, None))
 }
 
 /// Run a whole-section operation against `repo_path`.

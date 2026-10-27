@@ -10,6 +10,28 @@ use magit_lsp::errors;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection};
 
 #[test]
+fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", lines(40).to_string())]).modify_two_hunks().build();
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_marker("f.txt", '+');
+    let view = test.view_id().to_string();
+    let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
+        view_id: view.clone(), command: "status.discard".to_string(), version: Some(initial.version),
+        cursor: Some(Cursor { line, column: 0 }), selection: None, args: None,
+    }).unwrap() else { panic!("discard prompt"); };
+    test.session.resize(&view, WIDE_VIEWPORT).unwrap();
+    let render = test.session.refresh(&view).unwrap().unwrap();
+    test.session.ack(&view, render.version).unwrap();
+    let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap() else { panic!("discard complete"); };
+    assert!(result.effects.is_empty(), "{:?}", result.effects);
+    assert_eq!(hunk_count(&tmp.git(&["diff", "--", "f.txt"])), 1);
+    assert!(cached_diff(tmp.path()).is_empty());
+}
+
+#[test]
 fn staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

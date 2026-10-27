@@ -1,0 +1,19 @@
+# A05: real input() prompt, then ack/resize/resync BEFORE its answer.
+fixture: modified-two-files
+---
+keys: c
+wait
+expect screen contains "Commit"
+keys: = A
+wait prompt
+snapshot: waiting
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "luaeval('(function() for _,v in pairs(require(\"magit-lsp.view\").views) do if v.kind:match(\"^menu\") then local before=v.version; local c=vim.lsp.get_client_by_id(v.client_id); c:notify(\"view/rendered\",{viewId=v.id,version=before}); c:notify(\"view/resize\",{viewId=v.id,cols=60,rows=24}); local r=c:request_sync(\"view/resync\",{viewId=v.id},2000); assert(r and not r.err and r.result.version > before); return true end end error(\"No menu\") end)()')")" = true
+keys: Alice Enter
+wait
+expect screen contains "--author=Alice"
+expect pending == ""
+expect windows.floating == 1
+snapshot: answered
+keys: q
+wait
+expect windows.floating == 0

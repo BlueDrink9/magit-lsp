@@ -5,7 +5,7 @@ use crate::git::{self, GitRepo};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
-use crate::session::{InvokeResult, Session};
+use crate::session::{Execution, InvokeResult, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
@@ -22,7 +22,7 @@ use lsp_types::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
@@ -420,6 +420,7 @@ fn dynamic_delivery(client: &Arc<Mutex<ClientCaps>>) -> bool {
 /// server, so the bridge holds a *weak* sender: it must never keep the writer
 /// channel (and with it the server process) alive.
 struct PromptBridge {
+    closed: AtomicBool,
     sender: mpsc::WeakUnboundedSender<Message>,
     /// Questions waiting for an answer, keyed by prompt id.
     pending: Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>,
@@ -430,6 +431,7 @@ struct PromptBridge {
 impl PromptBridge {
     fn new(sender: &mpsc::UnboundedSender<Message>) -> Self {
         Self {
+            closed: AtomicBool::new(false),
             sender: sender.downgrade(),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
@@ -448,7 +450,11 @@ impl PromptBridge {
             ..request.clone()
         };
         let (tx, rx) = std_mpsc::channel();
-        self.lock().insert(prompt_id.clone(), tx);
+        {
+            let mut pending = self.lock();
+            if self.closed.load(Ordering::SeqCst) { return None; }
+            pending.insert(prompt_id.clone(), tx);
+        }
 
         let sent = match self.sender.upgrade() {
             Some(sender) => sender
@@ -460,7 +466,17 @@ impl PromptBridge {
             None => false,
         };
 
-        let answer = if sent { rx.recv().ok() } else { None };
+        let cancel = runner::current_cancel();
+        let answer = if sent {
+            loop {
+                if cancel.as_ref().is_some_and(|handle| handle.is_cancelled()) { break None; }
+                match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(answer) => break Some(answer),
+                    Err(std_mpsc::RecvTimeoutError::Disconnected) => break None,
+                    Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        } else { None };
 
         self.lock().remove(&prompt_id);
         answer
@@ -490,6 +506,12 @@ impl PromptBridge {
         self.pending
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn close(&self) {
+        let mut pending = self.lock();
+        self.closed.store(true, Ordering::SeqCst);
+        pending.clear();
     }
 }
 
@@ -741,6 +763,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
             Ok(Some(Message::Request(request))) => {
                 if request.method == "shutdown" {
                     shutdown_requested = true;
+                    shared.prompts.close();
                     // Earlier requests must finish (and answer) before the
                     // shutdown response, even if the client pipelined them.
                     while handlers.join_next().await.is_some() {}
@@ -764,6 +787,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     // answered, so abort it and let the worker (and Git)
                     // finish instead of hanging (§3.10 step 7).
                     editor::registry().abort_all();
+                    shared.prompts.close();
                     break if shutdown_requested { 0 } else { 1 };
                 }
                 // Acks and resizes update session state; they never answer.
@@ -802,9 +826,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // edit must abort so Git never hangs (§3.10 step 7), and the
                 // commit worker can then finish and release the writer.
                 editor::registry().abort_all();
+                shared.prompts.close();
                 break 0;
             }
             Err(error) => {
+                shared.prompts.close();
                 return Err(Error::new(format!("failed to read LSP message: {error}")));
             }
         }
@@ -1314,9 +1340,9 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let session = sessions
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let ui = ServerUi::new(shared);
-    let outcome = session.invoke_ui(&p, &ui)?;
+    let step = session.start_invoke(&p)?;
     drop(sessions);
+    let outcome = drive_execution(shared, &repo, step)?;
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
@@ -1335,9 +1361,9 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .get_mut(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     session.set_keymaps(keymaps);
-    let ui = ServerUi::new(shared);
-    let mut outcome = session.key_ui(&p, &ui)?;
+    let step = session.start_key(&p)?;
     drop(sessions);
+    let mut outcome = drive_execution(shared, &repo, step)?;
     if shared.delivery() == KeymapDelivery::ForwardAll
         && matches!(
             outcome.effects.as_slice(),
@@ -1347,6 +1373,30 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         outcome.effects = vec![Effect::PassThrough { key: p.key }];
     }
     Ok(dispatched_outcome(shared, &repo, outcome)?)
+}
+
+/// Wait with no session ownership; reacquire only to validate and apply an answer.
+fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<InvokeResult> {
+    loop {
+        match step {
+            Execution::Done(result) => return Ok(result),
+            Execution::Prompt(request) => {
+                let answer = crate::ui::answer(&ServerUi::new(shared), &request);
+                let mut sessions = shared.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let session = sessions.get_mut(repo).ok_or_else(|| Error::new("Prompt session closed"))?;
+                match answer {
+                    Ok(answer) => {
+                        let answer = if shared.prompts.closed.load(Ordering::SeqCst) { None } else { answer };
+                        step = session.resume_prompt(&request.prompt_id, answer)?;
+                    }
+                    Err(error) => {
+                        let _ = session.resume_prompt(&request.prompt_id, None);
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Handle `view/setMode`: switch between interactive and text mode.
@@ -1676,6 +1726,14 @@ fn is_request_method(method: &str) -> bool {
 
 /// The repository a mutation must lock; only the staging commands write.
 fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<String> {
+    // Prompting work retains its ordering turn, but new commands must reach
+    // the session's readable refusal rather than queue behind human input.
+    if matches!(method, ViewKeyRequest::METHOD | ViewInvokeRequest::METHOD) {
+        if let Some(repo) = params.get("viewId").and_then(Value::as_str).and_then(|id| shared.repo_for_view(id)) {
+            let sessions = shared.sessions.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if sessions.get(&repo).is_some_and(Session::has_pending_prompt) { return None; }
+        }
+    }
     // Keys run any command, so serialise every key press with its repo's views.
     if method == ViewKeyRequest::METHOD {
         let view_id = params.get("viewId").and_then(Value::as_str)?;
