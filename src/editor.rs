@@ -20,6 +20,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock};
 
+/// Managed commit-draft core; wire dispatch and client cutover are separate.
+#[cfg(unix)]
+pub mod draft;
+
 /// Environment variable carrying the bridge socket path to Git and the helper.
 pub const SOCKET_ENV: &str = "MAGIT_LSP_SOCKET";
 /// Environment variable carrying the pending edit id to Git and the helper.

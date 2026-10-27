@@ -84,6 +84,17 @@ pub enum EditDocumentMode {
     RealFile,
 }
 
+/// Managed-draft finish intent (§3.10); not yet dispatched on the production wire.
+/// LSP didClose is detach only and never supplies either intent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DraftFinishReason {
+    /// Explicit confirm must name a saved checkpoint of the current live version.
+    Confirm,
+    /// Native Save/Discard selected the saved checkpoint, possibly older than live.
+    NormalClose,
+}
+
 impl Effect {
     /// Create a plain message effect with no hint or detail.
     pub fn message(level: MessageLevel, text: impl Into<String>) -> Self {

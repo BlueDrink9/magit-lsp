@@ -235,6 +235,33 @@ impl GitRepo {
         &self.root
     }
 
+    /// Resolve COMMIT_EDITMSG in this worktree's actual, canonical Git directory.
+    /// Linked worktrees must not use the common repository's message file.
+    pub fn commit_message_path(&self) -> Result<PathBuf> {
+        let args = ["rev-parse", "--absolute-git-dir"];
+        let mut command = git_command(&self.root, &args, Stdio::null(), &[]);
+        let out = runner::run_owned(&mut command, None)
+            .map_err(|error| Error::new(format!("Cannot resolve editor directory: {error}")))?;
+        let status = out.status.ok_or_else(|| Error::new("Editor directory lookup was cancelled"))?;
+        if !status.success() {
+            return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr)));
+        }
+        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+            return Err(Error::new("Editor directory lookup returned incomplete output"));
+        }
+        let output = std::str::from_utf8(&out.stdout)
+            .map_err(|_| Error::new("Git editor directory is not UTF-8"))?;
+        let path = output
+            .strip_suffix('\n')
+            .filter(|path| !path.is_empty() && !path.contains(['\n', '\r', '\0']))
+            .ok_or_else(|| Error::new("Git returned an invalid editor directory"))?;
+        let path = Path::new(path);
+        if !path.is_absolute() {
+            return Err(Error::new("Git returned a relative editor directory"));
+        }
+        Ok(std::fs::canonicalize(path)?.join("COMMIT_EDITMSG"))
+    }
+
     /// Return a coherent page of log records; filtering values are individual
     /// argv entries and paths are separated from revisions by `--`.
     pub fn log(&self, options: &GitLogOptions) -> Result<GitLogPage> {
