@@ -3,7 +3,6 @@ use crate::runner;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -70,7 +69,18 @@ pub struct GitLogOptions {
 
 impl Default for GitLogOptions {
     fn default() -> Self {
-        Self { page_size: 100, graph: true, decorate: true, author: None, since: None, grep: None, pickaxe: None, pickaxe_regex: None, paths: Vec::new(), revision: None }
+        Self {
+            page_size: 100,
+            graph: true,
+            decorate: true,
+            author: None,
+            since: None,
+            grep: None,
+            pickaxe: None,
+            pickaxe_regex: None,
+            paths: Vec::new(),
+            revision: None,
+        }
     }
 }
 
@@ -577,7 +587,9 @@ impl GitRepo {
 
     /// Discard identity-resolved operations using verified fresh diffs.
     pub fn discard_selection_ops(&self, files: &[FileLayout], ops: &[SelectionOp]) -> Result<bool> {
-        if ops.is_empty() { return Ok(false); }
+        if ops.is_empty() {
+            return Ok(false);
+        }
         for file in files {
             let file_ops: Vec<&SelectionOp> =
                 ops.iter().filter(|op| op.path() == file.path).collect();
@@ -683,8 +695,15 @@ impl GitRepo {
     }
 
     /// Apply identity-resolved operations using verified fresh diffs.
-    pub fn apply_selection_ops(&self, files: &[FileLayout], ops: &[SelectionOp], reverse: bool) -> Result<bool> {
-        if ops.is_empty() { return Ok(false); }
+    pub fn apply_selection_ops(
+        &self,
+        files: &[FileLayout],
+        ops: &[SelectionOp],
+        reverse: bool,
+    ) -> Result<bool> {
+        if ops.is_empty() {
+            return Ok(false);
+        }
         for file in files {
             let file_ops: Vec<&SelectionOp> = ops
                 .iter()
@@ -893,43 +912,27 @@ impl GitRepo {
         // The patch body is user content: only ever visible at trace level.
         tracing::trace!(patch = %patch_text, "git stdin");
 
-        let mut child = git_command(&self.root, &args, Stdio::piped(), &[])
-            .spawn()
-            .map_err(|e| Error::new(format!("failed to spawn git apply: {e}")))?;
-        let cancel = runner::current_cancel();
-        if let Some(handle) = &cancel {
-            handle.register_child(&mut child);
-        }
-        let written = child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| Error::new("failed to open stdin"))
-            .and_then(|stdin| stdin.write_all(patch_text.as_bytes()).map_err(Error::from));
-        // Even if Git closes stdin early, preserve its original exit/stderr.
-        drop(child.stdin.take());
-        let out = child.wait_with_output();
-        if let Some(handle) = &cancel {
-            handle.clear_child();
-        }
-        let out = out?;
-        log_finished(
-            &self.root,
-            &args,
-            out.status,
-            started.elapsed(),
-            &out.stdout,
-            &out.stderr,
-        );
-        if !out.status.success() {
-            let mut failure = GitFailure::from_output(
-                &args,
-                out.status,
-                &out.stderr,
-            );
-            failure.warning = warn_if_git_is_below_recommendation(&self.root, &[], &out.status);
+        let mut command = git_command(&self.root, &args, Stdio::null(), &[]);
+        let out = runner::run_owned(&mut command, Some(patch_text.as_bytes()))
+            .map_err(|e| Error::new(format!("failed to run git apply: {e}")))?;
+        let Some(status) = out.status else {
+            return Err(Error::new("git apply was cancelled; process reap is incomplete"));
+        };
+        log_finished(&self.root, &args, status, started.elapsed(), &out.stdout, &out.stderr);
+        if !status.success() {
+            let mut failure = GitFailure::from_output(&args, status, &out.stderr);
+            failure.warning = warn_if_git_is_below_recommendation(&self.root, &[], &status);
             return Err(Error::git(failure));
         }
-        written?;
+        if out.outcome.cancelled {
+            return Err(Error::new("git apply was cancelled after completing successfully"));
+        }
+        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+            return Err(Error::new("git apply completed with incomplete process output"));
+        }
+        if out.outcome.stdin_error {
+            return Err(Error::new("failed to write patch to git apply stdin"));
+        }
         Ok(())
     }
 
@@ -944,9 +947,11 @@ impl GitRepo {
         let mut commit_args = vec!["commit"];
         commit_args.extend_from_slice(args);
         self.run_with_env(&commit_args, env)?;
-        Ok(runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]))?
-            .trim_end()
-            .to_string())
+        Ok(
+            runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]))?
+                .trim_end()
+                .to_string(),
+        )
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {
@@ -964,32 +969,26 @@ impl GitRepo {
     fn command_in_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<String> {
         let started = Instant::now();
         tracing::debug!(cwd = %cwd.display(), args = ?args, "git");
-        let mut child = git_command(cwd, args, Stdio::null(), env)
-            .spawn()
+        let mut command = git_command(cwd, args, Stdio::null(), env);
+        let out = runner::run_owned(&mut command, None)
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
-        let pid = child.id();
-        tracing::debug!(pid, cwd = %cwd.display(), args = ?args, "git child");
-        let cancel = runner::current_cancel();
-        if let Some(handle) = &cancel {
-            handle.register_child(&mut child);
-        }
-        let out = child.wait_with_output();
-        if let Some(handle) = &cancel {
-            handle.clear_child();
-        }
-        let out = out.map_err(|e| Error::new(format!("failed to wait for git: {e}")))?;
-        log_finished(
-            cwd,
-            args,
-            out.status,
-            started.elapsed(),
-            &out.stdout,
-            &out.stderr,
-        );
-        if !out.status.success() {
-            let mut failure = GitFailure::from_output(args, out.status, &out.stderr);
-            failure.warning = warn_if_git_is_below_recommendation(cwd, env, &out.status);
+        let Some(status) = out.status else {
+            return Err(Error::new("git command was cancelled; process reap is incomplete"));
+        };
+        log_finished(cwd, args, status, started.elapsed(), &out.stdout, &out.stderr);
+        if !status.success() {
+            let mut failure = GitFailure::from_output(args, status, &out.stderr);
+            failure.warning = warn_if_git_is_below_recommendation(cwd, env, &status);
             return Err(Error::git(failure));
+        }
+        if out.outcome.cancelled {
+            return Err(Error::new("git command was cancelled after completing successfully"));
+        }
+        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+            return Err(Error::new("git command completed with incomplete output"));
+        }
+        if out.outcome.stdin_error {
+            return Err(Error::new("git command stdin write failed"));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
@@ -1051,7 +1050,11 @@ fn warn_if_git_is_below_recommendation(
         return None;
     };
     if compare_versions(&installed_version, &recommended_version).is_lt() {
-        let warning = format!("Git {version} is older than the recommended version {}. Upgrade Git to at least {}.", RECOMMENDED_GIT_VERSION.trim(), RECOMMENDED_GIT_VERSION.trim());
+        let warning = format!(
+            "Git {version} is older than the recommended version {}. Upgrade Git to at least {}.",
+            RECOMMENDED_GIT_VERSION.trim(),
+            RECOMMENDED_GIT_VERSION.trim()
+        );
         tracing::warn!(
             installed = %installed.trim(),
             recommended = RECOMMENDED_GIT_VERSION.trim(),
