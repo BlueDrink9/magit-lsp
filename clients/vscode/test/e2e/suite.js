@@ -274,6 +274,130 @@ async function run() {
     );
     const firstShot = shot('r-vs-2-first-open.png');
 
+    // Isolate native selection mutations before unrelated widgets alter focus.
+    if (process.env.MAGIT_VSCODE_A34_ONLY === '1') {
+      const { store } = require(`${extension.extensionPath}/lib/store`);
+      const git = (...args) => execFileSync('git', ['-C', repo, ...args]);
+      const file = path.join(repo, 'tracked.txt');
+      const prefix = 'head\ncontext\n';
+      const unchanged = `${prefix}tail\n`;
+      const changed = `${prefix}FIRST\nSECOND\nGUARD\ntail\n`;
+      const cases = [];
+      const screenshots = [];
+      const paintedStatus = () => {
+        const lines = cdp('Runtime.evaluate', {
+          expression: `Array.from(document.querySelectorAll('.monaco-editor .view-lines .view-line'))
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+            .map(line => line.textContent.replace(/\\u00a0/g, ' ').trim()).filter(Boolean)`,
+          returnByValue: true,
+        }).result.value;
+        return JSON.stringify(lines) === JSON.stringify(editor.document.getText().split('\n')
+          .map((line) => line.trim()).filter(Boolean));
+      };
+      const snapshot = () => ({
+        anchor: [editor.selection.anchor.line, editor.selection.anchor.character],
+        active: [editor.selection.active.line, editor.selection.active.character],
+        start: [editor.selection.start.line, editor.selection.start.character],
+        end: [editor.selection.end.line, editor.selection.end.character],
+        visibleRanges: editor.visibleRanges.map((range) => [range.start.line, range.end.line]),
+        text: editor.document.getText(), focus: observe(),
+      });
+      for (const deletion of [false, true]) {
+        const base = deletion ? changed : unchanged;
+        const work = deletion ? unchanged : changed;
+        fs.writeFileSync(file, base);
+        git('add', 'tracked.txt');
+        git('-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+          'commit', '--allow-empty', '-qm', `A34 ${deletion ? 'deletion' : 'addition'}`);
+        for (const unstage of [false, true]) {
+          for (const nonzero of [false, true]) {
+            for (const method of ['view/key', 'view/invoke']) {
+              const reverse = (method === 'view/invoke') !== unstage;
+              const name = `a34-${deletion ? 'delete' : 'add'}-${unstage ? 'unstage' : 'stage'}-${nonzero ? 'nonzero' : 'colzero'}-${method.slice(5)}`;
+              fs.writeFileSync(file, base);
+              git('add', 'tracked.txt');
+              fs.writeFileSync(file, work);
+              if (unstage) git('add', 'tracked.txt');
+              editor.selection = new vscode.Selection(0, 0, 0, 0);
+              await vscode.commands.executeCommand('magit.invoke', { command: 'common.refresh' });
+              let hunk;
+              await waitFor(async () => {
+                const symbols = await store.client.sendRequest('textDocument/documentSymbol', {
+                  textDocument: { uri: store.views.get(uri.authority).descriptor.uri },
+                });
+                fs.writeFileSync(`${evidence}/a34-symbols.json`, JSON.stringify(symbols, null, 2));
+                const files = symbols.filter((symbol) => symbol.name ===
+                  (unstage ? 'Staged changes' : 'Unstaged changes')).flatMap((symbol) => symbol.children || []);
+                hunk = files.find((symbol) => symbol.name.includes('tracked.txt'))?.children?.[0];
+                const first = hunk?.range.start.line + 3; // header + two known fixture context rows
+                return hunk && ['FIRST', 'SECOND', 'GUARD'].every((line, offset) =>
+                  editor.document.lineAt(first + offset).text === `    ${deletion ? '-' : '+'}${line}`);
+              }, `${name} acknowledged structured fixture`);
+              const first = hunk.range.start.line + 3;
+              assert(hunk.range.end.line >= first + 2);
+              // Include a context row and stop at the adjacent SECOND boundary.
+              const start = [first - 1, 0];
+              const end = [first + 1, nonzero ? 1 : 0];
+              const anchor = reverse ? end : start;
+              const active = reverse ? start : end;
+              await vscode.window.showTextDocument(editor.document, { preview: false });
+              await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+              editor.selection = new vscode.Selection(new vscode.Position(...anchor), new vscode.Position(...active));
+              editor.revealRange(new vscode.Range(first - 1, 0, first + 2, 0), vscode.TextEditorRevealType.InCenter);
+              await waitFor(() => observe().editorFocused && editor.visibleRanges.some((range) =>
+                range.start.line <= first - 1 && range.end.line >= first + 2), `${name} visible selection`);
+              assert(editor.selection instanceof vscode.Selection);
+              const before = snapshot();
+              assert.deepEqual(before.anchor, anchor);
+              assert.deepEqual(before.active, active, 'active cursor is independent of ordered range');
+              assert.deepEqual(before.start, start);
+              assert.deepEqual(before.end, end);
+              await waitFor(paintedStatus, `${name} painted pre-mutation status`);
+              screenshots.push(shot(`${name}-before.png`));
+              const offset = requests.length;
+              const version = store.views.get(uri.authority).version;
+              const command = unstage ? 'status.unstage' : 'status.stage';
+              const key = unstage ? 'u' : 's';
+              await vscode.commands.executeCommand(method === 'view/key' ? 'magit.key' : 'magit.invoke',
+                method === 'view/key' ? { key } : { command });
+              const sent = requests.slice(offset).filter((request) =>
+                request.method === 'view/key' || request.method === 'view/invoke');
+              assert.equal(sent.length, 1);
+              assert.deepEqual(sent[0], { method, params: {
+                viewId: uri.authority, version,
+                ...(method === 'view/key' ? { key, editorMode: 'visual' } : { command }),
+                cursor: { line: active[0], column: active[1] },
+                selection: { startLine: start[0], endLine: first + (nonzero ? 1 : 0) },
+              } });
+              const selected = nonzero ? ['FIRST', 'SECOND'] : ['FIRST'];
+              const retained = ['FIRST', 'SECOND', 'GUARD'].filter((line) => {
+                const applied = unstage ? !selected.includes(line) : selected.includes(line);
+                return deletion ? !applied : applied;
+              });
+              const expected = `${prefix}${retained.length ? `${retained.join('\n')}\n` : ''}tail\n`;
+              assert.deepEqual(git('show', ':tracked.txt'), Buffer.from(expected), `${name} exact index with untouched neighbors`);
+              assert.deepEqual(fs.readFileSync(file), Buffer.from(work), `${name} untouched worktree`);
+              await waitFor(() => store.views.get(uri.authority).version > version &&
+                editor.document.getText().includes('Staged changes (1)') &&
+                editor.document.getText().includes('Unstaged changes (1)') &&
+                editor.document.getText() === store.views.get(uri.authority).lines.join('\n'), `${name} visible resulting status`);
+              const after = snapshot();
+              assert(after.focus.editorFocused, 'result remains in native editor');
+              await waitFor(paintedStatus, `${name} painted resulting status`);
+              screenshots.push(shot(`${name}-after.png`));
+              cases.push({ name, deletion, unstage, nonzero, reverse, hunk, before, request: sent[0], after,
+                bytes: { head: git('show', 'HEAD:tracked.txt').toString('base64'),
+                  index: git('show', ':tracked.txt').toString('base64'), worktree: fs.readFileSync(file).toString('base64'),
+                  expectedIndex: Buffer.from(expected).toString('base64') } });
+            }
+          }
+        }
+      }
+      fs.writeFileSync(`${evidence}/a34-evidence.json`, JSON.stringify({ gate: 'A34', cases, screenshots }, null, 2));
+      console.log(`PASS native A34 selections (${cases.length} exact request/index/worktree cases)`);
+      return;
+    }
+
     // Native A33 uses real commit/dispatch metadata in the owned Vim fixture.
     if (process.env.MAGIT_VSCODE_A33_ONLY === '1') {
       const { store } = require(`${extension.extensionPath}/lib/store`);
