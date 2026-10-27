@@ -87,7 +87,7 @@ function activate(context) {
   client.onNotification('view/render', requests.applyRender);
   client.onNotification('view/prompt', requests.handlePrompt);
   client.onNotification('view/effects', (params) => {
-    void effects.applyEffects(params && params.effects);
+    void effects.applyEffects(params && params.effects, store.activeViewId);
   });
   store.clientReady = client.start().then(() => {
     store.semanticChanged = semantic.register(

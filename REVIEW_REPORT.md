@@ -255,15 +255,18 @@ client, and real-Git acceptance gates still require their stated verification.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- [ ] **[P1] A06 — Handle the quit effect in VSCode** (`clients/vscode/extension.js:749–778`)
+- [x] **[P1] A06 — Handle the quit effect in VSCode** (`clients/vscode/lib/effects.js`)
   - **Problem:** Server `quit` falls into the JS unknown-effect branch, leaving client views alive after server views clear.
   - **Why it matters:** Broken root-quit lifecycle.
   - **Change:** Close/remove the affected session's views, dispose QuickPicks and reset contexts without recursive close requests.
   - **Done when:** Root quit leaves no visible/stored Magit view and reopening works.
   - **Constraints:** Preserve nested pop and unrelated repositories.
+  - **Implementation/mock evidence (2026-10-27):** Root ownership is attached to the status view and inherited by effect-created child views. Key/invoke effect dispatch carries its source view id; detached notifications use the active view. `Quit` removes only that root's view/URI/pending-render state, disposes menu QuickPicks, closes matching native editor tabs, and resets contexts only when the closed root held focus; it sends no `view/close`. `make vscode-test && npm --prefix clients/vscode run test:integration && make test && git diff --check` exited 0. Registered-command tests verify tab closure through the VSCode API seam, no recursive close, cleared state and reopening. Real-server Node integration verifies root quit/reopen and that a second repository remains stored while the other root quits. These use mocked VSCode and do not complete the native UI gate.
+  - **Final native/full gate (2026-10-27):** The single final `npm --prefix clients/vscode run test:e2e && make test && git diff --check` exited 0. The default full native suite reached A06 without bypassing Enter/folding assertions. Inspected `/tmp/opencode/vscode-review-P45Bx8/a06-menu-before-quit.png`, `a06-quit.png`, and `a06-reopened.png`: Commit QuickPick painted before quit, dismissed over the real tracked file after quit with the unrelated Status tab retained, and reopened Status visibly rendered alongside that tab. `a06-evidence.json` confirms removed views `v1` and `v1:menu.commit`, preserved root `v2`, reopened root `v3`, no recursive `view/close`, no real-file Magit key dispatch, and physical `g` dispatching `common.refresh` on `v3`. `make test` reported `ok: build`, `rust`, `lua`, `vscode`, and `keybindings`. Inspected invocation producers: the suite already supplies the fourth `info` argument; both production callers (`commands.js`, `edits.js`) supply `info.cursor`, so no fallback or producer change was needed. No editor/runner for this isolated directory remained; other-session test processes were observed and left untouched.
   - **Category:** simplify
   - **Net LOC:** +25
   - **Risk:** medium — document lifecycle.
+  - **Native A06 scenario:** The default suite includes the A06 native assertions after the existing UI scenarios. The runner supports `MAGIT_VSCODE_A06_ONLY=1` to execute that same A06 scenario independently when the unrelated Tab-fold scenario prevents reaching it.
   - **Verify:** `make vscode-test`; `npm --prefix clients/vscode run test:integration` with quit/reopen coverage.
   - **Parallel:** serial
   - **Behaviour lost:** none.

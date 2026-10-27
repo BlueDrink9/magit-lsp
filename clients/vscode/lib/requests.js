@@ -38,7 +38,7 @@ async function press(viewId, key, info) {
   try {
     await store.clientReady;
     const response = await client.sendRequest('view/key', params);
-    await effects.applyEffects(response && response.effects);
+    await effects.applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/key ${key} failed: ${message(error)}`);
     vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);
@@ -76,7 +76,7 @@ async function invoke(viewId, command, args, info) {
   try {
     await store.clientReady;
     const response = await client.sendRequest('view/invoke', params);
-    await effects.applyEffects(response && response.effects);
+    await effects.applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/invoke ${command} failed: ${message(error)}`);
     vscode.window.showWarningMessage(`magit-lsp: ${message(error)}`);

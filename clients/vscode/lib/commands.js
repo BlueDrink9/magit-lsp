@@ -75,6 +75,7 @@ async function openStatus() {
       });
       const state = views.ensureView(descriptor);
       state.repo = repo;
+      state.rootId = state.id;
       await views.showView(descriptor);
     })();
     store.statusOpens.set(repo, opening);

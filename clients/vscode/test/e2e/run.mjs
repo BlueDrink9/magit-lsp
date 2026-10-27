@@ -73,6 +73,7 @@ writeFileSync(`${repo}/.vscode/settings.json`, JSON.stringify({
 const env = Object.fromEntries(['HOME', 'PATH', 'DISPLAY', 'XAUTHORITY',
   'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'LANG', 'USER', 'SHELL']
   .filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
+if (process.env.MAGIT_VSCODE_A06_ONLY === '1') env.MAGIT_VSCODE_A06_ONLY = '1';
 env.MAGIT_VSCODE_EVIDENCE = directory;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
@@ -126,13 +127,18 @@ if (existsSync(`${directory}/failure.txt`)) {
 }
 // Some editor CLIs return zero even if the test host failed to start. The
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
-const evidenceReady = existsSync(`${directory}/r-vs-2-evidence.json`)
-  && existsSync(`${directory}/r-vs-3-evidence.json`)
-  && existsSync(`${directory}/r-vs-4-evidence.json`)
-  && existsSync(`${directory}/r-vs-5-evidence.json`);
+const evidenceReady = process.env.MAGIT_VSCODE_A06_ONLY === '1'
+  ? existsSync(`${directory}/a06-evidence.json`)
+  : existsSync(`${directory}/r-vs-2-evidence.json`)
+    && existsSync(`${directory}/r-vs-3-evidence.json`)
+    && existsSync(`${directory}/r-vs-4-evidence.json`)
+    && existsSync(`${directory}/r-vs-5-evidence.json`)
+    && existsSync(`${directory}/a06-evidence.json`);
 if (!evidenceReady) {
   console.error(
-    'Missing R-VS-2/R-VS-3/R-VS-4/R-VS-5 evidence; see the isolated evidence directory above.'
+    process.env.MAGIT_VSCODE_A06_ONLY === '1'
+      ? 'Missing A06 evidence; see the isolated evidence directory above.'
+      : 'Missing R-VS-2/R-VS-3/R-VS-4/R-VS-5/A06 evidence; see the isolated evidence directory above.'
   );
 }
 process.exit(result.status === 0 && evidenceReady ? 0 : 1);

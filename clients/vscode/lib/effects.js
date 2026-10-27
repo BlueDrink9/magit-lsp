@@ -60,7 +60,9 @@ function showMessage(effect) {
  *
  * @param {object[]|undefined} effects
  */
-async function applyEffects(effectList) {
+async function applyEffects(effectList, originViewId) {
+  const origin = originViewId && store.views.get(originViewId);
+  let rootId = origin && origin.rootId;
   for (const effect of effectList || []) {
     switch (effect.type) {
       case 'message':
@@ -75,6 +77,10 @@ async function applyEffects(effectList) {
         break;
       case 'openView':
       case 'pushView':
+        {
+          const state = views.ensureView(effect.descriptor);
+          if (state) state.rootId = rootId || (effect.type === 'openView' ? state.id : undefined);
+        }
         await views.showView(effect.descriptor);
         break;
       case 'popView':
@@ -82,6 +88,9 @@ async function applyEffects(effectList) {
         break;
       case 'focusView':
         await views.focusView(effect.viewId);
+        break;
+      case 'quit':
+        await views.closeRoot(rootId || originViewId);
         break;
       case 'visitFile': {
         const document = await vscode.workspace.openTextDocument(

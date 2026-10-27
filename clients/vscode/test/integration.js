@@ -198,6 +198,25 @@ async function run() {
     // The displayed text is always the server's last render; never recomposed.
     assert.match(statusEditor.document.getText(), /Unstaged changes/);
     assert.equal(vscode.__test.output.filter((line) => line.startsWith('unknown effect')).length, 0);
+
+    // Quit is dispatched through the registered command and scoped to the
+    // repository that owns the originating view. This harness uses mocked
+    // VSCode APIs; it is not evidence of native tab behavior.
+    const { store } = require('../lib/store');
+    const secondRepo = createRepository();
+    vscode.__test.setWorkspaceFolder(secondRepo);
+    await commands.get('magit.open')();
+    await waitFor(() => store.views.size === 2, 'second repository view');
+    await commands.get('magit.invoke')({ command: 'common.quit' });
+    assert.equal(store.views.size, 1, 'quit removes only the originating repository view');
+    assert.equal(Array.from(store.views.values())[0].repo, repo);
+    vscode.__test.setWorkspaceFolder(repo);
+    await commands.get('magit.open')();
+    await commands.get('magit.invoke')({ command: 'common.quit' });
+    assert.equal(store.views.size, 0, 'root quit removes the affected stored view');
+    await commands.get('magit.open')();
+    await waitFor(() => store.views.size === 1, 'reopened repository view');
+    fs.rmSync(secondRepo, { recursive: true, force: true });
   } finally {
     await extension.deactivate();
   }

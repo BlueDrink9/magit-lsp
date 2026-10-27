@@ -7,7 +7,7 @@ const vscode = require('vscode');
 const { LanguageClient } = require('vscode-languageclient/node');
 
 /** Requests this test records as evidence; notifications are not captured. */
-const WATCHED = new Set(['view/invoke', 'view/key', 'view/open']);
+const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open']);
 
 /**
  * Resolve after `milliseconds`, only used to let a native widget mount.
@@ -271,6 +271,88 @@ async function run() {
       'first-open status body is not in the visible editor'
     );
     const firstShot = shot('r-vs-2-first-open.png');
+
+    const verifyQuitReopen = async () => {
+      const { store } = require(`${extension.extensionPath}/lib/store`);
+      const views = require(`${extension.extensionPath}/lib/views`);
+      const otherRepo = path.join(evidence, 'other-repo');
+      execFileSync('git', ['clone', '-q', repo, otherRepo]);
+      const descriptor = await store.client.sendRequest('view/open', {
+        kind: 'status', args: { repo_path: otherRepo }, viewport: { cols: 100, rows: 30 },
+      });
+      const other = views.ensureView(descriptor);
+      other.rootId = other.id;
+      other.repo = otherRepo;
+      await views.showView(descriptor);
+      const root = views.stateForUri(uri);
+      await views.focusView(root.id);
+      await vscode.commands.executeCommand('magit.invoke', { command: 'open.commit' });
+      await waitFor(() => quickInputState().visible, 'nested menu visible');
+      await vscode.commands.executeCommand('magit.invoke', { command: 'common.quit' });
+      await waitFor(() => !quickInputState().visible, 'nested menu popped');
+      assert(store.views.has(root.id), 'nested quit removed root');
+      await views.focusView(root.id);
+      await vscode.commands.executeCommand('magit.invoke', { command: 'open.commit' });
+      await waitFor(() => quickInputState().visible
+        && /Commit/i.test(quickInputState().text || ''), 'native commit QuickPick');
+      shot('a06-menu-before-quit.png');
+      const removed = [...store.views.values()].filter((state) => state.rootId === root.id);
+      const beforeClose = requests.filter((request) => request.method === 'view/close').length;
+      // Quitting the menu only pops it; target the root with that menu open.
+      await require(`${extension.extensionPath}/lib/requests`).invoke(root.id, 'common.quit', undefined,
+        { cursor: { line: 0, column: 0 } });
+      await waitFor(() => removed.every((state) => !statusTabs().some((tab) =>
+        tab.input.uri.toString() === state.uri.toString())), 'root-owned tabs closed');
+      await waitFor(() => !quickInputState().visible, 'QuickPick dismissed');
+      assert.equal(requests.filter((request) => request.method === 'view/close').length, beforeClose,
+        'server quit did not recursively request view/close');
+      for (const state of removed) {
+        assert(!store.views.has(state.id), 'quit retained view');
+        assert(!store.uriToView.has(state.uri.toString()), 'quit retained URI');
+        assert(!store.pendingRenders.has(state.id), 'quit retained pending render');
+        assert(!state.quickPick, 'quit retained QuickPick');
+      }
+      assert(store.views.has(other.id), 'quit removed unrelated root');
+      assert(statusTabs().some((tab) => tab.input.uri.toString() === other.uri.toString()),
+        'quit closed unrelated tab');
+      await vscode.window.showTextDocument(vscode.Uri.file(path.join(repo, 'tracked.txt')));
+      await waitFor(() => store.activeViewId === undefined, 'inactive view context');
+      const afterQuitCount = requests.length;
+      await vscode.commands.executeCommand('magit.key', { key: 'g' });
+      await settle(300);
+      assert.equal(requests.length, afterQuitCount, 'inactive contexts dispatched a Magit key');
+      shot('a06-quit.png');
+      await vscode.commands.executeCommand('magit.open');
+      await waitFor(() => statusTabs().length === 2, 'status reopened alongside other root');
+      const reopened = vscode.window.activeTextEditor;
+      assert(reopened && reopened.document.uri.scheme === 'magit');
+      await waitFor(() => reopened.document.getText().includes('tracked.txt'),
+        'reopened status render');
+      shot('a06-reopened.png');
+      const refreshCount = requests.length;
+      execFileSync('xdotool', ['key', '--window', windowId, '--clearmodifiers', 'g']);
+      await waitFor(() => requests.slice(refreshCount).some((request) =>
+        request.method === 'view/invoke' && request.params.command === 'common.refresh'),
+      'reopened status responds to physical refresh');
+      fs.writeFileSync(`${evidence}/a06-evidence.json`, JSON.stringify({
+        menuBeforeQuit: 'a06-menu-before-quit.png',
+        quit: 'a06-quit.png',
+        reopened: 'a06-reopened.png',
+        affectedTabsAfterQuit: 0,
+        preservedRoot: other.id,
+        removedViews: removed.map((state) => state.id),
+        reopenedRoot: views.activeState().rootId,
+        reopenedRefresh: requests.slice(refreshCount),
+        quickPickHiddenAfterQuit: true,
+        noRecursiveViewClose: true,
+        keyDispatchedAfterQuit: false,
+      }, null, 2));
+      console.log('PASS native A06 root quit closes menu/tabs and reopens status');
+    };
+    if (process.env.MAGIT_VSCODE_A06_ONLY === '1') {
+      await verifyQuitReopen();
+      return;
+    }
 
     // Repeat and concurrent opens must focus the one status tab, not create a
     // second view or a temporary filename document.
@@ -559,6 +641,7 @@ async function run() {
       'type', '--clearmodifiers', '--delay', '25', text,
     ]);
     const focusStatus = async () => {
+      await vscode.window.showTextDocument(editor.document, { preview: false, preserveFocus: false });
       await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
       assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
     };
@@ -687,7 +770,10 @@ async function run() {
     await key('Return');
     await waitFor(() => magitTraffic() > beforeEnter, 'status Enter request');
     assert(invoked('common.visit'), 'status Enter did not dispatch common.visit');
-    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'file',
+      'Enter opens tracked file');
+    assert.equal(vscode.window.activeTextEditor.document.uri.scheme, 'file');
+    assert.equal(vscode.window.activeTextEditor.document.uri.fsPath, path.join(repo, 'tracked.txt'));
     const enterShot = shot('04-status-enter.png');
     matrix.push({
       widget: 'status editor', input: 'Enter', result: 'dispatched common.visit to the server',
@@ -700,6 +786,7 @@ async function run() {
     ).length;
 
     // 5. Returning to status: Tab still folds through the server tree.
+    await focusStatus();
     selectLine(sectionLine);
     const unfolded = editor.document.getText();
     await key('Tab');
@@ -1239,6 +1326,7 @@ async function run() {
       interactions,
     }, null, 2));
     shot('screen.png');
+    await verifyQuitReopen();
     console.log(
       'PASS real VSCode R-VS-2 first open/reopen/refresh, '
       + 'R-VS-3 generic dispatcher with physical default fold/refresh and a '
@@ -1249,6 +1337,21 @@ async function run() {
     );
   } catch (error) {
     try { captureFailure?.(); } catch { /* Keep the original verification failure. */ }
+    let lifecycle = {};
+    try {
+      const { store } = require(`${extension.extensionPath}/lib/store.js`);
+      lifecycle = {
+        activeViewId: store.activeViewId,
+        quickPickViewId: store.quickPickViewId,
+        views: Array.from(store.views.values()).map((state) => ({
+          id: state.id, rootId: state.rootId, uri: state.uri.toString(),
+          menu: Boolean(state.quickPick),
+        })),
+        tabs: vscode.window.tabGroups.all.flatMap((group) => group.tabs).map((tab) => ({
+          uri: tab.input?.uri?.toString(), label: tab.label,
+        })),
+      };
+    } catch {}
     fs.writeFileSync(`${process.env.MAGIT_VSCODE_EVIDENCE}/failure.txt`, error.stack);
     fs.writeFileSync(`${process.env.MAGIT_VSCODE_EVIDENCE}/failure-state.json`, JSON.stringify({
       extensionPath: extension.extensionPath,
@@ -1259,6 +1362,7 @@ async function run() {
       requests,
       renderedLines: Object.fromEntries(renderedLines),
       text: vscode.window.activeTextEditor?.document.getText(),
+      lifecycle,
     }, null, 2));
     throw error;
   } finally {

@@ -65,6 +65,7 @@ function ensureView(descriptor) {
   let resolveFirstRender;
   const state = {
     id: descriptor.id,
+    rootId: undefined,
     descriptor,
     uri,
     lines: [],
@@ -207,6 +208,25 @@ async function closeView(viewId, focusPrevious) {
   activateView(undefined);
 }
 
+/** Close every local view belonging to one server repository session. */
+async function closeRoot(rootId) {
+  if (!rootId) return;
+  const states = Array.from(store.views.values()).filter((state) => state.rootId === rootId);
+  const uris = new Set(states.map((state) => state.uri.toString()));
+  for (const state of states) {
+    menus.hideMenu(state);
+    store.views.delete(state.id);
+    store.uriToView.delete(state.uri.toString());
+    store.pendingRenders.delete(state.id);
+    store.documentsChanged.fire(state.uri);
+  }
+  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) =>
+    tab.input && tab.input.uri && uris.has(tab.input.uri.toString())
+  );
+  if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
+  if (states.some((state) => state.id === store.activeViewId)) activateView(undefined);
+}
+
 /**
  * Focus an already-open view.
  *
@@ -234,4 +254,5 @@ exports.showDocument = showDocument;
 exports.applyCursor = applyCursor;
 exports.activateView = activateView;
 exports.closeView = closeView;
+exports.closeRoot = closeRoot;
 exports.focusView = focusView;

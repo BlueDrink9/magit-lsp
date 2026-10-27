@@ -19,6 +19,7 @@ module.exports = async function testStatusOpenLifecycle() {
   const warnings = [];
   const output = [];
   let closeFailure = false;
+  let quitOnInvoke = false;
 
   class Uri {
     constructor({ scheme, authority = '', path = '' }) {
@@ -77,7 +78,15 @@ module.exports = async function testStatusOpenLifecycle() {
       showWarningMessage: (text) => { warnings.push(text); },
       showInformationMessage: () => {},
       visibleTextEditors: [],
-      tabGroups: { all: [] },
+      tabGroups: {
+        get all() { return [{ tabs: tabs.map((document) => ({ input: { uri: document.uri } })) }]; },
+        async close(closing) {
+          for (const tab of closing) {
+            const index = tabs.findIndex((document) => document.uri.toString() === tab.input.uri.toString());
+            if (index >= 0) tabs.splice(index, 1);
+          }
+        },
+      },
     },
     SemanticTokensLegend: class {},
     languages: {
@@ -109,7 +118,8 @@ module.exports = async function testStatusOpenLifecycle() {
         if (closeFailure) throw new Error('disconnected');
         return null;
       }
-      if (method === 'view/invoke') return {};
+       if (method === 'view/invoke') return quitOnInvoke && params.command === 'common.quit'
+         ? { effects: [{ type: 'quit' }] } : {};
       assert.equal(method, 'view/open');
       openCount += 1;
       const descriptor = {
@@ -285,5 +295,17 @@ module.exports = async function testStatusOpenLifecycle() {
   assert.equal(closeRequests().length, beforeDisconnect);
   assert.equal(store.views.size, 0);
   store.client = client;
+  await commands.get('magit.open')();
+  const beforeQuitClose = closeRequests().length;
+  quitOnInvoke = true;
+  await commands.get('magit.invoke')({ command: 'common.quit' });
+  quitOnInvoke = false;
+  assert.equal(store.views.size, 0, 'root quit removes the stored view');
+  assert.equal(store.uriToView.size, 0);
+  assert.equal(tabs.some((document) => document.uri.toString() === statusUri), false,
+    'root quit closes the native virtual-document tab');
+  assert.equal(closeRequests().length, beforeQuitClose, 'root quit does not recursively close');
+  await commands.get('magit.open')();
+  assert.equal(store.views.size, 1, 'status can be reopened after quit');
   await extension.deactivate();
 };
