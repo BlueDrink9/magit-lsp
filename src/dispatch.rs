@@ -1,6 +1,6 @@
 use crate::errors;
 use crate::git::GitRepo;
-use crate::patch::{self, FileLayout};
+use crate::patch::FileLayout;
 use crate::protocol::{Effect, MessageLevel};
 use crate::Result;
 
@@ -187,14 +187,7 @@ pub fn execute(
             end,
             reverse,
         } => {
-            if repo.apply_selection(layouts, *start, *end, *reverse)? {
-                Ok(Vec::new())
-            } else {
-                Ok(vec![Effect::message(
-                    MessageLevel::Info,
-                    patch::NO_CHANGED_LINES,
-                )])
-            }
+            errors::effects_for_result(repo.apply_selection(layouts, *start, *end, *reverse))
         }
         Resolution::Message(effect) => Ok(vec![effect.clone()]),
         Resolution::DiscardAllUnstaged => {

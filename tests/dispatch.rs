@@ -401,7 +401,7 @@ fn execute_stage_hunk_reports_hunk_changed_since_display() {
 }
 
 #[test]
-fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
+fn session_dispatch_returns_fresh_status_with_hunk_changed_message() {
     let (tmp, repo) = RepoFixture::new()
         .commit("init", [("f.txt", lines(40).to_string())])
         .build();
@@ -409,26 +409,35 @@ fn server_mutation_returns_fresh_status_with_hunk_changed_message() {
         &tmp.path().join("f.txt"),
         &lines(40).with(35, "line35 CHANGED").to_string(),
     );
-    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
-        .id
-        .clone();
+    let (mut test, initial) = TestSession::open_status(&tmp, magit_lsp::config::Profile::Vim);
+    let line = test.goto_marker("f.txt", '+');
+    let hunk_id = test.tree().line_nodes[line]
+        .hunk_id
+        .clone()
+        .expect("displayed hunk id");
+    let cursor = magit_lsp::protocol::Cursor { line, column: 0 };
     write(
         &tmp.path().join("f.txt"),
         &lines(40).with(35, "line35 DIFFERENT").to_string(),
     );
 
-    let (status, effects) =
-        magit_lsp::server::mutation(tmp.path().to_str().expect("utf-8 path"), |repo| {
-            repo.stage_hunk("f.txt", &hunk_id).map(|_| true)
-        })
-        .expect("mutation");
+    let result = test.invoke_at_version(
+        "status.stage",
+        initial.version,
+        Some(cursor),
+        None,
+        None,
+    );
 
     assert_eq!(
-        effects,
-        vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]
+        result.effects,
+        vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)],
+        "displayed hunk {hunk_id} must be refused after its content changes"
     );
+    let status = repo.status().expect("fresh status");
     assert!(status.staged.is_empty());
     assert_eq!(status.unstaged.len(), 1);
+    assert!(cached_diff(tmp.path()).is_empty(), "the index must stay untouched");
 }
 
 #[test]
@@ -543,6 +552,38 @@ fn execute_selection_without_changes_reports_message() {
         other => panic!("unexpected effect: {other:?}"),
     }
     assert!(cached_diff(tmp.path()).is_empty());
+}
+
+#[test]
+fn execute_selection_git_failure_returns_readable_effect() {
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let diff = repo.diff_unstaged("f.txt").expect("diff");
+    let layout = FileLayout::from_diff(&diff, 0).expect("layout");
+    write(&tmp.path().join(".git/index.lock"), "locked\n");
+
+    let effects = dispatch::execute(
+        &repo,
+        &Resolution::Selection {
+            start: 4,
+            end: 5,
+            reverse: false,
+        },
+        &[layout],
+    )
+    .expect("Git failures are returned as effects");
+
+    assert_eq!(effects.len(), 1);
+    match &effects[0] {
+        Effect::Message { level, text, hint, .. } => {
+            assert_eq!(*level, MessageLevel::Error);
+            assert!(text.contains("Another Git process is running"), "{text}");
+            assert!(hint.as_deref().is_some_and(|hint| hint.contains("index.lock")));
+        }
+        other => panic!("unexpected effect: {other:?}"),
+    }
 }
 
 #[test]
