@@ -106,6 +106,7 @@ function git(repo, ...args) {
 
 /** Stage/unstage real rendered ranges via registered commands and real RPC. */
 async function checkGitSelections({ vscode, commands, client }) {
+  const messageStart = vscode.__test.messages.length;
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-selection-'));
   const file = path.join(repo, 'boundary.txt');
   const originalEditor = vscode.__test.activeEditor;
@@ -221,7 +222,7 @@ async function checkGitSelections({ vscode, commands, client }) {
                   const label = `${deletion ? 'deletion' : 'addition'} ${ending} ${command} ${method} reverse=${reverse} ${range} nonzero=${nonzero}`;
                   assert.deepEqual(git(repo, 'show', ':boundary.txt'), Buffer.from(expected), `${label}: exact index (including guards)`);
                   assert.deepEqual(fs.readFileSync(file), Buffer.from(work), `${label}: exact untouched worktree`);
-                  assert.equal(vscode.__test.messages.filter((m) => m.level === 'warning' || m.level === 'error').length, 0, label);
+                  assert.equal(vscode.__test.messages.slice(messageStart).filter((m) => m.level === 'warning' || m.level === 'error').length, 0, label);
                   count += 1;
                 }
               }
