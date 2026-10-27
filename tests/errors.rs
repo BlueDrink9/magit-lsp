@@ -4,7 +4,9 @@ use common::*;
 use magit_lsp::errors::map_git_failure;
 use magit_lsp::git::GitFailure;
 use magit_lsp::protocol::{Effect, MessageLevel};
-use magit_lsp::server;
+use magit_lsp::config::Profile;
+use magit_lsp::git::GitRepo;
+use magit_lsp::protocol::Cursor;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -251,85 +253,89 @@ fn corrupt_patch_from_a_real_repository_is_readable() {
 fn index_lock_failure_returns_a_message_effect_and_status() {
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let line = test.goto_file("unstaged", "f.txt");
     write(&tmp.path().join(".git/index.lock"), "");
 
-    let (status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
-        repo.stage_file("f.txt").map(|_| true)
-    })
-    .expect("mutation response");
+    let outcome = test.invoke_at("status.stage", Cursor { line, column: 0 });
 
     assert_eq!(
-        effects,
-        vec![message(
-            MessageLevel::Error,
+        outcome.effects,
+        vec![message(MessageLevel::Error,
             "Another Git process is running in this repository.",
-            Some(
-                "If no Git process is running, remove the stale .git/index.lock file and try again."
-            ),
-            None
-        )]
+            Some("If no Git process is running, remove the stale .git/index.lock file and try again."),
+            None)]
     );
-    assert_eq!(status.repo_path, tmp.path().to_string_lossy());
+    let status = GitRepo::open(tmp.path()).expect("open repo").status().expect("status");
+    assert!(status.staged.is_empty());
 }
 
 #[test]
 fn not_a_repository_returns_a_message_effect() {
     let tmp = TempDir::new().expect("tempdir");
-    let path = tmp.path().to_str().expect("utf8 path");
-
-    let (status, effects) = server::mutation(path, |_| Ok(true)).expect("mutation response");
-
-    assert_eq!(
-        effects,
-        vec![message(
-            MessageLevel::Error,
-            "This folder is not inside a Git repository.",
-            None,
-            None
-        )]
-    );
-    assert_eq!(status.repo_path, path);
-    assert!(status.staged.is_empty());
-    assert!(status.unstaged.is_empty());
+    let mut server = common::stdio::TestServer::spawn(&[]);
+    server.initialize(serde_json::json!({}));
+    server.send(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "view/open",
+        "params": {
+            "kind": "status",
+            "args": {"repo_path": tmp.path().to_string_lossy()},
+            "viewport": {"cols": 80, "rows": 24}
+        }
+    }));
+    let response = server.response_with_id(2);
+    assert_eq!(response["error"]["message"], "This folder is not inside a Git repository.", "{response}");
+    server.shutdown_and_exit();
+    let status = server.finish(std::time::Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status}");
 }
 
 #[test]
-fn unmapped_git_failure_returns_the_fallback_effect() {
+fn disappeared_displayed_file_returns_a_readable_refusal() {
     let (tmp, _repo) = init_repo();
+    write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let line = test.goto_marker("f.txt", '+');
+    std::fs::remove_file(tmp.path().join("f.txt")).expect("remove displayed file");
 
-    let (_status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
-        repo.stage_file("missing.txt").map(|_| true)
-    })
-    .expect("mutation response");
+    let outcome = test.invoke_at("status.stage", Cursor { line, column: 0 });
 
-    assert_eq!(effects.len(), 1);
+    assert_eq!(outcome.effects.len(), 1);
     let Effect::Message {
         level, text, detail, ..
-    } = &effects[0]
+    } = &outcome.effects[0]
     else {
-        panic!("expected a message effect, got {:?}", effects[0]);
+        panic!("expected a message effect, got {:?}", outcome.effects[0]);
     };
-    assert_eq!(*level, MessageLevel::Error);
+    assert_eq!(*level, MessageLevel::Warn);
     assert_eq!(text, "The requested file is no longer available to Git.");
     assert!(detail.is_none());
+    let status = GitRepo::open(tmp.path()).expect("open repo").status().expect("status");
+    assert!(status.staged.is_empty());
 }
 
 #[test]
 fn no_op_selection_returns_an_info_effect() {
-    let (tmp, repo) = init_repo();
+    let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nline2 CHANGED\nline3\n");
 
-    // The first hunk line is context, so nothing is selected.
-    let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
-        .id
-        .clone();
-    let (_status, effects) = server::mutation(tmp.path().to_str().expect("utf8 path"), |repo| {
-        repo.stage_lines("f.txt", &hunk_id, 0, 0)
-    })
-    .expect("mutation response");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    // Resolve the context line from tree metadata, then dispatch a one-line selection.
+    let line = test.goto_text("f.txt", "line1");
+    let outcome = test.invoke_selection(
+        "status.stage",
+        Some(Cursor { line, column: 0 }),
+        Some(magit_lsp::protocol::Selection {
+            start_line: line,
+            end_line: line,
+        }),
+    );
 
     assert_eq!(
-        effects,
+        outcome.effects,
         vec![message(
             MessageLevel::Info,
             magit_lsp::patch::NO_CHANGED_LINES,
@@ -337,7 +343,7 @@ fn no_op_selection_returns_an_info_effect() {
             None
         )]
     );
-    assert!(repo.status().expect("status").staged.is_empty());
+    assert!(GitRepo::open(tmp.path()).expect("open repo").status().expect("status").staged.is_empty());
 }
 
 #[test]
