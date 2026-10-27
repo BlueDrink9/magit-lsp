@@ -641,7 +641,13 @@ Existing eligibility/recall rules above remain canonical.
 
 **Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
 owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
-completion channels; handlers only enqueue idempotent cancellation. Start Git in
+completion channels; handlers only enqueue idempotent cancellation. A valid
+progress-cancel request promptly receives one LSP `report` (`Cancelling…`, no
+longer cancellable) and readable feedback. This acknowledges intent, not Git
+termination or absence of a commit. Serialize report/end against token removal;
+duplicate/unknown/ended tokens do not report, and cleanup retains the repository
+reservation until the owner finishes. Exit-before-cancel still wins and completed
+commits still report success. Start Git in
 a new session/process group before exec (child-side spawn setup, not racy
 post-spawn `setpgid`). No controlling tty: piped stdout/stderr, null stdin unless
 the invocation requires otherwise. Concurrent readers retain at most 4 MiB per
@@ -651,9 +657,18 @@ dequeues cancel, it first observes leader status with
 `waitid(P_PID, pid, WEXITED|WNOHANG|WNOWAIT)`. If already exited, exit wins and
 no signal is sent. Otherwise cancellation linearizes: abort a connected helper,
 send TERM to the group, and send CONT to the group so stopped members can
-process termination. Retain the unreaped leader for the full 2-second TERM
+process termination. Retain the unreaped leader for at most the 2-second TERM
 grace, then send exactly one group KILL even if the leader exited during that
-grace. Reap only after KILL, using bounded observation; if KILL is not reaped within a further 2 seconds,
+grace. Linux may finish grace early **only after WNOWAIT observes leader exit**:
+inspect `/proc` for live nonleader members of its pinned process group, validating
+stat identity/state/pgrp outside the potentially arbitrary `comm` field. No live
+members observed is merely a latency hint: still send the final group KILL before
+reap. A fork/scan race can miss a member and end its grace early; inspection is
+neither a graceful-exit guarantee nor whole-descendant containment. Never signal
+individual scan PIDs. Unavailable, malformed, slow or uncertain inspection keeps
+full grace, as do observed live/stopped/TERM-resistant members. Other Unix targets
+retain the existing full-grace fallback, without platform validation claims.
+Reap only after KILL, using bounded observation; if KILL is not reaped within a further 2 seconds,
 transfer the still-owned Child handle to a process-lifetime reaper task that only
 waits/reaps; report cancellation incomplete and retain ownership until reap.
 The retained unreaped leader pins PID/PGID identity: no other waiter, `try_wait`,
@@ -682,8 +697,11 @@ Minimum adversarial acceptance for R-EDIT-2/A11: leader exits on TERM while a
 TERM-resistant descendant remains, and the group still receives KILL after the
 full grace; stopped member receives CONT then terminates; exit-before-cancel
 produces no signal; normal-exit daemon survives pipe-drain timeout; trace proves
-initial WNOWAIT observation → cancel linearization → TERM/CONT → full grace →
-KILL → final reap, with no signal after reap. These are required tests, not
+initial WNOWAIT observation → cancel linearization → TERM/CONT → full grace
+(or the conservative Linux hint after observed leader exit) → KILL → final reap,
+with no signal after reap. Cooperative real-hook cancellation must finish
+comfortably below two seconds with readiness established before timing; prompt
+intent acknowledgement is tested independently using a resistant hook. These are required tests, not
 claims of platform execution.
 
 Explicit abort, progress cancel, client disconnect/EOF/shutdown always cancel
@@ -1286,8 +1304,9 @@ policy or erase that evidence.
 ### Global unchecked backlog — priority order
 
 The task specifications and checkboxes remain in §§7, 11.3 and 12; this index makes
-the categories and ordering global. Complete all Review items before Feature
-work. Bugfix work is a distinct category, not a scenario-behavior task.
+the categories and ordering global. Complete the active review sprint before
+feature work. The explicit 0.2 milestone supersedes the old feature phase order.
+Bugfix work is a distinct category, not a scenario-behavior task.
 
 #### Review (highest priority; grouped by stated priority)
 
@@ -1381,12 +1400,20 @@ remain withdrawn. Do not duplicate the report's 32-task ledger in this index.
 
 #### Feature
 
-- First scheduled feature: **R-5.1**, log plus reusable server-owned select-mode
-  infrastructure. Phase order changed: Read views are now Phase 4 and Commit
-  flow Phase 5; retain R-5.* and R-4.* IDs because Planned messages and other
-  stable references already use them. Then R-5.2…R-5.5; R-4.1…R-4.3;
-  R-6.1…R-6.5; R-7.1…R-7.4; R-8.1…R-8.3;
-  R-9.1…R-9.5. Their full acceptance criteria remain in the phase entries.
+- 0.2 order: **R-5.1**, then minimal actual selection integration under
+  **R-4.1a**, then interactive rebase/todo editing under **R-7.3a**, then
+  the separately owned **R-CLIENT-SPEC** prerequisite, then immediately the
+  R-REL release sprint. Spec development may happen before/alongside fixup and
+  rebase; once R-4.1a, R-7.3a and the spec gate pass, release is next with no
+  unrelated feature inserted. This supersedes the old feature phase
+  order; no unrelated feature is inserted after both gates pass. Retain stable
+  R-4.1/R-7.3 parent IDs and all remaining feature backlog, which is not a
+  release prerequisite. Only necessary correctness/lifecycle dependencies and
+  R-4.2's Phase 3E Linux managed-draft cutover gate apply. R-EDIT-7 Windows
+  feasibility and R-EDIT-9 macOS acceptance remain deferred, not release gates.
+  Release readiness must explicitly disclose the known failing/deferred
+  BUG-READ-1 read-responsiveness limitation; do not silently schedule it or
+  make unbounded responsiveness claims.
 
 ### Task ticket template and UI rule
 
@@ -1616,6 +1643,10 @@ history implementation), and depends on this phase.
   - **Depends on:** R-EDIT-1; Linux acceptance does not depend on R-EDIT-9/macOS execution.
   - **Done when:** sole Child owner arbitrates nonblocking cancellation/reap; pre-hook, editor-active, commit-msg, finalizing and completed outcomes truthful (cancel-before-commit aborts; completed commit reports success); bounded drain, no detached indefinite readers, no normal-exit daemon killed to drain, one progress end/release.
   - **Verify:** `cargo test --test editor_bridge --test server_async` on Linux; real-Git foreground/background hooks, each cancellation phase, inherited pipes after normal exit, TERM-resistant escalation, exact HEAD/index/worktree, subsequent commit without manual lock cleanup, lock warning, no foreign kill. macOS runner/group/WNOWAIT/reap evidence is deferred to R-EDIT-9, not required for this Linux acceptance.
+  - **Earlier refinement verification (2026-10-28; superseded by Linux acceptance below):** numbered attempts below covered only prompt cancellation feedback and the Linux quiet-group latency hint; R-EDIT-2 was correctly left unchecked at that point. Baseline native failure was scenario line 12 (`wait`), with committing→failure artifact delta 2.045 s against the driver's 2000 ms plus 50 ms settle; prior cancelled/next-commit artifacts were stale, not evidence for this run.
+    1. Rust focused preflight: PASS, `cargo test --lib runner::owned && cargo test --test runner --test runner_hooks --test editor_bridge --test server_async` (5 owned unit, 13 editor, 6 runner, 4 real-hook, 20 stdio tests; BUG-READ-1 remains ignored). Cooperative/stopped cleanup is bounded below 1200 ms after readiness; resistant grace is at least 2 s; intent report/refusal is tested before terminal cleanup.
+    2. Native focused preflight: FAIL, `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`, line 12 bare `wait` (all four profile/size combinations). Fresh standard-100x30 committing/failure mtimes: 2026-10-28 08:03:09.204 / 08:03:11.456 local filesystem clock (command UTC clock reported 2026-10-27 19:03:08–20). The screen showed `Cancelling…`, then `` `git commit` failed. `` and Neovim's hit-enter prompt. Cancelled/next-commit snapshots remained stale and were not used. A diagnostic helper initially failed before interaction due to a mistyped parser API (`scenario.parse`); its session was stopped. Corrected inspect→act→inspect diagnosis stopped its session and retained `build/ui/commit-owned-cancel/diagnostic.trace.jsonl`: unique `Git`/`commit` token `magit-lsp/mutation/3`, cancellation intent at t=629.721 ms, report at 630.542 ms (0.821 ms), end at 668.103 ms (38.382 ms). Idle succeeded after dismissing messages. The scenario now inspects the terminal screen and dismisses the native hit-enter prompt before idle; no deadline/grace change.
+    3. Focused native retry: FAIL, `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`, line 21 (`expect screen contains "git commit"`): `Neovim did not answer the state request` while `:messages` held a hit-enter prompt (all four combinations). Fresh standard-100x30 committing/cancellation-feedback/failure mtimes: 2026-10-28 08:06:25.678 / 08:06:25.750 / 08:06:30.958 local filesystem clock (command UTC clock 2026-10-27 19:06:24–48). Thus the terminal Git-failure screen arrived roughly 72 ms after committing, but the predicate evaluator also requests debug state and blocks at the native modal prompt. Cancelled/next-commit snapshots and final per-combination traces were not refreshed; no subsequent-commit native success is claimed. **Circuit breaker:** two consecutive failing native verification reports; stopped for orchestrator supervision. The final exact combined verification command, including the single full `make test` gate, was unrun at this point. `git diff --check` passed; all owned UI sessions were stopped and process inspection found no owned server/hook survivors. Changes remained unstaged/uncommitted and R-EDIT-2 remained unchecked.
     4. Supervised native modal-handling refinement: PASS, `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`, all four profile/size combinations; focused Rust checks also passed. Removed `:messages` and blind Enter/q; retained final-feedback snapshots before terminal-only conditional hit-enter dismissal, then checked bounded notification history and one begin/report/end for the actual `Git`/`commit` token. Fresh artifacts (local filesystem clock 2026-10-28 08:12:38–46) were inspected under `build/ui/commit-owned-cancel/{standard,vim}-{100x30,80x24}/`: `committing.screen` shows `Committing…`, `cancellation-feedback.screen` shows the readable Git failure, `cancelled.screen` retains staged changes, and `next-commit.screen` shows `Committed: After progress cancellation` with a clean tree. Each `cancel.trace.jsonl` records the unique token `magit-lsp/mutation/3`, one cancellation lifecycle, the notification check and scenario completion. Scenario assertions also passed unchanged HEAD, hook TERM and the subsequent commit without lock cleanup. Per-run intent→report / intent→end: standard-100x30 **0.677 / 40.852 ms**, vim-100x30 **0.891 / 36.696 ms**, standard-80x24 **0.644 / 28.587 ms**, vim-80x24 **0.711 / 29.166 ms**. These are client-trace progress timings, not key-to-idle or universal deadlines. The following full `make test` FAILED only at `tests/test_magit_lsp.lua:518` (visual-line staging, cached diff empty); exact Lua output is preserved in `build/test-logs/lua.VDSuAF` (55 cases, 1 failure). Subsequent `git diff --check` passed and the orchestrator found no owned process survivors. No production fast-path, grace or deadline changes were made in this retry.
     5. Final adviser-guided synchronization correction: the old completion predicate matched `+NEW line` already present in the initial **unstaged** hunk, so it could read Git before native `V`, `s` finished. Wait instead for `HELPERS.find_line('+', 'NEW line', 'staged') ~= nil`, whose section range comes from server `documentSymbol`, then assert the existing settled `HELPERS.wait_idle()`. Native input and the exact cached `+NEW line`, absent cached `line3 CHANGED`, and remaining-worktree assertions are unchanged. No sleeps, timeout inflation, version-only predicate or product changes.
        - [x] Single authorized final gate: `make test-file FILE=tests/test_magit_lsp.lua && make test && git diff --check` exited **0 on its only attempt**: focused Lua, full Rust/Lua/VSCode/keybindings and whitespace checks all passed. Output is retained in `/tmp/opencode/r-edit-2-final-4qi85mqn/verification.log`. The fresh four-variant screens/traces from attempt 4 were re-inspected without rerunning unrelated UI. Post-gate process audit found no owned server/editor/hook/UI survivors; pre-existing unrelated hooks, editor and tmux processes were untouched. All pre-existing work outside the three ticket files was byte-for-byte preserved.
@@ -1653,13 +1684,6 @@ history implementation), and depends on this phase.
   - **Verify:** `make vscode-test`; extend `clients/vscode/test/integration.js` for real-server/scripted-widget integration (`npm --prefix clients/vscode run test:integration`), and `clients/vscode/test/e2e/suite.js` for actual native VSCode confirm/cancel/progress/close/version-error and history recall/return-to-current-draft scenarios (`npm --prefix clients/vscode run test:e2e`). The former is not native-client evidence.
 - [ ] **A11 / R-EDIT-6 — Migrate A11 and adversarial cutover**
   - **Candidate paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/session.rs` (dispatch), `src/protocol.rs`, `lua/magit-lsp/edit.lua` and relevant init/view/buffer attachment/capabilities from R-EDIT-4, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` if needed, `tests/editor_bridge.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
-- [ ] **R-EDIT-9 — macOS CI/platform acceptance (deferred, not Linux release blocker)**
-  - [x] Documentation-only acceptance split (2026-10-28): Linux gates and native guidance defer macOS execution here; R-EDIT-2 remains unchecked and no macOS validation is claimed.
-  - **Candidate paths:** CI workflow configuration, `src/runner.rs`, `src/runner/owned.rs`, `tests/runner.rs`, `tests/runner_hooks.rs`, `tests/editor_bridge.rs`, `tests/server_async.rs`, `TASKS.md`, `ui-test-plan.md`; choose concrete CI paths when this later task starts.
-  - **Depends on:** R-EDIT-1 design and Linux R-EDIT-2 acceptance; R-EDIT-6 for managed-draft native cutover acceptance on macOS. No reverse dependency from Linux R-EDIT-2/R-EDIT-6. Intended for a later macOS CI runner; unavailable local macOS execution is not a Linux blocker. Windows remains R-EDIT-7.
-  - **Done when:** retained macOS CI artifacts identify runner image, macOS/architecture, Rust/Git versions and exact commands/results; real-Git tests prove pre-exec session/group ownership, non-reaping WNOWAIT exit observation with PID/PGID pinned through full TERM/CONT grace and final group KILL, sole final reap and no signals after reap. Cover leader-exits/TERM-resistant descendant, stopped member, exit-before-cancel/no signal, normal-exit daemon survival, inherited-pipe bounded drain, exactly-once release, unchanged HEAD/index/worktree on abort, subsequent commit without lock cleanup, lock warning and no foreign kills. Trace observation → cancellation → TERM/CONT → full grace → KILL → reap; retain native evidence for both clients before claiming macOS cutover acceptance. Full-grace fallback stays; Linux `/proc` latency evidence is not macOS evidence. Until these gates pass, macOS remains explicitly unverified.
-  - **Verify:** on the macOS CI runner, `cargo test --test runner --test runner_hooks --test editor_bridge --test server_async`, plus the R-EDIT-6 native acceptance commands for macOS client cutover; retain process traces, runner metadata and native artifacts. This is a future verification requirement, not an execution claim.
-
   - **Depends on:** Linux R-EDIT-2 acceptance, R-EDIT-3…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner. R-EDIT-9/macOS execution is not a Linux client-cutover dependency.
   - **Done when:** remove realFile commit-message compatibility at cutover; Git keeps hooks/cleanup. Native acceptance covers save-stays-editing, normal close commits exactly saved message, dirty Save/Discard/Cancel, no hidden changes submitted, explicit abort versus close, disconnect across phases, stale/terminal cleanup without commits, and failed close recovery. Also cover pre-hook/editor-active/commit-msg/finalizing and finish-v-cancel (cancel before commit aborts; completed commit reports reality), stale/late/version/multi-root, exact HEAD/index/worktree and neighboring content, inherited pipes/bounded drain, TERM resistance, subsequent commit/no lock cleanup, lock warning/no foreign kills; preserve askpass/A29/text mode and document limits. Extend integration.js and native e2e/suite.js at the paths above; scripted widgets alone do not meet native acceptance. R-EDIT-8 verifies two-root ring ordering/dedup/eviction and current-draft restoration.
   - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour` on Linux; inspect relevant tour excerpts. Linux real-Git and both clients' native evidence are required; macOS remains unverified under later R-EDIT-9 and does not block Linux acceptance/cutover. No timeout inflation.
@@ -1668,6 +1692,13 @@ history implementation), and depends on this phase.
   - **Depends on:** R-EDIT-1 design; separate from Unix cutover.
   - **Done when:** named pipe, restrictive ACL and atomic suspended Job assignment feasibility/limitations documented; no guarantee claimed without evidence.
   - **Verify:** explicit platform design review/go-no-go; no test command claimed.
+- [ ] **R-EDIT-9 — macOS CI/platform acceptance (deferred, not Linux release blocker)**
+  - [x] Documentation-only acceptance split (2026-10-28): Linux gates and native guidance defer macOS execution here; R-EDIT-2 remains unchecked and no macOS validation is claimed.
+  - **Candidate paths:** CI workflow configuration, `src/runner.rs`, `src/runner/owned.rs`, `tests/runner.rs`, `tests/runner_hooks.rs`, `tests/editor_bridge.rs`, `tests/server_async.rs`, `TASKS.md`, `ui-test-plan.md`; choose concrete CI paths when this later task starts.
+  - **Depends on:** R-EDIT-1 design and Linux R-EDIT-2 acceptance; R-EDIT-6 for managed-draft native cutover acceptance on macOS. No reverse dependency from Linux R-EDIT-2/R-EDIT-6. Intended for a later macOS CI runner; unavailable local macOS execution is not a Linux blocker. Windows remains R-EDIT-7.
+  - **Done when:** retained macOS CI artifacts identify runner image, macOS/architecture, Rust/Git versions and exact commands/results; real-Git tests prove pre-exec session/group ownership, non-reaping WNOWAIT exit observation with PID/PGID pinned through full TERM/CONT grace and final group KILL, sole final reap and no signals after reap. Cover leader-exits/TERM-resistant descendant, stopped member, exit-before-cancel/no signal, normal-exit daemon survival, inherited-pipe bounded drain, exactly-once release, unchanged HEAD/index/worktree on abort, subsequent commit without lock cleanup, lock warning and no foreign kills. Trace observation → cancellation → TERM/CONT → full grace → KILL → reap; retain native evidence for both clients before claiming macOS cutover acceptance. Full-grace fallback stays; Linux `/proc` latency evidence is not macOS evidence. Until these gates pass, macOS remains explicitly unverified.
+  - **Verify:** on the macOS CI runner, `cargo test --test runner --test runner_hooks --test editor_bridge --test server_async`, plus the R-EDIT-6 native acceptance commands for macOS client cutover; retain process traces, runner metadata and native artifacts. This is a future verification requirement, not an execution claim.
+
 Shared design is canonical in §3.10. Unix owned group/session and tty decision,
 bounded TERM/KILL/output, finite drains, no indefinitely blocked detached reader,
 no signals after reap, exactly-once terminal/progress/edit/config release,
@@ -1737,6 +1768,18 @@ deferred.
 
 ### Phase 5 — Commit flow
 
+- [ ] **R-4.1a — Minimal release commit-selection integration** (stable parent
+      R-4.1; release slice only). Add a real target-dependent commit action
+      (fixup) using R-5.1 server-owned log/select infrastructure, not a client
+      picker. Broad menus and unrelated actions do not gate release.
+      **Depends on:** R-5.1 and necessary selection correctness only.
+      **Done when:** exact repository-state tests prove the selected commit is
+      the target; cancel causes no mutation and restores caller; confirm returns
+      to caller; failures are readable. Both clients have focused native
+      selection/confirm/cancel evidence.
+      **Verify:** focused Rust state tests and native scenarios in both clients;
+      full regression gate at milestone boundary.
+
 - [ ] R-4.1 Commit menu: commit, extend, amend, reword, fixup, squash, augment,
       instant fixup/squash, alter; switches `--all`, `--allow-empty`,
       `--verbose`, `--no-verify`, `--signoff`, `--gpg-sign`, `--reset-author`,
@@ -1800,6 +1843,19 @@ deferred.
 
 ### Phase 7 — History editing
 
+- [ ] **R-7.3a — Interactive rebase and editable todo** (stable parent R-7.3;
+      release slice only). Implement interactive rebase using server-owned
+      selection and structured editable todo; unrelated history/branch features
+      do not gate release.
+      **Depends on:** R-5.1, selection correctness, and Phase 3E Linux lifecycle/
+      editor bridge acceptance.
+      **Done when:** exact repository-state tests cover selected base, edited
+      todo execution, continue, abort and conflict state; cancel before execution
+      does not mutate and failures are readable. Both clients have focused native
+      evidence for base selection and todo editing/execution.
+      **Verify:** focused real-repository Rust tests and both clients' native
+      scenarios; full regression/phase evidence at milestone boundary.
+
 - [ ] R-7.1 Merge menu; Unmerged section; conflict actions; merge-tool effect;
       continue/abort.
 - [ ] R-7.2 Cherry-pick and revert with sequencer state; Cherry view.
@@ -1826,9 +1882,140 @@ deferred.
 - [ ] R-9.2 Performance: large-repo budgets, diff size limits, node-level
       incremental rendering if profiling demands.
 - [ ] R-9.3 Multi-repo, repository list, worktrees as separate sessions.
-- [ ] R-9.4 Windows paths/CRLF, packaging, published VSCode extension and
-      Neovim plugin.
+- [ ] R-9.4 Windows paths/CRLF and deferred platform work. Packaging and
+      publication are owned by R-REL, not this task.
 - [ ] R-9.5 `docs/FORKING.md`; optional jj fork (semi-hard).
+
+### R-CLIENT-SPEC — External client implementation spec (release prerequisite)
+
+- [ ] Investigate current `src/protocol.rs` wire contracts and both clients;
+  develop `docs/CLIENT_SPEC.md` as a practical implementation plan for external
+  clients. Inventory standard LSP/custom methods, capabilities and lifecycle,
+  version/ack rules; view/display/navigation/selection abilities; keyboard
+  capture and input-forwarding alternatives; editable bridge behavior; and
+  whether split/companion views are needed. Separate REQUIRED core-flow
+  capabilities from RECOMMENDED capabilities useful/necessary only for named
+  non-core workflows. Map features to capabilities, explain rationale, and give
+  unsupported/degraded behavior or alternatives, an implementation checklist
+  and example, and unresolved design decisions/follow-ups. Preserve server-owned
+  text/structure/actions and thin-client invariants; ground claims in current
+  contracts and clients without silently broadening core requirements.
+  **Done when:** the spec is reviewed against protocol authority and both
+  clients, with explicit core/non-core mapping and unresolved decisions.
+  **Verify:** documentation review and cross-check every protocol claim against
+  `src/protocol.rs` and both client implementations; no implementation/UI tests.
+
+### R-SELECT-AUDIT — Cross-hunk selection investigation (not a release prerequisite)
+
+- [ ] Inspect
+  actual stage/unstage/discard paths and both clients' selection forwarding to
+  determine whether a selection spanning hunks acts only on selected changed
+  lines or expands to whole hunks. Document current versus intended IMM-2/IMM-6
+  behavior with concrete partial-endpoint, header/context, intervening-hunk and
+  preferably cross-file cases. Retain exact expected Git state and focused
+  native evidence. Create a separately scoped fix only if a demonstrated
+  discrepancy exists; do not assume a behavior change.
+  **Done when:** evidence-backed behavior and any discrepancy/follow-up are
+  recorded without converting investigation into an automatic release gate.
+  **Verify:** focused real-repository state checks and native selection evidence
+  in both clients, if a behavior discrepancy is found; otherwise document the
+  traced paths and cases.
+
+### R-REL — Release sprint (immediately after R-4.1a, R-7.3a and R-CLIENT-SPEC)
+
+These linked, bounded tasks are the release checklist, not a competing ledger.
+Release sprint begins immediately after **both R-4.1a and R-7.3a, and
+R-CLIENT-SPEC**; no other
+feature work is scheduled in between. Each item stays unchecked until its own
+evidence is produced. Release readiness explicitly assesses and discloses
+BUG-READ-1's known limitation; do not silently schedule its implementation.
+
+- [ ] **R-REL-1 — Reproducible artifacts and safe publication**
+  **Depends on:** release-slice binaries/package metadata being buildable.
+  Tagged GitHub binary releases and crates.io publication; VS Code Marketplace
+  and Open VSX publication (the requested “open vsix” means Open VSX). Align tag,
+  Cargo and extension versions; packaging dry runs; scoped credentials and
+  protected publishing; document safe reruns and partial-publication recovery.
+  Clean-machine install/launch smoke tests use actual binary, crate and VSIX
+  deliverables. Review license/package metadata and dependencies/licenses;
+  generate checksums. State tested versus build-only platform/architecture
+  support explicitly. Document bundled/downloaded/external server strategy so
+  VS Code installation does not unexpectedly require Rust.
+  **Done when:** dry runs, credential-safety review, actual-artifact smoke tests,
+  metadata/license review and checksums are recorded; no unsupported platform is
+  described as tested.
+  **Verify:** packaging dry runs and clean-machine installation/launch on each
+  claimed tested target; CI workflow review and publication rehearsal, without
+  publishing from unprotected PR credentials.
+
+- [ ] **R-REL-2 — Client install and screenshots**
+  **Depends on:** R-REL-1 artifact/server strategy.
+  Document tested Neovim native-pack and lazy.nvim setup and server install/
+  discovery. Add cheap deterministic CI screenshot capture for both real
+  Neovim and VS Code using existing harnesses where feasible; reuse resulting
+  README assets, with documented manual fallback if capture is expensive or
+  flaky (not a costly per-PR requirement). Validate consumption/linkage of the
+  separately completed `docs/CLIENT_SPEC.md`. Welcome Helix, Zed and JetBrains
+  as external community clients; do not promise first-party implementations.
+  **Done when:** both client setup paths are tested and documented; both-client
+  screenshot assets or manual fallback are usable; client spec is linked and
+  consumable.
+  **Verify:** clean setup smoke tests for Neovim and VS Code; deterministic
+  screenshot job checked for both harnesses; spec link/consumption review.
+
+- [ ] **R-REL-3 — Release-facing README and honest project signals**
+  **Depends on:** R-REL-1/2 evidence and R-CLIENT-SPEC.
+  Redo README for actual features versus Planned, project purpose/differentiation,
+  modest evidenced responsiveness claims, both supported clients, install and
+  quickstart, screenshots, links and concise feature-focused roadmap. Publish
+  a brief fair comparison, researched at writing time, against Neogit and
+  Edamagit. Evaluate as candidate advantages over Edamagit faster/more responsive
+  key handling, a scriptable command interface, and contextual
+  auto-selection/preselection of commit-at-point for log/fixup/rebase; research
+  whether these are implemented or follow-up opportunities rather than asserting
+  them as established. Note Neogit's greater maturity/completeness/
+  integration and this project's possible easier key rebinding, thin multi-editor
+  architecture and possible performance differences; allow the conclusion
+  that no compelling Neovim-specific advantage currently exists. Support speed
+  claims with evidence or qualify/omit them; accurately state current feature and
+  integration limitations, respectfully, without unsupported superiority claims.
+  Add GitHub Releases, crates.io, VS Code Marketplace and Open VSX badges, plus
+  measured, clearly scoped coverage badges (distinguish Rust and client scopes);
+  link `docs/CLIENT_SPEC.md`. At the very end of the future README, disclose the user's
+  exact intent: most code generated using combinations around Sol 6.1 and
+  Deepseek 4.1 flash tiers, occasional Opus 5.5 guidance, very little code
+  reviewed by eye but overall goals human-reviewed, robust tests mostly Neovim
+  (mini.test, tmux snapshots, multiple viewport sizes) plus some VS Code
+  coverage, creator daily use mostly VS Code, and intent for sustained
+  maintenance/no vaporware at least for these two clients. Do not imply tests
+  equal human review or promise guarantees.
+  **Done when:** README claims match evidence; configured publication badge
+  targets are validated before tag (live publication checks belong to R-REL-4),
+  scoped coverage badges have measured evidence, and disclosure is last.
+  **Verify:** render/read README links and assets; independently verify badge
+  sources and every product/platform claim.
+
+- [ ] **R-REL-4 — v0.2.0 go/no-go and publication**
+  **Depends on:** R-REL-1…R-REL-3 and both feature gates.
+  Record bounded changelog and release checklist, history-rewrite safety
+  warnings, truthful known limitations/platform status, full regression and
+  phase/native evidence, install/publication dry-run gates, and explicit
+  **pre-tag human go/no-go** for v0.2.0. Before approval, validate configured
+  badge targets and publication destinations without requiring live URLs. After
+  approval, tagged CI publishes the binary release and all configured channels
+  (crates.io, VS Code Marketplace, Open VSX), then verifies publication and live
+  badges. Explicitly disclose BUG-READ-1's known failing
+  read-responsiveness probe and keep claims bounded; it is not silently fixed or
+  converted into a release prerequisite. Do not make deferred Windows/macOS
+  acceptance, unrelated menus/views/branches/history, or build-only targets
+  release gates.
+  **Done when:** all scoped evidence is linked, limitations and platform matrix
+  are truthful, pre-tag go/no-go is recorded, and post-approval tagged CI verifies
+  all publication channels and live badges; no release success is presumed.
+  **Verify:** full `make test`, phase and focused native evidence for both
+  clients, clean-install smoke tests and publication dry runs; human review of
+  changelog, safety warnings, known limitations, configured targets before tag,
+  and all live publication channels/badges after tagged CI.
 
 ### Known limitations → where fixed
 
