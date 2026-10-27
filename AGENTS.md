@@ -46,8 +46,10 @@ Start in these components:
 ## Read the right source
 
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap, glossary, design and
-  protocol (§§1–4), keymaps (§5), views (§6), phases (§7), review backlog (§12), testing
-  (§8), open questions (§9), and implementation status/deviations (§10).
+  protocol (§§1–4), keymaps (§5), views (§6), the dependency-ordered
+  implementation/review queue (§7), testing (§8), and open questions (§9).
+  §§10–12 are compact historical summaries/evidence pointers, not a separate
+  active review queue.
   Read only the sections relevant to the task; §10 is historical context, not
   proof of current behaviour. Do not duplicate its detailed design or progress
   history here.
