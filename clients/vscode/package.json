@@ -60,6 +60,14 @@
       {
         "id": "magit-diff-removed",
         "description": "Removed diff line"
+      },
+      {
+        "id": "magit-message-error",
+        "description": "Error output from a failed command"
+      },
+      {
+        "id": "magit-message-warn",
+        "description": "Warning output from a successful command"
       }
     ],
     "semanticTokenScopes": [
@@ -98,6 +106,12 @@
           ],
           "magit-diff-removed": [
             "markup.deleted"
+          ],
+          "magit-message-error": [
+            "invalid"
+          ],
+          "magit-message-warn": [
+            "markup.warning"
           ]
         }
       }

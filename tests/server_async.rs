@@ -76,6 +76,81 @@ fn shutdown_and_exit(server: &mut TestServer) {
     server.send(json!({"jsonrpc": "2.0", "method": "exit", "params": null}));
 }
 
+#[test]
+fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
+    let (first, _) = init_repo();
+    let (second, _) = init_repo();
+    std::fs::create_dir(first.path().join("subdir")).unwrap();
+    for (root, key) in [(first.path(), "z"), (second.path(), "Z")] {
+        std::fs::write(root.join(".magit-lsp.toml"), format!("profile = \"standard\"\ntrust_repo_config = false\n[diff]\ncontext = 11\n[keys.status]\nstage = [\"{key}\"]\n")).unwrap();
+    }
+    let user = first.path().join("user.toml");
+    std::fs::write(&user, "trust_repo_config = true\n").unwrap();
+    for trusted in [false, true] {
+        let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", user.to_str().unwrap())]);
+        let mut init = initialize_message();
+        init["params"]["initializationOptions"] = json!({
+            "trust_repo_config": trusted, "keys": {"status": {"stage": ["Q"]}}
+        });
+        server.send(init);
+        assert!(server.response_with_id(1).get("error").is_none());
+        let mut views = Vec::new();
+        for (id, root, expected) in [
+            (2, first.path().to_path_buf(), "z"),
+            (3, second.path().to_path_buf(), "Z"),
+            (4, first.path().join("subdir"), "z"),
+        ] {
+            server.send(open_view_message(id, &repo_param(&root)));
+            let response = server.response_with_id(id);
+            let view = response["result"]["id"].as_str().unwrap().to_string();
+            assert_eq!(server.recv()["method"], "view/render");
+            let keymap = server.recv();
+            assert_stage_binding(&keymap, if trusted { expected } else { "Q" });
+            views.push(view);
+        }
+        if trusted {
+            // A forced reload must update both aliases of the first root,
+            // without leaking that root's bindings into the second session.
+            std::fs::write(first.path().join(".magit-lsp.toml"), "[keys.status]\nstage = [\"X\"]\n").unwrap();
+            server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}));
+            let mut seen = std::collections::HashSet::new();
+            while seen.len() < 3 {
+                let notice = server.recv();
+                if notice["method"] != "view/keymap" { continue; }
+                let view = notice["params"]["viewId"].as_str().unwrap();
+                let expected = if view == views[1] { "Z" } else { "X" };
+                assert_stage_binding(&notice, expected);
+                seen.insert(view.to_string());
+            }
+            server.notifications.clear();
+            std::fs::write(first.path().join(".magit-lsp.toml"), "not valid toml").unwrap();
+            std::fs::write(second.path().join(".magit-lsp.toml"), "[keys.status]\nstage = [\"Y\"]\n").unwrap();
+            server.send(json!({"jsonrpc":"2.0", "method":"workspace/didChangeConfiguration", "params":{}}));
+            server.send(json!({"jsonrpc":"2.0", "id":10, "method":"view/resync", "params":{"viewId":views[0]}}));
+            assert!(server.response_with_id(10).get("error").is_none());
+            server.drain_notifications();
+            assert!(server.notifications.iter().any(|notice| {
+                notice["method"] == "window/showMessage"
+                    && notice["params"]["message"].as_str().is_some_and(|text| text.contains(".magit-lsp.toml"))
+            }), "missing readable configuration error: {:?}", server.notifications);
+            for view in &views {
+                let notice = server.notifications.iter().rev().find(|notice| {
+                    notice["method"] == "view/keymap" && notice["params"]["viewId"] == *view
+                }).expect("reloaded root keymap");
+                assert_stage_binding(notice, if *view == views[1] { "Y" } else { "X" });
+            }
+        }
+        shutdown_and_exit(&mut server);
+    }
+}
+
+fn assert_stage_binding(notice: &Value, expected: &str) {
+    assert_eq!(notice["method"], "view/keymap", "{notice}");
+    let binding = notice["params"]["bindings"].as_array().unwrap().iter()
+        .find(|binding| binding["command"] == "status.stage").expect("stage binding");
+    assert_eq!(binding["keys"], json!([expected]), "{notice}");
+}
+
 /// User-close requests must remove nested views from routing and parent order.
 #[test]
 fn nested_user_close_and_reopen_does_not_retain_views_or_parents() {

@@ -1797,6 +1797,53 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
   )
 end
 
+T['overlapping and nested prompts retain their originating client'] = function()
+  setup_child()
+  child.lua([[
+    local sent = { [11] = {}, [22] = {} }
+    local connected = { [11] = true, [22] = true }
+    vim.lsp.get_client_by_id = function(id)
+      if connected[id] then
+        return { request = function(_, method, params)
+          table.insert(sent[id], { method = method, params = params })
+        end }
+      end
+    end
+    local selects, inputs = {}, {}
+    vim.ui.select = function(items, _, callback)
+      table.insert(selects, { items = items, callback = callback })
+    end
+    vim.ui.input = function(_, callback) table.insert(inputs, callback) end
+    local handler = vim.lsp.handlers['view/prompt']
+    handler(nil, { promptId = 'first', kind = 'confirm' }, { client_id = 11 })
+    handler(nil, { promptId = 'second', kind = 'confirm' }, { client_id = 22 })
+    selects[2].callback(selects[2].items[1])
+    selects[1].callback(selects[1].items[1])
+
+    handler(nil, { promptId = 'nested', kind = 'choice', allowCustom = true,
+      items = { { id = 'custom', label = 'Custom' } } }, { client_id = 11 })
+    selects[3].callback(selects[3].items[2])
+    handler(nil, { promptId = 'other', kind = 'confirm' }, { client_id = 22 })
+    selects[4].callback(selects[4].items[1])
+    inputs[1]('nested answer')
+
+    handler(nil, { promptId = 'missing', kind = 'confirm' }, nil)
+    selects[5].callback(selects[5].items[1])
+    connected[11] = false
+    handler(nil, { promptId = 'disconnected', kind = 'confirm' }, { client_id = 11 })
+    selects[6].callback(selects[6].items[1])
+    _G.PROMPT_OWNERSHIP = sent
+  ]])
+  local sent = child.lua_get('PROMPT_OWNERSHIP')
+  MiniTest.expect.equality(sent[11][1].params.promptId, 'first')
+  MiniTest.expect.equality(sent[22][1].params.promptId, 'second')
+  MiniTest.expect.equality(sent[11][2].params.promptId, 'nested')
+  MiniTest.expect.equality(sent[11][2].params.value.custom, 'nested answer')
+  MiniTest.expect.equality(sent[22][2].params.promptId, 'other')
+  MiniTest.expect.equality(#sent[11], 2, 'missing and disconnected clients do not redirect')
+  MiniTest.expect.equality(#sent[22], 2, 'no response is sent through another client')
+end
+
 T['a menu option prompt asks through vim.ui.input and lands the value'] = function()
   setup_child()
   child.lua([[

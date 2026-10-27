@@ -290,6 +290,7 @@ pub fn load_config(options: &LoadOptions) -> Result<Config, ConfigError> {
     if config.trust_repo_config {
         if let Some(repo) = &options.repo_path {
             let repo_config = repo.join(".magit-lsp.toml");
+            files.push(repo_config.clone());
             if repo_config.is_file() {
                 let mut layered = Layered::default();
                 let mut visiting = Vec::new();
@@ -1015,6 +1016,8 @@ fn span_line(source: &str, span: Option<std::ops::Range<usize>>) -> usize {
 /// A loaded configuration plus its resolved keymaps, with hot reload.
 pub struct ConfigService {
     inner: Mutex<ServiceState>,
+    // When both are needed, lock repositories before inner, never the reverse.
+    repositories: Mutex<BTreeMap<PathBuf, Arc<ConfigService>>>,
 }
 
 struct ServiceState {
@@ -1041,6 +1044,7 @@ impl ConfigService {
         let keymaps = keymap::validate(&config)?;
         let observed = hash_files(&config.files);
         Ok(Self {
+            repositories: Mutex::new(BTreeMap::new()),
             inner: Mutex::new(ServiceState {
                 options,
                 config: Arc::new(config),
@@ -1056,6 +1060,7 @@ impl ConfigService {
         let config = Config::default();
         let keymaps = keymap::validate(&config).unwrap_or_default();
         Self {
+            repositories: Mutex::new(BTreeMap::new()),
             inner: Mutex::new(ServiceState {
                 options,
                 config: Arc::new(config),
@@ -1069,14 +1074,55 @@ impl ConfigService {
     /// Apply the client's `initializationOptions` and reload.
     pub fn set_initialization(&self, init: Option<serde_json::Value>) -> ReloadOutcome {
         {
+            let repositories = self.repositories.lock().unwrap_or_else(|p| p.into_inner());
             let mut state = self.lock();
-            state.options.initialization = init;
+            state.options.initialization = init.clone();
+            for service in repositories.values() {
+                service.lock().options.initialization = init.clone();
+            }
         }
         self.reload(true)
     }
 
+    /// Return the cached configuration for an already resolved working-tree root.
+    pub fn for_repository(&self, root: &Path) -> Arc<ConfigService> {
+        let mut repositories = self.repositories.lock().unwrap_or_else(|p| p.into_inner());
+        repositories.entry(root.to_path_buf()).or_insert_with(|| {
+            let state = self.lock();
+            let mut options = state.options.clone();
+            options.repo_path = Some(root.to_path_buf());
+            let service = Self::load(options.clone()).unwrap_or_else(|error| {
+                let mut config = (*state.config).clone();
+                config.files.push(root.join(".magit-lsp.toml"));
+                let observed = hash_files(&config.files);
+                Self {
+                    repositories: Mutex::new(BTreeMap::new()),
+                    inner: Mutex::new(ServiceState {
+                        options,
+                        config: Arc::new(config),
+                        keymaps: state.keymaps.clone(),
+                        error: Some(error),
+                        observed,
+                    }),
+                }
+            });
+            Arc::new(service)
+        }).clone()
+    }
+
     /// Reload if a watched file changed (or unconditionally when `force`).
     pub fn reload(&self, force: bool) -> ReloadOutcome {
+        let mut outcome = self.reload_local(force);
+        let force_repositories = force || outcome.changed;
+        for service in self.repositories.lock().unwrap_or_else(|p| p.into_inner()).values() {
+            let repo = service.reload_local(force_repositories);
+            outcome.changed |= repo.changed;
+            outcome.errors.extend(repo.errors);
+        }
+        outcome
+    }
+
+    fn reload_local(&self, force: bool) -> ReloadOutcome {
         let mut state = self.lock();
         let options = state.options.clone();
         let observed = hash_files(&state.config.files);

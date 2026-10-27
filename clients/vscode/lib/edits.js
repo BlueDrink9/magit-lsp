@@ -48,7 +48,7 @@ async function openEdit(effect) {
 }
 
 /**
- * The edit owning the active editor, or the most recent one.
+ * The edit owning the focused editor, if any.
  *
  * @returns {object|undefined}
  */
@@ -59,9 +59,6 @@ function currentEdit() {
     if (id && store.edits.has(id)) {
       return store.edits.get(id);
     }
-  }
-  if (store.activeEditId && store.edits.has(store.activeEditId)) {
-    return store.edits.get(store.activeEditId);
   }
   return undefined;
 }

@@ -1257,6 +1257,79 @@ async function run() {
       'generic unstage-all server render'
     );
     const actionRestored = stagedNames() === '';
+
+    // A07: the server's real Git bridge opens a writable message file. Exercise
+    // generated command IDs, never a client-owned key/chord interpretation.
+    const invokeGeneratedEditCommand = async (command) => {
+      const binding = contributed.keybindings.find((entry) =>
+        entry.args?.command === command
+          && entry.when.includes("magit.scope == 'commit-message'"));
+      assert(binding, `generated edit binding for ${command}`);
+      await vscode.commands.executeCommand(binding.command, binding.args);
+      return binding;
+    };
+    const startBridgeEdit = async () => {
+      fs.writeFileSync(path.join(repo, 'tracked.txt'), `bridge edit probe ${Date.now()}\n`);
+      await focusStatus();
+      execFileSync('git', ['-C', repo, 'add', 'tracked.txt']);
+      assert(stagedNames().length > 0, 'stage bridge edit fixture');
+      await vscode.commands.executeCommand('magit.invoke', { command: 'commit.create' });
+      await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'file'
+        && vscode.window.activeTextEditor.document.languageId === 'git-commit',
+      'real bridge commit message editor');
+      return vscode.window.activeTextEditor;
+    };
+    const bridgeEditor = await startBridgeEdit();
+    const commitMessage = `A07 native bridge ${Date.now()}`;
+    const messageRange = new vscode.Range(0, 0, bridgeEditor.document.lineCount, 0);
+    await bridgeEditor.edit((builder) => builder.replace(messageRange, `${commitMessage}\n`));
+    assert(bridgeEditor.document.isDirty, 'bridge message is unsaved before confirmation');
+    shot('a07-edit-before-confirm.png');
+    const editConfirmBinding = await invokeGeneratedEditCommand('common.confirm');
+    await waitFor(() => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
+      .toString().trim() === commitMessage, 'saved bridge message committed');
+    assert.equal(bridgeEditor.document.getText().trim(), commitMessage,
+      'confirm saved the bridge edit before answering the server');
+    const editConfirmShot = shot('a07-edit-confirmed.png');
+
+    // Keep another bridge edit open while status has focus. Status actions must
+    // route by the active document, not a stale last-edit fallback.
+    const outstandingEditor = await startBridgeEdit();
+    await focusStatus();
+    const statusDispatchBefore = requests.length;
+    await vscode.commands.executeCommand('magit.invoke', { command: 'common.refresh' });
+    await waitFor(() => requests.slice(statusDispatchBefore).some((request) =>
+      request.method === 'view/invoke' && request.params.command === 'common.refresh'),
+    'status dispatch while bridge edit remains open');
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
+    assert.equal(outstandingEditor.document.uri.scheme, 'file', 'bridge edit tab remains open');
+    await vscode.window.showTextDocument(outstandingEditor.document, { preserveFocus: false });
+    const editCancelBinding = await invokeGeneratedEditCommand('common.cancel');
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      'cancel returns focus to status');
+    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B']).toString().trim(),
+      commitMessage, 'cancel did not create a commit');
+    const editCancelShot = shot('a07-edit-cancelled.png');
+    const closeEditor = await startBridgeEdit();
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
+      'closing bridge editor cancels and restores status');
+    assert(closeEditor.document.uri.scheme === 'file', 'closed bridge editor was a real file');
+    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B']).toString().trim(),
+      commitMessage, 'closing the bridge editor did not create a commit');
+    const editCloseShot = shot('a07-edit-closed.png');
+    fs.writeFileSync(`${evidence}/a07-evidence.json`, JSON.stringify({
+      gate: 'A07',
+      generatedConfirm: editConfirmBinding.args.command,
+      generatedCancel: editCancelBinding.args.command,
+      confirmedMessage: commitMessage,
+      saveBeforeConfirm: true,
+      statusCommandWithOpenEdit: 'common.refresh',
+      statusCommandReachedServer: true,
+      cancelCreatedNoCommit: true,
+      closeCreatedNoCommit: true,
+      screenshots: ['a07-edit-before-confirm.png', editConfirmShot, editCancelShot, editCloseShot],
+    }, null, 2));
     fs.writeFileSync(`${evidence}/r-vs-3-evidence.json`, JSON.stringify({
       gate: 'R-VS-3',
       evidenceDirectory: evidence,

@@ -294,8 +294,7 @@ local function configure()
     view.apply_keymap(result, ctx and ctx.client_id)
   end
   vim.lsp.handlers['view/prompt'] = function(_, result, ctx)
-    prompt.configure({ client_id = ctx and ctx.client_id })
-    prompt.handle(result)
+    prompt.handle(result, ctx and ctx.client_id)
   end
   -- Detached Git work (a commit) still has to reach the user after the request
   -- that started it answered, so keep the client that produced it.
@@ -376,7 +375,6 @@ function M.setup(opts)
       vim.notify('Failed to start magit-lsp server', vim.log.levels.ERROR)
       return nil, 'failed to start client'
     end
-    prompt.configure({ client_id = session.client_id })
   end
 
   open_status(session)

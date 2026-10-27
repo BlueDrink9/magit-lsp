@@ -195,6 +195,37 @@ async function run() {
       'the menu row was forwarded as a canonical key, not a client command'
     );
 
+    // Exercise the actual editor bridge through the registered dispatcher and
+    // generated binding payloads rather than simulating profile key chords.
+    const invokeGenerated = async (command) => {
+      const binding = require('../package.json').contributes.keybindings.find((entry) =>
+        entry.args?.command === command
+          && entry.when.includes("magit.scope == 'commit-message'"));
+      assert(binding, `generated binding for ${command}`);
+      await commands.get(binding.command)(binding.args);
+    };
+    git(repo, ['add', 'tracked.txt']);
+    await commands.get('magit.invoke')({ command: 'commit.create' });
+    await waitFor(() => vscode.__test.activeEditor?.document.uri.scheme === 'file'
+      && vscode.__test.activeEditor.document.languageId === 'git-commit', 'bridge edit document');
+    const editDocument = vscode.__test.activeEditor.document;
+    const commitMessage = `integration bridge ${Date.now()}`;
+    fs.writeFileSync(editDocument.uri.fsPath, `${commitMessage}\n`);
+    await invokeGenerated('common.confirm');
+    await waitFor(() => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
+      .toString().trim() === commitMessage, 'confirmed bridge commit');
+
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), `cancel probe ${Date.now()}\n`);
+    git(repo, ['add', 'tracked.txt']);
+    await commands.get('magit.invoke')({ command: 'commit.create' });
+    await waitFor(() => vscode.__test.activeEditor?.document.uri.scheme === 'file'
+      && vscode.__test.activeEditor.document.languageId === 'git-commit', 'second bridge edit');
+    await invokeGenerated('common.cancel');
+    await waitFor(() => require('../lib/store').store.edits.size === 0,
+      'cancelled bridge edit is removed');
+    assert.equal(execFileSync('git', ['-C', repo, 'log', '-1', '--format=%B'])
+      .toString().trim(), commitMessage, 'cancelled bridge edit did not commit');
+
     // The displayed text is always the server's last render; never recomposed.
     assert.match(statusEditor.document.getText(), /Unstaged changes/);
     assert.equal(vscode.__test.output.filter((line) => line.startsWith('unknown effect')).length, 0);

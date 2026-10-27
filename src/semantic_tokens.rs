@@ -35,6 +35,8 @@ pub const TOKEN_TYPES: &[&str] = &[
     "magit.menu.disabled",
     "magit.menu.pending",
     "magit.menu.preview",
+    "magit.message.error",
+    "magit.message.warn",
 ];
 
 /// Token modifiers, in legend bit order.
@@ -72,6 +74,8 @@ pub const TOKEN_GROUPS: &[&str] = &[
     "MagitMenuDisabled",
     "MagitMenuPending",
     "Comment",
+    "ErrorMsg",
+    "WarningMsg",
 ];
 
 /// The legend advertised in `semanticTokensProvider`.

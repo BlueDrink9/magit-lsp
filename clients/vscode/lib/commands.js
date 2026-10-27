@@ -6,7 +6,6 @@ const path = require('node:path');
 
 const vscode = require('vscode');
 
-const edit = require('./edit');
 const edits = require('./edits');
 const foldkeys = require('./foldkeys');
 const menus = require('./menus');
@@ -110,19 +109,6 @@ async function pressCommand(args) {
     return;
   }
 
-  // An edit buffer is a real file, so it has no magit view id. The server's
-  // generated commit-message bindings still call `magit.key`; answer the two
-  // commands locally.
-  if (edits.currentEdit()) {
-    const command = edit.commandForKey(key);
-    if (command === 'confirm') {
-      await edits.confirmEditCommand();
-    } else if (command === 'cancel') {
-      await edits.cancelEditCommand();
-    }
-    return;
-  }
-
   const state = views.activeState();
   if (!state) {
     return;
@@ -151,8 +137,10 @@ async function invokeCommand(args) {
   if (!command) {
     return;
   }
-  // Generated edit-buffer bindings use the same dispatcher as view actions.
-  if (edits.currentEdit()) {
+  // The focused edit document has no Magit view; generated command IDs still
+  // identify the server-owned edit actions.
+  const currentEdit = edits.currentEdit();
+  if (currentEdit && currentEdit.effect.scope) {
     if (command === 'common.confirm') await edits.confirmEditCommand();
     else if (command === 'common.cancel') await edits.cancelEditCommand();
     return;

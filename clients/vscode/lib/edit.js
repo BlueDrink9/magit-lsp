@@ -16,10 +16,6 @@ const LANGUAGES = {
   'rebase-todo': 'git-rebase',
 };
 
-/** The canonical key each commit-message profile binds to confirm/cancel. */
-const CONFIRM_KEYS = new Set(['ctrl+Enter', 'Z Z']);
-const CANCEL_KEYS = new Set(['ctrl+shift+x', 'Z Q']);
-
 /**
  * Whether an effect asks the client to edit a Git-owned file.
  *
@@ -53,7 +49,7 @@ function editingContext(effect) {
   const editing = isEditEffect(effect);
   return {
     'magit.active': editing,
-    'magit.scope': editing ? 'commit-message' : '',
+    'magit.scope': editing ? effect.scope : '',
     'magit.textMode': false,
     'magit.capture': false,
     'magit.editing': editing,
@@ -70,25 +66,6 @@ function inactiveContext() {
 }
 
 /**
- * The command a canonical key performs in an edit buffer.
- *
- * @param {string|undefined} key
- * @returns {'confirm'|'cancel'|undefined}
- */
-function commandForKey(key) {
-  if (typeof key !== 'string') {
-    return undefined;
-  }
-  if (CONFIRM_KEYS.has(key)) {
-    return 'confirm';
-  }
-  if (CANCEL_KEYS.has(key)) {
-    return 'cancel';
-  }
-  return undefined;
-}
-
-/**
  * The `view/invoke` args for a confirm/cancel answer.
  *
  * @param {string} editId
@@ -100,7 +77,6 @@ function answerArgs(editId) {
 
 module.exports = {
   answerArgs,
-  commandForKey,
   editingContext,
   inactiveContext,
   isEditEffect,

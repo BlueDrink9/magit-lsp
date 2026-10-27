@@ -274,7 +274,7 @@ test('canonical status Enter, fold and refresh bindings keep the focus gate', ()
   }
 });
 
-test('status semantic-token types map to theme scopes', () => {
+test('semantic-token types map to theme scopes', () => {
   const contributions = require('../package.json').contributes;
   const scopes = contributions.semanticTokenScopes.find(
     (entry) => entry.language === 'magit'
@@ -293,10 +293,14 @@ test('status semantic-token types map to theme scopes', () => {
     'magit-hunk-header',
     'magit-diff-added',
     'magit-diff-removed',
+    'magit-message-error',
+    'magit-message-warn',
   ];
   for (const type of statusTypes) {
     assert(Array.isArray(scopes.scopes[type]) && scopes.scopes[type].length > 0, type);
   }
+  assert.deepEqual(scopes.scopes['magit-message-error'], ['invalid']);
+  assert.deepEqual(scopes.scopes['magit-message-warn'], ['markup.warning']);
   for (const type of ['magit-section', 'magit-diff-added', 'magit-diff-removed']) {
     assert(
       contributions.semanticTokenTypes.some((entry) => entry.id === type),

@@ -115,6 +115,8 @@ struct Shared {
     next_view: Arc<AtomicU64>,
     /// Configuration and resolved keymaps.
     config: Arc<ConfigService>,
+    /// Repository configuration associated with each pending bridge edit.
+    edit_configs: Arc<Mutex<HashMap<String, Arc<ConfigService>>>>,
     /// Key delivery settings declared by the client in `initialize`.
     client: Arc<Mutex<ClientCaps>>,
     /// Why the initial configuration load failed, if it did.
@@ -146,6 +148,7 @@ impl Shared {
             view_repos: Arc::new(Mutex::new(HashMap::new())),
             next_view: Arc::new(AtomicU64::new(0)),
             config,
+            edit_configs: Arc::new(Mutex::new(HashMap::new())),
             client: Arc::new(Mutex::new(ClientCaps::default())),
             startup_error,
             sender: sender.clone(),
@@ -581,13 +584,12 @@ fn refresh_view_keymaps(shared: &Shared, sender: &mpsc::UnboundedSender<Message>
     if shared.delivery() != KeymapDelivery::Dynamic {
         return;
     }
-    let keymaps = shared.config.keymaps();
     let mut sessions = shared
         .sessions
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for session in sessions.values_mut() {
-        session.set_keymaps(keymaps.clone());
+    for (root, session) in sessions.iter_mut() {
+        session.set_keymaps(shared.config.for_repository(std::path::Path::new(root)).keymaps());
         let ids: Vec<String> = session
             .views()
             .iter()
@@ -653,7 +655,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
             // The bridge's thread outlives the server, so it must not hold a
             // `Shared` (that would keep the writer channel alive for ever).
             let client = shared.client.clone();
-            let config = shared.config.clone();
+            let configs = shared.edit_configs.clone();
             Arc::new(move |effects: Vec<Effect>| {
                 let Some(sender) = sender.upgrade() else {
                     return;
@@ -670,7 +672,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 if dynamic_delivery(&client) {
                     for effect in &effects {
                         if let Effect::EditDocument { edit_id, kind, .. } = effect {
-                            if let Some(keymap) = edit_keymap(&config, edit_id, kind) {
+                            let config = configs.lock().unwrap_or_else(|p| p.into_inner()).get(edit_id).cloned();
+                            if let Some(keymap) = config.and_then(|config| edit_keymap(&config, edit_id, kind)) {
                                 let _ = sender.send(Message::Notification(Notification::new(
                                     VIEW_KEYMAP.to_string(),
                                     keymap,
@@ -741,11 +744,10 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     .await
                     .unwrap_or_default();
                 let changed = outcome.changed;
-                let had_errors = !outcome.errors.is_empty();
                 for error in outcome.errors {
                     let _ = sender.send(show_message(1, format!("magit-lsp config: {error}")));
                 }
-                if changed && !had_errors {
+                if changed {
                     refresh_view_keymaps(&shared, &sender);
                     tracing::debug!("configuration reloaded");
                 }
@@ -802,14 +804,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let outcome = tokio::task::spawn_blocking(move || config.reload(true))
                         .await
                         .unwrap_or_default();
-                    let had_errors = !outcome.errors.is_empty();
                     for error in outcome.errors {
                         let _ =
                             sender.send(show_message(1, format!("magit-lsp config: {error}")));
                     }
-                    if !had_errors {
-                        refresh_view_keymaps(&shared, &sender);
-                    }
+                    // Failed roots retain their last good maps; successful
+                    // roots must still receive their independently reloaded maps.
+                    refresh_view_keymaps(&shared, &sender);
                     tracing::debug!("configuration reloaded on client request");
                 }
                 // The client aborts the mutation running under this token.
@@ -1260,8 +1261,10 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .repo_path()
         .ok_or_else(|| Error::new("view/open needs args.repo_path for a status view"))?
         .to_string();
+    let repo = crate::git::GitRepo::open(&repo)?.root().canonicalize()?.to_string_lossy().into_owned();
     let id = shared.next_view_id();
-    let keymaps = shared.config.keymaps();
+    let config = shared.config.for_repository(std::path::Path::new(&repo));
+    let keymaps = config.keymaps();
     let mut sessions = shared
         .sessions
         .lock()
@@ -1291,6 +1294,9 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         VIEW_RENDER.to_string(),
         render,
     ))];
+    if let Some(error) = config.last_error() {
+        notifications.push(show_message(1, format!("magit-lsp config: {error}")));
+    }
     if shared.delivery() == KeymapDelivery::Dynamic {
         if let Some(keymap) = keymap {
             notifications.push(Message::Notification(Notification::new(
@@ -1352,7 +1358,7 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let keymaps = shared.config.keymaps();
+    let keymaps = shared.config.for_repository(std::path::Path::new(&repo)).keymaps();
     let mut sessions = shared
         .sessions
         .lock()
@@ -1561,11 +1567,15 @@ fn spawn_commit(shared: Shared, repo: String) {
         .spawn(move || {
             let _progress = progress;
             let edit_id = editor::registry().create(&repo);
+            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
+                edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
+            );
             let result = match editor::socket_path() {
                 Some(socket) => editor::commit(&repo, &edit_id, socket),
                 None => Err(Error::new("the editor bridge is not running")),
             };
             editor::registry().remove(&edit_id);
+            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).remove(&edit_id);
 
             let mut messages = Vec::new();
             match result {

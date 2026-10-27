@@ -29,6 +29,44 @@ fn status_keymap(config: &magit_lsp::config::Config, command: &str) -> Vec<Strin
 }
 
 #[test]
+fn repository_services_cache_layers_and_reload_without_overwriting_base() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    let other = dir.path().join("other");
+    let main = dir.path().join("user.toml");
+    write(&main, "trust_repo_config = true\n");
+    write(&root.join(".magit-lsp.toml"), "[diff]\ncontext = 11\n[keys.status]\nstage = [\"z\"]\n");
+    std::fs::create_dir_all(&other).unwrap();
+    let base = ConfigService::load(LoadOptions { config_path: Some(main), ..Default::default() }).unwrap();
+    let repo = base.for_repository(&root);
+    assert!(std::sync::Arc::ptr_eq(&repo, &base.for_repository(&root)));
+    let second = base.for_repository(&other);
+    assert_eq!(repo.config().diff.context, 11);
+    assert_eq!(second.config().diff.context, 3);
+    assert_eq!(base.config().diff.context, 3);
+    write(&other.join(".magit-lsp.toml"), "[diff]\ncontext = 8\n");
+    assert!(base.reload(false).changed);
+    assert_eq!(second.config().diff.context, 8);
+    write(&root.join(".magit-lsp.toml"), "[diff]\ncontext = 12\n");
+    assert!(base.reload(false).errors.is_empty());
+    assert_eq!(repo.config().diff.context, 12);
+    write(&root.join(".magit-lsp.toml"), "not valid toml");
+    write(&other.join(".magit-lsp.toml"), "[diff]\ncontext = 9\n");
+    let outcome = base.reload(false);
+    assert_eq!(outcome.errors.len(), 1);
+    assert!(outcome.errors[0].to_string().contains(".magit-lsp.toml"));
+    assert_eq!(repo.config().diff.context, 12);
+    assert_eq!(second.config().diff.context, 9);
+    assert!(base.set_initialization(Some(serde_json::json!({
+        "trust_repo_config": false, "keys": {"status": {"stage": ["Y"]}}
+    }))).errors.is_empty());
+    for service in [&*repo, &*second, &base] {
+        assert_eq!(service.config().diff.context, 3);
+        assert_eq!(status_keymap(&service.config(), "status.stage"), vec!["Y"]);
+    }
+}
+
+#[test]
 fn includes_load_first_and_the_including_file_overrides_them() {
     let dir = TempDir::new().unwrap();
     write(&dir.path().join("a.toml"), "[keys.status]\nstage = [\"a\"]\n");
