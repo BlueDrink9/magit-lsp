@@ -93,6 +93,8 @@ Effects serialize with camelCase `type` discriminators, e.g. `openView`, `pushVi
 
 Managed drafts are an optional workflow, not a core requirement. The `editDocument` effect payload has all fields `{type:"editDocument",runId,uri,text,version,kind,title,mode,scope}`; current values include `kind:"commit-message"` and `mode:"managedDraft"`. Treat its `magit-commit://` URI as opaque. Open exactly the supplied text and version (currently version 1) with `textDocument/didOpen`; do not synthesize an initial change. Every `didChange` sends exactly one full-text content change, with monotonically increasing positive i32 versions and UTF-8 text no larger than 1 MiB. Save is `draft/save {runId,uri,version}`; history is `draft/history {runId,uri,version,command}`, where command is exactly `commit-message.history-prev` or `commit-message.history-next`; finish is `draft/finish {runId,uri,version,reason}`, with reason `confirm` or `normal-close`. These no-text barriers first require full synchronization, then pin run/URI/version and gate edits until response. Each successful response is an ordinary JSON-RPC result object: `{"type":"draft/checkpointed","runId":...,"uri":...,"version":...}`, `{"type":"draft/finished","runId":...,"uri":...,"version":...}`, or `{"type":"draft/replaced","runId":...,"uri":...,"baseVersion":...,"version":...,"text":...}`; these `type` values are not notification methods. Save checkpoints exactly live text/version without writing or releasing Git. Initial text/version is also the initial saved checkpoint. Confirm must name a version equal to both live and saved; normal-close names the saved version and may discard newer live text. Every accepted history request replaces live text at `baseVersion+1`, even at a history clamp, and leaves saved unchanged. Apply only when baseVersion matches, suppress its didChange echo, then full-sync strictly above returned version. If native text changed despite the editing gate, retain it and reconcile above the returned version rather than dropping it. See `src/protocol.rs:60-159`, `src/server.rs:1169-1213`, `src/editor/draft.rs:138-251,310-316`, `src/editor.rs:165-175`, `lua/magit-lsp/edit.lua:201-219`, `clients/vscode/lib/drafts.js:645-674`.
 
+**Real-file target (pending R-EDIT-REAL; current managed implementation above remains the contract).** Preserve reusable validated document storage and bounds where applicable; do not delete all synchronization/version/writeback mechanisms. Saved-file close reads Git's saved `COMMIT_EDITMSG` and never substitutes unsaved synchronized text. Explicit confirm is a separate exact-version synchronization barrier followed by validation/writeback. A shared session/owner/run-aware idempotent path atomically arbitrates close, confirm and abort, preventing duplicate helper release or commit. Existing semantic confirm/abort are planned for `workspace/executeCommand` `magit.command` through the existing language client; registration is pending, and no new custom method is introduced. Step 0 must verify optional VS Code tabGroups last-tab fallback, pure-LSP didClose reliability, false close/open on language change, last-tab identity and native shutdown/reload/workspace assumptions. Failing didClose alone does not block VS Code if fallback is verified; never synthesize didClose. Shutdown assumption remains unverified. Retain historical spike evidence without claiming new runs. Distinguish native Discard-unsaved (prior saved content), explicit Abort, and VS Code Git Discard-clear/save. Git determines effective-empty semantics; do not use raw length or unconditional template equality. Test comments, status and configured templates. See TASKS §3.10 and the linked R-EDIT-REAL ticket.
+
 Correlate each barrier by its JSON-RPC request ID. A rejected full sync can also emit `draft/error {uri,version,method,message,recoverable}`; separately, barrier validation failures are JSON-RPC `InvalidParams` errors whose `data` contains `{runId,uri,version,recoverable}`. Present readable errors, retain the user's local text, invalidate in-flight barriers after a rejected sync, and do not issue finish until synchronization is recovered. `recoverable:true` does not authorize reviving a terminal run. A finish response means editor writeback/helper release, not Git commit success: later effects/progress report the Git operation outcome (`src/server.rs:858-874,919-926,1149-1158,1808-1863`).
 
 Abort explicitly through `view/invoke` on the owning ordinary view with `command:"common.cancel"` and `args:{runId}`; there is no `draft/abort` method, and `textDocument/didClose` only detaches. On normal close, clients choose the saved checkpoint; explicit abort, progress cancellation, disconnect/EOF/shutdown cancel. Neovim classifies intercepted close commands and cancels ambiguous unload/hidden/API-close paths (`lua/magit-lsp/edit.lua:135-188,340-368`). VS Code's explicit close command arbitrates Save/Discard/Cancel, while ambiguous tab/document teardown cancels (`clients/vscode/lib/drafts.js:529-598,819-887`; `clients/vscode/lib/edit.js`). These are observed client differences, not a guarantee that arbitrary native close intent can be inferred: the server bridge is currently Unix-only, with no claim of platform acceptance or tested parity. Drafts are in-memory, not crash durable; late responses cannot resurrect terminal runs. If an unsupported prompt unexpectedly arrives, answer with `cancelled:true` rather than leaving the waiting command suspended. If a managed-draft `editDocument` unexpectedly arrives, do not silently drop it: explicitly abort that owning run with `common.cancel` and `{runId}`.
@@ -257,38 +259,29 @@ and `draft/history` version barriers. It has explicit close-intent arbitration;
 `didClose` only detaches. Do not describe the real-file workflow below as
 implemented or remove the current contract before gated cutover.
 
-**Proposed R-EDIT-REAL target (not implemented):** Git supplies the normal,
-Git-generated `COMMIT_EDITMSG` template and retains ownership of commit,
-comment stripping, empty-message behavior, hooks and helper lifecycle. The
-backend owns canonical path discovery/security and refresh; the client treats
-the supplied file URI as opaque. Native save alone does not finish. A native
-`didClose` or positively identified last-tab close confirms the saved file text;
-explicit confirm instead validates the synchronized buffer version and its
-pending changes before finish. On dirty close, use the native Save/Discard/Cancel
-choice: Save confirms the saved file, Discard confirms the previously saved
-text (not the dirty buffer), and Cancel leaves the session active. Explicit
-abort cancels and is distinct from confirm. Preserve Git's normal comment and
-empty-message semantics; do not substitute a custom template or `git commit -F`.
+**Adopted R-EDIT-REAL target (pending implementation; current managed workflow above remains authoritative until cutover).** Git supplies its normal comments, status and configured template; preserve whitespace and let Git determine effective-empty validation. Saved-file close reads saved text. Explicit LSP code action `common.confirm` uses the latest synchronized exact-version buffer and validates/writes that exact content. These are distinct sources through one session/owner/run-aware idempotent path; terminal/abort arbitration is atomic, with no duplicate helper release or commit. Abort is `common.cancel`, not a discard synonym.
 
-For VS Code, investigate an optional `tabGroups.onDidChangeTabs` observer and
-confirm only when the last managed tab for that session closes. Focus changes,
-editor switches and non-last tab closure are not confirmation; do not synthesize
-`didClose`. Keep managed tabs permanent (`preview:false`; account for
-`showDocument` middleware). The existing `onDidChangeTabs` teardown handling and
-`preview:false` behavior are implementation conflicts to resolve, not proof the
-real-file fallback works. Retain explicit confirm/abort for clients without a
-reliable close signal. `magit.confirmEdit` is presently a local VS Code command;
-the target must establish its availability/registration in the applicable
-workflow. `workspace/executeCommand` is a proposed Plain action mechanism, not
-an already-registered server command; do not invent a custom protocol method.
+| Signal/workflow | Content source / result |
+|---|---|
+| `textDocument/didClose` | Saved Git file; never unsaved synchronized text |
+| VS Code `onDidChangeTabs` `event.closed` | Saved Git file; confirm only when the last matching draft tab across all tab groups closes; never on focus/switch or a non-last tab |
+| LSP Confirm code action | Latest synchronized, exact-version buffer; validate and write back |
+| VS Code explicit native-close confirmation | Saved file; source is not inferred from ambiguous tab state |
 
-`didClose`, explicit confirmation, cancellation, shutdown and tab closure must
-remain distinct, session-aware, idempotent outcomes. Shutdown/reload/workspace
-change is not confirmation; whether shutdown can emit `event.closed` remains an
-assumption to verify. The existing native evidence records VS Code `didClose`
-failure; the proposed extension tab observer is a new fallback that must be
-verified independently, including that shutdown cannot be mistaken for user
-confirmation. See R-EDIT-REAL for the spike and implementation gates.
+| User action | Required behavior |
+|---|---|
+| Save/close | Save alone does not finish; close confirms saved file |
+| Dirty Save | Save, then close confirms saved content |
+| Dirty Discard | Prior saved content, not dirty buffer |
+| Dirty Cancel | Keep open; no confirmation |
+| Cleared and saved empty | Git's effective-empty validation aborts |
+| Explicit Abort | No commit; atomic cancel |
+
+VS Code opens tabs permanently (`preview:false`), including `showDocument` middleware. Route semantic `common.confirm`/`common.cancel` through the existing language client's `workspace/executeCommand` to planned `magit.command`, carrying session/run identity and content-source discrimination; registration is pending, not a new custom method. The optional extension tab observer and pure-LSP close reliability are separate possibilities: verify both; failed didClose alone does not block VS Code if last-tab fallback works. Never synthesize didClose. Follow upstream [gitEditor.ts](https://github.com/microsoft/vscode/blob/main/extensions/git/src/gitEditor.ts) and [commands.ts](https://github.com/microsoft/vscode/blob/main/extensions/git/src/commands.ts), distinguishing native Discard-unsaved from explicit Abort and VS Code Git Discard-clear/save.
+
+Step 0 retains historical evidence in [`docs/evidence/real-file-client-spike.md`](evidence/real-file-client-spike.md); no new runs are claimed. Verify false close/open on language changes, last-tab identity, and native shutdown/reload/workspace assumptions. Shutdown/reload/workspace-change assumptions are UNVERIFIED: never interpret transport shutdown or extension deactivation as confirmation; whether shutdown emits `event.closed` remains unverified. Preserve reusable validated document storage/bounds and explicit-confirm version/writeback barriers; do not blanket-delete synchronization. See TASKS §3.10 and R-EDIT-REAL.
+
+For the VS Code fallback, consume `event.closed` from `onDidChangeTabs` and confirm only once the last matching draft tab across all tab groups closes; focus/switch and non-last tab closure never confirm. An unreadable saved file or synchronized-buffer version mismatch must not release the helper. Duplicate or late signals are run-correlated and cannot confirm another run.
 
 ### Generic Helix reference and conformance
 

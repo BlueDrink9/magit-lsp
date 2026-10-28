@@ -85,12 +85,12 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 
 ### R-EDIT-REAL: proposed cutover from managed drafts to Git's real `COMMIT_EDITMSG` (L)
 
-**Why:** investigate a real-file workflow while preserving the current managed-draft implementation until all gates pass. Git supplies the normal generated template and owns commit/helper lifecycle. Do not assume editor close equals intent: explicit confirm validates synchronized buffer/version; didClose or a verified last managed-tab close uses saved-file text. This target supersedes R-EDIT-3/4/5 only after acceptance; R-EDIT-6 acceptance is re-run.
+**Adopted target:** Git's real `COMMIT_EDITMSG` is the provider-file workflow after acceptance; current managed implementation remains intact until cutover. Git supplies comments, status and configured template and owns commit/helper lifecycle. Do not assume editor close equals intent. A single session/owner/run-aware idempotent confirmation path arbitrates saved-file close (read saved text) and explicit synchronized-buffer confirmation (exact version plus writeback); terminal/abort arbitration is atomic and helper release/commit occurs at most once. Saved-file close never substitutes unsaved synchronized text. This target supersedes managed-draft implementation only after acceptance.
 
 **Step 0, spike gate (report before deleting anything):**
-**2026-10-29 result: OBSERVED FAIL.** Corrected probes: Codium 1.140.06880 removes the real-file tab but emits no wire `didClose` within 5 seconds in test and normal hosts; Neovim 0.12.6 with explicit attach/`bufhidden=wipe` passes. Codium language change emits misleading close/open while the tab remains open. Preserve this evidence. The proposed VS Code `tabGroups.onDidChangeTabs` fallback must be verified, as must whether shutdown emits `event.closed`. No production migration until gates pass. See [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md).
+**2026-10-29 result: OBSERVED FAIL (historical evidence only; no new runs claimed).** Codium 1.140.06880 removed the real-file tab but emitted no wire `didClose` within 5 seconds in test and normal hosts; Neovim 0.12.6 with explicit attach/`bufhidden=wipe` passed. Codium language change emitted misleading close/open while the tab remained open. Preserve this evidence in [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md). Step 0 must verify optional VS Code `tabGroups.onDidChangeTabs` last-tab fallback (no focus/switch or non-last close confirmation; no synthetic didClose), pure-LSP reliable didClose, false close/open on language change, last-tab identity, and native shutdown/reload/workspace assumptions. Shutdown emits `event.closed` remains explicitly unverified. A failing didClose alone no longer blocks VS Code if the fallback is verified.
 
-- VS Code: a real file under `.git/`, opened by the extension, sends `didClose` promptly on tab close; is attached to the language client; a dirty tab shows the native save dialog. Note: an older VS Code report (1.63) says closing an editor did not dispose an existing file's document or fire the close event; check current behaviour.
+- VS Code: verify both pure-LSP didClose and optional tabGroups fallback, existing tab identity/permanent-open handling and dirty native dialog; fallback success can satisfy close detection despite didClose failure.
 - Neovim: a buffer with `bufhidden=wipe` and explicit LSP attach; `:q` on a modified buffer is refused natively and a real close sends `didClose`.
 - For each client: what `showDocument` does on an already-open file whose contents changed on disk (reload, prompt, or stale text). Git rewrites the template on every commit and the path is reused.
 - For each client: what reaches the server after a language-mode change (VS Code `setTextDocumentLanguage` fires document close then open; Neovim and Helix unverified).
@@ -102,22 +102,38 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 **Reference Files:** TASKS §3.10; `src/editor.rs` helper validation; git history before the R-EDIT-3 cutover for the old real-file adapter (reference only, no blind revert).
 
 **Change:**
-- **Effect:** `editDocument {type, runId, uri, kind:"commit-message", title, scope}`, where `uri` is the `file://` URI of Git's own `COMMIT_EDITMSG`. Drop `text`, `version` and `mode`. Reuse the existing canonical-path validation (actual gitdir, regular file, no symlink) before announcing.
+- **Effect/routing:** real `COMMIT_EDITMSG` URI with canonical-path validation. Existing semantic `common.confirm`/`common.cancel` route through planned `magit.command` `workspace/executeCommand` dispatcher using the existing language client, carrying session/run identity and explicit content-source discrimination; registration is pending, not a new custom method.
 - **Run events:**
   - `didSave`: no handler.
-  - `didClose` for the run's canonical path: read the file's text into the ring, then reply `ok` to the helper. No write-back, version check or barrier.
-  - `common.cancel {runId}` (abort): read the text into the ring, abort the helper (exit 1), focus the status view (`focusView`/`popView` for rich clients). Do not delete the file.
+  - Shared session/owner/run-aware idempotent terminal path arbitrates saved-file close versus exact-version synchronized-buffer confirmation; the latter has sync/version and writeback barriers. Atomic abort/terminal race arbitration prevents duplicate helper release or commit.
+  - `didClose` or verified last-tab close: read saved file text; never use this to confirm unsaved synced text. `common.cancel {runId}` explicitly aborts and is distinct from native Discard-unsaved. Do not delete the file.
   - Disconnect, EOF, shutdown and progress-cancel cancel the run; ring write is best-effort and skipped if the file is unreadable. Unchanged otherwise.
-- **Ring:** fed from the file's text at finish and at abort, under the existing rules (nonempty, template-only excluded, exact consecutive dedup, count and byte caps). Update §3.10's "never aborted text" and "only finish checkpoints feed retention".
-- **Delete:**
-  - `draft/save`, `draft/finish`, `draft/history` and `draft/error`, with their types.
-  - The receive-order draft lane, version and 1 MiB bounds, saved/live tracking and write-back.
+- **Content sources:**
+  | Path | Confirmation source |
+  |---|---|
+  | Saved-file close | Read saved Git file; never substitute unsaved buffer text |
+  | Explicit confirm | Exact synchronized buffer version, validated and written back before helper success |
+  | Abort | No confirmation; atomic helper abort |
+  | VS Code explicit action | Native close/save workflow; source explicitly identified |
+- **Dirty actions:**
+  | Action | Meaning |
+  |---|---|
+  | Save/close | Save does not finish; close confirms saved file |
+  | Dirty Save | Save, then close confirms saved content |
+  | Native Discard-unsaved | Close using prior saved file text |
+  | Dirty Cancel | Keep editor open; no confirmation |
+  | Cleared and saved empty | Git evaluates effective-empty message and aborts |
+  | Explicit Abort | Cancel helper; not a close/discard synonym |
+  | VS Code Git Discard | Clear and save; Git evaluates effective-empty message |
+- **Git validation:** effective-empty semantics belong to Git, not raw length or unconditional template equality. Preserve comments/status/configured-template semantics and test configured templates.
+- **Ring:** retain existing eligibility, dedup and caps; verify parity rather than assuming raw nonempty text is eligible.
+- **Migrate, do not blanket-delete:** retain reusable validated document store and bounds where applicable; explicit confirm keeps synchronized-version and writeback barriers. Remove only obsolete managed-draft wire APIs after accepted cutover.
   - Neovim close-command interception and the Save/Discard/Cancel picker.
   - VS Code's writable provider and tab-teardown detection.
   - The rich clients' history prev/next. The ring stays server-side; the history bindings become `planned` until R-EDIT-HISTORY.
-- **Clients:**
-  - Neovim: open the real file in the current window, attach explicitly, set `bufhidden=wipe`. Confirm is native `:wq`.
-  - VS Code: open permanently (`preview:false`, including `showDocument` middleware); reconcile existing `onDidChangeTabs` teardown handling with an optional observer. Native Save/Discard/Cancel: Discard confirms prior saved file text. Confirm only after last managed tab closes, never on focus/switch; do not synthesize `didClose`.
+- **Clients:** Follow upstream [gitEditor.ts](https://github.com/microsoft/vscode/blob/main/extensions/git/src/gitEditor.ts) and [commands.ts](https://github.com/microsoft/vscode/blob/main/extensions/git/src/commands.ts). Distinguish native Discard-unsaved from explicit Abort and VS Code Git Discard-clear/save.
+  - Neovim: open the real file in the current window, attach explicitly, set `bufhidden=wipe`. LSP code action `common.confirm` confirms latest synchronized exact-version buffer; close confirms saved file.
+  - VS Code: open permanently (`preview:false`, including `showDocument` middleware). Existing language-client `workspace/executeCommand` routes semantic `common.confirm`/`common.cancel` to planned `magit.command`; explicit action uses native close/save workflow and identified source. Extension tab fallback is optional; pure-LSP close reliability is separately verified. Never synthesize `didClose`.
   - Abort is `view/invoke common.cancel {runId}` in both.
 - **IMM-3:** map "Aborting commit due to empty commit message" to the info message "Commit aborted: empty message".
 
@@ -128,7 +144,9 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 - `didClose` is never abort.
 - Delete rather than deprecate; no shims.
 
-**Conflict and implementation gates:** Current wire remains `magit-commit://` managed URI with full sync and `draft/save|finish|history` version barriers; current close intent is explicitly arbitrated and `didClose` detaches only. Resolve this contract only at accepted cutover. VS Code already has `onDidChangeTabs` teardown handling (`drafts.js`) and permanent `preview:false` opens; verify/reconcile rather than assuming fallback works. Establish explicit-confirm availability: `magit.confirmEdit` is currently a local VS Code command, while `workspace/executeCommand` is a proposed Plain action mechanism, not an already-registered server command. Do not add a custom protocol method. Keep didClose, explicit confirm, cancellation, shutdown and tab closure distinct, session-aware and idempotent. Shutdown/reload/workspace-change is not confirm; verify whether shutdown can emit `event.closed`. Test Git normal template/comment/empty semantics.
+**Conflict and implementation gates:** Current wire remains `magit-commit://` managed URI with full sync and `draft/save|finish|history` version barriers; current close intent is explicitly arbitrated and `didClose` detaches only. Resolve this contract only at accepted cutover. VS Code already has `onDidChangeTabs` teardown handling (`drafts.js`) and permanent `preview:false` opens; verify/reconcile rather than assuming fallback works. Establish explicit-confirm availability: `magit.confirmEdit` is currently a local VS Code command, while `workspace/executeCommand` is a proposed Plain action mechanism, not an already-registered server command. Do not add a custom protocol method. Keep didClose, explicit confirm, cancellation, shutdown and tab closure distinct, session-aware and idempotent. Shutdown/reload/workspace-change assumption is UNVERIFIED; never interpret transport shutdown or extension deactivation as confirmation. Verify whether shutdown can emit `event.closed`. Test Git comments/status/configured template, whitespace and effective-empty semantics.
+
+**Native acceptance:** duplicate/late signals; reused `COMMIT_EDITMSG` with fresh run IDs; multi-root/session isolation; unreadable saved file; version mismatch; empty/comments/configured-template semantics; shutdown/reload/workspace change; saved close versus explicit exact-version confirmation; native Discard versus explicit Abort. Retain historical spike evidence without claiming fresh results.
 
 **Acceptance:**
 - Save alone never commits.
@@ -148,7 +166,7 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
   - §1 Glossary: reword "Editor bridge" to "helper waits until the client closes Git's `COMMIT_EDITMSG`".
   - §3.10: delete the "Managed commit drafts" paragraph, the "Stable R-EDIT-3 wire contract", the "Stable R-EDIT-8 history contract" and both "acceptance verified" paragraphs. Keep helper mechanism, ring limits, process-feasibility gate, askpass and lifecycle text. Rewrite mechanism steps 3 to 7 as a roughly 15-line real-file contract.
   - §4.2: replace the Phase 3E draft wire paragraph with one sentence.
-  - §5.5: `common.confirm` becomes client-local write plus close; history rows become `planned`; fix "closing the buffer is always cancel".
+  - §5.5: `common.confirm` remains a server semantic exact-version action; VS Code may additionally offer a native-close path. History rows become `planned`; fix "closing the buffer is always cancel".
   - §6: drop "managed draft; native adapters pending" from the Commit message row.
   - §7: mark R-EDIT-3, R-EDIT-4 and R-EDIT-5 "superseded by R-EDIT-REAL"; note R-EDIT-6 acceptance is re-run; change R-EDIT-8's "native history remains an obligation" to "moved to R-EDIT-HISTORY"; add R-EDIT-REAL and R-EDIT-HISTORY; R-EDIT-KINDS: "the todo helper reuses the real-file path".
   - **docs/CLIENT_SPEC.md:** preserve current managed-draft claims and distinguish them from the proposed real-file workflow, explicit confirm/close semantics, conflicts and gates.
@@ -344,13 +362,15 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 - **Target Files:** `src/presentation/plain.rs`, `src/editor.rs`, `tests/plain_draft.rs` (new).
 - **Reference Files:** R-EDIT-REAL (resulting run events); TASKS §3.10.
 - **Depends on:** R-EDIT-REAL, R-PLAIN-ACTIONS, R-PLAIN-SYNC.
-- **Constraints:** the draft is Git's own `COMMIT_EDITMSG`, identified by canonical path and URI, never by `languageId` (clients differ: `git-commit` versus `gitcommit`). Any other commit-message document gets no actions. No server Confirm action and no dirty-refusal setting: the editor's own save and close are the confirm.
+- **Constraints:** follow the coherent R-EDIT-REAL lifecycle contract above. The draft is Git's own `COMMIT_EDITMSG`, identified by canonical path and URI, never by `languageId`; semantic confirm/abort use planned `magit.command` through existing language-client executeCommand, registration pending. Include explicit Confirm code action against latest synchronized exact-version buffer and Abort action; session/run identity and content-source discriminator are required. Saved-file close remains distinct.
 - **Acceptance:**
   - On `editDocument`: if the document store shows the URI already open, send a versioned whole-buffer `applyEdit` with the fresh template, then `window/showDocument` (`takeFocus`). If not open, `showDocument` only.
   - Provider-file sessions are reusable interactions with explicit finish/cancel callbacks; Git-specific canonical-path and helper-security validation remains in the backend/editor provider, never in client VCS recognition.
   - If the client lacks `showDocument`, or no `didOpen` arrives within a bounded time, cancel the run with a message and mark commit commands `Unavailable`.
   - Abort is a code action running `common.cancel {runId}`; it focuses status via `showDocument`.
-  - Harness tests (real Git, disposable repo, hooks run): save-only no commit; save then close commits exactly the saved text; abort commits nothing and leaves the file; stale buffer from the previous commit is refreshed; client without `applyEdit` gets a message; a second server instance gets no actions.
+  - Explicit Confirm code action uses latest synchronized exact-version content; close confirms saved-file content.
+  - Acceptance requires both explicit Confirm and Abort code actions.
+  - Harness/native tests: save/close, dirty Save, dirty Discard uses prior saved content, dirty Cancel stays open/no confirm, cleared-and-saved empty Git abort, explicit Confirm exact version, explicit Abort no commit; stale buffer refresh; no `applyEdit` message; second session no actions; comments/status/configured-template/whitespace effective-empty behavior.
 - **Verify:** `make test-rust FILTER="--test plain_draft --test editor_bridge"`.
 
 ### R-PLAIN-E2E: vertical slice and native evidence (L)
