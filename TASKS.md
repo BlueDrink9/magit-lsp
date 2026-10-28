@@ -1427,7 +1427,7 @@ authority. Completed history is in the
   - **Requirement:** The client edit window replaces the current buffer in the full-size window instead of opening a split or smaller edit window.
   - **Done when:** A focused native-UI scenario verifies the edit replaces the current buffer in the full-size window without creating a split.
 
-- [ ] **[P2] UX-VIM-HORIZONTAL — Keep native h/l for structured vim views**
+- [ ] **[P2] UX-VIM-HORIZONTAL — Allow h/l overrides in structured vim views**
   - **Requirement:** The vim profile may override native `h`/`l` horizontal motion in structured/read-only mode, where it is useful only in text mode; keep log on `l`, not `g l`, and preserve native text-mode editing.
   - **Done when:** Reconcile the contradictory §5 R4/keymap documentation and tests with the intended bindings; focused keymap regression tests and scripted native-UI evidence verify structured/read-only motion, log `l`, and unchanged native text-mode editing.
 
