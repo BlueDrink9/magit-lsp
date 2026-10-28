@@ -169,27 +169,27 @@ harness runs, native traces, support-table generation, or Helix spike results.
 
 ### Selection and bootstrap
 
-Clients select presentation with `initializationOptions.presentation`:
-`"customRender"` selects the bundled/current adapter; absent selects target
-Plain mode. Bundled clients explicitly select `customRender`. Plain clients
+The sole selector is `initialize.params.capabilities.experimental.magit`:
+absent selects Plain; present selects rich and contains `{v:1, keys:'dynamic|static|forwardAll', modifiers:'full|basic', render:'edits|full', layout:['main','side','bottom','float'], effects:['visitFile','editDocument','clipboard'], prompts:['confirm','text','choice','multiChoice','secret'], folds:'server|native'}`. `initializationOptions` continues to carry `profile`; it is not a selector. Current keymap preferences are not negotiation. Bundled clients send the rich block. Plain clients
 bootstrap by opening a `.magit` document associated with a workspace/document
 repository context. The backend resolves and canonicalizes repository identity,
 secures paths, and excludes presentation documents from untracked status. If
 multiple repositories are plausible, it serves a choose-repository view; it
 must never guess for a mutation.
 
-For active core views, `workspace.applyEdit` is required. Without it the view is
-readable but inert. `workspace.workspaceEdit.documentChanges` is recommended;
-fall back to unversioned `WorkspaceEdit.changes` when absent. `window.showDocument.support`
-is required for workflows that edit a provider file, but optional for navigation
-(which can degrade to a path/location message). `window.workDoneProgress` is
-optional: omit progress when unsupported, and await the `window/workDoneProgress/create`
-response before sending begin. `general.positionEncodings` is optional; default
-to UTF-16 when absent. `window/showMessage` is standard baseline behavior.
-Recommended providers are document symbols, definition, links, folding and
-semantic tokens; completion is a server provider for fields, not a client
-capability. Server sync options (`textDocumentSync`) are advertised by the server,
-not client capabilities. This is target policy, not current server negotiation.
+Plain derives support only from standard capabilities: `workspace.applyEdit`
+absent means inert with a message; `workspace.workspaceEdit.documentChanges`
+supports versioned/unversioned edits; `textDocument.codeAction` and
+`workspace.executeCommand` enable actions; `disabledSupport` enables disabled
+reasons. `window.showDocument.support` gates visitFile and commit (otherwise
+Unavailable); `window.workDoneProgress`, `textDocument.completion`,
+`textDocument.foldingRange`, and `general.positionEncodings` gate those features.
+Key/title policy is configuration, not capability. Basic modifier filtering is
+pending implementation. Native folds are expanded; server folds are lazy. Full
+renders are still acknowledged. Mandatory effects are message/openView/pushView/
+popView/focusView/passThrough/quit; only listed effects/prompts/placements may
+be optional. Main-only layout retains the view stack. Optional initialize echo:
+`experimental.magit.effective` mode and reasons.
 
 ### Render synchronization and actions
 

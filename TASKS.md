@@ -60,7 +60,7 @@ here. General agent working conventions and verification guidance live in
 | Plain document sync (target) | Incremental sync uses one URI-keyed store; apply each notification's changes sequentially, accepting ranged and rangeless changes and negotiated encodings. |
 | Plain repository resolution (target) | Resolve an unambiguous repository from explicit/workspace/document context; never guess for mutations, use no launcher (the editor helper is required), and exclude presentation files from Untracked. |
 | Plain action/rendering (target) | Content-addressed targets are revalidated at execution; stale targets refresh without mutation. Render expanded by default, auto-cap large sections with expand actions, and retain folding support. |
-| Plain prompts/capabilities (target) | One document-backed prompt renderer serves confirm/text/choice/multiChoice and completion; support is declared once per effect type and prompt kind. |
+| Plain prompts/capabilities (target) | Selector is capabilities.experimental.magit; standard capabilities govern Plain support, while declared optional effects/prompts/placements are bounded by the block. |
 | Plain deferred/out-of-scope (target) | History is deferred to R-EDIT-HISTORY; character input, launcher, diagnostics, discard recovery refs, direct executeCommand bindings, custom URIs and LSP 3.18 virtual content are out of scope. |
 
 ---
@@ -252,9 +252,9 @@ the server's text. Hence the ack scheme above. While a view is in text mode,
 position-based requests return `null`. The custom `view/rendered` acknowledgement
 identifies an applied custom render version/tree; it differs from Plain synced-text
 snapshots, which associate document text with render state without that custom
-ack protocol. Plain presentation uses standard LSP
-documents and providers; it does not require editor-specific placements,
-prompts, or an editor bridge. Virtual-content transports and custom URIs remain
+ack protocol. Plain presentation uses standard LSP documents and providers. The adopted target
+uses the declared capability block, logical stack and bounded prompts/placements;
+this supersedes the obsolete no-prompts/no-placements/no-editor-bridge target claim. Virtual-content transports and custom URIs remain
 out of Plain scope; see §9 for deferred LSP 3.18 work.
 
 ### 3.5 Commands and effects
@@ -1162,7 +1162,7 @@ replacements land.
 
 | Method | Params | Returns |
 | --- | --- | --- |
-| `initialize` (options) | `clientInfo`, `capabilities` may include consumed preferences `keymapDelivery` (`dynamic`/`static`/`forwardAll`) and `keyModifiers` (`full`/`basic`); `initializationOptions.presentation` selects `customRender` or `plain` (absent means `plain`); `profile?`, `viewport` | server capabilities |
+| `initialize` (current wire) | `clientInfo`, current preferences `keymapDelivery` and `keyModifiers`; `profile?`, `viewport`. Adopted target selector is solely `capabilities.experimental.magit` (absent Plain, present rich); `initializationOptions.presentation` is obsolete target design. | server capabilities |
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
@@ -1591,7 +1591,6 @@ deferred. Release requires R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
 - [ ] **R-PLAIN-PROMPT — Document-backed prompts and support table.** Field-backed prompt kinds/completion, command effect support and safe unsupported behavior. Verify: `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`.
 - [ ] **R-PLAIN-SELECT — Parameterized stable-ID selection.** Single/multi selection, stable identity and caller restoration on confirm/cancel; no client picker or text parsing. Verify: `make test-rust FILTER="--test plain_select"`.
 - [ ] **R-PLAIN-DRAFT — Provider-file commit editing.** Follow §3.10/R-EDIT-REAL lifecycle: canonical Git COMMIT_EDITMSG, saved-file close versus exact-version synchronized confirmation, planned `magit.command` executeCommand routing and terminal/abort idempotence; refresh open file and reject unrelated documents. Verify: `make test-rust FILTER="--test plain_draft --test editor_bridge"`.
-- [ ] **R-PLAIN-DRAFT — Provider-file commit editing.** Acceptance includes explicit Confirm code action against latest synchronized exact-version buffer and explicit Abort, alongside saved-file close; route through existing language-client executeCommand to planned `magit.command` with session/run identity and content-source discrimination. Cover dirty Save/Discard/Cancel and Git effective-empty/comments/configured-template semantics.
 - [ ] **R-PLAIN-E2E — Vertical slice/native evidence.** Plain harness and plugin-free Neovim cover status/stage/stale/menu/commit exact message and abort. Verify focused tests and linked UI scenarios.
 - [ ] **R-PLAIN-HELIX — Helix manual smoke.** Record version/date and generic-configuration workflow results. Verify reviewed evidence.
 - [ ] **R-PLAIN-SPEC — Client spec, README and release wording.** Document capabilities, sync/echo/actions/commit/limits/example and harness checklist; cross-check protocol/tests. Verify links and `git diff --check`.

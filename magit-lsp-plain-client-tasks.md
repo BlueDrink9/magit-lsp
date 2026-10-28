@@ -21,7 +21,7 @@ Neovim passed. The proposed VS Code tab-close observer remains unverified; see
 | Naming | "Plain clients" / "Plain mode" = a general LSP client, spec only. Presentation adapter name: `plain`. |
 | Client model | Spec-only. No editor-specific features (including Helix expansions such as `%{buffer_name}`). Helix is a reference configuration, not a target. |
 | Architecture | One semantic dispatcher; two presentation adapters: `customRender` (existing) and `plain` (new). |
-| Adapter selection | Bundled clients send `initializationOptions.presentation = "customRender"`. Absent means `plain`. |
+| Adapter selection | Sole selector is `capabilities.experimental.magit`: absent Plain; present rich. `initializationOptions` carries profile only. |
 | Sync | Server advertises Incremental and accepts ranged and rangeless changes through one document store. |
 | Repository resolution | Workspace root plus document path. No launcher. Ambiguity renders a choose-repository view; the server never guesses among several repositories for a mutating command. Presentation documents are excluded from Untracked. |
 | VCS-neutral interactions | Presentation and standard-LSP transport are VCS-neutral. Server primitives for serving/stacking concrete views, stable-identity single/multi-selection with caller restoration, provider-file message-edit sessions with finish/cancel callbacks, and semantic action dispatch are reusable. Git providers own discovery, mutation validation, COMMIT_EDITMSG paths, helper lifecycle and completion lookup. Require a minimal fake-provider independence test; no production jj backend, VCS trait hierarchy, or speculative wire protocol. |
@@ -179,6 +179,8 @@ History prev/next as a server code action issuing a versioned `applyEdit` from t
 
 ### R-PLAIN-DOC: record decisions and amend the roadmap (S)
 
+- **Acceptance update:** document the adopted experimental capability block and standard-capability matrix in `docs/CLIENT_SPEC.md`; distinguish current bundled wire preferences from the target selector.
+
 **Status: [x] Complete (documentation only).** R-EDIT-REAL implementation and
 spike remain pending.
 
@@ -187,7 +189,7 @@ spike remain pending.
 - **Constraints:** docs only. Do not duplicate edits owned by R-EDIT-REAL.
 - **Acceptance:**
   - Section 1 decisions (except Commit editing and Message ring, owned by R-EDIT-REAL) added to TASKS §0.
-  - §3.4 and §4.1 updated. §4.1 states which `initialize` capabilities are consumed (`keymapDelivery`, `keyModifiers`), deletes the unused `prompts`, `placements`, `editorBridge` fields, and adds `initializationOptions.presentation`.
+  - §3.4 and §4.1 distinguish current wire behavior from the adopted target block `capabilities.experimental.magit`; keep `profile` in initializationOptions. Do not delete target prompt/placement/editor interaction design.
   - This phase inserted before "Feature: release prerequisites"; R-4.1a and R-7.3a explicitly require acceptance through the Plain harness at R-PLAIN-GATE; R-REL-2 wording becomes "general LSP clients supported in Plain mode per the spec; no first-party promise beyond the bundled clients".
   - AGENTS.md gains the Plain evidence rule from assumption 2.
   - The completed R-CLIENT-SPEC core-payload sub-task (fourth review recorded complete) is ticked.
@@ -254,7 +256,7 @@ closed and acceptance is demonstrated.
 - **Acceptance:**
   - A `Presentation` seam carries a view's render output, effects and prompts to the client. Current behaviour moves behind `CustomRender` unchanged.
   - The seam serves and stacks concrete views/interactions without client VCS recognition; a minimal fake provider proves dispatcher and view interaction reuse independently of Git.
-  - Adapter chosen from `initializationOptions.presentation`; absent means `plain`.
+  - Adapter chosen solely from `capabilities.experimental.magit`; absent means Plain, present means rich. Migrate keymapDelivery/keyModifiers into this block in server and bundled clients.
   - One `dispatch(DispatchRequest{command, target, args})` entry serves `view/key`, `view/invoke` and later `executeCommand`.
   - Sessions keyed by canonical repository identity (state by git-dir, locks by common-dir).
   - All existing suites green; unit tests cover adapter selection.
@@ -347,7 +349,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
   - `textDocument/completion` on a field returns branches, tags, remotes or revisions by field type. Checkout works through a prompt.
   - Candidate lookup is supplied by typed backend/workflow providers; the generic prompt renderer does not inspect Git or infer VCS from candidate text.
   - `secret` prompts and askpass cancel cleanly with a message.
-  - A CI test runs every registered command against a recording Plain `Ui` and generates `docs/plain-support.md`, snapshot-tested with `UPDATE_EXPECT=1`. Commands emitting unsupported effects become `Unavailable{reason}`. A runtime unsupported effect gives a readable message and a clean cancel.
+  - A CI test runs every registered command against a recording Plain `Ui` and generates `docs/plain-support.md` keyed by standard capabilities and unsupported reasons, snapshot-tested with `UPDATE_EXPECT=1`. Commands emitting unsupported effects become `Unavailable{reason}`. A runtime unsupported effect gives a readable message and a clean cancel.
 - **Verify:** `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`.
 
 ### R-PLAIN-SELECT: select mode over the document (S)
