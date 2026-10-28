@@ -1409,6 +1409,28 @@ authority. Completed history is in the
     status labels match verified behaviour.
   - **Verify:** relevant Rust key/menu tests plus a focused `.scn` scenario.
 
+### Active bugfix / UX
+
+- [ ] **[P1] BUG-STATUS-FOLD — Fold a hunk from its body**
+  - **Requirement:** Invoking fold from the middle/body of a hunk folds only that hunk, not the whole file; folding from the hunk title continues to work.
+  - **Done when:** Tree-owned cursor resolution folds the containing hunk from body positions without text parsing or positional hunk indices; focused Rust regression tests and a scripted native-UI scenario cover body and title folding.
+
+- [ ] **[P1] BUG-STAGE-NEXT — Advance to the next hunk after staging**
+  - **Requirement:** Staging a hunk advances to the next hunk rather than following the staged hunk into its new location. Schedule after R-NAV `common.next-sibling` is complete and reuse its navigation logic.
+  - **Done when:** Successor navigation uses stable tree identity and the shared `common.next-sibling` logic; focused Rust regression tests and a scripted native-UI scenario verify behavior across the staged relocation, with no text parsing or hunk indices.
+
+- [ ] **[P1] BUG-STAGED-STAGE — Ignore staging an already-staged hunk**
+  - **Requirement:** Staging a hunk in the staged section is an ignored/no-op action, not a misleading “no diffs” error.
+  - **Done when:** A focused Rust regression verifies the staged-hunk command is a no-op without an error, and a scripted native-UI scenario confirms the user-visible behavior.
+
+- [ ] **[P2] BUG-EDIT-WINDOW — Edit in the full-size current window**
+  - **Requirement:** The client edit window replaces the current buffer in the full-size window instead of opening a split or smaller edit window.
+  - **Done when:** A focused native-UI scenario verifies the edit replaces the current buffer in the full-size window without creating a split.
+
+- [ ] **[P2] UX-VIM-HORIZONTAL — Keep native h/l for structured vim views**
+  - **Requirement:** The vim profile may override native `h`/`l` horizontal motion in structured/read-only mode, where it is useful only in text mode; keep log on `l`, not `g l`, and preserve native text-mode editing.
+  - **Done when:** Reconcile the contradictory §5 R4/keymap documentation and tests with the intended bindings; focused keymap regression tests and scripted native-UI evidence verify structured/read-only motion, log `l`, and unchanged native text-mode editing.
+
 ### Deferred bugfix — not scheduled
 
 - [ ] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
