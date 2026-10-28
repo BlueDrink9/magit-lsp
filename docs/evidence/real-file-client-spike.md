@@ -1,6 +1,69 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
-## Verdict: OBSERVED FAIL — stop before production migration
+## Current verdict: core VSCode fallback PASS; step 0 still incomplete
+
+Observer-only follow-up on 2026-10-29; **R-EDIT-REAL is not done**. No production
+code, helper release, commit arbitration or task checkoff is included. The
+historical pure-`didClose` failure below remains valid but is not the fallback
+gate: failing `didClose` alone does not block the optional VSCode tab observer.
+
+Executed successfully (exit 0, including diff check):
+
+```sh
+MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
+```
+
+Retained final extension-test host: `/tmp/opencode/real-file-vscode-YHXvlc/`.
+Retained final normal development host: `/tmp/opencode/real-file-vscode-ZRGkrA/`.
+Each has `command.json` (exact binary/expanded arguments/version), `result.json`,
+`api.jsonl`, `wire.jsonl`, `output.txt` and PNGs. Both use owned disposable real
+Git repositories and isolated profiles/extensions. Codium is `1.140.06880`,
+commit `807ba2d6075c29587f884698cd7370c81ab0724c`, x64; languageclient `9.0.1`.
+Neovim was **not rerun** in this follow-up; its evidence below is historical.
+
+Both final hosts assert:
+
+| Probe | Observed/asserted result |
+| --- | --- |
+| Actual server `window/showDocument` | Real language-client `middleware.window.showDocument` invoked; permanent tab (`isPreview:false`). The middleware calls `showTextDocument` with `preview:false`; languageclient 9's default handler ignores a `preview` property added to protocol params. |
+| Focus/switch to another file and back | Draft remains in tabs; zero qualified closures. |
+| Same URI split across two groups; close first group's draft | Actual `event.closed` contains draft URI, but one matching tab remains in the other group; zero qualified closures. |
+| Last draft tab close | Actual `event.closed` contains draft URI, all groups have zero matches; exactly one qualified event, in 53 ms (test host) / 50 ms (normal host). |
+| Close unrelated tab while draft is absent | Actual closed URI is unrelated; zero additional qualifications. |
+| Change open draft language to plaintext | One wire `didClose` then `didOpen`, tab still present; zero additional qualified closures. |
+| Entire observation sequence | Exactly one qualified draft closure, not a commit/helper-release assertion. |
+
+The document is still alive at last-tab close, with zero wire `didClose` delta
+in both hosts. This is a separate immediate observation, **not** a new five-second
+reliability test; the historical five-second failure remains below. The sole
+wire close in each new trace belongs to language change, not native tab close.
+
+Normal host additionally shows the real dirty Save/Don't Save/Cancel dialog;
+Escape cancels. Assertions verify tab retained, document open and dirty, and no
+new qualified closure. Extension-test mode suppresses this dialog, so does not
+claim this case. Explicit later API save still emits `didSave`; it does **not**
+test choosing Save in the native close dialog. Existing rewrite/show/applyEdit
+observations remain present, not a production freshness or commit barrier test.
+
+Inspected final hosts' traces and screenshots: `01b-two-groups.png` (duplicate
+draft tabs), `02-native-close.png` (draft absent), plus normal host
+`03-dirty-dialog.png` and `03b-dirty-cancel.png` (native prompt then retained dirty
+tab). Also inspected the earlier passing run's same images, nonlast-close and
+refresh/language images in `/tmp/opencode/real-file-vscode-qsdHbK/` and
+`/tmp/opencode/real-file-vscode-kXFChS/`. Cleanup was then hardened: owned profiles
+are killed and bounded-poll checked absent even on failure; SIGTERM alone can
+leave a dirty dialog open. This abrupt cleanup is **not** shutdown acceptance.
+No sleeps, synthetic close notifications or production extension are used.
+
+**PENDING next ticket:** native dirty Save-on-close and Discard-on-close;
+shutdown, reload and workspace-change event behavior; production run-correlated
+idempotency/helper arbitration and migration. No transport shutdown or extension
+deactivation is interpreted as confirmation by this observer.
+
+## Historical verdict: pure didClose OBSERVED FAIL
+
+Everything below records the earlier run, not the new fallback gate or a new
+Neovim run. Its original command failure and retained paths are preserved.
 
 **Codium's ordinary real-file tab close did not deliver `didClose` within
 5 seconds.** The tab disappeared, but the document remained alive. This happened
@@ -132,7 +195,7 @@ During correction, non-accepted artifacts/errors were retained:
   `TimeoutExpired(..., 5)` while the following hit-enter prompt was pending.
   Driver now inspects/answers both native prompts, rather than bypassing them.
 
-Final runs above contain no harness exception. Their actual Codium result is
+Historical final runs above contain no harness exception. Their Codium result was
 `gate:"observed-fail"`, `closeError:"Deadline: native tab close wire didClose"`;
-Neovim is `gate:"pass"`. The hard gate remains failed. Do not check off
+Neovim was `gate:"pass"`. That pure-didClose gate failed. Do not check off
 R-EDIT-REAL or begin production deletion/cutover on these results.

@@ -39,26 +39,40 @@ const args = ['--wait', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--sk
   `--extensionDevelopmentPath=${ext}`, ...(!native ? [`--extensionTestsPath=${root}/clients/vscode/test/e2e/real-file-spike.js`] : []), repo];
 writeFileSync(`${dir}/command.json`, JSON.stringify({ editor, args, versions: execFileSync(editor, ['--version'], { encoding: 'utf8' }) }, null, 2));
 let result;
+try {
 if (native) {
   const child = spawn(editor, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
+  let launchError;
+  child.on('error', error => { launchError = error; });
   child.stdout.on('data', data => { stdout += data; });
   child.stderr.on('data', data => { stderr += data; });
   await new Promise(resolve => {
     const deadline = Date.now() + 90000;
     const timer = setInterval(() => {
-      if (existsSync(`${dir}/result.json`) || child.exitCode !== null || Date.now() > deadline) { clearInterval(timer); resolve(); }
+      if (existsSync(`${dir}/result.json`) || launchError || child.exitCode !== null || Date.now() > deadline) { clearInterval(timer); resolve(); }
     }, 25);
   });
-  result = { stdout, stderr, status: existsSync(`${dir}/result.json`) ? 0 : 1 };
+  result = { stdout, stderr, error: launchError, status: existsSync(`${dir}/result.json`) && !launchError ? 0 : 1 };
 } else {
   result = spawnSync(editor, args, { env, encoding: 'utf8', timeout: 90000 });
 }
 writeFileSync(`${dir}/output.txt`, `${result.stdout}\n${result.stderr}\n${result.error || ''}`);
-// Match only our unique profile, never another editor instance.
+} finally {
+// Abrupt cleanup is intentional: SIGTERM can leave a dirty native dialog open.
+// This is not evidence of shutdown semantics. Match only our unique profile.
 try { for (const pid of execFileSync('pgrep', ['-f', `${dir}/user`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
-  try { process.kill(Number(pid), 'SIGTERM'); } catch (_) { /* already exited */ }
+  try { process.kill(Number(pid), 'SIGKILL'); } catch (_) { /* already exited */ }
 } } catch (_) { /* none alive */ }
+await new Promise((resolve, reject) => {
+  const deadline = Date.now() + 5000;
+  const timer = setInterval(() => {
+    const owned = spawnSync('pgrep', ['-f', `${dir}/user`], { encoding: 'utf8' });
+    if (owned.status === 1) { clearInterval(timer); resolve(); }
+    else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(`Owned profile survived cleanup: ${dir}`)); }
+  }, 25);
+});
+}
 console.log(`Evidence: ${dir}`);
 if (existsSync(`${dir}/result.json`)) console.log(readFileSync(`${dir}/result.json`, 'utf8'));
 else console.error('INCOMPLETE: extension host produced no result', result.error || result.stderr);
