@@ -6,10 +6,13 @@
 index; TASKS.md §7 is the canonical scanner-visible queue and this file retains
 ticket bodies, decisions, risks and deferred notes. All implementation, spike,
 harness, phase and release work remains pending unless explicitly marked
-otherwise in TASKS.md. R-EDIT-REAL and its step-0 spike are NOT complete.
-The 2026-10-29 native spike is OBSERVED FAIL: Codium did not emit `didClose`
-after ordinary real-file tab close within five seconds in either host, while
-Neovim passed. Subsequent core tab fallback/dirty-choice evidence passed; the
+otherwise in TASKS.md. R-EDIT-REAL and its parent acceptance are NOT complete.
+Decision: assume ordinary `didClose` confirms saved-file content by default;
+standard LSP lacks run identity and reliability/late-event limitations are
+accepted assumptions, not protocol guarantees. VS Code is the known exception.
+The 2026-10-29 native spike observed Codium did not emit `didClose` after
+ordinary real-file tab close within five seconds in either host, while Neovim
+passed historically (not rerun). Subsequent core tab fallback/dirty-choice evidence passed; the
 2026-10-29 clean lifecycle observer follow-up found zero qualifying draft closed
 events for native close-window/reload/same-window folder-change. These scoped
 observations do not complete step 0 or the parent; see
@@ -32,7 +35,7 @@ observations do not complete step 0 or the parent; see
 | Rendering | Fully expanded by default. Sections above a size cap auto-collapse with an expand action. Toggle/expand are code actions. `foldingRange` is still served. |
 | Prompts | One document-backed prompt renderer for confirm/text/choice/multiChoice, with editable fields and `textDocument/completion`. |
 | Capability model | Declared once per effect type and prompt kind (section 2). No per-command annotations. |
-| Commit editing (proposed target, all clients) | Git's normal generated `COMMIT_EDITMSG` template; current managed-draft contract remains authoritative until implementation acceptance. Saved-file text confirms on didClose/last-tab close; explicit confirm validates synchronized buffer/version. Dirty native Save/Discard/Cancel: Save confirms saved text, Discard confirms prior saved text, Cancel remains open. Explicit abort cancels. |
+| Commit editing (proposed target, all clients) | Git's normal generated `COMMIT_EDITMSG` template; current managed-draft contract remains authoritative until implementation acceptance. Default didClose confirms saved-file text; assume acceptable despite no run identity/reliability proof. VS Code exception uses verified tabGroups last-matching-tab run-aware executeCommand fallback and ignores language-change didClose. Explicit confirm validates synchronized buffer/version. Dirty native Save/Discard/Cancel: Save confirms saved text, Discard confirms prior saved text, Cancel remains open. Explicit abort cancels. |
 | Message ring | Proposed target feeds file text at finish/abort. Magit ring parity is unverified; retain source-check as pending R-EDIT-REAL acceptance. Existing current ring contract remains TASKS §3.10. |
 | Close without saving | On an amend or reword, committing the unchanged message is Git's own behaviour and is kept. Abort is the explicit way out. |
 | History prev/next | Deferred to R-EDIT-HISTORY (server code action issuing a versioned `applyEdit`, identical for every client). |
@@ -88,7 +91,7 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 
 ### R-EDIT-REAL: proposed cutover from managed drafts to Git's real `COMMIT_EDITMSG` (L)
 
-**Adopted target:** Git's real `COMMIT_EDITMSG` is the provider-file workflow after acceptance; current managed implementation remains intact until cutover. Git supplies comments, status and configured template and owns commit/helper lifecycle. Do not assume editor close equals intent. A single session/owner/run-aware idempotent confirmation path arbitrates saved-file close (read saved text) and explicit synchronized-buffer confirmation (exact version plus writeback); terminal/abort arbitration is atomic and helper release/commit occurs at most once. Saved-file close never substitutes unsaved synchronized text. This target supersedes managed-draft implementation only after acceptance.
+**Adopted target:** Git's real `COMMIT_EDITMSG` is the provider-file workflow after acceptance; current managed implementation remains intact until cutover. Git supplies comments, status and configured template and owns commit/helper lifecycle. Assume ordinary `didClose` is acceptable confirmation of saved-file text by default, while acknowledging standard LSP has no run identity and does not prove reliability or exclude late events. VS Code is the known exception: its verified tabGroups last-matching-tab run-aware executeCommand fallback ignores language-change didClose as confirmation. A single session/owner/run-aware idempotent path arbitrates saved-file close and explicit synchronized-buffer confirmation (exact version plus writeback); terminal/abort arbitration is atomic and helper release/commit occurs at most once. Saved-file close never substitutes unsaved synchronized text. This target supersedes managed-draft implementation only after acceptance; no additional negotiation prerequisite.
 
 **Step 0, spike gate (report before deleting anything):**
 **Scoped follow-up (2026-10-29):** clean permanent draft, isolated normal Codium
@@ -101,14 +104,14 @@ remain pending, without production changes or general lifecycle guarantees.
 See the evidence report for exact commands, versions, paths and scope limits;
 this supersedes the historical unverified-shutdown statements below only for
 those three clean cases.
-**2026-10-29 result: OBSERVED FAIL (historical evidence only; no new runs claimed).** Codium 1.140.06880 removed the real-file tab but emitted no wire `didClose` within 5 seconds in test and normal hosts; Neovim 0.12.6 with explicit attach/`bufhidden=wipe` passed. Codium language change emitted misleading close/open while the tab remained open. Preserve this evidence in [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md). Step 0 must verify optional VS Code `tabGroups.onDidChangeTabs` last-tab fallback (no focus/switch or non-last close confirmation; no synthetic didClose), pure-LSP reliable didClose, false close/open on language change, last-tab identity, and native shutdown/reload/workspace assumptions. Shutdown emits `event.closed` remains explicitly unverified. A failing didClose alone no longer blocks VS Code if the fallback is verified.
+**2026-10-29 result:** Codium 1.140.06880 removed the real-file tab but emitted no wire `didClose` within 5 seconds in test and normal hosts; historical Neovim 0.12.6 explicit attach/`bufhidden=wipe` passed (not rerun). Codium language change emitted misleading close/open while the tab remained open. Preserve this evidence in [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md). Core tabGroups last-tab fallback and dirty choices passed; scoped clean close-window/reload/folder-change observations found zero qualifying closed events. Those checks satisfy their respective step-0 checks, not parent acceptance. Default didClose confirmation is consciously accepted; VS Code uses verified run-aware fallback and ignores language-change didClose. No extra negotiation prerequisite. See evidence report for limits; production migration/idempotency/acceptance remain pending.
 
-- VS Code: verify both pure-LSP didClose and optional tabGroups fallback, existing tab identity/permanent-open handling and dirty native dialog; fallback success can satisfy close detection despite didClose failure.
+- VS Code: fallback/dirty-choice checks are complete; known exception to default didClose assumption uses verified tabGroups last-matching-tab run-aware executeCommand fallback and ignores language-change didClose.
 - Neovim: a buffer with `bufhidden=wipe` and explicit LSP attach; `:q` on a modified buffer is refused natively and a real close sends `didClose`.
 - For each client: what `showDocument` does on an already-open file whose contents changed on disk (reload, prompt, or stale text). Git rewrites the template on every commit and the path is reused.
 - For each client: what reaches the server after a language-mode change (VS Code `setTextDocumentLanguage` fires document close then open; Neovim and Helix unverified).
 - Confirm that rich clients close their own buffer on abort.
-- Verify optional VS Code `tabGroups.onDidChangeTabs`: only last managed tab confirms; focus/switch and non-last closure do not; never synthesize didClose. Verify shutdown/reload/workspace-change is not confirmation, including whether shutdown emits `event.closed`. Keep explicit confirm and abort for clients without reliable close events.
+- Scoped clean shutdown/reload/workspace-change observation is complete with no qualifying closed event for those cases; its limits are in the evidence report. Keep explicit confirm and abort available. Do not treat standard didClose as run-correlated; explicit run-aware signals validate run/session.
 
 **Target Files:** `src/{protocol,server,editor,commands,session}.rs`, `src/editor/draft.rs`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/{drafts,edit,edits}.js`, their tests (`tests/editor_drafts.rs`, `editor_bridge.rs`, `server_async.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/*`), `tests/ui/scenarios/commit-*.scn`, `TASKS.md`, `docs/CLIENT_SPEC.md`.
 

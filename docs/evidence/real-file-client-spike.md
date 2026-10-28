@@ -1,6 +1,16 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
-## Current verdict: scoped lifecycle observations PASS; parent/step 0 incomplete
+## Current verdict: scoped lifecycle observations PASS; parent acceptance incomplete
+
+Decision recorded: assume ordinary LSP `didClose` confirms saved-file content by
+default. It has no run identity, and reliability/late-event limitations are
+consciously accepted assumptions, not proven protocol guarantees. VS Code is the
+known exception: verified tabGroups last-matching-tab run-aware executeCommand
+fallback, ignoring language-change `didClose` as confirmation. Core fallback,
+dirty choices and scoped clean lifecycle observations meet their respective
+step-0 checks; historical Neovim evidence is accepted without claiming rerun.
+No additional negotiation prerequisite. Production migration, run-aware
+idempotency and parent acceptance remain pending.
 
 ### Native lifecycle follow-up (observer only)
 
