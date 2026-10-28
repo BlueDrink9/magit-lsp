@@ -220,7 +220,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -232,7 +232,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -244,7 +244,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -256,7 +256,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -559,7 +559,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -571,7 +571,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -583,7 +583,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -595,7 +595,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -1197,7 +1197,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -1209,7 +1209,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -1221,7 +1221,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -1233,7 +1233,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -1496,7 +1496,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -1508,7 +1508,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -1520,7 +1520,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -1532,7 +1532,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -1823,7 +1823,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -1835,7 +1835,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -1847,7 +1847,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -1859,7 +1859,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -2140,7 +2140,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -2152,7 +2152,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -2164,7 +2164,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -2176,7 +2176,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -2456,7 +2456,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -2466,7 +2466,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -2476,7 +2476,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -2488,7 +2488,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
@@ -2781,7 +2781,7 @@
                 "visual"
               ],
               "label": "Cycle the visibility of every section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.next-sibling",
@@ -2793,7 +2793,7 @@
                 "visual"
               ],
               "label": "Move to the next sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.prev-sibling",
@@ -2805,7 +2805,7 @@
                 "visual"
               ],
               "label": "Move to the previous sibling",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.parent-section",
@@ -2817,7 +2817,7 @@
                 "visual"
               ],
               "label": "Move to the parent section",
-              "status": "planned"
+              "status": "implemented"
             },
             {
               "command": "common.toggle-text-mode",
