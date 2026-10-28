@@ -1611,7 +1611,8 @@ BUG-READ-1 are not release gates.
   **Done when:** the spec is reviewed against protocol authority and both
   clients, with explicit core/non-core mapping and unresolved decisions.
   **Verify:** documentation review and cross-check every protocol claim against
-  `src/protocol.rs` and both client implementations; no implementation/UI tests.
+   `src/protocol.rs` and both client implementations; no implementation/UI tests.
+  Draft/evidence pointer: `docs/CLIENT_SPEC.md`.
 
 ### R-REL — Release sprint (immediately after R-4.1a, R-7.3a and R-CLIENT-SPEC)
 
