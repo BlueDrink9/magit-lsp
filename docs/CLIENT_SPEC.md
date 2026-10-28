@@ -1,53 +1,117 @@
 # External client implementation specification
 
-Rust wire definitions and handlers are authoritative; this guide is cross-checked against both bundled clients. This is an implementation guide, not a promise that every optional workflow is supported by every client.
+This guide describes the current Rust wire contract and bundled clients, not a future promise. Rust protocol and dispatch are authoritative. A client is a thin transport/editor adapter: server-rendered text is displayed verbatim; structure, Git state, actions and navigation remain server-owned. Core status/menu/stage operation is distinct from optional workflows.
 
-## Capability mapping
+## Capability map
 
-| Capability | Status | Rationale | Unsupported behavior |
-|---|---|---|---|
-| Standard LSP lifecycle; `view/open`, render display, `view/rendered`, `view/resync` | REQUIRED | Core session and verbatim status view with ordered application and recovery. | No core view. |
-| `view/key` or `view/invoke`, structured cursor/selection/version | REQUIRED | Core menu, navigation, stage/unstage actions. | Core flow unavailable; never infer structure from text. |
-| Prompts/effects | REQUIRED for enabled prompting/effect-producing operations | Confirm, collect input, report messages and apply view effects. | Disable affected operations or provide equivalent interaction; never guess. |
-| `view/resize`, `view/setMode` | RECOMMENDED | Width-sensitive layout and interactive/text toggle. | Default viewport/layout; remain interactive. |
-| Dynamic keymaps | RECOMMENDED; `static` and `forwardAll` are alternatives | Use server mappings or forward keys and honor pass-through. | Static bindings or forward every key and execute normal editor behavior on `PassThrough`. |
-| Managed-draft bridge | RECOMMENDED; required for draft editing/history workflows | Versioned server-owned commit-message document. | Disable workflow; never edit a Git path as substitute. |
-| Companion/split placements | RECOMMENDED only when requested by a workflow descriptor | Present related views conveniently. | Fall back to one replaceable view; no universal split requirement. |
+| Feature | Requirement | Current scope / unsupported behavior |
+|---|---|---|
+| Standard LSP lifecycle, initialize, status `view/open`, render/apply/ack/resync | Core | Required for any useful session. |
+| Structured `view/key` or `view/invoke`, exact displayed cursor/selection/version | Core | Required for navigation and status stage/unstage. Never parse text for structure. |
+| Prompt/effect handling | Required when enabling operations that produce them | Do not expose dependent operations if an effect or prompt cannot be handled. No command-disable negotiation exists. |
+| Dynamic `view/keymap` | Optional alternative | `static` or `forwardAll` can replace it, with limitations below. |
+| Resize and setMode | Useful | Width-sensitive layout and text mode; not a prerequisite to core status. |
+| Managed draft bridge | Optional workflow, required for commit-message editing/history | If absent, do not enable that workflow; never edit a Git path as a substitute. |
+| Companion/split views | Optional workflow-dependent | Descriptor placement is a hint. A single replaceable window does not automatically preserve simultaneous view lifetimes. |
 
-Preserve server-owned text and structured actions/navigation. Display render lines verbatim; use tree-derived cursor, selection and versions as context. There is no separate structure notification in the current contract (`src/tree.rs`, `src/protocol.rs`).
+## Methods and lifecycle
 
-## Wire contract
+Direction is relative to the language server. Custom capabilities are client preferences, not arbitrary-method negotiation.
 
-Initialize using standard LSP. Optional initialization capabilities `keymapDelivery` accept `dynamic` (default), `static`, `forwardAll`; `keyModifiers` accept `full` (default) or `basic` (`src/protocol.rs`: `KeymapDelivery`, `KeyModifiers`). These describe client preferences, not negotiation of arbitrary methods. VS Code supplies `profile` in initialization options.
+| Method | Direction / JSON-RPC kind | Result or purpose |
+|---|---|---|
+| `initialize` | client → server request (standard) | Standard initialize result/capabilities. Custom client preferences are `params.capabilities.keymapDelivery` (`dynamic` default, `static`, `forwardAll`) and `params.capabilities.keyModifiers` (`full` default, `basic`); profile is in initialization options in both bundled clients. Modifiers are currently parsed/logged, not a negotiated filtering guarantee. |
+| `initialized` | client → server notification | Standard lifecycle. |
+| `shutdown` / `exit` | client → server request / notification | Standard lifecycle; pending drafts/processes are cancelled on connection shutdown/disconnect. |
+| `workspace/didChangeConfiguration` | client → server notification | Triggers configuration reload; do not assume its settings payload is ingested. |
+| `view/open` | client → server request | `{kind,args?,placement?,viewport}` → `ViewDescriptor`; status repository is in `args.repo_path`. |
+| `view/close` | client → server request | `{viewId}`; closes a view. |
+| `view/invoke` | client → server request | Command and optional args/cursor/selection/version → `{effects}`. |
+| `view/key` | client → server request | One canonical key step plus editor mode, cursor, selection?, version → `{effects}`. |
+| `view/render` | server → client notification | Full `{version,text}`, incremental `{version,baseVersion,edits}`, or metadata-only `{version,mode,pending?,menu?}` render. Metadata-only preserves content and version while applying metadata and acknowledging application. |
+| `view/rendered` | client → server notification | Ack exact applied `{viewId,version}`. |
+| `view/resync` | client → server request | `{viewId}` → current full render; replace local content. |
+| `view/resize` | client → server notification | `{viewId,cols,rows}`. |
+| `view/setMode` | client → server request | `{viewId,mode}` → effects. |
+| `view/keymap` | server → client notification | Complete replacement bindings for the scope, with capture/mode/pending/live keys. Normal notices use the view render version; draft keymaps use 0. This is separate bookkeeping, not a render ack or guaranteed newly incremented counter. Static delivery does not require pushes. |
+| `view/prompt` | server → client notification | Prompt request data; answer through `view/promptRespond`. |
+| `view/promptRespond` | client → server request | `{promptId,cancelled,value?}`; result is currently generic JSON value. |
+| `view/effects` | server → client notification | Asynchronous effects, e.g. draft editor opened after an action returned. |
+| `textDocument/didOpen`, `didChange`, `didClose` | client → server notifications | Standard full-sync managed draft stream only; didClose detaches, not finish intent. |
+| `draft/save`, `draft/finish`, `draft/history` | client → server requests | Versioned checkpoint, finish barrier, history replacement respectively; JSON-RPC request ID correlates result/error. |
 
-`view/open` request parameters: `kind`, optional `args`, `placement`, `viewport`; result `ViewDescriptor`. Status `args.repo_path` identifies the repository. `view/close` takes `viewId`. Server notification `view/render` carries `viewId`, `version`, full `text` or `edits` plus `baseVersion`, and optional cursor, mode, pending prefix and menu. Apply updates in order, verbatim, then notify `view/rendered` with applied version. If base is missing or updates are lost, request `view/resync` and replace with returned full render. Never ack before apply. Client `view/resize` reports cols/rows.
+The implemented and advertised standard providers are exactly `textDocument/documentSymbol` (document outline), `textDocument/definition` (tree-backed definition/navigation), `textDocument/documentLink` (links; no resolve), `textDocument/foldingRange`, and `textDocument/semanticTokens/full` (full only; no range or delta). Requests identify a document by URI. Positional lookups use the acknowledged tree, falling back to the current tree before the first acknowledgement; they return `null` in text mode. Draft documents use full sync `{openClose:true, change:1}`. The semantic-token legend includes custom `tokenTypeGroups`. No hover, references, formatting, document-link resolve, semantic-token range or delta providers are implemented. Optional providers are not prerequisites for basic status/staging. See `src/server.rs:1371-1431,1883-1926` and `src/session.rs:1581-1590`.
 
-`view/invoke` accepts viewId, command, optional args/cursor/selection/version; `view/key` accepts viewId, version, one canonical key, editorMode, cursor and optional selection. Positional commands require the displayed version; stale/omitted versions are refused. Non-positional commands ignore it. `view/keymap` sends complete binding scope/version, capture, mode, pending and live keys. Dynamic clients apply maps atomically; static clients ship bindings; forward-all clients forward individual canonical steps and perform ordinary editor behavior when result effects include `PassThrough`. `view/setMode` changes mode.
+## Descriptors, URIs and view lifetime
 
-`view/prompt` notification provides promptId, kind, title and kind-specific options; answer with `view/promptRespond` request containing promptId, cancelled and optional kind-shaped value. Support confirm/text/choice/multiChoice, defaults and cancellation for enabled workflows. Effects appear in invoke results or asynchronous `view/effects`: messages, clipboard, view open/push/pop/focus/quit, visit-file and edit-document. Implement relevant variants with readable user-facing errors.
+`ViewDescriptor` carries server-issued identity, kind, URI, title, placement, mode, scope and capture state (`src/view.rs`). Treat the URI as opaque; retain the descriptor and associate it with the server view ID. Placement is a hint, not a command to create a particular native layout. `view/close` closes one view; push/pop effects describe stack behavior but clients still decide concrete buffers/panels/windows. Do not assume replacing one window handles every lifetime or companion workflow.
 
-Managed drafts are not editable repository paths. `EditDocument` carries runId, opaque URI, text/version, kind/title/mode/scope. Send full-sync document changes. `draft/save` checkpoints exact applied version; `draft/finish` names saved version and reason; `draft/history` identifies applied version and server command. Apply `draft/replaced` only to its matching base and serialize editing while waiting. `didClose` detaches, it is not finish intent. See `src/protocol.rs` draft types and `src/server.rs` handlers.
+Render/application ordering:
 
-## Example: open, render, acknowledge
+   1. On open, retain the descriptor and await/apply the initial render. Render and keymap notifications have separate bookkeeping; ordinary keymap notices use the view render version, while draft keymaps use 0. A keymap notification is a complete replacement, not a render acknowledgement or a guaranteed newly incremented counter.
+2. Apply a full render by replacing all text. No `baseVersion` is required for a full render.
+   3. If `text` is present, it takes precedence: replace all text regardless of edits. Otherwise apply edits only if local content is exactly `baseVersion`; line ranges are half-open `[startLine,endLine)`. The current producer emits zero or one prefix/suffix replacement. Both bundled clients apply supplied edits bottom-up by descending `startLine`; arbitrary multiple/overlapping edit ordering semantics are not defined.
+4. Render text lines verbatim. A metadata-only render has neither `text` nor `edits`: preserve text and version, apply its mode/pending/menu/cursor metadata, then acknowledge application. Apply metadata accompanying content renders as well. Only after application send `view/rendered` for that version.
+5. Server retains only current and last acknowledged trees. Positional commands must name the displayed version; stale or omitted positional versions are refused. Commit selection confirm/toggle-mark requires exact acknowledged version. Non-positional commands ignore version.
+6. If a base is unavailable, update is lost, or local state cannot be proven to match, request `view/resync`; replace with returned full render, then ack. Never ack before application.
+
+Selections use inclusive document line endpoints (`startLine` through `endLine`); line edits use exclusive ends. Cursor is zero-based. Pass structured cursor/selection and editor mode, never derive them by parsing display lines (`src/protocol.rs`, `src/tree.rs`, `src/session.rs`).
+
+## Input, navigation and presentation
+
+Canonical keys use `[modifier+]*key`, lowercase modifiers in `ctrl`, `alt`, `shift`, `meta` order and W3C key names; chord steps are sent individually. `dynamic` consumes complete `view/keymap` replacements atomically. `static` ships generated mappings and requires synchronization with scope/mode/capture. `forwardAll` sends every step and must execute ordinary editor behavior on `passThrough`. These are alternatives, not server feature negotiation. Terminal modifier loss, VS Code layout/IME/dead-key limits, and reserved editor shortcuts constrain capture. Do not intercept native behavior outside the active view/editor focus.
+
+Text mode is disposable local plain-text editing/copying, not a Git edit or managed draft: local changes are not sent to the server tree, synchronized to Git, or preserved when the server replaces the document. Interactive mode is read-only server-rendered display. On entry the server sends a metadata-only render at the unchanged content/version; preserve the text, apply the mode, and acknowledge it (see render rules above). Do not require a native `view/setMode` control: mode changes produced by enabled server keys still arrive in render metadata and must be honored.
+
+In text mode capture is off and only `common.toggle-text-mode` remains bound; other `view/invoke`/`view/key` commands are refused with a readable informational hint, and positional standard-provider requests return `null`. Refresh requests are deferred/queued until exit. On exit, the server applies any queued refresh and sends a full replacement because locally edited text has no shared diff base; discard the local edits and restore read-only interactive display. Never send those edits as managed-draft `didChange` content. Neovim makes the existing buffer modifiable and restores its undo level on entry, then clears undo history and locks it on exit (`lua/magit-lsp/buffer.lua:130-144`). VS Code's virtual content provider remains read-only and queues refreshes (`clients/vscode/lib/session.js:65-72`); do not claim editable text mode there. This is not a mandatory native editable-core capability. Server navigation uses tree metadata; native cursor movement/search may remain available where capture permits. Fold behavior is client-specific and coordinated with server folding, not inferred from text. Styling may use semantic tokens where actually advertised; do not require a particular theme/color.
+
+## Prompts, effects and drafts
+
+Prompt kinds are `confirm` (boolean), `text` (string), `choice` (`{id}` or `{custom}`), and `multiChoice` (`{ids:[...]}`). All responses include `cancelled`; cancellation has no value requirement. Honor labels/defaults, choice item IDs and secret masking/no-history behavior where applicable (`src/protocol.rs`, `lua/magit-lsp/prompt.lua`, `clients/vscode/lib/prompt.js`).
+
+Effects serialize with camelCase `type` discriminators, e.g. `openView`, `pushView`, `popView`, `focusView`, `visitFile`, `editDocument`, `passThrough`, `clipboard`, `message`, `quit`—not Rust enum variant names. Messages carry level/text and optional hint/detail/processLogId. Visit-file uses a resolved file URI and zero-based location. Rendering is not an effect. Implement each effect used by enabled commands with readable errors.
+
+Managed drafts use opaque `magit-commit://` URIs and full-sync LSP documents. Initial open is version 1; each change sends complete text with monotonically increasing version. Save checkpoints the exact applied version and does not write Git/release helper. Finish names exact saved version and reason (`confirm` or `normal-close`); history names exact applied base and command and may return `draft/replaced` text/version. Serialize native edits and barriers: flush sync, pin run/URI/base, gate edits while awaiting, apply replacement only to matching base and suppress its didChange echo. Normal user close chooses the saved checkpoint; explicit abort, progress cancellation, disconnect/EOF/shutdown cancel. `didClose`, focus loss and editor teardown alone are not finish intent. Failed finish retains recoverable draft/helper; late responses cannot resurrect terminal runs. Drafts are in-memory, not crash durable. See `src/protocol.rs`, `src/server.rs`, Neovim `lua/magit-lsp/edit.lua`, VS Code `clients/vscode/lib/drafts.js` and `edit.js`.
+
+## Feature-to-capability mapping and clients
+
+| Workflow | Required client behavior | Present implementation / gap |
+|---|---|---|
+| Status, menus, stage/unstage | Core view/render/key or invoke, structured context, messages/prompts/effects used | Both clients implement status rendering and command routing (`lua/magit-lsp/view.lua`, `keymap.lua`, `keys.lua`; VS Code `render.js`, `views.js`, `requests.js`, `commands.js`). |
+| Commit and managed draft history | Managed editor, full sync, exact save/finish/history barriers, close-intent arbitration | Neovim implemented in `edit.lua`; VS Code code exists in `drafts.js`/`edit.js`, verify current status before claiming complete. |
+| Log selection / commit picker | Rendered log, selection mode, structured exact-acked commit node; no generic choice picker substitute | Server resolves selection; client forwards input and displays view. |
+| Process log | Message detail/process-log handling and view opening if enabled | Optional workflow; do not assume every message includes an ID. |
+| File visiting | Handle `visitFile` effect and open resolved URI/location | Optional; not a client-side Git lookup. |
+| Visual selections | Send inclusive selection lines with cursor/mode and displayed version | Optional editor-specific interaction; server handles patch selection. |
+| Splits/companion views | Multiple descriptor lifetimes and placement effects | Optional; placement fallback is client-specific, never universal single-window assumption. |
+
+Neovim primarily uses dynamic keymaps and buffer-local capture; VS Code uses static contributed bindings plus context/focus guards. Both should remain presentation/input adapters. Consult the listed client sources and `src/session.rs` for actual behavior rather than extrapolating parity from this table.
+
+## Minimal example
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"view/open","params":{"kind":"status","args":{"repo_path":"/work/project"},"viewport":{"cols":80,"rows":24}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"keymapDelivery":"dynamic","keyModifiers":"full"}}}
+{"jsonrpc":"2.0","id":2,"method":"view/open","params":{"kind":"status","args":{"repo_path":"/work/project"},"viewport":{"cols":80,"rows":24}}}
 ```
 
-The response is a `ViewDescriptor`; server notification:
+The open response is a descriptor. A subsequent server notification may be:
 
 ```json
 {"jsonrpc":"2.0","method":"view/render","params":{"viewId":"view-1","version":1,"text":["On branch main",""],"cursor":{"line":0,"column":0},"mode":"interactive"}}
 ```
 
-After applying exact lines, send `{"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":"view-1","version":1}}`. IDs and enum values in this illustrative example are server-defined.
+Apply exact lines, then notify `view/rendered` with version 1. A key request then includes that displayed version and structured cursor; apply resulting render/effects in order and ack each applied render. IDs and text are illustrative.
 
-## Implementation checklist and evidence
+## Implementation checklist and unresolved decisions
 
-1. Implement LSP lifecycle and choose key delivery preference.
-2. Open status; retain descriptor; display verbatim; apply ordered full/incremental renders, ack, resync on loss.
-3. Forward key steps or invoke commands with displayed version and structured position; honor pass-through/menu state.
-4. Implement prompts/effects used by enabled commands; add resize/mode as appropriate.
-5. Enable drafts/placements only after implementing their bridge/lifetime semantics.
+- [ ] Implement standard lifecycle and only actual advertised standard providers.
+- [ ] Open status, retain descriptor/opaque URI, verbatim apply, ack after apply, resync on loss.
+- [ ] Choose dynamic/static/forwardAll and document capture limitations; preserve native pass-through.
+- [ ] Forward structured cursor, inclusive selection, editor mode and displayed version.
+- [ ] Implement prompt kinds and effects required by the enabled command set.
+- [ ] Add resize/text mode and multiple placements only where needed.
+- [ ] Implement managed drafts only with ordered full sync, barriers, history replacement and explicit close-intent semantics.
 
-Evidence: `src/protocol.rs` types/methods, `src/server.rs` dispatch, `src/view.rs` descriptors. Neovim: `lua/magit-lsp/init.lua`, `view.lua`, `keymap.lua`, `keys.lua`, `prompt.lua`, `effects.lua`, `edit.lua`. VS Code: `clients/vscode/lib/session.js` sets static/full; `render.js`, `views.js`, `requests.js`, `commands.js`, `prompt.js`, `effects.js`, `drafts.js`, `edit.js` implement corresponding paths. Placement fallback is client-specific; static maps require release synchronization. Clients must state unsupported prompt/effect kinds and disable dependent operations. Source contracts supersede this summary as they evolve.
+Unresolved/follow-up: define support expectations for external clients' optional effects; decide whether any future method-level capability discovery is needed (none currently); document interoperability expectations for clients that cannot distinguish intentional close from teardown; decide whether multi-view placement needs stronger client lifecycle guidance. These are not current negotiation mechanisms.
+
+**Source cross-check:** `src/protocol.rs` (wire types/serialization), `src/server.rs` (dispatch/lifecycle), `src/view.rs` (descriptor), `src/session.rs` (render/ack retention); Neovim `lua/magit-lsp/init.lua`, `view.lua`, `buffer.lua`, `requests.lua`, `keymap.lua`, `keys.lua`, `prompt.lua`, `effects.lua`, `edit.lua`; VS Code `clients/vscode/lib/session.js`, `requests.js`, `render.js`, `views.js`, `commands.js`, `prompt.js`, `effects.js`, `drafts.js`, `edit.js`. Re-check these sources as contracts evolve.
