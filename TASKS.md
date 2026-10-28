@@ -1204,7 +1204,8 @@ meant to be committed as the first version; edit freely.
 - R3. `standard` uses direct, widely-known keys: `Enter` confirms, `Escape`
   cancels, `Delete` discards, arrows navigate.
 - R4. `vim` never rebinds visual-mode keys (`v`, `V`, `ctrl+v`), counts
-  (`0`–`9` as counts), `h j k l`, `gg`, `G`, `ctrl+d/u/f/b`, `/`, `H`, `L`.
+  (`0`–`9` as counts), `j k`, `gg`, `G`, `ctrl+d/u/f/b`, `/`, `H`, `L`.
+  Structured views may bind `h`/`l`; text mode retains native horizontal motions.
 - R5. Every command has a binding (or an explicit "unbound" entry) in every
   profile; a test enforces this.
 - R6. `ctrl+c` always means cancel in non-editable views (with the
@@ -1446,9 +1447,10 @@ authority. Completed history is in the
   - **Verified follow-up (2026-10-29):** Retains the completed checkbox after repairing caller restoration (including ambiguous native deletion) and creating the previously missing `commit-edit-window.scn`. `nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('tests/test_magit_lsp.lua', {collect={filter_cases=function(case) return table.concat(case.desc, ' '):find('managed', 1, true) ~= nil end}})"` passed both focused cases: window identity/count/dimensions and caller restoration, full-sync/version/history/error/disconnect policies, and real saved-checkpoint close. `scripts/ui run tests/ui/scenarios/commit-edit-window.scn tests/ui/scenarios/commit-draft-close.scn && git diff --check` exited 0 (2 PASS; each scenario under both profiles at 100x30 and 80x24). Inspected retained `build/ui/commit-edit-window/{vim-100x30,vim-80x24}/{full-size-draft,confirmed-caller,cancelled-caller}.screen` and draft-close choice/cancel/ambiguous-delete/recovered-close screens; no owned UI/server processes remained.
   - **Full-gate limits:** The earlier whole-file Lua attempt failed at the unrelated clipboard assertion (`tests/test_magit_lsp.lua:1249`); the earlier full `make test` failed in `tests/errors.rs` on a recommended-Git-version mismatch during concurrent release edits. Neither full gate is claimed green or repeated here; focused evidence above supersedes the earlier unverified command-only evidence. Release edits remain untouched.
 
-- [ ] **[P2] UX-VIM-HORIZONTAL — Allow h/l overrides in structured vim views**
+- [x] **[P2] UX-VIM-HORIZONTAL — Allow h/l overrides in structured vim views**
   - **Requirement:** The vim profile may override native `h`/`l` horizontal motion in structured/read-only mode, where it is useful only in text mode; keep log on `l`, not `g l`, and preserve native text-mode editing.
   - **Done when:** Reconcile the contradictory §5 R4/keymap documentation and tests with the intended bindings; focused keymap regression tests and scripted native-UI evidence verify structured/read-only motion, log `l`, and unchanged native text-mode editing.
+  - **Verified:** `cargo test --test keymap --test keys_protocol --test manifest --test parity && cargo build --release && scripts/ui run tests/ui/scenarios/vim-horizontal.scn && git diff --check` passed. Rust keymap coverage proves user `h`/`l` overrides resolve in structured status; Neovim Vim scenario verified `l` opens log and exact native text-mode `l` then `h` cursor-column movement at 100x30 and 80x24. Inspected `build/ui/vim-horizontal/vim-{100x30,80x24}/{structured-h,text-l,text-h,restored}.screen`; UI runner stopped owned processes.
 
 ### Deferred bugfix — not scheduled
 

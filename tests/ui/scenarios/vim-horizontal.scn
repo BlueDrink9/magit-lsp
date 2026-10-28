@@ -1,0 +1,33 @@
+# Horizontal bindings belong to the structured keymap; native text mode keeps Vim motions.
+fixture: modified-two-files
+profile: vim
+profile-only: true
+---
+keys: l
+wait screen contains "Log"
+expect screen contains "Log"
+snapshot: log
+keys: q
+wait screen contains "Unstaged changes"
+goto "M f.txt"
+expect cursor on "  M f.txt"
+keys: h
+wait
+expect cursor on "  M f.txt"
+snapshot: structured-h
+keys: C-t
+wait
+goto "M f.txt"
+keys: l
+wait
+expect cursor on "M"
+snapshot: text-l
+keys: h
+wait
+expect cursor on " "
+snapshot: text-h
+expect no_message /W10|readonly/
+keys: C-t
+wait
+expect screen contains "Unstaged changes"
+snapshot: restored

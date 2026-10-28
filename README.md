@@ -69,7 +69,7 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   files and conflicts show a plain-language summary and
   actionable hint; raw output remains available as detail when no specific
   explanation applies.
-- **Log and commit selection**: from status, `l l` (`standard`) or `g l l`
+- **Log and commit selection**: from status, `l l` (`standard`) or `l l`
   (`vim`) opens the current-branch log. The log uses the editor's native
   navigation and search, loads older commits with `+`, and supports log-menu
   filters. In the log menu, `c` opens a select-and-copy picker; use `Enter` to

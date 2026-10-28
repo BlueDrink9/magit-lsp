@@ -330,7 +330,7 @@ fn view_keymap_notices_follow_the_profile_and_config_reloads() {
         .iter()
         .find(|binding| binding.command == "open.log")
         .expect("open.log binding");
-    assert_eq!(log.keys, vec!["g l"]);
+    assert_eq!(log.keys, vec!["l"]);
 
     let (mut standard, _initial) = TestSession::open_status(&tmp, Profile::Standard);
     standard.ack();

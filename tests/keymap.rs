@@ -86,7 +86,7 @@ fn profile_chords(profile: Profile) -> Vec<KeyChord> {
 
 fn vim_rule_violation(chords: &[KeyChord]) -> Option<String> {
     let reserved_motions: BTreeSet<KeyStep> = [
-        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "h", "j", "k", "l",
+        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "j", "k",
         "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
     ]
     .into_iter()
@@ -137,14 +137,14 @@ fn standard_respects_r1_no_emacs_prefixes_or_alt_letters() {
 }
 
 #[test]
-fn vim_respects_r4_does_not_rebind_vim_motions() {
+fn vim_respects_r4_preserves_native_motions_except_structured_horizontal_keys() {
     let chords = profile_chords(Profile::Vim);
     assert_eq!(vim_rule_violation(&chords), None);
 }
 
 #[test]
 fn vim_r4_validator_rejects_injected_canonical_gg_and_motion_prefixes() {
-    for key in ["g g", "ctrl+d x", "h g"] {
+    for key in ["g g", "ctrl+d x", "j g"] {
         let injected = [KeyChord::parse(key).expect("injected key parses")];
         assert!(
             vim_rule_violation(&injected).is_some(),
@@ -157,6 +157,19 @@ fn vim_r4_validator_rejects_injected_canonical_gg_and_motion_prefixes() {
         .map(|key| KeyChord::parse(key).expect("permitted key parses"))
         .collect();
     assert_eq!(vim_rule_violation(&allowed), None);
+}
+
+#[test]
+fn vim_user_can_override_structured_horizontal_motions() {
+    let config = config_with(
+        Profile::Vim,
+        &[("status", &[("stage", &["h"]), ("unstage", &["l"])])],
+    );
+    let map = Keymap::resolve("status", Profile::Vim, &config).unwrap();
+    for (key, command) in [("h", "status.stage"), ("l", "status.unstage")] {
+        let step = KeyChord::parse(key).unwrap().steps().to_vec();
+        assert_eq!(map.lookup(&step, EditorMode::Normal), Match::Exact(command.into()));
+    }
 }
 
 #[test]
@@ -176,8 +189,7 @@ fn profiles_follow_r2_mnemonics_for_status_operations() {
         ("open.rebase", "r"),
         ("open.tag", "t"),
     ];
-    // §10 documents Vim's `g l` exception to §5.2: native `l` stays a motion.
-    for (profile, log_key) in [(Profile::Standard, "l"), (Profile::Vim, "g l")] {
+    for (profile, log_key) in [(Profile::Standard, "l"), (Profile::Vim, "l")] {
         let config = Config {
             profile,
             ..Default::default()
@@ -400,7 +412,7 @@ fn dispatch_is_reachable_from_status_under_both_profiles() {
         }
     }
 
-    // The vim profile keeps `h` a motion (R4).
+    // Horizontal motions remain available in structured views unless overridden.
     let config = Config {
         profile: Profile::Vim,
         ..Default::default()

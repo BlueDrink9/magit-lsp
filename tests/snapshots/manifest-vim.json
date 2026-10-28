@@ -717,7 +717,7 @@
             {
               "command": "open.log",
               "keys": [
-                "g l"
+                "l"
               ],
               "modes": [
                 "normal",

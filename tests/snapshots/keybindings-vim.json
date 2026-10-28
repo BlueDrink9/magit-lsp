@@ -448,7 +448,7 @@
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'status' && !magit.textMode"
   },
   {
-    "key": "g l",
+    "key": "l",
     "command": "magit.invoke",
     "args": {
       "command": "open.log"
