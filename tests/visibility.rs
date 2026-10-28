@@ -14,6 +14,61 @@ fn count_kind(tree: &Tree, kind: NodeKind) -> usize {
     tree.nodes.iter().filter(|node| node.kind == kind).count()
 }
 
+#[test]
+fn cycle_visibility_wraps_all_four_levels_and_survives_empty_refreshes() {
+    for profile in [Profile::Vim, Profile::Standard] {
+        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard().build();
+        let (mut test, _) = TestSession::open_status(&tmp, profile);
+        test.ack();
+        test.goto_marker("f.txt", '+');
+        for level in [1, 2, 3, 4, 1] {
+            let result = test.press("shift+Tab");
+            test.set_cursor(result.render.unwrap().cursor.unwrap());
+            test.ack();
+            assert_eq!(count_kind(test.tree(), NodeKind::File) > 0, level >= 2);
+            assert_eq!(count_kind(test.tree(), NodeKind::Hunk) > 0, level >= 3);
+            assert_eq!(count_kind(test.tree(), NodeKind::Line) > 0, level >= 4);
+            if level == 1 { assert_eq!(test.focused_node().kind, NodeKind::Section); }
+            test.refresh();
+            test.ack();
+        }
+        // An empty level must not stall cycling or lose the level on refresh.
+        tmp.git(&["checkout", "--", "f.txt"]);
+        test.refresh();
+        test.ack();
+        test.invoke("common.cycle-visibility"); // level 2, no children
+        test.ack();
+        test.refresh();
+        test.ack();
+        write(&tmp.path().join("f.txt"), &standard_changes());
+        test.refresh();
+        test.ack();
+        test.invoke("common.cycle-visibility"); // level 3
+        assert!(count_kind(test.tree(), NodeKind::Hunk) > 0);
+        assert_eq!(count_kind(test.tree(), NodeKind::Line), 0);
+    }
+}
+
+#[test]
+fn cycle_visibility_preserves_the_retained_cursor_identity_and_refuses_stale_input() {
+    let (tmp, _repo) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+    write(&tmp.path().join("b.txt"), "b\n");
+    let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let cursor = Cursor { line: test.goto_file("untracked", "b.txt"), column: 0 };
+    write(&tmp.path().join("a.txt"), "a\n");
+    test.refresh();
+    let result = test.invoke_at_version("common.cycle-visibility", initial.version, Some(cursor), None, None);
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "section:untracked");
+    test.ack();
+    let result = test.invoke_at_version("common.cycle-visibility", initial.version, Some(cursor), None, None);
+    assert!(result.render.is_none());
+    assert_eq!(message_texts(&result.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    assert_eq!(count_kind(test.tree(), NodeKind::File), 0);
+}
+
 /// Run one of the recursive visibility commands.
 fn toggle(
     test: &mut TestSession,

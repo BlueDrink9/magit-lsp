@@ -1239,6 +1239,11 @@ Visibility has four levels: section headers → file headers → hunk headers
 and `z M`/`z R` to hide/show extremes. These are server-owned visibility
 actions; clients do not infer structure or key-specific state.
 
+The four R-NAV bindings are Implemented. `shift+Tab` cycles the global detail
+level 4 → 1 → 2 → 3 → 4. Sibling motion stays within the immediate parent
+(root sections are siblings), never wraps, and treats a diff body as its hunk.
+Parent motion goes to the immediate containing header; roots stay put.
+
 ### 5.2 `status` scope (also used by diff-like views for staging)
 
 | Command | `standard` | `vim` |
@@ -1334,6 +1339,9 @@ support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 The final column references stable parent task IDs in §7; completed status/process
 work is summarized in the archive, managed editor work is R-EDIT, and todo is R7.3.
 
+Status common hierarchy navigation and four-level visibility cycling are
+implemented and verified by R-NAV (§7); these are server-tree operations.
+
 | View | Magit analog | Contents | Key commands | §7 parent task |
 | --- | --- | --- | --- | --- |
 | **Status** | `magit-status` | Header lines (Head, Merge, Push, Tag); sections: in-progress operation, Untracked, Unstaged, Staged, Unmerged, Stashes, Unpulled, Unpushed, Recent commits, Submodules | stage/unstage/discard/apply/reverse, visit, toggle, refresh, all menus | Completed (§10/archive); R-3.6; R-6 |
@@ -1399,7 +1407,7 @@ authority. Completed history is in the
 
 #### R-NAV — Common navigation commands ownership
 
-- [ ] **Verify and finish the four still-Planned common navigation commands**
+- [x] **Verify and finish the four still-Planned common navigation commands**
   (`common.cycle-visibility`, `common.next-sibling`, `common.prev-sibling`,
   `common.parent-section`).
   - **Problem:** R-2.3 is recorded complete, yet §5.1 still lists these four
@@ -1411,6 +1419,7 @@ authority. Completed history is in the
     covered by in-process tests and focused real-UI evidence, and the §6/§10
     status labels match verified behaviour.
   - **Verify:** relevant Rust key/menu tests plus a focused `.scn` scenario.
+  - **Verified 2026-10-28:** `cargo test --test navigation --test visibility --test commands --test keymap --test menu --test menus && cargo build --release && scripts/ui run tests/ui/scenarios/common-navigation.scn && git diff --check` passed (74 Rust tests; native Neovim Vim profile at 100x30 and 80x24). Inspected `build/ui/common-navigation/vim-80x24/{hierarchy,sections-only,folded-siblings,hunk-headers,expanded}.screen`: cursor assertions cover next/previous sibling, boundaries and body-to-parent; snapshots show all four detail levels. Rust coverage includes stable-ID targets after reordered refresh, retained/stale render rejection, hunk siblings, folded headers, roots, and empty-tree cycling. `Tree::sibling` is reusable by BUG-STAGE-NEXT. Owned UI/server processes stopped; pre-existing release work preserved separately.
 
 ### Active bugfix / UX
 
@@ -1950,9 +1959,8 @@ for the affected behavior; tests are named with each slice or shared rule.
 Parent-to-slices: R-4.1 → R-4.1-basic, R-4.1-signing, R-4.1c–d; R-4.2 → R-4.2a–c; R-4.3 → R-4.3;
 R-5.2 → R-5.2a–c; R-5.3 → R-5.3a–e; R-5.4 → R-5.4; R-5.5 → R-5.5;
 R-5.6 → R-5.6; R-6.1 → R-6.1a–b; R-6.2 → R-6.2; R-6.3 → R-6.3a–c;
-R-6.4 → R-6.4; R-6.5 → R-6.5a–b. The four still-Planned
-common.cycle-visibility/next-sibling/prev-sibling/parent-section commands are
-owned by R-NAV in the Review group.
+R-6.4 → R-6.4; R-6.5 → R-6.5a–b. Common cycle-visibility, next-sibling,
+prev-sibling and parent-section are Implemented; R-NAV records verification.
 
 ### Advanced workflows and integrations
 
@@ -2271,6 +2279,9 @@ unverified/deferred). See §§7 and 3.10, and the
 [completed-roadmap archive](./docs/archive/completed-roadmap-2026-10-28.md)
 for historical deviations and evidence.
 
+R-NAV is verified complete: common visibility cycling and sibling/parent
+navigation are Implemented, with focused Rust and native Neovim evidence in §7.
+
 ### Historical limitations audit (collection-time; not an open bug list)
 
 The rows below record where earlier reviews expected each limitation to be
@@ -2302,7 +2313,7 @@ not scheduling authority. Preserve explicit BUG-READ-1 deferral (§7).
 
 ### Review and test task summary
 
-All open review work now lives in §7 (`R-COPY-SOURCE`, `R-NAV`).
+The canonical review queue lives in §7; R-COPY-SOURCE and R-NAV are complete.
 
 Completed R-5.1 review, VSCode resolution, client/harness reviews and checked
 review/test tasks are archived at

@@ -198,6 +198,35 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// The immediate structural parent of a stable node identity.
+    pub fn parent(&self, id: &str) -> Option<&Node> {
+        self.nodes.iter().find(|node| node.children.iter().any(|child| child == id))
+    }
+
+    /// Resolve body lines to their containing navigable header.
+    pub fn navigation_node(&self, line: usize) -> Option<&Node> {
+        let node = self.node(&self.line_nodes.get(line)?.node)?;
+        match node.kind {
+            NodeKind::Line => self.parent(&node.id),
+            NodeKind::Section | NodeKind::File | NodeKind::Hunk | NodeKind::Commit => Some(node),
+            _ => None,
+        }
+    }
+
+    /// Adjacent sibling in hierarchy order, without wrapping at boundaries.
+    /// Root sections are siblings; body lines should first use `navigation_node`.
+    pub fn sibling(&self, id: &str, forward: bool) -> Option<&Node> {
+        let node = self.node(id)?;
+        let siblings: Vec<&Node> = if let Some(parent) = self.parent(id) {
+            parent.children.iter().filter_map(|id| self.node(id)).collect()
+        } else {
+            self.nodes.iter().filter(|candidate| candidate.kind == node.kind && self.parent(&candidate.id).is_none()).collect()
+        };
+        let index = siblings.iter().position(|node| node.id == id)?;
+        let next = if forward { index.checked_add(1)? } else { index.checked_sub(1)? };
+        siblings.get(next).copied()
+    }
+
     /// Find a node by its stable id.
     pub fn node(&self, id: &str) -> Option<&Node> {
         self.nodes.iter().find(|node| node.id == id)

@@ -93,6 +93,13 @@ const NAMESPACES: &[&str] = &[
     "process-log",
 ];
 
+#[test]
+fn common_hierarchy_commands_are_implemented() {
+    for id in ["common.cycle-visibility", "common.next-sibling", "common.prev-sibling", "common.parent-section"] {
+        assert_eq!(registry().get(id).unwrap().status, CommandStatus::Implemented);
+    }
+}
+
 /// Namespaces used only by commands that a menu item binds (R-2.8).
 const MENU_NAMESPACES: &[&str] = &[
     "commit",

@@ -37,6 +37,99 @@ fn file_uri(root: &str, path: &str) -> String {
 }
 
 #[test]
+fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
+    use magit_lsp::config::Profile;
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string()), ("g.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes()).modify("g.txt", two_hunk_changes()).build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let body = test.goto_marker("f.txt", '+');
+    let hunk = test.tree().navigation_node(body).unwrap().id.clone();
+    assert_eq!(test.tree().node(&hunk).unwrap().kind, NodeKind::Hunk);
+    let result = test.invoke_here("common.parent-section");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/f.txt");
+    test.ack();
+    let result = test.press("g j");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/g.txt");
+    test.ack();
+    let result = test.invoke_here("common.next-sibling");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/g.txt", "no wrapping");
+    test.ack();
+    test.invoke_here("common.hide-section");
+    test.ack();
+    let result = test.press("g k");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/f.txt");
+    test.ack();
+    let result = test.invoke_here("common.prev-sibling");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/f.txt");
+    test.ack();
+    let result = test.press("g u");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "section:unstaged");
+    test.ack();
+    let result = test.invoke_here("common.parent-section");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "section:unstaged", "root has no parent");
+    test.ack();
+    let result = test.invoke_here("common.next-sibling");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "section:untracked");
+
+    // Hunk siblings are scoped to the containing file, including from bodies.
+    test.invoke("common.show-all");
+    test.ack();
+    let hunks: Vec<_> = test.tree().nodes.iter().filter(|node| node.kind == NodeKind::Hunk && node.path.as_deref() == Some("f.txt")).cloned().collect();
+    assert!(hunks.len() >= 2);
+    test.goto_marker("f.txt", '+');
+    let result = test.invoke_here("common.next-sibling");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, hunks[1].id);
+    test.ack();
+    let result = test.invoke_here("common.prev-sibling");
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, hunks[0].id);
+    test.ack();
+    test.goto(0);
+    let result = test.invoke_here("common.next-sibling");
+    assert_eq!(result.render.unwrap().cursor.unwrap().line, 0, "nonstructural header is inert");
+}
+
+#[test]
+fn hierarchy_targets_use_retained_ids_after_refresh_and_reject_stale_coordinates() {
+    use magit_lsp::config::Profile;
+    use magit_lsp::protocol::Cursor;
+    for (command, origin, target) in [
+        ("common.next-sibling", "b.txt", "untracked/c.txt"),
+        ("common.next-sibling", "c.txt", "untracked/c.txt"),
+        ("common.prev-sibling", "c.txt", "untracked/b.txt"),
+        ("common.prev-sibling", "b.txt", "untracked/b.txt"),
+        ("common.parent-section", "b.txt", "section:untracked"),
+    ] {
+        let (tmp, _repo) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+        write(&tmp.path().join("b.txt"), "b\n");
+        write(&tmp.path().join("c.txt"), "c\n");
+        let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let cursor = Cursor { line: test.goto_file("untracked", origin), column: 0 };
+        write(&tmp.path().join("a.txt"), "inserted\n");
+        test.refresh().unwrap();
+        let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
+        test.set_cursor(result.render.unwrap().cursor.unwrap());
+        assert_eq!(test.focused_node().id, target, "{command}");
+        test.ack();
+        let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
+        assert!(result.render.is_none());
+        assert_eq!(message_texts(&result.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    }
+}
+
+#[test]
 fn visit_uses_the_requested_render_and_refuses_a_discarded_version() {
     use magit_lsp::config::Profile;
     use magit_lsp::protocol::{Cursor, Effect};

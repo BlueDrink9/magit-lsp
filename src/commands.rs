@@ -123,6 +123,8 @@ pub struct CommandOutcome {
     pub refresh: bool,
     /// A cursor to move to that the old node cannot describe.
     pub cursor: Option<Cursor>,
+    /// Stable navigation target resolved in the source tree, located after render.
+    pub cursor_node: Option<String>,
     /// A mode change the session must apply (and push a keymap for).
     pub mode: Option<ViewMode>,
     /// Push a new menu view and return to the current one on `popView`.
@@ -535,32 +537,26 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: quit,
         },
-        planned(
-            // keep-for: TASKS §5.1 retained binding; planned cycle implementation requires roadmap disposition.
-            "common.cycle-visibility",
-            Scope::Common,
-            "Cycle the visibility of every section",
-            "R-2.3",
-        ),
-        planned(
-            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
-            "common.next-sibling",
-            Scope::Common,
-            "Move to the next sibling",
-            "R-2.3",
-        ),
-        planned(
-            "common.prev-sibling",
-            Scope::Common,
-            "Move to the previous sibling",
-            "R-2.3",
-        ),
-        planned(
-            "common.parent-section",
-            Scope::Common,
-            "Move to the parent section",
-            "R-2.3",
-        ),
+        Command {
+            id: "common.cycle-visibility", scope: Scope::Common,
+            doc: "Cycle the visibility of every section",
+            status: CommandStatus::Implemented, run: cycle_visibility,
+        },
+        Command {
+            id: "common.next-sibling", scope: Scope::Common,
+            doc: "Move to the next sibling",
+            status: CommandStatus::Implemented, run: next_sibling,
+        },
+        Command {
+            id: "common.prev-sibling", scope: Scope::Common,
+            doc: "Move to the previous sibling",
+            status: CommandStatus::Implemented, run: prev_sibling,
+        },
+        Command {
+            id: "common.parent-section", scope: Scope::Common,
+            doc: "Move to the parent section",
+            status: CommandStatus::Implemented, run: parent_section,
+        },
         Command {
             id: "common.toggle-text-mode",
             scope: Scope::Common,
@@ -1199,6 +1195,34 @@ fn next_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         cursor: section_cursor(ctx.view, ctx.cursor, true),
         ..Default::default()
     })
+}
+
+fn cycle_visibility(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    ctx.view.cycle_visibility();
+    Ok(CommandOutcome::default())
+}
+
+fn hierarchy_cursor(ctx: &mut CommandCtx<'_>, direction: Option<bool>) -> Result<CommandOutcome> {
+    let tree = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    let target = ctx.cursor.and_then(|cursor| tree.navigation_node(cursor.line)).and_then(|node| {
+        match direction {
+            Some(forward) => tree.sibling(&node.id, forward).or(Some(node)),
+            None => tree.parent(&node.id).or(Some(node)),
+        }
+    });
+    Ok(CommandOutcome { cursor_node: target.map(|node| node.id.clone()), ..Default::default() })
+}
+
+fn next_sibling(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    hierarchy_cursor(ctx, Some(true))
+}
+
+fn prev_sibling(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    hierarchy_cursor(ctx, Some(false))
+}
+
+fn parent_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    hierarchy_cursor(ctx, None)
 }
 
 fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

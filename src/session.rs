@@ -66,6 +66,8 @@ pub struct OpenView {
     mode: ViewMode,
     /// A refresh arrived while in text mode; it is applied on exit.
     dirty: bool,
+    /// Global detail level, including levels with no visible children.
+    visibility_level: u8,
 }
 
 impl OpenView {
@@ -172,7 +174,25 @@ impl OpenView {
         line: Option<usize>,
         command: VisibilityCommand,
     ) -> bool {
-        self.view.set_visibility(tree, line, command)
+        let changed = self.view.set_visibility(tree, line, command);
+        if changed {
+            self.visibility_level = match command {
+                VisibilityCommand::ShowAll => 4,
+                VisibilityCommand::HideAll => 1,
+                VisibilityCommand::MoreDetail => (self.visibility_level + 1).min(4),
+                VisibilityCommand::LessDetail => self.visibility_level.saturating_sub(1).max(1),
+                VisibilityCommand::SetDetail(level) => level.clamp(1, 4),
+                _ => self.visibility_level,
+            };
+        }
+        changed
+    }
+
+    /// Cycle global detail even when an empty tree cannot expose its level.
+    pub(crate) fn cycle_visibility(&mut self) {
+        let level = self.visibility_level % 4 + 1;
+        let tree = self.tree.clone();
+        self.set_visibility(&tree, None, VisibilityCommand::SetDetail(level));
     }
 
     /// The current version, incremented on every render.
@@ -206,7 +226,7 @@ impl OpenView {
         tree.version = version;
 
         let successor =
-            forced.or_else(|| cursor.map(|cursor| successor_cursor(&old, &tree, cursor)));
+            forced.or_else(|| cursor.map(|cursor| successor_cursor(self.request_tree.as_ref().unwrap_or(&old), &tree, cursor)));
         // Edits are only safe when the client holds exactly the previous
         // version; otherwise fall back to a full replace.
         let base_version = (delivery == RenderDelivery::Acknowledged && self.acked_version == Some(old_version)).then_some(old_version);
@@ -258,7 +278,7 @@ fn initialize_open_view(
     let open_view = OpenView {
         descriptor: descriptor.clone(), view, tree, version, acked: None, request_tree: None,
         acked_version: None, pending: PendingChord::default(), menu_pending: Vec::new(),
-        key_cursor: None, mode: descriptor.mode, dirty: false,
+        key_cursor: None, mode: descriptor.mode, dirty: false, visibility_level: 4,
     };
     (descriptor, render, open_view)
 }
@@ -1176,7 +1196,9 @@ impl Session {
             "status.stage" | "status.unstage" | "status.discard"
             | "common.copy-value" | "common.visit"
             | "common.toggle-section" | "common.show-section" | "common.hide-section"
-            | "common.next-section" | "common.prev-section" | "common.jump");
+            | "common.next-section" | "common.prev-section" | "common.jump"
+            | "common.next-sibling" | "common.prev-sibling" | "common.parent-section"
+            | "common.cycle-visibility");
         // Commit selection intentionally waits for an acknowledgement. Other
         // positional actions may address the exact current, initially unacked
         // render, but neither policy substitutes a different retained version.
@@ -1304,7 +1326,7 @@ impl Session {
                 None
             } else {
                 let mode_change = outcome.mode.filter(|mode| *mode != view.mode());
-                let render = match mode_change {
+                let mut render = match mode_change {
                     Some(ViewMode::Text) => {
                         view.enter_text_mode();
                         Some(ViewRender {
@@ -1333,6 +1355,9 @@ impl Session {
                         view.render_with_delivery(cursor, outcome.cursor, RenderDelivery::Acknowledged)?
                     }),
                 };
+                if let (Some(render), Some(id)) = (&mut render, &outcome.cursor_node) {
+                    render.cursor = view.tree.node(id).map(|node| Cursor { line: node.start_line, column: 0 });
+                }
                 render
             }
         };
