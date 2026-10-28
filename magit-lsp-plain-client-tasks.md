@@ -2,9 +2,15 @@
 
 *Formerly "Level 0". Current phase working list linked from canonical TASKS.md §7, ahead of "Feature: release prerequisites". TASKS.md remains the canonical roadmap and design; this file preserves this phase's ticket boundaries, acceptance gates, dependencies and verification. Paths marked (new) are proposals; agents may rename files but must keep task boundaries. Updated 29 October 2026.*
 
-**Status:** Documentation decision R-PLAIN-DOC is complete. All implementation,
-spike, harness, phase and release work remains pending unless explicitly marked
-otherwise in TASKS.md. In particular R-EDIT-REAL and its spike are NOT complete.
+**Status:** R-PLAIN-DOC is complete in TASKS.md. This file is a concise working
+index; TASKS.md §7 is the canonical scanner-visible queue and this file retains
+ticket bodies, decisions, risks and deferred notes. All implementation, spike,
+harness, phase and release work remains pending unless explicitly marked
+otherwise in TASKS.md. R-EDIT-REAL and its step-0 spike are NOT complete.
+The 2026-10-29 native spike is OBSERVED FAIL: Codium did not emit `didClose`
+after ordinary real-file tab close within five seconds in either host, while
+Neovim passed. The proposed VS Code tab-close observer remains unverified; see
+`docs/evidence/real-file-client-spike.md`.
 
 ## 1. Goal and resolved decisions
 
@@ -23,8 +29,8 @@ otherwise in TASKS.md. In particular R-EDIT-REAL and its spike are NOT complete.
 | Rendering | Fully expanded by default. Sections above a size cap auto-collapse with an expand action. Toggle/expand are code actions. `foldingRange` is still served. |
 | Prompts | One document-backed prompt renderer for confirm/text/choice/multiChoice, with editable fields and `textDocument/completion`. |
 | Capability model | Declared once per effect type and prompt kind (section 2). No per-command annotations. |
-| Commit editing (all clients) | Git's own real `COMMIT_EDITMSG`; no virtual documents. Server announces it; the client opens it with its normal editor. `didSave`: no handler (the file is the checkpoint). `didClose`: the server reads the file into the ring, then releases the helper (exit 0); Git commits; no write-back, barriers or version checks. Abort: ring, helper exit 1, focus status; the file is not deleted. Disconnect, EOF, shutdown and progress-cancel cancel the run (ring best-effort). Helper token/owner/run validation and the R-EDIT-2 process lifecycle are unchanged. Tracked as R-EDIT-REAL, which supersedes R-EDIT-3, R-EDIT-4 and R-EDIT-5. |
-| Message ring | Fed from the file's text at finish and at abort (best-effort at disconnect). Reverses TASKS §3.10 "never aborted text". Existing caps, exact consecutive dedup, and template-only/empty exclusion stay. |
+| Commit editing (proposed target, all clients) | Git's normal generated `COMMIT_EDITMSG` template; current managed-draft contract remains authoritative until implementation acceptance. Saved-file text confirms on didClose/last-tab close; explicit confirm validates synchronized buffer/version. Dirty native Save/Discard/Cancel: Save confirms saved text, Discard confirms prior saved text, Cancel remains open. Explicit abort cancels. |
+| Message ring | Proposed target feeds file text at finish/abort. Magit ring parity is unverified; retain source-check as pending R-EDIT-REAL acceptance. Existing current ring contract remains TASKS §3.10. |
 | Close without saving | On an amend or reword, committing the unchanged message is Git's own behaviour and is kept. Abort is the explicit way out. |
 | History prev/next | Deferred to R-EDIT-HISTORY (server code action issuing a versioned `applyEdit`, identical for every client). |
 | Out of scope | Level 1 character input, launcher, diagnostics channel, discard recovery refs, direct `workspace/executeCommand` bindings (arguments come only from code actions), custom URIs, LSP 3.18 virtual content, the grace timer (section 6). |
@@ -36,6 +42,15 @@ otherwise in TASKS.md. In particular R-EDIT-REAL and its spike are NOT complete.
 3. BUG-READ-1's minimal first step is pulled forward (R-PLAIN-PREREQ), because `applyEdit` round-trips need an unblocked intake loop. The larger deferred design stays deferred.
 4. R-DIFF-SAFETY is pulled forward unchanged as a dependency of R-PLAIN-TARGET.
 5. Feeding the ring at abort is a gated R-EDIT-REAL decision; no implementation or behavior claim is complete before that ticket's evidence.
+
+**Contract status:** Plain presentation, provider-neutral interactions and real-file
+commit editing in this document are proposed target contracts, not current
+implementation. TASKS §3.10's managed-draft contract remains the current recorded
+decision until the R-EDIT-REAL step-0 spike and subsequent documentation/implementation
+acceptance establish a replacement. The R-EDIT-REAL proposal restores the
+unverified Magit ring-parity source check as a pending requirement; do not treat
+ring-at-abort or full parity as verified. The detailed real-file rewrite is
+subsequent documentation work, not accomplished implementation.
 
 ## 2. Plain-mode effect and prompt support (the one capability table)
 
@@ -68,17 +83,19 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 
 ## 4. Tasks
 
-### R-EDIT-REAL: replace managed virtual drafts with Git's real `COMMIT_EDITMSG` (L)
+### R-EDIT-REAL: proposed cutover from managed drafts to Git's real `COMMIT_EDITMSG` (L)
 
-**Why:** the `draft/*` barriers, full-sync stream and close-intent arbitration exist only because the draft is a virtual document. Git already supplies a real file, and the editor's own save and close are the confirm. This is the same model as Magit's with-editor. It supersedes R-EDIT-3, R-EDIT-4 and R-EDIT-5; R-EDIT-6 acceptance is re-run by this ticket.
+**Why:** investigate a real-file workflow while preserving the current managed-draft implementation until all gates pass. Git supplies the normal generated template and owns commit/helper lifecycle. Do not assume editor close equals intent: explicit confirm validates synchronized buffer/version; didClose or a verified last managed-tab close uses saved-file text. This target supersedes R-EDIT-3/4/5 only after acceptance; R-EDIT-6 acceptance is re-run.
 
 **Step 0, spike gate (report before deleting anything):**
+**2026-10-29 result: OBSERVED FAIL.** Corrected probes: Codium 1.140.06880 removes the real-file tab but emits no wire `didClose` within 5 seconds in test and normal hosts; Neovim 0.12.6 with explicit attach/`bufhidden=wipe` passes. Codium language change emits misleading close/open while the tab remains open. Preserve this evidence. The proposed VS Code `tabGroups.onDidChangeTabs` fallback must be verified, as must whether shutdown emits `event.closed`. No production migration until gates pass. See [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md).
+
 - VS Code: a real file under `.git/`, opened by the extension, sends `didClose` promptly on tab close; is attached to the language client; a dirty tab shows the native save dialog. Note: an older VS Code report (1.63) says closing an editor did not dispose an existing file's document or fire the close event; check current behaviour.
 - Neovim: a buffer with `bufhidden=wipe` and explicit LSP attach; `:q` on a modified buffer is refused natively and a real close sends `didClose`.
 - For each client: what `showDocument` does on an already-open file whose contents changed on disk (reload, prompt, or stale text). Git rewrites the template on every commit and the path is reused.
 - For each client: what reaches the server after a language-mode change (VS Code `setTextDocumentLanguage` fires document close then open; Neovim and Helix unverified).
 - Confirm that rich clients close their own buffer on abort.
-- If `didClose` is not delivered reliably in either client, stop and report. Do not add new close-intent arbitration.
+- Verify optional VS Code `tabGroups.onDidChangeTabs`: only last managed tab confirms; focus/switch and non-last closure do not; never synthesize didClose. Verify shutdown/reload/workspace-change is not confirmation, including whether shutdown emits `event.closed`. Keep explicit confirm and abort for clients without reliable close events.
 
 **Target Files:** `src/{protocol,server,editor,commands,session}.rs`, `src/editor/draft.rs`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/{drafts,edit,edits}.js`, their tests (`tests/editor_drafts.rs`, `editor_bridge.rs`, `server_async.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/*`), `tests/ui/scenarios/commit-*.scn`, `TASKS.md`, `docs/CLIENT_SPEC.md`.
 
@@ -100,7 +117,7 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
   - The rich clients' history prev/next. The ring stays server-side; the history bindings become `planned` until R-EDIT-HISTORY.
 - **Clients:**
   - Neovim: open the real file in the current window, attach explicitly, set `bufhidden=wipe`. Confirm is native `:wq`.
-  - VS Code: open the file normally; rely on the native dirty dialog; select the draft by filename pattern (`COMMIT_EDITMSG`), not language ID.
+  - VS Code: open permanently (`preview:false`, including `showDocument` middleware); reconcile existing `onDidChangeTabs` teardown handling with an optional observer. Native Save/Discard/Cancel: Discard confirms prior saved file text. Confirm only after last managed tab closes, never on focus/switch; do not synthesize `didClose`.
   - Abort is `view/invoke common.cancel {runId}` in both.
 - **IMM-3:** map "Aborting commit due to empty commit message" to the info message "Commit aborted: empty message".
 
@@ -110,6 +127,8 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 - Status read-only, A29, text mode and askpass are unchanged.
 - `didClose` is never abort.
 - Delete rather than deprecate; no shims.
+
+**Conflict and implementation gates:** Current wire remains `magit-commit://` managed URI with full sync and `draft/save|finish|history` version barriers; current close intent is explicitly arbitrated and `didClose` detaches only. Resolve this contract only at accepted cutover. VS Code already has `onDidChangeTabs` teardown handling (`drafts.js`) and permanent `preview:false` opens; verify/reconcile rather than assuming fallback works. Establish explicit-confirm availability: `magit.confirmEdit` is currently a local VS Code command, while `workspace/executeCommand` is a proposed Plain action mechanism, not an already-registered server command. Do not add a custom protocol method. Keep didClose, explicit confirm, cancellation, shutdown and tab closure distinct, session-aware and idempotent. Shutdown/reload/workspace-change is not confirm; verify whether shutdown can emit `event.closed`. Test Git normal template/comment/empty semantics.
 
 **Acceptance:**
 - Save alone never commits.
@@ -121,6 +140,7 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 - Existing disconnect and adversarial tests still pass.
 - No `draft/` method or `managedDraft` remains in `src/` or the clients.
 - In each client, after `:wq` or closing the commit tab, the status view is clean and shows the new commit.
+- Verify explicit confirm against synchronized buffer/version; close confirmation against saved-file text; Discard uses prior saved text and Cancel retains the session. Verify shutdown/reload/workspace-change and whether shutdown emits `event.closed`.
 
 **Docs (in this ticket):**
 - **TASKS.md:**
@@ -131,13 +151,13 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
   - §5.5: `common.confirm` becomes client-local write plus close; history rows become `planned`; fix "closing the buffer is always cancel".
   - §6: drop "managed draft; native adapters pending" from the Commit message row.
   - §7: mark R-EDIT-3, R-EDIT-4 and R-EDIT-5 "superseded by R-EDIT-REAL"; note R-EDIT-6 acceptance is re-run; change R-EDIT-8's "native history remains an obligation" to "moved to R-EDIT-HISTORY"; add R-EDIT-REAL and R-EDIT-HISTORY; R-EDIT-KINDS: "the todo helper reuses the real-file path".
-- **docs/CLIENT_SPEC.md:** remove the draft methods and the managed-draft quick reference; replace the capability-map row with "open the real file per `editDocument`; forward `didOpen`/`didSave`/`didClose`; abort via invoke".
+  - **docs/CLIENT_SPEC.md:** preserve current managed-draft claims and distinguish them from the proposed real-file workflow, explicit confirm/close semantics, conflicts and gates.
 
 **Verify:** `cargo test --test editor_bridge --test editor_drafts --test server_async && make test-lua && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test`, plus a new `scripts/ui run tests/ui/scenarios/commit-real-file.scn`. Remove `commit-draft-history.scn` and `commit-draft-close.scn`; keep `commit-cancel-progress.scn`. Remove `tests/editor_drafts.rs` cases that only covered deleted wire behaviour.
 
 ### R-EDIT-HISTORY (S, deferred stub)
 
-History prev/next as a server code action issuing a versioned `applyEdit` from the ring, identical for every client. Not scheduled; depends on R-EDIT-REAL and, for plain clients, R-PLAIN-ACTIONS.
+History prev/next as a server code action issuing a versioned `applyEdit` from the ring, identical for every client. Deferred and not scheduled until separately requested; depends on R-EDIT-REAL and, for Plain clients, R-PLAIN-ACTIONS.
 
 ### R-PLAIN-DOC: record decisions and amend the roadmap (S)
 
@@ -150,12 +170,30 @@ spike remain pending.
 - **Acceptance:**
   - Section 1 decisions (except Commit editing and Message ring, owned by R-EDIT-REAL) added to TASKS §0.
   - §3.4 and §4.1 updated. §4.1 states which `initialize` capabilities are consumed (`keymapDelivery`, `keyModifiers`), deletes the unused `prompts`, `placements`, `editorBridge` fields, and adds `initializationOptions.presentation`.
-  - This phase inserted before "Feature: release prerequisites"; R-4.1a and R-7.3a gain "also accepted through the Plain harness"; R-REL-2 wording becomes "general LSP clients supported in Plain mode per the spec; no first-party promise beyond the bundled clients".
+  - This phase inserted before "Feature: release prerequisites"; R-4.1a and R-7.3a explicitly require acceptance through the Plain harness at R-PLAIN-GATE; R-REL-2 wording becomes "general LSP clients supported in Plain mode per the spec; no first-party promise beyond the bundled clients".
   - AGENTS.md gains the Plain evidence rule from assumption 2.
   - The completed R-CLIENT-SPEC core-payload sub-task (fourth review recorded complete) is ticked.
 - **Verify:** `git diff --check`; grep TASKS.md for contradictions with the new decisions.
 
+### R-PLAIN-SPEC documentation design substep
+
+- [x] Drafted the Plain target-design section in `docs/CLIENT_SPEC.md` and
+  linked the single effect/prompt capability table here.
+- [ ] Source/runtime cross-check against protocol and implementation, harness
+  conformance across all seven profiles, native evidence, and Helix smoke remain
+  pending. R-PLAIN-SPEC remains unchecked until those later gates are complete.
+
 ### R-PLAIN-HARNESS: fake-editor conformance harness (M)
+
+**Acceptance warning:** baseline commit `2b15cad` is partial scaffolding, not
+accepted conformance. Its decomposition test produces/asserts one rangeless
+change instead of multiple ranged changes; reorder coverage fabricates a
+response locally instead of testing actual emit order; there is no real-binary
+FakeEditor pump servicing outbound requests; progress uses incorrect
+`workDoneProgress/create` rather than `window/workDoneProgress/create`;
+`respond` lacks `workspace/applyEdit` dispatch; positional edit ordering and
+overlap checks are inadequate. Keep this ticket unchecked until these gaps are
+closed and acceptance is demonstrated.
 
 - **Target Files:** `tests/common/fake_editor.rs` (new), `tests/fixtures/lsp_traces/` (new), `tests/plain_harness.rs` (new).
 - **Reference Files:** `tests/common/session.rs`, `tests/server_async.rs`, the recorded Helix traces from the Plain handoff (§G).
@@ -197,6 +235,7 @@ spike remain pending.
 - **Constraints:** no wire or behaviour change for rich clients; no shims.
 - **Acceptance:**
   - A `Presentation` seam carries a view's render output, effects and prompts to the client. Current behaviour moves behind `CustomRender` unchanged.
+  - The seam serves and stacks concrete views/interactions without client VCS recognition; a minimal fake provider proves dispatcher and view interaction reuse independently of Git.
   - Adapter chosen from `initializationOptions.presentation`; absent means `plain`.
   - One `dispatch(DispatchRequest{command, target, args})` entry serves `view/key`, `view/invoke` and later `executeCommand`.
   - Sessions keyed by canonical repository identity (state by git-dir, locks by common-dir).
@@ -225,6 +264,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 - **Constraints:** file content never selects the repository; never guess among candidates for any mutating command.
 - **Acceptance:**
   - Resolution order: explicit `repo_path` (rich, unchanged); a single unambiguous Git root from workspace folders; the document path if inside a repository; otherwise a choose-repository view whose rows are code actions over candidates.
+  - Backend-owned resolution supplies repository identity and mutation semantics; the presentation/client layer performs no VCS recognition or launcher discovery.
   - Canonical identity from `git rev-parse --git-dir --git-common-dir --show-toplevel`, handling linked worktrees (`.git` file) and symlinks.
   - Presentation documents (`.magit`, configurable) are excluded from Untracked and watcher noise.
   - Tests: no root, `/tmp` root, multi-root, nested, worktree, two repositories in one editor, and a mutating command refused while ambiguous.
@@ -287,6 +327,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 - **Acceptance:**
   - A Plain implementation of the `Ui` interface: `confirm` as Yes/No rows; `text` as a field plus Submit/Cancel; `choice` as item rows, plus a field when `allowCustom`; `multiChoice` as toggle rows plus Done.
   - `textDocument/completion` on a field returns branches, tags, remotes or revisions by field type. Checkout works through a prompt.
+  - Candidate lookup is supplied by typed backend/workflow providers; the generic prompt renderer does not inspect Git or infer VCS from candidate text.
   - `secret` prompts and askpass cancel cleanly with a message.
   - A CI test runs every registered command against a recording Plain `Ui` and generates `docs/plain-support.md`, snapshot-tested with `UPDATE_EXPECT=1`. Commands emitting unsupported effects become `Unavailable{reason}`. A runtime unsupported effect gives a readable message and a clean cancel.
 - **Verify:** `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`.
@@ -295,7 +336,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 
 - **Target Files:** `src/presentation/plain.rs`, `src/commands.rs`, `src/session.rs`.
 - **Reference Files:** TASKS §3.7; R-5.1 (completed).
-- **Acceptance:** the log select view works as an ordinary document view. Confirm, cancel and toggle-mark are actions; free-text revision uses a field. Commit identity comes from `ActionTarget`; the caller is restored on confirm and cancel; stale selection is rejected. Scenario: fixup target selected and cancelled with no mutation.
+- **Acceptance:** the log select view works as an ordinary document view. The picker is parameterized for single or multi selection and carries stable identities, not client-parsed labels. Confirm, cancel and toggle-mark are actions; free-text revision uses a field. Commit identity comes from `ActionTarget`; the caller is restored on confirm and cancel; stale selection is rejected. Scenario: fixup target selected and cancelled with no mutation.
 - **Verify:** `make test-rust FILTER="--test plain_select"`.
 
 ### R-PLAIN-DRAFT: commit editing for plain clients (S)
@@ -306,6 +347,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 - **Constraints:** the draft is Git's own `COMMIT_EDITMSG`, identified by canonical path and URI, never by `languageId` (clients differ: `git-commit` versus `gitcommit`). Any other commit-message document gets no actions. No server Confirm action and no dirty-refusal setting: the editor's own save and close are the confirm.
 - **Acceptance:**
   - On `editDocument`: if the document store shows the URI already open, send a versioned whole-buffer `applyEdit` with the fresh template, then `window/showDocument` (`takeFocus`). If not open, `showDocument` only.
+  - Provider-file sessions are reusable interactions with explicit finish/cancel callbacks; Git-specific canonical-path and helper-security validation remains in the backend/editor provider, never in client VCS recognition.
   - If the client lacks `showDocument`, or no `didOpen` arrives within a bounded time, cancel the run with a message and mark commit commands `Unavailable`.
   - Abort is a code action running `common.cancel {runId}`; it focuses status via `showDocument`.
   - Harness tests (real Git, disposable repo, hooks run): save-only no commit; save then close commits exactly the saved text; abort commits nothing and leaves the file; stale buffer from the previous commit is refreshed; client without `applyEdit` gets a message; a second server instance gets no actions.

@@ -54,8 +54,14 @@ here. General agent working conventions and verification guidance live in
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
-| Commit selection | Selecting a commit normally pushes/focuses a server-rendered log in select mode; clients forward selection/confirm/cancel and display its text verbatim. The server resolves structured commit nodes, restores the caller on confirm/cancel, and validates optional free-form revisions. This is not a client picker or choice prompt (§3.7) |
-| Plain presentation | Standard-LSP presentation is VCS-neutral; concrete backend/workflow providers supply repository identity and mutation semantics. Reusable server interactions operate on concrete views/data rather than imposing a lowest-common-denominator VCS abstraction |
+| Commit selection (target) | Intended selection uses server-rendered log select mode with structured stable identities and caller restoration; no client picker or choice prompt (§3.7). Current implementation must be checked against source; Plain's parameterized single/multi flow is pending. |
+| Plain presentation (target) | Standard-LSP presentation is VCS-neutral; concrete backend/workflow providers supply repository identity and mutation semantics. Reusable interactions target concrete views/data: serving/stacking; parameterized stable-ID single/multi pickers with caller restoration; provider-file message edits with finish/cancel callbacks; one semantic dispatcher; and a fake-provider independence test without jj implementation. Intended architecture, not current behavior. |
+| Plain client naming and selection (target) | “Plain” means spec-only generic LSP clients, not an editor-specific adapter; one semantic dispatcher selects `customRender` only when explicitly requested, otherwise Plain. |
+| Plain document sync (target) | Incremental sync uses one URI-keyed store; apply each notification's changes sequentially, accepting ranged and rangeless changes and negotiated encodings. |
+| Plain repository resolution (target) | Resolve an unambiguous repository from explicit/workspace/document context; never guess for mutations, use no launcher (the editor helper is required), and exclude presentation files from Untracked. |
+| Plain action/rendering (target) | Content-addressed targets are revalidated at execution; stale targets refresh without mutation. Render expanded by default, auto-cap large sections with expand actions, and retain folding support. |
+| Plain prompts/capabilities (target) | One document-backed prompt renderer serves confirm/text/choice/multiChoice and completion; support is declared once per effect type and prompt kind. |
+| Plain deferred/out-of-scope (target) | History is deferred to R-EDIT-HISTORY; character input, launcher, diagnostics, discard recovery refs, direct executeCommand bindings, custom URIs and LSP 3.18 virtual content are out of scope. |
 
 ---
 
@@ -243,7 +249,10 @@ an applied-version/base mismatch requires `view/resync`.
 
 Standard LSP positional requests only make sense if the client buffer equals
 the server's text. Hence the ack scheme above. While a view is in text mode,
-position-based requests return `null`. Plain presentation uses standard LSP
+position-based requests return `null`. The custom `view/rendered` acknowledgement
+identifies an applied custom render version/tree; it differs from Plain synced-text
+snapshots, which associate document text with render state without that custom
+ack protocol. Plain presentation uses standard LSP
 documents and providers; it does not require editor-specific placements,
 prompts, or an editor bridge. Virtual-content transports and custom URIs remain
 out of Plain scope; see §9 for deferred LSP 3.18 work.
@@ -513,6 +522,14 @@ keys keep them). Implementation per client:
 
 ### 3.10 Editor bridge (open Git's editor inside the user's editor)
 
+**Target-versus-current:** the Plain-client target proposes Git's real
+`COMMIT_EDITMSG` provider-file session with finish/cancel callbacks, pending the
+mandatory R-EDIT-REAL step-0 spike and later implementation acceptance. Until
+that gate and acceptance pass, the current recorded contract below remains
+managed drafts. See [Plain-client target and ticket bodies](./magit-lsp-plain-client-tasks.md)
+for the presentation/provider reuse design; this note does not change current
+helper or process-lifecycle guarantees.
+
 Git opens an editor for: commit messages (incl. `--amend`, reword), merge
 messages, annotated tag messages, interactive rebase todo lists, `git commit
 --fixup=reword:`, etc.
@@ -646,6 +663,13 @@ aborts; observed completed Git exit reports actual result. Terminal cleanup is
 idempotent and late responses rejected. Failed write/finish keeps helper/draft
 pending and reopens/recovery-copies if buffer closed. Drafts are in-memory and
 do not survive server crash; native recovery is best effort.
+
+**Current-versus-target note:** The managed-draft protocol above is the current
+recorded contract, not a completed implementation across both clients. The
+real-`COMMIT_EDITMSG` flow in linked R-EDIT-REAL is a proposed target behind its
+mandatory step-0 spike; its detailed rewrite of this section is subsequent
+documentation work. Magit message-ring parity is unverified and its source-check
+remains pending in R-EDIT-REAL acceptance.
 
 R-EDIT-8 ring limits: default 50 entries and 1 MiB aggregate UTF-8 payload per
 canonical repository, in memory for server lifetime. Reject retention of an
@@ -1132,7 +1156,7 @@ they are meaningful. See §0 and the Plain phase task list.
 No backward compatibility: delete the old `vcs/*` methods as their
 replacements land.
 
-### 4.1 Client → server
+### 4.1 Client → server (current contract; Plain presentation selection is intended, not yet implemented)
 
 | Method | Params | Returns |
 | --- | --- | --- |
@@ -1453,12 +1477,13 @@ authority. Completed history is in the
   - **Done when:** Reconcile the contradictory §5 R4/keymap documentation and tests with the intended bindings; focused keymap regression tests and scripted native-UI evidence verify structured/read-only motion, log `l`, and unchanged native text-mode editing.
   - **Verified:** `cargo test --test keymap --test keys_protocol --test manifest --test parity && cargo build --release && scripts/ui run tests/ui/scenarios/vim-horizontal.scn && git diff --check` passed. Rust keymap coverage proves user `h`/`l` overrides resolve in structured status; Neovim Vim scenario verified `l` opens log and exact native text-mode `l` then `h` cursor-column movement at 100x30 and 80x24. Inspected `build/ui/vim-horizontal/vim-{100x30,80x24}/{structured-h,text-l,text-h,restored}.screen`; UI runner stopped owned processes.
 
-### Deferred bugfix — not scheduled
+### Deferred bugfix — minimal intake slice scheduled; larger design not scheduled
 
 - [x] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
   blocked inside real Git** (unsolved; moved out of the completed
-  mutation-ordering review item, archived evidence; **not scheduled for
-  implementation until the user asks**)
+  mutation-ordering review item, archived evidence). The minimal intake slice
+  is scheduled in R-PLAIN-PREREQ; the larger design below remains deferred and
+  is not scheduled until the user asks.
   - **Requirement (preserved from the review item's read half):** a read
     (`view/resync`, and by the same root cause `view/rendered`, `view/resize`
     and `view/open` in any repository) must not be delayed by a `view/invoke`
@@ -1478,8 +1503,8 @@ authority. Completed history is in the
     is global across repositories, so a slow Git in one view also blocks
     `view/rendered`/`view/resize`/`view/open` everywhere.
   - **Proposed design-review gate (PROPOSED only — not implemented and not
-    approved; flagged for design/user review, not a decided shortcut; the bug
-    is not scheduled until the user asks):**
+  approved; flagged for design/user review, not a decided shortcut; the larger
+  design is not scheduled until the user asks):**
     - global registry lookup only → per-repo session handle;
     - per-view published latest-sent and last-acked immutable state, outside
       the Git and prompt locks;
@@ -1538,23 +1563,42 @@ these are not active acceptance queues. Canonical contracts remain in §§0–6
 and 8–9. R-3.4b, R-UI-7, R-VS-1, R-NV-1…R-NV-4, and R-3.5…R-3.7 are
 completed. Historical evidence and caveats are archived.
 
-### Feature — Plain-client phase (before release prerequisites)
+### Feature — Plain-client phase (target; pending implementation, before release prerequisites)
 
-This phase is tracked in the [Plain-client working list](./magit-lsp-plain-client-tasks.md),
-which preserves its ticket boundaries, acceptance gates, dependencies and
-verification. TASKS.md remains canonical. R-PLAIN-DOC is complete; remaining
-phase work and R-EDIT-REAL's spike are pending. The minimal BUG-READ-1 intake
-slice is scheduled in R-PLAIN-PREREQ; the larger design remains deferred.
-Virtual-content work is outside Plain scope. Release begins only after
-R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
+Canonical acceptance and verification bodies are in the linked [Plain-client
+working list](./magit-lsp-plain-client-tasks.md); this is the scanner-visible
+active queue. Intended Plain contracts are not current behavior. R-EDIT-REAL and
+its step-0 spike remain pending; R-DIFF-SAFETY ownership/scope are unchanged.
+The minimal BUG-READ-1 intake slice is scheduled; its larger design remains
+deferred. Release requires R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
 
 - [x] **R-PLAIN-DOC — Record decisions and phase queue.** Documentation only;
-  this does not complete R-EDIT-REAL or its spike. See the linked phase list.
+  this does not complete R-EDIT-REAL or its spike.
+- [ ] **R-EDIT-REAL — Proposed real `COMMIT_EDITMSG` workflow/cutover.** Current managed virtual URI, full-sync stream, `draft/save|finish|history` version barriers and explicit close-intent arbitration remain authoritative; no cutover or completion claim. The normal Git-generated template and actual Git/helper lifecycle remain server-owned. Explicit confirm must validate synchronized buffer/version; didClose or a verified VS Code last-managed-tab close uses saved-file text. Save/Discard/Cancel uses native behavior, with Discard confirming prior saved text; explicit abort remains available. Native evidence remains **OBSERVED FAIL**: Codium 1.140.06880 closed the real-file tab without wire `didClose` within 5 seconds in both hosts; Neovim 0.12.6 with `bufhidden=wipe` passed. Verify proposed optional `tabGroups.onDidChangeTabs` fallback (last tab only; no focus/switch confirmation; no synthetic didClose), existing `onDidChangeTabs`/`preview:false` behavior, and whether shutdown emits `event.closed`; shutdown/reload/workspace-change is never confirm. `magit.confirmEdit` is local VS Code registration; `workspace/executeCommand` is proposed Plain action plumbing, not an already-registered server command. Do not invent a method. Preserve comment/empty semantics and verify Magit ring parity. See `docs/evidence/real-file-client-spike.md` and linked ticket; remain unchecked.
+- [ ] **R-PLAIN-HARNESS — Fake-editor conformance harness.** Scripted stdio LSP, document model, versioned applyEdit/showDocument/progress and quirk profiles. **Acceptance warning:** baseline commit `2b15cad` is partial scaffolding, not conformance: decomposition produces/asserts one rangeless change rather than many ranged changes; reorder test fabricates a local response rather than testing actual emit order; no real-binary FakeEditor pump services outbound requests; progress method is `workDoneProgress/create` instead of `window/workDoneProgress/create`; `respond` lacks applyEdit dispatch; positional edit ordering/overlap checks are inadequate. Keep unchecked until these gaps are fixed and accepted. Verify: `make test-rust FILTER="--test plain_harness"` (test alone is not full conformance acceptance).
+- [ ] **R-PLAIN-PREREQ — Outbound requests, progress gating, minimal BUG-READ-1.** Gate progress on capability, avoid holding sessions over Git, remove test-delay hooks, and correlate outbound requests without blocking intake. Larger BUG-READ-1 design remains deferred. Verify: `make test-rust FILTER="--test server_async"`; `make test-rust`.
+- [ ] **R-PLAIN-SYNC — Document store and sync mode.** URI-keyed sequential changes with negotiated encoding and bounds; incremental sync; cover multibyte, CRLF, invalid ranges and bundled clients. Verify: `make test-rust FILTER="--test plain_sync"`; `make test-lua`; `npm --prefix clients/vscode run test:integration`.
+- [ ] **R-PLAIN-CORE — Presentation seam and unified dispatcher.** Preserve rich behavior; absent presentation selects Plain. One semantic dispatcher serves custom key/invoke and Plain executeCommand. Acceptance includes concrete-view serving/stacking, parameterized stable-ID single/multi picker with caller restoration, provider-file message edits with finish/cancel callbacks, and fake-provider independence without jj implementation. Verify: `make test`; `make ui-test`.
+- [ ] **R-DIFF-SAFETY — Displayed-patch identity and filtered-mutation prerequisite.** Existing roadmap ownership/scope unchanged; R-PLAIN-TARGET depends on it. Verify identity and stale/filtered patch tests.
+- [ ] **R-PLAIN-TARGET — Content-addressed action targets.** Revalidate node identity plus mutation hash against fresh backend state; stale means refresh/no mutation; cover rich and Plain paths. Verify: `make test-rust FILTER="--test commands"` plus patch proptests.
+- [ ] **R-PLAIN-REPO — Repository/document resolution.** Resolve explicit/workspace/document context without guessing among ambiguous candidates; exclude presentation docs from untracked/watcher noise. Verify: `make test-rust FILTER="--test plain_repo"`.
+- [ ] **R-PLAIN-RENDER — Bootstrap and versioned applyEdit pipeline.** Authoritative tree text, minimal encoding-correct edits, serialized/coalesced apply, echo reconciliation, divergence repair and stale retry. Verify: `make test-rust FILTER="--test plain_render"`.
+- [ ] **R-PLAIN-ACTIONS — Code actions and executeCommand.** Side-effect-free snapshot-matched actions, dispatcher revalidation, range conversion and stale/latency coverage. Verify: `make test-rust FILTER="--test plain_actions"`.
+- [ ] **R-PLAIN-STACK — View stack and menus in one document.** Concrete logical views are served/stacked in one document with identities and caller restoration; Back and any-line actions. Verify: `make test-rust FILTER="--test plain_stack"`.
+- [ ] **R-PLAIN-VIS — Visibility, folding fallback and providers.** Expanded default, bounded large sections, visibility code actions and standard providers from matching snapshots. Verify: `make test-rust FILTER="--test plain_vis"`.
+- [ ] **R-PLAIN-PROMPT — Document-backed prompts and support table.** Field-backed prompt kinds/completion, command effect support and safe unsupported behavior. Verify: `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`.
+- [ ] **R-PLAIN-SELECT — Parameterized stable-ID selection.** Single/multi selection, stable identity and caller restoration on confirm/cancel; no client picker or text parsing. Verify: `make test-rust FILTER="--test plain_select"`.
+- [ ] **R-PLAIN-DRAFT — Provider-file commit editing.** Use canonical Git COMMIT_EDITMSG, refresh already-open file, close completion and explicit abort; reject unrelated documents. Verify: `make test-rust FILTER="--test plain_draft --test editor_bridge"`.
+- [ ] **R-PLAIN-E2E — Vertical slice/native evidence.** Plain harness and plugin-free Neovim cover status/stage/stale/menu/commit exact message and abort. Verify focused tests and linked UI scenarios.
+- [ ] **R-PLAIN-HELIX — Helix manual smoke.** Record version/date and generic-configuration workflow results. Verify reviewed evidence.
+- [ ] **R-PLAIN-SPEC — Client spec, README and release wording.** Document capabilities, sync/echo/actions/commit/limits/example and harness checklist; cross-check protocol/tests. Verify links and `git diff --check`.
+- [ ] **R-PLAIN-GATE — Release-slice acceptance through Plain.** Run R-4.1a/R-7.3a through harness with exact repository assertions, regenerate support table and run full gate. Verify: `make test`; `make test-rust FILTER="--test plain_e2e"`.
 
 ### Feature — release prerequisites
 
 The 0.2 release queue is strictly ordered below. Deferred platform work and
-BUG-READ-1 are not release gates.
+BUG-READ-1's larger design are not release gates; its minimal R-PLAIN-PREREQ
+slice is scheduled and required before the Plain gate.
 
 - [ ] **R-ARGS — Typed operation and argument propagation**
   - **Size:** S.
@@ -1572,7 +1616,8 @@ BUG-READ-1 are not release gates.
       (fixup) using R-5.1 server-owned log/select infrastructure, not a client
       picker. Broad menus and unrelated actions do not gate release.
       **Depends on:** R-5.1, R-ARGS and R-SELECT-OPS.
-      **Done when:** exact repository-state tests prove the selected commit is
+       **Plain acceptance:** also accepted through the Plain harness at R-PLAIN-GATE.
+       **Done when:** exact repository-state tests prove the selected commit is
       the target; cancel causes no mutation and restores caller; confirm returns
       to caller; failures are readable. Both clients have focused native
       selection/confirm/cancel evidence.
@@ -1598,8 +1643,8 @@ BUG-READ-1 are not release gates.
   - **Candidate paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/session.rs` (dispatch), `src/protocol.rs`, `lua/magit-lsp/edit.lua` and relevant init/view/buffer attachment/capabilities from R-EDIT-4, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` if needed, `tests/editor_bridge.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
   - **Depends on:** Linux R-EDIT-2 acceptance, R-EDIT-3…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner. R-EDIT-9/macOS execution is not a Linux client-cutover dependency.
   - **Done when:** remove realFile commit-message compatibility at cutover; Git keeps hooks/cleanup. Native acceptance covers save-stays-editing, normal close commits exactly saved message, dirty Save/Discard/Cancel, no hidden changes submitted, explicit abort versus close, disconnect across phases, stale/terminal cleanup without commits, and failed close recovery. Also cover pre-hook/editor-active/commit-msg/finalizing and finish-v-cancel (cancel before commit aborts; completed commit reports reality), stale/late/version/multi-root, exact HEAD/index/worktree and neighboring content, inherited pipes/bounded drain, TERM resistance, subsequent commit/no lock cleanup, lock warning/no foreign kills; preserve askpass/A29/text mode and document limits. Extend integration.js and native e2e/suite.js at the paths above; scripted widgets alone do not meet native acceptance. R-EDIT-8 verifies two-root ring ordering/dedup/eviction and current-draft restoration.
-  - **Completed (2026-10-28):** realFile commit-message compatibility is removed at cutover: `EditDocumentMode` is ManagedDraft-only with no realFile path in `src/`; the sole remaining `realFile` reference is a negative VSCode test case asserting such an effect is rejected. Git owns hooks/cleanup/comment-stripping; the server never runs `git commit -F` (drafts write through the editor-bridge helper, §3.10). One adversarial gap found during final acceptance was closed in `tests/server_async.rs`: disconnect during the commit-msg hook phase — `disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing` proves EOF cancels the owned resistant hook group, leaves exact HEAD/index/write-tree/worktree and neighboring content, and allows a subsequent commit. macOS/Windows remain deferred (R-EDIT-9/R-EDIT-7); BUG-READ-1 stays ignored and untouched.
-  - **Evidence:** Full gate exited 0: `cargo test --test editor_bridge --test server_async` (editor_bridge 22; server_async 22 passed + 1 existing ignored BUG-READ-1), `make test-lua`, `make vscode-test`, `npm --prefix clients/vscode run test:integration` (240 exact index/worktree cases), `npm --prefix clients/vscode run test:e2e` (native VSCode, `r-edit-5-*.png`/`r-edit-5-evidence.json`), `make test`, `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn` → `1 PASS, 0 XFAIL, 0 FAIL`, `make ui-tour`, `git diff --check` clean. Adversarial Linux Rust evidence covers: cancel-before-commit aborts (`a_cancel_creates_no_commit`, `r_edit_2_progress_cancel_during_editor_releases_once`) vs completed-commit-reports-reality (`r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation`, `cancelling_post_commit_reports_the_commit_that_git_already_recorded`); pre-hook (`r_edit_2_eof_during_precommit_cancels_owned_hook`), editor-active, commit-msg, finalizing phases; disconnect across phases (pre-hook EOF, editor-active, preflight, plus the new commit-msg case); stale/late/version/multi-root isolation (`managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs`, editor_drafts stale/owner/version cases); exact HEAD/index/worktree + neighboring content throughout; inherited pipes/bounded drain (`normal_hook_exit_does_not_kill_background_writer_and_reports_drain`); TERM resistance/grace (resistant/cooperative/stopped hook modes); subsequent commit; no lock cleanup and lock warning/no foreign kills (`cancellation_warns_without_removing_gitdir_or_common_dir_locks`, `lock_warning_probe_has_its_own_bounded_readonly_deadline`); askpass secrets never logged; A29/text-mode preserved (text-mode typing inside `commit-cancel-progress.scn` and `text-mode-roundtrip.scn`); document byte limits; R-EDIT-8 two-root ring ordering/dedup/eviction + current-draft restoration (`editor_drafts` history tests, native history recall in both clients). Inspected `build/ui/commit-cancel-progress/{editor-active,cancellation-feedback,cancelled,next-commit}.screen` and the relevant `build/ui/tour.md` excerpts (`status`, `menu-commit`, `clean-commit`, `hook-error`). No orphan `magit-lsp`/test-codium processes remained after the gate.
+  - **Completed (2026-10-28):** realFile commit-message compatibility is removed at cutover: `EditDocumentMode` is ManagedDraft-only with no realFile path in `src/`; the sole remaining `realFile` reference is a negative VSCode test case asserting such an effect is rejected. Git owns hooks/cleanup/comment-stripping; the server never runs `git commit -F` (drafts write through the editor-bridge helper, §3.10). One adversarial gap found during final acceptance was closed in `tests/server_async.rs`: disconnect during the commit-msg hook phase — `disconnect_during_commit_msg_hook_cancels_owned_hook_group_without_committing` proves EOF cancels the owned resistant hook group, leaves exact HEAD/index/write-tree/worktree and neighboring content, and allows a subsequent commit. macOS/Windows remain deferred (R-EDIT-9/R-EDIT-7); BUG-READ-1 probe remains ignored; minimal intake slice now scheduled under R-PLAIN-PREREQ.
+  - **Evidence:** Full managed-draft gate passed on 2026-10-28 (details in §3.10). It is not evidence for R-EDIT-REAL's spike, real-file behavior or Magit ring parity; these remain pending.
   - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour` on Linux; inspect relevant tour excerpts. Linux real-Git and both clients' native evidence are required; macOS remains unverified under later R-EDIT-9 and does not block Linux acceptance/cutover. No timeout inflation.
 - [ ] **R-EDIT-KINDS — Sequential editor-helper kinds**
   - **Size:** S.
@@ -1626,7 +1671,7 @@ BUG-READ-1 are not release gates.
       todo execution, continue, abort and conflict state; cancel before execution
       does not mutate and failures are readable. Both clients have focused native
        evidence for base selection and todo editing/execution. Also accepted
-       through the Plain harness at R-PLAIN-GATE.
+       **Plain acceptance:** also accepted through the Plain harness at R-PLAIN-GATE.
       **Verify:** focused real-repository Rust tests and both clients' native
       scenarios; full regression/phase evidence at milestone boundary.
 
@@ -1756,14 +1801,14 @@ BUG-READ-1 are not release gates.
        - **Fourth-review:** Completed. The client capability preferences are top-level capabilities; initialize result/keymap are explicitly abridged, keymap JSON is valid illustrative data and disclaimed as non-installable, and progress/create response/key result/render/ack order is documented and shown. Each JSONL example line parses; `git diff --check` passes.
       - **Third-review done when:** Each example message is valid JSON; the example and line 23 agree on capability placement; progress ordering and the correlated create response agree with the actual handler; every shortened capability/keymap message is clearly identified outside the JSON as an excerpt rather than a complete wire payload. Source-only/document-payload verification suffices; no UI/implementation tests, commits, or changes outside this documentation task.
 
-### R-REL — Release sprint (immediately after R-4.1a, R-7.3a and R-CLIENT-SPEC)
+### R-REL — Release sprint (after R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE)
 
 These linked, bounded tasks are the release checklist, not a competing ledger.
-Release sprint begins immediately after **both R-4.1a and R-7.3a, and
-R-CLIENT-SPEC**; no other
+Release sprint begins only after **R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE**; no other
 feature work is scheduled in between. Each item stays unchecked until its own
 evidence is produced. Release readiness explicitly assesses and discloses
-BUG-READ-1's known limitation; do not silently schedule its implementation.
+BUG-READ-1's known limitation; the minimal prerequisite slice is scheduled, but
+its larger design is not a release gate.
 
 - [ ] **R-REL-1 — Reproducible artifacts and safe publication**
   **Depends on:** release-slice binaries/package metadata being buildable.
@@ -1822,7 +1867,7 @@ BUG-READ-1's known limitation; do not silently schedule its implementation.
   flaky (not a costly per-PR requirement). Validate consumption/linkage of the
   separately completed `docs/CLIENT_SPEC.md`. Welcome Helix, Zed and JetBrains
    as external community clients; do not promise first-party implementations.
-   General LSP clients are supported in Plain mode per `docs/CLIENT_SPEC.md`;
+    General LSP clients are a target for Plain mode per `docs/CLIENT_SPEC.md`;
    make no first-party promise beyond bundled clients.
   **Done when:** both client setup paths are tested and documented; both-client
   screenshot assets or manual fallback are usable; client spec is linked and
@@ -1905,7 +1950,7 @@ BUG-READ-1's known limitation; do not silently schedule its implementation.
   and all live publication channels/badges after tagged CI.
 
 
-### Post-release feature queue
+### Post-release feature queue (after release gates, including R-PLAIN-GATE)
 
 Three queues below order the remaining post-release work. S/M/I are relative
 size labels (small/medium/infrastructure), not time promises. Parent IDs remain
@@ -2168,7 +2213,8 @@ prev-sibling and parent-section are Implemented; R-NAV records verification.
 
 - [ ] R-9.5b — L. Depends on: R-9.5a. Optional semi-hard jj fork; do not
       compromise the Git boundary. *Done when:* separate fork demonstrates the
-      boundary without reducing Git features. *Verify:* fork review.
+      boundary without reducing Git features. *Verify:* fork review. Deferred,
+      not a post-release commitment.
 
 Parent-to-slices: R-7.1 → R-7.1a–b; R-7.2 → R-7.2a–b; R-7.3 → R-7.3-options–c;
 R-7.4 → R-7.4; R-8.1 → R-8.1a–b; R-8.2 → R-8.2a–g; R-8.3 → R-8.3a–b;
@@ -2190,6 +2236,10 @@ R-9.5 → R-9.5a–b.
   **Verify:** focused real-repository state checks and native selection evidence
   in both clients, if a behavior discrepancy is found; otherwise document the
   traced paths and cases.
+
+### Deferred work (not release gates)
+
+- **R-EDIT-HISTORY:** History prev/next as a server code action issuing a versioned `applyEdit`, identical for every client. Not scheduled until separately requested; depends on R-EDIT-REAL and R-PLAIN-ACTIONS.
 
 ### Deferred platform work (not release gates)
 
@@ -2390,7 +2440,8 @@ the command line and real colours.
 ## 10. Implementation status and deviations
 
 Current implementation status is determined from source and tests, not this
-historical section. Relevant caveats: BUG-READ-1 remains explicitly deferred
+historical section. Relevant caveats: BUG-READ-1's minimal intake slice is
+scheduled in R-PLAIN-PREREQ, while its larger design remains deferred
 and its probe ignored; Phase 3E is partially complete (R-EDIT-2 Linux acceptance
 only; R-EDIT-3 server integration and R-EDIT-8 history are complete, native
 adapters pending; A11 cutover is owned by R-EDIT-6; macOS/Windows remain
@@ -2426,7 +2477,7 @@ Completed Neovim, VSCode and UI harness review history is retained in the
 [completed-roadmap archive](./docs/archive/completed-roadmap-2026-10-28.md).
 Current review status: A01–A10/A12 and actionable A13–A21/A24–A34 complete;
 A22/A23 withdrawn; A11 owned by R-EDIT-6. See `REVIEW_REPORT.md` for evidence,
-not scheduling authority. Preserve explicit BUG-READ-1 deferral (§7).
+not scheduling authority. Preserve BUG-READ-1's larger-design deferral (§7).
 
 ## 12. Review backlog
 
@@ -2438,8 +2489,8 @@ Completed R-5.1 review, VSCode resolution, client/harness reviews and checked
 review/test tasks are archived at
 [`docs/archive/completed-roadmap-2026-10-28.md`](./docs/archive/completed-roadmap-2026-10-28.md).
 Detailed historical evidence remains at baseline commit `49efd16`; it is not
-current behavior or active scheduling. BUG-READ-1 remains explicitly deferred
-and unchecked in §7.
+current behavior or active scheduling. BUG-READ-1's probe remains ignored;
+the minimal intake slice is scheduled and the larger design remains deferred (§7).
 
 ### Test-review summary
 
