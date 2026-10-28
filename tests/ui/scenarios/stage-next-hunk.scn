@@ -1,0 +1,28 @@
+# Staging a hunk moves to its remaining unstaged sibling, not its staged relocation.
+fixture: modified-two-files
+profile: vim
+profile-only: true
+---
+sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'three-hunk base'; sed -i '5s/$/ CHANGED/;20s/$/ CHANGED/;35s/$/ CHANGED/' f.txt
+keys: g r
+wait
+snapshot: before-stage
+goto "@@ -2,7 +2,7 @@"
+keys: s
+wait
+expect cursor on "    @@ -17,7 +17,7 @@"
+snapshot: header-next-hunk
+goto "Staged changes (1)"
+keys: Tab
+wait
+goto "+line20 CHANGED"
+keys: s
+wait
+expect cursor on "    @@ -32,7 +32,7 @@"
+snapshot: body-next-hunk
+goto "@@ -32,7 +32,7 @@"
+keys: s
+wait
+expect cursor on "Unstaged changes (1)"
+expect screen contains "Staged changes (1)"
+snapshot: final-source-section

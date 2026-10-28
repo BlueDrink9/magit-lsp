@@ -94,6 +94,28 @@ const NAMESPACES: &[&str] = &[
 ];
 
 #[test]
+fn failed_and_noop_staging_do_not_advance_to_a_sibling() {
+    for failure in [true, false] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", lines(40).to_string())])
+            .modify("f.txt", two_hunk_changes()).build();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let line = if failure {
+            write(&tmp.path().join(".git/index.lock"), "locked\n");
+            test.goto_marker("f.txt", '+')
+        } else {
+            test.goto_section("staged")
+        };
+        let result = test.invoke_here("status.stage");
+        assert!(!message_texts(&result.effects).is_empty());
+        assert_eq!(result.render.unwrap().cursor.unwrap().line, line);
+        if failure { std::fs::remove_file(tmp.path().join(".git/index.lock")).unwrap(); }
+        assert!(tmp.git(&["diff", "--cached"]).is_empty());
+    }
+}
+
+#[test]
 fn common_hierarchy_commands_are_implemented() {
     for id in ["common.cycle-visibility", "common.next-sibling", "common.prev-sibling", "common.parent-section"] {
         assert_eq!(registry().get(id).unwrap().status, CommandStatus::Implemented);

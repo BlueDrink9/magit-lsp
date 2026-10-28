@@ -1355,8 +1355,8 @@ impl Session {
                         view.render_with_delivery(cursor, outcome.cursor, RenderDelivery::Acknowledged)?
                     }),
                 };
-                if let (Some(render), Some(id)) = (&mut render, &outcome.cursor_node) {
-                    render.cursor = view.tree.node(id).map(|node| Cursor { line: node.start_line, column: 0 });
+                if let (Some(render), Some(node)) = (&mut render, outcome.cursor_nodes.iter().find_map(|id| view.tree.node(id))) {
+                    render.cursor = Some(Cursor { line: node.start_line, column: 0 });
                 }
                 render
             }

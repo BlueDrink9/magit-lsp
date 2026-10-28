@@ -123,8 +123,8 @@ pub struct CommandOutcome {
     pub refresh: bool,
     /// A cursor to move to that the old node cannot describe.
     pub cursor: Option<Cursor>,
-    /// Stable navigation target resolved in the source tree, located after render.
-    pub cursor_node: Option<String>,
+    /// Ordered stable targets from the source tree; use the first surviving node after render.
+    pub cursor_nodes: Vec<String>,
     /// A mode change the session must apply (and push a keymap for).
     pub mode: Option<ViewMode>,
     /// Push a new menu view and return to the current one on `popView`.
@@ -1210,7 +1210,7 @@ fn hierarchy_cursor(ctx: &mut CommandCtx<'_>, direction: Option<bool>) -> Result
             None => tree.parent(&node.id).or(Some(node)),
         }
     });
-    Ok(CommandOutcome { cursor_node: target.map(|node| node.id.clone()), ..Default::default() })
+    Ok(CommandOutcome { cursor_nodes: target.map(|node| node.id.clone()).into_iter().collect(), ..Default::default() })
 }
 
 fn next_sibling(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -1276,6 +1276,20 @@ fn stage_or_unstage(
         start: selection.start_line as u32,
         end: selection.end_line as u32,
     });
+    let source = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    let destinations = if command == dispatch::Command::Stage && ctx.selection.is_none() {
+        ctx.cursor.and_then(|cursor| source.navigation_node(cursor.line))
+            .filter(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged"))
+            .map(|node| {
+                // Capture the successor and source ancestors before Git mutates the view.
+                // Never follow the staged hunk's relocation when no sibling survives.
+                let file = source.parent(&node.id);
+                source.sibling(&node.id, true).into_iter()
+                    .chain(file)
+                    .chain(file.and_then(|file| source.parent(&file.id)))
+                    .map(|node| node.id.clone()).collect()
+            }).unwrap_or_default()
+    } else { Vec::new() };
     let (effects, prompt) = stage_or_unstage_at(
         ctx.view,
         ctx.repo_path,
@@ -1283,10 +1297,13 @@ fn stage_or_unstage(
         ctx.cursor,
         selection,
     )?;
+    let succeeded = effects.is_empty();
+    let move_cursor = succeeded && prompt.is_none();
     ctx.extend(effects);
     Ok(CommandOutcome {
         prompt,
         refresh: true,
+        cursor_nodes: if move_cursor { destinations } else { Vec::new() },
         ..Default::default()
     })
 }

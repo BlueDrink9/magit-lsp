@@ -37,6 +37,49 @@ fn file_uri(root: &str, path: &str) -> String {
 }
 
 #[test]
+fn staging_headers_and_bodies_uses_source_siblings_and_final_section_fallback() {
+    use magit_lsp::config::Profile;
+    for body in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", lines(40).to_string())])
+            .modify("f.txt", two_hunk_changes()).build();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let first = test.tree().nodes.iter().find(|node| node.kind == NodeKind::Hunk
+            && node.section.as_deref() == Some("unstaged")).unwrap().clone();
+        let next = test.tree().sibling(&first.id, true).unwrap().id.clone();
+        if body { test.goto_marker("f.txt", '+'); } else { test.goto(first.start_line); }
+        let result = test.invoke_here("status.stage");
+        assert!(result.effects.is_empty());
+        test.set_cursor(result.render.unwrap().cursor.unwrap());
+        assert_eq!(test.focused_node().id, next, "body={body}");
+        test.ack();
+        let result = test.invoke_here("status.stage");
+        assert!(result.effects.is_empty());
+        test.set_cursor(result.render.unwrap().cursor.unwrap());
+        assert_eq!(test.focused_node().id, "section:unstaged", "must not follow staged relocation");
+        assert!(tmp.git(&["diff"]).is_empty());
+    }
+}
+
+#[test]
+fn staging_final_sibling_falls_back_to_surviving_source_file() {
+    use magit_lsp::config::Profile;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes()).build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let last = test.tree().nodes.iter().filter(|node| node.kind == NodeKind::Hunk
+        && node.section.as_deref() == Some("unstaged")).last().unwrap().start_line;
+    test.goto(last);
+    let result = test.invoke_here("status.stage");
+    assert!(result.effects.is_empty());
+    test.set_cursor(result.render.unwrap().cursor.unwrap());
+    assert_eq!(test.focused_node().id, "unstaged/f.txt");
+}
+
+#[test]
 fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
     use magit_lsp::config::Profile;
     let (tmp, _repo) = RepoFixture::new()
