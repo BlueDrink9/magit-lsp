@@ -26,8 +26,8 @@ use crate::view::{
 };
 use crate::{Error, Result};
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 /// The command that leaves or enters text mode in every scope.
@@ -44,6 +44,90 @@ fn unsupported_menu_item(status: MenuStatus, label: &str) -> Option<InvokeResult
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
 pub fn status_uri(repo_path: &str) -> String {
     format!("magit://status/{}", repo_path.trim_start_matches('/'))
+}
+
+/// The immutable state of one view as last published by its session.
+struct PublishedView {
+    version: u64,
+    lines: Arc<Vec<String>>,
+    mode: ViewMode,
+    pending: String,
+    menu: Option<Menu>,
+    /// A resync handed out this state; the next render must be a full replace.
+    resynced: bool,
+}
+
+/// Per-session snapshots of every open view, shared outside the session lock.
+///
+/// The session publishes after each state change and before its caller can
+/// notify the client, so a read answered from here is always a state the
+/// session really rendered, even while a command holds the session inside Git.
+#[derive(Clone, Default)]
+pub struct PublishedViews(Arc<Mutex<HashMap<String, PublishedView>>>);
+
+impl PublishedViews {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, PublishedView>> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Replace the snapshot with the session's current views.
+    ///
+    /// An unchanged version shares its previous text; a pending resync marker
+    /// survives until a render consumes it.
+    fn publish(&self, views: &ViewStack) {
+        let mut map = self.lock();
+        let mut next = HashMap::with_capacity(views.views.len());
+        for view in views.iter() {
+            let id = &view.descriptor.id;
+            let previous = map.remove(id);
+            let lines = match &previous {
+                Some(old) if old.version == view.version => old.lines.clone(),
+                _ => Arc::new(view.tree.lines.clone()),
+            };
+            next.insert(
+                id.clone(),
+                PublishedView {
+                    version: view.version,
+                    lines,
+                    mode: view.mode,
+                    pending: view.pending(),
+                    menu: view.menu(),
+                    resynced: previous.is_some_and(|old| old.resynced),
+                },
+            );
+        }
+        *map = next;
+    }
+
+    /// The latest published full text of `view_id`, without any session lock.
+    ///
+    /// Marks the view so the session's next render replaces the client's text
+    /// instead of diffing against content this resync replaced.
+    pub fn resync(&self, view_id: &str) -> Result<ViewRender> {
+        let mut map = self.lock();
+        let view = map
+            .get_mut(view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        view.resynced = true;
+        Ok(ViewRender {
+            view_id: view_id.to_string(),
+            version: view.version,
+            base_version: None,
+            text: Some(view.lines.as_ref().clone()),
+            edits: None,
+            cursor: None,
+            mode: view.mode,
+            pending: view.pending.clone(),
+            menu: view.menu.clone(),
+        })
+    }
+
+    /// Consume the resync marker of `view_id`.
+    fn take_resynced(&self, view_id: &str) -> bool {
+        self.lock()
+            .get_mut(view_id)
+            .is_some_and(|view| std::mem::take(&mut view.resynced))
+    }
 }
 
 /// One open view plus the versions the client has and has not acknowledged.
@@ -68,6 +152,8 @@ pub struct OpenView {
     dirty: bool,
     /// Global detail level, including levels with no visible children.
     visibility_level: u8,
+    /// Where the session publishes this view; consulted for resync markers.
+    published: PublishedViews,
 }
 
 impl OpenView {
@@ -229,7 +315,8 @@ impl OpenView {
             forced.or_else(|| cursor.map(|cursor| successor_cursor(self.request_tree.as_ref().unwrap_or(&old), &tree, cursor)));
         // Edits are only safe when the client holds exactly the previous
         // version; otherwise fall back to a full replace.
-        let base_version = (delivery == RenderDelivery::Acknowledged && self.acked_version == Some(old_version)).then_some(old_version);
+        let resynced = self.published.take_resynced(&self.descriptor.id);
+        let base_version = (delivery == RenderDelivery::Acknowledged && !resynced && self.acked_version == Some(old_version)).then_some(old_version);
         let (text, edits) = match base_version {
             Some(_) => (None, Some(diff_text::line_edits(&old.lines, &tree.lines))),
             None => (Some(tree.lines.clone()), None),
@@ -279,6 +366,7 @@ fn initialize_open_view(
         descriptor: descriptor.clone(), view, tree, version, acked: None, request_tree: None,
         acked_version: None, pending: PendingChord::default(), menu_pending: Vec::new(),
         key_cursor: None, mode: descriptor.mode, dirty: false, visibility_level: 4,
+        published: PublishedViews::default(),
     };
     (descriptor, render, open_view)
 }
@@ -353,6 +441,7 @@ pub struct Session {
     next_prompt: u64,
     pending_prompt: Option<PendingPrompt>,
     pending_selections: BTreeMap<String, PendingSelection>,
+    published: PublishedViews,
 }
 
 struct PendingPrompt {
@@ -423,7 +512,18 @@ impl Session {
             next_prompt: 0,
             pending_prompt: None,
             pending_selections: BTreeMap::new(),
+            published: PublishedViews::default(),
         }
+    }
+
+    /// The shared snapshot handle that answers reads without the session lock.
+    pub fn published(&self) -> PublishedViews {
+        self.published.clone()
+    }
+
+    /// Publish every open view's current state.
+    fn publish(&self) {
+        self.published.publish(&self.views);
     }
 
     /// Replace the resolved keymaps, e.g. after a config hot reload.
@@ -508,8 +608,10 @@ impl Session {
         }
 
         let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
-        let (descriptor, render, open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        let (descriptor, render, mut open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        open_view.published = self.published.clone();
         self.views.push(open_view);
+        self.publish();
         Ok((descriptor, render))
     }
 
@@ -521,6 +623,7 @@ impl Session {
         self.views.remove(view_id);
         self.pending_selections.remove(view_id);
         self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
+        self.publish();
         Ok(())
     }
 
@@ -542,6 +645,12 @@ impl Session {
     /// Menus re-lay out their columns immediately; other views keep their
     /// current render until the next refresh.
     pub fn resize(&mut self, view_id: &str, viewport: Viewport) -> Result<Option<ViewRender>> {
+        let result = self.resize_view(view_id, viewport);
+        self.publish();
+        result
+    }
+
+    fn resize_view(&mut self, view_id: &str, viewport: Viewport) -> Result<Option<ViewRender>> {
         let view = self
             .views
             .get_mut(view_id)
@@ -554,23 +663,11 @@ impl Session {
         }
     }
 
-    /// The current full text, for a client that lost an update.
+    /// The latest published full text, for a client that lost an update.
+    ///
+    /// Reads the published snapshot, so it never waits for a running command.
     pub fn resync(&self, view_id: &str) -> Result<ViewRender> {
-        let view = self
-            .views
-            .get(view_id)
-            .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
-        Ok(ViewRender {
-            view_id: view_id.to_string(),
-            version: view.version,
-            base_version: None,
-            text: Some(view.tree.lines.clone()),
-            edits: None,
-            cursor: None,
-            mode: view.mode,
-            pending: view.pending(),
-            menu: view.menu(),
-        })
+        self.published.resync(view_id)
     }
 
     /// Run a registered command against a view by id.
@@ -593,6 +690,12 @@ impl Session {
 
     /// Prepare an invocation without waiting for user input.
     pub fn start_invoke(&mut self, params: &ViewInvokeParams) -> Result<Execution> {
+        let step = self.begin_invoke(params);
+        self.publish();
+        step
+    }
+
+    fn begin_invoke(&mut self, params: &ViewInvokeParams) -> Result<Execution> {
         if self.pending_prompt.is_some() && params.command != "common.refresh" {
             return Ok(Execution::Done(prompt_busy()));
         }
@@ -629,6 +732,12 @@ impl Session {
 
     /// Prepare a key operation without waiting for user input.
     pub fn start_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
+        let step = self.begin_key(params);
+        self.publish();
+        step
+    }
+
+    fn begin_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
         let already_pending = self.pending_prompt.is_some();
         let result = self.key_start(params, &crate::ui::NullUi)?;
         Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
@@ -738,6 +847,12 @@ impl Session {
 
     /// Resume exactly the pending operation; cancelled, closed or replaced targets do nothing.
     pub fn resume_prompt(&mut self, prompt_id: &str, answer: Option<crate::protocol::PromptValue>) -> Result<Execution> {
+        let step = self.resume_pending(prompt_id, answer);
+        self.publish();
+        step
+    }
+
+    fn resume_pending(&mut self, prompt_id: &str, answer: Option<crate::protocol::PromptValue>) -> Result<Execution> {
         if !self.pending_prompt.as_ref().is_some_and(|pending| pending.request.prompt_id == prompt_id) {
             return Ok(Execution::Done(InvokeResult::empty()));
         }
@@ -1168,7 +1283,8 @@ impl Session {
             suffix += 1;
         }
 
-        let (descriptor, render, open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        let (descriptor, render, mut open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))
     }
@@ -1533,6 +1649,12 @@ impl Session {
     /// edited text in place. The file watcher (R-3.5) and `common.refresh` both
     /// route through here.
     pub fn refresh(&mut self, view_id: &str) -> Result<Option<ViewRender>> {
+        let result = self.refresh_view(view_id);
+        self.publish();
+        result
+    }
+
+    fn refresh_view(&mut self, view_id: &str) -> Result<Option<ViewRender>> {
         let view = self
             .views
             .get_mut(view_id)
@@ -1571,6 +1693,16 @@ impl Session {
 
     /// Switch a view to `mode`, asking the user through `ui` when needed.
     pub fn set_mode_ui(
+        &mut self,
+        params: &ViewSetModeParams,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
+        let result = self.switch_mode(params, ui);
+        self.publish();
+        result
+    }
+
+    fn switch_mode(
         &mut self,
         params: &ViewSetModeParams,
         ui: &dyn PromptUi,

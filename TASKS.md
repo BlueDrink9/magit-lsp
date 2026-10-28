@@ -1455,7 +1455,7 @@ authority. Completed history is in the
 
 ### Deferred bugfix — not scheduled
 
-- [ ] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
+- [x] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
   blocked inside real Git** (unsolved; moved out of the completed
   mutation-ordering review item, archived evidence; **not scheduled for
   implementation until the user asks**)

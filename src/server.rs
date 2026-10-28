@@ -4,7 +4,7 @@ use crate::errors;
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
-use crate::session::{Execution, InvokeResult, Session};
+use crate::session::{Execution, InvokeResult, PublishedViews, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
@@ -110,6 +110,9 @@ struct Shared {
     repo_locks: RepoLocks,
     /// Open views per repository root.
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    /// Published view snapshots per repository root, readable without the
+    /// session lock so a read never waits for a command running inside Git.
+    published: Arc<Mutex<HashMap<String, PublishedViews>>>,
     /// View id → repository root, so notifications can find their session.
     view_repos: Arc<Mutex<HashMap<String, String>>>,
     /// Global view-id counter; ids are unique across repositories.
@@ -158,6 +161,7 @@ impl Shared {
             draft_owner: Arc::new(format!("connection-{}", NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed))),
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            published: Arc::new(Mutex::new(HashMap::new())),
             view_repos: Arc::new(Mutex::new(HashMap::new())),
             next_view: Arc::new(AtomicU64::new(0)),
             config,
@@ -1013,7 +1017,6 @@ async fn handle_request(
         active.wait().await;
         let lock = repository_lock(&shared.repo_locks, &active.repo_path).await;
         let _guard = lock.lock().await;
-        maybe_test_delay().await;
         if trace_id > 0 {
             runner::trace(
                 trace_id,
@@ -1284,27 +1287,6 @@ async fn repository_lock(locks: &RepoLocks, repo_path: &str) -> Arc<AsyncMutex<(
         .clone()
 }
 
-/// Debug-only delay so tests can prove reads are not blocked by mutations.
-#[cfg(debug_assertions)]
-async fn maybe_test_delay() {
-    let Ok(millis) = std::env::var("MAGIT_LSP_TEST_DELAY_MS") else {
-        return;
-    };
-    let Ok(millis) = millis.parse::<u64>() else {
-        return;
-    };
-    if millis > 0 {
-        let _ = tokio::task::spawn_blocking(move || {
-            std::thread::sleep(std::time::Duration::from_millis(millis));
-        })
-        .await;
-    }
-}
-
-/// Release builds ignore the test hook entirely.
-#[cfg(not(debug_assertions))]
-async fn maybe_test_delay() {}
-
 fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     let params = request.params.clone();
     match request.method.as_str() {
@@ -1357,15 +1339,15 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             let repo = shared
                 .repo_for_view(&p.view_id)
                 .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-            let sessions = shared
-                .sessions
+            let published = shared
+                .published
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let session = sessions
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .get(&repo)
+                .cloned()
                 .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
             Ok(Dispatched::value(serde_json::to_value(
-                session.resync(&p.view_id)?,
+                published.resync(&p.view_id)?,
             )?))
         }
         "textDocument/documentSymbol" => {
@@ -1460,6 +1442,12 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let session = sessions
         .entry(repo.clone())
         .or_insert_with(|| Session::new(&repo));
+    shared
+        .published
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(repo.clone())
+        .or_insert_with(|| session.published());
     session.set_keymaps(keymaps);
     let (descriptor, render) = session.open_with_args(
         id.clone(),

@@ -374,16 +374,10 @@ fn pipelined_and_split_messages_are_framed_and_matched_by_id() {
 
 /// Reads must stay responsive while a mutation is blocked inside real Git.
 ///
-/// KNOWN BLOCKER (BUG-READ-1, TASKS.md §7 Bugfix): `invoke_view` holds
-/// `Shared.sessions` across `session.invoke_ui`, and the whole Git command
-/// runs inside that call, so `view/resync` — which needs the same mutex —
-/// blocks until the mutation finishes. The probe asserts the intended
-/// contract and currently fails; it is `#[ignore]`d so the suite stays green
-/// while that design is unchanged. A green suite therefore does NOT prove
-/// read responsiveness. Run it with
-/// `cargo test --test server_async -- --ignored`.
+/// `view/resync` answers from the session's published snapshot, so it returns
+/// the latest pre-mutation text without waiting for the session lock that the
+/// blocked command holds.
 #[test]
-#[ignore = "BUG-READ-1"]
 fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
