@@ -1,6 +1,70 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
-## Current verdict: core VSCode fallback plus dirty Save/Don't Save PASS; step 0 still incomplete
+## Current verdict: scoped lifecycle observations PASS; parent/step 0 incomplete
+
+### Native lifecycle follow-up (observer only)
+
+Executed successfully (exit 0):
+
+```sh
+MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs --lifecycle && git diff --check
+```
+
+Codium `1.140.06880`, commit `807ba2d6075c29587f884698cd7370c81ab0724c`,
+x64, Linux native display, Node `v24.21.0`, languageclient `9.0.1`.
+The evidence clock reports `2026-10-28T22:43:03Z`–`22:43:18Z` (task calendar
+date 2026-10-29). Each case uses a separate normal extension-development host,
+without `--extensionTestsPath`, unique profile/extensions, real `git init`,
+clean permanent `.git/COMMIT_EDITMSG`, and actual server `window/showDocument`.
+
+| Native action | Retained directory under `/tmp/opencode/` | Observation |
+| --- | --- | --- |
+| `workbench.action.closeWindow` | `real-file-lifecycle-LKfk4O` | Action 22:43:07.190Z; actual deactivate .214Z; launcher exits 0 at .346Z; all profile processes absent before result. One activation, one deactivation. |
+| `workbench.action.reloadWindow` | `real-file-lifecycle-0pw2kj` | Action 22:43:11.391Z; deactivate .404Z; second activation 22:43:12.688Z; ready .766Z in original repo with one matching draft tab. Issuing RPC rejects `Canceled` during host termination; restart independently observed. |
+| `vscode.openFolder(Uri.file(<dir>/other-workspace), {forceReuseWindow:true})` | `real-file-lifecycle-DFAgvp` | Action 22:43:16.671Z; deactivate .684Z; second activation 22:43:17.743Z; ready .870Z in new folder, zero matching draft tabs. |
+
+**None delivered an observed `event.closed` containing the draft; qualifying
+draft-closed events: zero for all three.** Each trace has two initial tab events
+with `closed:[]`, all-group matching count 1, `qualified:false`; no later closed
+event. Each action records/asserts one permanent matching tab and `dirty:false`.
+All three wire traces contain initial draft `didOpen` and successful show
+response, but no `didClose`, `shutdown` or `exit`. Reload appends initialize and
+draft didOpen; workspace-change appends initialize with the new root and no
+draft didOpen. EOF/deactivation never confirms. No lifecycle false-confirmation
+blocker was observed in this bounded configuration.
+
+Inspected all three `pre-action.png` images: native Explorer, permanent draft
+tab, visible `spike message`, no dirty marker/dialog. Inspected each
+`command.json`, `api.jsonl`, `wire.jsonl`, `result.json`, `supervisor.jsonl`:
+commands, timestamps, roots, exits and cleanup. `command.json` retains exact
+expanded arguments/ports/version: binary above, `--wait --no-sandbox
+--disable-gpu --skip-welcome --skip-release-notes --disable-workspace-trust`,
+unique `--remote-debugging-port`, `--user-data-dir`, `--extensions-dir`,
+`--extensionDevelopmentPath`, real repo path. `lifecycle-action.json` retains
+action arguments; stdout/stderr files retain process output when nonempty.
+API/wire logs append across host restart. External Node supervisor timestamps
+wire observations (not send times), survives launcher exit/restart, and requires
+actual reactivation/new root, not launcher exit alone, for restart completion.
+
+Cleanup follows observation, kills only unique owned profiles and bounded-poll
+checks absence. Separate inspection found no surviving owned profiles/Python
+observers. No sleeps, fake events, synthetic didClose, production extension,
+commit/helper release or production changes. Superseded attempt
+`real-file-lifecycle-GTFsVY` misclassified reload RPC `Canceled` as harness error;
+final harness records RPC rejection and requires external completion instead.
+Earlier exploratory `yPVK5e`, `h85lCx`, `HW32TO` traces used subscription-disposal
+markers; final paths above use the actual exported `deactivate` callback.
+
+**Limits:** one clean draft/group/run per action on this Codium/Linux build;
+workspace-change is another folder in the same window, not all multi-root
+operations. Only events delivered while the extension/listener is alive can be
+observed, not internal workbench events after disposal. No general lifecycle
+guarantee, dirty-shutdown/OS-crash coverage or production arbitration acceptance.
+Core/dirty probes and Neovim were not rerun. R-EDIT-REAL, step-0 overall
+acceptance, pure-LSP limitations, run-correlated idempotency/helper arbitration
+and migration remain pending. No production design/cutover or parent checkoff.
+
+### Previously verified core fallback and dirty choices
 
 Observer-only follow-up on 2026-10-29; **R-EDIT-REAL is not done**. No production
 code, helper release, commit arbitration or task checkoff is included. The
@@ -65,9 +129,10 @@ also found no surviving owned profiles or Python observer. SIGTERM alone can
 leave a dirty dialog open. This abrupt cleanup is **not** shutdown acceptance.
 No sleeps, synthetic close notifications or production extension are used.
 
-**PENDING:** shutdown, reload and workspace-change event behavior; production run-correlated
-idempotency/helper arbitration and migration. No transport shutdown or extension
-deactivation is interpreted as confirmation by this observer.
+The earlier pending clean close-window/reload/folder-change observations are
+supplied by the scoped follow-up above. Production run-correlated
+idempotency/helper arbitration and migration remain pending. No transport
+shutdown or extension deactivation is interpreted as confirmation.
 
 ## Historical verdict: pure didClose OBSERVED FAIL
 

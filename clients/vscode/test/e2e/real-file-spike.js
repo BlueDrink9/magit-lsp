@@ -53,7 +53,7 @@ exports.activate = async function activate(context) {
       uri: tab.input && tab.input.uri ? tab.input.uri.toString() : null,
       isCommitEditMsg: !!(tab.input && tab.input.uri && tab.input.uri.toString() === uri),
     }));
-    fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'tabs', closed, matchingTabs,
+    fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'tabs', timestamp: new Date().toISOString(), closed, matchingTabs,
       qualified: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0,
       savedDiskText: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0
         ? fs.readFileSync(vscode.Uri.parse(uri).fsPath, 'utf8') : null,
@@ -61,10 +61,61 @@ exports.activate = async function activate(context) {
         uris: group.tabs.map(tab => tab.input?.uri?.toString() || null) })),
     }) + '\n');
   }));
+  context.subscriptions.push(vscode.extensions.onDidChange(() => fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'extensionsChanged', timestamp: new Date().toISOString() }) + '\n')));
+  fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'activate', timestamp: new Date().toISOString() }) + '\n');
   await client.start();
+  if (process.env.MAGIT_REAL_FILE_LIFECYCLE) {
+    setImmediate(() => observeLifecycle(client).catch(error => {
+      fs.writeFileSync(`${base}/lifecycle-error.json`, JSON.stringify({ error: error.stack }));
+    }));
+    return { client };
+  }
   if (process.env.MAGIT_REAL_FILE_NATIVE === '1') setImmediate(() => exports.run().catch(error => console.error(error)));
   return { client };
 };
+
+/** Retain actual extension deactivation separately from subscription disposal. */
+exports.deactivate = function deactivate() {
+  fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'deactivate', timestamp: new Date().toISOString() }) + '\n');
+};
+
+/** Observe one real native lifecycle action; the external supervisor owns completion. */
+async function observeLifecycle(client) {
+  const log = data => fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ timestamp: new Date().toISOString(), ...data }) + '\n');
+  const uri = vscode.Uri.file(`${base}/repo/.git/COMMIT_EDITMSG`);
+  const tabs = () => vscode.window.tabGroups.all.flatMap(g => g.tabs).filter(t => t.input?.uri?.toString() === uri.toString());
+  if (fs.existsSync(`${base}/lifecycle-action.json`)) {
+    log({ event: 'lifecycle-reactivated', matchingTabs: tabs().length,
+      workspace: vscode.workspace.workspaceFolders?.map(f => f.uri.toString()) });
+    fs.writeFileSync(`${base}/reactivated.json`, JSON.stringify({ timestamp: new Date().toISOString() }));
+    return;
+  }
+  assert.equal((await client.sendRequest('spike/show', { uri: uri.toString(), takeFocus: true })).success, true);
+  await until(() => count('textDocument/didOpen') && tabs().length === 1, 'permanent lifecycle draft');
+  assert.equal(tabs()[0].isPreview, false);
+  assert.equal(vscode.window.activeTextEditor.document.isDirty, false);
+  const cdp = (method, params = {}) => JSON.parse(execFileSync(process.execPath, [
+    `${root}/clients/vscode/test/e2e/real-file-spike.mjs`, '--cdp', process.env.MAGIT_REAL_FILE_CDP, method, JSON.stringify(params),
+  ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 10000 }));
+  await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.replace(/\s/g, ' ').includes('spike message'), 'painted lifecycle draft');
+  fs.writeFileSync(`${base}/pre-action.png`, Buffer.from(cdp('Page.captureScreenshot', { format: 'png' }).data, 'base64'));
+  const action = process.env.MAGIT_REAL_FILE_LIFECYCLE;
+  const command = { 'close-window': 'workbench.action.closeWindow', 'reload-window': 'workbench.action.reloadWindow',
+    'workspace-change': 'vscode.openFolder' }[action];
+  const args = action === 'workspace-change' ? [vscode.Uri.file(`${base}/other-workspace`), { forceReuseWindow: true }] : [];
+  const record = { event: 'lifecycle-action', action, command, args, timestamp: new Date().toISOString(),
+    matchingTabs: tabs().length, dirty: false, isPreview: tabs()[0].isPreview };
+  log(record);
+  fs.writeFileSync(`${base}/lifecycle-action.json`, JSON.stringify(record, null, 2));
+  try {
+    await vscode.commands.executeCommand(command, ...args);
+    log({ event: 'lifecycle-command-resolved', command });
+  } catch (error) {
+    // A native restart can cancel the issuing host's command RPC. Completion is
+    // still proved externally by exit/reactivation, never by this rejection.
+    log({ event: 'lifecycle-command-rejected', command, error: error.stack });
+  }
+}
 
 /** Exercise the real editor, retaining observations even when the hard gate fails. */
 exports.run = async function run() {

@@ -9,7 +9,10 @@ harness, phase and release work remains pending unless explicitly marked
 otherwise in TASKS.md. R-EDIT-REAL and its step-0 spike are NOT complete.
 The 2026-10-29 native spike is OBSERVED FAIL: Codium did not emit `didClose`
 after ordinary real-file tab close within five seconds in either host, while
-Neovim passed. The proposed VS Code tab-close observer remains unverified; see
+Neovim passed. Subsequent core tab fallback/dirty-choice evidence passed; the
+2026-10-29 clean lifecycle observer follow-up found zero qualifying draft closed
+events for native close-window/reload/same-window folder-change. These scoped
+observations do not complete step 0 or the parent; see
 `docs/evidence/real-file-client-spike.md`.
 
 ## 1. Goal and resolved decisions
@@ -88,6 +91,16 @@ Verification follows AGENTS.md: narrowest relevant check per task; full `make te
 **Adopted target:** Git's real `COMMIT_EDITMSG` is the provider-file workflow after acceptance; current managed implementation remains intact until cutover. Git supplies comments, status and configured template and owns commit/helper lifecycle. Do not assume editor close equals intent. A single session/owner/run-aware idempotent confirmation path arbitrates saved-file close (read saved text) and explicit synchronized-buffer confirmation (exact version plus writeback); terminal/abort arbitration is atomic and helper release/commit occurs at most once. Saved-file close never substitutes unsaved synchronized text. This target supersedes managed-draft implementation only after acceptance.
 
 **Step 0, spike gate (report before deleting anything):**
+**Scoped follow-up (2026-10-29):** clean permanent draft, isolated normal Codium
+hosts: native close-window/reload-window/same-window folder-change produced no
+qualifying draft `event.closed` event. External supervisor survived exit/restart;
+actual deactivate/reactivate, all-group counts, API/wire logs and native
+pre-action screenshots retained and inspected. Core fallback and dirty choices
+passed earlier. Only this observer slice is complete; parent/overall step 0
+remain pending, without production changes or general lifecycle guarantees.
+See the evidence report for exact commands, versions, paths and scope limits;
+this supersedes the historical unverified-shutdown statements below only for
+those three clean cases.
 **2026-10-29 result: OBSERVED FAIL (historical evidence only; no new runs claimed).** Codium 1.140.06880 removed the real-file tab but emitted no wire `didClose` within 5 seconds in test and normal hosts; Neovim 0.12.6 with explicit attach/`bufhidden=wipe` passed. Codium language change emitted misleading close/open while the tab remained open. Preserve this evidence in [`docs/evidence/real-file-client-spike.md`](docs/evidence/real-file-client-spike.md). Step 0 must verify optional VS Code `tabGroups.onDidChangeTabs` last-tab fallback (no focus/switch or non-last close confirmation; no synthetic didClose), pure-LSP reliable didClose, false close/open on language change, last-tab identity, and native shutdown/reload/workspace assumptions. Shutdown emits `event.closed` remains explicitly unverified. A failing didClose alone no longer blocks VS Code if the fallback is verified.
 
 - VS Code: verify both pure-LSP didClose and optional tabGroups fallback, existing tab identity/permanent-open handling and dirty native dialog; fallback success can satisfy close detection despite didClose failure.

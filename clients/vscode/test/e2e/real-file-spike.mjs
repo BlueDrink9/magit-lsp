@@ -16,6 +16,102 @@ if (process.argv[2] === '--cdp') {
   socket.send(JSON.stringify({ id: 1, method, params: JSON.parse(params) }));
   console.log(JSON.stringify(await response)); socket.close(); process.exit(0);
 }
+if (process.argv.includes('--lifecycle')) {
+  await lifecycle();
+  process.exit(0);
+}
+
+/** Supervise isolated normal hosts across native exit/restart, retaining durable observations. */
+async function lifecycle() {
+  const editor = process.env.MAGIT_VSCODE_BIN || '/home/william/.nix-profile/bin/codium';
+  const readLines = path => existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+  const wait = (check, label, timeout = 90000) => new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeout;
+    const timer = setInterval(() => {
+      try {
+        const value = check();
+        if (value) { clearInterval(timer); resolve(value); }
+        else if (Date.now() > deadline) { clearInterval(timer); reject(new Error(`Deadline: ${label}`)); }
+      } catch (error) { clearInterval(timer); reject(error); }
+    }, 25);
+  });
+  for (const action of ['close-window', 'reload-window', 'workspace-change']) {
+    const dir = mkdtempSync('/tmp/opencode/real-file-lifecycle-');
+    const record = data => writeFileSync(`${dir}/supervisor.jsonl`, JSON.stringify({ timestamp: new Date().toISOString(), ...data }) + '\n', { flag: 'a' });
+    execFileSync('git', ['init', '-q', `${dir}/repo`]);
+    writeFileSync(`${dir}/repo/.git/COMMIT_EDITMSG`, 'spike message\n');
+    mkdirSync(`${dir}/other-workspace`);
+    mkdirSync(`${dir}/extension`);
+    writeFileSync(`${dir}/extension/package.json`, JSON.stringify({ publisher: 'spike', name: 'real-file-spike', version: '1.0.0', engines: { vscode: '^1.85.0' }, main: './extension.js', activationEvents: ['*'] }));
+    copyFileSync(`${root}/clients/vscode/test/e2e/real-file-spike.js`, `${dir}/extension/extension.js`);
+    mkdirSync(`${dir}/user/User`, { recursive: true });
+    writeFileSync(`${dir}/user/User/settings.json`, JSON.stringify({ 'window.dialogStyle': 'custom', 'workbench.startupEditor': 'none', 'window.title': dir, 'git.enabled': false }));
+    const server = createServer();
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    await new Promise(resolve => server.close(resolve));
+    const env = { ...process.env, MAGIT_REAL_FILE_ROOT: root, MAGIT_REAL_FILE_EVIDENCE: dir,
+      MAGIT_REAL_FILE_CDP: String(port), MAGIT_REAL_FILE_LIFECYCLE: action };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const args = ['--wait', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust',
+      `--remote-debugging-port=${port}`, '--user-data-dir', `${dir}/user`, '--extensions-dir', `${dir}/extensions`,
+      `--extensionDevelopmentPath=${dir}/extension`, `${dir}/repo`];
+    writeFileSync(`${dir}/command.json`, JSON.stringify({ editor, args, versions: execFileSync(editor, ['--version'], { encoding: 'utf8' }) }, null, 2));
+    console.log(`Lifecycle ${action}: ${dir}`);
+    let child, watcher;
+    try {
+      child = spawn(editor, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout.on('data', data => writeFileSync(`${dir}/stdout.txt`, data, { flag: 'a' }));
+      child.stderr.on('data', data => writeFileSync(`${dir}/stderr.txt`, data, { flag: 'a' }));
+      let launchError;
+      child.on('error', error => { launchError = error; });
+      child.on('exit', (code, signal) => record({ event: 'launcher-exit', code, signal }));
+      record({ event: 'spawn', pid: child.pid, action });
+      let wireCount = 0;
+      watcher = setInterval(() => {
+        const messages = readLines(`${dir}/wire.jsonl`);
+        for (; wireCount < messages.length; wireCount++) record({ event: 'wire-observed', index: wireCount, message: messages[wireCount] });
+      }, 25);
+      await wait(() => {
+        if (launchError) throw launchError;
+        if (existsSync(`${dir}/lifecycle-error.json`)) throw new Error(readFileSync(`${dir}/lifecycle-error.json`, 'utf8'));
+        return existsSync(`${dir}/lifecycle-action.json`);
+      }, 'native action issued');
+      await wait(() => action === 'close-window' ? child.exitCode !== null : existsSync(`${dir}/reactivated.json`), 'native lifecycle completion');
+      if (action === 'close-window') {
+        await wait(() => spawnSync('pgrep', ['-f', `${dir}/user`]).status === 1, 'native window processes exited', 10000);
+        if (child.exitCode !== 0) throw new Error(`Native close exited ${child.exitCode}`);
+      }
+      const events = readLines(`${dir}/api.jsonl`);
+      if (!events.some(e => e.event === 'deactivate')) throw new Error('Missing actual deactivation');
+      if (action !== 'close-window') {
+        const resumed = events.find(e => e.event === 'lifecycle-reactivated');
+        const workspace = `file://${dir}/${action === 'workspace-change' ? 'other-workspace' : 'repo'}`;
+        if (!resumed?.workspace?.includes(workspace)) throw new Error('Unexpected reactivated workspace');
+      }
+      const qualified = events.filter(e => e.event === 'tabs' && e.qualified);
+      const result = { gate: 'pass', action, outcome: action === 'close-window' ? 'launcher-exited' : 'extension-reactivated',
+        qualifyingClosures: qualified.length, blocker: qualified.length > 0,
+        activations: events.filter(e => e.event === 'activate').length,
+        deactivations: events.filter(e => e.event === 'deactivate').length,
+        wireMethods: readLines(`${dir}/wire.jsonl`).map(m => m.method).filter(Boolean),
+        confirmation: 'none: observer only; EOF/deactivation never confirms' };
+      writeFileSync(`${dir}/result.json`, JSON.stringify(result, null, 2));
+      record({ event: 'observation-complete', result });
+      console.log(JSON.stringify(result));
+      if (result.blocker) { console.log('BLOCKER: lifecycle emitted qualifying closure; stop before production design.'); return; }
+    } finally {
+      if (watcher) clearInterval(watcher);
+      try {
+        for (const pid of execFileSync('pgrep', ['-f', `${dir}/user`], { encoding: 'utf8' }).trim().split('\n').filter(Boolean)) {
+          try { process.kill(Number(pid), 'SIGKILL'); } catch (_) { /* exited */ }
+        }
+      } catch (_) { /* no owned processes */ }
+      await wait(() => spawnSync('pgrep', ['-f', `${dir}/user`]).status === 1, 'owned processes absent', 5000);
+      record({ event: 'cleanup-complete' });
+    }
+  }
+}
 const editor = process.env.MAGIT_VSCODE_BIN || '/home/william/.nix-profile/bin/codium';
 const dir = mkdtempSync('/tmp/opencode/real-file-vscode-');
 const repo = `${dir}/repo`;
