@@ -203,6 +203,18 @@ impl Tree {
         self.nodes.iter().find(|node| node.children.iter().any(|child| child == id))
     }
 
+    /// Resolve a node to itself or its nearest collapsible ancestor by identity.
+    /// Diff body lines target their hunk, while headers target themselves.
+    pub fn collapsible_ancestor(&self, id: &str) -> Option<&Node> {
+        let mut node = self.node(id)?;
+        loop {
+            if matches!(node.kind, NodeKind::Section | NodeKind::File | NodeKind::Hunk) {
+                return Some(node);
+            }
+            node = self.parent(&node.id)?;
+        }
+    }
+
     /// Resolve body lines to their containing navigable header.
     pub fn navigation_node(&self, line: usize) -> Option<&Node> {
         let node = self.node(&self.line_nodes.get(line)?.node)?;

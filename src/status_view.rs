@@ -168,7 +168,7 @@ impl StatusView {
         }) else {
             return false;
         };
-        let Some(target) = collapsible_node(tree, node) else {
+        let Some(target) = tree.collapsible_ancestor(&node.id) else {
             return false;
         };
         let state = state.unwrap_or_else(|| {
@@ -212,38 +212,6 @@ impl StatusView {
             _ => Vec::new(),
         }
     }
-}
-
-/// The node a fold command acts on: the node itself, or its nearest
-/// collapsible ancestor.
-///
-/// A diff line belongs to a hunk, but folding it acts on the file so a file
-/// body can be collapsed from any of its lines.
-fn collapsible_node<'a>(tree: &'a Tree, node: &'a Node) -> Option<&'a Node> {
-    if matches!(
-        node.kind,
-        NodeKind::Section | NodeKind::File | NodeKind::Hunk
-    ) {
-        return Some(node);
-    }
-    let skip_hunk = node.kind == NodeKind::Line;
-    let mut current = node;
-    while let Some(parent) = tree
-        .nodes
-        .iter()
-        .find(|candidate| candidate.children.iter().any(|id| id == &current.id))
-    {
-        let collapsible = match parent.kind {
-            NodeKind::Section | NodeKind::File => true,
-            NodeKind::Hunk => !skip_hunk,
-            _ => false,
-        };
-        if collapsible {
-            return Some(parent);
-        }
-        current = parent;
-    }
-    None
 }
 
 impl View for StatusView {

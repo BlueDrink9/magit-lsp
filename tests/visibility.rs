@@ -95,9 +95,8 @@ fn collapsing_a_file_hides_its_hunks_and_moves_the_cursor_to_the_header() {
     let initial_text = initial.text.clone().expect("initial full text");
     test.ack();
 
-    let line = test.goto_marker("f.txt", '+');
     let header = test.goto_file("unstaged", "f.txt");
-    let cursor = Cursor { line, column: 0 };
+    let cursor = Cursor { line: header, column: 0 };
 
     let outcome = toggle(&mut test, "common.toggle-section", Some(cursor), None);
     let render = outcome.render.expect("render notification");
@@ -159,6 +158,59 @@ fn collapsing_a_file_hides_its_hunks_and_moves_the_cursor_to_the_header() {
 }
 
 #[test]
+fn folding_a_hunk_body_and_title_only_hides_that_stable_hunk() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", common::lines(40).to_string())])
+        .modify_two_hunks()
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let body = test.goto_marker("f.txt", '+');
+    let body_id = test.tree().line_nodes[body].node.clone();
+    let target_id = test.tree().collapsible_ancestor(&body_id).expect("body's hunk").id.clone();
+    let sibling_id = test.tree().nodes.iter().find(|node|
+        node.kind == NodeKind::Hunk && node.id != target_id
+    ).expect("distinct sibling hunk").id.clone();
+    let target_body = test.tree().node(&target_id).unwrap().children.clone();
+    let sibling_body = test.tree().node(&sibling_id).unwrap().children.clone();
+    assert!(!target_body.is_empty());
+    assert!(!sibling_body.is_empty());
+    let file_id = test.tree().parent(&target_id).unwrap().id.clone();
+    let outcome = toggle(&mut test, "common.toggle-section", Some(Cursor { line: body, column: 0 }), None);
+    let cursor = outcome.render.expect("body fold renders").cursor.expect("hunk title cursor");
+    test.ack();
+    assert_eq!(cursor.line, test.tree().node(&target_id).unwrap().start_line);
+
+    // Collapsing retains both titles and the file, not the target's body.
+    // A repository refresh must preserve the same content-owned identities.
+    for refresh in [false, true] {
+        if refresh {
+            test.refresh();
+            test.ack();
+        }
+        assert_eq!(count_kind(test.tree(), NodeKind::Hunk), 2);
+        assert_eq!(test.tree().node(&file_id).unwrap().children, vec![target_id.clone(), sibling_id.clone()]);
+        assert!(test.tree().node(&target_id).unwrap().children.is_empty());
+        assert!(target_body.iter().all(|id| test.tree().node(id).is_none()));
+        assert_eq!(test.tree().node(&sibling_id).unwrap().children, sibling_body);
+        assert!(sibling_body.iter().all(|id| test.tree().node(id).is_some()));
+    }
+
+    // Unfold, fold, and unfold from the containing title, leaving its sibling alone.
+    for expanded in [true, false, true] {
+        let title = test.tree().node(&target_id).unwrap().start_line;
+        let result = toggle(&mut test, "common.toggle-section", Some(Cursor { line: title, column: 0 }), None);
+        assert!(result.render.is_some());
+        test.ack();
+        let target = test.tree().node(&target_id).expect("stable hunk title");
+        assert_eq!(target.children, if expanded { target_body.clone() } else { vec![] });
+        assert_eq!(test.tree().node(&sibling_id).unwrap().children, sibling_body);
+        assert_eq!(test.tree().node(&file_id).unwrap().children.len(), 2);
+    }
+}
+
+#[test]
 fn visibility_survives_a_refresh_and_a_mutation_of_another_file() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES), ("g.txt", TEN_LINES)])
@@ -168,7 +220,7 @@ fn visibility_survives_a_refresh_and_a_mutation_of_another_file() {
     let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
 
-    let line = test.goto_marker("f.txt", '+');
+    let line = test.goto_file("unstaged", "f.txt");
     let collapse = toggle(
         &mut test,
         "common.toggle-section",
@@ -385,7 +437,7 @@ fn a_collapsed_file_is_not_diffed_until_it_is_expanded() {
         "the default expanded view loads the body"
     );
 
-    let line = test.goto_marker("f.txt", '+');
+    let line = test.goto_file("unstaged", "f.txt");
     let collapse = toggle(
         &mut test,
         "common.toggle-section",

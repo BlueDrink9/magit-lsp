@@ -1,0 +1,37 @@
+# Folding a body line targets its containing hunk; its title restores it.
+fixture: modified-two-files
+profile: vim
+profile-only: true
+---
+# Create two actual sibling hunks in f.txt, rather than one hunk per file.
+sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'two-hunk base'; sed -i '5s/$/ CHANGED/;35s/$/ CHANGED/' f.txt
+keys: g r
+wait
+goto "+line5 CHANGED"
+keys: Tab
+wait
+expect screen not-contains "+line5 CHANGED"
+expect screen contains "+line35 CHANGED"
+expect screen contains "M f.txt"
+expect screen contains "M g.txt"
+expect cursor on "    @@ -2,7 +2,7 @@"
+snapshot: body-folded
+keys: g r
+wait
+expect screen not-contains "+line5 CHANGED"
+expect screen contains "+line35 CHANGED"
+snapshot: refreshed-fold
+goto "@@ -"
+keys: Tab
+wait
+expect screen contains "+line5 CHANGED"
+snapshot: title-unfolded
+keys: Tab
+wait
+expect screen not-contains "+line5 CHANGED"
+expect screen contains "+line35 CHANGED"
+expect screen contains "M f.txt"
+snapshot: title-folded
+keys: Tab
+wait
+expect screen contains "+line5 CHANGED"
