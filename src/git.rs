@@ -114,7 +114,7 @@ pub struct GitLogPage {
     pub rows: Vec<GitLogRow>,
 }
 
-/// A commit that exited successfully, with any diagnostic from bounded output or message reading.
+/// A recorded commit, with any diagnostic from cancellation, output or message reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
     /// Commit message read back from HEAD, when available.
@@ -981,17 +981,27 @@ impl GitRepo {
         commit_args.extend_from_slice(args);
         let started = Instant::now();
         let refs: Vec<_> = commit_args.iter().copied().collect();
+        // Git updates HEAD before post-commit runs. A killed post-commit must
+        // not turn an already recorded commit into a reported failure.
+        let before = commit_head(&self.root);
         let mut command = git_command(&self.root, &refs, Stdio::null(), env);
         let out = runner::run_owned(&mut command, None).map_err(|e| Error::new(format!("failed to run git: {e}")))?;
-        let Some(status) = out.status else { return Err(Error::new("git commit was cancelled; process reap is incomplete")); };
+        let Some(status) = out.status else { return Err(Error::new("git commit cancellation is incomplete; process ownership remains with the reaper. Git lock files may remain; no locks were removed.")); };
         log_finished(&self.root, &refs, status, started.elapsed(), &out.stdout, &out.stderr);
-        if !status.success() {
+        let recorded = out.outcome.cancelled && before.as_ref().is_some_and(|before| {
+            commit_head(&self.root).is_some_and(|after| !after.is_empty() && &after != before)
+        });
+        let cancellation_warning = out.outcome.cancelled.then(|| cancellation_lock_warning(&self.root));
+        if !status.success() && !recorded {
             let mut failure = GitFailure::from_output(&refs, status, &out.stderr);
-            failure.warning = warn_if_git_is_below_recommendation(&self.root, env, &status);
+            failure.warning = cancellation_warning.or_else(|| warn_if_git_is_below_recommendation(&self.root, env, &status));
             return Err(Error::git(failure));
         }
         let mut warning = (out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete)
             .then(|| "git commit completed, but process output was incomplete".to_string());
+        if let Some(locks) = cancellation_warning {
+            warning = Some(format!("Git recorded a commit before cancellation; a hook may have been interrupted. {locks}"));
+        }
         let read = runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]));
         let message = match read {
             Ok(message) => Some(message.trim_end().to_string()),
@@ -1031,6 +1041,85 @@ impl GitRepo {
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
+}
+
+// Diagnostics have their own cancellation deadline, never consume mutation
+// intent, and use the same sole-Child owner as every other Git invocation.
+// The 500ms probe budget is followed by the owner's bounded TERM/KILL/reap.
+fn readonly_probe(root: &Path, args: &[&str]) -> Option<runner::OwnedOutput> {
+    let cancel = runner::CancelHandle::new();
+    let timer_cancel = cancel.clone();
+    let (done, waiting) = std::sync::mpsc::channel();
+    let timer = std::thread::spawn(move || {
+        if waiting.recv_timeout(std::time::Duration::from_millis(500)).is_err() {
+            timer_cancel.cancel();
+        }
+    });
+    let mut args_with_flags = vec!["--no-optional-locks"];
+    args_with_flags.extend_from_slice(args);
+    let result = runner::with_cancel(Some(cancel), || {
+        runner::run_owned(&mut git_command(root, &args_with_flags, Stdio::null(), &[]), None)
+    });
+    let _ = done.send(());
+    let _ = timer.join();
+    let out = result.ok()?;
+    (out.status.is_some() && !out.outcome.cancelled && !out.outcome.stdout_truncated
+        && !out.outcome.stderr_truncated && !out.outcome.drain_incomplete).then_some(out)
+}
+
+// An empty, successfully observed state denotes unborn HEAD; None is unknown.
+fn commit_head(root: &Path) -> Option<String> {
+    let out = readonly_probe(root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    if out.status?.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty() {
+        return Some(String::new());
+    }
+    if !out.status?.success() { return None; }
+    let oid = std::str::from_utf8(&out.stdout).ok()?.trim();
+    (matches!(oid.len(), 40 | 64) && oid.bytes().all(|b| b.is_ascii_hexdigit())).then(|| oid.to_string())
+}
+
+fn cancellation_lock_warning(root: &Path) -> String {
+    let mut locks = Vec::new();
+    if let Some(out) = readonly_probe(root, &["rev-parse", "--absolute-git-dir", "--git-common-dir"]) {
+        if out.status.is_some_and(|s| s.success()) {
+            if let Ok(paths) = std::str::from_utf8(&out.stdout) {
+                // Exactly two paths are expected. Newlines in Git paths or
+                // malformed diagnostic output must not expand the scan budget.
+                let paths: Vec<_> = paths.lines().take(3).collect();
+                if paths.len() == 2 && paths.iter().all(|p| !p.is_empty() && !p.contains('\0')) {
+                let deadline = Instant::now() + std::time::Duration::from_millis(25);
+                let mut remaining = 128usize;
+                let mut dirs: Vec<_> = paths.into_iter().map(|p| root.join(p)).collect();
+                dirs.sort();
+                dirs.dedup();
+                for dir in dirs {
+                    for name in ["index.lock", "HEAD.lock", "packed-refs.lock", "config.lock", "shallow.lock"] {
+                        let path = dir.join(name);
+                        if path.symlink_metadata().is_ok() { locks.push(path); }
+                    }
+                    let mut pending = vec![dir.join("refs")];
+                    while let Some(dir) = pending.pop() {
+                        if remaining == 0 || Instant::now() >= deadline { break; }
+                        let Ok(entries) = std::fs::read_dir(dir) else { continue; };
+                        for entry in entries {
+                            if remaining == 0 || Instant::now() >= deadline { break; }
+                            remaining -= 1;
+                            let Ok(entry) = entry else { continue; };
+                            if entry.file_type().is_ok_and(|t| t.is_dir()) { pending.push(entry.path()); }
+                            else if entry.path().extension().is_some_and(|e| e == "lock") { locks.push(entry.path()); }
+                        }
+                    }
+                }
+                }
+            }
+        }
+    }
+    let mut warning = "Cancellation may leave Git lock files; no locks were removed. Check that no Git process is still using them before manual recovery.".to_string();
+    if !locks.is_empty() {
+        warning.push_str(" Observed: ");
+        warning.push_str(&locks.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+    }
+    warning
 }
 
 /// Best-effort warning for a completed Git failure on an older-than-recommended Git.

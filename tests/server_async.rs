@@ -1788,3 +1788,101 @@ fn a_cancel_notification_aborts_a_slow_mutation() {
     let status = server.finish(Duration::from_secs(10));
     assert!(status.success(), "server exited: {status:?}");
 }
+
+/// Disconnect (EOF) exactly while a real commit is blocked inside its
+/// commit-msg hook: the server's shutdown path must cancel the owned process
+/// group, the resistant hook descendant must be TERM/grace/KILL-reaped, no
+/// commit or repository state change may be recorded, and the repository must
+/// stay usable for a subsequent commit. This closes the disconnect-across-phases
+/// acceptance for the commit-msg phase (pre-hook/editor-active are covered
+/// elsewhere; progress-cancel covers commit-msg but not the disconnect path).
+#[cfg(target_os = "linux")]
+#[test]
+fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .staged_file("f.txt", standard_changes())
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+    let tree = tmp.git(&["write-tree"]);
+    let patch = tmp.git(&["diff", "--cached", "--binary"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+    let ready = tmp.path().join("hook.ready");
+    let child_pid = tmp.path().join("hook-child.pid");
+    let hook = tmp.path().join(".git/hooks/commit-msg");
+    write(&hook, &format!(
+        "#!/bin/sh\ntrap '' TERM\nsh -c 'echo $$ > \"$1\"; touch \"$2\"; exec sleep 60' sh '{}' '{}' </dev/null >/dev/null 2>&1 &\nwait\n",
+        child_pid.display(), ready.display()
+    ));
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    fn start_time(pid: i32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+    }
+    fn live(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok().and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
+                !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
+            })).unwrap_or(false)
+    }
+
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+    let mut edit = None;
+    while edit.is_none() {
+        let message = server.recv();
+        if message["method"] == json!("view/effects") {
+            edit = message["params"]["effects"].as_array().unwrap().iter()
+                .find(|e| e["type"] == json!("editDocument")).cloned().or(edit);
+        }
+    }
+    let edit = edit.unwrap();
+    // The one explicit full-sync stream, then a confirm barrier on the exact
+    // saved checkpoint (never a file or a guessed version).
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}})));
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":2},"contentChanges":[{"text":"Never submitted\n"}]}})));
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":500,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2}})));
+    assert_eq!(server.response_with_id(500)["result"]["type"], "draft/checkpointed");
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":501,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2,"reason":"confirm"}})));
+    assert!(server.response_with_id(501).get("error").is_none());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "commit-msg hook did not become ready");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let child: i32 = read(&child_pid).trim().parse().unwrap();
+    let identity = start_time(child).expect("hook descendant identity");
+    struct Cleanup(i32, u64);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if start_time(self.0) == Some(self.1) && live(self.0) {
+                unsafe { libc::kill(self.0, libc::SIGKILL); }
+            }
+        }
+    }
+    let _owned = Cleanup(child, identity);
+
+    // Disconnect while the hook is blocked; the shutdown path must cancel the
+    // owned group rather than orphan it past the server's own exit.
+    server.close_stdin();
+    let exit = server.finish(Duration::from_secs(15));
+    assert!(exit.success(), "server exited cleanly on disconnect: {exit:?}");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while live(child) && Instant::now() < deadline { thread::sleep(Duration::from_millis(20)); }
+    assert!(!live(child), "owned hook descendant survived the disconnect");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+    assert_eq!(tmp.git(&["write-tree"]), tree);
+    assert_eq!(tmp.git(&["diff", "--cached", "--binary"]), patch);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+    // The repository is not poisoned: a follow-up commit lands after removing
+    // the blocking hook.
+    std::fs::remove_file(&hook).unwrap();
+    tmp.git(&["commit", "-m", "follow-up"]);
+}

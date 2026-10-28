@@ -177,6 +177,7 @@ mod unix {
             }
             let exited = unsafe { info.si_pid() != 0 };
             if exited && matches!(state, State::Running) {
+                event(pid, "exit_observed");
                 // Exit wins over a cancellation that arrived after the child
                 // completed; consume it so it cannot affect the next command.
                 if let Some(handle) = &cancel {
@@ -187,18 +188,23 @@ mod unix {
             if matches!(state, State::Running)
                 && cancel.as_ref().is_some_and(|h| h.take_cancelled())
             {
+                event(pid, "observe_running");
                 outcome.cancelled = true;
+                event(pid, "cancel");
                 unsafe {
                     libc::kill(-pid, libc::SIGTERM);
+                    event(pid, "term");
                     libc::kill(-pid, libc::SIGCONT);
+                    event(pid, "cont");
                 }
                 state = State::Cancelling(Instant::now());
             }
             if let State::Cancelling(t) = state {
-                if t.elapsed() >= GRACE {
+                if t.elapsed() >= GRACE || (exited && group_observed_quiet(pid)) {
                     unsafe {
                         libc::kill(-pid, libc::SIGKILL);
                     }
+                    event(pid, "kill");
                     state = State::AfterKill(Instant::now());
                 }
             }
@@ -285,7 +291,7 @@ mod unix {
                 cleanup(child, pid, false);
                 return Err(error);
             }
-            Ok(Some(s)) => status = Some(s),
+            Ok(Some(s)) => { event(pid, "reap"); status = Some(s); }
             Ok(None) => {
                 let deadline = match state {
                     State::AfterKill(t) => t + GRACE,
@@ -293,14 +299,14 @@ mod unix {
                 };
                 while Instant::now() < deadline {
                     match child.try_wait() {
-                        Ok(Some(s)) => { status = Some(s); break; }
+                        Ok(Some(s)) => { event(pid, "reap"); status = Some(s); break; }
                         Ok(None) => std::thread::sleep(Duration::from_millis(10)),
                         Err(error) => { cleanup(child, pid, false); return Err(error); }
                     }
                 }
                 if status.is_none() {
                     outcome.reap_incomplete = true;
-                    std::thread::spawn(move || { let _ = child.wait(); });
+                    std::thread::spawn(move || { if child.wait().is_ok() { event(pid, "reap"); } });
                 }
             }
         }
@@ -310,6 +316,17 @@ mod unix {
             stderr,
             outcome,
         })
+    }
+
+    fn event(pid: libc::pid_t, phase: &'static str) {
+        super::super::trace_current("owned_process", serde_json::json!({"pid": pid, "phase": phase}));
+        #[cfg(test)]
+        EVENTS.with(|events| events.borrow_mut().push((phase, Instant::now(), std::path::Path::new(&format!("/proc/{pid}")).exists())));
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static EVENTS: std::cell::RefCell<Vec<(&'static str, Instant, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
     fn cleanup(mut child: std::process::Child, pid: libc::pid_t, signal_group: bool) {
@@ -326,11 +343,68 @@ mod unix {
                     std::thread::spawn(move || { let _ = child.wait(); });
                     return;
                 }
+                if result == 0 && unsafe { info.si_pid() != 0 } && group_observed_quiet(pid) {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(10));
             }
             unsafe { libc::kill(-pid, libc::SIGKILL); }
         }
         std::thread::spawn(move || { let _ = child.wait(); });
+    }
+
+    // Only called after WNOWAIT observed the unreaped leader exit. This scan
+    // is a latency hint, not a containment proof: a concurrent fork can be
+    // missed. The final group KILL still precedes every reap; never signal
+    // individual PIDs discovered here. Uncertain inspection keeps full grace.
+    #[cfg(target_os = "linux")]
+    fn group_observed_quiet(leader: libc::pid_t) -> bool {
+        let inspect = || -> Option<bool> {
+            let started = Instant::now();
+            for entry in std::fs::read_dir("/proc").ok()? {
+                if started.elapsed() >= Duration::from_millis(25) { return None; }
+                let entry = entry.ok()?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue; };
+                if !name.bytes().all(|b| b.is_ascii_digit()) { continue; }
+                let pid: libc::pid_t = name.parse().ok()?;
+                if pid <= 0 { return None; }
+                let stat = match std::fs::read(entry.path().join("stat")) {
+                    Ok(stat) => stat,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                    Err(_) => return None,
+                };
+                let (state, group) = proc_stat_group(&stat, pid)?;
+                if pid != leader && group == leader && !matches!(state, b'Z' | b'X' | b'x') {
+                    return Some(false);
+                }
+            }
+            Some(true)
+        };
+        inspect().unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn group_observed_quiet(_leader: libc::pid_t) -> bool { false }
+
+    // comm may contain spaces, newlines, non-UTF8 and ')' characters. Only
+    // numeric fields outside its final ')' are decoded as text.
+    #[cfg(target_os = "linux")]
+    fn proc_stat_group(stat: &[u8], expected_pid: libc::pid_t) -> Option<(u8, libc::pid_t)> {
+        let open = stat.iter().position(|&b| b == b'(')?;
+        let close = stat.iter().rposition(|&b| b == b')')?;
+        if open == 0 || close < open || stat.get(open - 1) != Some(&b' ') || stat.get(close + 1) != Some(&b' ') {
+            return None;
+        }
+        let pid: libc::pid_t = std::str::from_utf8(&stat[..open - 1]).ok()?.parse().ok()?;
+        if pid != expected_pid || pid <= 0 { return None; }
+        let mut fields = stat[close + 2..].split(|b| b.is_ascii_whitespace()).filter(|f| !f.is_empty());
+        let state = fields.next()?;
+        if state.len() != 1 || !b"RSDZTtXxKWPI".contains(&state[0]) { return None; }
+        let ppid: libc::pid_t = std::str::from_utf8(fields.next()?).ok()?.parse().ok()?;
+        let group: libc::pid_t = std::str::from_utf8(fields.next()?).ok()?.parse().ok()?;
+        if ppid < 0 || group < 0 { return None; }
+        Some((state[0], group))
     }
 
     fn drain<R: Read>(
@@ -391,7 +465,9 @@ mod unix {
             let (tx, rx) = mpsc::channel();
             let worker_cancel = handle.clone();
             let worker = thread::spawn(move || {
-                tx.send(with_cancel(Some(worker_cancel), || run_owned(Command::new("sh").arg("-c").arg(script), None))).unwrap();
+                let result = with_cancel(Some(worker_cancel), || run_owned(Command::new("sh").arg("-c").arg(script), None));
+                let events = EVENTS.with(|events| events.borrow().clone());
+                tx.send((result, events)).unwrap();
             });
             let until = Instant::now() + Duration::from_secs(5);
             while !leader_file.exists() || !daemon_file.exists() {
@@ -409,11 +485,15 @@ mod unix {
                 thread::yield_now();
             }
             handle.cancel();
-            let result = rx.recv_timeout(Duration::from_secs(5)).expect("run_owned drain bound").unwrap();
+            let (result, events) = rx.recv_timeout(Duration::from_secs(5)).expect("run_owned drain bound");
+            let result = result.unwrap();
             worker.join().unwrap();
             assert!(result.status.unwrap().success());
             assert!(!result.outcome.cancelled);
             assert!(result.outcome.drain_incomplete);
+            assert_eq!(events.iter().map(|e| e.0).collect::<Vec<_>>(), ["exit_observed", "reap"], "normal exit must never signal, including after reap");
+            assert!(events[0].2, "WNOWAIT must retain leader identity");
+            assert!(!events[1].2, "final wait must release leader identity");
             assert_eq!(unsafe { libc::kill(daemon, 0) }, 0, "same-group daemon was signalled");
             unsafe { libc::kill(daemon, libc::SIGKILL); }
             let _ = std::fs::remove_dir_all(dir);
@@ -451,22 +531,67 @@ mod unix {
             assert!(!result.outcome.stdin_error);
         }
 
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn child_starts_as_session_and_group_leader_without_a_tty() {
+            let result = run_owned(Command::new("sh").arg("-c").arg("ps -o pid=,pgid=,sid=,tty= -p $$"), None).unwrap();
+            assert!(result.status.unwrap().success());
+            let text = String::from_utf8(result.stdout).unwrap();
+            let fields: Vec<_> = text.split_whitespace().collect();
+            assert_eq!(fields.len(), 4, "{text}");
+            assert_eq!(fields[0], fields[1], "new process group before exec");
+            assert_eq!(fields[0], fields[2], "new session before exec");
+            assert_eq!(fields[3], "?", "no controlling terminal");
+        }
+
         #[test]
         fn cancellation_escalates_after_leader_exits() {
             let handle = CancelHandle::new();
-            handle.cancel();
-            let started = Instant::now();
-            let result = with_cancel(Some(handle), || {
-                run_owned(
+            let ready = tempfile::tempdir().unwrap();
+            let marker = ready.path().join("ready");
+            let script = format!("trap 'exit 0' TERM; (trap '' TERM; touch '{}'; exec sleep 30) & wait", marker.display());
+            let worker_handle = handle.clone();
+            let worker = std::thread::spawn(move || with_cancel(Some(worker_handle), || {
+                let result = run_owned(
                     Command::new("sh")
                         .arg("-c")
-                        .arg("trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) & wait"),
+                        .arg(script),
                     None,
-                )
-            })
-            .unwrap();
+                );
+                (result, EVENTS.with(|events| events.borrow().clone()))
+            }));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !marker.exists() {
+                assert!(Instant::now() < deadline, "resistant child readiness timed out");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let started = Instant::now();
+            handle.cancel();
+            let (result, events) = worker.join().unwrap();
+            let result = result.unwrap();
             assert!(result.outcome.cancelled);
             assert!(started.elapsed() >= GRACE);
+            assert_eq!(events.iter().map(|e| e.0).collect::<Vec<_>>(), ["observe_running", "cancel", "term", "cont", "kill", "reap"]);
+            assert!(events[4].1.duration_since(events[3].1) >= GRACE, "resistant member must receive full grace before KILL");
+            #[cfg(target_os = "linux")]
+            {
+                assert!(events[..5].iter().all(|e| e.2), "leader identity must remain pinned until final KILL");
+                assert!(!events[5].2, "reap must be final, with no subsequent signal");
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn proc_stat_validates_identity_state_and_group_outside_comm() {
+            assert_eq!(proc_stat_group(b"42 (a ) tricky\n\xff) T 1 42 0", 42), Some((b'T', 42)));
+            assert_eq!(proc_stat_group(b"42 (zombie) Z 1 42 0", 42), Some((b'Z', 42)));
+            for stat in [
+                &b"43 (wrong pid) S 1 42"[..], &b"42 (bad state) ? 1 42"[..],
+                &b"42 (bad group) S 1 -1"[..], &b"42 (missing) S 1"[..],
+                &b"42 (state) SS 1 42"[..], &b"42(bad delimiter) S 1 42"[..],
+            ] {
+                assert_eq!(proc_stat_group(stat, 42), None, "{stat:?}");
+            }
         }
     }
 }

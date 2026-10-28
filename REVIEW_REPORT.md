@@ -346,7 +346,7 @@ gate: `git diff --check` and required scoped diff/search review.
   - **Parallel:** serial
   - **Behaviour lost:** none.
 
-- **[P1] A11 — Migration to Phase 3E managed commit drafts and cancellable Git runs** — **INCOMPLETE; failed attempt, not verified.** The original `realFile` implementation remains current until coordinated cutover. See `TASKS.md` Phase 3E, R-EDIT-1…R-EDIT-7; A11's sole implementation/acceptance ownership moves there. A12 remains the next independent active review task.
+- [x] **[P1] A11 — Migration to Phase 3E managed commit drafts and cancellable Git runs** — **COMPLETE and verified (2026-10-28).** The `realFile` implementation is removed at cutover: `EditDocumentMode` is ManagedDraft-only with no realFile path in `src/`; the sole remaining `realFile` reference is a negative VSCode test case. Acceptance is owned by TASKS.md §7 A11/R-EDIT-6; see its Completed/Evidence record and §3.10. macOS remains a later R-EDIT-9 gate; Windows remains R-EDIT-7. A12 remains the next independent active review task.
   - **Problem:** `spawn_commit` creates `_cancel` but never installs it on the commit thread; simple handle plumbing is insufficient for correct process-tree cancellation and edit lifecycle.
   - **Why it matters:** Advertised progress cancellation cannot stop the Git child.
   - **Change:** Follow the managed-draft and single Child-owner design in Phase 3E; no compatibility mode at coordinated cutover.
@@ -371,6 +371,21 @@ and related inferences are unverified. A11 is not complete and its
 implementation work is moved to Phase 3E; A12 is next independent active review
 work. The redesign phase is not automatically started by recording this
 decision.
+
+**A11 completion record (2026-10-28):** the Phase 3E managed-draft cutover
+(R-EDIT-2…R-EDIT-5, R-EDIT-8, A11/R-EDIT-6) supersedes the 2026-10-27 failed
+attempt above. The exact Linux gate in TASKS.md §7 A11/R-EDIT-6 **Verify** exited
+**0**: `cargo test --test editor_bridge --test server_async` (editor_bridge 22;
+server_async 22 passed + 1 existing ignored BUG-READ-1), `make test-lua`, `make
+vscode-test`, `npm --prefix clients/vscode run test:integration`, `npm --prefix
+clients/vscode run test:e2e`, `make test`, `scripts/ui run
+tests/ui/scenarios/commit-cancel-progress.scn` (`1 PASS, 0 XFAIL, 0 FAIL`),
+`make ui-tour`, `git diff --check`. The final adversarial acceptance closed one
+gap — disconnect during the commit-msg hook phase — with the new
+`disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing` in
+`tests/server_async.rs`. macOS remains unverified under R-EDIT-9 and does not
+block Linux acceptance/cutover; Windows remains R-EDIT-7; BUG-READ-1 stays
+ignored and untouched.
 
 - [x] **[P1] A12 — Test Git failures through the real dispatch path** (`src/server.rs:1202–1265,1461–1489`; `src/dispatch.rs:204–216`)
   - **Problem:** Test-only callers exercise production `server::mutation`, while real selection dispatch bypasses its readable-effect behavior with `?`.

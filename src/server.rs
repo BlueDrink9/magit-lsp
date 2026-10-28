@@ -139,9 +139,12 @@ struct Shared {
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
 }
 
+#[derive(Clone)]
 struct ProgressRun {
     cancel: CancelHandle,
     edit_id: Option<String>,
+    cancellation_requested: bool,
+    repo: Option<String>,
 }
 
 impl Shared {
@@ -299,13 +302,14 @@ impl Shared {
         sender: &mpsc::UnboundedSender<Message>,
         command: &str,
         edit_id: Option<String>,
+        repo: Option<&str>,
     ) -> (String, CancelHandle) {
         let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
         let token = format!("magit-lsp/mutation/{next}");
         let handle = CancelHandle::new();
         let mut progress = self.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let closing = self.closing.load(Ordering::SeqCst);
-        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone() });
+        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone(), cancellation_requested: false, repo: repo.map(str::to_string) });
         drop(progress);
         if closing {
             handle.cancel();
@@ -328,15 +332,15 @@ impl Shared {
 
     /// Finish the progress sequence started by [`Self::begin_progress`].
     fn end_progress(&self, sender: &mpsc::UnboundedSender<Message>, token: &str) {
-        self.progress
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(token);
-        self.progress_changed.notify_waiters();
+        // Serialize report/end sends with removal, so a racing cancel cannot
+        // resurrect an ended token. Repeated terminal release is harmless.
+        let mut progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+        if progress.remove(token).is_none() { return; }
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({ "token": token, "value": { "kind": "end" } }),
         )));
+        self.progress_changed.notify_waiters();
     }
 
     /// Stop new work and cancel every operation that can wait on the client.
@@ -344,7 +348,7 @@ impl Shared {
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             self.closing.store(true, Ordering::SeqCst);
-            progress.values().map(|run| ProgressRun { cancel: run.cancel.clone(), edit_id: run.edit_id.clone() }).collect::<Vec<_>>()
+            progress.values().cloned().collect::<Vec<_>>()
         };
         for run in runs {
             run.cancel.cancel();
@@ -368,18 +372,36 @@ impl Shared {
         let Some(token) = params.get("token").and_then(progress_token) else {
             return;
         };
-        let run = self
+        let mut progress = self
             .progress
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&token)
-            .map(|run| ProgressRun { cancel: run.cancel.clone(), edit_id: run.edit_id.clone() });
-        if let Some(run) = run {
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(run) = progress.get_mut(&token) {
+            if run.cancellation_requested { return; }
+            run.cancellation_requested = true;
+            // Acknowledge intent, not termination or repository outcome. Keep
+            // progress and the repository reservation until the owner finishes.
+            let _ = self.sender.send(Message::Notification(Notification::new(
+                "$/progress".to_string(),
+                serde_json::json!({ "token": token, "value": {
+                    "kind": "report", "message": "Cancelling…", "cancellable": false,
+                } }),
+            )));
+            let _ = self.sender.send(Message::Notification(Notification::new(
+                VIEW_EFFECTS.to_string(),
+                ViewEffectsParams { effects: vec![Effect::message(MessageLevel::Info, "Cancelling…".to_string())] },
+            )));
             run.cancel.cancel();
-            if let Some(edit_id) = run.edit_id {
-                editor::registry().resolve(&edit_id, editor::Reply::Abort);
+            if let Some(edit_id) = &run.edit_id {
+                editor::registry().resolve(edit_id, editor::Reply::Abort);
             }
         }
+    }
+
+    /// Refuse new commands until a cancelled owner has finished cleanup.
+    fn cancellation_pending(&self, repo: &str) -> bool {
+        self.progress.lock().unwrap_or_else(|p| p.into_inner()).values()
+            .any(|run| run.cancellation_requested && run.repo.as_deref() == Some(repo))
     }
 
     /// Deliver a `view/promptRespond` answer to the waiting command.
@@ -999,7 +1021,7 @@ async fn handle_request(
                 serde_json::json!({ "method": method }),
             );
         }
-        let (token, cancel) = shared.begin_progress(&sender, &method, None);
+        let (token, cancel) = shared.begin_progress(&sender, &method, None, Some(&active.repo_path));
         let outcome = dispatch_response(request, &shared, Some(cancel), trace_id).await;
         shared.end_progress(&sender, &token);
         if trace_id > 0 {
@@ -1505,6 +1527,7 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    if shared.cancellation_pending(&repo) { return cancelling_response(); }
     let mut sessions = shared
         .sessions
         .lock()
@@ -1524,6 +1547,7 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    if shared.cancellation_pending(&repo) { return cancelling_response(); }
     let keymaps = shared
         .config
         .for_repository(std::path::Path::new(&repo))
@@ -1548,6 +1572,13 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         outcome.effects = vec![Effect::PassThrough { key: p.key }];
     }
     Ok(dispatched_outcome(shared, &repo, outcome)?)
+}
+
+/// Readable refusal while the prior operation still owns repository cleanup.
+fn cancelling_response() -> Result<Dispatched> {
+    Ok(Dispatched::value(serde_json::json!({ "effects": [Effect::message(
+        MessageLevel::Info, "Cancelling… wait for the current Git operation to finish".to_string(),
+    )] })))
 }
 
 /// Wait with no session ownership; reacquire only to validate and apply an answer.
@@ -1766,7 +1797,7 @@ fn spawn_commit(shared: Shared, repo: String) {
         id: edit_id.clone(),
         configs: shared.edit_configs.clone(),
     };
-    let (token, cancel) = shared.begin_progress(&sender, "commit", Some(edit_id));
+    let (token, cancel) = shared.begin_progress(&sender, "commit", Some(edit_id), Some(&repo));
     let progress = ProgressEnd {
         shared: shared.clone(),
         token,

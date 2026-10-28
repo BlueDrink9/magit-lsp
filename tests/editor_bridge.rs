@@ -1043,18 +1043,49 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     assert!(!processes.is_empty(), "commit processes carry edit identity");
     let mut owned = OwnedEdit { edit_id: edit_id.clone(), socket: socket.clone(), pids: processes.into_iter().map(|p| p.pid).collect() };
     let child: u32 = read(&child_pid).trim().parse().expect("hook child pid");
-    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token.unwrap()}}));
+    let token = token.unwrap();
+    let cancelled_at = Instant::now();
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.recv_timeout = Duration::from_millis(500);
+    loop {
+        let message = server.recv();
+        assert_ne!(message["params"]["value"]["kind"], "end", "acknowledgement must precede terminal cleanup");
+        if message["method"] == "$/progress" && message["params"]["token"] == token && message["params"]["value"]["kind"] == "report" {
+            assert_eq!(message["params"]["value"]["message"], "Cancelling…");
+            assert_eq!(message["params"]["value"]["cancellable"], false);
+            break;
+        }
+    }
+    assert!(cancelled_at.elapsed() < Duration::from_millis(500), "cancellation intent was not promptly acknowledged");
+    // Duplicate/foreign requests must not restart cleanup or release the repo.
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":"not-a-run"}}));
+    server.send(json!({"jsonrpc":"2.0","id":55,"method":"view/invoke","params":{"viewId":status,"command":"status.stage-all"}}));
+    let refused = server.response_with_id(55);
+    assert!(refused["result"]["effects"][0]["text"].as_str().is_some_and(|s| s.contains("Cancelling")), "mutation overlapped cleanup: {refused}");
+    assert!(cancelled_at.elapsed() < Duration::from_secs(1), "refusal waited for cleanup");
+    server.recv_timeout = Duration::from_secs(20);
     let mut ends = 0;
     let mut failed = false;
     let deadline = Instant::now() + Duration::from_secs(10);
     while !failed || ends == 0 {
         assert!(Instant::now() < deadline, "cancellation did not finish promptly");
         let message = server.recv();
-        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("end") { ends += 1; }
+        if message["method"] == "$/progress" && message["params"]["token"] == token {
+            assert_ne!(message["params"]["value"]["kind"], "report", "duplicate cancellation was acknowledged twice");
+            if message["params"]["value"]["kind"] == "end" { ends += 1; }
+        }
         if message["method"] == json!("view/effects") { failed |= message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|e| e["type"] == json!("message") && e["level"] == json!("error") && e["text"].as_str().is_some_and(|s| !s.is_empty()))); }
     }
     owned.finished();
     assert_eq!(ends, 1, "progress ends exactly once");
+    assert!(cancelled_at.elapsed() >= Duration::from_secs(2), "resistant hook lost its full TERM grace");
+    server.notifications.clear();
+    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.send(json!({"jsonrpc":"2.0","id":56,"method":"view/resync","params":{"viewId":status}}));
+    assert!(server.response_with_id(56).get("error").is_none());
+    server.drain_notifications();
+    assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress" && m["params"]["token"] == token), "late cancellation resurrected an ended token");
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
     assert_eq!(tmp.git(&["write-tree"]), tree);
