@@ -2379,7 +2379,18 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
       b.callback({ type = kind, runId = b.payload.runId, uri = b.payload.uri,
         version = b.payload.version })
     end
+    CALLER_WIN, CALLER_BUF = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+    CALLER_WIDTH, CALLER_HEIGHT = vim.api.nvim_win_get_width(0), vim.api.nvim_win_get_height(0)
+    CALLER_COUNT = #vim.api.nvim_list_wins()
+    CHECK_WINDOW = function(draft)
+      assert(vim.api.nvim_get_current_win() == CALLER_WIN)
+      assert(#vim.api.nvim_list_wins() == CALLER_COUNT)
+      assert(vim.api.nvim_win_get_width(0) == CALLER_WIDTH)
+      assert(vim.api.nvim_win_get_height(0) == CALLER_HEIGHT)
+      if not draft then assert(vim.api.nvim_get_current_buf() == CALLER_BUF) end
+    end
     DOC = OPEN_DRAFT('draft', 'α\n\n')
+    CHECK_WINDOW(true)
     DOCUMENT = { name = vim.api.nvim_buf_get_name(DOC.buf),
       buftype = vim.bo[DOC.buf].buftype, filetype = vim.bo[DOC.buf].filetype,
       editable = vim.bo[DOC.buf].modifiable, base = DOC.base, current = VIEW.current() == DOC,
@@ -2403,6 +2414,7 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     FINISH_PENDING = VIEW.views[DOC.key] == DOC
     ACK(4, 'draft/finished')
     CONFIRMED = VIEW.views[DOC.key] == nil
+    CHECK_WINDOW(false)
   ]])
   MiniTest.expect.equality(child.lua_get('DOCUMENT'), {
     name = 'magit-commit://draft/message', buftype = 'acwrite', filetype = 'gitcommit',
@@ -2442,6 +2454,7 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     FAILED_FINISH = VIEW.current() == DOC and DOC.sync_error == 'finish write rejected'
       and vim.bo[DOC.buf].modifiable and DOC.text == 'recover β'
     EDIT.cancel(DOC.key)
+    CHECK_WINDOW(false)
 
     BARRIERS = {}
     DOC = OPEN_DRAFT('raced-history', 'before')
@@ -2462,7 +2475,9 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     vim.api.nvim_buf_delete(DOC.buf, { force = true })
     AMBIGUOUS_CANCEL = ANSWERS[#ANSWERS][1] == 'common.cancel'
       and ANSWERS[#ANSWERS][2] == 'raced-history'
-
+  ]])
+  child.lua([[CHECK_WINDOW(false)]])
+  child.lua([[
     DOC = OPEN_DRAFT('disconnect', 'recover disconnected')
     EDIT.disconnected(DOC.client_id)
     local count = #BARRIERS

@@ -249,6 +249,7 @@ end
 ---@return integer
 function M.place(record)
   local win = vim.api.nvim_get_current_win()
+  record.previous_buf = vim.api.nvim_win_get_buf(win)
   local buf = vim.api.nvim_create_buf(true, false)
   record.buf = buf
   vim.api.nvim_buf_set_name(buf, record.uri)

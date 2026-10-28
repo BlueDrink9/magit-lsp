@@ -1,0 +1,39 @@
+# Drafts replace the caller, and every terminal path restores that same window.
+fixture: staged-one-file
+---
+keys: ":lua CALLER={win=vim.api.nvim_get_current_win(),buf=vim.api.nvim_get_current_buf(),width=vim.api.nvim_win_get_width(0),height=vim.api.nvim_win_get_height(0),count=#vim.api.nvim_list_wins()}; function CheckWindow(draft) local v=require('magit-lsp.view').current(); assert(v and (v.document==true)==draft); assert(vim.api.nvim_get_current_win()==CALLER.win and #vim.api.nvim_list_wins()==CALLER.count); assert(vim.api.nvim_win_get_width(0)==CALLER.width and vim.api.nvim_win_get_height(0)==CALLER.height); if not draft then assert(vim.api.nvim_get_current_buf()==CALLER.buf) end end" Enter
+snapshot: caller
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: ":lua CheckWindow(true)" Enter
+snapshot: full-size-draft
+keys: g g d G i "Full window commit"
+keys: Escape
+keys standard: C-Enter
+keys vim: Z Z
+wait screen contains "Committed"
+wait
+keys: ":lua CheckWindow(false)" Enter
+snapshot: confirmed-caller
+sh: test "$(git log -1 --format=%B)" = 'Full window commit'; printf '\nnext\n' >> f.txt; git add f.txt; git rev-parse HEAD > .git/window-head; git write-tree > .git/window-index
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: ":lua CheckWindow(true)" Enter
+keys: i "Do not submit"
+keys: Escape
+keys: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
+wait screen contains "git commit"
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait
+keys: ":lua CheckWindow(false)" Enter
+snapshot: cancelled-caller
+expect screen contains "Staged changes (1)"
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/window-head)" && test "$(git write-tree)" = "$(cat .git/window-index)"
+expect no_message /E5108|Error executing lua|unexpected draft/

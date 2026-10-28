@@ -559,6 +559,16 @@ local function attach(view)
   end
 end
 
+local function restore_document(view)
+  local win, buf = view.win, view.previous_buf
+  if not win or not vim.api.nvim_win_is_valid(win)
+    or not buf or not vim.api.nvim_buf_is_valid(buf) then return false end
+  if not pcall(vim.api.nvim_win_set_buf, win, buf) then return false end
+  local previous = view_for_buf(buf)
+  if previous then previous.win = win end
+  return true
+end
+
 local function on_wiped(key)
   local view = M.views[key]
   if not view or view.closing then
@@ -577,6 +587,13 @@ local function on_wiped(key)
     if view.on_closed then
       view.on_closed(view)
     end
+    -- Native deletion chooses a replacement after BufDelete/BufWipeout.
+    hooks.schedule(function()
+      if view.win and vim.api.nvim_win_is_valid(view.win)
+        and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
+        restore_document(view)
+      end
+    end)
     return
   end
   local c = client(view.client_id)
@@ -789,6 +806,9 @@ function M.close(id, focus_previous_window, client_id)
 
   local win = view.win
   local restored = false
+  if view.document then
+    restored = restore_document(view)
+  end
   if view.placement == 'main' and view.previous then
     local previous = M.views[view.previous]
     if previous and previous.buf and vim.api.nvim_buf_is_valid(previous.buf) then
