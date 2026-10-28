@@ -1,0 +1,28 @@
+# Copy source content through the existing Vim profile binding.
+fixture: clean
+profile: vim
+profile-only: true
+---
+wait
+# Build one hunk with added, removed, context, literal marker and blank lines.
+sh: printf '\n+literal\n-old\n  context\n\nlast' > f.txt; git add f.txt; git commit -qm base; printf '\n+literal\n+new\n  context\n\nlast' > f.txt; git diff --binary > ../copy-before.diff; git write-tree > ../copy-before.tree
+wait screen contains "+new"
+goto "@@"
+keys: y y
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr 'json_encode(getreg("\""))')" = '"\n+literal\n-old\n+new\n  context\n\nlast"'
+snapshot: copied-hunk
+# Copy a line; one leading structural marker is removed, literal '+' remains.
+goto "+literal"
+keys: y y
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr 'json_encode(getreg("\""))')" = '"+literal"'
+snapshot: copied-line
+# Inclusive visual selection copies only selected source lines in order.
+goto "-old"
+keys: V j y y
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr 'json_encode(getreg("\""))')" = '"-old\n+new"'
+keys: Escape
+sh: git diff --binary > ../copy-after.diff; cmp ../copy-before.diff ../copy-after.diff; test "$(git write-tree)" = "$(cat ../copy-before.tree)"; test "$(cat f.txt)" = "$(printf '\n+literal\n+new\n  context\n\nlast')"
+snapshot: copied-source

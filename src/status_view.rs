@@ -491,10 +491,6 @@ where
             "    @@ -{},{} +{},{} @@",
             hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
         );
-        let raw_header = format!(
-            "@@ -{},{} +{},{} @@",
-            hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
-        );
         self.tree.lines.push(header.clone());
 
         let mut entry = line_node(&hunk_id, NodeKind::Hunk);
@@ -510,7 +506,7 @@ where
         hunk_node.path = Some(file.path.clone());
         hunk_node.hunk_id = Some(hunk.id.clone());
         hunk_node.new_line = Some(hunk.new_start);
-        hunk_node.copy = Some(hunk_diff_text(&raw_header, hunk));
+        hunk_node.copy = Some(hunk_source_text(hunk));
         self.tree.nodes.push(hunk_node);
 
         let staged = section == "staged";
@@ -562,6 +558,9 @@ where
                 self.tree.line_nodes.push(entry);
 
                 let mut line_node = node(&id, NodeKind::Line, diff_line.text.clone(), line);
+                if matches!(diff_line.marker, '+' | '-' | ' ') {
+                    line_node.copy = Some(diff_line.text.clone());
+                }
                 line_node.section = Some(section.to_string());
                 line_node.path = Some(file.path.clone());
                 line_node.hunk_id = Some(hunk.id.clone());
@@ -724,13 +723,19 @@ fn line_node(id: &str, kind: NodeKind) -> LineNode {
     }
 }
 
-/// A hunk as it appears in a patch: the header plus every marked line.
-fn hunk_diff_text(header: &str, hunk: &Hunk) -> String {
-    let mut text = String::from(header);
+/// Source content from each valid hunk line, without markers or metadata.
+fn hunk_source_text(hunk: &Hunk) -> String {
+    let mut text = String::new();
+    let mut first = true;
     for line in &hunk.lines {
-        text.push('\n');
-        text.push(line.marker);
+        if !matches!(line.marker, '+' | '-' | ' ') {
+            continue;
+        }
+        if !first {
+            text.push('\n');
+        }
         text.push_str(&line.text);
+        first = false;
     }
     text
 }

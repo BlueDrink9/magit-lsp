@@ -53,7 +53,13 @@ fn text_mode_narrows_the_keymap_and_refuses_every_other_command() {
     let entered = test.invoke("common.toggle-text-mode");
     assert!(entered.effects.is_empty(), "{:?}", entered.effects);
     assert!(
-        entered.render.as_ref().is_some_and(|render| render.text.is_none() && render.edits.is_none() && render.cursor.is_none() && render.mode == ViewMode::Text),
+        entered
+            .render
+            .as_ref()
+            .is_some_and(|render| render.text.is_none()
+                && render.edits.is_none()
+                && render.cursor.is_none()
+                && render.mode == ViewMode::Text),
         "entering text mode sends metadata without content"
     );
     let keymap = entered.keymap.expect("a keymap notice");
@@ -145,15 +151,10 @@ fn copy_value_returns_the_right_text_per_node_kind() {
     let file = line_of(NodeKind::File, 0);
     assert_eq!(copy_at(&mut test, file, None), "f.txt");
 
-    // A hunk header copies the patch hunk text (header + marked lines).
+    // A hunk header copies source lines without diff decoration.
     let hunk = line_of(NodeKind::Hunk, 0);
     let hunk_text = copy_at(&mut test, hunk, None);
-    assert!(hunk_text.starts_with("@@ -1,10 +1,10 @@"), "{hunk_text:?}");
-    assert!(hunk_text.contains("\n+NEW line"), "{hunk_text:?}");
-    assert!(
-        !hunk_text.contains("    @@"),
-        "the patch header is not indented"
-    );
+    assert!(hunk_text.contains("NEW line"), "{hunk_text:?}");
 
     // A diff line copies its content without the marker.
     let added = tree
@@ -163,9 +164,9 @@ fn copy_value_returns_the_right_text_per_node_kind() {
         .expect("the added line");
     assert_eq!(copy_at(&mut test, added, None), "NEW line");
 
-    // A selection copies the selected lines as diff text, markers included.
+    // A selection copies source lines without diff markers.
     let selected = copy_at(&mut test, added, Some((added, added + 1)));
-    assert!(selected.starts_with("+NEW line\n"), "{selected:?}");
+    assert!(selected.starts_with("NEW line\n"), "{selected:?}");
 
     // A section header copies its title.
     let section = line_of(NodeKind::Section, 1);
@@ -177,6 +178,91 @@ fn copy_value_returns_the_right_text_per_node_kind() {
     let outcome = copy_invoke(&mut test, Some(header), None);
     assert_eq!(outcome.effects.len(), 1);
     assert_eq!(message(&outcome.effects[0]), "Nothing to copy here");
+}
+
+#[test]
+fn copy_value_preserves_source_markers_whitespace_and_excludes_metadata() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "\n+literal\n-old\n  context\n\nlast")])
+        .build();
+    let source = "\n+literal\n+new\n  context\n\nlast";
+    std::fs::write(tmp.path().join("f.txt"), source).expect("write changed source");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(tmp.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        output.stdout
+    };
+    let before = (
+        git(&["status", "--porcelain=v1", "-z"]),
+        git(&["diff", "--binary"]),
+        git(&["diff", "--cached", "--binary"]),
+        git(&["write-tree"]),
+        git(&["rev-parse", "HEAD"]),
+    );
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let tree = test.tree().clone();
+    let hunk = tree
+        .nodes
+        .iter()
+        .find(|n| n.kind == NodeKind::Hunk)
+        .unwrap();
+    let expected = "\n+literal\n-old\n+new\n  context\n\nlast";
+    assert_eq!(copy_at(&mut test, hunk.start_line, None), expected);
+    let lines: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter(|n| n.kind == NodeKind::Line)
+        .collect();
+    for line in &lines {
+        if matches!(line.marker, Some('+' | '-' | ' ')) {
+            assert_eq!(copy_at(&mut test, line.start_line, None), line.label);
+            assert_eq!(
+                copy_at(
+                    &mut test,
+                    line.start_line,
+                    Some((line.start_line, line.start_line))
+                ),
+                line.label
+            );
+        } else {
+            let outcome = copy_invoke(&mut test, Some(line.start_line), None);
+            assert_eq!(message(&outcome.effects[0]), "Nothing to copy here");
+        }
+    }
+    let first = lines.first().unwrap().start_line;
+    let last = lines.last().unwrap().start_line;
+    // Headers/annotations are excluded, even with the cursor on the hunk title.
+    for range in [(0, last), (last, 0), (hunk.start_line, last)] {
+        assert_eq!(copy_at(&mut test, hunk.start_line, Some(range)), expected);
+    }
+    assert_eq!(
+        copy_at(&mut test, first, Some((first, first + 1))),
+        "\n+literal"
+    );
+    assert_eq!(
+        copy_at(&mut test, first, Some((first + 3, first + 2))),
+        "-old\n+new"
+    );
+    let outcome = copy_invoke(&mut test, Some(hunk.start_line), Some((0, hunk.start_line)));
+    assert_eq!(message(&outcome.effects[0]), "Nothing to copy here");
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+        source
+    );
+    assert_eq!(
+        before,
+        (
+            git(&["status", "--porcelain=v1", "-z"]),
+            git(&["diff", "--binary"]),
+            git(&["diff", "--cached", "--binary"]),
+            git(&["write-tree"]),
+            git(&["rev-parse", "HEAD"]),
+        )
+    );
 }
 
 // --- The real server proves positional requests go quiet in text mode. ---

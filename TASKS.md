@@ -1387,12 +1387,15 @@ authority. Completed history is in the
 
 #### R-COPY-SOURCE — Raw source for structured diff yanks
 
-- [ ] **[P1] Return raw source for structured diff yanks** (`src/commands.rs`; `src/tree.rs`; public copy/invoke seam)
+- [x] **[P1] Return raw source for structured diff yanks** (`src/commands.rs`; `src/tree.rs`; public copy/invoke seam)
   - **Problem:** Diff copy must yield code rather than rendered patch decoration, with exact structural identity even for literal marker characters.
   - **Why it matters:** Copying whole hunks, lines and visual selections should produce usable source without parsing display text or changing repository state.
   - **Change:** Implement whole-hunk, single-line and visual-selection raw-source yanks as server-owned structured-tree/content operations returning clipboard effects. Strip exactly one structural leading diff marker (`+`, `-`, or context space); preserve remaining code, indentation, literal `+`/`-` characters and line order; exclude file/hunk headers and no-newline annotations. Do not reconstruct old/new file semantics or add bindings beyond existing profile bindings.
   - **Done when:** Rust tests exercise the public command/request seam for added, removed and context lines, literal marker characters, indentation, multiple lines, and excluded metadata; none mutates Git. A scripted real-UI scenario verifies whole-hunk, single-line and visual-selection copy output.
   - **Constraints:** No client parsing of rendered text; use structured nodes/content. Never mutate Git. No new keybindings.
+
+  - **Verified 2026-10-28:** `cargo test --test text_mode && cargo build && scripts/ui run tests/ui/scenarios/copy-source.scn && git diff --check` passed (6 Rust tests; native Vim at 100x30 and 80x24). Built `cargo build --release` first because client discovery prefers an existing release executable over debug. Inspected `build/ui/copy-source/vim-{100x30,80x24}/copied-{hunk,line,source}.screen`; scenario asserts exact JSON-encoded register contents and unchanged worktree/index. Public-seam tests cover leading blanks, literal markers, indentation, inclusive/reversed/single-line selections, metadata exclusion and unchanged HEAD/index/diffs/status. All owned UI/server processes stopped.
+  - **Sprint scheduling:** Prioritize remaining views/log work and editor-independent rebase ahead of the blocked release; preserve the separate release work in progress.
 
 #### R-NAV — Common navigation commands ownership
 
