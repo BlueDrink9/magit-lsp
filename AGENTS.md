@@ -81,6 +81,10 @@ Start in these components:
 
 ## Verification
 
+- Plain-mode evidence requires the fake-editor harness plus focused native
+  Neovim runs using a plain LSP setup without the magit-lsp plugin. Helix is a
+  manual smoke checklist, not a harness or first-party support promise.
+
 - `make test` runs Rust and Neovim integration tests.
 - Prefer the narrowest relevant check for the task: for example,
   `make test-rust FILTER="--test menu"` or

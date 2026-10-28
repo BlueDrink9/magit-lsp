@@ -46,7 +46,7 @@ here. General agent working conventions and verification guidance live in
 | Key notation | W3C `KeyboardEvent.key` names + VSCode-style `ctrl+shift+x` modifiers (see §3.8) |
 | Section folding | Server-owned, but triggered by the client's own fold keys wherever possible (§3.9) |
 | Unimplemented Magit operations | Shown in menus, greyed out, with their default key and description (Neogit style) (§3.12) |
-| jj | May be a semi-hard fork. Do not complicate the Git design or drop Git features for jj's sake |
+| VCS boundary | Keep presentation and standard-LSP transport VCS-neutral so future jj support requires effectively zero Plain-client changes. Keep Git discovery, mutation validation, commit-file paths, helper lifecycle and completion lookup in backend/workflow providers. Do not add a jj backend, lowest-common-denominator VCS hierarchy, or speculative wire protocol |
 | Diff/patch | Git computes diffs; we parse its output and build patches for `git apply` (this is what Magit does, §3.13) |
 | Rendering | Server re-renders fully (as Magit does) and sends line-range edits, so clients stay stable (§3.3) |
 | Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few (§8) |
@@ -55,7 +55,7 @@ here. General agent working conventions and verification guidance live in
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
 | Commit selection | Selecting a commit normally pushes/focuses a server-rendered log in select mode; clients forward selection/confirm/cancel and display its text verbatim. The server resolves structured commit nodes, restores the caller on confirm/cancel, and validates optional free-form revisions. This is not a client picker or choice prompt (§3.7) |
-| Managed commit drafts (2026-10-27) | At coordinated commit-message cutover, use a server-managed per-run draft with exact owner/version write-back; save checkpoints never commit, normal user close confirms the saved checkpoint, explicit abort/disconnect cancel, and a bounded server-owned per-repository ring backs history-prev/next (§3.10, Phase 3E) |
+| Plain presentation | Standard-LSP presentation is VCS-neutral; concrete backend/workflow providers supply repository identity and mutation semantics. Reusable server interactions operate on concrete views/data rather than imposing a lowest-common-denominator VCS abstraction |
 
 ---
 
@@ -243,9 +243,10 @@ an applied-version/base mismatch requires `view/resync`.
 
 Standard LSP positional requests only make sense if the client buffer equals
 the server's text. Hence the ack scheme above. While a view is in text mode,
-position-based requests return `null`. Track LSP 3.18
-`workspace/textDocumentContent`; adopt it as the transport when clients
-support it.
+position-based requests return `null`. Plain presentation uses standard LSP
+documents and providers; it does not require editor-specific placements,
+prompts, or an editor bridge. Virtual-content transports and custom URIs remain
+out of Plain scope; see §9 for deferred LSP 3.18 work.
 
 ### 3.5 Commands and effects
 
@@ -270,11 +271,10 @@ ordinary linear code. Tests supply a `ScriptedUi`.
 | `pushView` | same as `openView` | As `openView`, remembering the previous view so `popView` returns to it |
 | `popView` | `viewId` | Close that view and focus the previous one |
 | `focusView` | `viewId` | Focus it |
-| `showDocument` | `uri`, `line?`, `column?`, `preview?` | Open a real file (standard `window/showDocument`) |
+| `showDocument` | `uri`, `line?`, `column?` | Open a real file (standard `window/showDocument`) |
 | `editDocument` | see §3.10 | Open it for editing in the client's own editor |
 | `clipboard` | `text` | Put the text on the system clipboard |
 | `passThrough` | `key` | Perform the key's normal editor behaviour as if unbound |
-| `progress` | `token`, `title`, `message?`, `percentage?` | Display progress (standard `$/progress`) |
 | `quit` | — | Close all magit-lsp views of this session |
 
 Rendering updates are not effects; they arrive as `view/render`.
@@ -1116,13 +1116,14 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
 
 ### 3.19 Backend boundary and jj
 
-Stance: **do not weaken the Git design for jj.** jj support may be a
-semi-hard fork.
-- Keep all `git` CLI calls under `backend::git` and domain types (`Revision`,
-  `RefName`, `Diff`, `Commit`, …) free of Git-only strings where it costs
-  nothing. No trait or capability layer is required now.
-- Document the seams in `docs/FORKING.md` (where views, commands, menus and
-  the runner are registered) so a fork can swap them.
+Stance: **keep Git operation semantics intact while making Plain presentation
+and standard-LSP transport VCS-neutral.** Git-specific discovery, mutation
+validation and workflow details stay behind providers; reusable interactions
+take concrete views/data and stable identities. This enables future jj support
+with effectively zero Plain-client changes, without requiring a jj backend,
+generic VCS trait hierarchy, or speculative wire protocol. This does not
+promise a low-cost backend fork; keep Git-specific CLI/domain details where
+they are meaningful. See §0 and the Plain phase task list.
 
 ---
 
@@ -1135,7 +1136,7 @@ replacements land.
 
 | Method | Params | Returns |
 | --- | --- | --- |
-| `initialize` (options) | `clientInfo`, `capabilities: {keymapDelivery: "dynamic"/"static"/"forwardAll", keyModifiers: "full"/"basic", prompts: ["confirm","text","choice","multiChoice"], placements: ["main","side","bottom","float"], editorBridge: bool}`, `profile?`, `viewport` | server capabilities |
+| `initialize` (options) | `clientInfo`, `capabilities` may include consumed preferences `keymapDelivery` (`dynamic`/`static`/`forwardAll`) and `keyModifiers` (`full`/`basic`); `initializationOptions.presentation` selects `customRender` or `plain` (absent means `plain`); `profile?`, `viewport` | server capabilities |
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
@@ -1156,19 +1157,19 @@ replacements land.
 | `view/prompt` (request) | See §3.6; returns `{cancelled, value?}` |
 | standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
 
-**Phase 3E server draft wire contract (R-EDIT-3 and Neovim R-EDIT-4 implemented;
-VSCode adapter pending).**
-`editDocument {runId,uri,text,version:1,kind,title,mode:"managedDraft",scope}`
-announces the opaque draft, never a Git-owned path. Standard LSP full-sync
-`textDocument/didOpen`, `didChange`, `didClose` are the sole text-input path.
-Versioned JSON-RPC `draft/save` checkpoints without committing; `draft/finish`
-selects the exact saved version and writes it before helper `ok`. See §3.10 for
-the stable request/result/error shapes, receive-order serialization, native
-close-intent contract and lifecycle limits. R-EDIT-5 still owns the VSCode
-Save/Discard/Cancel, teardown classification and recovery; R-EDIT-6 owns the
-final cross-client cutover. The Neovim native acceptance is recorded in §3.10.
-No realFile fallback or custom competing text sync exists. Status views remain
-readonly and server-rendered.
+Plain mode uses standard document synchronization and code actions/commands for
+semantic action dispatch; concrete views/data carry stable identities and are
+never reconstructed by parsing rendered text. Git-specific discovery,
+mutation validation, commit-file paths, helper lifecycle and completion
+candidates belong to Git backend/workflow providers. Reusable server
+interaction primitives must support serving/stacking views, single and
+multi-item in-buffer selection with stable identities and caller restoration,
+message-edit sessions using a provider-supplied real file and finish/cancel
+callbacks, and semantic action dispatch. Git wrappers retain operation-specific
+semantics. Require a minimal fake-provider independence test, not a production
+jj backend or new wire protocol. R-EDIT-REAL owns the detailed real-file/ring
+contract and cutover; the managed-draft paragraphs in §3.10 describe current
+implementation being superseded by that gated target, not the desired contract.
 
 ### 4.3 Example
 
@@ -1537,6 +1538,19 @@ these are not active acceptance queues. Canonical contracts remain in §§0–6
 and 8–9. R-3.4b, R-UI-7, R-VS-1, R-NV-1…R-NV-4, and R-3.5…R-3.7 are
 completed. Historical evidence and caveats are archived.
 
+### Feature — Plain-client phase (before release prerequisites)
+
+This phase is tracked in the [Plain-client working list](./magit-lsp-plain-client-tasks.md),
+which preserves its ticket boundaries, acceptance gates, dependencies and
+verification. TASKS.md remains canonical. R-PLAIN-DOC is complete; remaining
+phase work and R-EDIT-REAL's spike are pending. The minimal BUG-READ-1 intake
+slice is scheduled in R-PLAIN-PREREQ; the larger design remains deferred.
+Virtual-content work is outside Plain scope. Release begins only after
+R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
+
+- [x] **R-PLAIN-DOC — Record decisions and phase queue.** Documentation only;
+  this does not complete R-EDIT-REAL or its spike. See the linked phase list.
+
 ### Feature — release prerequisites
 
 The 0.2 release queue is strictly ordered below. Deferred platform work and
@@ -1611,7 +1625,8 @@ BUG-READ-1 are not release gates.
       **Done when:** exact repository-state tests cover selected base, edited
       todo execution, continue, abort and conflict state; cancel before execution
       does not mutate and failures are readable. Both clients have focused native
-      evidence for base selection and todo editing/execution.
+       evidence for base selection and todo editing/execution. Also accepted
+       through the Plain harness at R-PLAIN-GATE.
       **Verify:** focused real-repository Rust tests and both clients' native
       scenarios; full regression/phase evidence at milestone boundary.
 
@@ -1726,7 +1741,7 @@ BUG-READ-1 are not release gates.
      - **Constraints:** Documentation only; do not implement a command policy, broaden the required core to all workflows, or move command/key resolution into clients.
      - **Evidence (2026-10-28):** Replaced vague exclusion promises with an explicit direct-invoke allowlist/no-unrestricted-key-or-menu-forwarding reduced-client option; clarified that delivery/modifier preferences and binding status do not suppress server operations. Documented cancellation for unexpected prompts, owning-run abort for unexpected drafts, and retained view identities/focus across single-window push/pop independently of optional splits. Cross-checked cited protocol/server/keymap/menu sources; `git diff --check` passed.
 
-    - [ ] **[P1] Supply a self-contained core payload reference and exchange** (`docs/CLIENT_SPEC.md:117-137`)
+     - [x] **[P1] Supply a self-contained core payload reference and exchange** (`docs/CLIENT_SPEC.md:117-137`)
     - **Problem:** The external implementation guide still requires Rust source reading for basic payload field names/enums and keymap bindings; its example omits initialized, a descriptor response, the actual acknowledgement and any complete input request. Source pointers alone are not an externally usable wire specification.
     - **Why it matters:** Readability and cohesion: an external adapter should not guess casing, distinguish editor/view modes by inference, or treat a transport response as completion of its follow-up renders.
     - **Change:** Add concise schemas/tables (or a checked-in-reference link within this same document) for core descriptor, invoke/key, keymap binding, prompt and effect payloads, marking required/optional fields and wire enum values. In particular name `editorMode:"normal"|"visual"`, view mode `interactive|text`, placement `main|side|bottom|float`, binding `keys` as alternative space-separated canonical chords with command/modes/label/status, and `liveKeys`' actual camelCase field (`src/view.rs:79-159`, `src/keymap.rs:16-57`, `src/protocol.rs:175-537`). Explain that dynamic draft keymaps identify `runId` even though the draft is not an ordinary `view/open` view, with confirm/history routed through draft barriers (`src/server.rs:739-756,1719-1738`; `lua/magit-lsp/edit.lua:293-329`). Extend the JSON-RPC example through initialize response/initialized, open descriptor/render/ack, a complete versioned `view/key`, and its result plus subsequent render/ack; include standard initialize fields rather than suggesting open is pipelined before initialization. Explain response-before-follow-up-notifications and buffering renders/keymaps until their descriptor/effect is registered (`src/server.rs:1054-1074`; `lua/magit-lsp/view.lua:332-353,435-450`; `clients/vscode/lib/views.js:42-91`). Record concrete client presentation differences where relevant: Neovim rendered-buffer menus versus VS Code structured-menu QuickPicks, limited VS Code passThrough replay and placement handling, rather than a blanket parity claim (`clients/vscode/lib/menus.js:11-103`, `effects.js:15-37`, `views.js:95-135`).
@@ -1806,7 +1821,9 @@ BUG-READ-1's known limitation; do not silently schedule its implementation.
   README assets, with documented manual fallback if capture is expensive or
   flaky (not a costly per-PR requirement). Validate consumption/linkage of the
   separately completed `docs/CLIENT_SPEC.md`. Welcome Helix, Zed and JetBrains
-  as external community clients; do not promise first-party implementations.
+   as external community clients; do not promise first-party implementations.
+   General LSP clients are supported in Plain mode per `docs/CLIENT_SPEC.md`;
+   make no first-party promise beyond bundled clients.
   **Done when:** both client setup paths are tested and documented; both-client
   screenshot assets or manual fallback are usable; client spec is linked and
   consumable.
