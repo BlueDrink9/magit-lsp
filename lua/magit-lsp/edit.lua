@@ -248,6 +248,7 @@ end
 ---@param record table
 ---@return integer
 function M.place(record)
+  local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(true, false)
   record.buf = buf
   vim.api.nvim_buf_set_name(buf, record.uri)
@@ -258,8 +259,6 @@ function M.place(record)
   replace(record, record.text)
   record.saved_text, record.saved_version = record.text, record.version
   vim.bo[buf].modified = false
-  vim.cmd('botright split')
-  local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)
   return win
 end
