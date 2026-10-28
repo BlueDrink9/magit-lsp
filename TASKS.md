@@ -1162,7 +1162,7 @@ replacements land.
 
 | Method | Params | Returns |
 | --- | --- | --- |
-| `initialize` (current wire) | `clientInfo`, current preferences `keymapDelivery` and `keyModifiers`; `profile?`, `viewport`. Adopted target selector is solely `capabilities.experimental.magit` (absent Plain, present rich); `initializationOptions.presentation` is obsolete target design. | server capabilities |
+| `initialize` (current wire) | `clientInfo`, current preferences `keymapDelivery` and `keyModifiers`; `profile?`, `viewport`. Adopted target selector is solely `capabilities.experimental.magit` (absent Plain, present rich); `initializationOptions.presentation` is rejected/obsolete current intent, not the selector. | server capabilities |
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |

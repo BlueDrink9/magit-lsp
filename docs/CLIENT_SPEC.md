@@ -111,7 +111,13 @@ Abort explicitly through `view/invoke` on the owning ordinary view with `command
 | Visual selections | Send inclusive selection lines with cursor/mode and displayed version | Optional editor-specific interaction; server handles patch selection. |
 | Splits/companion views | Multiple descriptor lifetimes and placement effects | Optional; placement fallback is client-specific, never universal single-window assumption. |
 
-Neovim primarily uses dynamic keymaps and buffer-local capture; VS Code uses static contributed bindings plus context/focus guards. Both should remain presentation/input adapters. Consult the listed client sources and `src/session.rs` for actual behavior rather than extrapolating parity from this table.
+| Client | Source-checked behavior and limits |
+|---|---|
+| Neovim | Dynamic keymaps and buffer-local capture (`lua/magit-lsp/init.lua`, `view.lua`). Modifier declaration is GUI/terminal-specific; do not promise `full` unconditionally. |
+| VS Code | Static contributed bindings plus focus guards (`clients/vscode/lib/session.js`). Presents main/bottom layouts and menus with QuickPick; pass-through replay and placement are limited (`views.js`, `menus.js`, `effects.js`). |
+| Plain (target) | Standard native document/code actions; no clipboard or secret prompt support. Optional declared values are pending implementation, not current support. |
+
+These are client-specific, not parity guarantees. Consult the listed sources and `src/session.rs` for actual behavior.
 
 ## Implementation checklist and unresolved decisions (`customRender`)
 
@@ -128,7 +134,7 @@ Presentation differs: Neovim displays rendered menu buffers; VS Code may present
 The following is an abridged illustrative exchange (IDs/text are illustrative). The initialize response and keymap are abridged; the keymap bindings are valid JSON examples only and are not an installable complete map:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1234,"rootUri":"file:///work/project","capabilities":{"window":{"workDoneProgress":true},"textDocument":{"synchronization":{"dynamicRegistration":false,"didSave":true}},"keymapDelivery":"dynamic","keyModifiers":"full"},"initializationOptions":{"profile":"standard"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1234,"rootUri":"file:///work/project","capabilities":{"window":{"workDoneProgress":true},"textDocument":{"synchronization":{"dynamicRegistration":false,"didSave":true}},"keymapDelivery":"dynamic","keyModifiers":"full","experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"full","render":"edits","layout":["main"],"effects":["visitFile"],"prompts":["confirm"],"folds":"server"}}},"initializationOptions":{"profile":"standard"}}}
 {"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"window":{"workDoneProgress":true}}}}
 {"jsonrpc":"2.0","method":"initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"view/open","params":{"kind":"status","args":{"repo_path":"/work/project"},"placement":"main","viewport":{"cols":80,"rows":24}}}
@@ -170,7 +176,7 @@ harness runs, native traces, support-table generation, or Helix spike results.
 ### Selection and bootstrap
 
 The sole selector is `initialize.params.capabilities.experimental.magit`:
-absent selects Plain; present selects rich and contains `{v:1, keys:'dynamic|static|forwardAll', modifiers:'full|basic', render:'edits|full', layout:['main','side','bottom','float'], effects:['visitFile','editDocument','clipboard'], prompts:['confirm','text','choice','multiChoice','secret'], folds:'server|native'}`. `initializationOptions` continues to carry `profile`; it is not a selector. Current keymap preferences are not negotiation. Bundled clients send the rich block. Plain clients
+absent selects Plain; present selects rich. `initializationOptions` continues to carry `profile`; it is not a selector. Current keymap preferences are not negotiation. Bundled clients send the rich block. The illustrative valid JSON above chooses concrete values. Allowed alternatives are `keys`: `dynamic`, `static`, `forwardAll`; `modifiers`: `full`, `basic`; `render`: `edits`, `full`; `layout` entries: `main`, `side`, `bottom`, `float`; `effects` entries: `visitFile`, `editDocument`, `clipboard`; `prompts` entries: `confirm`, `text`, `choice`, `multiChoice`, `secret`; `folds`: `server`, `native`. The server MUST NOT emit any undeclared optional effect, prompt kind, or placement. Plain clients
 bootstrap by opening a `.magit` document associated with a workspace/document
 repository context. The backend resolves and canonicalizes repository identity,
 secures paths, and excludes presentation documents from untracked status. If
@@ -190,6 +196,16 @@ renders are still acknowledged. Mandatory effects are message/openView/pushView/
 popView/focusView/passThrough/quit; only listed effects/prompts/placements may
 be optional. Main-only layout retains the view stack. Optional initialize echo:
 `experimental.magit.effective` mode and reasons.
+
+| Capability | Present | Missing |
+|---|---|---|
+| `workspace.workspaceEdit.documentChanges` | Use versioned `documentChanges` edits. | Use `changes` with unversioned edits. |
+| `textDocument.codeAction.disabledSupport` | Planned/unavailable actions may be returned disabled with a reason. | Omit unavailable actions; do not return a disabled object. |
+| `window.showDocument.support` | `visitFile` and commit navigation may use `showDocument`. | Report `Unavailable`; a `path:line` message is not equivalent support. |
+
+`docs/plain-support.md` is a planned generated artifact keyed by effective
+capabilities and unsupported reasons. If it is not yet generated, record that
+gap in R-PLAIN-PROMPT; do not check in a hand-generated artifact.
 
 ### Render synchronization and actions
 

@@ -60,7 +60,7 @@ Commands inherit support from the effects they emit. A CI test (R-PLAIN-PROMPT) 
 |---|---|---|---|
 | `message` | `window/showMessage`; detail/process log as a view row | none | n/a |
 | `openView`/`pushView`/`popView`/`focusView` | re-render the active logical view in the same document | `workspace.applyEdit` | document inert, readable message |
-| `visitFile` | `window/showDocument` (file URI, selection) | `window.showDocument.support` | message with `path:line` |
+| `visitFile` | `window/showDocument` (file URI, selection) | `window.showDocument.support` | `Unavailable`; a `path:line` message is not equivalent support |
 | `editDocument` (commit message) | `window/showDocument` on Git's `COMMIT_EDITMSG`; if already open, a versioned whole-buffer `applyEdit` with the fresh template first | `showDocument`; `applyEdit` for the refresh | commit-producing commands `Unavailable` |
 | `clipboard` | none | none | message showing the text; copy commands `Unavailable` |
 | `passThrough`, `quit` | no key capture; `quit` returns to a closed notice | none | n/a |
@@ -349,7 +349,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
   - `textDocument/completion` on a field returns branches, tags, remotes or revisions by field type. Checkout works through a prompt.
   - Candidate lookup is supplied by typed backend/workflow providers; the generic prompt renderer does not inspect Git or infer VCS from candidate text.
   - `secret` prompts and askpass cancel cleanly with a message.
-  - A CI test runs every registered command against a recording Plain `Ui` and generates `docs/plain-support.md` keyed by standard capabilities and unsupported reasons, snapshot-tested with `UPDATE_EXPECT=1`. Commands emitting unsupported effects become `Unavailable{reason}`. A runtime unsupported effect gives a readable message and a clean cancel.
+  - A CI test runs every registered command against a recording Plain `Ui` and generates `docs/plain-support.md` keyed by effective capabilities and unsupported reasons, snapshot-tested with `UPDATE_EXPECT=1`. If the artifact is absent, record the gap here rather than generating it manually. Commands emitting unsupported effects become `Unavailable{reason}`. A runtime unsupported effect gives a readable message and a clean cancel.
 - **Verify:** `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`.
 
 ### R-PLAIN-SELECT: select mode over the document (S)
