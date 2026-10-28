@@ -116,6 +116,31 @@ fn failed_and_noop_staging_do_not_advance_to_a_sibling() {
 }
 
 #[test]
+fn staging_a_staged_hunk_is_a_quiet_exact_noop() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes()).build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    test.goto_marker("f.txt", '+');
+    test.invoke_here("status.stage");
+    test.ack();
+    let staged_line = test.tree().line_nodes.iter().position(|node| node.kind == magit_lsp::tree::NodeKind::Line && node.section.as_deref() == Some("staged") && node.marker == Some('+')).unwrap();
+    let head_before = tmp.git(&["rev-parse", "HEAD"]);
+    let index_before = tmp.git(&["hash-object", ".git/index"]);
+    let worktree_before = std::fs::read(tmp.path().join("f.txt")).unwrap();
+    for line in [staged_line, staged_line + 1] {
+        test.goto(line);
+        let result = test.invoke_here("status.stage");
+        assert!(message_texts(&result.effects).is_empty());
+        assert_eq!(result.render.unwrap().cursor.unwrap().line, line);
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head_before);
+        assert_eq!(tmp.git(&["hash-object", ".git/index"]), index_before);
+        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), worktree_before);
+    }
+}
+
+#[test]
 fn common_hierarchy_commands_are_implemented() {
     for id in ["common.cycle-visibility", "common.next-sibling", "common.prev-sibling", "common.parent-section"] {
         assert_eq!(registry().get(id).unwrap().status, CommandStatus::Implemented);

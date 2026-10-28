@@ -1734,6 +1734,26 @@ BUG-READ-1's known limitation; do not silently schedule its implementation.
   **Verify:** clean setup smoke tests for Neovim and VS Code; deterministic
   screenshot job checked for both harnesses; spec link/consumption review.
 
+  - [x] **R-REL-2a — Unblocked client setup documentation.** Document native-pack
+    and lazy.nvim setup with explicit on-demand status opening, external-server
+    discovery for both clients, and usable screenshot capture/manual-fallback
+    instructions using the existing harnesses. Retain isolated setup smoke
+    evidence where available; distinguish it from pending published-VSIX,
+    clean-machine and screenshot evidence. Link `docs/CLIENT_SPEC.md` and welcome
+    community clients without first-party promises. Do not close R-REL-2 yet.
+    **Evidence (2026-10-28):** `docs/CLIENT_INSTALL.md` and
+    `docs/SCREENSHOTS.md`, linked from README, document both clients' external
+    server setup and existing native screenshot/manual-capture paths. All 13
+    release-tool tests passed with `MAGIT_LSP_TEST_BINARY` set, including the
+    isolated Neovim native-pack and lazy-spec callback smoke; shellcheck and
+    `git diff --check` passed. Follow-up native capture passed all four Neovim
+    commit-menu variants and VSCode A06 root lifecycle; exact commands and local
+    artifact paths are in `docs/RELEASING.md` (final bounded verification).
+    VSCode's captured Commit QuickPick has no action rows, so it is not a
+    release-ready menu screenshot. The lazy.nvim manager, desktop-terminal PNG
+    fallback and clean-machine/published VSIX installation remain unverified;
+    parent gates remain open. No core code was changed to address capture gaps.
+
 - [ ] **R-REL-3 — Release-facing README and honest project signals**
   **Depends on:** R-REL-1/2 evidence and R-CLIENT-SPEC.
   Redo README for actual features versus Planned, project purpose/differentiation,

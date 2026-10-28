@@ -1277,6 +1277,15 @@ fn stage_or_unstage(
         end: selection.end_line as u32,
     });
     let source = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    // A stage request originating in the displayed staged section is never
+    // retargeted to an unstaged hunk after a refresh. Visual selections retain
+    // precedence and are resolved by their original section below.
+    if command == dispatch::Command::Stage && selection.is_none()
+        && ctx.cursor.and_then(|cursor| source.navigation_node(cursor.line))
+            .is_some_and(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("staged"))
+    {
+        return Ok(CommandOutcome::default());
+    }
     let destinations = if command == dispatch::Command::Stage && ctx.selection.is_none() {
         ctx.cursor.and_then(|cursor| source.navigation_node(cursor.line))
             .filter(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged"))

@@ -1,0 +1,26 @@
+# Staging a hunk from the staged section is a silent no-op.
+fixture: modified-two-files
+profile: vim
+profile-only: true
+---
+sh: awk 'BEGIN { for (i=1; i<=40; i++) print "line" i }' > f.txt; git add f.txt; git commit -qm 'base'; sed -i '5s/$/ CHANGED/' f.txt; git add f.txt; sed -i '20s/$/ CHANGED/' f.txt
+keys: g r
+wait
+goto "Staged changes (1)"
+keys: Tab
+wait
+snapshot: staged-before
+goto "Staged changes (1)"
+keys: Tab
+wait
+goto "+line5 CHANGED"
+keys: s
+wait
+expect screen contains "Staged changes (1)"
+expect cursor on "+line5 CHANGED"
+snapshot: staged-noop
+keys: s
+wait
+expect screen contains "Staged changes (1)"
+expect cursor on "+line5 CHANGED"
+snapshot: staged-noop
