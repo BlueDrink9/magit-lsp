@@ -55,6 +55,8 @@ exports.activate = async function activate(context) {
     }));
     fs.appendFileSync(`${base}/api.jsonl`, JSON.stringify({ event: 'tabs', closed, matchingTabs,
       qualified: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0,
+      savedDiskText: closed.some(tab => tab.isCommitEditMsg) && matchingTabs === 0
+        ? fs.readFileSync(vscode.Uri.parse(uri).fsPath, 'utf8') : null,
       groups: vscode.window.tabGroups.all.map(group => ({ viewColumn: group.viewColumn,
         uris: group.tabs.map(tab => tab.input?.uri?.toString() || null) })),
     }) + '\n');
@@ -147,7 +149,7 @@ exports.run = async function run() {
     result.cases.unrelatedClose = { qualifiedClosureDelta: 0 };
     await show();
     await until(() => matchingTabs().length === 1, 'reopened tab');
-    const editor = vscode.window.activeTextEditor;
+    let editor = vscode.window.activeTextEditor;
     result.cases.dirtyEdit = await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'dirty native text\n'));
     await until(() => editor.document.isDirty, 'dirty editor');
     if (process.env.MAGIT_REAL_FILE_NATIVE === '1') {
@@ -166,6 +168,76 @@ exports.run = async function run() {
     assert.equal(result.cases.dirtyCancel.matchingTabs, 1);
     assert.equal(result.cases.dirtyCancel.qualifiedClosureDelta, 0);
     shot('03b-dirty-cancel');
+    const savedText = 'dirty native text\ndirty native text\nspike message\n';
+    // Save by itself must not qualify; qualification is caused by tab closure.
+    await editor.document.save();
+    await until(() => count('textDocument/didSave') > 0, 'dirty save wire');
+    assert.equal(qualifiedClosures().length, qualifiedBefore + 1, 'save alone must not qualify');
+    result.cases.saveAlone = { savedText: fs.readFileSync(uri.fsPath, 'utf8'),
+      qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1, matchingTabs: matchingTabs().length };
+    assert.equal(result.cases.saveAlone.savedText, editor.document.getText());
+    assert.equal(result.cases.saveAlone.matchingTabs, 1);
+    await editor.edit(edit => edit.insert(new vscode.Position(0, 0), 'dirty native text\n'));
+    await until(() => editor.document.isDirty, 'dirty again after save-alone probe');
+    // Native dialog default action is Save; drive the actual focused control.
+    let saveSettled = false;
+    const savingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { saveSettled = true; });
+    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Save dialog');
+    shot('03c-dirty-save-dialog');
+    cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await savingClose;
+    await until(() => qualifiedClosures().length === qualifiedBefore + 2, 'Save-on-close qualification');
+    result.cases.dirtySave = { savedText: fs.readFileSync(uri.fsPath, 'utf8'), qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 1,
+      closeSettled: saveSettled, matchingTabs: matchingTabs().length };
+    assert.equal(result.cases.dirtySave.savedText, savedText);
+    assert.equal(qualifiedClosures().at(-1).savedDiskText, savedText);
+    assert.equal(result.cases.dirtySave.qualifiedClosureDelta, 1);
+    assert.equal(result.cases.dirtySave.matchingTabs, 0);
+    shot('03d-dirty-save-closed');
+    await show();
+    await until(() => matchingTabs().length === 1, 'reopened for discard');
+    const discardEditor = vscode.window.activeTextEditor;
+    const discardText = fs.readFileSync(uri.fsPath, 'utf8');
+    const discardEdit = await discardEditor.edit(edit => edit.replace(new vscode.Range(discardEditor.document.positionAt(0), discardEditor.document.positionAt(discardEditor.document.getText().length)), 'discarded text\n'));
+    assert.equal(discardEdit, true);
+    await until(() => discardEditor.document.isDirty, 'discard editor dirty');
+    // Discard reverts the live document: retain the synchronized UNSAVED text now.
+    const unsavedText = discardEditor.document.getText();
+    assert.equal(unsavedText, 'discarded text\n');
+    assert.notEqual(unsavedText, discardText);
+    await until(() => trace().some(item => item.method === 'textDocument/didChange'
+      && item.params.textDocument.uri === uri.toString()
+      && item.params.textDocument.version === discardEditor.document.version
+      && item.params.contentChanges[0].text === unsavedText), 'unsaved discard text synchronized');
+    let discardSettled = false;
+    const discardingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { discardSettled = true; });
+    await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Discard dialog');
+    shot('03e-dirty-discard-dialog');
+    // Tab from the default Save button to Don't Save, then activate it.
+    // One forward tab from default Save wraps to Don't Save.
+    for (let i = 0; i < 1; i++) {
+      cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+      cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    }
+    cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await discardingClose;
+    await until(() => qualifiedClosures().length === qualifiedBefore + 3, "Don't Save qualification");
+    result.cases.dirtyDiscard = { unsavedText, diskText: fs.readFileSync(uri.fsPath, 'utf8'),
+      expectedDiskText: discardText, qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore - 2,
+      closeSettled: discardSettled, matchingTabs: matchingTabs().length };
+    assert.equal(result.cases.dirtyDiscard.diskText, discardText);
+    assert.equal(qualifiedClosures().at(-1).savedDiskText, discardText);
+    assert.notEqual(result.cases.dirtyDiscard.unsavedText, discardText);
+    assert.equal(result.cases.dirtyDiscard.qualifiedClosureDelta, 1);
+    assert.equal(result.cases.dirtyDiscard.matchingTabs, 0);
+    shot('03f-dirty-discard-closed');
+    await show();
+    await until(() => matchingTabs().length === 1, 'reopened after discard');
+    editor = vscode.window.activeTextEditor;
+    assert.equal(editor.document.isClosed, false);
+    assert.equal(editor.document.getText(), discardText);
     } else {
       result.cases.dirtyDialog = 'not tested here: extensionTestsPath suppresses native save confirmation; separate normal host required';
     }
@@ -188,9 +260,10 @@ exports.run = async function run() {
     result.cases.languageChange.matchingTabs = matchingTabs().length;
     assert.equal(result.cases.languageChange.qualifiedClosureDelta, 0, 'language change must not qualify');
     assert.equal(result.cases.languageChange.matchingTabs, 1);
-    assert.equal(qualifiedClosures().length, 1, 'only the last draft tab close qualified in the entire run');
+    assert.equal(qualifiedClosures().length, process.env.MAGIT_REAL_FILE_NATIVE === '1' ? 3 : 1,
+      'only actual last draft tab closes qualify');
     shot('04-refresh-language');
-    result.pending = ['native dirty Save-on-close', 'native dirty Discard-on-close', 'shutdown', 'reload', 'workspace-change'];
+    result.pending = ['shutdown', 'reload', 'workspace-change'];
     result.gate = 'pass';
   } catch (error) {
     result.error = error.stack;

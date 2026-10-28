@@ -1,6 +1,6 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
-## Current verdict: core VSCode fallback PASS; step 0 still incomplete
+## Current verdict: core VSCode fallback plus dirty Save/Don't Save PASS; step 0 still incomplete
 
 Observer-only follow-up on 2026-10-29; **R-EDIT-REAL is not done**. No production
 code, helper release, commit arbitration or task checkoff is included. The
@@ -13,8 +13,8 @@ Executed successfully (exit 0, including diff check):
 MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
 ```
 
-Retained final extension-test host: `/tmp/opencode/real-file-vscode-YHXvlc/`.
-Retained final normal development host: `/tmp/opencode/real-file-vscode-ZRGkrA/`.
+Retained verified extension-test host: `/tmp/opencode/real-file-vscode-XSt31I/`.
+Retained verified normal development host: `/tmp/opencode/real-file-vscode-jLMkbH/`.
 Each has `command.json` (exact binary/expanded arguments/version), `result.json`,
 `api.jsonl`, `wire.jsonl`, `output.txt` and PNGs. Both use owned disposable real
 Git repositories and isolated profiles/extensions. Codium is `1.140.06880`,
@@ -28,35 +28,44 @@ Both final hosts assert:
 | Actual server `window/showDocument` | Real language-client `middleware.window.showDocument` invoked; permanent tab (`isPreview:false`). The middleware calls `showTextDocument` with `preview:false`; languageclient 9's default handler ignores a `preview` property added to protocol params. |
 | Focus/switch to another file and back | Draft remains in tabs; zero qualified closures. |
 | Same URI split across two groups; close first group's draft | Actual `event.closed` contains draft URI, but one matching tab remains in the other group; zero qualified closures. |
-| Last draft tab close | Actual `event.closed` contains draft URI, all groups have zero matches; exactly one qualified event, in 53 ms (test host) / 50 ms (normal host). |
+| Last draft tab close | Actual `event.closed` contains draft URI, all groups have zero matches; exactly one qualified event, in 57 ms (test host) / 52 ms (normal host). |
 | Close unrelated tab while draft is absent | Actual closed URI is unrelated; zero additional qualifications. |
 | Change open draft language to plaintext | One wire `didClose` then `didOpen`, tab still present; zero additional qualified closures. |
-| Entire observation sequence | Exactly one qualified draft closure, not a commit/helper-release assertion. |
+| Entire observation sequence | Exactly one qualified draft closure in the test host; three in the normal host (clean close, Save-on-close, Don't Save). Not a commit/helper-release assertion. |
 
 The document is still alive at last-tab close, with zero wire `didClose` delta
 in both hosts. This is a separate immediate observation, **not** a new five-second
 reliability test; the historical five-second failure remains below. The sole
 wire close in each new trace belongs to language change, not native tab close.
 
-Normal host additionally shows the real dirty Save/Don't Save/Cancel dialog;
-Escape cancels. Assertions verify tab retained, document open and dirty, and no
-new qualified closure. Extension-test mode suppresses this dialog, so does not
-claim this case. Explicit later API save still emits `didSave`; it does **not**
-test choosing Save in the native close dialog. Existing rewrite/show/applyEdit
-observations remain present, not a production freshness or commit barrier test.
+Normal host additionally drives the actual dirty Save/Don't Save/Cancel dialog
+through CDP keyboard input. Cancel retains the dirty open tab without qualifying;
+save alone leaves one open tab and qualifies zero times. Save-on-close saves
+exact edited disk text and qualifies once; Don't Save closes,
+qualifies once, and leaves disk at the previous saved text despite unsaved editor
+text. The unsaved `discarded text\n` is captured and asserted **before** close,
+including its exact-version full-text wire `didChange`; sampling the document
+after Don't Save instead sees the reverted saved text. Both Save-on-close and
+Don't Save tab events log/assert `savedDiskText` as
+`dirty native text\ndirty native text\nspike message\n`. The observer reopens and
+uses the live editor for the following refresh/language probes.
+Extension-test mode suppresses the native dialog and makes no such claim.
+These are tab-observer observations, not production freshness or commit-barrier
+tests.
 
-Inspected final hosts' traces and screenshots: `01b-two-groups.png` (duplicate
-draft tabs), `02-native-close.png` (draft absent), plus normal host
-`03-dirty-dialog.png` and `03b-dirty-cancel.png` (native prompt then retained dirty
-tab). Also inspected the earlier passing run's same images, nonlast-close and
-refresh/language images in `/tmp/opencode/real-file-vscode-qsdHbK/` and
-`/tmp/opencode/real-file-vscode-kXFChS/`. Cleanup was then hardened: owned profiles
-are killed and bounded-poll checked absent even on failure; SIGTERM alone can
+Inspected both verified hosts' API/wire traces and the normal host screenshots:
+`03c-dirty-save-dialog.png` (Save focused; two dirty native text lines),
+`03e-dirty-discard-dialog.png` (actual Save/Don't Save/Cancel prompt over
+`discarded text`), `03b-dirty-cancel.png` (dirty tab retained),
+`03d-dirty-save-closed.png` and `03f-dirty-discard-closed.png` (no draft tab),
+and `04-refresh-language.png` (reopened, refreshed dirty plaintext editor).
+Both results have `gate:"pass"`. Owned profiles
+are killed and bounded-poll checked absent even on failure; process inspection
+also found no surviving owned profiles or Python observer. SIGTERM alone can
 leave a dirty dialog open. This abrupt cleanup is **not** shutdown acceptance.
 No sleeps, synthetic close notifications or production extension are used.
 
-**PENDING next ticket:** native dirty Save-on-close and Discard-on-close;
-shutdown, reload and workspace-change event behavior; production run-correlated
+**PENDING:** shutdown, reload and workspace-change event behavior; production run-correlated
 idempotency/helper arbitration and migration. No transport shutdown or extension
 deactivation is interpreted as confirmation by this observer.
 
