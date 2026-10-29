@@ -7,6 +7,18 @@ use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::protocol::{Effect, MessageLevel};
 use rstest::rstest;
 
+#[test]
+fn hunk_section_compatibility_preserves_only_the_staged_stage_noop() {
+    use magit_lsp::dispatch::hunk_section_compatible;
+    assert!(hunk_section_compatible("status.stage", Some("unstaged")));
+    assert!(hunk_section_compatible("status.stage", Some("staged")));
+    assert!(!hunk_section_compatible("status.stage", Some("untracked")));
+    assert!(hunk_section_compatible("status.unstage", Some("staged")));
+    assert!(!hunk_section_compatible("status.unstage", Some("unstaged")));
+    assert!(hunk_section_compatible("status.discard", Some("unstaged")));
+    assert!(!hunk_section_compatible("status.discard", Some("staged")));
+}
+
 fn message_text(resolution: &Resolution) -> &str {
     match resolution {
         Resolution::Message(Effect::Message { level, text, .. }) => {

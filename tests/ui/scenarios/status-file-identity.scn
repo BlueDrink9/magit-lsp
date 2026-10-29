@@ -49,3 +49,12 @@ sh: test ! -e delete.txt && test "$(cat new.txt)" = 'new file' && test "$(git sh
 expect screen not-contains "? delete.txt"
 expect no_message /E5108|Error executing lua|failed/
 snapshot: untracked-discarded
+sh: printf 'a\nb\nc\nold\nd\ne\nf\nseparator\na\nb\nc\nold\nd\ne\nf\nseparator\n' > identity.txt; git add identity.txt; git commit -m 'identical blocks' >/dev/null; sed -i 's/old/new/g' identity.txt; printf 'y\nn\n' | git add -p -- identity.txt >/dev/null
+keys standard: g
+keys vim: g r
+wait screen contains "identity.txt"
+goto "-old"
+keys vim: x
+wait screen contains "Unstaged changes (2)"
+expect no_message /prompt|E5108|Error executing lua/
+sh: test "$(git show :identity.txt)" = "$(git show HEAD:identity.txt | sed '0,/old/s//new/')" && test "$(git diff -- identity.txt | grep -c '^[-+]old\|^[-+]new')" -eq 2
