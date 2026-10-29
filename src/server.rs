@@ -93,6 +93,7 @@ pub struct ServerOptions {
 struct ClientCaps {
     delivery: KeymapDelivery,
     close_confirms: bool,
+    work_done_progress: bool,
 }
 
 impl Default for ClientCaps {
@@ -100,6 +101,7 @@ impl Default for ClientCaps {
         Self {
             delivery: KeymapDelivery::Dynamic,
             close_confirms: true,
+            work_done_progress: false,
         }
     }
 }
@@ -154,6 +156,7 @@ struct ProgressRun {
     edit_id: Option<String>,
     cancellation_requested: bool,
     repo: Option<String>,
+    visible: bool,
 }
 
 impl Shared {
@@ -362,25 +365,29 @@ impl Shared {
         let handle = CancelHandle::new();
         let mut progress = self.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let closing = self.closing.load(Ordering::SeqCst);
-        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone(), cancellation_requested: false, repo: repo.map(str::to_string) });
+        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone(), cancellation_requested: false, repo: repo.map(str::to_string), visible: false });
         drop(progress);
         if closing {
             handle.cancel();
             if let Some(edit_id) = edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
         }
-        let shared = self.clone();
-        let params = serde_json::json!({ "token": token });
-        let waiting = self.register_outbound("window/workDoneProgress/create", params);
-        tokio::spawn(async move {
-            if let Ok((key, rx)) = waiting { let _ = shared.await_outbound(key, rx).await; }
-        });
-        let _ = sender.send(Message::Notification(Notification::new(
-            "$/progress".to_string(),
-            serde_json::json!({
-                "token": token,
-                "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true },
-            }),
-        )));
+        let enabled = self.client.lock().unwrap_or_else(|p| p.into_inner()).work_done_progress;
+        if enabled {
+            let shared = self.clone();
+            let sender = sender.clone();
+            let token = token.clone();
+            let command = command.to_string();
+            tokio::spawn(async move {
+                let waiting = shared.register_outbound("window/workDoneProgress/create", serde_json::json!({ "token": token }));
+                let Ok((key, rx)) = waiting else { return; };
+                if shared.await_outbound(key, rx).await.is_err() { return; }
+                let mut runs = shared.progress.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(run) = runs.get_mut(&token) {
+                    run.visible = true;
+                    let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
+                }
+            });
+        }
         (token, handle)
     }
 
@@ -389,7 +396,8 @@ impl Shared {
         // Serialize report/end sends with removal, so a racing cancel cannot
         // resurrect an ended token. Repeated terminal release is harmless.
         let mut progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
-        if progress.remove(token).is_none() { return; }
+        let Some(run) = progress.remove(token) else { return; };
+        if !run.visible { self.progress_changed.notify_waiters(); return; }
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({ "token": token, "value": { "kind": "end" } }),
@@ -436,12 +444,12 @@ impl Shared {
             run.cancellation_requested = true;
             // Acknowledge intent, not termination or repository outcome. Keep
             // progress and the repository reservation until the owner finishes.
-            let _ = self.sender.send(Message::Notification(Notification::new(
+            if run.visible { let _ = self.sender.send(Message::Notification(Notification::new(
                 "$/progress".to_string(),
                 serde_json::json!({ "token": token, "value": {
                     "kind": "report", "message": "Cancelling…", "cancellable": false,
                 } }),
-            )));
+            ))); }
             let _ = self.sender.send(Message::Notification(Notification::new(
                 VIEW_EFFECTS.to_string(),
                 ViewEffectsParams { effects: vec![Effect::message(MessageLevel::Info, "Cancelling…".to_string())] },
@@ -1369,6 +1377,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
+                client.work_done_progress = params.pointer("/capabilities/window/workDoneProgress").and_then(Value::as_bool) == Some(true);
                 client.close_confirms = !params.pointer("/clientInfo/name").and_then(Value::as_str)
                     .is_some_and(|name| name.to_ascii_lowercase().contains("visual studio code") || name.to_ascii_lowercase().contains("codium"));
             }

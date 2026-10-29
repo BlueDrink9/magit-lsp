@@ -114,7 +114,7 @@ impl TestServer {
 
     /// Receive the next frame with a bounded wait.
     pub fn recv(&mut self) -> Value {
-        match self.responses.recv_timeout(self.recv_timeout) {
+        let message = match self.responses.recv_timeout(self.recv_timeout) {
             Ok(Ok(message)) => message,
             Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
             Err(error) => {
@@ -129,7 +129,12 @@ impl TestServer {
                     tail.into_iter().rev().collect::<Vec<_>>().join("\n")
                 )
             }
+        };
+        if message["method"] == "window/workDoneProgress/create" {
+            let response = json!({"jsonrpc":"2.0", "id":message["id"], "result":null});
+            self.send(response);
         }
+        message
     }
 
     /// Read until the response carrying `id`, failing if the stream ends.
@@ -147,6 +152,9 @@ impl TestServer {
     pub fn initialize(&mut self, capabilities: Value) -> Value {
         let mut message = initialize_message();
         message["params"]["capabilities"] = capabilities;
+        if message["params"]["capabilities"].get("window").is_none() {
+            message["params"]["capabilities"]["window"] = json!({"workDoneProgress": true});
+        }
         self.send(message);
         self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
         self.response_with_id(1)
@@ -246,7 +254,7 @@ pub fn initialize_message() -> Value {
         "params": {
             "processId": null,
             "rootUri": null,
-            "capabilities": {},
+            "capabilities": {"window": {"workDoneProgress": true}},
         },
     })
 }
