@@ -14,6 +14,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
   const status = vscode.window.activeTextEditor;
   assert.equal(status?.document.uri.scheme, 'magit');
   const cases = [];
+  const resetAuthorCases = [];
   const screenshots = [];
   const openedDrafts = [];
   const observer = vscode.workspace.onDidOpenTextDocument((document) => {
@@ -23,6 +24,8 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     index: git('write-tree'), indexEntries: raw('ls-files', '--stage'),
     parents: git('show', '-s', '--format=%P', 'HEAD'), count: git('rev-list', '--count', 'HEAD'),
     date: git('show', '-s', '--format=%cI', 'HEAD'), message: raw('log', '-1', '--format=%B'),
+    author: git('log', '-1', '--format=%an <%ae>'), authorTime: Number(git('log', '-1', '--format=%at')),
+    committerTime: Number(git('log', '-1', '--format=%ct')),
     worktree: git('hash-object', 'tracked.txt'), porcelain: raw('status', '--porcelain'),
     untracked: raw('ls-files', '--others', '--exclude-standard'),
     sentinel: fs.existsSync(`${repo}/untracked.txt`) ? git('hash-object', 'untracked.txt') : null });
@@ -39,7 +42,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     shot(name);
   };
   const persist = () => fs.writeFileSync(`${evidence}/head-operations-trace.json`, JSON.stringify({
-    cases, screenshots, requests, draftMessages, draftNotes, openedDrafts,
+    cases, resetAuthorCases, screenshots, requests, draftMessages, draftNotes, openedDrafts,
   }, null, 2));
   const focusStatus = async () => {
     await vscode.window.showTextDocument(status.document, { preview: false });
@@ -140,10 +143,10 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(after.worktree, before.worktree);
     if (preserveDate) assert.equal(after.date, before.date);
   };
-  const recordCase = async (name, before, extra = {}) => {
+  const recordCase = async (name, before, extra = {}, collection = cases) => {
     await focusStatus();
     await capture(`head-${name}-status.png`);
-    cases.push({ name, before, after: snapshot(), status: status.document.getText(), ...extra });
+    collection.push({ name, before, after: snapshot(), status: status.document.getText(), ...extra });
     persist();
   };
   try {
@@ -251,11 +254,54 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
       && request.params.arguments?.[0]?.runId === record.runId
       && request.params.arguments[0].command === 'common.confirm'));
     await recordCase('amend-abort', before, { runId: record.runId });
+    for (const [selection, operation] of [['a', 'amend'], ['e', 'extend'], ['w', 'reword']]) {
+      const name = `reset-author-${operation}`;
+      await reset('nonempty historical author commit\n');
+      execFileSync('git', ['-C', repo, 'commit', '-qm', 'Reset author baseline', '-m', 'Exact retained body.'],
+        { env: { ...process.env, GIT_AUTHOR_NAME: 'Historical Author', GIT_AUTHOR_EMAIL: 'old@example.com',
+          GIT_AUTHOR_DATE: '1999-02-03T04:05:06+0000', GIT_COMMITTER_DATE: '2001-01-01T00:00:00+0000' } });
+      if (operation !== 'extend') {
+        fs.appendFileSync(`${repo}/tracked.txt`, 'reset-author staged sentinel\n');
+        git('add', 'tracked.txt');
+      }
+      before = snapshot();
+      assert.equal(before.author, 'Historical Author <old@example.com>', `${name} historical identity`);
+      assert.equal(before.authorTime, Date.parse('1999-02-03T04:05:06Z') / 1000, `${name} historical date`);
+      assert.equal(before.index === before.tree, operation === 'extend', `${name} staged fixture`);
+      const started = Math.floor(Date.now() / 1000);
+      const opened = openedDrafts.length;
+      const notes = draftNotes.length;
+      const messages = draftMessages.length;
+      await action(selection, name, '-R');
+      let close = {};
+      if (operation === 'extend') {
+        await waitFor(() => draftMessages.slice(messages).some((message) => /Committed/.test(message.text))
+          && git('rev-parse', 'HEAD') !== before.head, 'reset-author clean Extend completed');
+        assert.equal(openedDrafts.length, opened, 'reset-author Extend opens no editor');
+        assert.equal(draftNotes.length, notes, 'reset-author Extend sends no editor document traffic');
+        assert.equal(store.drafts.size, 0);
+      } else {
+        record = await draft(name);
+        close = await savedClose(record, before, name);
+      }
+      const finished = Math.floor(Date.now() / 1000);
+      const after = snapshot();
+      replaced(before, after, operation === 'reword' ? before.tree : before.index,
+        before.message, operation !== 'amend');
+      assert.equal(after.author, 'Test <test@example.com>', `${name} current identity`);
+      assert(after.authorTime >= started && after.authorTime <= finished, `${name} current author date`);
+      if (operation === 'amend') assert(after.committerTime >= started && after.committerTime <= finished,
+        'Amend updates rather than preserves the committer date');
+      assert.equal(after.porcelain, operation === 'reword' ? before.porcelain : '', `${name} index status`);
+      await recordCase(name, before, { ...close, started, finished, openedDrafts: openedDrafts.length - opened },
+        resetAuthorCases);
+    }
+    assert.equal(resetAuthorCases.length, 3, 'all three native reset-author cases completed');
     fs.writeFileSync(`${evidence}/head-operations-evidence.json`, JSON.stringify({
-      gate: 'R-EDIT-REAL HEAD operations', status: 'pass', baseline, cases, screenshots,
+      gate: 'R-EDIT-REAL HEAD operations', status: 'pass', baseline, cases, resetAuthorCases, screenshots,
       trace: 'head-operations-trace.json',
     }, null, 2));
-    console.log(`PASS native HEAD operations (${cases.length} exact repository-state cases)`);
+    console.log(`PASS native HEAD operations (${cases.length} exact state cases, ${resetAuthorCases.length} reset-author cases)`);
   } finally {
     observer.dispose();
     persist();

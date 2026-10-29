@@ -92,9 +92,9 @@ staged index. Extend/Reword preserve the historical committer date. Existing
 typed execution and published-HEAD capture are reused without lifecycle changes.
 
 `cargo test --test commands --test commit_preflight --test editor_bridge --test menu --test menus && git diff --check`
-passed (79 Rust tests). Focused native `-R` checks in **both** clients remain
-pending; earlier native evidence below does not establish reset-author success.
-The review and feature parent checkboxes remain unchecked. Previously reported
+passed (79 Rust tests). Focused native `-R` follow-up is recorded below;
+the earlier native evidence alone does not establish reset-author success.
+The feature parent checkboxes remain unchecked. Previously reported
 phase failures in errors/log_commands/views and six full-UI scenarios are outside
 this slice; this is not a full-suite success claim.
 
@@ -253,3 +253,88 @@ The suite deactivated its client and the runner terminated its owned host;
 process inspection found no remaining magit-lsp or owned host. Only this focused
 slice is complete: parent HEAD-edit and R-EDIT-REAL remain unchecked until phase
 gates. Inherited release/license work is untouched. No full-suite claim is made.
+
+## Native reset-author follow-up (2026-10-29)
+
+The focused scenario now types `- R` then Reword in Neovim. A nonempty
+historical commit has a real parent and author `Historical Author
+<old@example.com>` dated `1999-02-03T04:05:06Z`. A separate staged sentinel
+makes the index genuinely different from HEAD's tree. Saving the unchanged
+real COMMIT_EDITMSG leaves HEAD unchanged; native `:q` completes it. Exact
+message, tree, index tree and entries, worktree hash, porcelain, parents/count
+and historical committer date remain unchanged; HEAD and author identity/date
+change. Each field has an individual diagnostic, and the full before/after
+state is retained as `reset-author-evidence.json` beside the native snapshots.
+The expected current identity/date comes from `git var GIT_AUTHOR_IDENT` in
+the fixture environment: **Test User**, `test@example.com`, **2000-01-01**.
+This deterministic worker date is not the wall clock or the historical date.
+
+The VSCode helper types the real QuickPick's `- R` activation steps for each
+of Amend, clean Extend and staged Reword. Its historical author/date fixture
+is the same; the current identity is **Test <test@example.com>** and current
+author timestamps are bounded by the operation's start/end wall-clock seconds.
+Amend updates the committer timestamp; Extend/Reword preserve 2001's timestamp.
+All three retain exact message/parents/count, index entries and worktree;
+Amend consumes the staged tree, clean Extend opens no editor or draft traffic,
+and Reword retains the original HEAD tree and different staged index. Amend
+and Reword save and close actual native file tabs, asserting save alone does
+not commit and exactly one `saved-file` confirmation completes each operation.
+The existing Rust matrix supplies all three actions' staged/clean/unstaged
+coverage; this follow-up changes no production paths.
+
+**Failed-attempt diagnosis:** the inherited reset-author Amend assertion
+incorrectly expected `Test` (Neovim's fixture is `Test User`) and preserved
+committer date (only Extend/Reword promise preservation). Earlier empty-commit
+fixtures and sole-window native `:q` also prevented acceptance; the nonempty
+fixture and real extra window are retained. The first diagnostic Reword run
+reached successful `Committed: Reset author baseline` but correctly rejected
+a wall-clock author-date expectation: the Neovim server inherits the harness's
+fixed 2000 author date. Expectations now assert that exact configured current
+date rather than merely checking inequality. No production workaround,
+timeout increase, sleeps, ring or lifecycle changes were introduced.
+
+A subsequent run passed all native state assertions but the VSCode launcher
+rejected an evidence schema with eleven entries: it requires exactly the eight
+original `cases`. The helper now retains those unchanged and records the three
+additional cases in `resetAuthorCases` in both JSON files, asserting all three
+completed before publishing `status: pass`. The launcher and its completion
+gate were not weakened or modified.
+
+### Final retained pass
+
+The exact ticket command exited **0**:
+
+```sh
+cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
+```
+
+Neovim reported `1 PASS, 0 XFAIL, 0 FAIL` across standard/vim and 100x30/80x24.
+Inspected all four variants' `reset-author-{option,saved,result}.screen` and
+`reset-author-evidence.json` in `build/ui/commit-head-operations/`. Screens show
+`--reset-author [x]`, the saved real COMMIT_EDITMSG, successful Committed feedback
+and the retained staged sentinel. JSON records author timestamp **946684800**,
+committer date **2001-01-01T00:00:00Z**, count **3**, and replacement
+`cb4bb50bb0710e159fe171b007b0364706ed30ce` →
+`ec298d2840631a77c1597ec3c57efe434346a62a` in every variant.
+
+VSCode evidence is retained at `/tmp/opencode/vscode-review-nmM2OM/`:
+`head-operations-evidence.json` has `status: pass`, eight original `cases`,
+three `resetAuthorCases` and 39 named screenshots; the trace retains native
+requests ending in `-, R, a, -, R, e, -, R, w` and saved-file confirmations.
+Inspected current `head-reset-author-amend-saved.png`,
+`head-reset-author-extend-menu.png`, and
+`head-reset-author-reword-{saved,status}.png`: the real saved subject/body,
+reset-author **on**, and retained Reword staging are visible. Old cancellation
+failure toasts remain visible from the deliberately aborted earlier case;
+they are not this operation's outcome. JSON proves current author timestamps
+**1793251564**, **1793251567**, **1793251569**, each within its operation bounds;
+all counts remain **3**. Result HEADs are respectively
+`e423229c80226c5359bf0a1028f383c14bdafaeb`,
+`a64e3f6d2e9a6bd82db8e6911453ec6f5cb3a10c`, and
+`15d63d0dd6bf9ba1e9bf13db0eb9233d58245058`.
+
+Process inspection after completion found no owned tmux/Neovim sessions,
+release/debug magit-lsp servers or this isolated VSCode host. Rust acceptance
+from `9002cbd` is reused; no unrelated suite or production change was needed.
+The reset-author review is complete; HEAD-edit/real-file feature parents and
+broad phase gates remain unchecked. Inherited release/license edits are preserved.
