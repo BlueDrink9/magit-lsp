@@ -55,6 +55,8 @@ pub struct PlainDocument {
     snapshots: VecDeque<Snapshot>,
     snapshot_limit: usize,
     in_flight: Option<InFlight>,
+    /// A rejected target is not retried until the client or render advances.
+    rejected: Option<([u8; 32], [u8; 32])>,
     next_id: u64,
 }
 
@@ -64,7 +66,7 @@ impl PlainDocument {
         Self {
             uri: uri.into(), encoding, document_changes,
             state: DocumentState::Detached, authoritative: None, client: None,
-            snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, next_id: 0,
+            snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, rejected: None, next_id: 0,
         }
     }
 
@@ -79,6 +81,7 @@ impl PlainDocument {
     /// Record an authoritative render and start an edit if the client is ready.
     pub fn render(&mut self, text: impl Into<String>) -> Option<ApplyEdit> {
         self.authoritative = Some(self.snapshot_for(text.into(), 0));
+        self.rejected = None;
         self.prepare()
     }
 
@@ -86,6 +89,7 @@ impl PlainDocument {
     pub fn open(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
         self.in_flight = None;
         self.client = Some(self.snapshot_for(text.into(), version));
+        self.rejected = None;
         self.state = DocumentState::Ready;
         self.prepare()
     }
@@ -96,6 +100,7 @@ impl PlainDocument {
         let text = text.into();
         let observed = self.snapshot_for(text, version);
         self.client = Some(observed.clone());
+        self.rejected = None;
         if let Some(flight) = self.in_flight.as_mut() {
             flight.echoed = flight.target.hash == observed.hash;
             flight.diverged |= !flight.echoed;
@@ -115,6 +120,9 @@ impl PlainDocument {
         if flight.request.id != id { return None; }
         flight.response = Some(applied);
         if !applied {
+            if !flight.diverged {
+                self.rejected = Some((flight.target.hash, self.client.as_ref().map_or([0; 32], |client| client.hash)));
+            }
             self.in_flight = None;
             self.state = DocumentState::Ready;
             return self.prepare();
@@ -132,6 +140,7 @@ impl PlainDocument {
         self.state = DocumentState::Detached;
         self.client = None;
         self.in_flight = None;
+        self.rejected = None;
     }
 
     fn snapshot_for(&mut self, text: String, version: i32) -> Snapshot {
@@ -147,6 +156,10 @@ impl PlainDocument {
         if self.state == DocumentState::Detached || self.in_flight.is_some() { return None; }
         let (Some(authoritative), Some(client)) = (&self.authoritative, &self.client) else { return None; };
         if authoritative.hash == client.hash {
+            self.state = DocumentState::Ready;
+            return None;
+        }
+        if self.rejected == Some((authoritative.hash, client.hash)) {
             self.state = DocumentState::Ready;
             return None;
         }

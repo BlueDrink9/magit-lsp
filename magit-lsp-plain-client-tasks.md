@@ -539,8 +539,17 @@ coverage, not actual-binary acceptance.
 
 **Still pending for R-PLAIN-RENDER:** ordinary didOpen bootstrap of the resolved
 Session/status Tree, transport wiring and standard applyEdit delivery, and
-actual-binary runtime tests. Keep the parent unchecked until those acceptance
-gates pass.
+actual-binary runtime tests. Repeated `applied:false` for an unchanged
+authoritative/client snapshot is held inert to avoid an unbounded retry loop;
+a fresh client change or new render makes the controller eligible again. This
+does not implement or test server transport. Remaining concrete gates are to
+connect recognized didOpen to the safely resolved repository and status Tree,
+feed accepted sequential DocStore changes plus apply responses to controllers
+with close/reopen/disconnect incarnation checks, and add actual-binary fake
+editor tests for request/echo ordering, stale rejection, coalescing, detach and
+the capability/encoding/newline profiles. Keep the parent unchecked until those
+runtime acceptance gates pass; controller profile loops are not live transport
+tests.
 
 - **Target Files:** `src/presentation/plain.rs` (new), `src/diff_text.rs`, `src/session.rs`, `tests/plain_render.rs` (new).
 - **Reference Files:** the handoff's state-machine and applyEdit results; TASKS §3.3.
