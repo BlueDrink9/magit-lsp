@@ -274,7 +274,7 @@ fn positional_requests_return_null_in_text_mode() {
         .modify_standard()
         .build();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
-    server.initialize(json!({"keymapDelivery": "dynamic"}));
+    server.initialize_rich(json!({}));
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -456,7 +456,7 @@ fn static_clients_receive_mode_metadata_without_dynamic_keymaps() {
         .modify_standard()
         .build();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::LEVEL_ENV, "warn")]);
-    server.initialize(json!({"keymapDelivery": "static"}));
+    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"static","modifiers":"full","render":"edits","layout":["main"],"effects":[],"prompts":[],"folds":"server"}}}));
     server.send(json!({"jsonrpc":"2.0","id":2,"method":"view/open","params":{"kind":"status","args":{"repo_path":tmp.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
     let opened = server.response_with_id(2);
     let view_id = opened["result"]["id"].as_str().unwrap().to_string();

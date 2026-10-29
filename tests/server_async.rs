@@ -1090,7 +1090,7 @@ fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
     let config = config_path.to_string_lossy().to_string();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
-    server.initialize(json!({"keymapDelivery": "static"}));
+    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"static","modifiers":"full","render":"edits","layout":["main"],"effects":[],"prompts":[],"folds":"server"}}}));
 
     server.send(open_view_message(2, &repo));
     let opened = server.response_with_id(2);
@@ -1139,7 +1139,7 @@ fn forward_all_passes_through_unbound_keys_and_dispatches_bound_keys() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({"keymapDelivery": "forwardAll"}));
+    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"forwardAll","modifiers":"full","render":"edits","layout":["main"],"effects":[],"prompts":[],"folds":"server"}}}));
     server.send(open_view_message(2, &repo));
     let opened = server.response_with_id(2);
     let view_id = opened["result"]["id"]

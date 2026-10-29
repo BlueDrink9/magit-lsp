@@ -96,8 +96,17 @@ end
 ---@return table
 function M.client_capabilities()
   local capabilities = vim.lsp.protocol.make_client_capabilities()
-  capabilities.keymapDelivery = 'dynamic'
-  capabilities.keyModifiers = M.key_modifiers()
+  capabilities.experimental = capabilities.experimental or {}
+  capabilities.experimental.magit = {
+    v = 1,
+    keys = 'dynamic',
+    modifiers = M.key_modifiers(),
+    render = 'edits',
+    layout = { 'main', 'side', 'bottom', 'float' },
+    effects = { 'visitFile', 'editDocument', 'clipboard' },
+    prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
+    folds = 'server',
+  }
   capabilities.prompts = true
   capabilities.placements = { 'main', 'side', 'bottom', 'float' }
   capabilities.editorBridge = false

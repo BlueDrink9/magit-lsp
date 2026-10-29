@@ -29,7 +29,7 @@ Direction is relative to the language server. Custom capabilities are client pre
 
 | Method | Direction / JSON-RPC kind | Result or purpose |
 |---|---|---|
-| `initialize` | client → server request (standard) | Standard initialize result/capabilities. Custom client preferences are `params.capabilities.keymapDelivery` (`dynamic` default, `static`, `forwardAll`) and `params.capabilities.keyModifiers` (`full` default, `basic`); profile is in initialization options in both bundled clients. Modifiers are currently parsed/logged, not a negotiated filtering guarantee. |
+| `initialize` | client → server request (standard) | `capabilities.experimental.magit` declares rich v1; absence selects Plain. Key preferences are `keys` and `modifiers` inside that block. Profile remains in initialization options. |
 | `initialized` | client → server notification | Standard lifecycle. |
 | `shutdown` / `exit` | client → server request / notification | Standard lifecycle; pending drafts/processes are cancelled on connection shutdown/disconnect. |
 | `workspace/didChangeConfiguration` | client → server notification | Triggers configuration reload; do not assume its settings payload is ingested. |
@@ -176,7 +176,7 @@ Presentation differs: Neovim displays rendered menu buffers; VS Code may present
 The following is an abridged illustrative exchange (IDs/text are illustrative). The initialize response and keymap are abridged; the keymap bindings are valid JSON examples only and are not an installable complete map:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1234,"rootUri":"file:///work/project","capabilities":{"window":{"workDoneProgress":true},"textDocument":{"synchronization":{"dynamicRegistration":false,"didSave":true}},"keymapDelivery":"dynamic","keyModifiers":"full","experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"full","render":"edits","layout":["main"],"effects":["visitFile"],"prompts":["confirm"],"folds":"server"}}},"initializationOptions":{"profile":"standard"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":1234,"rootUri":"file:///work/project","capabilities":{"window":{"workDoneProgress":true},"textDocument":{"synchronization":{"dynamicRegistration":false,"didSave":true}},"experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"full","render":"edits","layout":["main"],"effects":["visitFile"],"prompts":["confirm"],"folds":"server"}}},"initializationOptions":{"profile":"standard"}}}
 {"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"window":{"workDoneProgress":true}}}}
 {"jsonrpc":"2.0","method":"initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"view/open","params":{"kind":"status","args":{"repo_path":"/work/project"},"placement":"main","viewport":{"cols":80,"rows":24}}}

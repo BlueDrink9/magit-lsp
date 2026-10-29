@@ -3,6 +3,7 @@ use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
 use crate::protocol::*;
+use crate::presentation::{negotiate, Presentation};
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
 use crate::session::{Execution, InvokeResult, PublishedViews, Session};
@@ -91,9 +92,12 @@ pub struct ServerOptions {
 }
 
 /// Client capabilities that affect key delivery (§3.9).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ClientCaps {
     delivery: KeymapDelivery,
+    key_modifiers: KeyModifiers,
+    /// Selected presentation recorded from initialize; routing is a later slice.
+    presentation: Option<Presentation>,
     close_confirms: bool,
     work_done_progress: bool,
     encoding: Encoding,
@@ -103,6 +107,8 @@ impl Default for ClientCaps {
     fn default() -> Self {
         Self {
             delivery: KeymapDelivery::Dynamic,
+            key_modifiers: KeyModifiers::Full,
+            presentation: None,
             close_confirms: true,
             work_done_progress: false,
             encoding: Encoding::Utf16,
@@ -1688,13 +1694,22 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     match request.method.as_str() {
         "initialize" => {
             let mut notifications = Vec::new();
-            let (delivery, key_modifiers) = parse_client_capabilities(&params);
+            let presentation = negotiate(&params).map_err(|error| Error::new(error.to_string()))?;
+            let (delivery, key_modifiers) = match &presentation {
+                Presentation::Rich(rich) => (
+                    KeymapDelivery::parse(&rich.keys),
+                    KeyModifiers::parse(&rich.modifiers),
+                ),
+                Presentation::Plain(_) => (KeymapDelivery::Dynamic, KeyModifiers::Full),
+            };
             {
                 let mut client = shared
                     .client
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
+                client.key_modifiers = key_modifiers;
+                client.presentation = Some(presentation);
                 client.encoding = params
                     .pointer("/capabilities/general/positionEncodings")
                     .and_then(Value::as_array)
@@ -2432,22 +2447,6 @@ fn progress_token(value: &Value) -> Option<String> {
         .as_str()
         .map(str::to_string)
         .or_else(|| value.as_u64().map(|number| number.to_string()))
-}
-
-/// Read the key-delivery capabilities a client declared in `initialize`.
-fn parse_client_capabilities(params: &Value) -> (KeymapDelivery, KeyModifiers) {
-    let caps = params.get("capabilities");
-    let delivery = caps
-        .and_then(|caps| caps.get("keymapDelivery"))
-        .and_then(Value::as_str)
-        .map(KeymapDelivery::parse)
-        .unwrap_or_default();
-    let modifiers = caps
-        .and_then(|caps| caps.get("keyModifiers"))
-        .and_then(Value::as_str)
-        .map(KeyModifiers::parse)
-        .unwrap_or_default();
-    (delivery, modifiers)
 }
 
 fn error_response(id: lsp_server::RequestId, err: Error) -> Response {

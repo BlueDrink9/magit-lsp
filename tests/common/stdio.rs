@@ -166,6 +166,18 @@ impl TestServer {
         self.response_with_id(1)
     }
 
+    /// Initialize with the bundled rich client's supported v1 declaration.
+    pub fn initialize_rich(&mut self, mut capabilities: Value) -> Value {
+        capabilities["experimental"]["magit"] = serde_json::json!({
+            "v": 1, "keys": "dynamic", "modifiers": "full", "render": "edits",
+            "layout": ["main", "side", "bottom", "float"],
+            "effects": ["visitFile", "editDocument", "clipboard"],
+            "prompts": ["confirm", "text", "choice", "multiChoice", "secret"],
+            "folds": "server"
+        });
+        self.initialize(capabilities)
+    }
+
     /// Enable automatic responses for progress-create requests in this client.
     pub fn auto_respond_to_progress_create(&mut self) {
         self.auto_respond_progress_create = true;

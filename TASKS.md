@@ -410,7 +410,7 @@ combine them:
 
 **Terminal limits:** many terminals cannot distinguish `ctrl+Enter`,
 `ctrl+shift+<letter>`, or `shift+Enter` from their plain forms. Clients report
-`keyModifiers: "full" | "basic"` in `initialize`. Profiles (§5) avoid these
+`keyModifiers: "full" | "basic"` in the versioned rich declaration during `initialize`. Profiles (§5) avoid these
 combinations in the `vim` profile; `standard` assumes a GUI editor.
 
 ### 3.9 Keybinding architecture
@@ -1133,7 +1133,7 @@ replacements land.
 
 | Method | Params | Returns |
 | --- | --- | --- |
-| `initialize` (current wire) | `clientInfo`, current preferences `keymapDelivery` and `keyModifiers`; `profile?`, `viewport`. Adopted target selector is solely `capabilities.experimental.magit` (absent Plain, present rich); `initializationOptions.presentation` is rejected/obsolete current intent, not the selector. | server capabilities |
+| `initialize` | `clientInfo`; rich clients declare `capabilities.experimental.magit` v1. Absence selects Plain. `profile?` remains in initializationOptions. | server capabilities |
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
