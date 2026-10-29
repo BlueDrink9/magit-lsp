@@ -65,11 +65,12 @@ keys: g g d G i "Recovered failed close"
 keys: Escape
 keys: :write Enter
 sh: mv .git/COMMIT_EDITMSG .git/draft-original; printf 'sentinel\n' > .git/draft-sentinel; ln -s draft-sentinel .git/COMMIT_EDITMSG
+keys: ":lua local r=require('magit-lsp.view').current(); _G.failed_close_run=r.id; _G.failed_close_version=r.version" Enter
 keys: :bdelete Enter
 wait screen contains "commit draft:"
 snapshot: failed-close-retained
 sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
-keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r.sync_error and vim.bo[r.buf].modifiable and r.text=='Recovered failed close\n'); print('Recoverable draft retained')" Enter
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r.sync_error and vim.bo[r.buf].modifiable and r.text=='Recovered failed close\n'); assert(r.id==_G.failed_close_run and r.version==_G.failed_close_version); assert(vim.fn.maparg('q','n')~=''); print('Recoverable draft retained')" Enter
 wait screen contains "Recoverable draft retained"
 snapshot: recovery-text
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(cat .git/draft-sentinel)" = sentinel; rm .git/COMMIT_EDITMSG; mv .git/draft-original .git/COMMIT_EDITMSG

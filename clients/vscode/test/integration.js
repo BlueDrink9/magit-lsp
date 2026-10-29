@@ -429,11 +429,17 @@ async function run() {
     const unsent = 'exact unsent message\n\nbody ü\n';
     draft.document.replaceText(unsent);
     await waitFor(() => draft.text === unsent && !draft.flushQueued, 'synchronized native text');
+    const recoveryVersion = draft.version;
+    await require('../lib/drafts').open({ ...draft.effect, version: recoveryVersion,
+      text: 'older server snapshot must not replace local edits' }, draft.baseViewId);
+    assert.equal(draft.document.getText(), unsent, 'same-run presentation preserves native text');
+    assert.equal(draft.version, recoveryVersion, 'same-run presentation never resets synchronization');
     const sendRequest = client.sendRequest.bind(client);
     const finishCount = client.requests.filter((request) => request.method === 'workspace/executeCommand').length;
     client.sendNotification('textDocument/didChange', { textDocument: { uri: draft.effect.uri,
       version: draft.version }, contentChanges: [{ text: 'stale text must not replace native text' }] });
-    await waitFor(() => draft.syncError, 'readable version error');
+    await waitFor(() => vscode.__test.messages.some((notice) => notice.level === 'error'
+      && notice.text.includes('stale or duplicated')), 'readable version error');
     assert.equal(draft.document.getText(), unsent, 'sync errors retain native text');
     assert.equal(client.requests.filter((request) => request.method === 'workspace/executeCommand').length, finishCount);
     await assert.rejects(sendRequest('workspace/executeCommand', { command: 'magit.command', arguments: [{
@@ -441,11 +447,13 @@ async function run() {
       version: draft.version, source: 'synchronized', text: 'not a second text channel',
     }] }));
     await draft.document.save();
-    assert.equal(draft.syncError, undefined, 'retry resynchronizes above the rejected version');
+    assert.equal(draft.syncError, undefined, 'rejected duplicate leaves accepted text/version usable');
     draft.document.replaceText('explicit confirmed text\n');
     await invokeGenerated('common.confirm');
     await idle();
     assert.equal(subject(), 'explicit confirmed text');
+    await require('../lib/drafts').open(draft.effect, draft.baseViewId);
+    assert(!draftStore.drafts.has(draft.runId), 'late presentation cannot resurrect a terminal run');
 
     // Dirty close Save/Discard/Cancel is exercised by the fake editor harness.
     draft = await startDraft();

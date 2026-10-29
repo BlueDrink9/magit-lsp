@@ -8,7 +8,7 @@
 //! Three parties share [`EditRegistry`] through a process-global map keyed by
 //! opaque run: the worker that spawns Git (creates the entry), the socket
 //! listener (takes the reply receiver, sends `editDocument`, answers the
-//! helper) and the ordered draft/cancel handlers (validate and send the reply).
+//! helper) and the ordered confirmation/cancellation handlers (validate and reply).
 
 use crate::git::GitRepo;
 use crate::protocol::{EditDocumentMode, Effect};
@@ -257,6 +257,38 @@ impl EditRegistry {
     #[cfg(not(unix))]
     pub fn run_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {
         Err(Error::new("commit message editing requires Unix"))
+    }
+
+    /// Report rejected synchronization through existing effects, re-presenting
+    /// only the same still-pending run after a failed native close.
+    pub(crate) fn notification_failure(
+        &self, owner: &str, run_id: &str, uri: &str, message: String,
+        reopen: bool, emit: impl FnOnce(Vec<Effect>),
+    ) {
+        #[cfg(unix)]
+        {
+            let entries = self.lock();
+            let Some(entry) = entries.get(run_id) else { return; };
+            if entry.owner != owner || entry.draft.uri() != uri || entry.draft.is_terminal() { return; }
+            let mut effects = vec![Effect::message(crate::protocol::MessageLevel::Error,
+                format!("commit draft: {message}. Your text is retained; retry or abort explicitly."))];
+            if reopen {
+                if let Some(snapshot) = entry.draft.live() {
+                    let metadata = edit_document_metadata(COMMIT_MESSAGE_KIND);
+                    effects.push(Effect::EditDocument {
+                        run_id: run_id.to_string(), uri: uri.to_string(),
+                        text: snapshot.text().to_string(), version: snapshot.version(),
+                        kind: COMMIT_MESSAGE_KIND.to_string(), title: metadata.title.to_string(),
+                        mode: EditDocumentMode::RealFile, scope: metadata.scope.to_string(),
+                    });
+                }
+            }
+            // Queue while holding the lifecycle lock: terminal progress cannot
+            // overtake this recovery and resurrect an already-completed run.
+            emit(effects);
+        }
+        #[cfg(not(unix))]
+        let _ = (owner, run_id, uri, message, reopen, emit);
     }
 
     /// Retain only a validated submitted checkpoint, before Git's eventual result.

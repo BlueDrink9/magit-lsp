@@ -541,13 +541,48 @@ with regular-file, no-symlink/no-hardlink and owner checks. History remains
 in the bounded server ring; rich recall routes are removed and both history
 commands are planned under R-EDIT-HISTORY. Confirmation returns
 `{type:"confirmed",runId,uri,version}` after helper release, not Git success.
-`draft/error` recovery is deliberately unchanged pending the existing-effects
-recovery slice. Git owns
+Rejected sync is reported as a readable `Message` through `view/effects` without
+replacing local edits. Failed ordinary native close also re-presents the same
+pending `EditDocument` run/snapshot; Neovim restores its wiped native buffer,
+full-sync observer and keymaps with retained local text/version. No custom draft
+error notification remains. Git owns
 templates, cleanup, effective-empty behavior and hooks.
 
 This is an implementation/integration slice, **not parent R-EDIT-REAL native or
 adversarial acceptance**; that parent stays unchecked. The material below is the
 **archived pre-cutover managed-draft design**, not today's wire contract.
+
+- [x] **R-EDIT-REAL existing-effects recovery slice (2026-10-29).** Remove the
+  last obsolete draft error notification and both client handlers. Rejected
+  open/change reports a readable message without overwriting native edits;
+  failed saved-file native close re-presents only the same pending run through
+  existing effects. Recovery preserves local text/version, native full-sync and
+  keymaps, with retry/explicit abort and stale-run resurrection guards. Parent
+  R-EDIT-REAL remains unchecked.
+  - **Verification:** exact ticket command passed: `cargo test --test editor_bridge
+    --test editor_drafts --test server_async` (64 tests), `make test-lua`,
+    `make vscode-test` (unit/integration and generated bindings),
+    `scripts/ui run tests/ui/scenarios/commit-draft-close.scn` (1 PASS),
+    `MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_EDIT_ONLY=1
+    npm --prefix clients/vscode run test:e2e`, and `git diff --check`.
+    Stdio tests cover unreadable-file failed close retaining the same run/version,
+    then retry committing restored disk rather than unsaved synchronized text.
+    Lua covers recovered-buffer explicit abort; both client suites cover retained
+    edits/version and terminal-run re-presentation rejection.
+  - **Inspected native evidence:** `build/ui/commit-draft-close/{failed-close-retained,
+    recovery-text,recovered-close-committed}.screen` shows readable failure,
+    retained text and successful same-run retry; scenario assertions also check
+    restored keymaps/version. `/tmp/opencode/vscode-review-umgCTE/real-file-native-{evidence,
+    trace}.json` and `real-file-native-3-discard-dialog.png` retain production
+    Codium native Save/Don't Save/Cancel and all-group last-owned-tab evidence:
+    exactly one saved-file confirmation per run and exact saved subject/body,
+    never unsaved text. Additional inspected screenshots in the passing
+    `/tmp/opencode/vscode-review-vAMNxo/` run cover two groups and native Cancel.
+    No owned live UI/server remained after cleanup. No test deadline increased.
+  - Full regression is **not clean**: the inherited release baseline at fc47bcf
+    already failed `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details`
+    at line 477 (`build/test-logs/rust.EwFXOb`). This slice does not modify that
+    unrelated failure or claim `make test` passed.
 
 - [x] **R-EDIT-REAL implementation/integration slice.** Real file server/client
   cutover and focused integration verification; parent native/adversarial

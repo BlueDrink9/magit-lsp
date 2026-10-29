@@ -18,6 +18,8 @@ const { message } = require('./util');
 
 /** Maximum live or saved UTF-8 draft size (§3.10). */
 const MAX_BYTES = 1024 * 1024;
+// A late effect must not reopen a terminal run, even when its URI is reused.
+const seenRuns = new WeakMap();
 
 
 /**
@@ -558,18 +560,23 @@ async function cancel(record) {
  * @param {string|undefined} originViewId
  */
 async function open(effect, originViewId) {
-  if (!edit.isEditEffect(effect)) {
+  if (!Number.isInteger(effect?.version) || effect.version < 1
+    || !edit.isEditEffect({ ...effect, version: 1 })) {
     vscode.window.showErrorMessage('magit-lsp: invalid managed commit draft announcement; no document was opened.');
     return;
   }
   const existing = store.drafts.get(effect.runId);
   if (existing) {
-    if (live(existing)) {
+    if (existing.uri.toString() === effect.uri && live(existing) && !existing.disconnected) {
       await vscode.window.showTextDocument(existing.document, { preview: false });
       await setContext(edit.editingContext(existing.effect));
     }
     return;
   }
+  let seen = seenRuns.get(store.client);
+  if (!seen) { seen = new Set(); seenRuns.set(store.client, seen); }
+  if (seen.has(effect.runId) || effect.version !== 1 || store.draftUris.has(effect.uri)) return;
+  seen.add(effect.runId);
   const uri = vscode.Uri.parse(effect.uri);
   const record = {
     runId: effect.runId,
@@ -622,6 +629,7 @@ async function open(effect, originViewId) {
       .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
   } catch (error) {
     store.output.appendLine(`commit draft document failed: ${message(error)}`);
+    seen.delete(record.runId);
     store.drafts.delete(record.runId);
     store.draftUris.delete(uri.toString());
     store.activeDraftId = undefined;
@@ -673,22 +681,6 @@ function onChanged(event) {
   }
   record.document = event.document;
   scheduleFlush(record);
-}
-
-/**
- * Handle a server `draft/error` for the matching live draft.
- *
- * @param {{uri?: string, message?: string}} notice
- */
-function onError(notice) {
-  if (!notice || !notice.uri) {
-    return;
-  }
-  const runId = store.draftUris.get(notice.uri);
-  const record = runId ? store.drafts.get(runId) : undefined;
-  if (live(record)) {
-    fail(record, notice.message || 'the commit draft was rejected');
-  }
 }
 
 /**
@@ -798,7 +790,6 @@ exports.forUri = forUri;
 exports.handleInvoke = handleInvoke;
 exports.onChanged = onChanged;
 exports.onClosed = onClosed;
-exports.onError = onError;
 exports.onTabsChanged = onTabsChanged;
 exports.open = open;
 exports.save = save;

@@ -65,7 +65,7 @@ async function run() {
   const extension = vscode.extensions.getExtension('magit-lsp.magit-lsp');
   const requests = [];
   const draftNotes = [];
-  const draftErrors = [];
+  const draftMessages = [];
   const progressEvents = [];
   const sendNotification = LanguageClient.prototype.sendNotification;
   LanguageClient.prototype.sendNotification = function (method, params, ...rest) {
@@ -130,8 +130,8 @@ async function run() {
   };
   const onNotification = LanguageClient.prototype.onNotification;
   LanguageClient.prototype.onNotification = function (method, handler, ...rest) {
-    if (method === 'draft/error') return onNotification.call(this, method, (params) => {
-      draftErrors.push(params);
+    if (method === 'view/effects') return onNotification.call(this, method, (params) => {
+      draftMessages.push(...(params.effects || []).filter((effect) => effect.type === 'message'));
       return handler(params);
     }, ...rest);
     if (method !== 'view/render') {
@@ -1699,7 +1699,7 @@ async function run() {
     await draftStore.client.sendNotification('textDocument/didChange', {
       textDocument: { uri: recoveryUri, version: record.version }, contentChanges: [{ text: 'stale update' }],
     });
-    await waitFor(() => record.syncError && draftErrors.some((error) => error.uri === recoveryUri), 'native readable version error');
+    await waitFor(() => draftMessages.some((effect) => effect.text.includes('stale or duplicated')), 'native readable version error');
     assert.equal(recoveryEditor.document.getText(), unsent);
     shot('r-edit-5-version-error-preserves-text.png');
     assert(await recoveryEditor.document.save(), 'native retry checkpoint succeeds');
@@ -1710,7 +1710,7 @@ async function run() {
     await progressIdle();
     assert.equal(subject(), 'native explicit confirm');
     cases.push({ name: 'version-recovery-confirm', head: head(),
-      errors: draftErrors.slice(), unsent });
+      messages: draftMessages.slice(), unsent });
     shot('r-edit-5-confirmed.png');
 
     // The draft can remain open while status commands go to the status view.
@@ -1761,7 +1761,7 @@ async function run() {
     assert.equal(editor.document.uri.scheme, 'magit', 'status remains the read-only content provider');
     fs.writeFileSync(`${evidence}/r-edit-5-evidence.json`, JSON.stringify({
       gate: 'R-EDIT-REAL', cases, requests: requests.filter((request) =>
-        request.method.startsWith('draft/') || request.method === 'workspace/executeCommand'),
+        request.method === 'workspace/executeCommand'),
       notes: draftNotes, progress: progressEvents,
       closeIntent: 'Actual last-owned-tab closure confirms saved disk; explicit confirm validates synchronized version.',
     }, null, 2));

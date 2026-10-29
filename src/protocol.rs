@@ -57,7 +57,9 @@ pub enum Effect {
         line: u32,
         column: u32,
     },
-    /// Open Git's real commit-message file, with full-sync document validation.
+    /// Open Git's real commit-message file, or re-present the same pending run
+    /// after failed native close. New runs start at version 1; recovery carries
+    /// the accepted snapshot and must not replace retained client edits/versions.
     EditDocument {
         #[serde(rename = "runId")]
         run_id: String,

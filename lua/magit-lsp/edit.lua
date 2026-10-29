@@ -3,6 +3,8 @@ local view = require('magit-lsp.view')
 local hooks = require('magit-lsp.hooks')
 local M = {}
 local progress = {}
+-- Remember announcements after terminal teardown; file URIs can be reused.
+local seen = {}
 local attach
 
 local function live(record)
@@ -155,28 +157,6 @@ function M.on_closed(record)
   notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
 end
 
---- Display a readable sync rejection while preserving native user text.
----@param notice table
----@param client_id integer
-function M.on_error(notice, client_id)
-  for _, record in pairs(view.views) do
-    if record.document and record.client_id == client_id and record.uri == notice.uri then
-      if record.detached and not vim.api.nvim_buf_is_valid(record.buf) then
-        local value, saved, version = record.text, record.saved_text, record.saved_version
-        record.win = M.place(record)
-        record.saved_text, record.saved_version = saved, version
-        replace(record, value)
-        vim.bo[record.buf].filetype = 'gitcommit'
-        vim.bo[record.buf].modified = true
-        record.detached = false
-        attach(record)
-        view.apply_keymap(record.keymap, record.client_id)
-      end
-      fail(record, notice.message)
-    end
-  end
-end
-
 --- Retain disconnected drafts as editable recovery buffers, with no finish path.
 ---@param client_id integer
 function M.disconnected(client_id)
@@ -254,17 +234,44 @@ function M.open(effect, source)
   if type(effect) ~= 'table' or effect.mode ~= 'realFile'
     or type(effect.runId) ~= 'string' or type(effect.uri) ~= 'string'
     or not effect.uri:match('^file://.*/COMMIT_EDITMSG$') or type(effect.text) ~= 'string'
-    or effect.version ~= 1 or effect.kind ~= 'commit-message' then return nil end
+    or type(effect.version) ~= 'number' or effect.version < 1
+    or effect.version % 1 ~= 0 or effect.kind ~= 'commit-message' then return nil end
   source = source and source.key and source or view.last_for_client(source and source.client_id)
   local base = source and (source.document and source.base or source.key)
   local existing = view.find(effect.runId, source and source.client_id)
-  if existing then view.focus(existing.key); return existing end
+  if existing then
+    if existing.uri ~= effect.uri or existing.closing or existing.disconnected then return nil end
+    if existing.detached and not vim.api.nvim_buf_is_valid(existing.buf) then
+      local value, saved, version = existing.text, existing.saved_text, existing.saved_version
+      existing.win = M.place(existing)
+      existing.saved_text, existing.saved_version = saved, version
+      replace(existing, value)
+      vim.bo[existing.buf].filetype = 'gitcommit'
+      vim.bo[existing.buf].modified = true
+      existing.detached = false
+      existing.generation = (existing.generation or 0) + 1
+      existing.busy = false
+      existing.sync_error = 'saved-file close failed'
+      attach(existing)
+      view.apply_keymap(existing.keymap, existing.client_id)
+    end
+    view.focus(existing.key)
+    return existing
+  end
+  local identity = tostring(source and source.client_id) .. ':' .. effect.runId
+  if seen[identity] or effect.version ~= 1 then return nil end
+  for _, record in pairs(view.views) do
+    if record.document and record.uri == effect.uri and record.client_id == (source and source.client_id) then
+      return nil
+    end
+  end
   local record = view.open_document(effect, {
     placement = 'edit', filetype = 'gitcommit', client_id = source and source.client_id,
     root = source and source.root, base = base,
     keymap_options = keymap_options, on_closed = M.on_closed,
   })
   if not record then return nil end
+  seen[identity] = true
   record.progress_token = progress[record.client_id]
   notify(record, 'textDocument/didOpen', { textDocument = {
     uri = record.uri, languageId = 'gitcommit', version = record.version, text = record.text,

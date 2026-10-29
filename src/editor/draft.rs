@@ -214,7 +214,7 @@ impl Draft {
     }
 
     /// Confirm exact live-version writeback, or independently read saved disk text
-    /// on close. Read/write failure retains all draft/helper state for retry.
+    /// on close. Read/write failure retains the draft and helper for retry.
     pub fn finish(
         &mut self,
         context: DraftContext<'_>,

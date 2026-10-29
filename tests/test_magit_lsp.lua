@@ -2451,13 +2451,21 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     BARRIERS = {}
     DOC = OPEN_DRAFT('rejected-sync', 'before')
     vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'newer local text' })
-    EDIT.confirm(DOC.key)
-    EDIT.on_error({ uri = DOC.uri, version = 2, message = 'sync rejected' }, DOC.client_id)
-    ACK(1, 'confirmed')
-    BLOCKED_FINISH = #BARRIERS == 1 and VIEW.current() == DOC
-      and DOC.sync_error == 'sync rejected' and vim.bo[DOC.buf].modifiable
+    EDIT.flush(DOC)
+    local version = DOC.version
+    local effect = { mode = 'realFile', runId = DOC.id, uri = DOC.uri, version = version,
+      kind = 'commit-message', text = 'server snapshot' }
+    EDIT.open(effect, VIEW.views[DOC.base])
+    BLOCKED_FINISH = VIEW.current() == DOC and DOC.text == 'newer local text'
+      and DOC.version == version and vim.bo[DOC.buf].modifiable
     vim.api.nvim_buf_delete(DOC.buf, { force = true })
     AMBIGUOUS_CANCEL = SYNCS[#SYNCS][1] == 'textDocument/didClose'
+    EDIT.open(effect, VIEW.views[DOC.base])
+    BLOCKED_FINISH = BLOCKED_FINISH and vim.api.nvim_buf_is_valid(DOC.buf)
+      and DOC.text == 'newer local text' and DOC.version == version
+      and vim.bo[DOC.buf].modifiable and DOC.sync_error ~= nil
+    EDIT.cancel(DOC.key)
+    BLOCKED_FINISH = BLOCKED_FINISH and EDIT.open(effect, VIEW.views[DOC.base]) == nil
   ]])
   child.lua([[CHECK_WINDOW(false)]])
   child.lua([[
@@ -2493,7 +2501,9 @@ T['native commit buffer close refuses dirty text and recovers a rejected saved c
     assert(vim.uv.fs_symlink(PATH .. '.original', PATH))
     vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'recover unsaved text' })
     vim.cmd('bdelete!')
-    assert(vim.wait(5000, function() return DOC.sync_error ~= nil end, 10))
+    assert(vim.wait(5000, function() return DOC.sync_error ~= nil end, 10),
+      vim.inspect({ detached = DOC.detached, valid = vim.api.nvim_buf_is_valid(DOC.buf),
+        version = DOC.version, messages = vim.fn.execute('messages') }))
     assert(VIEW.current() == DOC and vim.api.nvim_buf_is_valid(DOC.buf))
     assert(vim.bo[DOC.buf].modifiable and vim.bo[DOC.buf].modified)
     assert(vim.api.nvim_buf_get_lines(DOC.buf, 0, -1, false)[1] == 'recover unsaved text')

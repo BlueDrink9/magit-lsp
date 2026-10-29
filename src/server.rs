@@ -927,12 +927,16 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 "textDocument/didOpen" | "textDocument/didChange" | "textDocument/didClose" => {
                     let uri = notification.params.pointer("/textDocument/uri").and_then(Value::as_str).unwrap_or("");
-                    if editor::registry().run_for_uri(&shared.draft_owner, uri).is_ok() {
+                    if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                         if let Err(error) = draft_notification(&shared, &notification) {
-                            let _ = sender.send(Message::Notification(Notification::new("draft/error".to_string(), serde_json::json!({
-                                "uri": uri, "version": notification.params.pointer("/textDocument/version"),
-                                "method": notification.method, "message": error.to_string(), "recoverable": true,
-                            }))));
+                            editor::registry().notification_failure(
+                                &shared.draft_owner, &run, uri, error.to_string(),
+                                notification.method == "textDocument/didClose", |effects| {
+                                    let _ = sender.send(Message::Notification(Notification::new(
+                                        VIEW_EFFECTS.to_string(), ViewEffectsParams { effects },
+                                    )));
+                                },
+                            );
                         }
                     }
                 }

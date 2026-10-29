@@ -456,10 +456,12 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     assert!(draft_request(&mut server, 20, "draft/finish", &edit, 9, Some("normal-close"))["error"].is_object());
     change_draft(&mut server, &edit, 12, "Late terminal text\n");
     assert!(draft_request(&mut server, 21, "draft/save", &edit, 12, None)["error"].is_object());
-    let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "draft/error").collect();
+    let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "view/effects")
+        .flat_map(|n| n["params"]["effects"].as_array().into_iter().flatten())
+        .filter(|effect| effect["type"] == "message" && effect["text"].as_str().unwrap_or("").contains("commit draft:"))
+        .collect();
     assert!(errors.len() >= 4, "stale, duplicate, oversized and range errors: {errors:?}");
-    assert!(errors.iter().all(|n| n["params"]["uri"] == edit["uri"] && n["params"]["recoverable"] == true));
-    assert!(errors.iter().any(|n| n["params"]["version"] == 10));
+    assert!(errors.iter().all(|n| n["text"].as_str().unwrap().contains("Your text is retained")));
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -492,6 +494,46 @@ fn managed_draft_stdio_failed_write_retains_helper_and_selected_checkpoint() {
     assert_eq!(retried["result"]["type"], "confirmed", "{retried}");
     wait_for_commit(&tmp, "Recovered checkpoint");
     assert_eq!(read(&neighbor), "Neighbor must survive\n");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[cfg(unix)]
+#[test]
+fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
+    let (tmp, _) = staged_repo();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let target = tmp.path().join(".git/COMMIT_EDITMSG");
+    let held = tmp.path().join(".git/held-message");
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let edit = start_commit(&mut server, &status);
+    sync_draft(&mut server, &edit, "Unsaved retained local text\n");
+    std::fs::rename(&target, &held).unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose",
+        "params":{"textDocument":{"uri":edit["uri"]}}}));
+    let recovery = loop {
+        let message = server.recv();
+        if let Some(recovery) = edit_document(&message) {
+            assert!(message["params"]["effects"].as_array().unwrap().iter().any(|effect|
+                effect["type"] == "message" && effect["text"].as_str().unwrap().contains("Your text is retained")));
+            break recovery;
+        }
+    };
+    assert_eq!(recovery["runId"], edit["runId"]);
+    assert_eq!(recovery["uri"], edit["uri"]);
+    assert_eq!(recovery["version"], 2);
+    assert_eq!(recovery["text"], "Unsaved retained local text\n");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "unreadable saved file cannot confirm");
+    std::fs::rename(&held, &target).unwrap();
+    write(&target, "Restored saved disk message\n");
+    // The same pending helper accepts subsequent synchronization, but native
+    // retry still commits disk rather than those newer unsaved bytes.
+    change_draft(&mut server, &edit, 3, "Newer unsaved recovery edits\n");
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose",
+        "params":{"textDocument":{"uri":edit["uri"]}}}));
+    wait_for_commit(&tmp, "Restored saved disk message");
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -544,7 +586,7 @@ fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     change_draft(&mut foreign, &a, 99, "Foreign connection\n");
     assert!(draft_request(&mut foreign, 10, "draft/save", &a, 2, None)["error"].is_object());
     assert!(draft_request(&mut foreign, 11, "draft/finish", &a, 1, Some("normal-close"))["error"].is_object());
-    assert!(!foreign.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == a["uri"]));
+    assert!(!foreign.notifications.iter().any(|n| n["method"] == "view/effects"));
     foreign.shutdown_and_exit();
     assert!(foreign.finish(Duration::from_secs(10)).success());
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
