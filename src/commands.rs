@@ -250,6 +250,12 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
                 ctx.info("Repository changed while the prompt was open; nothing discarded");
                 return Ok(CommandOutcome::default());
             }
+            if let dispatch::Resolution::DiscardFile { path } = &resolution {
+                if !displayed_file_is_current(&repo, &tree, path, "unstaged")? {
+                    ctx.info(errors::HUNK_CHANGED);
+                    return Ok(CommandOutcome { refresh: true, ..Default::default() });
+                }
+            }
             let effects = match resolution {
                 dispatch::Resolution::DiscardSelection { start, end } => execute_displayed_selection(&repo, &tree, start, end, false, true)?,
                 _ => dispatch::execute(&repo, &resolution, &[])?,
@@ -1567,6 +1573,14 @@ fn stage_or_unstage_at(
     };
 
     let repo = GitRepo::open(repo_path)?;
+    if let Some(path) = match &resolution {
+        dispatch::Resolution::StageFile { path } | dispatch::Resolution::UnstageFile { path } => Some(path.as_str()),
+        _ => None,
+    } {
+        if !displayed_file_is_current(&repo, source, path, if matches!(resolution, dispatch::Resolution::UnstageFile { .. }) { "staged" } else { "unstaged" })? {
+            return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
+        }
+    }
     if matches!(
         resolution,
         dispatch::Resolution::DiscardAllUnstaged
@@ -1575,6 +1589,11 @@ fn stage_or_unstage_at(
             | dispatch::Resolution::DiscardHunk { .. }
             | dispatch::Resolution::DiscardSelection { .. }
     ) {
+        if let dispatch::Resolution::DiscardFile { path } = &resolution {
+            if !displayed_file_is_current(&repo, source, path, "unstaged")? {
+                return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
+            }
+        }
         let what = match &resolution {
             dispatch::Resolution::DiscardFile { path } => format!("Discard changes to {path}?"),
             dispatch::Resolution::DiscardHunk { path, .. } => {
@@ -1617,6 +1636,26 @@ fn stage_or_unstage_at(
         _ => dispatch::execute(&repo, &resolution, &[]),
     }?;
     Ok((effects, None))
+}
+
+/// Check that a whole-file request still denotes exactly the hunks visible in
+/// its originating render. A file row is not permission to include later,
+/// undisplayed changes.
+fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &str) -> Result<bool> {
+    let Some(file) = tree.nodes.iter().find(|node| node.kind == NodeKind::File
+        && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section)) else {
+        return Ok(false);
+    };
+    let displayed: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Hunk
+        && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section))
+        .filter_map(|node| node.hunk_id.as_deref()).collect();
+    let diff = if section == "staged" { repo.diff_staged(path)? } else { repo.diff_unstaged(path)? };
+    let Some(layout) = FileLayout::from_diff(&diff, 0) else { return Ok(false); };
+    // A collapsed body has no captured patch identities; reject rather than
+    // treating an empty visible subset as the complete file patch.
+    Ok(file.children.len() == displayed.len()
+        && displayed.len() == layout.hunks.len()
+        && displayed.iter().zip(&layout.hunks).all(|(old, new)| *old == new.hunk.id))
 }
 
 /// Run a whole-section operation against `repo_path`.

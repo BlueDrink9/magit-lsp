@@ -477,6 +477,142 @@ fn unstaging_an_untracked_file_reports_nothing_to_unstage() {
 }
 
 #[test]
+fn stale_displayed_selection_does_not_stage_changed_hunk() {
+    use magit_lsp::protocol::Selection;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes())
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let selected = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::Line
+        && node.path.as_deref() == Some("f.txt") && node.marker == Some('+')).unwrap().start_line;
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_index = tmp.git(&["hash-object", ".git/index"]);
+    let before_worktree = std::fs::read(tmp.path().join("f.txt")).unwrap();
+    std::fs::write(tmp.path().join("f.txt"), lines(40).with(5, "new concurrent change").to_string()).unwrap();
+    let after_worktree = std::fs::read(tmp.path().join("f.txt")).unwrap();
+
+    let result = test.invoke_at_version("status.stage", version, None,
+        Some(Selection { start_line: selected, end_line: selected }), None);
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), after_worktree);
+    assert_ne!(before_worktree, after_worktree);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn file_row_does_not_stage_changes_added_after_its_render() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes())
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let file_line = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::File
+        && node.path.as_deref() == Some("f.txt") && node.section.as_deref() == Some("unstaged")).unwrap().start_line;
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_index = tmp.git(&["hash-object", ".git/index"]);
+    std::fs::write(tmp.path().join("f.txt"), lines(40).with(5, "line5 CHANGED").with(20, "new hidden change").to_string()).unwrap();
+
+    let result = test.invoke_at_version("status.stage", version, Some(Cursor { line: file_line, column: 0 }), None, None);
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+    assert!(tmp.git(&["diff"]).contains("new hidden change"));
+}
+
+#[test]
+fn collapsed_file_row_cannot_stage_its_hidden_patch_body() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify("f.txt", two_hunk_changes())
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let file_line = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::File
+        && node.path.as_deref() == Some("f.txt") && node.section.as_deref() == Some("unstaged")).unwrap().start_line;
+    test.invoke_at("common.hide-section", Cursor { line: file_line, column: 0 });
+    let version = test.version();
+    let file = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::File
+        && node.path.as_deref() == Some("f.txt") && node.section.as_deref() == Some("unstaged")).unwrap();
+    assert!(file.children.is_empty());
+    let file_line = file.start_line;
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_index = tmp.git(&["hash-object", ".git/index"]);
+
+    let result = test.invoke_at_version("status.stage", version, Some(Cursor { line: file_line, column: 0 }), None, None);
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn one_stale_file_prevents_a_displayed_multifile_selection_from_mutating_any_file() {
+    use magit_lsp::protocol::Selection;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("a.txt", lines(40).to_string()), ("b.txt", lines(40).to_string())])
+        .modify("a.txt", lines(40).with(5, "a changed").to_string())
+        .modify("b.txt", lines(40).with(5, "b changed").to_string())
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let changed_lines: Vec<_> = test.tree().nodes.iter().filter(|node| node.kind == magit_lsp::tree::NodeKind::Line
+        && node.section.as_deref() == Some("unstaged") && node.marker == Some('+'))
+        .map(|node| node.start_line).collect();
+    assert_eq!(changed_lines.len(), 2);
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_index = tmp.git(&["hash-object", ".git/index"]);
+    let a_before = std::fs::read(tmp.path().join("a.txt")).unwrap();
+    std::fs::write(tmp.path().join("b.txt"), lines(40).with(5, "b concurrent edit").to_string()).unwrap();
+    let b_after = std::fs::read(tmp.path().join("b.txt")).unwrap();
+
+    let result = test.invoke_at_version("status.stage", version, None, Some(Selection {
+        start_line: changed_lines[0], end_line: changed_lines[1],
+    }), None);
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert_eq!(std::fs::read(tmp.path().join("a.txt")).unwrap(), a_before);
+    assert_eq!(std::fs::read(tmp.path().join("b.txt")).unwrap(), b_after);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn unchanged_hunk_can_be_staged_after_an_unrelated_hunk_shifts_it() {
+    use magit_lsp::protocol::Selection;
+    let original = lines(100).to_string();
+    let initial = lines(100).with(80, "line80 changed").to_string();
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", original)])
+        .modify("f.txt", initial).build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let changed_line = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::Line
+        && node.marker == Some('+')).unwrap().start_line;
+    let mut shifted: Vec<_> = (1..=100).map(|n| format!("line{n}")).collect();
+    shifted.insert(10, "new unrelated line".to_string());
+    shifted[80] = "line80 changed".to_string();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    std::fs::write(tmp.path().join("f.txt"), shifted.join("\n") + "\n").unwrap();
+
+    let result = test.invoke_at_version("status.stage", version, None, Some(Selection {
+        start_line: changed_line, end_line: changed_line,
+    }), None);
+    assert!(!message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert!(tmp.git(&["diff", "--cached"]).contains("line80 changed"));
+    assert!(tmp.git(&["diff"]).contains("new unrelated line"));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+}
+
+#[test]
 fn an_unknown_command_is_a_protocol_error() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
