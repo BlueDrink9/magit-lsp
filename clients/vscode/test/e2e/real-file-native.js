@@ -23,6 +23,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     && request.params.arguments[0].source === 'saved-file');
   const status = vscode.window.activeTextEditor;
   assert.equal(status?.document.uri.scheme, 'magit', 'shared production status required');
+  const views = require(`${extension.extensionPath}/lib/views`);
   const cases = [];
   const screenshots = [];
   const events = [];
@@ -290,6 +291,169 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     capture(`real-file-native-${sequence}-stale-probes-retained.png`);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await completed(record, before, 'native same-URI run survives stale protocol probes');
+
+    // Two real sessions in one native host: open the second root through the
+    // production view adapter and keep both provider-file runs alive together.
+    const secondRepo = `${evidence}/real-file-second-repo`;
+    fs.mkdirSync(secondRepo);
+    execFileSync('git', ['-C', secondRepo, 'init', '-q']);
+    execFileSync('git', ['-C', secondRepo, 'config', 'user.name', 'Native Evidence']);
+    execFileSync('git', ['-C', secondRepo, 'config', 'user.email', 'native@example.invalid']);
+    fs.writeFileSync(`${secondRepo}/tracked.txt`, 'second repository baseline\n');
+    execFileSync('git', ['-C', secondRepo, 'add', 'tracked.txt']);
+    execFileSync('git', ['-C', secondRepo, 'commit', '-qm', 'second baseline']);
+    // A clean Create is refused before Git starts an editor helper. Each root
+    // needs its own staged delta, just like start() above.
+    fs.writeFileSync(`${secondRepo}/tracked.txt`, 'second repository staged delta\n');
+    execFileSync('git', ['-C', secondRepo, 'add', 'tracked.txt']);
+    fs.writeFileSync(`${repo}/tracked.txt`, 'first repository isolated staged delta\n');
+    git('add', 'tracked.txt');
+    const descriptor = await store.client.sendRequest('view/open', {
+      kind: 'status', args: { repo_path: secondRepo }, viewport: { cols: 100, rows: 30 },
+    });
+    const secondView = views.ensureView(descriptor);
+    secondView.rootId = secondView.id;
+    secondView.repo = secondRepo;
+    await views.showView(descriptor);
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === secondView.uri.toString(),
+      'second repository native status');
+    await require(`${extension.extensionPath}/lib/requests`).invoke(secondView.id,
+      'commit.create', undefined, { cursor: { line: 0, column: 0 } });
+    await waitFor(() => [...store.drafts.values()].some((draft) => draft.attached
+      && draft.uri.fsPath.startsWith(`${secondRepo}/`)), 'second repository draft');
+    const draftB = [...store.drafts.values()].find((draft) => draft.uri.fsPath.startsWith(`${secondRepo}/`));
+    assert(draftB);
+    assert.equal(draftB.baseViewId, secondView.id, 'second session owns B');
+    await vscode.window.showTextDocument(status.document, { preview: false });
+    await require(`${extension.extensionPath}/lib/requests`).invoke(status.document.uri.authority,
+      'commit.create', undefined, { cursor: { line: 0, column: 0 } });
+    await waitFor(() => [...store.drafts.values()].some((draft) => draft.attached
+      && !draft.uri.fsPath.startsWith(`${secondRepo}/`)), 'first repository draft alongside second');
+    const draftA = [...store.drafts.values()].find((draft) => !draft.uri.fsPath.startsWith(`${secondRepo}/`));
+    assert.equal(draftA.baseViewId, status.document.uri.authority, 'first session owns A');
+    assert.notEqual(draftA.baseViewId, draftB.baseViewId);
+    assert.equal(fs.realpathSync(repo), repo);
+    assert.equal(fs.realpathSync(secondRepo), secondRepo);
+    const repositoryState = (root) => {
+      const raw = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+      return { head: raw('rev-parse', 'HEAD'), tree: raw('rev-parse', 'HEAD^{tree}'),
+        indexTree: raw('write-tree'), index: raw('ls-files', '--stage', '-z'),
+        indexText: raw('show', ':tracked.txt'), worktree: fs.readFileSync(`${root}/tracked.txt`, 'utf8'),
+        count: raw('rev-list', '--count', 'HEAD'), message: raw('log', '-1', '--format=%B'),
+        status: raw('status', '--porcelain=v1', '-z') };
+    };
+    const snapshots = () => ({ A: repositoryState(repo), B: repositoryState(secondRepo) });
+    const initial = snapshots();
+    const textA = 'isolated repository A message\n';
+    const textB = 'isolated repository B message\n';
+    await replace(draftA, textA);
+    await replace(draftB, textB);
+    await draftA.document.save(); await draftA.queue;
+    await draftB.document.save(); await draftB.queue;
+    assert.notEqual(draftA.runId, draftB.runId);
+    assert.notEqual(draftA.uri.toString(), draftB.uri.toString());
+    assert.equal(store.drafts.get(draftA.runId), draftA);
+    assert.equal(store.drafts.get(draftB.runId), draftB);
+    const beforeProbes = snapshots();
+    const pendingState = () => [draftA, draftB].map((draft) => ({ runId: draft.runId,
+      owner: draft.baseViewId, pending: store.drafts.get(draft.runId) === draft,
+      version: draft.version, savedVersion: draft.savedVersion, text: draft.document.getText(),
+      disk: fs.readFileSync(draft.uri.fsPath, 'utf8'), closed: draft.document.isClosed,
+      tabs: tabs(draft).map(tabState) }));
+    const beforePending = pendingState();
+    const probes = [];
+    const confirmProbe = async (client, label, run, uri, source) => {
+      const params = { command: 'magit.command', arguments: [{ command: 'common.confirm',
+        runId: run.runId, uri: uri.uri.toString(), version: run.version, source }] };
+      const result = await client.sendRequest('workspace/executeCommand', params)
+        .catch((error) => ({ error: String(error) }));
+      probes.push({ label, method: 'workspace/executeCommand', params, result,
+        after: snapshots(), pending: pendingState() });
+      assert.match(result?.error || '', /Commit draft .* (does not match|not pending)/);
+      assert.deepEqual(snapshots(), beforeProbes, `${label} changes neither root`);
+      assert.deepEqual(pendingState(), beforePending, `${label} retains both editable runs`);
+    };
+    for (const source of ['synchronized', 'saved-file']) {
+      await confirmProbe(store.client, 'cross-root A run with B URI', draftA, draftB, source);
+      await confirmProbe(store.client, 'cross-root B run with A URI', draftB, draftA, source);
+    }
+    // Like editor_bridge.rs, use an independent stdio connection solely for
+    // semantic owner probes. A second workbench LanguageClient would collide
+    // with the live host's registered magit.command; do not deactivate it.
+    const { spawn } = require('node:child_process');
+    const { once } = require('node:events');
+    const { createMessageConnection, StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
+    const helper = spawn(vscode.workspace.getConfiguration('magit-lsp').get('serverPath'), [],
+      { stdio: ['pipe', 'pipe', 'pipe'] });
+    const exited = once(helper, 'exit');
+    const foreign = createMessageConnection(new StreamMessageReader(helper.stdout),
+      new StreamMessageWriter(helper.stdin));
+    foreign.listen();
+    try {
+      await foreign.sendRequest('initialize', { processId: process.pid, rootUri: null,
+        capabilities: {}, clientInfo: { name: 'R-EDIT-REAL semantic owner probe' } });
+      await foreign.sendNotification('initialized', {});
+      for (const source of ['synchronized', 'saved-file']) {
+        await confirmProbe(foreign, 'foreign connection with A run/URI', draftA, draftA, source);
+        await confirmProbe(foreign, 'foreign connection with B run/URI', draftB, draftB, source);
+      }
+      await foreign.sendRequest('shutdown');
+      await foreign.sendNotification('exit');
+      const [code] = await exited;
+      assert.equal(code, 0, 'independent semantic probe server exits cleanly');
+    } finally {
+      if (helper.exitCode === null && helper.signalCode === null) {
+        helper.kill();
+        await exited;
+      }
+      foreign.dispose();
+    }
+    cases.push({ name: 'two-repository-cross-wire-semantic-protocol-probes', roots: { A: repo, B: secondRepo },
+      runs: { A: draftA.runId, B: draftB.runId }, uris: { A: draftA.uri.toString(), B: draftB.uri.toString() },
+      owners: { A: draftA.baseViewId, B: draftB.baseViewId },
+      messages: { A: textA, B: textB }, initial,
+      before: beforeProbes, beforePending, probes, after: snapshots(), afterPending: pendingState() });
+    capture('real-file-native-two-repository-pending.png');
+    persist();
+    const probeConfirmations = { A: confirmations(draftA).length, B: confirmations(draftB).length };
+    await vscode.window.showTextDocument(draftA.uri, { preview: false });
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    await waitFor(() => !store.drafts.has(draftA.runId) && store.drafts.has(draftB.runId),
+      'native saved close only finishes repository A');
+    assert.equal(message(), textA.trim());
+    assert.equal(git('rev-list', '--count', `${initial.A.head.trim()}..HEAD`), '1');
+    assert.equal(confirmations(draftA).length, probeConfirmations.A + 1);
+    assert.equal(confirmations(draftB).length, probeConfirmations.B);
+    assert.equal(repositoryState(repo).tree, initial.A.indexTree);
+    assert.equal(repositoryState(repo).indexTree, initial.A.indexTree);
+    assert.equal(repositoryState(repo).worktree, initial.A.worktree);
+    assert.deepEqual(repositoryState(secondRepo), initial.B);
+    assert.equal(draftB.document.getText(), textB);
+    assert.equal(draftB.document.isClosed, false);
+    assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
+    cases.push({ name: 'two-repository-native-A-last-close-B-pending', before: beforeProbes,
+      after: snapshots(), pending: pendingState(), confirmations: confirmations(draftA) });
+    await vscode.window.showTextDocument(draftB.uri, { preview: false });
+    capture('real-file-native-two-repository-A-committed-B-pending.png');
+    const beforeAbort = snapshots();
+    await vscode.commands.executeCommand('magit.cancelEdit');
+    await waitFor(() => !store.drafts.has(draftB.runId), 'explicit abort of repository B');
+    assert.deepEqual(snapshots(), beforeAbort, 'explicit native Abort preserves both exact repository states');
+    assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
+    cases.push({ name: 'two-repository-native-A-close-abort-B', beforeAbort,
+      after: snapshots(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8') });
+    capture('real-file-native-two-repository-A-committed-B-aborted.png');
+    await vscode.window.showTextDocument(draftB.uri, { preview: false });
+    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+    assert.equal(tabs(draftB).length, 0);
+    assert.deepEqual(snapshots(), beforeAbort, 'late native close after abort cannot commit B');
+    assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
+    assert.equal(confirmations(draftB).length, probeConfirmations.B);
+    assert.equal(store.drafts.size, 0);
+    cases.push({ name: 'two-repository-late-native-B-close-after-abort', before: beforeAbort,
+      after: snapshots(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8'),
+      confirmations: confirmations(draftB) });
+    capture('real-file-native-two-repository-late-B-close.png');
     persist();
     fs.writeFileSync(`${evidence}/real-file-native-evidence.json`, JSON.stringify({
       gate: 'R-EDIT-REAL production native close', status: 'pass', cases, screenshots,

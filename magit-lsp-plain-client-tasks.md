@@ -187,16 +187,18 @@ criteria are complete in both clients (see TASKS §7 and `docs/evidence/commit-h
 `commit-real-file.scn` (both profiles at 100x30 and 80x24), retaining empty/template/
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
-scenarios remain. **Remaining checklist:** actual native duplicate/late delivery and
-multi-root isolation are not evidenced; same-URI fresh-run/stale-run handling is
+scenarios remain. **Scoped native checklist:** multi-root isolation passed the
+dedicated Codium EDIT_ONLY slice below; same-URI fresh-run/stale-run handling is
 covered by `clients/vscode/test/e2e/real-file-lifecycle.js`. Rust unreadable saved
 file and exact-version rejection/recovery are covered by
 `tests/editor_drafts.rs::saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read`
 and `confirm_requires_exact_current_version_and_writes_without_a_checkpoint`,
 with additional client evidence below. Native saved-close/dirty choice is covered by
 `tests/ui/scenarios/commit-real-file.scn` and
-`clients/vscode/test/e2e/real-file-native.js`. Multi-root, duplicate/late native
-signals, and broader dirty shutdown/reload/workspace-change/cross-build and
+`clients/vscode/test/e2e/real-file-native.js`. Semantic duplicate/late protocol
+probes are covered, but are not evidence of duplicate native events; do not
+fabricate such events. Native nonlast/last-tab behavior and unsafe-read recovery
+are covered. Broader dirty shutdown/reload/workspace-change/cross-build and
 last-window exit remain unverified; scoped clean Codium observer results and
 Neovim extra-window close evidence are not universal lifecycle guarantees.
 Ring differences documented in `docs/evidence/commit-message-ring-parity.md`
@@ -233,11 +235,33 @@ not because ownership blocked retry (the trace already contained two confirmatio
 No production adapter change or weakened guards was needed. Focused verification:
 `make vscode-test && npm --prefix clients/vscode run test:integration && MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_EDIT_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check`.
 
-**Native acceptance still requested:** actual native duplicate/late signal and
-multi-root/session-isolation cases. Preserve separate shutdown/reload/workspace-change assertions only for
-specified clients/platforms; do not infer universal lifecycle guarantees. Existing
-Rust coverage is not a substitute for these native cases. Exact existing coverage
-and limits are listed above.
+**Multi-root native isolation: [x] scoped Codium slice complete (2026-10-29).**
+Two canonical repository sessions under one unchanged production host retain
+simultaneous distinct runIds/URIs/messages. Bidirectional cross-root run/URI
+confirmation and independent-connection owner misuse are explicitly semantic
+protocol probes, not fabricated native events. All reject without changing
+either root's exact HEAD/tree/index/worktree/count/message/status or either
+pending draft's disk/live text. Actual saved last-tab close commits A once
+(count 7→8); B stays editable/pending and unchanged (count 1). Production Abort
+B preserves exact state/file, and actual reopen/late close emits no new
+confirmation or commit. Inspected all four two-repository PNGs and persisted
+before/after/request JSON in `/tmp/opencode/vscode-review-S81D41/`.
+The second-root view/open/session/invoke route was correct: the original clean
+Create had no staged delta, so refused before opening any draft/helper. Both
+roots now stage distinct deltas. A second workbench LanguageClient collided
+with the existing `magit.command` registration; owner probes instead use a
+separate labelled stdio connection and await its shutdown/exit. No production
+changes, reload/deactivation, synthetic effects/contexts/tab events, sleeps or
+deadline increases. No magit-lsp helpers remained. Exact ticket verification
+above passed. Parent and broader lifecycle/platform/full gates remain unchecked.
+
+**Native acceptance limits:** Same-URI/late/duplicate
+semantic protocol probes, native nonlast/last-tab behavior, and unsafe-read
+recovery are already covered; do not fabricate duplicate native events. Preserve
+separate shutdown/reload/workspace-change assertions only for specified
+clients/platforms; do not infer universal lifecycle guarantees. Existing Rust
+coverage is not a substitute for native cases. Exact existing coverage and limits
+are listed above.
 
 **Acceptance:**
 - Save alone never commits.
