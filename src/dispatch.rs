@@ -3,6 +3,34 @@ use crate::git::GitRepo;
 use crate::patch::FileLayout;
 use crate::protocol::{Effect, MessageLevel};
 use crate::Result;
+use crate::protocol::{Cursor, Selection};
+use serde_json::Value;
+
+/// The displayed view location and input context bound to a dispatch request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchTarget {
+    /// Server view identity.
+    pub view_id: String,
+    /// Exact displayed render version, when positional input is used.
+    pub version: Option<u64>,
+    /// Cursor from that displayed render.
+    pub cursor: Option<Cursor>,
+    /// Inclusive selection from that displayed render.
+    pub selection: Option<Selection>,
+    /// Canonical key chord, when dispatched from a key.
+    pub key: Option<String>,
+}
+
+/// A semantic command request shared by invocation and resolved key paths.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatchRequest {
+    /// Registered command identifier.
+    pub command: String,
+    /// Display-version-bound input target.
+    pub target: DispatchTarget,
+    /// Typed command arguments, including captured menu arguments.
+    pub args: Option<Value>,
+}
 
 /// The command the user invoked on the row under the cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,9 +214,7 @@ pub fn execute(
             start,
             end,
             reverse,
-        } => {
-            errors::effects_for_result(repo.apply_selection(layouts, *start, *end, *reverse))
-        }
+        } => errors::effects_for_result(repo.apply_selection(layouts, *start, *end, *reverse)),
         Resolution::Message(effect) => Ok(vec![effect.clone()]),
         Resolution::DiscardAllUnstaged => {
             errors::effects_for_result(repo.discard_all_unstaged().map(|_| true))

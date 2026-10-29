@@ -28,6 +28,10 @@ R-PLAIN-PREREQ's scoped acceptance and R-PLAIN-SYNC are complete; R-PLAIN-CORE i
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
+The typed dispatcher slice is now complete: `Session::dispatch` accepts typed
+command/target/args and is shared by rich invocation, resolved keys and menu
+actions. Plain delivery, capability enforcement and later content-addressed
+action targets remain subsequent work; R-PLAIN-CORE parent acceptance is pending.
 Decision: assume ordinary `didClose` confirms saved-file content by default;
 standard LSP lacks run identity and reliability/late-event limitations are
 accepted assumptions, not protocol guarantees. VS Code is the known exception.

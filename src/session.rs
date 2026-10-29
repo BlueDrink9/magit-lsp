@@ -809,14 +809,15 @@ impl Session {
             return Ok(Execution::Done(prompt_busy()));
         }
         let already_pending = self.pending_prompt.is_some();
-        let result = self.run_versioned_command(
-            &params.view_id,
-            &params.command,
-            params.version,
-            params.cursor,
-            params.selection,
-            params.args.as_ref(),
-            None,
+        let result = self.dispatch(
+            crate::dispatch::DispatchRequest {
+                command: params.command.clone(),
+                target: crate::dispatch::DispatchTarget {
+                    view_id: params.view_id.clone(), version: params.version,
+                    cursor: params.cursor, selection: params.selection, key: None,
+                },
+                args: params.args.clone(),
+            },
             &crate::ui::NullUi,
         )?;
         Ok(if already_pending {
@@ -824,6 +825,19 @@ impl Session {
         } else {
             self.execution(result)
         })
+    }
+
+    /// Execute a semantic command using its captured args and displayed target.
+    pub fn dispatch(
+        &mut self,
+        request: crate::dispatch::DispatchRequest,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
+        let target = request.target;
+        self.run_versioned_command(
+            &target.view_id, &request.command, target.version, target.cursor,
+            target.selection, request.args.as_ref(), target.key, ui,
+        )
     }
 
     /// Handle one key step: resolve it through the view's keymap and either run
@@ -905,15 +919,16 @@ impl Session {
 
         match resolution {
             Resolution::Pending => Ok(InvokeResult::empty()),
-            Resolution::Run { command, chord } => self.run_versioned_command(
-                &params.view_id,
-                &command,
-                Some(params.version),
-                Some(params.cursor),
-                params.selection,
-                None,
-                Some(chord),
-                ui,
+            Resolution::Run { command, chord } => self.dispatch(
+                crate::dispatch::DispatchRequest {
+                    command,
+                    target: crate::dispatch::DispatchTarget {
+                        view_id: params.view_id.clone(), version: Some(params.version),
+                        cursor: Some(params.cursor), selection: params.selection,
+                        key: Some(chord),
+                    },
+                    args: None,
+                }, ui,
             ),
             Resolution::PassThrough { chord } => Ok(InvokeResult {
                 effects: vec![Effect::PassThrough { key: chord }],
@@ -1350,16 +1365,13 @@ impl Session {
                     .map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
                 if registered.scope.matches(&scope) {
-                    return self.run_versioned_command(
-                        view_id,
-                        registered.id,
-                        Some(params.version),
-                        Some(params.cursor),
-                        params.selection,
-                        serialized_args.as_ref(),
-                        Some(key.to_string()),
-                        ui,
-                    );
+                    return self.dispatch(crate::dispatch::DispatchRequest {
+                        command: registered.id.to_string(),
+                        target: crate::dispatch::DispatchTarget { view_id: view_id.to_string(),
+                            version: Some(params.version), cursor: Some(params.cursor),
+                            selection: params.selection, key: Some(key.to_string()) },
+                        args: serialized_args,
+                    }, ui);
                 }
 
                 // The action belongs to an earlier view: close this menu (and
@@ -1395,15 +1407,12 @@ impl Session {
                         keymap = popped.keymap;
                     }
                 }
-                let mut run = self.run_command(
-                    &target,
-                    registered.id,
-                    None,
-                    None,
-                    serialized_args.as_ref(),
-                    Some(key.to_string()),
-                    ui,
-                )?;
+                let mut run = self.dispatch(crate::dispatch::DispatchRequest {
+                    command: registered.id.to_string(),
+                    target: crate::dispatch::DispatchTarget { view_id: target, version: None,
+                        cursor: None, selection: None, key: Some(key.to_string()) },
+                    args: serialized_args,
+                }, ui)?;
                 effects.extend(run.effects);
                 run.effects = effects;
                 if run.keymap.is_none() {
