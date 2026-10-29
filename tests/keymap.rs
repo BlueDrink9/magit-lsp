@@ -71,6 +71,27 @@ fn basic_modifier_mode_filters_delivery_and_resolution_but_full_keeps_bindings()
 }
 
 #[test]
+fn basic_modifiers_check_every_step_without_removing_commands_or_printable_shift() {
+    let config = config_with(Profile::Standard, &[("status", &[
+        ("stage", &["ctrl+alt+9 meta+x", "shift+Tab", "ctrl+alt+x", "S", "!", "Enter"]),
+        ("unstage", &["meta+u"]),
+    ])]);
+    let full = Keymap::resolve("status", Profile::Standard, &config).unwrap();
+    let basic = full.clone().with_basic_modifiers(true);
+    assert_eq!(basic.command("status.unstage").unwrap().keys, Vec::<String>::new());
+    for key in ["ctrl+alt+9", "ctrl+alt+9 meta+x", "shift+Tab", "meta+u"] {
+        assert_eq!(basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal), Match::None, "{key}");
+    }
+    for key in ["ctrl+alt+x", "S", "!", "Enter"] {
+        assert_eq!(basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal), Match::Exact("status.stage".into()), "{key}");
+        assert!(basic.command("status.stage").unwrap().keys.contains(&key.to_owned()));
+    }
+    let restored = basic.with_basic_modifiers(false);
+    assert_eq!(restored.command("status.stage").unwrap().keys, full.command("status.stage").unwrap().keys);
+    assert_eq!(restored.lookup(KeyChord::parse("ctrl+alt+9 meta+x").unwrap().steps(), EditorMode::Normal), Match::Exact("status.stage".into()));
+}
+
+#[test]
 fn every_profile_resolves_without_conflicts() {
     for profile in [Profile::Standard, Profile::Vim] {
         let config = Config {

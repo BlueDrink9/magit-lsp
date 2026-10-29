@@ -240,6 +240,21 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
 }
 
 #[test]
+fn reduced_key_render_and_fold_modes_do_not_disable_explicit_commands() {
+    let mut block = rich_block();
+    block["modifiers"] = json!("basic");
+    block["render"] = json!("full");
+    block["folds"] = json!("native");
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
+        panic!("expected rich")
+    };
+    for command in ["status.stage", "open.commit", "common.hide-all", "menu.save-args"] {
+        assert_eq!(caps.command_requirement(command), None, "{command}");
+    }
+    assert_eq!(caps.command_requirement("commit.create"), Some("editDocument"));
+}
+
+#[test]
 fn rich_v1_accepts_each_declared_enum_option() {
     for keys in ["dynamic", "static", "forwardAll"] {
         for modifiers in ["full", "basic"] {

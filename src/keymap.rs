@@ -238,12 +238,15 @@ impl Keymap {
     }
 
     /// Select modifier fidelity for both key resolution and client delivery.
+    /// Commands remain present even when none of their keys are deliverable.
     pub fn with_basic_modifiers(mut self, basic: bool) -> Self {
         self.basic_modifiers = basic;
-        if basic {
-            for binding in &mut self.bindings {
-                binding.keys.retain(|key| self.parsed.get(&binding.command).is_some_and(|chords| chords.iter().any(|chord| chord.to_canonical() == *key && chord.steps().iter().all(basic_step))));
-            }
+        for binding in &mut self.bindings {
+            binding.keys = self.parsed.get(&binding.command).into_iter().flatten()
+                .filter(|chord| !basic || chord.steps().iter().all(basic_step))
+                .map(KeyChord::to_canonical)
+                .collect();
+            binding.keys.sort();
         }
         self
     }

@@ -444,9 +444,27 @@ Verified with `cargo test --lib presentation:: && cargo test --test plain_core
 Native bundled menu regression passed both profiles/sizes via
 `scripts/ui run tests/ui/scenarios/commit-menu-shows-actions.scn`; inspect text
 evidence in `build/ui/commit-menu-shows-actions/{standard,vim}-{100x30,80x24}/commit-menu.screen`.
-Plain implementation and full-render/native-fold/basic-modifier enforcement are
-later slices, not claimed here. R-PLAIN-CORE remains unchecked; no provider/VCS
-abstraction is introduced before the user checkpoint.
+**Rich render/fold/modifier enforcement (scoped complete):** audited b3967e6
+with new real-binary stdio regressions, not just negotiation tests. Full render
+omits edits/baseVersion even after consecutive acks, while provider snapshots
+still advance on ack; edits mode reconstructs the same resized menu text from
+its acknowledged base. Native folds keep initial, refreshed and newly staged
+file/hunk text expanded; visibility calls do not truncate it and standard fold
+ranges remain usable. Server folds still collapse and preserve collapse across
+refresh. Basic mode filters entire explicit-shift/meta chords and prefixes from
+delivery/matching, retains ctrl/alt and literal uppercase/shifted printables,
+and keeps empty-key command metadata, explicit invocation and menu switches.
+Fidelity reselection now restores full keys directly from parsed chords, with
+unit boundary coverage and no hot-path canonical reparsing.
+Verified: `cargo test --lib presentation:: && cargo test --test plain_core
+--test keymap --test server_async --test editor_bridge && scripts/ui run
+tests/ui/scenarios/commit-menu-shows-actions.scn && git diff --check` (2 unit,
+91 integration tests; native scenario PASS across both profiles/sizes).
+Text-only native evidence inspected:
+`build/ui/commit-menu-shows-actions/standard-100x30/commit-menu.screen`;
+no owned server/UI processes remain. Concrete Plain implementation and
+downstream acceptance are still pending. R-PLAIN-CORE remains unchecked; no
+provider/VCS abstraction is introduced before the user checkpoint.
 
 - **Target Files:** `src/presentation/{mod,custom}.rs` (new), `src/session.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/init.lua`, `clients/vscode/lib/session.js` (init options only).
 - **Reference Files:** AGENTS.md architecture flow; TASKS §3.2, §3.5.
