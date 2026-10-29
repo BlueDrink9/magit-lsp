@@ -398,7 +398,7 @@ pub fn socket_path() -> Option<&'static Path> {
 /// Run `git commit` with the helper as its editor and return the committed
 /// message, read back from `git log -1 --format=%B`. Repository discovery is
 /// not a cancellation target; only the commit inherits the caller's handle.
-pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<crate::git::CommitOutcome> {
+pub fn commit(repo_path: &str, edit_id: &str, socket: &Path, operation: &crate::git::CommitOperation) -> Result<crate::git::CommitOutcome> {
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
@@ -411,7 +411,8 @@ pub fn commit(repo_path: &str, edit_id: &str, socket: &Path) -> Result<crate::gi
         (EDIT_ID_ENV, edit_id),
         (HELPER_TOKEN_ENV, token.as_str()),
     ];
-    repo.commit(&[], &env)
+    let args = operation.argv();
+    repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
 }
 
 /// The helper subcommand: forward the file Git passed, then wait for a reply.

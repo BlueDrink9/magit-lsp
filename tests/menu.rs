@@ -21,6 +21,31 @@ fn menu_switch(test: &TestSession, view: &str, key: &str) -> bool {
 }
 
 #[test]
+fn commit_options_survive_menu_pop_and_staging_prompt() {
+    use magit_lsp::git::CommitOperation;
+    for staged in [false, true] {
+        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+        std::fs::write(tmp.path().join("f.txt"), "changed\n").unwrap();
+        if staged { tmp.git(&["add", "f.txt"]); }
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        let (menu, _) = test.open_via_command("open.commit");
+        test.press("- s");
+        test.press("- n");
+        test.ui().reply_text(Some("Captured <captured@example.com>".into()));
+        test.press_ui("=");
+        test.press_ui("A");
+        if !staged { test.ui().reply_confirm(true); }
+        let result = test.press_ui("c");
+        assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView {view_id} if view_id == &menu.id)));
+        let CommitOperation::Create(options) = result.commit.expect("operation survives ancestor routing and prompt");
+        assert!(options.signoff && options.no_verify);
+        assert_eq!(options.author.as_deref(), Some("Captured <captured@example.com>"));
+        assert!(tmp.git(&["diff", "--cached"]).contains("changed"));
+        assert_eq!(tmp.git(&["log", "-1", "--format=%s"]).trim(), "init");
+    }
+}
+
+#[test]
 fn structured_menu_roundtrips_with_server_activation_steps() {
     use magit_lsp::menu::{Args, Group, Item, Reader};
     let cases = [

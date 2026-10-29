@@ -1647,10 +1647,10 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 /// Turn a command outcome into its response plus render/keymap notifications.
 fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
     let mut notifications = Vec::new();
-    if outcome.commit.is_some() && !shared.closing.load(Ordering::SeqCst) {
+    if let Some(operation) = outcome.commit.filter(|_| !shared.closing.load(Ordering::SeqCst)) {
         // Git must not run while this request still holds any session or repo
         // lock: it waits for the user to edit and confirm.
-        spawn_commit(shared.clone(), repo.to_string());
+        spawn_commit(shared.clone(), repo.to_string(), operation);
     }
     if let Some(render) = outcome.render {
         notifications.push(Message::Notification(Notification::new(
@@ -1785,7 +1785,7 @@ impl Drop for CommitEdit {
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
 /// lock is held while Git blocks on the helper. Only the final refresh takes
 /// the session lock again, briefly.
-fn spawn_commit(shared: Shared, repo: String) {
+fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOperation) {
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
@@ -1818,7 +1818,7 @@ fn spawn_commit(shared: Shared, repo: String) {
         .spawn(move || {
             let _progress = progress;
             let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
-                Some(socket) => editor::commit(&repo, &edit.id, socket),
+                Some(socket) => editor::commit(&repo, &edit.id, socket, &operation),
                 None => Err(Error::new("the editor bridge is not running")),
             });
             // Release both resources before any outcome or progress-end reaches

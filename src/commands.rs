@@ -141,14 +141,14 @@ pub struct CommandOutcome {
     pub pop: bool,
     /// Spawn `git commit` on a detached worker once this command returns; the
     /// editor bridge keeps Git waiting until the client confirms.
-    pub commit: bool,
+    pub commit: Option<crate::git::CommitOperation>,
 }
 
 /// A prepared operation resumed exactly once after the user answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptAction {
     /// Stage the captured working tree before starting commit.
-    Commit { fingerprint: RepositoryFingerprint, untracked: bool },
+    Commit { fingerprint: RepositoryFingerprint, untracked: bool, operation: crate::git::CommitOperation },
     /// Apply the captured resolution against the displayed patch identities.
     Discard { fingerprint: RepositoryFingerprint, resolution: dispatch::Resolution, tree: Tree },
     /// Resolve a revision for the originating selection view.
@@ -207,7 +207,7 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
     use crate::protocol::PromptValue;
     let Some(answer) = answer else { return Ok(CommandOutcome::default()); };
     match action {
-        PromptAction::Commit { fingerprint, untracked } => {
+        PromptAction::Commit { fingerprint, untracked, operation } => {
             if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
             let repo = GitRepo::open(ctx.repo_path)?;
             if RepositoryFingerprint::capture(&repo)? != fingerprint {
@@ -217,7 +217,7 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
             ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUnstaged)?);
             if untracked { ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUntracked)?); }
             ctx.info("Committing…");
-            Ok(CommandOutcome { commit: true, ..Default::default() })
+            Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
         }
         PromptAction::Discard { fingerprint, resolution, tree } => {
             if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
@@ -795,14 +795,23 @@ fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Commit asks the server to launch `git commit` on a detached worker.
 ///
-/// The pre-flight runs before any progress is shown: a clean tree never starts
-/// Git (so no "Committing" feedback can be left behind), and an unstaged-only
-/// tree asks before staging everything. Menu switches and amend/extend land
-/// with R-4.1.
+/// The pre-flight runs before progress: a clean tree requires allow-empty,
+/// and an unstaged-only tree asks before staging unless all is selected.
+/// Options are validated before mutation
+/// and captured with the operation across the staging prompt.
 fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     let repo = GitRepo::open(ctx.repo_path)?;
+    let options = match commit_options(ctx.args, &repo) {
+        Ok(options) => options,
+        Err(error) => {
+            ctx.info(format!("Invalid commit arguments: {error}"));
+            return Ok(CommandOutcome::default());
+        }
+    };
     let status = repo.status_listing()?;
-    if status.staged.is_empty() {
+    let ready = options.allow_empty || (options.all && !status.unstaged.is_empty());
+    let operation = crate::git::CommitOperation::Create(options);
+    if status.staged.is_empty() && !ready {
         if status.unstaged.is_empty() && status.untracked.is_empty() {
             ctx.effects.push(Effect::Message {
                 level: MessageLevel::Info,
@@ -833,13 +842,68 @@ fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         return Ok(CommandOutcome { prompt: Some((prompt, PromptAction::Commit {
             fingerprint: RepositoryFingerprint::capture(&repo)?,
             untracked: !status.untracked.is_empty(),
+            operation,
         })), ..Default::default() });
     }
     ctx.info("Committing…");
     Ok(CommandOutcome {
-        commit: true,
+        commit: Some(operation),
         ..Default::default()
     })
+}
+
+/// Validate structured commit-menu input once, before staging or launching Git.
+fn commit_options(args: Option<&Value>, repo: &GitRepo) -> Result<crate::git::CommitOptions> {
+    let args: crate::menu::Args = match args.filter(|value| !value.is_null()) {
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| crate::Error::new(format!("Expected commit switches and option values: {error}")))?,
+        None => crate::menu::Args::default(),
+    };
+    let mut options = crate::git::CommitOptions::default();
+    let mut seen = std::collections::HashSet::new();
+    for key in args.switches {
+        if !seen.insert(key.clone()) { return Err(crate::Error::new(format!("Duplicate commit switch {key}"))); }
+        match key.as_str() {
+            "-a" => options.all = true,
+            "-e" => options.allow_empty = true,
+            "-v" => options.verbose = true,
+            "-n" => options.no_verify = true,
+            "-R" => options.reset_author = true,
+            "-s" => options.signoff = true,
+            _ => return Err(crate::Error::new(format!("Unsupported commit switch {key}"))),
+        }
+    }
+    for (key, value) in args.options {
+        if value.contains('\0') || (value.trim().is_empty() && key != "=S") {
+            return Err(crate::Error::new(format!("Missing or invalid value for {key}")));
+        }
+        match key.as_str() {
+            "=A" => {
+                let valid = value.rsplit_once('<').is_some_and(|(name, email)|
+                    !name.trim().is_empty() && email.ends_with('>') && email.len() > 2);
+                if !valid || value.contains(['\n', '\r']) {
+                    return Err(crate::Error::new("Author must be Name <email>"));
+                }
+                options.author = Some(value);
+            }
+            "=D" => options.date = Some(value),
+            "=S" => options.signing_key = Some(value),
+            "=C" => options.reuse_message = Some(value),
+            "=c" => options.reedit_message = Some(value),
+            _ => return Err(crate::Error::new(format!("Unsupported commit option {key}"))),
+        }
+    }
+    if options.reuse_message.is_some() && options.reedit_message.is_some() {
+        return Err(crate::Error::new("Reuse and reedit message options conflict"));
+    }
+    if options.reset_author && (options.author.is_some() || (options.reuse_message.is_none() && options.reedit_message.is_none())) {
+        return Err(crate::Error::new("Reset author requires reuse/reedit and cannot be combined with author"));
+    }
+    for revision in [&mut options.reuse_message, &mut options.reedit_message].into_iter().flatten() {
+        *revision = repo.resolve_commit(revision)?;
+    }
+    if let Some(date) = &options.date { repo.validate_author_date(date)?; }
+    Ok(options)
 }
 
 /// Open the dispatch menu, including from inside another menu.

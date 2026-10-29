@@ -156,12 +156,17 @@ fn edit_document(message: &Value) -> Option<Value> {
 
 /// Start a commit from the status view and return its pending edit.
 fn start_commit(server: &mut TestServer, status: &str) -> Value {
+    start_commit_with_args(server, status, json!(null))
+}
+
+/// Start a real editor-backed commit with structured menu arguments.
+fn start_commit_with_args(server: &mut TestServer, status: &str, args: Value) -> Value {
     eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 4,
         "method": "view/invoke",
-        "params": {"viewId": status, "command": "commit.create"},
+        "params": {"viewId": status, "command": "commit.create", "args": args},
     }));
     let mut response = None;
     let mut edit = None;
@@ -473,6 +478,45 @@ fn a_commit_is_created_from_the_typed_message() {
     server.shutdown_and_exit();
     let exit = server.finish(Duration::from_secs(20));
     assert!(exit.success(), "server exited: {exit:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn typed_commit_options_reach_real_git_through_the_editor_worker() {
+    use std::os::unix::fs::PermissionsExt;
+    let (tmp, _) = staged_repo();
+    write(&tmp.path().join("f.txt"), "typed all content\n");
+    let hook = tmp.path().join(".git/hooks/pre-commit");
+    write(&hook, "#!/bin/sh\ntouch .git/unexpected-hook\nexit 1\n");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut server = TestServer::spawn(&[]);
+    server.recv_timeout = Duration::from_secs(20);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let author = "Typed ; $(not-a-shell) <typed@example.com>";
+    let edit = start_commit_with_args(&mut server, &status, json!({
+        "switches": ["-a", "-v", "-n", "-s"],
+        "options": {"=A": author, "=D": "2001-02-03T04:05:06+00:00"}
+    }));
+    let path = magit_lsp::git::GitRepo::open(tmp.path()).unwrap().commit_message_path().unwrap();
+    let initial = read(&path);
+    assert!(initial.contains("Signed-off-by:"), "{initial}");
+    assert!(initial.contains("diff --git"), "verbose diff reaches the real editor file: {initial}");
+    // Preserve Git's generated signoff and verbose cleanup/scissors content.
+    sync_draft(&mut server, &edit, &format!("Typed options message\n{initial}"));
+    let confirmed = finish_draft(&mut server, 5, &edit);
+    assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
+    wait_for_commit(&tmp, "Typed options message\n\nSigned-off-by: Test User <test@example.com>");
+    assert_eq!(tmp.git(&["log", "-1", "--format=%an <%ae>"]).trim(), author);
+    assert_eq!(tmp.git(&["log", "-1", "--format=%at"]).trim(), "981173106");
+    let message = tmp.git(&["log", "-1", "--format=%B"]);
+    assert!(message.contains("Signed-off-by:"));
+    assert!(!message.contains("diff --git"), "Git owns verbose cleanup");
+    assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), "typed all content\n");
+    assert!(!tmp.path().join(".git/unexpected-hook").exists());
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(20)).success());
 }
 
 #[test]
@@ -1064,7 +1108,8 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let run = magit_lsp::editor::registry().create(tmp.path().to_str().unwrap(), "early-test").unwrap();
     cancel.cancel();
     let error = magit_lsp::runner::with_cancel(Some(cancel), || {
-        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), &run, &tmp.path().join("unused.sock"))
+        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), &run, &tmp.path().join("unused.sock"),
+            &magit_lsp::git::CommitOperation::Create(Default::default()))
     }).expect_err("the pre-cancelled commit must fail");
     magit_lsp::editor::registry().remove(&run);
     assert_eq!(error.git.expect("a structured Git failure").subcommand, "commit");

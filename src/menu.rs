@@ -147,7 +147,7 @@ fn menu_key_steps(key: &str) -> Vec<String> {
 
 /// A saved set of switches and option values.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Args {
     /// Keys of the switches that are on, e.g. `-a`.
     pub switches: Vec<String>,

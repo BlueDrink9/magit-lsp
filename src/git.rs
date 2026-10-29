@@ -123,6 +123,61 @@ pub struct CommitOutcome {
     pub warning: Option<String>,
 }
 
+/// Captured commit operation, independent of menu and prompt lifetime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitOperation {
+    /// Create a new commit using validated menu options.
+    Create(CommitOptions),
+}
+
+impl CommitOperation {
+    /// Render the captured operation as individual Git arguments.
+    pub fn argv(&self) -> Vec<String> {
+        match self { Self::Create(options) => options.argv() }
+    }
+}
+
+/// Validated arguments for creating a commit; values are passed as argv entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommitOptions {
+    /// `git commit --all`.
+    pub all: bool,
+    /// `git commit --allow-empty`.
+    pub allow_empty: bool,
+    /// `git commit --verbose`.
+    pub verbose: bool,
+    /// `git commit --no-verify`.
+    pub no_verify: bool,
+    /// `git commit --reset-author`.
+    pub reset_author: bool,
+    /// `git commit --signoff`.
+    pub signoff: bool,
+    /// Optional explicit author identity.
+    pub author: Option<String>,
+    /// Optional Git date expression.
+    pub date: Option<String>,
+    /// Optional signing key (empty means Git's default key).
+    pub signing_key: Option<String>,
+    /// Optional message to reuse.
+    pub reuse_message: Option<String>,
+    /// Optional message to re-edit.
+    pub reedit_message: Option<String>,
+}
+
+impl CommitOptions {
+    /// Render trusted values to argv without shell parsing.
+    pub fn argv(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        for (enabled, flag) in [(self.all, "--all"), (self.allow_empty, "--allow-empty"), (self.verbose, "--verbose"), (self.no_verify, "--no-verify"), (self.reset_author, "--reset-author"), (self.signoff, "--signoff")] {
+            if enabled { args.push(flag.to_string()); }
+        }
+        for (flag, value) in [("--author", self.author.as_deref()), ("--date", self.date.as_deref()), ("--gpg-sign", self.signing_key.as_deref()), ("--reuse-message", self.reuse_message.as_deref()), ("--reedit-message", self.reedit_message.as_deref())] {
+            if let Some(value) = value { args.push(format!("{flag}={value}")); }
+        }
+        args
+    }
+}
+
 /// An ordered row in a Git log page's graph output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitLogRow {
@@ -212,6 +267,16 @@ pub struct GitRepo {
 }
 
 impl GitRepo {
+    /// Check an external author-date expression without changing repository state.
+    pub fn validate_author_date(&self, date: &str) -> Result<()> {
+        Self::command_in_with_env(&self.root, &["var", "GIT_AUTHOR_IDENT"], &[
+            ("GIT_AUTHOR_NAME", "Date validation"),
+            ("GIT_AUTHOR_EMAIL", "date@example.invalid"),
+            ("GIT_AUTHOR_DATE", date),
+        ])?;
+        Ok(())
+    }
+
     /// Open the repository containing `path`, resolving its working-tree root.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();

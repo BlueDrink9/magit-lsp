@@ -94,6 +94,75 @@ const NAMESPACES: &[&str] = &[
 ];
 
 #[test]
+fn commit_arguments_are_typed_and_invalid_input_never_stages() {
+    use serde_json::json;
+    use magit_lsp::git::CommitOperation;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+    std::fs::write(tmp.path().join("f.txt"), "changed\n").unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    let before = tmp.git(&["status", "--porcelain"]);
+    for args in [
+        json!({"switches": [], "options": {}, "raw": "--amend"}),
+        json!({"switches": ["--amend"], "options": {}}),
+        json!({"switches": ["-a", "-a"], "options": {}}),
+        json!({"switches": ["-a"]}),
+        json!({"switches": [], "options": {"=A": ""}}),
+        json!({"switches": [], "options": {"=D": "not a date"}}),
+        json!({"switches": [], "options": {"=A": "bad author"}}),
+        json!({"switches": [], "options": {"=S": null}}),
+        json!({"switches": [], "options": {"=X": "unsupported"}}),
+        json!({"switches": [], "options": {"=C": "HEAD", "=c": "HEAD"}}),
+        json!({"switches": ["-R"], "options": {}}),
+        json!({"switches": ["-R"], "options": {"=C": "HEAD", "=A": "A <a@b>"}}),
+        json!({"switches": [], "options": {"=C": "--all"}}),
+    ] {
+        let result = test.invoke_args("commit.create", args.clone());
+        assert!(result.commit.is_none(), "{args}");
+        assert!(message_texts(&result.effects).iter().any(|text| text.contains("Invalid commit arguments")), "{args}: {:?}", result.effects);
+        assert_eq!(tmp.git(&["status", "--porcelain"]), before);
+    }
+    let result = test.invoke_args("commit.create", json!({
+        "switches": ["-a", "-e", "-v", "-n", "-s", "-R"],
+        "options": {"=D": "2001-02-03T04:05:06+00:00", "=S": "", "=c": "HEAD"}
+    }));
+    let CommitOperation::Create(options) = result.commit.expect("typed operation");
+    assert!(options.all && options.allow_empty && options.verbose && options.no_verify && options.signoff && options.reset_author);
+    assert_eq!(options.signing_key.as_deref(), Some(""));
+    assert_eq!(options.reedit_message.as_deref(), Some(tmp.git(&["rev-parse", "HEAD"]).trim()));
+    assert_eq!(options.argv(), vec![
+        "--all".to_string(), "--allow-empty".into(), "--verbose".into(), "--no-verify".into(),
+        "--reset-author".into(), "--signoff".into(), "--date=2001-02-03T04:05:06+00:00".into(),
+        "--gpg-sign=".into(), format!("--reedit-message={}", tmp.git(&["rev-parse", "HEAD"]).trim()),
+    ]);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), before, "dispatch itself does not stage");
+}
+
+#[test]
+fn captured_reuse_and_reedit_options_have_real_git_effects() {
+    use serde_json::json;
+    for (key, reset) in [("=C", false), ("=c", false), ("=C", true), ("=c", true)] {
+        let (tmp, _) = RepoFixture::new().commit("original message", [("f.txt", TEN_LINES)]).build();
+        let original_tree = tmp.git(&["rev-parse", "HEAD^{tree}"]);
+        let original_author = tmp.git(&["log", "-1", "--format=%an <%ae>"]);
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        let operation = test.invoke_args("commit.create", json!({
+            "switches": if reset { vec!["-e", "-R"] } else { vec!["-e"] }, "options": {(key): "HEAD"}
+        })).commit.expect("allow-empty bypasses clean guard");
+        let argv = operation.argv();
+        let repo = magit_lsp::git::GitRepo::open(tmp.path()).unwrap();
+        repo.commit(&argv.iter().map(String::as_str).collect::<Vec<_>>(), &[
+            ("GIT_EDITOR", "true"), ("GIT_AUTHOR_NAME", "New Committer"),
+            ("GIT_AUTHOR_EMAIL", "new@example.com"),
+        ]).unwrap();
+        assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]).trim(), "2");
+        assert_eq!(tmp.git(&["log", "-1", "--format=%s"]).trim(), "original message");
+        assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), original_tree);
+        let expected = if reset { "New Committer <new@example.com>" } else { original_author.trim() };
+        assert_eq!(tmp.git(&["log", "-1", "--format=%an <%ae>"]).trim(), expected);
+    }
+}
+
+#[test]
 fn failed_and_noop_staging_do_not_advance_to_a_sibling() {
     for failure in [true, false] {
         let (tmp, _) = RepoFixture::new()

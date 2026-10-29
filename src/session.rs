@@ -482,8 +482,8 @@ pub struct InvokeResult {
     pub keymap: Option<ViewKeymapParams>,
     /// Initial renders and keymaps for views the effects pushed or opened.
     pub opened: Vec<(ViewRender, Option<ViewKeymapParams>)>,
-    /// The repository whose `git commit` must run on a detached worker.
-    pub commit: Option<String>,
+    /// Captured operation to run on the repository's detached commit worker.
+    pub commit: Option<crate::git::CommitOperation>,
 }
 
 impl InvokeResult {
@@ -1125,7 +1125,7 @@ impl Session {
                     .map(|view| view.descriptor().scope.as_str().to_string())
                     .unwrap_or_default();
                 let menu_args = self.views.get(view_id).and_then(|view| view.menu()).map(|menu| menu.args());
-                let serialized_args = menu_args.as_ref().and_then(|args| serde_json::to_value(args).ok());
+                let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
                 if registered.scope.matches(&scope) {
                     return self.run_versioned_command(
                         view_id,
@@ -1437,7 +1437,7 @@ impl Session {
                 || outcome.open_view.is_some()
                 || outcome.open_selection.is_some()
                 || outcome.selected_commits.is_some()
-                || outcome.commit
+                || outcome.commit.is_some()
             {
                 None
             } else {
@@ -1625,7 +1625,7 @@ impl Session {
             render,
             keymap,
             opened: Vec::new(),
-            commit: outcome.commit.then(|| self.repo_path.clone()),
+            commit: outcome.commit,
         })
     }
 
