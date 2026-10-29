@@ -457,9 +457,9 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 | `-` | `=C` | `-` | Implemented | commit |
 | `-` | `=c` | `-` | Implemented | commit |
 | `magit-commit-create` | `c c` | `commit.create` | Implemented | commit |
-| `magit-commit-extend` | `c e` | `commit.extend` | Planned R-4.1 | commit |
-| `magit-commit-amend` | `c a` | `commit.amend` | Planned R-4.1 | commit |
-| `magit-commit-reword` | `c w` | `commit.reword` | Planned R-4.1 | commit |
+| `magit-commit-extend` | `c e` | `commit.extend` | Implemented | commit |
+| `magit-commit-amend` | `c a` | `commit.amend` | Implemented | commit |
+| `magit-commit-reword` | `c w` | `commit.reword` | Implemented | commit |
 | `magit-commit-reshelve` | `c d` | `commit.reshelve` | Planned R-4.1 | commit |
 | `magit-commit-fixup` | `c f` | `commit.fixup` | Planned R-4.1 | commit |
 | `magit-commit-squash` | `c s` | `commit.squash` | Planned R-4.1 | commit |
