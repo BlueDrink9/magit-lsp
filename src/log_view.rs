@@ -335,6 +335,7 @@ fn node(
         line_index: None,
         new_line: None,
         copy: None,
+        mutation: None,
         commit,
         children: Vec::new(),
     }

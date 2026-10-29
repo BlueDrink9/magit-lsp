@@ -411,7 +411,7 @@ where
         file_node.section = Some(section.to_string());
         file_node.path = Some(file.path.clone());
         file_node.status = Some(file.status.clone());
-        file_node.copy = file.mutation_identity.as_ref().and_then(|identity| serde_json::to_string(identity).ok()).map(|identity| format!("file-identity:{identity}"));
+        file_node.mutation = file.mutation_identity.clone().map(crate::tree::MutationContent::File);
         self.tree.nodes.push(file_node);
 
         let staged = section == "staged";
@@ -446,14 +446,17 @@ where
             let hunks = (self.load)(section, file);
             let children = hunks
                 .iter()
-                .map(|hunk| self.hunk(section, file, &file_id, hunk))
+                .map(|hunk| {
+                    let identical = hunks.iter().filter(|other| other.same_content(hunk)).count();
+                    self.hunk(section, file, &file_id, hunk, identical)
+                })
                 .collect::<Vec<_>>();
             self.tree.nodes[index].children = children;
         }
         file_id
     }
 
-    fn hunk(&mut self, section: &str, file: &FileEntry, file_id: &str, hunk: &Hunk) -> String {
+    fn hunk(&mut self, section: &str, file: &FileEntry, file_id: &str, hunk: &Hunk, identical: usize) -> String {
         let hunk_id = format!("{file_id}/hunk:{}", hunk.id);
         let line = self.tree.lines.len();
         let header = format!(
@@ -476,6 +479,7 @@ where
         hunk_node.hunk_id = Some(hunk.id.clone());
         hunk_node.new_line = Some(hunk.new_start);
         hunk_node.copy = Some(hunk_source_text(hunk));
+        hunk_node.mutation = Some(crate::tree::MutationContent::Hunk { hunk: hunk.clone(), identical });
         self.tree.nodes.push(hunk_node);
 
         let staged = section == "staged";
@@ -724,6 +728,7 @@ fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -
         line_index: None,
         new_line: None,
         copy: None,
+        mutation: None,
         commit: None,
         children: Vec::new(),
     }

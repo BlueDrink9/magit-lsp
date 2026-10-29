@@ -85,8 +85,9 @@ fn file_identity_is_retained_in_the_server_tree_but_never_sent_or_copied() {
     let status = repo.status_listing().unwrap();
     let tree = status_view::build(&status);
     let file = tree.nodes.iter().find(|node| node.kind == NodeKind::File).unwrap();
-    let captured = file.copy.clone().expect("server-owned identity");
-    assert!(captured.starts_with("file-identity:"));
+    let captured = file.mutation.clone().expect("server-owned identity");
+    assert!(matches!(captured, magit_lsp::tree::MutationContent::File(_)));
+    assert!(file.copy.is_none());
     assert_eq!(tree.copy_value(Some(file.start_line), None).as_deref(), Some("f.txt"));
     let wire = serde_json::to_string(&tree).unwrap();
     assert!(!wire.contains("file-identity:"));
@@ -94,8 +95,8 @@ fn file_identity_is_retained_in_the_server_tree_but_never_sent_or_copied() {
     write(&tmp.path().join("f.txt"), "later\0bytes");
     let fresh = status_view::build(&repo.status_listing().unwrap());
     let new_file = fresh.nodes.iter().find(|node| node.kind == NodeKind::File).unwrap();
-    assert_ne!(new_file.copy.as_ref(), Some(&captured));
-    assert_eq!(tree.clone().node(&file.id).unwrap().copy.as_ref(), Some(&captured));
+    assert_ne!(new_file.mutation.as_ref(), Some(&captured));
+    assert_eq!(tree.clone().node(&file.id).unwrap().mutation.as_ref(), Some(&captured));
 }
 
 fn line_of(tree: &Tree, text: &str) -> usize {

@@ -37,8 +37,111 @@ pub struct DispatchRequest {
     pub command: String,
     /// Display-version-bound input target.
     pub target: DispatchTarget,
+    /// Optional content target offered from the named displayed render.
+    pub action_target: Option<ActionTarget>,
     /// Typed command arguments, including captured menu arguments.
     pub args: Option<Value>,
+}
+
+/// Whether a command mutates displayed status content (not deliberate bulk).
+pub fn content_command(command: &str) -> bool {
+    matches!(command, "status.stage" | "status.unstage" | "status.discard")
+}
+
+fn file_identity(tree: &crate::tree::Tree, node: &crate::tree::Node) -> Option<crate::git::FileMutationIdentity> {
+    tree.nodes.iter().find_map(|file| {
+        if file.path != node.path || file.section != node.section { return None; }
+        match &file.mutation {
+            Some(crate::tree::MutationContent::File(identity)) => Some(identity.clone()),
+            _ => None,
+        }
+    })
+}
+
+fn mutation_hash(
+    command: &str, mut identity: crate::git::FileMutationIdentity,
+    hunk: Option<(&crate::patch::Hunk, usize)>,
+) -> String {
+    use sha2::{Digest, Sha256};
+    fn index_only(identity: &mut crate::git::FileMutationIdentity) {
+        identity.worktree.clear();
+        if let Some((_, original)) = &mut identity.original { index_only(original); }
+    }
+    if command == "status.unstage" { index_only(&mut identity); }
+    let value = if let Some((hunk, identical)) = hunk {
+        // Ordinals distinguish identical siblings only. Bind ambiguous siblings
+        // to the complete file state so removing one cannot retarget another.
+        serde_json::json!([command, hunk.id, identical,
+            hunk.lines.iter().map(|line| (line.marker, &line.text, line.no_newline)).collect::<Vec<_>>(),
+            identity.original.as_ref().map(|(path, _)| path),
+            if identical > 1 || command == "status.discard" { Some(&identity) } else { None }])
+    } else { serde_json::json!([command, identity]) };
+    format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
+}
+
+/// Offer a content target from typed metadata in the exact displayed tree.
+/// Diff lines intentionally target their owning hunk; sections remain bulk.
+pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> Option<ActionTarget> {
+    use crate::tree::{MutationContent, NodeKind};
+    if !content_command(command) { return None; }
+    let mut node = tree.node(node_id)?;
+    if node.kind == NodeKind::Line {
+        node = tree.nodes.iter().find(|hunk| hunk.kind == NodeKind::Hunk
+            && hunk.path == node.path && hunk.section == node.section && hunk.hunk_id == node.hunk_id)?;
+    }
+    let identity = file_identity(tree, node)?;
+    let hunk = match node.mutation.as_ref()? {
+        MutationContent::File(_) => None,
+        MutationContent::Hunk { hunk, identical } => Some((hunk, *identical)),
+    };
+    Some(ActionTarget { node_id: node.id.clone(), mutation_hash: mutation_hash(command, identity, hunk) })
+}
+
+/// Re-derive an offered target from fresh Git state without using fresh rows.
+pub fn target_is_current(repo: &GitRepo, tree: &crate::tree::Tree, command: &str, target: &ActionTarget) -> Result<bool> {
+    use crate::tree::MutationContent;
+    let Some(node) = tree.node(&target.node_id) else { return Ok(false); };
+    if offer_target(tree, command, &node.id).as_ref() != Some(target) { return Ok(false); }
+    let Some(captured) = file_identity(tree, node) else { return Ok(false); };
+    let Some(path) = node.path.as_deref() else { return Ok(false); };
+    let identity = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), command != "status.unstage")?;
+    let hunks;
+    let hunk = match node.mutation.as_ref() {
+        Some(MutationContent::Hunk { hunk, .. }) => {
+            hunks = repo.file_hunks(path, node.section.as_deref() == Some("staged"))?;
+            let Some(current) = hunks.iter().find(|current| current.id == hunk.id) else { return Ok(false); };
+            Some((current, hunks.iter().filter(|other| other.same_content(current)).count()))
+        }
+        Some(MutationContent::File(_)) => None,
+        _ => return Ok(false),
+    };
+    Ok(mutation_hash(command, identity, hunk) == target.mutation_hash)
+}
+
+/// Capture cursor/selection targets from displayed structure, not rendered text.
+pub fn displayed_targets(tree: &crate::tree::Tree, command: &str, cursor: Option<Cursor>, selection: Option<Selection>) -> Vec<ActionTarget> {
+    use crate::tree::NodeKind;
+    let mut targets = Vec::new();
+    if let Some(selection) = selection {
+        let start = selection.start_line.min(selection.end_line);
+        let end = selection.start_line.max(selection.end_line);
+        let section = if command == "status.unstage" { "staged" } else { "unstaged" };
+        if tree.line_nodes.get(start).and_then(|line| line.section.as_deref()) != Some(section) { return targets; }
+        for node in &tree.nodes {
+            if node.section.as_deref() != Some(section) { continue; }
+            let selected = match node.kind {
+                NodeKind::File => start <= node.start_line && node.start_line <= end,
+                NodeKind::Hunk => start <= node.end_line && node.start_line <= end,
+                _ => false,
+            };
+            if selected {
+                if let Some(target) = offer_target(tree, command, &node.id) { targets.push(target); }
+            }
+        }
+    } else if let Some(node) = cursor.and_then(|cursor| tree.line_nodes.get(cursor.line)).and_then(|line| tree.node(&line.node)) {
+        if let Some(target) = offer_target(tree, command, &node.id) { targets.push(target); }
+    }
+    targets
 }
 
 /// The command the user invoked on the row under the cursor.

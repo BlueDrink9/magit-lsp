@@ -115,11 +115,12 @@ pub struct Node {
     /// Line in the new (worktree) file this node visits, 1-based.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_line: Option<u32>,
-    /// Raw source for hunk/line copies. File rows reserve this slot for an
-    /// internal render identity, omitted from the wire; copying a file always
-    /// uses its structured path, never this payload.
-    #[serde(skip_serializing_if = "is_file_identity")]
+    /// Raw source for hunk/line copies.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub copy: Option<String>,
+    /// Server-only mutation content captured by this exact render.
+    #[serde(skip)]
+    pub mutation: Option<MutationContent>,
     /// Full commit object ID for structured commit selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
@@ -127,8 +128,18 @@ pub struct Node {
     pub children: Vec<NodeId>,
 }
 
-fn is_file_identity(value: &Option<String>) -> bool {
-    value.as_deref().is_none_or(|value| value.starts_with("file-identity:"))
+/// Typed content used to offer and validate actions, never sent to clients.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutationContent {
+    /// Complete file endpoint identity, including rename source.
+    File(crate::git::FileMutationIdentity),
+    /// Displayed hunk and number of identical-content siblings in its file.
+    Hunk {
+        /// Exact displayed patch content, with its content-derived identity.
+        hunk: crate::patch::Hunk,
+        /// Number of content-identical siblings, not a hunk address/index.
+        identical: usize,
+    },
 }
 
 /// The node that owns one rendered line; this is the client's cursor map.

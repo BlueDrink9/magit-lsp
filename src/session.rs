@@ -849,6 +849,7 @@ impl Session {
         let already_pending = self.pending_prompt.is_some();
         let result = self.dispatch(
             crate::dispatch::DispatchRequest {
+                action_target: None,
                 command: params.command.clone(),
                 target: crate::dispatch::DispatchTarget {
                     view_id: params.view_id.clone(), version: params.version,
@@ -865,13 +866,45 @@ impl Session {
         })
     }
 
+    /// Start a typed action through the same dispatcher and prompt lifecycle as
+    /// rich input. Later Plain actions can reuse this without executeCommand.
+    pub fn start_dispatch(&mut self, request: crate::dispatch::DispatchRequest) -> Result<Execution> {
+        let already_pending = self.pending_prompt.is_some();
+        let result = self.dispatch(request, &crate::ui::NullUi)?;
+        self.publish();
+        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
+    }
+
     /// Execute a semantic command using its captured args and displayed target.
     pub fn dispatch(
         &mut self,
         request: crate::dispatch::DispatchRequest,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        let target = request.target;
+        if self.pending_prompt.is_some() && request.command != "common.refresh" {
+            return Ok(prompt_busy());
+        }
+        let mut target = request.target;
+        if let Some(offered) = request.action_target.as_ref() {
+            let view = self.views.get(&target.view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {}", target.view_id)))?;
+            let source = match target.version {
+                Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
+                Some(version) if version == view.version => Some(&view.tree),
+                _ => None,
+            };
+            let node = source.filter(|tree| crate::dispatch::offer_target(tree, &request.command, &offered.node_id).as_ref() == Some(offered))
+                .and_then(|tree| tree.node(&offered.node_id));
+            if let Some(node) = node.filter(|_| target.selection.is_none()) {
+                target.cursor = Some(Cursor { line: node.start_line, column: 0 });
+            } else {
+                return Ok(InvokeResult {
+                    effects: vec![Effect::message(MessageLevel::Warn, crate::errors::HUNK_CHANGED)],
+                    render: self.refresh(&target.view_id)?,
+                    ..InvokeResult::empty()
+                });
+            }
+        }
         self.run_versioned_command(
             &target.view_id, &request.command, target.version, target.cursor,
             target.selection, request.args.as_ref(), target.key, ui,
@@ -959,6 +992,7 @@ impl Session {
             Resolution::Pending => Ok(InvokeResult::empty()),
             Resolution::Run { command, chord } => self.dispatch(
                 crate::dispatch::DispatchRequest {
+                    action_target: None,
                     command,
                     target: crate::dispatch::DispatchTarget {
                         view_id: params.view_id.clone(), version: Some(params.version),
@@ -1407,6 +1441,7 @@ impl Session {
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
                 if registered.scope.matches(&scope) {
                     return self.dispatch(crate::dispatch::DispatchRequest {
+                        action_target: None,
                         command: registered.id.to_string(),
                         target: crate::dispatch::DispatchTarget { view_id: view_id.to_string(),
                             version: Some(params.version), cursor: Some(params.cursor),
@@ -1449,6 +1484,7 @@ impl Session {
                     }
                 }
                 let mut run = self.dispatch(crate::dispatch::DispatchRequest {
+                    action_target: None,
                     command: registered.id.to_string(),
                     target: crate::dispatch::DispatchTarget { view_id: target, version: None,
                         cursor: None, selection: None, key: Some(key.to_string()) },
@@ -1629,6 +1665,31 @@ impl Session {
                 });
             };
             view.request_tree = Some(source.clone());
+        }
+        if crate::dispatch::content_command(command_id) && view.mode() != ViewMode::Text {
+            let source = view.command_source_tree().unwrap_or_else(|| view.tree());
+            let targets = crate::dispatch::displayed_targets(source, command_id, cursor, selection);
+            let repo = crate::git::GitRepo::open(&self.repo_path)?;
+            let mut rejection = None;
+            for target in &targets {
+                match crate::dispatch::target_is_current(&repo, source, command_id, target) {
+                    Ok(true) => continue,
+                    Ok(false) => rejection = Some(vec![Effect::message(MessageLevel::Warn, crate::errors::HUNK_CHANGED)]),
+                    Err(error) => {
+                        view.request_tree = None;
+                        rejection = Some(crate::errors::effects_for_result(Err(error))?);
+                    }
+                }
+                break;
+            }
+            if let Some(effects) = rejection {
+                view.request_tree = None;
+                return Ok(InvokeResult {
+                    effects,
+                    render: self.refresh(view_id)?,
+                    ..InvokeResult::empty()
+                });
+            }
         }
         let result = self.run_command(view_id, command_id, cursor, selection, args, key, ui);
         if let Some(view) = self.views.get_mut(view_id) {

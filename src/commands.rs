@@ -1651,9 +1651,7 @@ fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &
         && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section)) else {
         return Ok(false);
     };
-    let Some(captured) = file.copy.as_deref()
-        .and_then(|identity| identity.strip_prefix("file-identity:"))
-        .and_then(|json| serde_json::from_str::<crate::git::FileMutationIdentity>(json).ok()) else {
+    let Some(crate::tree::MutationContent::File(captured)) = file.mutation.as_ref() else {
         return Ok(false);
     };
     let current = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), section != "staged")?;

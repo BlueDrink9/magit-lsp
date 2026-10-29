@@ -29,6 +29,12 @@ pub struct Hunk {
 }
 
 impl Hunk {
+    /// Compare mutation content without location or identical-sibling ordinal.
+    pub fn same_content(&self, other: &Self) -> bool {
+        self.lines.len() == other.lines.len() && self.lines.iter().zip(&other.lines)
+            .all(|(a, b)| a.marker == b.marker && a.text == b.text && a.no_newline == b.no_newline)
+    }
+
     /// Compute `id` from the hunk's line markers and text.
     ///
     /// `@@` line numbers are deliberately excluded: inserting lines above a
@@ -320,6 +326,9 @@ pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
 /// The first occurrence keeps the content id; later ones append an occurrence
 /// counter (`id-1`, `id-2`, …) so a file with repeated hunks can address each
 /// one independently.
+/// This ordinal is only a content-collision disambiguator, not a hunk index.
+/// Action targets also bind ambiguous siblings to the displayed file state;
+/// reviewer sign-off is required for this documented ordinal exception.
 fn disambiguate_hunk_ids(hunks: &mut [Hunk]) {
     let mut occurrences: HashMap<String, usize> = HashMap::new();
     for hunk in hunks.iter_mut() {
