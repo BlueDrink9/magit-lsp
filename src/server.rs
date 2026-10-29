@@ -2194,19 +2194,25 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 
 fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
     let uri = params.text_document.uri.as_str();
-    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-    let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
-    let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
-    let text = document.text.as_str();
-    let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-    let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
-    let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(text) else { return Value::Array(Vec::new()); };
-    if tree.lines.join("\n") != text || view_id != entry.view_id { return Value::Array(Vec::new()); }
+    let (text, tree, generation, scope, repo) = {
+        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
+        let text = document.text.clone();
+        let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
+        let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
+        if tree.lines.join("\n") != text || view_id != entry.view_id { return Value::Array(Vec::new()); }
+        (text, tree.clone(), generation, scope.to_owned(), entry.repo.clone())
+    };
+    let config = shared.config.for_repository(std::path::Path::new(&repo));
+    let style = config.config().actions.title_style;
+    let keymap = config.keymap(&scope);
     let start = params.range.start;
     let end = params.range.end;
     let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding;
-    if !plain_position_valid(text, start, encoding)
-        || !plain_position_valid(text, end, encoding)
+    if !plain_position_valid(&text, start, encoding)
+        || !plain_position_valid(&text, end, encoding)
         || (start.line, start.character) > (end.line, end.character) {
         return Value::Array(Vec::new());
     }
@@ -2215,26 +2221,53 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     let end_line = end_line as usize;
     let mut actions = Vec::new();
     for command in crate::commands::registry().iter() {
-        if !command.scope.matches(scope) { continue; }
+        if !command.scope.matches(&scope) { continue; }
         for node in &tree.nodes {
             if node.end_line < start_line || node.start_line > end_line { continue; }
-            let Some(target) = crate::dispatch::offer_target(tree, command.id, &node.id) else { continue; };
+            let Some(target) = crate::dispatch::offer_target(&tree, command.id, &node.id) else { continue; };
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
                 "target": target,
                 "viewGeneration": generation,
             });
+            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), node.path.as_deref());
             let action = lsp_types::CodeAction {
-                title: command.doc.to_string(), kind: None, diagnostics: None, is_preferred: None,
+                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
                 disabled: None, edit: None, command: Some(lsp_types::Command {
-                    title: command.doc.to_string(), command: "magit.command".to_string(), arguments: Some(vec![args]),
+                    title, command: "magit.command".to_string(), arguments: Some(vec![args]),
                 }), data: None,
             };
             actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
         }
     }
     Value::Array(actions)
+}
+
+fn plain_action_title(style: crate::config::TitleStyle, doc: &str, chord: Option<&str>, path: Option<&str>) -> String {
+    let mnemonic = matches!(style, crate::config::TitleStyle::Mnemonic | crate::config::TitleStyle::MnemonicPath).then_some(chord).flatten();
+    let path = matches!(style, crate::config::TitleStyle::Path | crate::config::TitleStyle::MnemonicPath).then_some(path).flatten();
+    match (mnemonic, path) {
+        (Some(chord), Some(path)) => format!("{chord} {path}: {doc}"),
+        (Some(chord), None) => format!("{chord} {doc}"),
+        (None, Some(path)) => format!("{path}: {doc}"),
+        (None, None) => doc.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod plain_action_title_tests {
+    use super::plain_action_title;
+    use crate::config::TitleStyle;
+
+    #[test]
+    fn title_styles_omit_missing_components() {
+        assert_eq!(plain_action_title(TitleStyle::Plain, "Stage", None, None), "Stage");
+        assert_eq!(plain_action_title(TitleStyle::Mnemonic, "Stage", None, None), "Stage");
+        assert_eq!(plain_action_title(TitleStyle::Path, "Stage", None, Some("src/a")), "src/a: Stage");
+        assert_eq!(plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), None), "s Stage");
+        assert_eq!(plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), Some("src/a")), "s src/a: Stage");
+    }
 }
 
 fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Encoding) -> bool {

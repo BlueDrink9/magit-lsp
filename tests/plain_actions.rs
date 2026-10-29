@@ -85,6 +85,52 @@ fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) 
 }
 
 #[test]
+fn titles_use_repository_style_configured_chord_and_structured_path() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let config_dir = tempfile::tempdir().unwrap();
+    let config_path = config_dir.path().join("user.toml");
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut identity: Option<Value> = None;
+    for (style, expected, repo_override) in [
+        ("plain", "Stage the change at point", false),
+        ("mnemonic", "z Stage the change at point", false),
+        ("path", "f.txt: Stage the change at point", false),
+        ("mnemonicPath", "z f.txt: Stage the change at point", false),
+        ("mnemonicPath", "f.txt: Stage the change at point", true),
+    ] {
+        std::fs::write(&config_path, format!("trust_repo_config = true\n[actions]\ntitle_style = \"{style}\"\n[keys.status]\nstage = [\"z\"]\n")).unwrap();
+        let repo_config = repo.path().join(".magit-lsp.toml");
+        if repo_override { std::fs::write(&repo_config, "[actions]\ntitle_style = \"path\"\n").unwrap(); }
+        else { let _ = std::fs::remove_file(&repo_config); }
+        let mut server = stdio::TestServer::spawn(&[(magit_lsp::config::CONFIG_ENV, config_path.to_str().unwrap())]);
+        let mut init = stdio::initialize_message();
+        init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
+        init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+        server.send(init); assert!(server.response_with_id(1)["result"].is_object());
+        server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+        let mut editor = FakeEditor::new(Profile::Standard);
+        server.send(editor.open(&uri, "old"));
+        let edit = next_apply(&mut server); for frame in editor.dispatch(&edit) { server.send(frame); }
+        let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+        server.send(json!({"jsonrpc":"2.0","id":71,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+        let response = server.response_with_id(71);
+        let action = response["result"].as_array().unwrap().iter().find(|a| a["command"]["arguments"][0]["command"] == "status.stage").unwrap();
+        assert_eq!(action["title"], expected);
+        assert_eq!(action["command"]["title"], expected);
+        assert_eq!(action["command"]["command"], "magit.command");
+        let args = action["command"]["arguments"][0].clone();
+        if let Some(previous) = &identity {
+            assert_eq!(args["command"], previous["command"]);
+            assert_eq!(args["target"], previous["target"]);
+        } else { identity = Some(args); }
+        server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+    }
+}
+
+#[test]
 fn half_open_range_uses_previous_row_and_distinct_node_targets() {
     let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("a.txt", "one\n"), ("b.txt", "two\n")]).build();
     fixtures::write(&repo.path().join("a.txt"), "changed-a\n");
