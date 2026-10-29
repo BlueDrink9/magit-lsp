@@ -6,6 +6,15 @@ use crate::Result;
 use crate::protocol::{Cursor, Selection};
 use serde_json::Value;
 
+/// A content-addressed action target tied to an existing server node identity.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ActionTarget {
+    /// Existing path/content-derived tree node identity.
+    pub node_id: String,
+    /// Hash of the exact content the action is permitted to mutate.
+    pub mutation_hash: String,
+}
+
 /// The displayed view location and input context bound to a dispatch request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DispatchTarget {
