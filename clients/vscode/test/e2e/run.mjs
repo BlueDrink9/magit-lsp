@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -29,9 +29,12 @@ if (!existsSync(`${root}/target/debug/magit-lsp`)) {
 }
 
 // This subprocess observes the isolated renderer; it never sets context keys or
-// dispatches commands. Page.captureScreenshot captures Monaco's actual surface.
+// dispatches commands. Image capture methods are explicitly forbidden.
 if (process.argv[2] === '--cdp') {
   const [, , , port, method, params] = process.argv;
+  if (/image|screenshot|snapshot/i.test(method)) {
+    throw new Error(`Image-related CDP method is forbidden: ${method}`);
+  }
   const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const page = pages.find((entry) => entry.type === 'page' && entry.url.includes('workbench'));
   if (!page) throw new Error('Isolated workbench CDP target not found');
@@ -171,12 +174,7 @@ if (focusedEdit || focusedHead) {
   result = spawnSync(editor, args, { env, stdio: 'inherit', timeout: 180000 });
 }
 stopOwned(directory);
-console.log(`VSCode evidence: ${directory}`);
-try {
-  console.log('Screenshots:', readdirSync(directory).filter((name) => name.endsWith('.png')).join(', '));
-} catch {
-  // Evidence directory survived; listing is informational only.
-}
+console.log(`VSCode text evidence: ${directory}`);
 if (result.error) console.error(result.error);
 if (existsSync(`${directory}/failure.txt`)) {
   console.error(await (await import('node:fs/promises')).readFile(`${directory}/failure.txt`, 'utf8'));

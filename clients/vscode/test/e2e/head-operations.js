@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 
 /** Exercise commit HEAD operations through the production commit menu. */
-exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot,
+exports.run = async function run({ extension, evidence, repo, cdp, waitFor, checkpoint,
   requests, draftMessages, draftNotes }) {
   const { store } = require(`${extension.extensionPath}/lib/store`);
   const raw = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
@@ -15,7 +15,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
   assert.equal(status?.document.uri.scheme, 'magit');
   const cases = [];
   const resetAuthorCases = [];
-  const screenshots = [];
+  const checkpoints = [];
   const openedDrafts = [];
   const observer = vscode.workspace.onDidOpenTextDocument((document) => {
     if (document.uri.fsPath.endsWith('/COMMIT_EDITMSG')) openedDrafts.push(document.uri.toString());
@@ -38,11 +38,11 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
       returnByValue: true }).result.value;
       return painted.length && (store.quickPickViewId || expected.every((line) => painted.includes(line)));
     }, `${name} native editor painted`);
-    screenshots.push(name);
-    shot(name);
+    checkpoints.push(name);
+    checkpoint(name);
   };
   const persist = () => fs.writeFileSync(`${evidence}/head-operations-trace.json`, JSON.stringify({
-    cases, resetAuthorCases, screenshots, requests, draftMessages, draftNotes, openedDrafts,
+    cases, resetAuthorCases, checkpoints, requests, draftMessages, draftNotes, openedDrafts,
   }, null, 2));
   const focusStatus = async () => {
     await vscode.window.showTextDocument(status.document, { preview: false });
@@ -70,7 +70,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     const row = state.menu.groups.flatMap((group) => group.items).find((item) => item.key === canonical);
     assert(row, `missing server menu row ${canonical}`);
     await waitFor(() => state.quickPick.activeItems[0]?.key, 'native initial menu selection');
-    await capture(`head-${name}-menu.png`);
+    await capture(`head-${name}-menu.json`);
     const start = requests.length;
     // Type into the actual native QuickPick. Its production onDidChangeValue
     // routes each captured key; never invoke an action or set selectedItems.
@@ -105,7 +105,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(tabs(record).length, 1);
     assert.equal(record.document.getText(), fs.readFileSync(record.uri.fsPath, 'utf8'));
     assert(record.document.getText().includes('Exact retained body.'));
-    await capture(`head-${name}-draft.png`);
+    await capture(`head-${name}-draft.json`);
     return record;
   };
   const replace = async (record, text) => {
@@ -120,7 +120,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(git('rev-parse', 'HEAD'), before.head, 'save alone must not commit');
     const saved = fs.readFileSync(record.uri.fsPath, 'utf8');
     assert.equal(saved, record.document.getText());
-    await capture(`head-${name}-saved.png`);
+    await capture(`head-${name}-saved.json`);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await waitFor(() => !store.drafts.has(record.runId) && git('rev-parse', 'HEAD') !== before.head,
       'native saved last-tab close replaces HEAD');
@@ -145,7 +145,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
   };
   const recordCase = async (name, before, extra = {}, collection = cases) => {
     await focusStatus();
-    await capture(`head-${name}-status.png`);
+    await capture(`head-${name}-status.json`);
     collection.push({ name, before, after: snapshot(), status: status.document.getText(), ...extra });
     persist();
   };
@@ -246,7 +246,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     await action('a', 'amend-abort');
     record = await draft('amend-abort');
     await replace(record, 'Explicitly cancelled amendment\n');
-    await capture('head-amend-abort-edited.png');
+    await capture('head-amend-abort-edited.json');
     await vscode.commands.executeCommand('magit.cancelEdit');
     await waitFor(() => !store.drafts.has(record.runId), 'explicit abort finished');
     assert.deepEqual(snapshot(), before, 'explicit abort preserves exact HEAD/index/worktree');
@@ -298,7 +298,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     }
     assert.equal(resetAuthorCases.length, 3, 'all three native reset-author cases completed');
     fs.writeFileSync(`${evidence}/head-operations-evidence.json`, JSON.stringify({
-      gate: 'R-EDIT-REAL HEAD operations', status: 'pass', baseline, cases, resetAuthorCases, screenshots,
+      gate: 'R-EDIT-REAL HEAD operations', status: 'pass', baseline, cases, resetAuthorCases, checkpoints,
       trace: 'head-operations-trace.json',
     }, null, 2));
     console.log(`PASS native HEAD operations (${cases.length} exact state cases, ${resetAuthorCases.length} reset-author cases)`);

@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 
 /** Exercise production real-file drafts with actual workbench dirty dialogs. */
-exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot,
+exports.run = async function run({ extension, evidence, repo, cdp, waitFor, checkpoint,
   requests, draftNotes }) {
   const { store } = require(`${extension.extensionPath}/lib/store`);
   const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
@@ -25,7 +25,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
   assert.equal(status?.document.uri.scheme, 'magit', 'shared production status required');
   const views = require(`${extension.extensionPath}/lib/views`);
   const cases = [];
-  const screenshots = [];
+  const checkpoints = [];
   const events = [];
   const identities = new WeakMap();
   let nextIdentity = 0;
@@ -38,14 +38,14 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     document: identity(record.document), documentClosed: record.document.isClosed,
     nativeClosed: record.nativeClosed, owned: [...record.tabs].map(tabState),
     actual: tabs(record).map(tabState) });
-  const capture = (name) => { screenshots.push(name); shot(name); };
+  const capture = (name) => { checkpoints.push(name); checkpoint(name); };
   const observer = vscode.window.tabGroups.onDidChangeTabs((event) => events.push({
     closed: event.closed.map(tabState),
     groups: vscode.window.tabGroups.all.map((group) => group.tabs.map(tabState)),
     records: [...store.drafts.values()].filter((record) => record.document && record.tabs).map(ownership),
   }));
   const persist = () => fs.writeFileSync(`${evidence}/real-file-native-trace.json`, JSON.stringify({
-    cases, events, requests, notes: draftNotes, screenshots,
+    cases, events, requests, notes: draftNotes, checkpoints,
   }, null, 2));
   const key = (key, code, windowsVirtualKeyCode) => {
     for (const type of ['keyDown', 'keyUp']) {
@@ -95,14 +95,14 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(tabs(record).length, 0);
     previous = { runId: record.runId, message: expected };
     cases.push({ name: 'committed', runId: record.runId, before, after: head(), message: message() });
-    capture(`real-file-native-${sequence}-committed.png`);
+    capture(`real-file-native-${sequence}-committed.json`);
     persist();
   };
   const closeDialog = async (record, action) => {
     const closing = vscode.commands.executeCommand('magit.closeEdit');
     await waitFor(dialog, `actual native ${action} dialog`);
     assert(record.document.isDirty);
-    capture(`real-file-native-${sequence}-${action}-dialog.png`);
+    capture(`real-file-native-${sequence}-${action}-dialog.json`);
     if (action === 'cancel') key('Escape', 'Escape', 27);
     else {
       if (action === 'discard') key('Tab', 'Tab', 9);
@@ -119,7 +119,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     await record.queue;
     assert.equal(head(), before, 'save alone never commits');
     assert.equal(confirmations(record).length, 0);
-    capture('real-file-native-save-alone.png');
+    capture('real-file-native-save-alone.json');
     await vscode.window.showTextDocument(status.document, { preview: false });
     assert.equal(head(), before, 'focus/switch never commits');
     await vscode.window.showTextDocument(record.uri, { preview: false });
@@ -129,12 +129,12 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(confirmations(record).length, 0);
     await vscode.commands.executeCommand('workbench.action.splitEditorRight');
     await waitFor(() => tabs(record).length === 2, 'same draft in two real groups');
-    capture('real-file-native-two-groups.png');
+    capture('real-file-native-two-groups.json');
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await waitFor(() => tabs(record).length === 1, 'nonlast tab closed');
     assert.equal(head(), before, 'nonlast close never commits');
     assert.equal(confirmations(record).length, 0);
-    capture('real-file-native-nonlast-close.png');
+    capture('real-file-native-nonlast-close.json');
     await vscode.window.showTextDocument(record.uri, { preview: false });
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await completed(record, before, 'native saved message\n\nexact body');
@@ -149,7 +149,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert(store.drafts.has(record.runId));
     assert.equal(confirmations(record).length, 0);
     cases.push({ name: 'native-cancel', head: head(), dirty: true, tabs: 1 });
-    capture('real-file-native-cancel-retained.png');
+    capture('real-file-native-cancel-retained.json');
     await closeDialog(record, 'save');
     await completed(record, before, 'native Save new bytes\n\nnew body');
 
@@ -183,7 +183,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
       command: 'magit.command', arguments: [{ command: 'common.confirm', runId: record.runId,
         uri: record.uri.toString(), version: record.version - 1, source: 'synchronized' }],
     }).catch((error) => ({ error: String(error) }));
-    assert.match(wrongVersion.error, /exact synchronized commit message version/);
+    assert.match(wrongVersion.error, /exact synchronized document version/);
     assert.equal(head(), before, 'wrong-version protocol probe cannot commit');
     assert.equal(index(), oldIndex);
     assert.equal(worktree(), oldWorktree);
@@ -193,7 +193,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     cases.push({ name: 'wrong-version-protocol-probe', runId: record.runId,
       version: record.version, result: wrongVersion, head: head(), index: index(),
       worktree: worktree(), saved: fs.readFileSync(record.uri.fsPath, 'utf8'), liveText });
-    capture(`real-file-native-${sequence}-wrong-version-retained.png`);
+    capture(`real-file-native-${sequence}-wrong-version-retained.json`);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await completed(record, before, saved.trimEnd());
 
@@ -232,7 +232,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     cases.push({ name: 'unsafe-native-close-rejected', error: record.syncError,
       head: head(), index: index(), worktree: worktree(), version: record.version,
       text: record.text, ...ownership(record) });
-    capture(`real-file-native-${sequence}-unsafe-rejected.png`);
+    capture(`real-file-native-${sequence}-unsafe-rejected.json`);
     // VS Code may evict the document after its file disappears. Restore the
     // Git target before asking the existing adapter to present the retained run.
     fs.unlinkSync(record.uri.fsPath);
@@ -246,7 +246,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(fs.readFileSync(record.uri.fsPath, 'utf8'), originalBytes.toString());
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'sentinel must remain untouched\n');
     cases.push({ name: 'unsafe-restored-before-native-retry', ...ownership(record) });
-    capture(`real-file-native-${sequence}-unsafe-recovered.png`);
+    capture(`real-file-native-${sequence}-unsafe-recovered.json`);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await completed(record, before, originalBytes.toString().trimEnd(), 2);
     assert.equal(git('rev-list', '--count', `${before}..HEAD`), '1');
@@ -288,7 +288,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     await record.document.save();
     await record.queue;
     await probe('stale-old-run-confirm-abort-after-URI-reuse-protocol-probes', record);
-    capture(`real-file-native-${sequence}-stale-probes-retained.png`);
+    capture(`real-file-native-${sequence}-stale-probes-retained.json`);
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await completed(record, before, 'native same-URI run survives stale protocol probes');
 
@@ -342,8 +342,8 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
         count: raw('rev-list', '--count', 'HEAD'), message: raw('log', '-1', '--format=%B'),
         status: raw('status', '--porcelain=v1', '-z') };
     };
-    const snapshots = () => ({ A: repositoryState(repo), B: repositoryState(secondRepo) });
-    const initial = snapshots();
+    const snapshot = () => ({ A: repositoryState(repo), B: repositoryState(secondRepo) });
+    const initial = snapshot();
     const textA = 'isolated repository A message\n';
     const textB = 'isolated repository B message\n';
     await replace(draftA, textA);
@@ -354,7 +354,7 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.notEqual(draftA.uri.toString(), draftB.uri.toString());
     assert.equal(store.drafts.get(draftA.runId), draftA);
     assert.equal(store.drafts.get(draftB.runId), draftB);
-    const beforeProbes = snapshots();
+    const beforeProbes = snapshot();
     const pendingState = () => [draftA, draftB].map((draft) => ({ runId: draft.runId,
       owner: draft.baseViewId, pending: store.drafts.get(draft.runId) === draft,
       version: draft.version, savedVersion: draft.savedVersion, text: draft.document.getText(),
@@ -368,9 +368,15 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
       const result = await client.sendRequest('workspace/executeCommand', params)
         .catch((error) => ({ error: String(error) }));
       probes.push({ label, method: 'workspace/executeCommand', params, result,
-        after: snapshots(), pending: pendingState() });
-      assert.match(result?.error || '', /Commit draft .* (does not match|not pending)/);
-      assert.deepEqual(snapshots(), beforeProbes, `${label} changes neither root`);
+        after: snapshot(), pending: pendingState() });
+      const rejection = result?.error || '';
+      if (label.startsWith('foreign connection') && source === 'synchronized') {
+        assert.match(rejection, /exact synchronized document version/,
+          'unattached foreign connection must reject a synchronized confirmation before owner lookup');
+      } else {
+        assert.match(rejection, /Commit draft .* (does not match|not pending)/);
+      }
+      assert.deepEqual(snapshot(), beforeProbes, `${label} changes neither root`);
       assert.deepEqual(pendingState(), beforePending, `${label} retains both editable runs`);
     };
     for (const source of ['synchronized', 'saved-file']) {
@@ -412,8 +418,8 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
       runs: { A: draftA.runId, B: draftB.runId }, uris: { A: draftA.uri.toString(), B: draftB.uri.toString() },
       owners: { A: draftA.baseViewId, B: draftB.baseViewId },
       messages: { A: textA, B: textB }, initial,
-      before: beforeProbes, beforePending, probes, after: snapshots(), afterPending: pendingState() });
-    capture('real-file-native-two-repository-pending.png');
+      before: beforeProbes, beforePending, probes, after: snapshot(), afterPending: pendingState() });
+    capture('real-file-native-two-repository-pending.json');
     persist();
     const probeConfirmations = { A: confirmations(draftA).length, B: confirmations(draftB).length };
     await vscode.window.showTextDocument(draftA.uri, { preview: false });
@@ -432,31 +438,31 @@ exports.run = async function run({ extension, evidence, repo, cdp, waitFor, shot
     assert.equal(draftB.document.isClosed, false);
     assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
     cases.push({ name: 'two-repository-native-A-last-close-B-pending', before: beforeProbes,
-      after: snapshots(), pending: pendingState(), confirmations: confirmations(draftA) });
+      after: snapshot(), pending: pendingState(), confirmations: confirmations(draftA) });
     await vscode.window.showTextDocument(draftB.uri, { preview: false });
-    capture('real-file-native-two-repository-A-committed-B-pending.png');
-    const beforeAbort = snapshots();
+    capture('real-file-native-two-repository-A-committed-B-pending.json');
+    const beforeAbort = snapshot();
     await vscode.commands.executeCommand('magit.cancelEdit');
     await waitFor(() => !store.drafts.has(draftB.runId), 'explicit abort of repository B');
-    assert.deepEqual(snapshots(), beforeAbort, 'explicit native Abort preserves both exact repository states');
+    assert.deepEqual(snapshot(), beforeAbort, 'explicit native Abort preserves both exact repository states');
     assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
     cases.push({ name: 'two-repository-native-A-close-abort-B', beforeAbort,
-      after: snapshots(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8') });
-    capture('real-file-native-two-repository-A-committed-B-aborted.png');
+      after: snapshot(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8') });
+    capture('real-file-native-two-repository-A-committed-B-aborted.json');
     await vscode.window.showTextDocument(draftB.uri, { preview: false });
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     assert.equal(tabs(draftB).length, 0);
-    assert.deepEqual(snapshots(), beforeAbort, 'late native close after abort cannot commit B');
+    assert.deepEqual(snapshot(), beforeAbort, 'late native close after abort cannot commit B');
     assert.equal(fs.readFileSync(draftB.uri.fsPath, 'utf8'), textB);
     assert.equal(confirmations(draftB).length, probeConfirmations.B);
     assert.equal(store.drafts.size, 0);
     cases.push({ name: 'two-repository-late-native-B-close-after-abort', before: beforeAbort,
-      after: snapshots(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8'),
+      after: snapshot(), bFile: fs.readFileSync(draftB.uri.fsPath, 'utf8'),
       confirmations: confirmations(draftB) });
-    capture('real-file-native-two-repository-late-B-close.png');
+    capture('real-file-native-two-repository-late-B-close.json');
     persist();
     fs.writeFileSync(`${evidence}/real-file-native-evidence.json`, JSON.stringify({
-      gate: 'R-EDIT-REAL production native close', status: 'pass', cases, screenshots,
+      gate: 'R-EDIT-REAL production native close', status: 'pass', cases, checkpoints,
       trace: 'real-file-native-trace.json',
     }, null, 2));
   } finally {
