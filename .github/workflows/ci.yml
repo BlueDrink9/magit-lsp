@@ -1,24 +1,46 @@
+
 name: CI
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  release-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test download and packaging contracts (no Rust release build)
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/release -p 'test_*.py' -v
+          shellcheck scripts/install.sh scripts/package-release.sh
+
   recommended-git:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: rust:bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Install isolated-container build dependencies
         run: apt-get update && apt-get install -y build-essential curl xz-utils zlib1g-dev
-      - name: Build and test recommended Git 2.30.8
+
+      - name: Build and test recommended Git
         run: scripts/test_recommended_git.sh
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -28,9 +50,11 @@ jobs:
           neovim: true
           version: stable
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm
+          cache-dependency-path: clients/vscode/package-lock.json
 
       # The vscode keybinding drift check and node tests run together; install
       # the locked dependencies first.
@@ -44,9 +68,11 @@ jobs:
         run: make test-rust test-lua
 
   ui-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -68,9 +94,35 @@ jobs:
         env:
           CI: "1"
 
-      - name: upload UI artefacts
+      - name: Upload UI artefacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-artefacts
           path: build/ui/
+
+
+  # Test on other operating systems, just rust tests.
+  native-test:
+    name: Rust (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+          - os: macos-26
+            target: aarch64-apple-darwin
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test Rust
+        run: cargo test --workspace --locked
