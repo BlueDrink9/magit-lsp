@@ -20,6 +20,42 @@ const Module = require('node:module');
 const vscode = require('./fake/vscode');
 const { LanguageClient, instances } = require('./fake/languageclient');
 
+// Model the native workbench close command without weakening production code:
+// invoke the registered tab observer only after the tab is absent from every
+// group. Dirty choices use the existing scripted answer solely in this fake.
+const tabObserver = { handler: undefined };
+const nativeTabs = new WeakMap();
+Object.defineProperty(vscode.window.tabGroups, 'all', { get() {
+  return vscode.__test.editors.map((editor) => {
+    if (!nativeTabs.has(editor)) nativeTabs.set(editor, { input: { uri: editor.document.uri } });
+    return { tabs: [nativeTabs.get(editor)] };
+  });
+} });
+vscode.window.tabGroups.onDidChangeTabs = (handler) => {
+  tabObserver.handler = handler;
+  return { dispose() {} };
+};
+const executeWorkbenchCommand = vscode.commands.executeCommand.bind(vscode.commands);
+vscode.commands.executeCommand = async (name, ...args) => {
+  if (name !== 'workbench.action.closeActiveEditor') return executeWorkbenchCommand(name, ...args);
+  const draft = require('../lib/drafts').current();
+  if (!draft) return;
+  if (draft.document.isDirty) {
+    const selected = await vscode.window.showQuickPick([
+      { id: 'save' }, { id: 'discard' }, { id: 'cancel' },
+    ]);
+    if (!selected || selected.id === 'cancel') return;
+    if (selected.id === 'save') await draft.document.save();
+    else await executeWorkbenchCommand('workbench.action.files.revert', draft.uri);
+  }
+  const tab = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+    .find((item) => item.input.uri.toString() === draft.uri.toString());
+  vscode.__test.editors.splice(0, vscode.__test.editors.length,
+    ...vscode.__test.editors.filter((editor) => editor.document !== draft.document));
+  draft.document.isClosed = true;
+  if (tabObserver.handler) tabObserver.handler({ closed: [tab] });
+};
+
 // Model VSCode's built-in local filesystem, not an extension draft provider.
 const savedHandlers = [];
 vscode.workspace.onDidSaveTextDocument = (handler) => {
@@ -434,7 +470,7 @@ async function run() {
     await idle();
     assert.equal(subject(), 'explicit confirmed text');
 
-    // Dirty close Cancel retains the run; Discard selects the old checkpoint.
+    // Dirty close Save/Discard/Cancel is exercised by the fake editor harness.
     draft = await startDraft();
     draft.document.replaceText('saved discard checkpoint\n');
     await draft.document.save();

@@ -509,44 +509,16 @@ async function save(record, expectedText) {
 }
 
 /**
- * Explicit normal close: confirm the saved checkpoint, or ask Save/Discard/Cancel.
+ * Request VSCode's native close workflow. The actual last-tab event confirms
+ * the saved file; native Save/Don't Save/Cancel owns dirty-document behavior.
  *
  * @param {object} record
  */
 async function close(record) {
-  await operate(record, async () => {
-    if (!(await flush(record))) {
-      return false;
-    }
-    const clean = !record.syncError && record.text === record.savedText;
-    if (clean) {
-      return finish(record, 'normal-close');
-    }
-    const choice = await vscode.window.showQuickPick(
-      [
-        { id: 'save', label: 'Save' },
-        { id: 'discard', label: 'Discard changes' },
-        { id: 'cancel', label: 'Cancel' },
-      ],
-      { title: 'Close commit draft', placeHolder: 'Save, discard changes or cancel' }
-    );
-    if (!choice || choice.id === 'cancel') {
-      return false;
-    }
-    if (choice.id === 'save') {
-      if (!(await flush(record))) return false;
-      if (!(await checkpoint(record))) {
-        return false;
-      }
-      return finish(record, 'normal-close');
-    }
-    // A rejected sync must never release the helper, even when discarding.
-    if (record.syncError) {
-      fail(record, record.syncError);
-      return false;
-    }
-    return finish(record, 'normal-close');
-  });
+  if (!live(record)) return;
+  // Do not flush/finish here: Save is observed through didSave and Don't Save
+  // must retain the prior disk bytes. Only onTabsChanged can confirm.
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
 }
 
 /**
@@ -836,15 +808,15 @@ async function onClosed(document) {
  * @returns {void}
  */
 function onTabsChanged(event) {
-  if (store.disposing || !event?.closed?.length) return;
-  const closed = new Set(event.closed.filter((tab) => tab.input?.uri)
+  if (store.disposing || !event) return;
+  const closed = new Set((event.closed || []).filter((tab) => tab.input?.uri)
     .map((tab) => tab.input.uri.toString()));
   const open = new Set(vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
     .filter((tab) => tab.input && tab.input.uri)
     .map((tab) => tab.input.uri.toString()));
   for (const record of store.drafts.values()) {
-    const ownedClose = event.closed.some((tab) => record.tabs?.has(tab));
+    const ownedClose = (event.closed || []).some((tab) => record.tabs?.has(tab));
     record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
       .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
     if (!ownedClose || !closed.has(record.uri.toString()) || !record.attached || record.closing

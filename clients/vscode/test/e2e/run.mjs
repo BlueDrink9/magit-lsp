@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -13,17 +13,18 @@ const root = resolve(import.meta.dirname, '../../../..');
 const candidates = [process.env.MAGIT_VSCODE_BIN, '/usr/bin/codium', '/usr/bin/code']
   .filter(Boolean);
 const editor = candidates.find((candidate) => existsSync(candidate));
+const focusedEdit = process.env.MAGIT_VSCODE_EDIT_ONLY === '1';
 if (!editor) {
   console.log('skip e2e: no `code`/`codium` binary found (set MAGIT_VSCODE_BIN to run it)');
-  process.exit(['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  process.exit(focusedEdit || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 if (!process.env.DISPLAY) {
   console.log('skip e2e: DISPLAY is required for the real-editor keyboard checks');
-  process.exit(['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  process.exit(focusedEdit || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 if (!existsSync(`${root}/target/debug/magit-lsp`)) {
   console.log('skip e2e: missing target/debug/magit-lsp; run cargo build first');
-  process.exit(['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  process.exit(focusedEdit || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 
 // This subprocess observes the isolated renderer; it never sets context keys or
@@ -59,6 +60,7 @@ mkdirSync(`${directory}/user/User`, { recursive: true });
 // profile, without changing the user's XKB layout or any Magit context/binding.
 writeFileSync(`${directory}/user/User/settings.json`, JSON.stringify({
   'keyboard.dispatch': 'keyCode',
+  'window.dialogStyle': 'custom',
 }));
 writeFileSync(`${directory}/user/User/keybindings.json`, JSON.stringify(mirror, null, 2));
 writeFileSync(`${directory}/mirrored-bindings.json`, JSON.stringify(mirror, null, 2));
@@ -84,6 +86,7 @@ if (process.env.MAGIT_VSCODE_A06_ONLY === '1') env.MAGIT_VSCODE_A06_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A29_ONLY === '1') env.MAGIT_VSCODE_A29_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A33_ONLY === '1') env.MAGIT_VSCODE_A33_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A34_ONLY === '1') env.MAGIT_VSCODE_A34_ONLY = '1';
+if (focusedEdit) env.MAGIT_VSCODE_EDIT_ONLY = '1';
 env.MAGIT_VSCODE_EVIDENCE = directory;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
@@ -109,21 +112,60 @@ function ownedPids(base) {
 function stopOwned(base) {
   for (const pid of ownedPids(base)) {
     try {
-      process.kill(pid, 'SIGTERM');
+      process.kill(pid, 'SIGKILL');
     } catch {
       // Already gone.
     }
   }
 }
 
-const result = spawnSync(editor, [
+// Extension test hosts suppress native dirty-close dialogs. A tiny normal-host
+// launcher runs the same production suite without extensionTestsPath instead.
+if (focusedEdit) {
+  mkdirSync(`${directory}/launcher`);
+  writeFileSync(`${directory}/launcher/package.json`, JSON.stringify({
+    publisher: 'test', name: 'native-edit-launcher', version: '1.0.0',
+    engines: { vscode: '^1.85.0' }, main: './launcher.js', activationEvents: ['*'],
+  }));
+  writeFileSync(`${directory}/launcher/launcher.js`, `
+    /** Run production acceptance in a normal extension host. */
+    exports.activate = function () {
+      setImmediate(async () => {
+        let status = 0;
+        try { await require(${JSON.stringify(`${root}/clients/vscode/test/e2e/suite.js`)}).run(); }
+        catch (error) { status = 1; console.error(error); }
+        require('node:fs').writeFileSync(${JSON.stringify(`${directory}/native-complete.json`)}, JSON.stringify({ status }));
+      });
+    };
+  `);
+}
+const args = [
   '--wait', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
   `--remote-debugging-port=${env.MAGIT_VSCODE_CDP_PORT}`,
   '--disable-workspace-trust', '--user-data-dir', `${directory}/user`,
   '--extensions-dir', `${directory}/extensions`,
   `--extensionDevelopmentPath=${root}/clients/vscode`,
-  `--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`, repo,
-], { env, stdio: 'inherit', timeout: 180000 });
+  ...(focusedEdit ? [`--extensionDevelopmentPath=${directory}/launcher`]
+    : [`--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`]), repo,
+];
+let result;
+if (focusedEdit) {
+  const child = spawn(editor, args, { env, stdio: 'inherit' });
+  let launchError;
+  child.on('error', (error) => { launchError = error; });
+  const deadline = Date.now() + 180000;
+  await new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (launchError || child.exitCode !== null || existsSync(`${directory}/native-complete.json`)
+        || Date.now() > deadline) { clearInterval(timer); resolve(); }
+    }, 30);
+  });
+  result = { status: existsSync(`${directory}/native-complete.json`)
+    ? JSON.parse((await import('node:fs')).readFileSync(`${directory}/native-complete.json`)).status : 1,
+  error: launchError };
+} else {
+  result = spawnSync(editor, args, { env, stdio: 'inherit', timeout: 180000 });
+}
 stopOwned(directory);
 console.log(`VSCode evidence: ${directory}`);
 try {
@@ -137,7 +179,9 @@ if (existsSync(`${directory}/failure.txt`)) {
 }
 // Some editor CLIs return zero even if the test host failed to start. The
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
-const evidenceReady = process.env.MAGIT_VSCODE_A34_ONLY === '1'
+const evidenceReady = focusedEdit
+  ? existsSync(`${directory}/real-file-native-evidence.json`)
+  : process.env.MAGIT_VSCODE_A34_ONLY === '1'
   ? existsSync(`${directory}/a34-evidence.json`)
   : process.env.MAGIT_VSCODE_A33_ONLY === '1'
   ? existsSync(`${directory}/a33-evidence.json`)
@@ -152,7 +196,9 @@ const evidenceReady = process.env.MAGIT_VSCODE_A34_ONLY === '1'
     && existsSync(`${directory}/a06-evidence.json`);
 if (!evidenceReady) {
   console.error(
-    process.env.MAGIT_VSCODE_A34_ONLY === '1'
+    focusedEdit
+      ? 'Missing production real-file native evidence; see the isolated evidence directory above.'
+      : process.env.MAGIT_VSCODE_A34_ONLY === '1'
       ? 'Missing A34 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A33_ONLY === '1'
       ? 'Missing A33 evidence; see the isolated evidence directory above.'

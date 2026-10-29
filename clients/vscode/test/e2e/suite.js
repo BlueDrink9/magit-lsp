@@ -297,6 +297,12 @@ async function run() {
     );
     const firstShot = shot('r-vs-2-first-open.png');
 
+    if (process.env.MAGIT_VSCODE_EDIT_ONLY === '1') {
+      await require('./real-file-native').run({ extension, evidence, repo, cdp, waitFor, shot,
+        requests, draftNotes });
+      return;
+    }
+
     // Isolate native selection mutations before unrelated widgets alter focus.
     if (process.env.MAGIT_VSCODE_A34_ONLY === '1') {
       const { store } = require(`${extension.extensionPath}/lib/store`);
@@ -1734,47 +1740,9 @@ async function run() {
     assert.equal(head(), cancelHead, 'explicit abort did not create a commit');
     shot('r-edit-5-aborted.png');
 
-    for (const choice of ['Save', 'Discard changes']) {
-      const target = await startBridgeEdit();
-      const saved = `native saved ${draftProbe}\n`;
-      await replaceDraft(target, saved);
-      assert(await target.document.save());
-      const savedVersion = draftFor(target).savedVersion;
-      await replaceDraft(target, `native unsaved ${draftProbe}\n`);
-      const oldHead = head();
-      const index = gitDraft('show', ':tracked.txt');
-      const worktree = fs.readFileSync(path.join(repo, 'tracked.txt'));
-      // Use the registered explicit-close command while testing the actual
-      // native Save/Discard/Cancel picker, never scripted widget answers.
-      const cancelled = vscode.commands.executeCommand('magit.closeEdit');
-      await waitFor(() => quickInputState().text?.includes('Close commit draft'), 'dirty native close prompt');
-      // A freshly shown picker can briefly lack DOM focus, so the physical
-      // Escape/Return would land in the editor instead of the picker. Wait for
-      // the picker to own focus before sending the native key.
-      await waitFor(() => {
-        const qs = quickInputState();
-        return qs.visible && !observe().editorFocused;
-      }, 'dirty native close prompt focused');
-      await key('Escape');
-      await cancelled;
-      assert.equal(head(), oldHead);
-      assert(draftFor(target), 'Cancel keeps draft/run open');
-      const closing = vscode.commands.executeCommand('magit.closeEdit');
-      await waitFor(() => quickInputState().text?.includes('Close commit draft'), 'dirty native close prompt again');
-      await waitFor(() => {
-        const qs = quickInputState();
-        return qs.visible && !observe().editorFocused;
-      }, 'dirty native close prompt focused again');
-      if (choice === 'Discard changes') await key('Down');
-      shot(`r-edit-5-dirty-${choice.split(' ')[0].toLowerCase()}.png`);
-      await key('Return');
-      await closing;
-      await progressIdle();
-      assert.equal(subject(), (choice === 'Save' ? `native unsaved ${draftProbe}` : saved.trim()));
-      assert.deepEqual(gitDraft('show', ':tracked.txt'), index);
-      assert.deepEqual(fs.readFileSync(path.join(repo, 'tracked.txt')), worktree);
-      cases.push({ name: `dirty-close-${choice}`, savedVersion, selectedMessage: subject(), head: head() });
-    }
+    // Actual dirty Save/Don't Save/Cancel dialogs require a normal host:
+    // MAGIT_VSCODE_EDIT_ONLY=1 runs real-file-native.js without the test-host
+    // dialog suppression. Do not substitute QuickPick answers for that gate.
 
     const closeEditor = await startBridgeEdit();
     await replaceDraft(closeEditor, 'native last tab saved close\n');
