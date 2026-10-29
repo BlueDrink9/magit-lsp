@@ -210,10 +210,22 @@ impl EditRegistry {
         let entry = self.lock().remove(edit_id);
         match entry {
             Some(entry) => {
+                if reply == Reply::Abort {
+                    self.retain_saved(&entry.draft);
+                }
                 let _ = entry.replies.send(reply);
                 true
             }
             None => false,
+        }
+    }
+
+    #[cfg(unix)]
+    fn retain_saved(&self, draft: &draft::Draft) {
+        if let (Some(saved), Some(initial)) = (draft.saved(), draft.initial()) {
+            let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
+            let _ = histories.entry(draft.repository().to_path_buf()).or_default()
+                .retain(saved.text(), initial);
         }
     }
 
