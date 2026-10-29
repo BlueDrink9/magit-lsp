@@ -84,6 +84,14 @@ fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) 
         .filter_map(|a| a["command"]["arguments"][0]["target"]["node_id"].as_str().map(str::to_owned)).collect()
 }
 
+fn action_targets(server: &mut stdio::TestServer, uri: &str, line: u32, id: i64) -> Vec<(String, String)> {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":line,"character":0},"end":{"line":line,"character":0}},"context":{"diagnostics":[]}}}));
+    server.response_with_id(id)["result"].as_array().unwrap().iter().map(|action| (
+        action["command"]["arguments"][0]["command"].as_str().unwrap().to_owned(),
+        action["command"]["arguments"][0]["target"]["node_id"].as_str().unwrap().to_owned(),
+    )).collect()
+}
+
 #[test]
 fn titles_use_repository_style_configured_chord_and_structured_path() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -131,7 +139,7 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
 }
 
 #[test]
-fn half_open_range_uses_previous_row_and_distinct_node_targets() {
+fn nonempty_ranges_do_not_broaden_to_node_targets() {
     let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("a.txt", "one\n"), ("b.txt", "two\n")]).build();
     fixtures::write(&repo.path().join("a.txt"), "changed-a\n");
     fixtures::write(&repo.path().join("b.txt"), "changed-b\n");
@@ -150,11 +158,39 @@ fn half_open_range_uses_previous_row_and_distinct_node_targets() {
     let first=action_ids(&mut server,&uri,json!({"start":{"line":first_row,"character":0},"end":{"line":second_row,"character":0}}),81);
     let first_and_second=action_ids(&mut server,&uri,json!({"start":{"line":first_row,"character":0},"end":{"line":second_row,"character":1}}),82);
     let second=action_ids(&mut server,&uri,json!({"start":{"line":second_row,"character":0},"end":{"line":second_row+1,"character":0}}),83);
-    assert!(!first.is_empty() && !second.is_empty());
-    assert!(!first.iter().any(|id| second.contains(id)), "end at column zero excludes the next row target");
-    assert!(first_and_second.iter().any(|id| second.contains(id)), "non-zero end character includes the next row target");
-    assert!(first_and_second.iter().any(|id| first.contains(id)));
-    assert_ne!(first[0],second[0],"adjacent ranges must bind distinct node targets");
+    assert!(first.is_empty() && first_and_second.is_empty() && second.is_empty(), "nonempty ranges must not become executable node actions");
+    server.shutdown_and_exit(); let (status,_)=server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn cursor_actions_target_file_or_owning_hunk_once() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("a.txt", "before\nkeep\nafter\n")]).build();
+    fixtures::write(&repo.path().join("a.txt"), "changed\nkeep\nafter\n");
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}}});
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    server.send(init); assert!(server.response_with_id(1)["result"].is_object());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let mut editor=FakeEditor::new(Profile::Standard); server.send(editor.open(&uri,"old"));
+    let edit=next_apply(&mut server); for frame in editor.dispatch(&edit) { server.send(frame); }
+    let text=editor.text(&uri);
+    let rows: Vec<_> = text.lines().enumerate().collect();
+    let file = rows.iter().find(|(_,line)| line.contains("a.txt")).unwrap().0 as u32;
+    let changed = rows.iter().find(|(_,line)| line.contains("changed") || line.contains("before")).unwrap().0 as u32;
+    let context = rows.iter().find(|(_,line)| line.contains(" keep")).unwrap().0 as u32;
+    let file_actions = action_targets(&mut server,&uri,file,91);
+    let changed_actions = action_targets(&mut server,&uri,changed,92);
+    let context_actions = action_targets(&mut server,&uri,context,93);
+    let file_target = file_actions.iter().find(|(command,_)| command == "status.stage").unwrap().1.clone();
+    for (actions,label) in [(&changed_actions,"changed line"),(&context_actions,"context line")] {
+        let stage: Vec<_> = actions.iter().filter(|(command,_)| command == "status.stage").collect();
+        assert_eq!(stage.len(),1,"{label} must offer stage once");
+        assert_ne!(stage[0].1,file_target,"{label} must target hunk, not whole file");
+    }
+    assert_eq!(changed_actions.iter().filter(|(command,_)| command == "status.stage").count(),1);
+    assert_eq!(context_actions.iter().filter(|(command,_)| command == "status.stage").count(),1);
     server.shutdown_and_exit(); let (status,_)=server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 
@@ -177,9 +213,8 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
     server.send(editor.open(&uri, "old"));
     let edit = next_apply(&mut server);
     for frame in editor.dispatch(&edit) { server.send(frame); }
-    let last = editor.text(&uri).lines().count().saturating_sub(1) as u32;
-    let end_character = editor.text(&uri).lines().last().unwrap_or("").encode_utf16().count() as u32;
-    let request = editor.code_action(&uri, json!({"start":{"line":0,"character":0},"end":{"line":last,"character":end_character}}));
+    let file_row = editor.text(&uri).lines().position(|line| line.contains("f-😀.txt")).unwrap() as u32;
+    let request = editor.code_action(&uri, json!({"start":{"line":file_row,"character":0},"end":{"line":file_row,"character":0}}));
     server.send(request);
     let response = server.response_with_id(71);
     let actions = response["result"].as_array().expect("action array");

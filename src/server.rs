@@ -2216,22 +2216,23 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         || (start.line, start.character) > (end.line, end.character) {
         return Value::Array(Vec::new());
     }
-    let end_line = if end.character == 0 && end.line > start.line { end.line - 1 } else { end.line };
-    let start_line = start.line as usize;
-    let end_line = end_line as usize;
+    // Exact selection targets are implemented separately. Never broaden a
+    // non-empty range into one or more whole-node actions.
+    if start != end { return Value::Array(Vec::new()); }
+    let Some(line_node) = tree.line_nodes.get(start.line as usize).and_then(|line| tree.node(&line.node)) else {
+        return Value::Array(Vec::new());
+    };
     let mut actions = Vec::new();
     for command in crate::commands::registry().iter() {
         if !command.scope.matches(&scope) { continue; }
-        for node in &tree.nodes {
-            if node.end_line < start_line || node.start_line > end_line { continue; }
-            let Some(target) = crate::dispatch::offer_target(&tree, command.id, &node.id) else { continue; };
+        if let Some(target) = crate::dispatch::offer_target(&tree, command.id, &line_node.id) {
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
                 "target": target,
                 "viewGeneration": generation,
             });
-            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), node.path.as_deref());
+            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
             let action = lsp_types::CodeAction {
                 title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
                 disabled: None, edit: None, command: Some(lsp_types::Command {
