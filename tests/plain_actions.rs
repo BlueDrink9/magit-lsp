@@ -6,6 +6,7 @@ mod fixtures;
 mod fake_editor;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::errors::STALE_VIEW;
 use serde_json::{json, Value};
 
 fn next_apply(server: &mut stdio::TestServer) -> Value {
@@ -13,6 +14,68 @@ fn next_apply(server: &mut stdio::TestServer) -> Value {
         let message = server.recv();
         if message["method"] == "workspace/applyEdit" { return message; }
     }
+}
+
+/// Open the repository's `.magit` status document as a Plain client.
+fn open_plain(repo: &fixtures::RepoFixture) -> (stdio::TestServer, FakeEditor, String) {
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["capabilities"] = json!({
+        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
+        "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
+    });
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    server.send(init);
+    assert!(server.response_with_id(1)["result"].is_object());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "old"));
+    let edit = next_apply(&mut server);
+    for frame in editor.dispatch(&edit) { server.send(frame); }
+    (server, editor, uri)
+}
+
+/// Request code actions on the `f.txt` row and return the offered stage argument.
+fn offered_stage(server: &mut stdio::TestServer, editor: &FakeEditor, uri: &str, id: i64) -> Value {
+    let row = editor.text(uri).lines().position(|line| line.contains("f.txt")).expect("file row") as u32;
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let response = server.response_with_id(id);
+    response["result"].as_array().expect("actions").iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "status.stage")
+        .map(|action| action["command"]["arguments"][0].clone())
+        .unwrap_or_else(|| panic!("no stage action offered: {response}"))
+}
+
+/// Execute an offered Plain action, acknowledging any render edits it causes.
+fn execute_offered(server: &mut stdio::TestServer, editor: &mut FakeEditor, args: Value, id: i64) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" {
+            for frame in editor.dispatch(&message) { server.send(frame); }
+            continue;
+        }
+        if message["id"] == json!(id) { return message; }
+    }
+}
+
+/// Exact `(HEAD, index f.txt, worktree f.txt)` repository state.
+fn repo_state(repo: &fixtures::RepoFixture) -> (String, String, String) {
+    (
+        repo.git(&["rev-parse", "HEAD"]),
+        repo.git(&["show", ":f.txt"]),
+        fixtures::read(&repo.path().join("f.txt")),
+    )
+}
+
+/// Assert a stale Plain action was refused readably without an RPC error.
+fn assert_refused(response: &Value) {
+    assert!(response["error"].is_null(), "refusal must be a normal result: {response}");
+    let effects = response["result"]["effects"].as_array().unwrap_or_else(|| panic!("refusal effects: {response}"));
+    assert!(effects.iter().any(|effect| effect["type"] == "message"
+        && effect["level"] == "warn"
+        && effect["text"] == STALE_VIEW), "expected readable refusal: {response}");
 }
 
 fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) -> Vec<String> {
@@ -50,7 +113,7 @@ fn half_open_range_uses_previous_row_and_distinct_node_targets() {
 }
 
 #[test]
-fn binary_code_actions_are_snapshot_matched_and_disabled_until_execution_exists() {
+fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
     let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f-😀.txt", "one\ntwo\n")]).build();
     fixtures::write(&repo.path().join("f-😀.txt"), "changed\ntwo\n");
     let uri = format!("file://{}/.magit", repo.path().display());
@@ -93,6 +156,87 @@ fn binary_code_actions_are_snapshot_matched_and_disabled_until_execution_exists(
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":uri}}}));
     server.send(json!({"jsonrpc":"2.0","id":45,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
     assert!(server.response_with_id(45)["result"].as_array().unwrap().is_empty());
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn offered_stage_action_executes_and_mutates_its_target() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\ntwo\n")])
+        .modify("f.txt", "changed\ntwo\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let args = offered_stage(&mut server, &editor, &uri, 91);
+    let before = repo_state(&repo);
+    let response = execute_offered(&mut server, &mut editor, args, 92);
+    assert!(response["error"].is_null(), "execute failed: {response}");
+    let effects = response["result"]["effects"].as_array().unwrap_or_else(|| panic!("success effects: {response}"));
+    assert!(!effects.iter().any(|effect| effect["text"] == STALE_VIEW), "action must not be refused: {response}");
+    let after = repo_state(&repo);
+    assert_eq!(after.0, before.0, "HEAD must not move");
+    assert_eq!(before.1, "one\ntwo\n");
+    assert_eq!(after.1, "changed\ntwo\n", "index must hold the offered content");
+    assert_eq!(after.2, "changed\ntwo\n", "worktree must be untouched");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "M  f.txt\n");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn execution_refuses_when_target_content_changed_after_offer() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\ntwo\n")])
+        .modify("f.txt", "changed\ntwo\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let args = offered_stage(&mut server, &editor, &uri, 93);
+    fixtures::write(&repo.path().join("f.txt"), "other\ntwo\n");
+    let before = repo_state(&repo);
+    let response = execute_offered(&mut server, &mut editor, args, 94);
+    assert_refused(&response);
+    assert_eq!(repo_state(&repo), before, "refused execution must not touch Git");
+    assert_eq!(before.1, "one\ntwo\n");
+    assert_eq!(before.2, "other\ntwo\n");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn execution_refuses_a_wrong_view_generation() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\ntwo\n")])
+        .modify("f.txt", "changed\ntwo\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let mut args = offered_stage(&mut server, &editor, &uri, 95);
+    let generation = args["viewGeneration"].as_u64().expect("offered generation");
+    args["viewGeneration"] = json!(generation + 1);
+    let before = repo_state(&repo);
+    let response = execute_offered(&mut server, &mut editor, args, 96);
+    assert_refused(&response);
+    assert_eq!(repo_state(&repo), before, "refused execution must not touch Git");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn execution_refuses_when_the_document_is_closed() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\ntwo\n")])
+        .modify("f.txt", "changed\ntwo\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let args = offered_stage(&mut server, &editor, &uri, 97);
+    let before = repo_state(&repo);
+    server.send(editor.close(&uri));
+    let response = execute_offered(&mut server, &mut editor, args, 98);
+    assert_refused(&response);
+    assert_eq!(repo_state(&repo), before, "refused execution must not touch Git");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
