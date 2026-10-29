@@ -4,6 +4,9 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fmt;
 
+mod custom;
+pub use custom::{CustomRender, Ui};
+
 /// Presentation selected by `capabilities.experimental.magit` during initialize.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Presentation {

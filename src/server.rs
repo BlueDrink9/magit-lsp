@@ -2,8 +2,8 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
+use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
 use crate::protocol::*;
-use crate::presentation::{negotiate, Presentation};
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
 use crate::session::{Execution, InvokeResult, PublishedViews, Session};
@@ -379,16 +379,7 @@ impl Shared {
                         }
                     };
                     for render in renders {
-                        match serde_json::to_value(&render) {
-                            Ok(value) => {
-                                let _ = shared.sender.send(Message::Notification(
-                                    Notification::new(VIEW_RENDER.to_string(), value),
-                                ));
-                            }
-                            Err(error) => {
-                                tracing::debug!(%error, "watcher render failed to serialise");
-                            }
-                        }
+                        let _ = shared.sender.send(CustomRender::new().render(render));
                     }
                 }
                 Refresh::IndexLocked => {
@@ -608,15 +599,14 @@ impl Shared {
                 } }),
                 )));
             }
-            let _ = self.sender.send(Message::Notification(Notification::new(
-                VIEW_EFFECTS.to_string(),
-                ViewEffectsParams {
+            let _ = self
+                .sender
+                .send(CustomRender::new().effects(ViewEffectsParams {
                     effects: vec![Effect::message(
                         MessageLevel::Info,
                         "Cancelling…".to_string(),
                     )],
-                },
-            )));
+                }));
             run.cancel.cancel();
             if let Some(edit_id) = &run.edit_id {
                 editor::registry().resolve(edit_id, editor::Reply::Abort);
@@ -764,12 +754,7 @@ impl PromptBridge {
         }
 
         let sent = match self.sender.upgrade() {
-            Some(sender) => sender
-                .send(Message::Notification(Notification::new(
-                    VIEW_PROMPT.to_string(),
-                    params,
-                )))
-                .is_ok(),
+            Some(sender) => sender.send(CustomRender::new().prompt(params)).is_ok(),
             None => false,
         };
 
@@ -963,12 +948,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 let Some(sender) = sender.upgrade() else {
                     return;
                 };
-                let _ = sender.send(Message::Notification(Notification::new(
-                    VIEW_EFFECTS.to_string(),
-                    ViewEffectsParams {
-                        effects: effects.clone(),
-                    },
-                )));
+                let _ = sender.send(CustomRender::new().effects(ViewEffectsParams {
+                    effects: effects.clone(),
+                }));
                 // A dynamic client gets the edit's keymap as a normal
                 // `view/keymap`, keyed by the edit id. Static clients use
                 // their own bindings and ignore it.
@@ -1200,10 +1182,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 error.to_string(),
                                 notification.method == "textDocument/didClose",
                                 |effects| {
-                                    let _ = sender.send(Message::Notification(Notification::new(
-                                        VIEW_EFFECTS.to_string(),
-                                        ViewEffectsParams { effects },
-                                    )));
+                                    let _ = sender.send(
+                                        CustomRender::new().effects(ViewEffectsParams { effects }),
+                                    );
                                 },
                             );
                         } else {
@@ -1457,12 +1438,11 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                 }
             }
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
-                let _ = shared.sender.send(Message::Notification(Notification::new(
-                    VIEW_EFFECTS.to_string(),
-                    ViewEffectsParams {
+                let _ = shared
+                    .sender
+                    .send(CustomRender::new().effects(ViewEffectsParams {
                         effects: vec![Effect::message(MessageLevel::Warn, warning)],
-                    },
-                )));
+                    }));
             }
             EditConfirmation::Confirmed {
                 run_id: p.run_id,
@@ -1665,10 +1645,7 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec
             };
             match session.resize(&params.view_id, viewport) {
                 // A menu re-flows its columns for the new width.
-                Ok(Some(render)) => vec![Message::Notification(Notification::new(
-                    VIEW_RENDER.to_string(),
-                    render,
-                ))],
+                Ok(Some(render)) => vec![CustomRender::new().render(render)],
                 Ok(None) => Vec::new(),
                 Err(error) => {
                     tracing::warn!(%error, "failed to resize view");
@@ -1913,10 +1890,7 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .insert(id, repo.to_string());
     shared.ensure_watcher(repo);
 
-    let mut notifications = vec![Message::Notification(Notification::new(
-        VIEW_RENDER.to_string(),
-        render,
-    ))];
+    let mut notifications = vec![CustomRender::new().render(render)];
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
@@ -2075,10 +2049,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
         spawn_commit(shared.clone(), repo.to_string(), operation);
     }
     if let Some(render) = outcome.render {
-        notifications.push(Message::Notification(Notification::new(
-            VIEW_RENDER.to_string(),
-            render,
-        )));
+        notifications.push(CustomRender::new().render(render));
     }
     // A mode change replaces the binding set, so the client must see it even
     // when the scope's ordinary keymap would not change.
@@ -2127,10 +2098,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
     }
 
     for (render, keymap) in outcome.opened {
-        notifications.push(Message::Notification(Notification::new(
-            VIEW_RENDER.to_string(),
-            render,
-        )));
+        notifications.push(CustomRender::new().render(render));
         if shared.delivery() == KeymapDelivery::Dynamic {
             if let Some(keymap) = keymap {
                 notifications.push(Message::Notification(Notification::new(
@@ -2269,9 +2237,11 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                             .filter_map(|id| session.refresh(&id).ok().flatten())
                             .collect()
                     };
-                    messages.extend(renders.into_iter().map(|render| {
-                        Message::Notification(Notification::new(VIEW_RENDER.to_string(), render))
-                    }));
+                    messages.extend(
+                        renders
+                            .into_iter()
+                            .map(|render| CustomRender::new().render(render)),
+                    );
                     // Replace the "Committing…" feedback with the outcome.
                     let subject = outcome
                         .message
@@ -2291,19 +2261,13 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     if let Some(warning) = outcome.warning {
                         effects.push(Effect::message(MessageLevel::Warn, warning));
                     }
-                    messages.push(Message::Notification(Notification::new(
-                        VIEW_EFFECTS.to_string(),
-                        ViewEffectsParams { effects },
-                    )));
+                    messages.push(CustomRender::new().effects(ViewEffectsParams { effects }));
                 }
                 Err(error) => {
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
                         vec![Effect::message(MessageLevel::Error, error.to_string())]
                     });
-                    messages.push(Message::Notification(Notification::new(
-                        VIEW_EFFECTS.to_string(),
-                        ViewEffectsParams { effects },
-                    )));
+                    messages.push(CustomRender::new().effects(ViewEffectsParams { effects }));
                 }
             }
             for message in messages {

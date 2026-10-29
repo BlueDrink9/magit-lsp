@@ -418,9 +418,13 @@ Plain, while a present `experimental.magit` must be a complete supported v1
 declaration. It separately represents mandatory core behavior and declared
 optional effects/prompts/placements, and extracts standard Plain capabilities
 with support reasons. `tests/plain_core.rs` covers negotiation, allowed values,
-invalid declarations and missing standard capabilities. This does not route
-production requests, enforce rich declarations, deliver a Plain document, change
-clients, or implement the seam/dispatcher; none of those behaviors are claimed.
+invalid declarations, missing standard capabilities, transport-independent
+recording delivery, and unchanged custom wire shapes. **Scoped typed-seam slice
+complete:** production render/effects/prompt notifications pass through `Ui` and
+`CustomRender`, including watcher, resync/resize, editor/recovery and outcome
+paths; prompt pending registration remains before send. This does not implement
+a Plain renderer, runtime optional-feature enforcement, client changes, or the
+unified dispatcher. The R-PLAIN-CORE parent remains unchecked.
 
 - **Target Files:** `src/presentation/{mod,custom}.rs` (new), `src/session.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/init.lua`, `clients/vscode/lib/session.js` (init options only).
 - **Reference Files:** AGENTS.md architecture flow; TASKS §3.2, §3.5.
