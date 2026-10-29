@@ -48,6 +48,17 @@ pub fn content_command(command: &str) -> bool {
     matches!(command, "status.stage" | "status.unstage" | "status.discard")
 }
 
+/// Whether a hunk or line in a status section may authorize this command.
+pub fn hunk_section_compatible(command: &str, section: Option<&str>) -> bool {
+    match command {
+        // Staging a staged hunk is an intentional quiet no-op.
+        "status.stage" => matches!(section, Some("unstaged" | "staged")),
+        "status.unstage" => section == Some("staged"),
+        "status.discard" => section == Some("unstaged"),
+        _ => false,
+    }
+}
+
 fn file_identity(tree: &crate::tree::Tree, node: &crate::tree::Node) -> Option<crate::git::FileMutationIdentity> {
     tree.nodes.iter().find_map(|file| {
         if file.path != node.path || file.section != node.section { return None; }
@@ -89,6 +100,8 @@ pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> O
         node = tree.nodes.iter().find(|hunk| hunk.kind == NodeKind::Hunk
             && hunk.path == node.path && hunk.section == node.section && hunk.hunk_id == node.hunk_id)?;
     }
+    if matches!(node.kind, NodeKind::Hunk | NodeKind::Line)
+        && !hunk_section_compatible(command, node.section.as_deref()) { return None; }
     let identity = file_identity(tree, node)?;
     let hunk = match node.mutation.as_ref()? {
         MutationContent::File(_) => None,

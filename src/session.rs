@@ -1668,6 +1668,28 @@ impl Session {
         }
         if crate::dispatch::content_command(command_id) && view.mode() != ViewMode::Text {
             let source = view.command_source_tree().unwrap_or_else(|| view.tree());
+            if let Some(node) = cursor.and_then(|cursor| source.line_nodes.get(cursor.line))
+                .and_then(|line| source.node(&line.node)) {
+                let hunk = if node.kind == crate::tree::NodeKind::Line {
+                    source.nodes.iter().find(|candidate| candidate.kind == crate::tree::NodeKind::Hunk
+                        && candidate.path == node.path && candidate.section == node.section
+                        && candidate.hunk_id == node.hunk_id)
+                } else { Some(node) };
+                if let Some(hunk) = hunk.filter(|node| matches!(node.kind, crate::tree::NodeKind::Hunk | crate::tree::NodeKind::Line)) {
+                    if !crate::dispatch::hunk_section_compatible(command_id, hunk.section.as_deref()) {
+                        let effects = if command_id == "status.stage" && hunk.section.as_deref() == Some("staged") {
+                            vec![]
+                        } else {
+                            vec![Effect::message(MessageLevel::Info, match command_id {
+                                "status.stage" => crate::dispatch::NOTHING_TO_STAGE,
+                                "status.unstage" => crate::dispatch::NOTHING_TO_UNSTAGE,
+                                _ => crate::dispatch::NOTHING_TO_DISCARD,
+                            })]
+                        };
+                        return Ok(InvokeResult { effects, render: None, ..InvokeResult::empty() });
+                    }
+                }
+            }
             let targets = crate::dispatch::displayed_targets(source, command_id, cursor, selection);
             let repo = crate::git::GitRepo::open(&self.repo_path)?;
             let mut rejection = None;
