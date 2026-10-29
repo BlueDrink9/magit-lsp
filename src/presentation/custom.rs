@@ -102,24 +102,81 @@ mod tests {
             menu: None,
         });
         let _ = ui.effects(ViewEffectsParams {
-            effects: vec![Effect::message(MessageLevel::Info, "ok".into())],
+            effects: vec![Effect::message(MessageLevel::Info, "ok")],
+        });
+        let _ = ui.prompt(ViewPromptParams {
+            prompt_id: "p1".into(),
+            kind: crate::protocol::PromptKind::Confirm,
+            title: "Continue?".into(),
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: None,
+            default: None,
+            placeholder: None,
+            secret: None,
+            items: None,
+            allow_custom: None,
+            preselected: None,
+            min: None,
+            max: None,
         });
         let got = ui.0.lock().unwrap();
-        assert_eq!(got.len(), 2);
+        assert_eq!(got.len(), 3);
         assert_eq!(got[0].0, "render");
         assert_eq!(got[1].0, "effects");
+        assert_eq!(got[2].0, "prompt");
+        assert_eq!(got[2].1["promptId"], "p1");
     }
 
     #[test]
     fn custom_adapter_preserves_notification_wire_shape() {
         let ui = CustomRender::new();
+        let Message::Notification(render) = ui.render(ViewRender {
+            view_id: "v".into(),
+            version: 1,
+            base_version: None,
+            text: Some(vec!["hello".into()]),
+            edits: None,
+            cursor: None,
+            mode: ViewMode::default(),
+            pending: String::new(),
+            menu: None,
+        }) else {
+            panic!("notification expected")
+        };
+        assert_eq!(render.method, VIEW_RENDER);
+        assert_eq!(render.params["viewId"], "v");
+        assert_eq!(render.params["text"][0], "hello");
         let Message::Notification(note) = ui.effects(ViewEffectsParams {
-            effects: vec![Effect::message(MessageLevel::Info, "ok".into())],
+            effects: vec![Effect::message(MessageLevel::Info, "ok")],
         }) else {
             panic!("notification expected")
         };
         assert_eq!(note.method, VIEW_EFFECTS);
         assert_eq!(note.params["effects"][0]["type"], "message");
-        assert_eq!(note.params["effects"][0]["message"], "ok");
+        assert_eq!(note.params["effects"][0]["text"], "ok");
+        let Message::Notification(prompt) = ui.prompt(ViewPromptParams {
+            prompt_id: "p".into(),
+            kind: crate::protocol::PromptKind::Confirm,
+            title: "Question".into(),
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: None,
+            default: None,
+            placeholder: None,
+            secret: None,
+            items: None,
+            allow_custom: None,
+            preselected: None,
+            min: None,
+            max: None,
+        }) else {
+            panic!("notification expected")
+        };
+        assert_eq!(prompt.method, VIEW_PROMPT);
+        assert_eq!(prompt.params["promptId"], "p");
+        assert_eq!(prompt.params["title"], "Question");
     }
 }
