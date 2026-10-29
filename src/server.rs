@@ -1323,6 +1323,17 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // Draft barriers and document notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
                 if request.method == "workspace/executeCommand" {
+                    if let Some(params) = plain_execute_params(&request) {
+                        let (response, notifications) = match execute_plain_action(&shared, params) {
+                            Ok(dispatched) => (Response::new_ok(request.id, dispatched.result), dispatched.notifications),
+                            Err(error) => (error_response(request.id, error), Vec::new()),
+                        };
+                        for message in notifications {
+                            let _ = sender.send(message);
+                        }
+                        let _ = sender.send(Message::Response(response));
+                        continue;
+                    }
                     let response = match draft_request(&shared, &request) {
                         Ok(result) => Response::new_ok(request.id, result),
                         Err(error) => {
@@ -1659,6 +1670,89 @@ async fn dispatch_response(
             Vec::new(),
         ),
     }
+}
+
+/// Parse the Plain action shape from an `executeCommand` request.
+fn plain_execute_params(request: &Request) -> Option<crate::dispatch::PlainActionParams> {
+    let params: lsp_types::ExecuteCommandParams =
+        serde_json::from_value(request.params.clone()).ok()?;
+    if params.command != "magit.command" || params.arguments.len() != 1 {
+        return None;
+    }
+    let argument = &params.arguments[0];
+    if argument.get("documentUri").is_none() || argument.get("viewGeneration").is_none() {
+        return None;
+    }
+    serde_json::from_value(argument.clone()).ok()
+}
+
+/// Stale Plain action feedback without running the command or touching Git.
+fn plain_stale_message() -> Result<Dispatched> {
+    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse {
+        effects: vec![Effect::message(MessageLevel::Warn, crate::errors::STALE_VIEW)],
+    })?))
+}
+
+/// Execute a Plain action only while its retained offer still matches live state.
+fn execute_plain_action(
+    shared: &Shared,
+    params: crate::dispatch::PlainActionParams,
+) -> Result<Dispatched> {
+    let uri = params.document_uri.as_str();
+    let text = {
+        let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+        match documents.get(uri) {
+            Some(document) if !document.repair => document.text.clone(),
+            _ => return plain_stale_message(),
+        }
+    };
+    let (repo, view_id, line) = {
+        let documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get(uri) else { return plain_stale_message(); };
+        let Some((tree, view_id, generation, _scope)) = entry.controller.action_snapshot(&text)
+        else {
+            return plain_stale_message();
+        };
+        if view_id != entry.view_id || generation != params.view_generation {
+            return plain_stale_message();
+        }
+        let Some(node) = tree.node(&params.target.node_id) else { return plain_stale_message(); };
+        let line = node.start_line;
+        let repo = entry.repo.clone();
+        let view_id = entry.view_id.clone();
+        let git = crate::git::GitRepo::open(&repo)?;
+        if !crate::dispatch::target_is_current(&git, tree, &params.command, &params.target)? {
+            return plain_stale_message();
+        }
+        (repo, view_id, line)
+    };
+    if shared.cancellation_pending(&repo) {
+        return cancelling_response();
+    }
+    let handle = shared
+        .session(&repo)
+        .ok_or_else(|| Error::new("Plain action session closed"))?;
+    let request = crate::dispatch::DispatchRequest {
+        command: params.command,
+        target: crate::dispatch::DispatchTarget {
+            view_id: view_id.clone(),
+            version: Some(params.view_generation),
+            cursor: Some(Cursor { line, column: 0 }),
+            selection: None,
+            key: None,
+        },
+        action_target: Some(params.target),
+        args: None,
+    };
+    let step = handle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .start_dispatch(request)?;
+    let outcome = drive_execution(shared, &repo, step)?;
+    dispatched_outcome(shared, &repo, outcome)
 }
 
 /// Draft barriers on the receive-order lane; JSON-RPC ids correlate results.
@@ -2131,10 +2225,9 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 "target": target,
                 "viewGeneration": generation,
             });
-            let disabled = Some(lsp_types::CodeActionDisabled { reason: "Plain command execution is not yet supported".to_string() });
             let action = lsp_types::CodeAction {
                 title: command.doc.to_string(), kind: None, diagnostics: None, is_preferred: None,
-                disabled, edit: None, command: Some(lsp_types::Command {
+                disabled: None, edit: None, command: Some(lsp_types::Command {
                     title: command.doc.to_string(), command: "magit.command".to_string(), arguments: Some(vec![args]),
                 }), data: None,
             };

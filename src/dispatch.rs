@@ -15,6 +15,20 @@ pub struct ActionTarget {
     pub mutation_hash: String,
 }
 
+/// A Plain `workspace/executeCommand` action offered from a retained render.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlainActionParams {
+    /// Registered command identifier.
+    pub command: String,
+    /// Open document URI the action was offered in.
+    pub document_uri: String,
+    /// Content-addressed target from the offering render.
+    pub target: ActionTarget,
+    /// Render generation the action was offered from.
+    pub view_generation: u64,
+}
+
 /// The displayed view location and input context bound to a dispatch request.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DispatchTarget {

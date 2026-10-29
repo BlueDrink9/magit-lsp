@@ -75,7 +75,7 @@ fn binary_code_actions_are_snapshot_matched_and_disabled_until_execution_exists(
     let response = server.response_with_id(71);
     let actions = response["result"].as_array().expect("action array");
     assert!(!actions.is_empty(), "status row should offer registered content actions");
-    assert!(actions.iter().all(|action| action["disabled"]["reason"].is_string()));
+    assert!(actions.iter().all(|action| action["disabled"].is_null()));
     assert!(actions.iter().any(|action| action["command"]["arguments"][0]["target"]["node_id"].is_string()
         && action["command"]["arguments"][0]["viewGeneration"].is_number()
         && action["command"]["arguments"][0]["documentUri"] == uri));
