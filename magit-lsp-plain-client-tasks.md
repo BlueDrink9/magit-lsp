@@ -187,13 +187,13 @@ criteria are complete in both clients (see TASKS §7 and `docs/evidence/commit-h
 `commit-real-file.scn` (both profiles at 100x30 and 80x24), retaining empty/template/
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
-scenarios remain. **Remaining checklist:** native duplicate/late delivery and
+scenarios remain. **Remaining checklist:** actual native duplicate/late delivery and
 multi-root isolation are not evidenced; same-URI fresh-run/stale-run handling is
 covered by `clients/vscode/test/e2e/real-file-lifecycle.js`. Rust unreadable saved
 file and exact-version rejection/recovery are covered by
 `tests/editor_drafts.rs::saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read`
 and `confirm_requires_exact_current_version_and_writes_without_a_checkpoint`,
-but lack native-client acceptance. Native saved-close/dirty choice is covered by
+with additional client evidence below. Native saved-close/dirty choice is covered by
 `tests/ui/scenarios/commit-real-file.scn` and
 `clients/vscode/test/e2e/real-file-native.js`. Multi-root, duplicate/late native
 signals, and broader dirty shutdown/reload/workspace-change/cross-build and
@@ -213,9 +213,28 @@ Fresh `make ui-tour` succeeded; inspected `menu-commit`, `clean-commit-menu` and
 `clean-commit` excerpts in `build/ui/tour.md`. This is tour evidence only; parent
 remains unchecked and no full gate is green.
 
-**Native acceptance still requested:** add native duplicate/late signal and
-multi-root/session-isolation cases, plus native unreadable-file/version-mismatch
-recovery. Preserve separate shutdown/reload/workspace-change assertions only for
+**Focused rejection/retry evidence (2026-10-29):** the Neovim canonical scenario
+already covers unsafe-file same-run recovery. Normal-host Codium EDIT_ONLY now
+also covers a wrong-version protocol rejection with exact HEAD/index/worktree/
+disk/live-text invariants followed by exact-saved-version native close, and an
+actual native unsafe-file close rejected by the secure read. Restoring the regular
+target and reopening/reclosing a real owned tab retains the same pending run and
+commits the meaningful saved message once, leaving a neighboring sentinel intact.
+The dangling symlink deliberately separates server secure-read validation from
+native editor following/reloading an external target. Duplicate terminal and stale
+old-run confirm/abort requests before and after same-URI reuse are labelled
+**protocol probes**, not native duplicate tab events; the new run remains intact
+and subsequently commits once. Inspected PNGs and identity-bearing JSON traces:
+`/tmp/opencode/vscode-review-VQvOzT/real-file-native-{trace,evidence}.json`,
+`real-file-native-4-wrong-version-retained.png`, `real-file-native-5-unsafe-{rejected,recovered}.png`,
+`real-file-native-6-stale-probes-retained.png` and commit-result screens.
+The preceding unsafe retry timed out because its restored bytes were template-only,
+not because ownership blocked retry (the trace already contained two confirmations).
+No production adapter change or weakened guards was needed. Focused verification:
+`make vscode-test && npm --prefix clients/vscode run test:integration && MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_EDIT_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check`.
+
+**Native acceptance still requested:** actual native duplicate/late signal and
+multi-root/session-isolation cases. Preserve separate shutdown/reload/workspace-change assertions only for
 specified clients/platforms; do not infer universal lifecycle guarantees. Existing
 Rust coverage is not a substitute for these native cases. Exact existing coverage
 and limits are listed above.
