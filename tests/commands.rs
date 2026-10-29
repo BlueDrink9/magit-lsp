@@ -113,6 +113,7 @@ fn commit_arguments_are_typed_and_invalid_input_never_stages() {
         json!({"switches": [], "options": {"=X": "unsupported"}}),
         json!({"switches": [], "options": {"=C": "HEAD", "=c": "HEAD"}}),
         json!({"switches": ["-R"], "options": {}}),
+        json!({"switches": ["-R"], "options": {"=A": "A <a@b>"}}),
         json!({"switches": ["-R"], "options": {"=C": "HEAD", "=A": "A <a@b>"}}),
         json!({"switches": [], "options": {"=C": "--all"}}),
     ] {

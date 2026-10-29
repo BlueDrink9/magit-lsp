@@ -63,8 +63,11 @@ Neovim and VS Code. Do not expand to fixup, selection, rebase or reshelve.
 * `tests/menu.rs`: both profiles select Amend/Extend/Reword from the menu,
   pop to the ancestor, and retain typed switches with exact action argv.
 * `tests/commit_preflight.rs`: all three reject unborn HEAD and conflicting
-  reuse/reedit/reset-author or raw only/no-edit input without mutation; Reword
-  rejects `--all`. Published HEAD confirmation captures author/no-verify argv;
+  reuse/reedit or raw only/no-edit input without mutation; Reword
+  rejects `--all`. Standalone reset-author is accepted for all three, including
+  clean and unstaged-only Extend without staging or a tracked-all prompt.
+  Reset-author with explicit author remains invalid; Create still requires
+  reuse/reedit for reset-author. Published HEAD confirmation captures reset-author/no-verify argv;
   decline/dismiss, changed HEAD/index/worktree and closed origin start no worker
   and mutate no repository state. Extend's tracked-all offer is likewise
   captured/revalidated; clean Extend without metadata arguments fails readably.
@@ -77,6 +80,23 @@ Neovim and VS Code. Do not expand to fixup, selection, rebase or reshelve.
   are asserted, including a successful byte-identical Extend with allow-empty.
   Existing helper/run/version/cancellation, cleanup/hooks and security tests run
   unchanged through the same production pipeline; no `commit -F` path exists.
+
+### Reset-author Rust follow-up (2026-10-29)
+
+The same real-Git matrix adds nine `-R` cases (staged, clean, unstaged-only
+for each action). Each starts with a nonempty HEAD, an actual parent, a distinct
+original author and a fixed 1999 author date. The worker's supplied author identity
+and 2026 author date replace both, preserving parents/count. Extend opens no
+editor and retains the message; Reword retains HEAD's tree and the nonempty
+staged index. Extend/Reword preserve the historical committer date. Existing
+typed execution and published-HEAD capture are reused without lifecycle changes.
+
+`cargo test --test commands --test commit_preflight --test editor_bridge --test menu --test menus && git diff --check`
+passed (79 Rust tests). Focused native `-R` checks in **both** clients remain
+pending; earlier native evidence below does not establish reset-author success.
+The review and feature parent checkboxes remain unchecked. Previously reported
+phase failures in errors/log_commands/views and six full-UI scenarios are outside
+this slice; this is not a full-suite success claim.
 
 The exact ticket verification command passed (122 focused Rust tests,
 `cargo test --no-run`, canonical manifest/menu/parity and VSCode keybinding

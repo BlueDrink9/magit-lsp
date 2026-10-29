@@ -836,7 +836,7 @@ fn commit_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_op
 
 fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> Result<CommandOutcome> {
     let repo = GitRepo::open(ctx.repo_path)?;
-    let options = match commit_options(ctx.args, &repo) {
+    let options = match commit_options(ctx.args, &repo, kind) {
         Ok(options) => options,
         Err(error) => {
             ctx.info(format!("Invalid commit arguments: {error}"));
@@ -848,8 +848,8 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
         ctx.info("Cannot edit HEAD: this repository has no commit yet");
         return Ok(CommandOutcome::default());
     }
-    if kind != crate::git::CommitKind::Create && (options.reuse_message.is_some() || options.reedit_message.is_some() || options.reset_author) {
-        ctx.info("Message reuse, reedit and reset-author options conflict with HEAD edit actions");
+    if kind != crate::git::CommitKind::Create && (options.reuse_message.is_some() || options.reedit_message.is_some()) {
+        ctx.info("Message reuse and reedit options conflict with HEAD edit actions");
         return Ok(CommandOutcome::default());
     }
     if kind == crate::git::CommitKind::Reword && options.all {
@@ -858,7 +858,7 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
     }
     if kind == crate::git::CommitKind::Extend && status.staged.is_empty()
         && !(options.all && !status.unstaged.is_empty())
-        && !(options.allow_empty || options.signoff || options.author.is_some() || options.date.is_some())
+        && !(options.allow_empty || options.reset_author || options.signoff || options.author.is_some() || options.date.is_some())
     {
         if status.unstaged.is_empty() {
             ctx.info("Nothing staged (or unstaged) to extend");
@@ -942,7 +942,7 @@ fn prepare_head_commit(ctx: &mut CommandCtx<'_>, repo: &GitRepo, operation: crat
 }
 
 /// Validate structured commit-menu input once, before staging or launching Git.
-fn commit_options(args: Option<&Value>, repo: &GitRepo) -> Result<crate::git::CommitOptions> {
+fn commit_options(args: Option<&Value>, repo: &GitRepo, kind: crate::git::CommitKind) -> Result<crate::git::CommitOptions> {
     let args: crate::menu::Args = match args.filter(|value| !value.is_null()) {
         Some(value) => serde_json::from_value(value.clone())
             .map_err(|error| crate::Error::new(format!("Expected commit switches and option values: {error}")))?,
@@ -985,8 +985,12 @@ fn commit_options(args: Option<&Value>, repo: &GitRepo) -> Result<crate::git::Co
     if options.reuse_message.is_some() && options.reedit_message.is_some() {
         return Err(crate::Error::new("Reuse and reedit message options conflict"));
     }
-    if options.reset_author && (options.author.is_some() || (options.reuse_message.is_none() && options.reedit_message.is_none())) {
-        return Err(crate::Error::new("Reset author requires reuse/reedit and cannot be combined with author"));
+    if options.reset_author && options.author.is_some() {
+        return Err(crate::Error::new("Reset author cannot be combined with author"));
+    }
+    if options.reset_author && kind == crate::git::CommitKind::Create
+        && options.reuse_message.is_none() && options.reedit_message.is_none() {
+        return Err(crate::Error::new("Reset author requires reuse/reedit when creating a commit"));
     }
     for revision in [&mut options.reuse_message, &mut options.reedit_message].into_iter().flatten() {
         *revision = repo.resolve_commit(revision)?;

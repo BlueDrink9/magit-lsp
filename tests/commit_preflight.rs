@@ -192,6 +192,8 @@ fn head_edits_reject_unborn_and_conflicting_options_without_mutation() {
                 json!({"switches": [], "options": {"=C": "HEAD"}}),
                 json!({"switches": [], "options": {"=c": "HEAD"}}),
                 json!({"switches": ["-R"], "options": {"=C": "HEAD"}}),
+                json!({"switches": ["-R"], "options": {"=c": "HEAD"}}),
+                json!({"switches": ["-R"], "options": {"=A": "Explicit <explicit@example.com>"}}),
                 json!({"switches": ["--only"], "options": {}}),
                 json!({"switches": ["--no-edit"], "options": {}}),
             ] };
@@ -213,6 +215,32 @@ fn head_edits_reject_unborn_and_conflicting_options_without_mutation() {
 }
 
 #[test]
+fn reset_author_head_edits_start_without_staging_or_a_prompt() {
+    use serde_json::json;
+    for command in ["commit.amend", "commit.extend", "commit.reword"] {
+        for unstaged in [false, true] {
+            let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+            if unstaged { write(&tmp.path().join("f.txt"), "unstaged\n"); }
+            let index = tmp.git(&["ls-files", "--stage"]);
+            let status = tmp.git(&["status", "--porcelain"]);
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+            let result = test.invoke_args(command, json!({"switches": ["-R"], "options": {}}));
+            let flags = match command {
+                "commit.amend" => vec!["--amend", "--reset-author"],
+                "commit.extend" => vec!["--amend", "--no-edit", "--reset-author"],
+                _ => vec!["--amend", "--only", "--allow-empty", "--reset-author"],
+            };
+            assert_eq!(result.commit.expect(command).argv(), flags);
+            assert!(test.ui().requests().is_empty(), "{command}/{unstaged}");
+            assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
+            assert_eq!(tmp.git(&["status", "--porcelain"]), status);
+            assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+        }
+    }
+}
+
+#[test]
 fn published_head_confirmation_captures_options_and_revalidates_state() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
@@ -226,7 +254,7 @@ fn published_head_confirmation_captures_options_and_revalidates_state() {
             let view = test.view_id().to_string();
             let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
                 view_id: view.clone(), command: command.into(), version: None, cursor: None, selection: None,
-                args: Some(json!({"switches": ["-n"], "options": {"=A": "Captured <captured@example.com>"}})),
+                args: Some(json!({"switches": ["-n", "-R"], "options": {}})),
             }).unwrap() else { panic!("published HEAD must prompt: {command}"); };
             assert!(prompt.title.contains("published HEAD"));
             match change {
@@ -248,7 +276,7 @@ fn published_head_confirmation_captures_options_and_revalidates_state() {
                     "commit.extend" => vec!["--amend", "--no-edit"],
                     _ => vec!["--amend", "--only", "--allow-empty"],
                 };
-                expected.extend(["--no-verify", "--author=Captured <captured@example.com>"]);
+                expected.extend(["--no-verify", "--reset-author"]);
                 assert_eq!(operation.argv(), expected);
             } else { assert!(result.commit.is_none(), "{command}: {change}"); }
             assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);

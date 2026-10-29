@@ -212,10 +212,17 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
 #[test]
 fn head_operations_real_git_tree_message_date_and_saved_close() {
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
-        for state in ["staged", "unstaged", "all", "clean", "cancel"] {
+        for state in ["staged", "unstaged", "all", "clean", "cancel", "reset-staged", "reset-clean", "reset-unstaged"] {
+            let reset_author = state.starts_with("reset-");
+            let state = state.strip_prefix("reset-").unwrap_or(state);
             if command == "commit.reword" && state == "all" { continue; }
             if command == "commit.extend" && state == "cancel" { continue; }
-            let (tmp, repo) = RepoFixture::new().commit("original message", [("f.txt", TEN_LINES)]).build();
+            let fixture = if reset_author { RepoFixture::new().commit("parent", [("parent.txt", "parent\n")]) }
+                else { RepoFixture::new() };
+            let (tmp, repo) = fixture.commit("original message", [("f.txt", TEN_LINES)]).build();
+            if reset_author {
+                tmp.git(&["commit", "--amend", "--no-edit", "--author=Original Author <original@example.com>", "--date=1999-01-02T03:04:05+00:00"]);
+            }
             // Make date preservation observable independently of wall-clock speed.
             let output = Command::new("git").args(["commit", "--amend", "--no-edit"])
                 .current_dir(tmp.path()).env("GIT_COMMITTER_DATE", "2001-02-03T04:05:06+00:00").output().unwrap();
@@ -224,6 +231,8 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
             let head_tree = tmp.git(&["rev-parse", "HEAD^{tree}"]);
             let date = repo.head_committer_date().unwrap();
             let message = tmp.git(&["log", "-1", "--format=%B"]);
+            let parents = tmp.git(&["show", "-s", "--format=%P", "HEAD"]);
+            let author_date = tmp.git(&["show", "-s", "--format=%aI", "HEAD"]);
             if state != "clean" {
                 write(&tmp.path().join("f.txt"), "staged content\n");
                 if state == "staged" || state == "cancel" { tmp.git(&["add", "f.txt"]); }
@@ -233,16 +242,19 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
             let index = tmp.git(&["ls-files", "--stage", "-z"]);
             let index_tree = tmp.git(&["write-tree"]);
             let worktree = read(&tmp.path().join("f.txt"));
-            let mut server = TestServer::spawn(&[]);
+            let mut server = TestServer::spawn(if reset_author { &[
+                ("GIT_AUTHOR_NAME", "New Committer"), ("GIT_AUTHOR_EMAIL", "new@example.com"),
+                ("GIT_AUTHOR_DATE", "2026-10-29T12:00:00+00:00"),
+            ] } else { &[] });
             server.initialize(json!({}));
             let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
-            let args = json!({"switches": if state == "all" { vec!["-a"] }
+            let args = json!({"switches": if reset_author { vec!["-R"] } else if state == "all" { vec!["-a"] }
                 else if command == "commit.extend" && state == "clean" { vec!["-e"] } else { vec![] }, "options": {}});
             if command == "commit.extend" {
                 server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{
                     "viewId":status,"command":command,"args":args
                 }}));
-                if state == "unstaged" {
+                if state == "unstaged" && !reset_author {
                     let prompt = server.prompt();
                     server.respond_prompt(5, prompt["params"]["promptId"].as_str().unwrap(), false, json!(true));
                 }
@@ -287,7 +299,7 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
                     assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
                     assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), head_tree);
                     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
-                } else if state == "all" || (command == "commit.extend" && state == "unstaged") {
+                } else if state == "all" || (command == "commit.extend" && state == "unstaged" && !reset_author) {
                     assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), worktree);
                     assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
                     assert!(tmp.git(&["diff", "--cached"]).is_empty());
@@ -297,13 +309,20 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
                     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
                     if state == "staged" { assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head); }
                 }
-                if command == "commit.extend" && state == "clean" {
+                if command == "commit.extend" && state == "clean" && !reset_author {
                     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "identical preserved metadata may retain the OID");
                 }
                 if command != "commit.amend" { assert_eq!(repo.head_committer_date().unwrap(), date); }
                 else { assert_ne!(repo.head_committer_date().unwrap(), date); }
+                if reset_author {
+                    assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+                    assert_eq!(tmp.git(&["show", "-s", "--format=%an <%ae>", "HEAD"]), "New Committer <new@example.com>\n");
+                    assert_ne!(tmp.git(&["show", "-s", "--format=%aI", "HEAD"]), author_date);
+                    assert!(tmp.git(&["show", "-s", "--format=%aI", "HEAD"]).starts_with("2026-10-29T12:00:00"));
+                    assert_eq!(tmp.git(&["show", "-s", "--format=%P", "HEAD"]), parents);
+                }
             }
-            assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), "1\n");
+            assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), if reset_author { "2\n" } else { "1\n" });
             assert_eq!(read(&tmp.path().join("f.txt")), worktree);
             if state != "clean" { assert_eq!(read(&tmp.path().join("untracked.txt")), "never implicitly added\n"); }
             assert!(!tmp.git(&["ls-files"]).contains("untracked.txt"));
