@@ -527,6 +527,21 @@ claimed here.
 
 ### R-PLAIN-RENDER: bootstrap and versioned applyEdit pipeline (L)
 
+**Controller slice complete; parent task remains pending.** `PlainDocument` is
+a reusable Detached/Ready/Applying controller with bounded exact-text-hash
+snapshots, one in-flight edit and latest-render coalescing. It emits minimal
+UTF-8/16/32-positioned edits in versioned `documentChanges` or unversioned
+`changes`, reconciles exact text echoes on either side of the response, and
+recomputes after stale rejection or divergent edits. Closing invalidates the
+pending request. Deterministic fake-editor tests cover the applicable profile,
+encoding, CRLF, version, echo-order and detach cases. This is controller-only
+coverage, not actual-binary acceptance.
+
+**Still pending for R-PLAIN-RENDER:** ordinary didOpen bootstrap of the resolved
+Session/status Tree, transport wiring and standard applyEdit delivery, and
+actual-binary runtime tests. Keep the parent unchecked until those acceptance
+gates pass.
+
 - **Target Files:** `src/presentation/plain.rs` (new), `src/diff_text.rs`, `src/session.rs`, `tests/plain_render.rs` (new).
 - **Reference Files:** the handoff's state-machine and applyEdit results; TASKS §3.3.
 - **Constraints:** never write the presentation file from the server; no parsing rendered text for structure; render is spawned after the `didOpen` handler returns.
@@ -537,7 +552,7 @@ claimed here.
   - A user edit, undo or formatter divergence is repaired back to authoritative text. A stale `applied:false` recomputes and retries. A few recent snapshots are retained, keyed by text hash.
   - A client without `workspace.applyEdit` gets a readable message and an inert document.
   - All harness quirk profiles pass.
-- **Verify:** `make test-rust FILTER="--test plain_render"`.
+- **Verify:** `cargo test --test plain_render --test plain_harness --test plain_sync && git diff --check`.
 
 ### R-PLAIN-ACTIONS: code actions and executeCommand (M)
 
