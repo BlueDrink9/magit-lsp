@@ -18,6 +18,8 @@ pub struct TestServer {
     stderr: Arc<Mutex<String>>,
     /// Messages observed while waiting for responses.
     pub notifications: Vec<Value>,
+    /// Frames actually written through the JSON transport, in emission order.
+    pub sent: Vec<Value>,
     /// Maximum wait for each incoming frame.
     pub recv_timeout: Duration,
 }
@@ -62,6 +64,7 @@ impl TestServer {
             responses,
             reader: Some(reader),
             notifications: Vec::new(),
+            sent: Vec::new(),
             recv_timeout: Duration::from_secs(10),
             stderr: log,
             stderr_reader: Some(stderr_reader),
@@ -98,7 +101,8 @@ impl TestServer {
 
     /// Send one framed JSON-RPC message.
     pub fn send(&mut self, message: Value) {
-        self.send_raw(&frame(message));
+        self.send_raw(&frame(message.clone()));
+        self.sent.push(message);
     }
 
     /// Write bytes verbatim to stdin.

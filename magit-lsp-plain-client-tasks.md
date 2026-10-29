@@ -15,8 +15,8 @@ native evidence) are complete; see TASKS §7 and
 Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
 log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
 advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
-the failed gates or release acceptance. HARNESS is now the first unchecked
-active feature task; the scoped R-EDIT-REAL lifecycle limits, native semantic,
+the failed gates or release acceptance. HARNESS is now complete as test infrastructure;
+R-PLAIN-PREREQ is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
@@ -323,26 +323,29 @@ implemented; broader parent acceptance remains pending.
 
 ### R-PLAIN-HARNESS: fake-editor conformance harness (M)
 
-**Acceptance warning:** baseline commit `2b15cad` is partial scaffolding, not
-accepted conformance. Its decomposition test produces/asserts one rangeless
-change instead of multiple ranged changes; reorder coverage fabricates a
-response locally instead of testing actual emit order; there is no real-binary
-FakeEditor pump servicing outbound requests; progress uses incorrect
-`workDoneProgress/create` rather than `window/workDoneProgress/create`;
-`respond` lacks `workspace/applyEdit` dispatch; positional edit ordering and
-overlap checks are inadequate. Keep this ticket unchecked until these gaps are
-closed and acceptance is demonstrated.
+**Completed (2026-10-29):** 12 harness tests cover all seven profiles, lifecycle
+operations, negotiated position encoding, 26 sequential ranged changes in one
+notification, atomic edit validation and captured emission order. The bounded
+real-binary stdio pump acknowledges actual `window/workDoneProgress/create`
+requests during successful staging and commit cancellation, awaiting progress
+end. Cancelling on begin previously killed setup `git rev-parse`; the test now
+waits for the actual commit editor before cancelling. Local scripted applyEdit
+and showDocument requests use that same dispatcher/send path and capture actual
+pipe writes, but are **not evidence of production Plain server support**.
+The fixture is explicitly reconstructed, not a raw Helix capture. Future Plain
+server conformance tasks remain unchecked. Verification: 12 harness tests and
+23 server_async tests passed, plus `git diff --check`.
 
 - **Target Files:** `tests/common/fake_editor.rs` (new), `tests/fixtures/lsp_traces/` (new), `tests/plain_harness.rs` (new).
 - **Reference Files:** `tests/common/session.rs`, `tests/server_async.rs`, the recorded Helix traces from the Plain handoff (§G).
 - **Constraints:** test code only; no production test hooks; no sleeps (await message conditions).
 - **Acceptance:**
   - A scripted LSP client drives the real binary over stdio and keeps a document model (text, version, negotiated position encoding).
-  - It implements `workspace/applyEdit` (versioned; stale rejected with `applied:false` and `failureReason`, as Helix 25.07.1 verified), `window/showDocument`, and `workDoneProgress/create`.
+  - It implements `workspace/applyEdit` (versioned; stale rejected with `applied:false` and `failureReason`), `window/showDocument`, and `window/workDoneProgress/create`. Do not attribute reconstructed fixture behavior to Helix evidence.
   - Operations: open, edit, save, close, `code_action(range)`, `execute_command`, `text()`.
   - Quirk profiles, each with a self-test: `decomposed-changes` (a full replace arrives as many incremental changes in one notification), `debounced-didchange`, `reorder-echo` (`didChange` after the `applyEdit` response), `no-documentChanges`, `no-showDocument`, `crlf-normalise`, `utf16`.
   - Trace fixtures come from the user's raw Helix JSONL. If unavailable, reconstruct from the handoff's quoted examples and mark fixtures "reconstructed".
-- **Verify:** `make test-rust FILTER="--test plain_harness"`.
+- **Verify:** `make test-rust FILTER="--test plain_harness" && cargo test --test server_async && git diff --check`.
 
 ### R-PLAIN-PREREQ: outbound requests, progress gating, minimal BUG-READ-1 (M)
 
