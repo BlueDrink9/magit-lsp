@@ -596,6 +596,39 @@ adversarial acceptance**; that parent stays unchecked. The material below is the
     at line 477 (`build/test-logs/rust.EwFXOb`). This slice does not modify that
     unrelated failure or claim `make test` passed.
 
+- [x] **R-EDIT-REAL production VSCode lifecycle supervisor slice.** Run the
+  production extension/server/Git helper in isolated normal hosts across native
+  close-window, reload-window and same-window single-root folder replacement.
+  Persist wire/API/progress/process observations outside the host; require actual
+  exit/reactivation, saved-file preservation, unchanged HEAD/index/worktree,
+  no lifecycle confirmation and eventual old server/helper exit before cleanup.
+  Reload must open fresh Git text with a new run ID at the reused URI and reject
+  late old-run confirmation. Parent R-EDIT-REAL remains unchecked; evidence is
+  limited to the current Linux/Codium build and clean single-root fixtures.
+  - **Verification:** `MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium
+    node clients/vscode/test/e2e/real-file-lifecycle.mjs && git diff --check`
+    passed. Inspected all six native pre/post PNGs plus results, progress/wire
+    observations and PID/start-time process identities under
+    `/tmp/opencode/real-file-lifecycle-NVD44m/{close-window,reload-window,workspace-change}/`.
+    All three original hosts deactivated without a matching `event.closed` or
+    `common.confirm`; HEAD, index tree and staged/unstaged bytes were unchanged.
+    Old server, Git commit and editor-helper processes exited before forced
+    cleanup. Every `cleanup.json` reports zero remaining owned processes.
+    Reload retained the saved file, then opened fresh Git text with a distinct
+    run ID at the same URI; the deliberate late old-run request returned
+    `Commit draft run is not pending`, without affecting the new draft or HEAD.
+  - **Harness diagnosis:** the inherited loop expected a dead extension host to
+    supervise itself and had no writer for `lifecycle-result.json`. The external
+    supervisor now owns each phase and persists failures, process census and
+    cleanup even on failure. Native reload can reject the outstanding command
+    RPC with `Canceled`; this is recorded, never accepted as completion without
+    actual host reactivation. Small tiled windows hide editor text behind side
+    bars, so the harness closes those bars and waits for painted saved text.
+    Close-window's desktop post-shot includes unrelated pre-existing windows;
+    only the isolated profile's process identities establish its complete exit.
+    No production lifecycle implementation changed; no broader platform,
+    multi-root, full-regression or parent acceptance claim is made.
+
 - [x] **R-EDIT-REAL implementation/integration slice.** Real file server/client
   cutover and focused integration verification; parent native/adversarial
   acceptance and Magit message-ring parity remain pending.
