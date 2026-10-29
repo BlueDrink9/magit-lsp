@@ -11,6 +11,15 @@ evidence; its broader parent acceptance remains incomplete. R-ARGS and the state
 R-4.1-head-edit criteria (including reset-author review correction and both-client
 native evidence) are complete; see TASKS §7 and
 `docs/evidence/commit-head-operations.md`.
+**Authorization (2026-10-29):** the user explicitly chose “Defer and continue
+Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
+log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
+advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
+the failed gates or release acceptance. HARNESS is now the first unchecked
+active feature task; the scoped R-EDIT-REAL lifecycle limits, native semantic,
+recovery and two-repository evidence, and finite uncovered criteria remain
+recorded below. The ring's pinned parity differences remain documented policy,
+not a change request or a missing source-research blocker.
 Decision: assume ordinary `didClose` confirms saved-file content by default;
 standard LSP lacks run identity and reliability/late-event limitations are
 accepted assumptions, not protocol guarantees. VS Code is the known exception.
@@ -76,7 +85,7 @@ Commands inherit support from the effects they emit. A CI test (R-PLAIN-PROMPT) 
 
 ## 3. Order of work
 
-1. R-ARGS and R-4.1-head-edit (amend, extend and reword) are complete prerequisites for R-EDIT-REAL parent acceptance (production cutover implemented); also in parallel R-PLAIN-DOC (complete), R-PLAIN-HARNESS and R-PLAIN-PREREQ. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
+1. R-ARGS and R-4.1-head-edit (amend, extend and reword) are complete. R-EDIT-REAL parent acceptance remains unchecked and deferred by explicit user authorization while Plain proceeds; it is not a prerequisite to starting R-PLAIN-HARNESS or R-PLAIN-PREREQ. R-PLAIN-DOC is complete. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
 2. R-PLAIN-SYNC (after R-EDIT-REAL), then R-PLAIN-CORE.
 3. R-DIFF-SAFETY, then R-PLAIN-TARGET. R-PLAIN-REPO after R-PLAIN-CORE.
 4. R-PLAIN-RENDER, then R-PLAIN-ACTIONS, then R-PLAIN-STACK, R-PLAIN-VIS and R-PLAIN-PROMPT (parallel), then R-PLAIN-SELECT.
