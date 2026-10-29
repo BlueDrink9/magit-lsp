@@ -201,6 +201,7 @@ impl Shared {
         sender: mpsc::UnboundedSender<Message>,
     ) -> Self {
         static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
+        let client = Arc::new(Mutex::new(ClientCaps::default()));
         Self {
             draft_owner: Arc::new(format!(
                 "connection-{}",
@@ -213,13 +214,13 @@ impl Shared {
             next_view: Arc::new(AtomicU64::new(0)),
             config,
             edit_configs: Arc::new(Mutex::new(HashMap::new())),
-            client: Arc::new(Mutex::new(ClientCaps::default())),
+            client: client.clone(),
             documents: Arc::new(Mutex::new(DocStore::default())),
             startup_error,
             sender: sender.clone(),
             outbound: Arc::new(Mutex::new(HashMap::new())),
             next_outbound: Arc::new(AtomicU64::new(0)),
-            prompts: Arc::new(PromptBridge::new(&sender)),
+            prompts: Arc::new(PromptBridge::new(&sender, client)),
             progress: Arc::new(Mutex::new(HashMap::new())),
             closing: Arc::new(AtomicBool::new(false)),
             progress_changed: Arc::new(Notify::new()),
@@ -379,7 +380,7 @@ impl Shared {
                         }
                     };
                     for render in renders {
-                        let _ = shared.sender.send(CustomRender::new().render(render));
+                        let _ = shared.sender.send(custom_ui(&shared.client).render(render));
                     }
                 }
                 Refresh::IndexLocked => {
@@ -601,7 +602,7 @@ impl Shared {
             }
             let _ = self
                 .sender
-                .send(CustomRender::new().effects(ViewEffectsParams {
+                .send(custom_ui(&self.client).effects(ViewEffectsParams {
                     effects: vec![Effect::message(
                         MessageLevel::Info,
                         "Cancelling…".to_string(),
@@ -709,6 +710,16 @@ fn dynamic_delivery(client: &Arc<Mutex<ClientCaps>>) -> bool {
         == KeymapDelivery::Dynamic
 }
 
+fn custom_ui(client: &Arc<Mutex<ClientCaps>>) -> CustomRender {
+    let client = client.clone();
+    CustomRender::negotiated(move || {
+        match client.lock().unwrap_or_else(|p| p.into_inner()).presentation.as_ref() {
+            Some(Presentation::Rich(rich)) => Some(rich.clone()),
+            _ => None,
+        }
+    })
+}
+
 /// The prompt transport: a `view/prompt` notification and its answer.
 ///
 /// The editor bridge's askpass prompt runs on a thread that outlives the
@@ -721,15 +732,17 @@ struct PromptBridge {
     pending: Mutex<HashMap<String, std_mpsc::Sender<PromptValue>>>,
     /// Prompt-id counter; ids are unique across this server process.
     next_id: AtomicU64,
+    client: Arc<Mutex<ClientCaps>>,
 }
 
 impl PromptBridge {
-    fn new(sender: &mpsc::UnboundedSender<Message>) -> Self {
+    fn new(sender: &mpsc::UnboundedSender<Message>, client: Arc<Mutex<ClientCaps>>) -> Self {
         Self {
             closed: AtomicBool::new(false),
             sender: sender.downgrade(),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(0),
+            client,
         }
     }
 
@@ -739,6 +752,15 @@ impl PromptBridge {
     /// without a value, so `recv` fails. A prompt that cannot be delivered (the
     /// writer is gone) is cancelled as well.
     fn ask(&self, request: &ViewPromptParams) -> Option<PromptValue> {
+        let ui = custom_ui(&self.client);
+        if !ui.allows_prompt(request) {
+            if let Some(sender) = self.sender.upgrade() {
+                let _ = sender.send(ui.effects(ViewEffectsParams { effects: vec![
+                    Effect::message(MessageLevel::Warn, "Client does not support this prompt"),
+                ] }));
+            }
+            return None;
+        }
         let prompt_id = format!("p{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         let params = ViewPromptParams {
             prompt_id: prompt_id.clone(),
@@ -754,7 +776,7 @@ impl PromptBridge {
         }
 
         let sent = match self.sender.upgrade() {
-            Some(sender) => sender.send(CustomRender::new().prompt(params)).is_ok(),
+            Some(sender) => sender.send(ui.prompt(params)).is_ok(),
             None => false,
         };
 
@@ -948,13 +970,24 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 let Some(sender) = sender.upgrade() else {
                     return;
                 };
-                let _ = sender.send(CustomRender::new().effects(ViewEffectsParams {
+                let unsupported_edit = client.lock().unwrap_or_else(|p| p.into_inner())
+                    .presentation.as_ref().is_some_and(|presentation| matches!(
+                        presentation, Presentation::Rich(caps) if !caps.supports_effect("editDocument")
+                    ));
+                if unsupported_edit {
+                    for effect in &effects {
+                        if let Effect::EditDocument { run_id, .. } = effect {
+                            editor::registry().resolve(run_id, editor::Reply::Abort);
+                        }
+                    }
+                }
+                let _ = sender.send(custom_ui(&client).effects(ViewEffectsParams {
                     effects: effects.clone(),
                 }));
                 // A dynamic client gets the edit's keymap as a normal
                 // `view/keymap`, keyed by the edit id. Static clients use
                 // their own bindings and ignore it.
-                if dynamic_delivery(&client) {
+                if !unsupported_edit && dynamic_delivery(&client) {
                     for effect in &effects {
                         if let Effect::EditDocument { run_id, kind, .. } = effect {
                             let config = configs
@@ -1183,7 +1216,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 notification.method == "textDocument/didClose",
                                 |effects| {
                                     let _ = sender.send(
-                                        CustomRender::new().effects(ViewEffectsParams { effects }),
+                                        custom_ui(&shared.client).effects(ViewEffectsParams { effects }),
                                     );
                                 },
                             );
@@ -1440,7 +1473,7 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
                 let _ = shared
                     .sender
-                    .send(CustomRender::new().effects(ViewEffectsParams {
+                    .send(custom_ui(&shared.client).effects(ViewEffectsParams {
                         effects: vec![Effect::message(MessageLevel::Warn, warning)],
                     }));
             }
@@ -1645,7 +1678,7 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec
             };
             match session.resize(&params.view_id, viewport) {
                 // A menu re-flows its columns for the new width.
-                Ok(Some(render)) => vec![CustomRender::new().render(render)],
+                Ok(Some(render)) => vec![custom_ui(&shared.client).render(render)],
                 Ok(None) => Vec::new(),
                 Err(error) => {
                     tracing::warn!(%error, "failed to resize view");
@@ -1865,6 +1898,11 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     };
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        let rich = match shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation.as_ref() {
+            Some(Presentation::Rich(caps)) => Some(caps.clone()),
+            _ => None,
+        };
+        session.set_rich_capabilities(rich);
         shared
             .published
             .lock()
@@ -1872,10 +1910,11 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             .entry(repo.clone())
             .or_insert_with(|| session.published());
         session.set_keymaps(keymaps);
+        let placement = p.placement.unwrap_or_default();
         let (descriptor, render) = session.open_with_args(
             id.clone(),
             p.kind,
-            p.placement.unwrap_or_default(),
+            placement,
             p.viewport,
             p.args.as_ref(),
         )?;
@@ -1890,7 +1929,7 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .insert(id, repo.to_string());
     shared.ensure_watcher(repo);
 
-    let mut notifications = vec![CustomRender::new().render(render)];
+    let mut notifications = vec![custom_ui(&shared.client).render(render)];
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
@@ -2038,7 +2077,8 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 }
 
 /// Turn a command outcome into its response plus render/keymap notifications.
-fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
+fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) -> Result<Dispatched> {
+    outcome.effects = custom_ui(&shared.client).prepare_effects(ViewEffectsParams { effects: outcome.effects }).effects;
     let mut notifications = Vec::new();
     if let Some(operation) = outcome
         .commit
@@ -2049,7 +2089,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
         spawn_commit(shared.clone(), repo.to_string(), operation);
     }
     if let Some(render) = outcome.render {
-        notifications.push(CustomRender::new().render(render));
+        notifications.push(custom_ui(&shared.client).render(render));
     }
     // A mode change replaces the binding set, so the client must see it even
     // when the scope's ordinary keymap would not change.
@@ -2098,7 +2138,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Res
     }
 
     for (render, keymap) in outcome.opened {
-        notifications.push(CustomRender::new().render(render));
+        notifications.push(custom_ui(&shared.client).render(render));
         if shared.delivery() == KeymapDelivery::Dynamic {
             if let Some(keymap) = keymap {
                 notifications.push(Message::Notification(Notification::new(
@@ -2176,6 +2216,16 @@ impl Drop for CommitEdit {
 /// lock is held while Git blocks on the helper. Only the final refresh takes
 /// the session lock again, briefly.
 fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOperation) {
+    let unsupported = shared.client.lock().unwrap_or_else(|p| p.into_inner())
+        .presentation.as_ref().is_some_and(|presentation| matches!(
+            presentation, Presentation::Rich(caps) if !caps.supports_effect("editDocument")
+        ));
+    if unsupported {
+        let _ = shared.sender.send(custom_ui(&shared.client).effects(ViewEffectsParams {
+            effects: vec![Effect::message(MessageLevel::Warn, "Client does not support editDocument")],
+        }));
+        return;
+    }
     let sender = shared.sender.clone();
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
@@ -2240,7 +2290,7 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     messages.extend(
                         renders
                             .into_iter()
-                            .map(|render| CustomRender::new().render(render)),
+                            .map(|render| custom_ui(&shared.client).render(render)),
                     );
                     // Replace the "Committing…" feedback with the outcome.
                     let subject = outcome
@@ -2261,13 +2311,13 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     if let Some(warning) = outcome.warning {
                         effects.push(Effect::message(MessageLevel::Warn, warning));
                     }
-                    messages.push(CustomRender::new().effects(ViewEffectsParams { effects }));
+                    messages.push(custom_ui(&shared.client).effects(ViewEffectsParams { effects }));
                 }
                 Err(error) => {
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
                         vec![Effect::message(MessageLevel::Error, error.to_string())]
                     });
-                    messages.push(CustomRender::new().effects(ViewEffectsParams { effects }));
+                    messages.push(custom_ui(&shared.client).effects(ViewEffectsParams { effects }));
                 }
             }
             for message in messages {

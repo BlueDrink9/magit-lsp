@@ -1,10 +1,13 @@
 //! Typed transport for the existing custom view protocol.
 
+use super::RichCapabilities;
 use crate::protocol::{
-    ViewEffectsParams, ViewPromptParams, ViewRender, VIEW_EFFECTS, VIEW_PROMPT, VIEW_RENDER,
+    Effect, MessageLevel, ViewEffectsParams, ViewPromptParams, ViewRender, VIEW_EFFECTS,
+    VIEW_PROMPT, VIEW_RENDER,
 };
 use lsp_server::{Message, Notification};
 use serde::Serialize;
+use std::sync::Arc;
 
 /// Client-facing typed presentation delivery seam.
 pub trait Ui: Send + Sync {
@@ -17,13 +20,61 @@ pub trait Ui: Send + Sync {
 }
 
 /// Existing rich/custom wire transport, retained as the initial adapter.
-#[derive(Clone, Copy, Default)]
-pub struct CustomRender;
+#[derive(Clone)]
+pub struct CustomRender {
+    capabilities: Arc<dyn Fn() -> Option<RichCapabilities> + Send + Sync>,
+}
+
+impl Default for CustomRender {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CustomRender {
     /// Construct the custom-protocol adapter.
     pub fn new() -> Self {
-        Self
+        Self::negotiated(|| None)
+    }
+
+    /// Bind delivery to the connection's current negotiated declaration.
+    pub fn negotiated(
+        source: impl Fn() -> Option<RichCapabilities> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            capabilities: Arc::new(source),
+        }
+    }
+
+    /// Enforce optional effects and placement on notifications and response payloads.
+    pub fn prepare_effects(&self, mut effects: ViewEffectsParams) -> ViewEffectsParams {
+        if let Some(caps) = (self.capabilities)() {
+            for effect in &mut effects.effects {
+                let required = match effect {
+                    Effect::VisitFile { .. } => Some("visitFile"),
+                    Effect::EditDocument { .. } => Some("editDocument"),
+                    Effect::Clipboard { .. } => Some("clipboard"),
+                    Effect::OpenView { descriptor } | Effect::PushView { descriptor } => {
+                        descriptor.placement = caps.placement(descriptor.placement);
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(required) = required.filter(|required| !caps.supports_effect(required))
+                {
+                    *effect = Effect::message(
+                        MessageLevel::Warn,
+                        format!("Client does not support {required}"),
+                    );
+                }
+            }
+        }
+        effects
+    }
+
+    /// Check before registering a waiter or entering an editor-helper transition.
+    pub fn allows_prompt(&self, prompt: &ViewPromptParams) -> bool {
+        (self.capabilities)().is_none_or(|caps| caps.allows_prompt(prompt))
     }
 
     fn notify<T: Serialize>(method: &str, params: &T) -> Message {
@@ -37,9 +88,17 @@ impl Ui for CustomRender {
         Self::notify(VIEW_RENDER, &render)
     }
     fn effects(&self, effects: ViewEffectsParams) -> Message {
-        Self::notify(VIEW_EFFECTS, &effects)
+        Self::notify(VIEW_EFFECTS, &self.prepare_effects(effects))
     }
     fn prompt(&self, prompt: ViewPromptParams) -> Message {
+        if !self.allows_prompt(&prompt) {
+            return self.effects(ViewEffectsParams {
+                effects: vec![Effect::message(
+                    MessageLevel::Warn,
+                    "Client does not support this prompt",
+                )],
+            });
+        }
         Self::notify(VIEW_PROMPT, &prompt)
     }
 }

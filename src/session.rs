@@ -515,6 +515,7 @@ impl ViewStack {
 /// One repository's open views and render versions.
 pub struct Session {
     repo_path: String,
+    rich_capabilities: Option<crate::presentation::RichCapabilities>,
     views: ViewStack,
     keymaps: Arc<BTreeMap<String, Keymap>>,
     /// The next prompt id handed to a prompt request.
@@ -586,6 +587,13 @@ impl InvokeResult {
     }
 }
 
+fn unsupported_feature(feature: &str) -> InvokeResult {
+    InvokeResult {
+        effects: vec![Effect::message(MessageLevel::Warn, format!("Client does not support {feature}"))],
+        ..InvokeResult::empty()
+    }
+}
+
 fn prompt_busy() -> InvokeResult {
     InvokeResult {
         effects: vec![Effect::message(
@@ -601,6 +609,7 @@ impl Session {
     pub fn new(repo_path: impl Into<String>) -> Self {
         Self {
             repo_path: repo_path.into(),
+            rich_capabilities: None,
             views: ViewStack::new(),
             keymaps: Arc::new(BTreeMap::new()),
             next_prompt: 0,
@@ -608,6 +617,19 @@ impl Session {
             pending_selections: BTreeMap::new(),
             published: PublishedViews::default(),
         }
+    }
+
+    /// Apply the connection's negotiated rich feature set to all session transitions.
+    pub fn set_rich_capabilities(&mut self, caps: Option<crate::presentation::RichCapabilities>) {
+        self.rich_capabilities = caps;
+    }
+
+    fn placement(&self, placement: Placement) -> Placement {
+        self.rich_capabilities.as_ref().map_or(placement, |caps| caps.placement(placement))
+    }
+
+    fn unsupported_prompt(&self, request: &ViewPromptParams) -> bool {
+        self.rich_capabilities.as_ref().is_some_and(|caps| !caps.allows_prompt(request))
     }
 
     /// The shared snapshot handle that answers reads without the session lock.
@@ -706,6 +728,7 @@ impl Session {
         }
 
         let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let placement = self.placement(placement);
         let (descriptor, render, mut open_view) =
             initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
         open_view.published = self.published.clone();
@@ -1236,6 +1259,9 @@ impl Session {
                 }
 
                 let request = self.option_prompt(&label, &flag, reader);
+                if self.unsupported_prompt(&request) {
+                    return Ok(unsupported_feature("requested prompt"));
+                }
                 let menu = self
                     .views
                     .get(view_id)
@@ -1503,6 +1529,7 @@ impl Session {
         placement: Placement,
         view: Box<dyn View>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
+        let placement = self.placement(placement);
         let viewport = self
             .views
             .get(parent_id)
@@ -1611,6 +1638,9 @@ impl Session {
         key: Option<String>,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
+        if let Some(required) = self.rich_capabilities.as_ref().and_then(|caps| caps.command_requirement(command_id)) {
+            return Ok(unsupported_feature(required));
+        }
         let Some(command) = commands::registry().get(command_id) else {
             return Err(Error::new(format!("unknown command: {command_id}")));
         };
@@ -1688,6 +1718,9 @@ impl Session {
         mut outcome: commands::CommandOutcome,
     ) -> Result<InvokeResult> {
         if let Some((request, action)) = outcome.prompt.take() {
+            if self.unsupported_prompt(&request) {
+                return Ok(unsupported_feature("requested prompt"));
+            }
             self.prepare_prompt(
                 view_id,
                 cursor,

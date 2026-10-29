@@ -14,6 +14,165 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+fn limited_rich(effects: Value, prompts: Value) -> Value {
+    json!({"experimental":{"magit":{
+        "v":1,"keys":"dynamic","modifiers":"full","render":"edits",
+        "layout":["main"],"effects":effects,"prompts":prompts,"folds":"server"
+    }}})
+}
+
+fn invoke_rich(server: &mut TestServer, id: i64, view: &str, command: &str) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+        "params":{"viewId":view,"command":command}}));
+    server.response_with_id(id)
+}
+
+#[test]
+fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_effects() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let draft = std::fs::read(tmp.path().join(".git/COMMIT_EDITMSG")).unwrap();
+    let trace = tmp.path().join("trace.jsonl");
+    let mut server = TestServer::spawn(&[("GIT_TRACE2_EVENT", trace.to_str().unwrap())]);
+    assert!(server.initialize(limited_rich(json!([]), json!(["confirm","text","secret"])))
+        ["error"].is_null());
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    for (id, command, required) in [
+        (3, "common.copy-value", "clipboard"),
+        (4, "common.visit", "visitFile"),
+        (5, "log.select-and-copy", "clipboard"),
+        (6, "commit.create", "editDocument"),
+        (7, "commit.amend", "editDocument"),
+        (8, "commit.reword", "editDocument"),
+    ] {
+        let response = invoke_rich(&mut server, id, &view, command);
+        let effects = response["result"]["effects"].as_array().unwrap();
+        assert_eq!(effects.len(), 1, "{response}");
+        assert_eq!(effects[0]["type"], "message", "{response}");
+        assert!(effects[0]["text"].as_str().unwrap().contains(required), "{response}");
+    }
+    let opened = invoke_rich(&mut server, 9, &view, "open.commit");
+    let menu = opened["result"]["effects"].as_array().unwrap().iter()
+        .find(|effect| effect["type"] == "pushView").unwrap()["descriptor"]["id"]
+        .as_str().unwrap();
+    // Menu-key dispatch must refuse before its commit continuation can stage or spawn.
+    server.send(json!({"jsonrpc":"2.0","id":10,"method":"view/key","params":{
+        "viewId":menu,"version":1,"key":"c","editorMode":"normal","cursor":{"line":0,"column":0}
+    }}));
+    let keyed = server.response_with_id(10);
+    assert!(keyed["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["text"].as_str().unwrap().contains("editDocument")
+    ), "{keyed}");
+    server.shutdown_and_exit();
+    let mut observed = server.notifications.clone();
+    let (exit, remaining) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(exit.success());
+    observed.extend(remaining);
+    assert!(!observed.iter().any(|message| message["method"] == "view/prompt"));
+    assert!(!observed.iter().any(|message| message["params"]["effects"].as_array()
+        .is_some_and(|effects| effects.iter().any(|effect| matches!(
+            effect["type"].as_str(), Some("editDocument" | "clipboard" | "visitFile")
+        )))));
+    for line in read(&trace).lines() {
+        let event: Value = serde_json::from_str(line).unwrap();
+        if event["event"] == "start" {
+            assert!(!event["argv"].as_array().unwrap().iter()
+                .any(|arg| arg == "commit" || arg == "add"), "mutation started: {event}");
+        }
+    }
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(std::fs::read(tmp.path().join(".git/COMMIT_EDITMSG")).unwrap(), draft);
+    assert!(!tmp.path().join(".git/index.lock").exists());
+}
+
+#[test]
+fn rich_missing_confirm_leaves_no_mutation_or_pending_prompt() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!(["editDocument"]), json!([])));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let response = invoke_rich(&mut server, 3, &view, "commit.create");
+    assert!(response["result"]["effects"][0]["text"].as_str().unwrap()
+        .contains("does not support"), "{response}");
+    // A second semantic command completes normally, not with a pending-prompt refusal.
+    let opened = invoke_rich(&mut server, 4, &view, "open.commit");
+    assert!(opened["result"]["effects"].as_array().unwrap().iter()
+        .any(|effect| effect["type"] == "pushView"), "{opened}");
+    server.shutdown_and_exit();
+    let mut observed = server.notifications.clone();
+    let (exit, remaining) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(exit.success());
+    observed.extend(remaining);
+    assert!(!observed.iter().any(|message| message["method"] == "view/prompt"));
+    assert!(!observed.iter().any(|message| message["params"]["effects"].as_array()
+        .is_some_and(|effects| effects.iter().any(|effect| effect["type"] == "editDocument"))));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(read(&tmp.path().join("f.txt")), "changed\n");
+    assert!(!tmp.path().join(".git/index.lock").exists());
+}
+
+#[test]
+fn rich_full_caps_delivers_clipboard_and_visit_file() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize_rich(json!({}));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().unwrap();
+    let uri = opened["result"]["uri"].as_str().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":1}}));
+    // Resolve the request position from the server's structured outline.
+    let line = first_hunk_line(&mut server, uri);
+    for (id, command, effect) in [(3, "common.copy-value", "clipboard"), (4, "common.visit", "visitFile")] {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+            "params":{"viewId":view,"version":1,"command":command,"cursor":{"line":line,"column":0}}}));
+        let response = server.response_with_id(id);
+        assert!(response["result"]["effects"].as_array().unwrap().iter()
+            .any(|value| value["type"] == effect), "{response}");
+    }
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn rich_main_only_nested_push_pop_preserves_caller_and_full_caps_keep_placement() {
+    for full in [false, true] {
+        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", "initial\n")]).build();
+        let mut server = TestServer::spawn(&[]);
+        if full { server.initialize_rich(json!({})); }
+        else { server.initialize(limited_rich(json!([]), json!([]))); }
+        let caller = open_view(&mut server, 2, &repo_param(tmp.path()));
+        let opened = invoke_rich(&mut server, 3, &caller, "open.commit");
+        let descriptor = &opened["result"]["effects"].as_array().unwrap().iter()
+            .find(|effect| effect["type"] == "pushView").unwrap()["descriptor"];
+        assert_eq!(descriptor["placement"], if full { "bottom" } else { "main" });
+        let child = descriptor["id"].as_str().unwrap();
+        let popped = invoke_rich(&mut server, 4, child, "common.quit");
+        let effects = popped["result"]["effects"].as_array().unwrap();
+        assert!(effects.iter().any(|effect| effect["type"] == "popView" && effect["viewId"] == child), "{popped}");
+        assert!(effects.iter().any(|effect| effect["type"] == "focusView" && effect["viewId"] == caller), "{popped}");
+        let reopened = invoke_rich(&mut server, 5, &caller, "open.commit");
+        assert!(reopened["result"]["effects"].as_array().unwrap().iter()
+            .any(|effect| effect["type"] == "pushView"), "{reopened}");
+        server.shutdown_and_exit();
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
 #[test]
 fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_input() {
     let (tmp, _) = RepoFixture::new()

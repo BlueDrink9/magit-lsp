@@ -6,6 +6,50 @@ use magit_lsp::protocol::*;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
+#[test]
+fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(rich_block()))).unwrap() else {
+        panic!()
+    };
+    let state = std::sync::Arc::new(Mutex::new(caps));
+    let source = state.clone();
+    let ui = CustomRender::negotiated(move || Some(source.lock().unwrap().clone()));
+    let effects = || ViewEffectsParams {
+        effects: vec![Effect::Clipboard {
+            text: "copied".into(),
+        }],
+    };
+    let Message::Notification(allowed) = ui.effects(effects()) else {
+        panic!()
+    };
+    assert_eq!(allowed.params["effects"][0]["type"], "clipboard");
+    state.lock().unwrap().effects.clear();
+    let Message::Notification(refused) = ui.effects(effects()) else {
+        panic!()
+    };
+    assert_eq!(refused.params["effects"][0]["type"], "message");
+    let prompt: ViewPromptParams = serde_json::from_value(json!({
+        "promptId":"p", "kind":"text", "title":"Password", "secret":true
+    }))
+    .unwrap();
+    for (declared, allowed) in [
+        (vec![], false),
+        (vec!["text"], false),
+        (vec!["secret"], false),
+        (vec!["text", "secret"], true),
+    ] {
+        state.lock().unwrap().prompts = declared.into_iter().map(str::to_owned).collect();
+        assert_eq!(ui.allows_prompt(&prompt), allowed);
+        let Message::Notification(message) = ui.prompt(prompt.clone()) else {
+            panic!()
+        };
+        assert_eq!(
+            message.method,
+            if allowed { VIEW_PROMPT } else { VIEW_EFFECTS }
+        );
+    }
+}
+
 fn rich_block() -> Value {
     json!({"v":1,"keys":"dynamic","modifiers":"full","render":"edits",
         "layout":["main","bottom"],"effects":["visitFile","clipboard"],

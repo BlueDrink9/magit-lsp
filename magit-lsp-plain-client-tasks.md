@@ -427,8 +427,26 @@ recording delivery, and unchanged custom wire shapes. **Scoped typed-seam slice
 complete:** production render/effects/prompt notifications pass through `Ui` and
 `CustomRender`, including watcher, resync/resize, editor/recovery and outcome
 paths; prompt pending registration remains before send. This does not implement
-a Plain renderer, runtime optional-feature enforcement, client changes, or the
+a Plain renderer, client changes, or the
 unified dispatcher. The R-PLAIN-CORE parent remains unchecked.
+
+**Rich optional-feature enforcement (scoped complete):** delivery now reads the
+shared negotiated declaration; command preflight refuses unsupported visit,
+clipboard/selection and commit-worker operations before mutation/helper startup.
+Unsupported confirmation/menu prompts return feedback without pending waiters;
+secret text requires both text and secret. Unsupported bridge edits abort the
+helper, and undeclared root/nested placements become main while preserving
+push/pop and caller identity. Actual stdio tests check refusal, no Git mutation
+subprocess, unchanged HEAD/index/draft, prompt-free continuation, nested caller
+restoration and full-capability delivery, including a real edited commit.
+Verified with `cargo test --lib presentation:: && cargo test --test plain_core
+--test server_async --test editor_bridge --test plain_harness && git diff --check`.
+Native bundled menu regression passed both profiles/sizes via
+`scripts/ui run tests/ui/scenarios/commit-menu-shows-actions.scn`; inspect text
+evidence in `build/ui/commit-menu-shows-actions/{standard,vim}-{100x30,80x24}/commit-menu.screen`.
+Plain implementation and full-render/native-fold/basic-modifier enforcement are
+later slices, not claimed here. R-PLAIN-CORE remains unchecked; no provider/VCS
+abstraction is introduced before the user checkpoint.
 
 - **Target Files:** `src/presentation/{mod,custom}.rs` (new), `src/session.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/init.lua`, `clients/vscode/lib/session.js` (init options only).
 - **Reference Files:** AGENTS.md architecture flow; TASKS §3.2, §3.5.

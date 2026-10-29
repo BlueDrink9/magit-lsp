@@ -137,6 +137,46 @@ pub struct RichCapabilities {
 }
 
 impl RichCapabilities {
+    /// Required optional effect for a command, before any command-side work.
+    pub fn command_requirement(&self, command: &str) -> Option<&'static str> {
+        let required = match command {
+            "common.visit" => "visitFile",
+            "common.copy-value" | "log.select-and-copy" => "clipboard",
+            "commit.create" | "commit.amend" | "commit.extend" | "commit.reword" => "editDocument",
+            _ => return None,
+        };
+        (!self.supports_effect(required)).then_some(required)
+    }
+
+    /// Whether both the prompt kind and any secret-text requirement are declared.
+    pub fn allows_prompt(&self, prompt: &crate::protocol::ViewPromptParams) -> bool {
+        use crate::protocol::PromptKind;
+        let kind = match prompt.kind {
+            PromptKind::Confirm => "confirm",
+            PromptKind::Text => "text",
+            PromptKind::Choice => "choice",
+            PromptKind::MultiChoice => "multiChoice",
+        };
+        self.supports_prompt(kind)
+            && (prompt.secret != Some(true) || self.supports_prompt("secret"))
+    }
+
+    /// Fall back to the mandatory main placement without changing view identity.
+    pub fn placement(&self, placement: crate::view::Placement) -> crate::view::Placement {
+        use crate::view::Placement;
+        let name = match placement {
+            Placement::Main => "main",
+            Placement::Side => "side",
+            Placement::Bottom => "bottom",
+            Placement::Float => "float",
+        };
+        if self.supports_placement(name) {
+            placement
+        } else {
+            Placement::Main
+        }
+    }
+
     /// Whether this declaration opts into a named optional effect.
     pub fn supports_effect(&self, effect: &str) -> bool {
         self.effects.contains(effect)

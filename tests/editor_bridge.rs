@@ -571,7 +571,7 @@ fn a_commit_is_created_from_the_typed_message() {
     let repo = json!(tmp.path().to_string_lossy());
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
         "initialize response: {response}"
