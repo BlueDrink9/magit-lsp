@@ -7,7 +7,10 @@ index; TASKS.md §7 is the canonical scanner-visible queue and this file retains
 ticket bodies, decisions, risks and deferred notes. All implementation, spike,
 harness, phase and release work remains pending unless explicitly marked
 otherwise in TASKS.md. R-EDIT-REAL's production cutover is implemented with focused
-evidence; its parent acceptance is NOT complete.
+evidence; its broader parent acceptance remains incomplete. R-ARGS and the stated
+R-4.1-head-edit criteria (including reset-author review correction and both-client
+native evidence) are complete; see TASKS §7 and
+`docs/evidence/commit-head-operations.md`.
 Decision: assume ordinary `didClose` confirms saved-file content by default;
 standard LSP lacks run identity and reliability/late-event limitations are
 accepted assumptions, not protocol guarantees. VS Code is the known exception.
@@ -73,14 +76,14 @@ Commands inherit support from the effects they emit. A CI test (R-PLAIN-PROMPT) 
 
 ## 3. Order of work
 
-1. R-ARGS, then R-4.1-head-edit (amend, extend and reword), must complete before R-EDIT-REAL parent acceptance (production cutover implemented); also in parallel R-PLAIN-DOC (complete), R-PLAIN-HARNESS and R-PLAIN-PREREQ. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
+1. R-ARGS and R-4.1-head-edit (amend, extend and reword) are complete prerequisites for R-EDIT-REAL parent acceptance (production cutover implemented); also in parallel R-PLAIN-DOC (complete), R-PLAIN-HARNESS and R-PLAIN-PREREQ. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
 2. R-PLAIN-SYNC (after R-EDIT-REAL), then R-PLAIN-CORE.
 3. R-DIFF-SAFETY, then R-PLAIN-TARGET. R-PLAIN-REPO after R-PLAIN-CORE.
 4. R-PLAIN-RENDER, then R-PLAIN-ACTIONS, then R-PLAIN-STACK, R-PLAIN-VIS and R-PLAIN-PROMPT (parallel), then R-PLAIN-SELECT.
 5. R-PLAIN-DRAFT (after R-EDIT-REAL and R-PLAIN-ACTIONS).
 6. R-PLAIN-E2E, R-PLAIN-HELIX, R-PLAIN-SPEC, then R-PLAIN-GATE.
 
-R-ARGS is moved ahead of R-EDIT-REAL; R-4.1-head-edit follows it and precedes parent acceptance. The remaining release-slice chain (R-SELECT-OPS, R-EDIT-KINDS, R-OP-STATE, R-TODO, then R-4.1a and R-7.3a) is unchanged and can run in parallel. R-PLAIN-GATE re-runs those slices through Plain mode. The release sprint (R-REL-1 to R-REL-4) starts after R-PLAIN-GATE.
+R-ARGS is complete and R-4.1-head-edit is complete after both-client native reset-author review; they precede R-EDIT-REAL parent acceptance. The remaining release-slice chain (R-SELECT-OPS, R-EDIT-KINDS, R-OP-STATE, R-TODO, then R-4.1a and R-7.3a) is unchanged and can run in parallel. R-PLAIN-GATE re-runs those slices through Plain mode. The release sprint (R-REL-1 to R-REL-4) starts after R-PLAIN-GATE.
 
 Verification follows AGENTS.md: narrowest relevant check per task; full `make test` at R-EDIT-REAL, R-PLAIN-CORE and R-PLAIN-GATE.
 
@@ -179,16 +182,23 @@ transport shutdown/deactivation confirmation. Scoped clean lifecycle evidence
 does not establish general dirty/multi-root/cross-build behavior.
 
 Focused production evidence is recorded in TASKS §3.10, including Rust/Lua/VSCode
-integration and native Codium runs. The canonical Neovim scenario is now
+integration and native Codium runs. HEAD-edit is no longer a prerequisite; its stated
+criteria are complete in both clients (see TASKS §7 and `docs/evidence/commit-head-operations.md`). The canonical Neovim scenario is now
 `commit-real-file.scn` (both profiles at 100x30 and 80x24), retaining empty/template/
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
-scenarios remain. **Still missing:** R-ARGS then R-4.1-head-edit (amend, extend
-and reword) before parent acceptance, policy resolution for ring differences documented in
-`docs/evidence/commit-message-ring-parity.md`, broader native/adversarial and
-full-phase gates. Inherited full `make test` fails
-`tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` at 477,
-log `build/test-logs/rust.xUBxoH`. Parent remains unchecked; no green full gate.
+scenarios remain. **Still missing:** broader native/adversarial acceptance,
+lifecycle/platform limits, policy resolution for ring differences documented in
+`docs/evidence/commit-message-ring-parity.md`, and full-phase gates. Historical
+phase failures: `make test` failed at
+`tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` line 477
+(`build/test-logs/rust.P4rm85`); no-fail-fast Rust also failed `errors`,
+`log_commands`, and `views` (`build/test-logs/real-file-phase-rust.log`). UI gate42
+was 42 PASS/6 FAIL (`build/test-logs/ui-test.R6BK0X`): log-select, log-view,
+process-log and three obsolete commit scenarios. The three commit scenarios
+subsequently passed focused repair; the other UI failures remain out of scope.
+`make ui-tour` was not run because the chained gate stopped on failure. Parent
+remains unchecked; no green full gate.
 
 **Native acceptance:** duplicate/late signals; reused `COMMIT_EDITMSG` with fresh run IDs; multi-root/session isolation; unreadable saved file; version mismatch; empty/comments/configured-template semantics; shutdown/reload/workspace change; saved close versus explicit exact-version confirmation; native Discard versus explicit Abort. Retain historical spike evidence without claiming fresh results.
 
@@ -209,7 +219,7 @@ obsolete managed-wire/picker/history designs are superseded, not current claims.
 Plain capabilities and broader presentation/dispatcher work remain targets.
 
 **Focused scenario/docs verification:** `scripts/ui run tests/ui/scenarios/commit-real-file.scn && git diff --check`.
-**Parent gates (not claimed complete):** `cargo test --test editor_bridge --test editor_drafts --test server_async && make test-lua && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test`, plus broader native/adversarial acceptance above.
+**Parent gates (not claimed complete):** `cargo test --test editor_bridge --test editor_drafts --test server_async && make test-lua && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test`, plus broader native/adversarial acceptance above. Historical full-phase failures and current scoped repair are recorded above; no green full gate is claimed.
 
 ### R-EDIT-HISTORY (S, deferred stub)
 
