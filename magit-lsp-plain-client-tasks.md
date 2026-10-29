@@ -16,7 +16,7 @@ Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
 log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
 advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
 the failed gates or release acceptance. HARNESS is now complete as test infrastructure;
-R-PLAIN-PREREQ is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
+R-PLAIN-PREREQ's minimal scoped acceptance is complete; R-PLAIN-SYNC is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
@@ -348,6 +348,8 @@ server conformance tasks remain unchecked. Verification: 12 harness tests and
 - **Verify:** `make test-rust FILTER="--test plain_harness" && cargo test --test server_async && git diff --check`.
 
 ### R-PLAIN-PREREQ: outbound requests, progress gating, minimal BUG-READ-1 (M)
+
+**Complete (2026-10-29):** see TASKS.md §7 for exact evidence and deferred gate limits. Per-repository handles release the global registry before session/Git work; published resync/positional snapshots and prompt routing avoid unrelated-session waits. Watchers are terminal-gated and drained/joined outside their registry, breaking shutdown ownership cycles. Focused verification passed (11 server unit, 27 async, 26 editor bridge, 12 plain harness); blocked-A/same-view resync and independent-B resize/resync/outline/mutation pass alongside outbound/progress and real-file cancellation regressions. No owned magit-lsp processes remained. Full `make test-rust` still fails at the user-deferred errors case; explicit errors/log_commands/views verification reconfirms the five deferred failures (`build/test-logs/rust.rUL2j1`, `rust.puCxlW`). No broad acceptance or larger same-session ack/resize redesign is claimed.
 
 - **Target Files:** `src/server.rs`, `src/session.rs`, `tests/server_async.rs`.
 - **Reference Files:** TASKS BUG-READ-1; CLIENT_SPEC progress section.

@@ -27,6 +27,7 @@ use tokio::io::{AsyncWrite, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
 use tokio::task::JoinSet;
 
+type SessionHandle = Arc<Mutex<Session>>;
 type RepoLocks = Arc<AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>>;
 
 /// FIFO tickets for one repository's mutations.
@@ -113,7 +114,7 @@ struct Shared {
     draft_owner: Arc<String>,
     repo_locks: RepoLocks,
     /// Open views per repository root.
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionHandle>>>,
     /// Published view snapshots per repository root, readable without the
     /// session lock so a read never waits for a command running inside Git.
     published: Arc<Mutex<HashMap<String, PublishedViews>>>,
@@ -167,11 +168,23 @@ struct PendingOutbound {
 
 impl Drop for PendingOutbound {
     fn drop(&mut self) {
-        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.key);
+        self.outbound
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.key);
     }
 }
 
 impl Shared {
+    /// Clone a repository session handle without retaining the registry lock.
+    fn session(&self, repo: &str) -> Option<SessionHandle> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(repo)
+            .cloned()
+    }
+
     fn new(
         config: Arc<ConfigService>,
         startup_error: Option<String>,
@@ -179,7 +192,10 @@ impl Shared {
     ) -> Self {
         static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
         Self {
-            draft_owner: Arc::new(format!("connection-{}", NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed))),
+            draft_owner: Arc::new(format!(
+                "connection-{}",
+                NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed)
+            )),
             repo_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             published: Arc::new(Mutex::new(HashMap::new())),
@@ -203,7 +219,11 @@ impl Shared {
     }
 
     /// Register before sending so a fast response cannot arrive before its waiter exists.
-    fn register_outbound(&self, method: &str, params: Value) -> Result<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
+    fn register_outbound(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
         let next = self.next_outbound.fetch_add(1, Ordering::Relaxed) + 1;
         let id = RequestId::from(format!("magit-lsp/outbound/{next}"));
         let key = serde_json::to_string(&id).map_err(|e| Error::new(e.to_string()))?;
@@ -213,20 +233,44 @@ impl Shared {
             return Err(Error::new("client request transport is closed"));
         }
         outbound.insert(key.clone(), tx);
-        if self.sender.send(Message::Request(Request::new(id, method.to_string(), params))).is_err() {
+        if self
+            .sender
+            .send(Message::Request(Request::new(
+                id,
+                method.to_string(),
+                params,
+            )))
+            .is_err()
+        {
             outbound.remove(&key);
             return Err(Error::new("client request transport is closed"));
         }
         drop(outbound);
-        Ok((PendingOutbound { outbound: self.outbound.clone(), key }, rx))
+        Ok((
+            PendingOutbound {
+                outbound: self.outbound.clone(),
+                key,
+            },
+            rx,
+        ))
     }
 
     /// Await a registered request, removing it on response, timeout or cancellation.
-    async fn await_outbound(&self, pending: PendingOutbound, rx: tokio::sync::oneshot::Receiver<Response>) -> Result<Response> {
-        self.await_outbound_for(pending, rx, std::time::Duration::from_secs(30)).await
+    async fn await_outbound(
+        &self,
+        pending: PendingOutbound,
+        rx: tokio::sync::oneshot::Receiver<Response>,
+    ) -> Result<Response> {
+        self.await_outbound_for(pending, rx, std::time::Duration::from_secs(30))
+            .await
     }
 
-    async fn await_outbound_for(&self, _pending: PendingOutbound, rx: tokio::sync::oneshot::Receiver<Response>, duration: std::time::Duration) -> Result<Response> {
+    async fn await_outbound_for(
+        &self,
+        _pending: PendingOutbound,
+        rx: tokio::sync::oneshot::Receiver<Response>,
+        duration: std::time::Duration,
+    ) -> Result<Response> {
         let response = tokio::time::timeout(duration, rx).await;
         match response {
             Ok(Ok(response)) => match &response.response_result {
@@ -240,15 +284,25 @@ impl Shared {
 
     /// Resolve a matching response; unknown and late IDs are ignored.
     fn resolve_outbound(&self, response: Response) {
-        let Ok(key) = serde_json::to_string(&response.id) else { return; };
-        if let Some(sender) = self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key) {
+        let Ok(key) = serde_json::to_string(&response.id) else {
+            return;
+        };
+        if let Some(sender) = self
+            .outbound
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&key)
+        {
             let _ = sender.send(response);
         }
     }
 
     /// Cancel every request still awaiting a client response.
     fn cancel_outbound(&self) {
-        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        self.outbound
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
     }
 
     /// Reserve the next mutation slot for `repo_path`.
@@ -286,6 +340,9 @@ impl Shared {
             .watchers
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.closing.load(Ordering::SeqCst) {
+            return;
+        }
         if watchers.contains_key(repo) {
             return;
         }
@@ -297,15 +354,16 @@ impl Shared {
             WatcherConfig::default(),
             move |refresh: Refresh| match refresh {
                 Refresh::Changed(_paths) => {
-                    // The sessions lock also serialises request handlers, so a
-                    // burst cannot race a server-owned mutation's session work.
+                    // Only this repository's session serialises refresh and mutation.
+                    if shared.closing.load(Ordering::SeqCst) {
+                        return;
+                    }
                     let renders = {
-                        let mut sessions = shared
-                            .sessions
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        match sessions.get_mut(&repo_for_handler) {
-                            Some(session) => session.refresh_all(),
+                        match shared.session(&repo_for_handler) {
+                            Some(handle) => handle
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .refresh_all(),
                             None => Vec::new(),
                         }
                     };
@@ -360,10 +418,23 @@ impl Shared {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .values()
             .all(|owner| owner != repo);
-        if no_views_left {
-            if let Some(mut watcher) = watchers.remove(repo) {
-                watcher.join();
-            }
+        let watcher = if no_views_left {
+            watchers.remove(repo)
+        } else {
+            None
+        };
+        drop(watchers);
+        if let Some(mut watcher) = watcher {
+            watcher.join();
+        }
+    }
+
+    /// Break watcher callback ownership before dropping the writer transport.
+    fn stop_watchers(&self) {
+        let watchers =
+            std::mem::take(&mut *self.watchers.lock().unwrap_or_else(|p| p.into_inner()));
+        for (_, mut watcher) in watchers {
+            watcher.join();
         }
     }
 
@@ -383,15 +454,33 @@ impl Shared {
         let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
         let token = format!("magit-lsp/mutation/{next}");
         let handle = CancelHandle::new();
-        let mut progress = self.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let closing = self.closing.load(Ordering::SeqCst);
-        progress.insert(token.clone(), ProgressRun { cancel: handle.clone(), edit_id: edit_id.clone(), cancellation_requested: false, repo: repo.map(str::to_string), visible: false });
+        progress.insert(
+            token.clone(),
+            ProgressRun {
+                cancel: handle.clone(),
+                edit_id: edit_id.clone(),
+                cancellation_requested: false,
+                repo: repo.map(str::to_string),
+                visible: false,
+            },
+        );
         drop(progress);
         if closing {
             handle.cancel();
-            if let Some(edit_id) = edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
+            if let Some(edit_id) = edit_id {
+                editor::registry().resolve(&edit_id, editor::Reply::Abort);
+            }
         }
-        let enabled = self.client.lock().unwrap_or_else(|p| p.into_inner()).work_done_progress;
+        let enabled = self
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .work_done_progress;
         if enabled {
             let shared = self.clone();
             let sender = sender.clone();
@@ -405,11 +494,25 @@ impl Shared {
     }
 
     /// Publish progress only after successful creation, while its owner is live.
-    async fn create_progress(&self, sender: &mpsc::UnboundedSender<Message>, token: &str, command: &str) {
-        let Ok((pending, rx)) = self.register_outbound("window/workDoneProgress/create", serde_json::json!({ "token": token })) else { return; };
-        if self.await_outbound(pending, rx).await.is_err() { return; }
+    async fn create_progress(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        token: &str,
+        command: &str,
+    ) {
+        let Ok((pending, rx)) = self.register_outbound(
+            "window/workDoneProgress/create",
+            serde_json::json!({ "token": token }),
+        ) else {
+            return;
+        };
+        if self.await_outbound(pending, rx).await.is_err() {
+            return;
+        }
         let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
-        if self.closing.load(Ordering::SeqCst) { return; }
+        if self.closing.load(Ordering::SeqCst) {
+            return;
+        }
         if let Some(run) = runs.get_mut(token) {
             run.visible = true;
             let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
@@ -421,8 +524,13 @@ impl Shared {
         // Serialize report/end sends with removal, so a racing cancel cannot
         // resurrect an ended token. Repeated terminal release is harmless.
         let mut progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(run) = progress.remove(token) else { return; };
-        if !run.visible { self.progress_changed.notify_waiters(); return; }
+        let Some(run) = progress.remove(token) else {
+            return;
+        };
+        if !run.visible {
+            self.progress_changed.notify_waiters();
+            return;
+        }
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({ "token": token, "value": { "kind": "end" } }),
@@ -441,7 +549,9 @@ impl Shared {
         self.cancel_outbound();
         for run in runs {
             run.cancel.cancel();
-            if let Some(edit_id) = run.edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
+            if let Some(edit_id) = run.edit_id {
+                editor::registry().resolve(&edit_id, editor::Reply::Abort);
+            }
         }
         editor::registry().abort_all();
         self.prompts.close();
@@ -451,7 +561,14 @@ impl Shared {
     async fn wait_progress(&self) {
         loop {
             let notified = self.progress_changed.notified();
-            if self.progress.lock().unwrap_or_else(|p| p.into_inner()).is_empty() { return; }
+            if self
+                .progress
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_empty()
+            {
+                return;
+            }
             notified.await;
         }
     }
@@ -466,19 +583,28 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(run) = progress.get_mut(&token) {
-            if run.cancellation_requested { return; }
+            if run.cancellation_requested {
+                return;
+            }
             run.cancellation_requested = true;
             // Acknowledge intent, not termination or repository outcome. Keep
             // progress and the repository reservation until the owner finishes.
-            if run.visible { let _ = self.sender.send(Message::Notification(Notification::new(
-                "$/progress".to_string(),
-                serde_json::json!({ "token": token, "value": {
+            if run.visible {
+                let _ = self.sender.send(Message::Notification(Notification::new(
+                    "$/progress".to_string(),
+                    serde_json::json!({ "token": token, "value": {
                     "kind": "report", "message": "Cancelling…", "cancellable": false,
                 } }),
-            ))); }
+                )));
+            }
             let _ = self.sender.send(Message::Notification(Notification::new(
                 VIEW_EFFECTS.to_string(),
-                ViewEffectsParams { effects: vec![Effect::message(MessageLevel::Info, "Cancelling…".to_string())] },
+                ViewEffectsParams {
+                    effects: vec![Effect::message(
+                        MessageLevel::Info,
+                        "Cancelling…".to_string(),
+                    )],
+                },
             )));
             run.cancel.cancel();
             if let Some(edit_id) = &run.edit_id {
@@ -489,7 +615,10 @@ impl Shared {
 
     /// Refuse new commands until a cancelled owner has finished cleanup.
     fn cancellation_pending(&self, repo: &str) -> bool {
-        self.progress.lock().unwrap_or_else(|p| p.into_inner()).values()
+        self.progress
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
             .any(|run| run.cancellation_requested && run.repo.as_deref() == Some(repo))
     }
 
@@ -513,17 +642,16 @@ impl Shared {
 
     /// The repository root that owns `uri`, found through its open view.
     fn repo_for_uri(&self, uri: &str) -> Option<String> {
-        self.sessions
+        let snapshots: Vec<_> = self
+            .published
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|p| p.into_inner())
             .iter()
-            .find(|(_, session)| {
-                session
-                    .views()
-                    .iter()
-                    .any(|view| view.descriptor().uri == uri)
-            })
-            .map(|(repo, _)| repo.clone())
+            .map(|(repo, session)| (repo.clone(), session.clone()))
+            .collect();
+        snapshots
+            .into_iter()
+            .find_map(|(repo, views)| views.contains_uri(uri).then_some(repo))
     }
 
     /// Allocate a view id, unique for this server process.
@@ -546,22 +674,28 @@ impl Shared {
     /// Positional requests resolve through the view only, so they cannot refer
     /// to a render the client has not applied yet.
     fn view_tree_for_uri(&self, uri: &str) -> Option<Tree> {
-        let sessions = self
-            .sessions
+        let handles: Vec<_> = self
+            .published
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        sessions
+            .unwrap_or_else(|p| p.into_inner())
             .values()
+            .cloned()
+            .collect();
+        handles
+            .into_iter()
             .find_map(|session| session.acked_tree_for_uri(uri))
     }
 
     /// Whether the view showing `uri` is in text mode.
     fn is_text_uri(&self, uri: &str) -> bool {
-        let sessions = self
-            .sessions
+        let handles: Vec<_> = self
+            .published
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        sessions.values().any(|session| session.is_text_uri(uri))
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        handles.into_iter().any(|session| session.is_text_uri(uri))
     }
 }
 
@@ -738,21 +872,20 @@ fn refresh_view_keymaps(shared: &Shared, sender: &mpsc::UnboundedSender<Message>
     if shared.delivery() != KeymapDelivery::Dynamic {
         return;
     }
-    let mut sessions = shared
+    let sessions: Vec<_> = shared
         .sessions
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for (root, session) in sessions.iter_mut() {
-        session.set_keymaps(
-            shared
-                .config
-                .for_repository(std::path::Path::new(root))
-                .keymaps(),
-        );
-        let ids: Vec<String> = session
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .map(|(root, handle)| (root.clone(), handle.clone()))
+        .collect();
+    for (root, handle) in sessions {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.set_keymaps(shared.config.for_repository(Path::new(&root)).keymaps());
+        let ids: Vec<_> = session
             .views()
             .iter()
-            .map(|view| view.descriptor().id.clone())
+            .map(|v| v.descriptor().id.clone())
             .collect();
         for id in ids {
             if let Some(keymap) = session.keymap_notice(&id) {
@@ -941,7 +1074,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     continue;
                 }
                 if shared.closing.load(Ordering::SeqCst) {
-                    let _ = sender.send(Message::Response(Response::new_err(request.id, ErrorCode::InvalidRequest as i32, "server is shutting down".to_string())));
+                    let _ = sender.send(Message::Response(Response::new_err(
+                        request.id,
+                        ErrorCode::InvalidRequest as i32,
+                        "server is shutting down".to_string(),
+                    )));
                     continue;
                 }
                 // Draft barriers and full-sync notifications execute on the
@@ -950,11 +1087,20 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let response = match draft_request(&shared, &request) {
                         Ok(result) => Response::new_ok(request.id, result),
                         Err(error) => {
-                            let mut response = Response::new_err(request.id, ErrorCode::InvalidParams as i32, error.to_string());
+                            let mut response = Response::new_err(
+                                request.id,
+                                ErrorCode::InvalidParams as i32,
+                                error.to_string(),
+                            );
                             if let Err(error) = &mut response.response_result {
                                 let params = if request.method == "workspace/executeCommand" {
-                                    request.params.pointer("/arguments/0").unwrap_or(&request.params)
-                                } else { &request.params };
+                                    request
+                                        .params
+                                        .pointer("/arguments/0")
+                                        .unwrap_or(&request.params)
+                                } else {
+                                    &request.params
+                                };
                                 error.data = Some(serde_json::json!({
                                     "runId": params.get("runId"), "uri": params.get("uri"),
                                     "version": params.get("version"), "recoverable": true,
@@ -1009,14 +1155,23 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     shared.cancel_progress(&notification.params);
                 }
                 "textDocument/didOpen" | "textDocument/didChange" | "textDocument/didClose" => {
-                    let uri = notification.params.pointer("/textDocument/uri").and_then(Value::as_str).unwrap_or("");
+                    let uri = notification
+                        .params
+                        .pointer("/textDocument/uri")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
                     if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                         if let Err(error) = draft_notification(&shared, &notification) {
                             editor::registry().notification_failure(
-                                &shared.draft_owner, &run, uri, error.to_string(),
-                                notification.method == "textDocument/didClose", |effects| {
+                                &shared.draft_owner,
+                                &run,
+                                uri,
+                                error.to_string(),
+                                notification.method == "textDocument/didClose",
+                                |effects| {
                                     let _ = sender.send(Message::Notification(Notification::new(
-                                        VIEW_EFFECTS.to_string(), ViewEffectsParams { effects },
+                                        VIEW_EFFECTS.to_string(),
+                                        ViewEffectsParams { effects },
                                     )));
                                 },
                             );
@@ -1049,6 +1204,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     let _ = watcher.await;
     while handlers.join_next().await.is_some() {}
     shared.wait_progress().await;
+    shared.stop_watchers();
     // `Shared` also holds a sender clone, so it must go before the writer
     // channel can close.
     drop(shared);
@@ -1059,7 +1215,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         Ok(Err(error)) => return Err(Error::from(error)),
         Err(error) => return Err(Error::new(error.to_string())),
     }
-    if let Some(error) = read_error { return Err(error); }
+    if let Some(error) = read_error {
+        return Err(error);
+    }
     Ok(exit_code)
 }
 
@@ -1116,7 +1274,8 @@ async fn handle_request(
                 serde_json::json!({ "method": method }),
             );
         }
-        let (token, cancel) = shared.begin_progress(&sender, &method, None, Some(&active.repo_path));
+        let (token, cancel) =
+            shared.begin_progress(&sender, &method, None, Some(&active.repo_path));
         let outcome = dispatch_response(request, &shared, Some(cancel), trace_id).await;
         shared.end_progress(&sender, &token);
         if trace_id > 0 {
@@ -1238,14 +1397,18 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
         "workspace/executeCommand" => {
             let params: lsp_types::ExecuteCommandParams = from_params(request.params.clone())?;
             if params.command != "magit.command" || params.arguments.len() != 1 {
-                return Err(Error::new("Expected magit.command with one semantic command"));
+                return Err(Error::new(
+                    "Expected magit.command with one semantic command",
+                ));
             }
             let command: EditConfirmParams = from_params(params.arguments[0].clone())?;
             if command.command != "common.confirm" {
                 return Err(Error::new("Only common.confirm is supported here"));
             }
             let p = DraftFinishParams {
-                run_id: command.run_id, uri: command.uri, version: command.version,
+                run_id: command.run_id,
+                uri: command.uri,
+                version: command.version,
                 reason: match command.source {
                     EditConfirmSource::Synchronized => DraftFinishReason::Confirm,
                     EditConfirmSource::SavedFile => DraftFinishReason::NormalClose,
@@ -1253,12 +1416,17 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
             };
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
                 let _ = shared.sender.send(Message::Notification(Notification::new(
-                    VIEW_EFFECTS.to_string(), ViewEffectsParams {
+                    VIEW_EFFECTS.to_string(),
+                    ViewEffectsParams {
                         effects: vec![Effect::message(MessageLevel::Warn, warning)],
                     },
                 )));
             }
-            EditConfirmation::Confirmed { run_id: p.run_id, uri: p.uri, version: p.version }
+            EditConfirmation::Confirmed {
+                run_id: p.run_id,
+                uri: p.uri,
+                version: p.version,
+            }
         }
         _ => return Err(Error::new("Unknown commit draft request")),
     };
@@ -1268,40 +1436,66 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
 /// Apply full-sync text; ordinary clients confirm saved disk text on didClose.
 #[cfg(unix)]
 fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
-    use lsp_types::{DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams};
-    if shared.closing.load(Ordering::SeqCst) { return Err(Error::new("Server is shutting down")); }
+    use lsp_types::{
+        DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    };
+    if shared.closing.load(Ordering::SeqCst) {
+        return Err(Error::new("Server is shutting down"));
+    }
     match notification.method.as_str() {
         "textDocument/didOpen" => {
             let p: DidOpenTextDocumentParams = from_params(notification.params.clone())?;
             let doc = p.text_document;
             let uri = doc.uri.as_str();
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            editor::registry().apply(&shared.draft_owner, &run, uri,
-                |draft, context| draft.did_open(context, doc.version, doc.text.as_bytes()))
+            editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                draft.did_open(context, doc.version, doc.text.as_bytes())
+            })
         }
         "textDocument/didChange" => {
             let p: DidChangeTextDocumentParams = from_params(notification.params.clone())?;
-            if p.content_changes.len() != 1 || p.content_changes[0].range.is_some() || p.content_changes[0].range_length.is_some() {
-                return Err(Error::new("Commit drafts require exactly one full-sync text change"));
+            if p.content_changes.len() != 1
+                || p.content_changes[0].range.is_some()
+                || p.content_changes[0].range_length.is_some()
+            {
+                return Err(Error::new(
+                    "Commit drafts require exactly one full-sync text change",
+                ));
             }
             let uri = p.text_document.uri.as_str();
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            editor::registry().apply(&shared.draft_owner, &run, uri,
-                |draft, context| draft.did_change(context, p.text_document.version, p.content_changes[0].text.as_bytes()))
+            editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                draft.did_change(
+                    context,
+                    p.text_document.version,
+                    p.content_changes[0].text.as_bytes(),
+                )
+            })
         }
         "textDocument/didClose" => {
             let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
             let uri = p.text_document.uri.as_str();
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            let close_confirms = shared.client.lock().unwrap_or_else(|p| p.into_inner()).close_confirms;
+            let close_confirms = shared
+                .client
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .close_confirms;
             if close_confirms {
-                editor::registry().finish(&shared.draft_owner, &DraftFinishParams {
-                    run_id: run, uri: uri.to_string(), version: 0, reason: DraftFinishReason::NormalClose,
-                })?;
+                editor::registry().finish(
+                    &shared.draft_owner,
+                    &DraftFinishParams {
+                        run_id: run,
+                        uri: uri.to_string(),
+                        version: 0,
+                        reason: DraftFinishReason::NormalClose,
+                    },
+                )?;
                 Ok(())
             } else {
-                editor::registry().apply(&shared.draft_owner, &run, uri,
-                    |draft, context| draft.did_close(context))
+                editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                    draft.did_close(context)
+                })
             }
         }
         _ => Err(Error::new("Unknown commit draft notification")),
@@ -1333,12 +1527,12 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec
             let Some(repo) = shared.repo_for_view(&params.view_id) else {
                 return Vec::new();
             };
-            let mut sessions = shared
-                .sessions
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(session) = sessions.get_mut(&repo) {
-                if let Err(error) = session.ack(&params.view_id, params.version) {
+            if let Some(handle) = shared.session(&repo) {
+                if let Err(error) = handle
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .ack(&params.view_id, params.version)
+                {
                     tracing::warn!(%error, "failed to record view ack");
                 }
             }
@@ -1354,13 +1548,10 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec
             let Some(repo) = shared.repo_for_view(&params.view_id) else {
                 return Vec::new();
             };
-            let mut sessions = shared
-                .sessions
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(session) = sessions.get_mut(&repo) else {
+            let Some(handle) = shared.session(&repo) else {
                 return Vec::new();
             };
+            let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
             let viewport = Viewport {
                 cols: params.cols,
                 rows: params.rows,
@@ -1403,9 +1594,17 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
-                client.work_done_progress = params.pointer("/capabilities/window/workDoneProgress").and_then(Value::as_bool) == Some(true);
-                client.close_confirms = !params.pointer("/clientInfo/name").and_then(Value::as_str)
-                    .is_some_and(|name| name.to_ascii_lowercase().contains("visual studio code") || name.to_ascii_lowercase().contains("codium"));
+                client.work_done_progress = params
+                    .pointer("/capabilities/window/workDoneProgress")
+                    .and_then(Value::as_bool)
+                    == Some(true);
+                client.close_confirms = !params
+                    .pointer("/clientInfo/name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| {
+                        name.to_ascii_lowercase().contains("visual studio code")
+                            || name.to_ascii_lowercase().contains("codium")
+                    });
             }
             tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
             let init = params
@@ -1542,29 +1741,39 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let id = shared.next_view_id();
     let config = shared.config.for_repository(std::path::Path::new(&repo));
     let keymaps = config.keymaps();
-    let mut sessions = shared
-        .sessions
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let session = sessions
-        .entry(repo.clone())
-        .or_insert_with(|| Session::new(&repo));
-    shared
-        .published
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .entry(repo.clone())
-        .or_insert_with(|| session.published());
-    session.set_keymaps(keymaps);
-    let (descriptor, render) = session.open_with_args(
-        id.clone(),
-        p.kind,
-        p.placement.unwrap_or_default(),
-        p.viewport,
-        p.args.as_ref(),
-    )?;
-    let keymap = session.keymap_notice(&id);
-    drop(sessions);
+    let handle = match shared.session(&repo) {
+        Some(handle) => handle,
+        None => {
+            // Repository discovery/initialisation must not own the registry.
+            let candidate = Arc::new(Mutex::new(Session::new(&repo)));
+            shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .entry(repo.clone())
+                .or_insert(candidate)
+                .clone()
+        }
+    };
+    let (descriptor, render, keymap) = {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        shared
+            .published
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(repo.clone())
+            .or_insert_with(|| session.published());
+        session.set_keymaps(keymaps);
+        let (descriptor, render) = session.open_with_args(
+            id.clone(),
+            p.kind,
+            p.placement.unwrap_or_default(),
+            p.viewport,
+            p.args.as_ref(),
+        )?;
+        let keymap = session.keymap_notice(&id);
+        (descriptor, render, keymap)
+    };
     let repo = repo.as_str();
     shared
         .view_repos
@@ -1600,14 +1809,12 @@ fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         // The client may have closed the view before its own close landed.
         return Ok(Dispatched::value(Value::Null));
     };
-    let mut sessions = shared
-        .sessions
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(session) = sessions.get_mut(&repo) {
-        session.close(&p.view_id)?;
+    if let Some(handle) = shared.session(&repo) {
+        handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&p.view_id)?;
     }
-    drop(sessions);
     shared
         .view_repos
         .lock()
@@ -1622,16 +1829,16 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    if shared.cancellation_pending(&repo) { return cancelling_response(); }
-    let mut sessions = shared
-        .sessions
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let session = sessions
-        .get_mut(&repo)
+    if shared.cancellation_pending(&repo) {
+        return cancelling_response();
+    }
+    let handle = shared
+        .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let step = session.start_invoke(&p)?;
-    drop(sessions);
+    let step = handle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .start_invoke(&p)?;
     let outcome = drive_execution(shared, &repo, step)?;
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
@@ -1642,21 +1849,21 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    if shared.cancellation_pending(&repo) { return cancelling_response(); }
+    if shared.cancellation_pending(&repo) {
+        return cancelling_response();
+    }
     let keymaps = shared
         .config
         .for_repository(std::path::Path::new(&repo))
         .keymaps();
-    let mut sessions = shared
-        .sessions
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let session = sessions
-        .get_mut(&repo)
+    let handle = shared
+        .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    session.set_keymaps(keymaps);
-    let step = session.start_key(&p)?;
-    drop(sessions);
+    let step = {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.set_keymaps(keymaps);
+        session.start_key(&p)?
+    };
     let mut outcome = drive_execution(shared, &repo, step)?;
     if shared.delivery() == KeymapDelivery::ForwardAll
         && matches!(
@@ -1671,9 +1878,11 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 
 /// Readable refusal while the prior operation still owns repository cleanup.
 fn cancelling_response() -> Result<Dispatched> {
-    Ok(Dispatched::value(serde_json::json!({ "effects": [Effect::message(
+    Ok(Dispatched::value(
+        serde_json::json!({ "effects": [Effect::message(
         MessageLevel::Info, "Cancelling… wait for the current Git operation to finish".to_string(),
-    )] })))
+    )] }),
+    ))
 }
 
 /// Wait with no session ownership; reacquire only to validate and apply an answer.
@@ -1683,13 +1892,10 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
             Execution::Done(result) => return Ok(result),
             Execution::Prompt(request) => {
                 let answer = crate::ui::answer(&ServerUi::new(shared), &request);
-                let mut sessions = shared
-                    .sessions
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                let session = sessions
-                    .get_mut(repo)
+                let handle = shared
+                    .session(repo)
                     .ok_or_else(|| Error::new("Prompt session closed"))?;
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
                 match answer {
                     Ok(answer) => {
                         let answer = if shared.prompts.closed.load(Ordering::SeqCst) {
@@ -1715,23 +1921,24 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let repo = shared
         .repo_for_view(&p.view_id)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let mut sessions = shared
-        .sessions
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let session = sessions
-        .get_mut(&repo)
+    let handle = shared
+        .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
     let ui = ServerUi::new(shared);
-    let outcome = session.set_mode_ui(&p, &ui)?;
-    drop(sessions);
+    let outcome = handle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .set_mode_ui(&p, &ui)?;
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
 /// Turn a command outcome into its response plus render/keymap notifications.
 fn dispatched_outcome(shared: &Shared, repo: &str, outcome: InvokeResult) -> Result<Dispatched> {
     let mut notifications = Vec::new();
-    if let Some(operation) = outcome.commit.filter(|_| !shared.closing.load(Ordering::SeqCst)) {
+    if let Some(operation) = outcome
+        .commit
+        .filter(|_| !shared.closing.load(Ordering::SeqCst))
+    {
         // Git must not run while this request still holds any session or repo
         // lock: it waits for the user to edit and confirm.
         spawn_commit(shared.clone(), repo.to_string(), operation);
@@ -1876,7 +2083,10 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
     let edit_id = match editor::registry().create(&repo, &shared.draft_owner) {
         Ok(id) => id,
         Err(error) => {
-            let _ = sender.send(show_message(1, format!("Cannot open commit draft: {error}")));
+            let _ = sender.send(show_message(
+                1,
+                format!("Cannot open commit draft: {error}"),
+            ));
             return;
         }
     };
@@ -1912,14 +2122,13 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
             let mut messages = Vec::new();
             match result {
                 Ok(outcome) => {
-                    let renders: Vec<ViewRender> = if shared.closing.load(Ordering::SeqCst) { Vec::new() } else {
-                        let mut sessions = shared
-                            .sessions
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        let Some(session) = sessions.get_mut(&repo) else {
+                    let renders: Vec<ViewRender> = if shared.closing.load(Ordering::SeqCst) {
+                        Vec::new()
+                    } else {
+                        let Some(handle) = shared.session(&repo) else {
                             return;
                         };
+                        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
                         let ids: Vec<String> = session
                             .views()
                             .iter()
@@ -1933,19 +2142,27 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                         Message::Notification(Notification::new(VIEW_RENDER.to_string(), render))
                     }));
                     // Replace the "Committing…" feedback with the outcome.
-                    let subject = outcome.message.as_deref().unwrap_or("").lines().next().unwrap_or("").trim().to_string();
+                    let subject = outcome
+                        .message
+                        .as_deref()
+                        .unwrap_or("")
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
                     let text = if subject.is_empty() {
                         "Committed".to_string()
                     } else {
                         format!("Committed: {subject}")
                     };
                     let mut effects = vec![Effect::message(MessageLevel::Info, text)];
-                    if let Some(warning) = outcome.warning { effects.push(Effect::message(MessageLevel::Warn, warning)); }
+                    if let Some(warning) = outcome.warning {
+                        effects.push(Effect::message(MessageLevel::Warn, warning));
+                    }
                     messages.push(Message::Notification(Notification::new(
                         VIEW_EFFECTS.to_string(),
-                        ViewEffectsParams {
-                            effects,
-                        },
+                        ViewEffectsParams { effects },
                     )));
                 }
                 Err(error) => {
@@ -1995,18 +2212,15 @@ fn capabilities() -> Result<Value> {
         ..Default::default()
     })
     .map_err(|e| Error::new(e.to_string()))?;
-    // `window.workDoneProgress` is a client capability in the spec, but the
-    // server advertises the window features it drives so thin clients can
-    // enable them without a second handshake.
+    // Work-done progress is a client capability, not a server advertisement.
     if let Some(object) = capabilities.as_object_mut() {
-        object.insert("executeCommandProvider".to_string(), serde_json::json!({ "commands": ["magit.command"] }));
+        object.insert(
+            "executeCommandProvider".to_string(),
+            serde_json::json!({ "commands": ["magit.command"] }),
+        );
         object.insert(
             "textDocumentSync".to_string(),
             serde_json::json!({ "openClose": true, "change": 1 }),
-        );
-        object.insert(
-            "window".to_string(),
-            serde_json::json!({ "workDoneProgress": true }),
         );
     }
     // The legend carries a suggested theme group per token type, so a client
@@ -2053,11 +2267,13 @@ fn mutation_repo_path(shared: &Shared, method: &str, params: &Value) -> Option<S
             .and_then(Value::as_str)
             .and_then(|id| shared.repo_for_view(id))
         {
-            let sessions = shared
-                .sessions
+            let published = shared
+                .published
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if sessions.get(&repo).is_some_and(Session::has_pending_prompt) {
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&repo)
+                .cloned();
+            if published.is_some_and(|views| views.has_pending_prompt()) {
                 return None;
             }
         }
@@ -2137,7 +2353,11 @@ mod commit_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "").unwrap();
-        let config = ConfigService::load(LoadOptions { config_path: Some(path), ..Default::default() }).unwrap();
+        let config = ConfigService::load(LoadOptions {
+            config_path: Some(path),
+            ..Default::default()
+        })
+        .unwrap();
         let (sender, receiver) = mpsc::unbounded_channel();
         (Shared::new(Arc::new(config), None, sender), receiver)
     }
@@ -2146,11 +2366,14 @@ mod commit_tests {
         std::future::poll_fn(|cx| {
             assert!(future.as_mut().poll(cx).is_pending());
             std::task::Poll::Ready(())
-        }).await;
+        })
+        .await;
     }
 
     fn request_id(receiver: &mut mpsc::UnboundedReceiver<Message>) -> RequestId {
-        let Message::Request(request) = receiver.try_recv().expect("outbound request") else { panic!("expected request") };
+        let Message::Request(request) = receiver.try_recv().expect("outbound request") else {
+            panic!("expected request")
+        };
         request.id
     }
 
@@ -2162,14 +2385,33 @@ mod commit_tests {
         let id1 = request_id(&mut messages);
         let id2 = request_id(&mut messages);
         assert_ne!(id1, id2);
-        shared.resolve_outbound(Response::new_ok(RequestId::from("unknown".to_string()), Value::Null));
+        shared.resolve_outbound(Response::new_ok(
+            RequestId::from("unknown".to_string()),
+            Value::Null,
+        ));
         assert_eq!(shared.outbound.lock().unwrap().len(), 2);
-        shared.resolve_outbound(Response::new_ok(id2.clone(), serde_json::json!("second result")));
+        shared.resolve_outbound(Response::new_ok(
+            id2.clone(),
+            serde_json::json!("second result"),
+        ));
         shared.resolve_outbound(Response::new_err(id2, -32000, "duplicate".into()));
         assert_eq!(shared.outbound.lock().unwrap().len(), 1);
-        assert_eq!(shared.await_outbound(second, rx2).await.unwrap().response_result.unwrap(), serde_json::json!("second result"));
+        assert_eq!(
+            shared
+                .await_outbound(second, rx2)
+                .await
+                .unwrap()
+                .response_result
+                .unwrap(),
+            serde_json::json!("second result")
+        );
         shared.resolve_outbound(Response::new_err(id1.clone(), -32000, "declined".into()));
-        assert!(shared.await_outbound(first, rx1).await.unwrap_err().to_string().contains("declined"));
+        assert!(shared
+            .await_outbound(first, rx1)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("declined"));
         shared.resolve_outbound(Response::new_ok(id1, Value::Null));
         assert!(shared.outbound.lock().unwrap().is_empty());
     }
@@ -2179,7 +2421,12 @@ mod commit_tests {
         let (shared, mut messages) = test_shared();
         let (pending, rx) = shared.register_outbound("timeout", Value::Null).unwrap();
         let id = request_id(&mut messages);
-        assert!(shared.await_outbound_for(pending, rx, std::time::Duration::ZERO).await.unwrap_err().to_string().contains("timed out"));
+        assert!(shared
+            .await_outbound_for(pending, rx, std::time::Duration::ZERO)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
         assert!(shared.outbound.lock().unwrap().is_empty());
         shared.resolve_outbound(Response::new_ok(id, Value::Null));
         let (pending, rx) = shared.register_outbound("unpolled", Value::Null).unwrap();
@@ -2210,7 +2457,12 @@ mod commit_tests {
         let (pending, rx) = shared.register_outbound("waiting", Value::Null).unwrap();
         let id = request_id(&mut messages);
         shared.terminal_cleanup();
-        assert!(shared.await_outbound(pending, rx).await.unwrap_err().to_string().contains("disconnected"));
+        assert!(shared
+            .await_outbound(pending, rx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("disconnected"));
         shared.resolve_outbound(Response::new_ok(id, Value::Null));
         assert!(shared.register_outbound("too late", Value::Null).is_err());
         assert!(messages.try_recv().is_err());
@@ -2232,11 +2484,16 @@ mod commit_tests {
                 barrier.wait();
                 shared.terminal_cleanup();
                 if let Ok((_pending, mut rx)) = registration.join().unwrap() {
-                    assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed)));
+                    assert!(matches!(
+                        rx.try_recv(),
+                        Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+                    ));
                 }
             });
             assert!(shared.outbound.lock().unwrap().is_empty());
-            assert!(shared.register_outbound("after shutdown", Value::Null).is_err());
+            assert!(shared
+                .register_outbound("after shutdown", Value::Null)
+                .is_err());
         }
     }
 
@@ -2254,7 +2511,9 @@ mod commit_tests {
         shared.end_progress(&shared.sender, &token);
         shared.end_progress(&shared.sender, &token);
         for phase in ["begin", "end"] {
-            let Message::Notification(notice) = messages.try_recv().unwrap() else { panic!("expected progress") };
+            let Message::Notification(notice) = messages.try_recv().unwrap() else {
+                panic!("expected progress")
+            };
             assert_eq!(notice.method, "$/progress");
             assert_eq!(notice.params["token"], token);
             assert_eq!(notice.params["value"]["kind"], phase);
@@ -2276,8 +2535,11 @@ mod commit_tests {
             // Resolve before cleanup but leave the awakened task unpolled: this
             // is the success-response/terminal race, not just a closed receiver.
             shared.resolve_outbound(Response::new_ok(id, Value::Null));
-            if terminal { shared.terminal_cleanup(); }
-            else { shared.end_progress(&shared.sender, &token); }
+            if terminal {
+                shared.terminal_cleanup();
+            } else {
+                shared.end_progress(&shared.sender, &token);
+            }
             create.await;
             shared.end_progress(&shared.sender, &token);
             assert!(messages.try_recv().is_err(), "no orphan begin/end");
@@ -2294,8 +2556,11 @@ mod commit_tests {
             tokio::pin!(create);
             poll_pending(create.as_mut()).await;
             let id = request_id(&mut messages);
-            if disconnected { shared.terminal_cleanup(); }
-            else { shared.resolve_outbound(Response::new_err(id, -32000, "declined".into())); }
+            if disconnected {
+                shared.terminal_cleanup();
+            } else {
+                shared.resolve_outbound(Response::new_err(id, -32000, "declined".into()));
+            }
             create.await;
             assert!(shared.progress.lock().unwrap().contains_key(&token));
             assert!(!shared.progress.lock().unwrap()[&token].visible);
@@ -2325,15 +2590,21 @@ mod commit_tests {
     fn failed_outbound_send_removes_registration() {
         let (shared, messages) = test_shared();
         drop(messages);
-        assert!(shared.register_outbound("disconnected", Value::Null).is_err());
+        assert!(shared
+            .register_outbound("disconnected", Value::Null)
+            .is_err());
         assert!(shared.outbound.lock().unwrap().is_empty());
     }
 
     #[test]
     fn commit_edit_releases_registry_and_repository_config_together() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(std::process::Command::new("git").args(["init", "-q"])
-            .current_dir(tmp.path()).status().unwrap().success());
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap()
+            .success());
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "").unwrap();
         let config = Arc::new(
@@ -2344,7 +2615,9 @@ mod commit_tests {
             .unwrap(),
         );
         let retained = Arc::downgrade(&config);
-        let id = editor::registry().create(tmp.path().to_str().unwrap(), "test-connection").unwrap();
+        let id = editor::registry()
+            .create(tmp.path().to_str().unwrap(), "test-connection")
+            .unwrap();
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
         let edit = CommitEdit {
             id: id.clone(),

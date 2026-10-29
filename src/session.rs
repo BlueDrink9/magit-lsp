@@ -6,12 +6,12 @@
 //! acked the base version.
 
 use crate::commands::{self, CommandStatus, Scope, SelectionOperation};
-use crate::git::GitLogOptions;
-use crate::log_view::LogView;
-use crate::log_view::CommitSelection;
 use crate::diff_text;
+use crate::git::GitLogOptions;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
+use crate::log_view::CommitSelection;
+use crate::log_view::LogView;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
@@ -27,18 +27,23 @@ use crate::view::{
 use crate::{Error, Result};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 /// The command that leaves or enters text mode in every scope.
 const TOGGLE_TEXT_MODE: &str = "common.toggle-text-mode";
 
 fn unsupported_menu_item(status: MenuStatus, label: &str) -> Option<InvokeResult> {
     let message = match status {
-        MenuStatus::Planned { roadmap_id } => format!("Not implemented yet: {label} (roadmap {roadmap_id})"),
+        MenuStatus::Planned { roadmap_id } => {
+            format!("Not implemented yet: {label} (roadmap {roadmap_id})")
+        }
         MenuStatus::Implemented => return None,
     };
-    Some(InvokeResult { effects: vec![Effect::message(MessageLevel::Info, message)], ..InvokeResult::empty() })
+    Some(InvokeResult {
+        effects: vec![Effect::message(MessageLevel::Info, message)],
+        ..InvokeResult::empty()
+    })
 }
 
 /// The URI a status view registers, e.g. `magit://status/home/me/repo`.
@@ -48,6 +53,8 @@ pub fn status_uri(repo_path: &str) -> String {
 
 /// The immutable state of one view as last published by its session.
 struct PublishedView {
+    uri: String,
+    acked: Option<Tree>,
     version: u64,
     lines: Arc<Vec<String>>,
     mode: ViewMode,
@@ -63,11 +70,16 @@ struct PublishedView {
 /// notify the client, so a read answered from here is always a state the
 /// session really rendered, even while a command holds the session inside Git.
 #[derive(Clone, Default)]
-pub struct PublishedViews(Arc<Mutex<HashMap<String, PublishedView>>>);
+pub struct PublishedViews(
+    Arc<Mutex<HashMap<String, PublishedView>>>,
+    Arc<std::sync::atomic::AtomicBool>,
+);
 
 impl PublishedViews {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, PublishedView>> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Replace the snapshot with the session's current views.
@@ -87,6 +99,9 @@ impl PublishedViews {
             next.insert(
                 id.clone(),
                 PublishedView {
+                    uri: view.descriptor.uri.clone(),
+                    acked: (view.mode != ViewMode::Text)
+                        .then(|| view.acked.clone().unwrap_or_else(|| view.tree.clone())),
                     version: view.version,
                     lines,
                     mode: view.mode,
@@ -120,6 +135,32 @@ impl PublishedViews {
             pending: view.pending.clone(),
             menu: view.menu.clone(),
         })
+    }
+
+    /// Whether a published view owns this document URI.
+    pub fn contains_uri(&self, uri: &str) -> bool {
+        self.lock().values().any(|view| view.uri == uri)
+    }
+
+    /// The last acknowledged tree for this URI, without waiting on Git.
+    pub fn acked_tree_for_uri(&self, uri: &str) -> Option<Tree> {
+        self.lock()
+            .values()
+            .find(|view| view.uri == uri)?
+            .acked
+            .clone()
+    }
+
+    /// Whether the published document is in text mode.
+    pub fn is_text_uri(&self, uri: &str) -> bool {
+        self.lock()
+            .values()
+            .any(|view| view.uri == uri && view.mode == ViewMode::Text)
+    }
+
+    /// Whether the session is waiting for a prompt answer.
+    pub fn has_pending_prompt(&self) -> bool {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Consume the resync marker of `view_id`.
@@ -300,7 +341,12 @@ impl OpenView {
     ///
     /// `forced` replaces the identity-based successor cursor; section
     /// navigation uses it to move somewhere the old node cannot describe.
-    fn render_with_delivery(&mut self, cursor: Option<Cursor>, forced: Option<Cursor>, delivery: RenderDelivery) -> Result<ViewRender> {
+    fn render_with_delivery(
+        &mut self,
+        cursor: Option<Cursor>,
+        forced: Option<Cursor>,
+        delivery: RenderDelivery,
+    ) -> Result<ViewRender> {
         let old = self.tree.clone();
         let old_version = self.version;
         let pending = self.menu_pending.clone();
@@ -311,12 +357,18 @@ impl OpenView {
         let version = old_version + 1;
         tree.version = version;
 
-        let successor =
-            forced.or_else(|| cursor.map(|cursor| successor_cursor(self.request_tree.as_ref().unwrap_or(&old), &tree, cursor)));
+        let successor = forced.or_else(|| {
+            cursor.map(|cursor| {
+                successor_cursor(self.request_tree.as_ref().unwrap_or(&old), &tree, cursor)
+            })
+        });
         // Edits are only safe when the client holds exactly the previous
         // version; otherwise fall back to a full replace.
         let resynced = self.published.take_resynced(&self.descriptor.id);
-        let base_version = (delivery == RenderDelivery::Acknowledged && !resynced && self.acked_version == Some(old_version)).then_some(old_version);
+        let base_version = (delivery == RenderDelivery::Acknowledged
+            && !resynced
+            && self.acked_version == Some(old_version))
+        .then_some(old_version);
         let (text, edits) = match base_version {
             Some(_) => (None, Some(diff_text::line_edits(&old.lines, &tree.lines))),
             None => (Some(tree.lines.clone()), None),
@@ -336,11 +388,13 @@ impl OpenView {
             menu: self.view.menu(),
         })
     }
-
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RenderDelivery { Acknowledged, Full }
+enum RenderDelivery {
+    Acknowledged,
+    Full,
+}
 
 fn initialize_open_view(
     repo_path: &str,
@@ -350,22 +404,48 @@ fn initialize_open_view(
     viewport: Viewport,
     mut view: Box<dyn View>,
 ) -> (ViewDescriptor, ViewRender, OpenView) {
-    let mut tree = view.render(&Ctx { viewport, pending: &[] });
+    let mut tree = view.render(&Ctx {
+        viewport,
+        pending: &[],
+    });
     let version = 1;
     tree.version = version;
     let descriptor = ViewDescriptor {
-        id: id.clone(), kind: view.kind(), uri: view_uri(repo_path, &kind, &id),
-        title: view.title(), placement, mode: view.mode(), scope: view.scope(),
-        capture: view.capture(), viewport,
+        id: id.clone(),
+        kind: view.kind(),
+        uri: view_uri(repo_path, &kind, &id),
+        title: view.title(),
+        placement,
+        mode: view.mode(),
+        scope: view.scope(),
+        capture: view.capture(),
+        viewport,
     };
     let render = ViewRender {
-        view_id: id, version, base_version: None, text: Some(tree.lines.clone()),
-        edits: None, cursor: None, mode: descriptor.mode, pending: String::new(), menu: view.menu(),
+        view_id: id,
+        version,
+        base_version: None,
+        text: Some(tree.lines.clone()),
+        edits: None,
+        cursor: None,
+        mode: descriptor.mode,
+        pending: String::new(),
+        menu: view.menu(),
     };
     let open_view = OpenView {
-        descriptor: descriptor.clone(), view, tree, version, acked: None, request_tree: None,
-        acked_version: None, pending: PendingChord::default(), menu_pending: Vec::new(),
-        key_cursor: None, mode: descriptor.mode, dirty: false, visibility_level: 4,
+        descriptor: descriptor.clone(),
+        view,
+        tree,
+        version,
+        acked: None,
+        request_tree: None,
+        acked_version: None,
+        pending: PendingChord::default(),
+        menu_pending: Vec::new(),
+        key_cursor: None,
+        mode: descriptor.mode,
+        dirty: false,
+        visibility_level: 4,
         published: PublishedViews::default(),
     };
     (descriptor, render, open_view)
@@ -455,8 +535,16 @@ struct PendingPrompt {
 }
 
 enum SessionContinuation {
-    Option { key: String, menu: crate::menu::Menu, cursor: Cursor },
-    Command { command_id: String, action: commands::PromptAction, effects: Vec<Effect> },
+    Option {
+        key: String,
+        menu: crate::menu::Menu,
+        cursor: Cursor,
+    },
+    Command {
+        command_id: String,
+        action: commands::PromptAction,
+        effects: Vec<Effect>,
+    },
 }
 
 /// A completed operation or a question whose continuation remains session-owned.
@@ -499,7 +587,13 @@ impl InvokeResult {
 }
 
 fn prompt_busy() -> InvokeResult {
-    InvokeResult { effects: vec![Effect::message(MessageLevel::Info, "Answer or cancel the pending prompt before running another command")], ..InvokeResult::empty() }
+    InvokeResult {
+        effects: vec![Effect::message(
+            MessageLevel::Info,
+            "Answer or cancel the pending prompt before running another command",
+        )],
+        ..InvokeResult::empty()
+    }
 }
 
 impl Session {
@@ -523,6 +617,10 @@ impl Session {
 
     /// Publish every open view's current state.
     fn publish(&self) {
+        self.published.1.store(
+            self.pending_prompt.is_some(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.published.publish(&self.views);
     }
 
@@ -608,7 +706,8 @@ impl Session {
         }
 
         let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
-        let (descriptor, render, mut open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        let (descriptor, render, mut open_view) =
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -617,12 +716,17 @@ impl Session {
 
     /// Close a view; closing one the client already closed is a no-op.
     pub fn close(&mut self, view_id: &str) -> Result<()> {
-        if let Some(pending) = self.pending_prompt.as_mut().filter(|pending| pending.view_id == view_id) {
+        if let Some(pending) = self
+            .pending_prompt
+            .as_mut()
+            .filter(|pending| pending.view_id == view_id)
+        {
             pending.invalidated = true;
         }
         self.views.remove(view_id);
         self.pending_selections.remove(view_id);
-        self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
+        self.pending_selections
+            .retain(|_, pending| pending.caller_id != view_id);
         self.publish();
         Ok(())
     }
@@ -637,6 +741,7 @@ impl Session {
             view.acked = Some(view.tree.clone());
             view.acked_version = Some(version);
         }
+        self.publish();
         Ok(())
     }
 
@@ -657,7 +762,11 @@ impl Session {
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
         view.descriptor.viewport = viewport;
         if view.is_menu() {
-            Ok(Some(view.render_with_delivery(None, None, RenderDelivery::Acknowledged)?))
+            Ok(Some(view.render_with_delivery(
+                None,
+                None,
+                RenderDelivery::Acknowledged,
+            )?))
         } else {
             Ok(None)
         }
@@ -710,7 +819,11 @@ impl Session {
             None,
             &crate::ui::NullUi,
         )?;
-        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
+        Ok(if already_pending {
+            Execution::Done(result)
+        } else {
+            self.execution(result)
+        })
     }
 
     /// Handle one key step: resolve it through the view's keymap and either run
@@ -740,7 +853,11 @@ impl Session {
     fn begin_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
         let already_pending = self.pending_prompt.is_some();
         let result = self.key_start(params, &crate::ui::NullUi)?;
-        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
+        Ok(if already_pending {
+            Execution::Done(result)
+        } else {
+            self.execution(result)
+        })
     }
 
     fn key_start(&mut self, params: &ViewKeyParams, ui: &dyn PromptUi) -> Result<InvokeResult> {
@@ -761,7 +878,9 @@ impl Session {
         };
 
         if is_menu {
-            if self.pending_prompt.is_some() { return Ok(prompt_busy()); }
+            if self.pending_prompt.is_some() {
+                return Ok(prompt_busy());
+            }
             return self.menu_key(params, cursor_moved, ui);
         }
 
@@ -810,21 +929,40 @@ impl Session {
         }
     }
 
-    fn prepare_prompt(&mut self, view_id: &str, cursor: Option<Cursor>, mut request: ViewPromptParams, action: SessionContinuation) {
+    fn prepare_prompt(
+        &mut self,
+        view_id: &str,
+        cursor: Option<Cursor>,
+        mut request: ViewPromptParams,
+        action: SessionContinuation,
+    ) {
         self.next_prompt += 1;
         request.prompt_id = format!("session-prompt-{}", self.next_prompt);
-        self.pending_prompt = Some(PendingPrompt { invalidated: false, prepared: None, request, view_id: view_id.to_string(), cursor, action, cancel: crate::runner::current_cancel() });
+        self.pending_prompt = Some(PendingPrompt {
+            invalidated: false,
+            prepared: None,
+            request,
+            view_id: view_id.to_string(),
+            cursor,
+            action,
+            cancel: crate::runner::current_cancel(),
+        });
     }
 
     fn execution(&mut self, result: InvokeResult) -> Execution {
         match &mut self.pending_prompt {
-            Some(pending) => { pending.prepared = Some(result); Execution::Prompt(pending.request.clone()) },
+            Some(pending) => {
+                pending.prepared = Some(result);
+                Execution::Prompt(pending.request.clone())
+            }
             None => Execution::Done(result),
         }
     }
 
     /// Whether a staged operation currently owns this session's prompt slot.
-    pub fn has_pending_prompt(&self) -> bool { self.pending_prompt.is_some() }
+    pub fn has_pending_prompt(&self) -> bool {
+        self.pending_prompt.is_some()
+    }
 
     fn drive(&mut self, mut step: Execution, ui: &dyn PromptUi) -> Result<InvokeResult> {
         loop {
@@ -834,8 +972,14 @@ impl Session {
                     let answer = match crate::ui::answer(ui, &request) {
                         Ok(answer) => answer,
                         Err(error) => {
-                            let Execution::Done(mut result) = self.resume_prompt(&request.prompt_id, None)? else { unreachable!("cancellation cannot prompt"); };
-                            result.effects.push(Effect::message(MessageLevel::Info, error.to_string()));
+                            let Execution::Done(mut result) =
+                                self.resume_prompt(&request.prompt_id, None)?
+                            else {
+                                unreachable!("cancellation cannot prompt");
+                            };
+                            result
+                                .effects
+                                .push(Effect::message(MessageLevel::Info, error.to_string()));
                             return Ok(result);
                         }
                     };
@@ -846,49 +990,106 @@ impl Session {
     }
 
     /// Resume exactly the pending operation; cancelled, closed or replaced targets do nothing.
-    pub fn resume_prompt(&mut self, prompt_id: &str, answer: Option<crate::protocol::PromptValue>) -> Result<Execution> {
+    pub fn resume_prompt(
+        &mut self,
+        prompt_id: &str,
+        answer: Option<crate::protocol::PromptValue>,
+    ) -> Result<Execution> {
         let step = self.resume_pending(prompt_id, answer);
         self.publish();
         step
     }
 
-    fn resume_pending(&mut self, prompt_id: &str, answer: Option<crate::protocol::PromptValue>) -> Result<Execution> {
-        if !self.pending_prompt.as_ref().is_some_and(|pending| pending.request.prompt_id == prompt_id) {
+    fn resume_pending(
+        &mut self,
+        prompt_id: &str,
+        answer: Option<crate::protocol::PromptValue>,
+    ) -> Result<Execution> {
+        if !self
+            .pending_prompt
+            .as_ref()
+            .is_some_and(|pending| pending.request.prompt_id == prompt_id)
+        {
             return Ok(Execution::Done(InvokeResult::empty()));
         }
         let pending = self.pending_prompt.take().expect("checked pending prompt");
-        if pending.invalidated || pending.cancel.as_ref().is_some_and(|cancel| cancel.is_cancelled()) || self.views.get(&pending.view_id).is_none() {
+        if pending.invalidated
+            || pending
+                .cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.is_cancelled())
+            || self.views.get(&pending.view_id).is_none()
+        {
             return Ok(Execution::Done(InvokeResult::empty()));
         }
         let mut result = match pending.action {
             SessionContinuation::Option { key, menu, cursor } => {
-                if self.views.get(&pending.view_id).and_then(|view| view.menu()) != Some(menu) {
+                if self
+                    .views
+                    .get(&pending.view_id)
+                    .and_then(|view| view.menu())
+                    != Some(menu)
+                {
                     return Ok(Execution::Done(InvokeResult::empty()));
                 }
                 let value = match answer {
                     Some(crate::protocol::PromptValue::Text(text)) => Some(text),
-                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Id { id })) => Some(id),
-                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Custom { custom })) => Some(custom),
+                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Id { id })) => {
+                        Some(id)
+                    }
+                    Some(crate::protocol::PromptValue::Choice(PromptChoiceAnswer::Custom {
+                        custom,
+                    })) => Some(custom),
                     None => None,
                     _ => return Err(Error::new("Unexpected option answer")),
                 };
                 if let Some(value) = value {
-                    self.views.get_mut(&pending.view_id).and_then(|view| view.menu_mut()).expect("checked menu").set_option(&key, Some(value));
+                    self.views
+                        .get_mut(&pending.view_id)
+                        .and_then(|view| view.menu_mut())
+                        .expect("checked menu")
+                        .set_option(&key, Some(value));
                     self.menu_rerender(&pending.view_id, cursor)?
-                } else { InvokeResult { keymap: self.keymap_notice(&pending.view_id), ..InvokeResult::empty() } }
+                } else {
+                    InvokeResult {
+                        keymap: self.keymap_notice(&pending.view_id),
+                        ..InvokeResult::empty()
+                    }
+                }
             }
-            SessionContinuation::Command { command_id, action, mut effects } => {
+            SessionContinuation::Command {
+                command_id,
+                action,
+                mut effects,
+            } => {
                 let view = self.views.get_mut(&pending.view_id).expect("checked view");
-                let mut ctx = commands::CommandCtx::new(view, &self.repo_path, &self.keymaps, pending.cursor, None, None, None, &crate::ui::NullUi);
+                let mut ctx = commands::CommandCtx::new(
+                    view,
+                    &self.repo_path,
+                    &self.keymaps,
+                    pending.cursor,
+                    None,
+                    None,
+                    None,
+                    &crate::ui::NullUi,
+                );
                 let outcome = commands::resume_prompt(&mut ctx, action, answer)?;
                 effects.extend(ctx.into_effects());
-                self.finish_command(&pending.view_id, &command_id, pending.cursor, effects, outcome)?
+                self.finish_command(
+                    &pending.view_id,
+                    &command_id,
+                    pending.cursor,
+                    effects,
+                    outcome,
+                )?
             }
         };
         if let Some(mut prepared) = pending.prepared {
             prepared.effects.extend(result.effects);
             result.effects = prepared.effects;
-            if result.keymap.is_none() { result.keymap = prepared.keymap; }
+            if result.keymap.is_none() {
+                result.keymap = prepared.keymap;
+            }
         }
         Ok(self.execution(result))
     }
@@ -986,7 +1187,9 @@ impl Session {
             .and_then(|menu| menu.item(key).cloned());
         match item {
             Some(crate::menu::Item::Switch { status, label, .. }) => {
-                if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
+                if let Some(result) = unsupported_menu_item(status, &label) {
+                    return Ok(result);
+                }
                 let toggled = self
                     .views
                     .get_mut(view_id)
@@ -1006,7 +1209,9 @@ impl Session {
                 status,
                 ..
             }) => {
-                if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
+                if let Some(result) = unsupported_menu_item(status, &label) {
+                    return Ok(result);
+                }
                 if value.is_some() {
                     if let Some(menu) = self.views.get_mut(view_id).and_then(|view| view.menu_mut())
                     {
@@ -1016,8 +1221,22 @@ impl Session {
                 }
 
                 let request = self.option_prompt(&label, &flag, reader);
-                let menu = self.views.get(view_id).and_then(|view| view.menu()).expect("menu option").clone();
-                self.prepare_prompt(view_id, Some(params.cursor), request, SessionContinuation::Option { key: key.to_string(), menu, cursor: params.cursor });
+                let menu = self
+                    .views
+                    .get(view_id)
+                    .and_then(|view| view.menu())
+                    .expect("menu option")
+                    .clone();
+                self.prepare_prompt(
+                    view_id,
+                    Some(params.cursor),
+                    request,
+                    SessionContinuation::Option {
+                        key: key.to_string(),
+                        menu,
+                        cursor: params.cursor,
+                    },
+                );
                 Ok(InvokeResult::empty())
             }
             Some(crate::menu::Item::Action { .. }) => {
@@ -1124,7 +1343,11 @@ impl Session {
                     .get(view_id)
                     .map(|view| view.descriptor().scope.as_str().to_string())
                     .unwrap_or_default();
-                let menu_args = self.views.get(view_id).and_then(|view| view.menu()).map(|menu| menu.args());
+                let menu_args = self
+                    .views
+                    .get(view_id)
+                    .and_then(|view| view.menu())
+                    .map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
                 if registered.scope.matches(&scope) {
                     return self.run_versioned_command(
@@ -1208,7 +1431,8 @@ impl Session {
     fn pop_view(&mut self, view_id: &str) -> Result<InvokeResult> {
         self.views.remove(view_id);
         self.pending_selections.remove(view_id);
-        self.pending_selections.retain(|_, pending| pending.caller_id != view_id);
+        self.pending_selections
+            .retain(|_, pending| pending.caller_id != view_id);
         let mut effects = vec![Effect::PopView {
             view_id: view_id.to_string(),
         }];
@@ -1283,7 +1507,8 @@ impl Session {
             suffix += 1;
         }
 
-        let (descriptor, render, mut open_view) = initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+        let (descriptor, render, mut open_view) =
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))
@@ -1301,24 +1526,41 @@ impl Session {
         key: Option<String>,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        if self.pending_prompt.is_some() && command_id != "common.refresh" { return Ok(prompt_busy()); }
-        let view = self.views.get_mut(view_id)
+        if self.pending_prompt.is_some() && command_id != "common.refresh" {
+            return Ok(prompt_busy());
+        }
+        let view = self
+            .views
+            .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
         // These handlers consume document coordinates. Menu keys, refresh,
         // edit confirmation and other non-positional actions need no tree.
         let requires_ack = command_id == "select.toggle-mark"
             || (command_id == "common.confirm" && view.commit_selection().is_some());
-        let positional = requires_ack || matches!(command_id,
-            "status.stage" | "status.unstage" | "status.discard"
-            | "common.copy-value" | "common.visit"
-            | "common.toggle-section" | "common.show-section" | "common.hide-section"
-            | "common.next-section" | "common.prev-section" | "common.jump"
-            | "common.next-sibling" | "common.prev-sibling" | "common.parent-section"
-            | "common.cycle-visibility");
+        let positional = requires_ack
+            || matches!(
+                command_id,
+                "status.stage"
+                    | "status.unstage"
+                    | "status.discard"
+                    | "common.copy-value"
+                    | "common.visit"
+                    | "common.toggle-section"
+                    | "common.show-section"
+                    | "common.hide-section"
+                    | "common.next-section"
+                    | "common.prev-section"
+                    | "common.jump"
+                    | "common.next-sibling"
+                    | "common.prev-sibling"
+                    | "common.parent-section"
+                    | "common.cycle-visibility"
+            );
         // Commit selection intentionally waits for an acknowledgement. Other
         // positional actions may address the exact current, initially unacked
         // render, but neither policy substitutes a different retained version.
-        if positional && (requires_ack || cursor.is_some() || selection.is_some())
+        if positional
+            && (requires_ack || cursor.is_some() || selection.is_some())
             && view.mode() != ViewMode::Text
         {
             let source = match version {
@@ -1328,7 +1570,10 @@ impl Session {
             };
             let Some(source) = source else {
                 return Ok(InvokeResult {
-                    effects: vec![Effect::message(MessageLevel::Warn, crate::errors::STALE_VIEW)],
+                    effects: vec![Effect::message(
+                        MessageLevel::Warn,
+                        crate::errors::STALE_VIEW,
+                    )],
                     ..InvokeResult::empty()
                 });
             };
@@ -1425,13 +1670,32 @@ impl Session {
         self.finish_command(view_id, command.id, cursor, effects, outcome)
     }
 
-    fn finish_command(&mut self, view_id: &str, command_id: &str, cursor: Option<Cursor>, effects: Vec<Effect>, mut outcome: commands::CommandOutcome) -> Result<InvokeResult> {
+    fn finish_command(
+        &mut self,
+        view_id: &str,
+        command_id: &str,
+        cursor: Option<Cursor>,
+        effects: Vec<Effect>,
+        mut outcome: commands::CommandOutcome,
+    ) -> Result<InvokeResult> {
         if let Some((request, action)) = outcome.prompt.take() {
-            self.prepare_prompt(view_id, cursor, request, SessionContinuation::Command { command_id: command_id.to_string(), action, effects });
+            self.prepare_prompt(
+                view_id,
+                cursor,
+                request,
+                SessionContinuation::Command {
+                    command_id: command_id.to_string(),
+                    action,
+                    effects,
+                },
+            );
             return Ok(InvokeResult::empty());
         }
         let render = {
-            let view = self.views.get_mut(view_id).ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+            let view = self
+                .views
+                .get_mut(view_id)
+                .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
             if outcome.pop
                 || outcome.open_menu.is_some()
                 || outcome.open_view.is_some()
@@ -1461,18 +1725,39 @@ impl Session {
                     None => Some(if outcome.refresh {
                         match view.refresh_and_render(cursor) {
                             Ok(render) => render,
-                            Err(err) if command_id == "common.refresh" && view.descriptor().kind == ViewKind::Log => {
-                                let effect = Effect::from_error(&err).unwrap_or_else(|| Effect::message(MessageLevel::Error, err.to_string()));
-                                return Ok(InvokeResult { effects: vec![effect], ..InvokeResult::empty() });
+                            Err(err)
+                                if command_id == "common.refresh"
+                                    && view.descriptor().kind == ViewKind::Log =>
+                            {
+                                let effect = Effect::from_error(&err).unwrap_or_else(|| {
+                                    Effect::message(MessageLevel::Error, err.to_string())
+                                });
+                                return Ok(InvokeResult {
+                                    effects: vec![effect],
+                                    ..InvokeResult::empty()
+                                });
                             }
                             Err(err) => return Err(err),
                         }
                     } else {
-                        view.render_with_delivery(cursor, outcome.cursor, RenderDelivery::Acknowledged)?
+                        view.render_with_delivery(
+                            cursor,
+                            outcome.cursor,
+                            RenderDelivery::Acknowledged,
+                        )?
                     }),
                 };
-                if let (Some(render), Some(node)) = (&mut render, outcome.cursor_nodes.iter().find_map(|id| view.tree.node(id))) {
-                    render.cursor = Some(Cursor { line: node.start_line, column: 0 });
+                if let (Some(render), Some(node)) = (
+                    &mut render,
+                    outcome
+                        .cursor_nodes
+                        .iter()
+                        .find_map(|id| view.tree.node(id)),
+                ) {
+                    render.cursor = Some(Cursor {
+                        line: node.start_line,
+                        column: 0,
+                    });
                 }
                 render
             }
@@ -1484,7 +1769,14 @@ impl Session {
             if let Some(pending) = self.pending_selections.remove(view_id) {
                 self.views.remove(view_id);
                 return Ok(InvokeResult {
-                    effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: pending.caller_id.clone() }],
+                    effects: vec![
+                        Effect::PopView {
+                            view_id: view_id.to_string(),
+                        },
+                        Effect::FocusView {
+                            view_id: pending.caller_id.clone(),
+                        },
+                    ],
                     keymap: self.keymap_notice(&pending.caller_id),
                     ..InvokeResult::empty()
                 });
@@ -1504,9 +1796,17 @@ impl Session {
         if outcome.pop {
             if let Some(pending) = self.pending_selections.remove(view_id) {
                 self.views.remove(view_id);
-                let mut effects = vec![Effect::PopView { view_id: view_id.to_string() }];
-                effects.push(Effect::FocusView { view_id: pending.caller_id.clone() });
-                return Ok(InvokeResult { effects, keymap: self.keymap_notice(&pending.caller_id), ..InvokeResult::empty() });
+                let mut effects = vec![Effect::PopView {
+                    view_id: view_id.to_string(),
+                }];
+                effects.push(Effect::FocusView {
+                    view_id: pending.caller_id.clone(),
+                });
+                return Ok(InvokeResult {
+                    effects,
+                    keymap: self.keymap_notice(&pending.caller_id),
+                    ..InvokeResult::empty()
+                });
             }
             let mut result = self.pop_view(view_id)?;
             let mut all = effects;
@@ -1524,31 +1824,72 @@ impl Session {
                 Ok(view) => Box::new(view),
                 Err(err) => {
                     if let Some(effect) = Effect::from_error(&err) {
-                        return Ok(InvokeResult { effects: [effects, vec![effect]].concat(), ..InvokeResult::empty() });
+                        return Ok(InvokeResult {
+                            effects: [effects, vec![effect]].concat(),
+                            ..InvokeResult::empty()
+                        });
                     }
                     return Err(err);
                 }
             };
-            let (descriptor, mut render) = self.push_view(view_id, ViewKind::Log, Placement::Main, view)?;
-            if let Some(node) = self.views.get(&descriptor.id).and_then(|view| view.tree().nodes.iter().find(|node| node.kind == NodeKind::Commit)) {
-                render.cursor = Some(Cursor { line: node.start_line, column: 0 });
+            let (descriptor, mut render) =
+                self.push_view(view_id, ViewKind::Log, Placement::Main, view)?;
+            if let Some(node) = self.views.get(&descriptor.id).and_then(|view| {
+                view.tree()
+                    .nodes
+                    .iter()
+                    .find(|node| node.kind == NodeKind::Commit)
+            }) {
+                render.cursor = Some(Cursor {
+                    line: node.start_line,
+                    column: 0,
+                });
             }
-            self.pending_selections.insert(descriptor.id.clone(), PendingSelection { caller_id: view_id.to_string(), operation: request.operation });
+            self.pending_selections.insert(
+                descriptor.id.clone(),
+                PendingSelection {
+                    caller_id: view_id.to_string(),
+                    operation: request.operation,
+                },
+            );
             let mut all = effects;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
-            return Ok(InvokeResult { effects: all, render: None, keymap: None, opened: vec![(render, keymap)], commit: None });
+            return Ok(InvokeResult {
+                effects: all,
+                render: None,
+                keymap: None,
+                opened: vec![(render, keymap)],
+                commit: None,
+            });
         }
 
         if let Some(commits) = outcome.selected_commits {
-            let allow_free_text = self.views.get(view_id).and_then(|view| view.commit_selection()).is_some_and(|selection| selection.allow_free_text);
-            let loaded = |oid: &str| self.views.get(view_id).is_some_and(|view| view.tree().nodes.iter().any(|node| node.kind == NodeKind::Commit && node.commit.as_deref() == Some(oid)));
+            let allow_free_text = self
+                .views
+                .get(view_id)
+                .and_then(|view| view.commit_selection())
+                .is_some_and(|selection| selection.allow_free_text);
+            let loaded = |oid: &str| {
+                self.views.get(view_id).is_some_and(|view| {
+                    view.tree().nodes.iter().any(|node| {
+                        node.kind == NodeKind::Commit && node.commit.as_deref() == Some(oid)
+                    })
+                })
+            };
             let valid = if !commits.is_empty() && commits.iter().all(|oid| loaded(oid)) {
                 Some(commits)
             } else if allow_free_text {
                 let repo = crate::git::GitRepo::open(&self.repo_path)?;
-                let resolved: Result<Vec<String>> = commits.iter().map(|oid| repo.resolve_commit(oid)).collect();
-                resolved.ok().filter(|resolved| !resolved.is_empty() && resolved.iter().zip(&commits).all(|(resolved, original)| resolved == original))
+                let resolved: Result<Vec<String>> =
+                    commits.iter().map(|oid| repo.resolve_commit(oid)).collect();
+                resolved.ok().filter(|resolved| {
+                    !resolved.is_empty()
+                        && resolved
+                            .iter()
+                            .zip(&commits)
+                            .all(|(resolved, original)| resolved == original)
+                })
             } else {
                 None
             };
@@ -1557,10 +1898,30 @@ impl Session {
                 if pending.operation == SelectionOperation::CopyCommits {
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
-                    return Ok(InvokeResult { effects: vec![Effect::Clipboard { text: valid.join("\n") }, Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }], keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
+                    return Ok(InvokeResult {
+                        effects: vec![
+                            Effect::Clipboard {
+                                text: valid.join("\n"),
+                            },
+                            Effect::PopView {
+                                view_id: view_id.to_string(),
+                            },
+                            Effect::FocusView {
+                                view_id: caller.clone(),
+                            },
+                        ],
+                        keymap: self.keymap_notice(&caller),
+                        ..InvokeResult::empty()
+                    });
                 }
             }
-            return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Info, "No valid commits were selected")], ..InvokeResult::empty() });
+            return Ok(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Info,
+                    "No valid commits were selected",
+                )],
+                ..InvokeResult::empty()
+            });
         }
 
         if let Some(menu) = outcome.open_menu {
@@ -1595,14 +1956,20 @@ impl Session {
 
         if let Some((kind, placement)) = outcome.open_view {
             let is_log = kind == ViewKind::Log;
-            let (descriptor, render) = match self.push_kind(view_id, kind, placement, outcome.open_args.as_ref()) {
-                Ok(opened) => opened,
-                Err(err) if is_log => {
-                    let effect = Effect::from_error(&err).unwrap_or_else(|| Effect::message(MessageLevel::Error, err.to_string()));
-                    return Ok(InvokeResult { effects: [effects, vec![effect]].concat(), ..InvokeResult::empty() });
-                }
-                Err(err) => return Err(err),
-            };
+            let (descriptor, render) =
+                match self.push_kind(view_id, kind, placement, outcome.open_args.as_ref()) {
+                    Ok(opened) => opened,
+                    Err(err) if is_log => {
+                        let effect = Effect::from_error(&err).unwrap_or_else(|| {
+                            Effect::message(MessageLevel::Error, err.to_string())
+                        });
+                        return Ok(InvokeResult {
+                            effects: [effects, vec![effect]].concat(),
+                            ..InvokeResult::empty()
+                        });
+                    }
+                    Err(err) => return Err(err),
+                };
             let mut all = effects;
             all.push(Effect::PushView { descriptor });
             let keymap = self.keymap_notice(&render.view_id);
@@ -1707,7 +2074,9 @@ impl Session {
         params: &ViewSetModeParams,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        if self.pending_prompt.is_some() { return Ok(prompt_busy()); }
+        if self.pending_prompt.is_some() {
+            return Ok(prompt_busy());
+        }
         let current = self
             .views
             .get(&params.view_id)
@@ -1748,7 +2117,6 @@ impl Session {
     }
 }
 
-
 fn create_view(
     repo_path: &str,
     kind: &ViewKind,
@@ -1762,7 +2130,9 @@ fn create_view(
                 Some(args) => {
                     if args.get("options").is_some() || args.get("switches").is_some() {
                         log_options_from_args(Some(args))?
-                    } else { serde_json::from_value::<crate::git::GitLogOptions>(args.clone())? }
+                    } else {
+                        serde_json::from_value::<crate::git::GitLogOptions>(args.clone())?
+                    }
                 }
                 None => crate::git::GitLogOptions::default(),
             };
@@ -1793,11 +2163,15 @@ fn create_view(
 
 /// Convert menu arguments or a typed log-options payload into Git query options.
 pub(crate) fn log_options_from_args(args: Option<&Value>) -> Result<GitLogOptions> {
-    let Some(args) = args else { return Ok(GitLogOptions::default()) };
+    let Some(args) = args else {
+        return Ok(GitLogOptions::default());
+    };
     if args.get("options").is_none() && args.get("switches").is_none() {
         let mut log_args = args.clone();
         if let Some(object) = log_args.as_object_mut() {
-            for key in ["purpose", "prompt", "multi", "allowFreeText"] { object.remove(key); }
+            for key in ["purpose", "prompt", "multi", "allowFreeText"] {
+                object.remove(key);
+            }
         }
         return Ok(serde_json::from_value(log_args)?);
     }
@@ -1805,11 +2179,19 @@ pub(crate) fn log_options_from_args(args: Option<&Value>) -> Result<GitLogOption
     let mut options = GitLogOptions::default();
     for (key, value) in values.options {
         match key.as_str() {
-            "=n" => options.page_size = value.parse().ok().filter(|size| *size > 0)
-                .ok_or_else(|| Error::new("Log page size must be a positive integer."))?,
-            "=a" => options.author = Some(value), "=s" => options.since = Some(value),
-            "=g" => options.grep = Some(value), "=S" => options.pickaxe = Some(value),
-            "=G" => options.pickaxe_regex = Some(value), "=f" => options.paths.push(value),
+            "=n" => {
+                options.page_size = value
+                    .parse()
+                    .ok()
+                    .filter(|size| *size > 0)
+                    .ok_or_else(|| Error::new("Log page size must be a positive integer."))?
+            }
+            "=a" => options.author = Some(value),
+            "=s" => options.since = Some(value),
+            "=g" => options.grep = Some(value),
+            "=S" => options.pickaxe = Some(value),
+            "=G" => options.pickaxe_regex = Some(value),
+            "=f" => options.paths.push(value),
             _ => return Err(Error::new(format!("Unsupported log option: {key}"))),
         }
     }

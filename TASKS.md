@@ -1464,17 +1464,18 @@ authority. Completed history is in the
 ### Deferred bugfix — minimal intake slice scheduled; larger design not scheduled
 
 - [x] **[P1] BUG-READ-1 — Reads must stay responsive while a mutation is
-  blocked inside real Git** (unsolved; moved out of the completed
+  blocked inside real Git** (minimal slice completed; moved out of the completed
   mutation-ordering review item, archived evidence). The minimal intake slice
-  is scheduled in R-PLAIN-PREREQ; the larger design below remains deferred and
+  is complete in R-PLAIN-PREREQ; the larger design below remains deferred and
   is not scheduled until the user asks.
   - **Requirement (preserved from the review item's read half):** a read
     (`view/resync`, and by the same root cause `view/rendered`, `view/resize`
     and `view/open` in any repository) must not be delayed by a `view/invoke`
     that is blocked inside a real Git command. The probe asserts this
-    contract with the real gate; it currently fails and is `#[ignore]`d as
-    BUG-READ-1 (run `cargo test --test server_async -- --ignored`), so the
-    green debug+release suites say nothing about read responsiveness.
+    contract with the real gate. The original failure below is historical:
+    the resync probe is now enabled and passes, as do independent-repository
+    reads/mutations. Same-session ack/resize intake redesign remains deferred;
+    these passing probes do not establish that larger contract.
   - **Evidence (known-failing probe, retained intact in
     `tests/server_async.rs`):** bounded evidence from the failing run: the
     server spawned `git add -u` at 05:58:35.173604Z (child blocked in the
@@ -1509,11 +1510,10 @@ authority. Completed history is in the
   - **Escalation:** escalate before implementing if this needs a
     View/`CommandCtx` rewrite or multiple unacked versions per view; an
     async/backend redesign is out of scope.
-  - **Minimal first step (unchanged from the review item's separate-ticket
-    scope):** stop holding `Shared.sessions` across the Git run in
-    `invoke_view` (and the identical `key_view`/`set_mode_view` shape), then
-    un-ignore the probe; the now-unused debug-only `maybe_test_delay`/
-    `MAGIT_LSP_TEST_DELAY_MS` hook in `src/server.rs` can be removed with it.
+  - **Minimal first step completed (R-PLAIN-PREREQ):** registry locks only
+    clone per-repository handles; invoke/key/setMode run without the registry.
+    Published snapshots serve resync and positional reads. The real-Git probe
+    is enabled; obsolete debug-delay hooks are removed, not used as evidence.
 ### Task ticket template and UI rule
 
 Every implementation TASK TICKET specifies **Target Files** (exclusive write
@@ -1561,7 +1561,7 @@ remain explicit; latest native semantic rejection/recovery and two-repository
 isolation evidence is recorded under R-EDIT-REAL. Ring parity differences remain
 documented retained policy, not an implementation change request or invented
 source-research blocker.
-The minimal BUG-READ-1 intake slice is scheduled; its larger design remains
+The minimal BUG-READ-1 intake slice is complete; its larger design remains
 deferred. Release requires R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
 
 - [x] **R-PLAIN-DOC — Record decisions and phase queue.** Documentation only;
@@ -1589,9 +1589,10 @@ deferred. Release requires R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
   - [x] **Neovim native slice (2026-10-29):** `cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && git diff --check` passed (standard/vim, 100x30/80x24). Inspected all 15 current snapshots per variant: staged/clean unchanged saved-close Amend, exact-body Reword with genuinely nonempty preserved index, editor-free Extend with retained message/prior committer date, captured tracked-only `--all`, clean Extend guard/allow-empty and exact-state explicit cancellation. Original parents/count are retained; fresh baselines/checkpoints isolate cases. Corrected Create-vs-Amend input and fixture setup, not production source; native extra windows preserve `:q` semantics, with no sleeps/deadline inflation. See `docs/evidence/commit-head-operations.md` for assertions, retained screens and failed-attempt diagnosis. Owned sessions/processes stopped; R-4.1-head-edit stated client criteria complete; broad gates remain failed as documented.
 - [x] **R-EDIT-REAL stale commit-scenario assertions (2026-10-29).** Updated the three retained cancellation/message-editor scenarios to assert a normal-buffer real `COMMIT_EDITMSG` in the current window rather than the removed virtual `acwrite` buffer or bottom split. Both cancellation cases still observe/cancel the actual work-done progress token; owned-hook cancellation still checks TERM and unchanged HEAD before a fresh successful commit. Focused native output was inspected across standard/vim at 100x30 and 80x24. Verification: `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn tests/ui/scenarios/commit-message-editor.scn tests/ui/scenarios/commit-owned-cancel.scn && git diff --check` passed (3/3 scenarios). The broad gate42 result was 42 PASS/6 FAIL; unrelated scenario and inherited Rust failures are outside this slice. Fresh `make ui-tour` succeeded; inspected `menu-commit`, `clean-commit-menu` and `clean-commit` excerpts in `build/ui/tour.md`. Tour evidence is not full UI/Rust gate success. Parent R-EDIT-REAL remains unchecked.
 - [x] **R-PLAIN-HARNESS — Fake-editor conformance harness.** Twelve self-tests cover all seven quirk profiles, 26 sequential ranged changes in one notification, queued debounce, original-snapshot atomic edits (UTF-8/16/32, CRLF, astral bounds, stale/malformed/overlapping/multi-document rejection), document lifecycle and unique response correlation. The bounded real-binary pump services actual `window/workDoneProgress/create` requests for successful staging and a cancelled commit through progress end; local scripted applyEdit/showDocument requests share its dispatcher and actual captured pipe writes, including both echo/response orders. These scripted requests and the explicitly reconstructed JSONL are **not production Plain server conformance or Helix capture evidence**; later Plain tasks remain unchecked. Root cause of the earlier rev-parse failure: cancelling immediately on progress begin killed setup Git, not a broken fixture; cancellation now waits for the real commit editor. Verification passed: `make test-rust FILTER="--test plain_harness" && cargo test --test server_async && git diff --check` (12 harness, 23 async tests).
- - [ ] **R-PLAIN-PREREQ — Outbound requests, progress gating, minimal BUG-READ-1.** Gate progress on capability, avoid holding sessions over Git, remove test-delay hooks, and correlate outbound requests without blocking intake. Larger BUG-READ-1 design remains deferred. Verify: `make test-rust FILTER="--test server_async"`; `make test-rust`.
+- [x] **R-PLAIN-PREREQ — Outbound requests, progress gating, minimal BUG-READ-1.** Gate progress on capability, avoid holding sessions over Git, remove test-delay hooks, and correlate outbound requests without blocking intake. Larger BUG-READ-1 design remains deferred. Verify: `make test-rust FILTER="--test server_async"`; `make test-rust`.
   - **Outbound-correlation slice (2026-10-29; parent remains unchecked):** Added unique pending IDs, pre-send registration, `Message::Response` dispatch, one-shot success/error resolution, 30-second timeout and shutdown/disconnect cleanup. `tests/server_async.rs::outbound_request_responses_are_correlated_without_blocking_intake` exercises delayed response/remote error, unknown responses, and a resync while the response is outstanding. Existing async suite paths shut down with unanswered progress-create requests, exercising terminal cleanup. Verified: `make test-rust FILTER="--test server_async" && git diff --check` (24 tests passed). Progress capability gating and per-session lock conversion are not included in this slice.
   - [x] **Progress handshake/adversarial regression slice (2026-10-29).** Earlier handshake verification covered existing passing suites, not the complete adversarial matrix. Added explicit absent/false zero-create/zero-progress assertions; gated delayed-success/error/unanswered/completed-before-reply cases with responsive resync; real editor shutdown/EOF cancellation across all three capability states with exact HEAD/index/tree/worktree preservation and no orphan frames through EOF. Unit channels cover successful create-before-begin ordering, terminal-before-reply and resolved-but-not-yet-resumed terminal races, unique out-of-order IDs, unknown/duplicate/error/late replies, timeout, aborted/unpolled awaits, failed sends, and registration racing/after shutdown with empty pending maps. Fixed two substantiated gaps: the guard now owns registration before its await is polled, and begin publication checks/serializes with the terminal boundary. Raw stdio receive can withhold replies even with convenience auto-replies enabled; initialize still sends exactly the supplied capabilities. Exact verification passed: `cargo test --lib server:: && make test-rust FILTER="--test server_async --test editor_bridge --test plain_harness" && git diff --check` (11 server unit + 26 async + 26 editor bridge + 12 plain harness = 75 tests). No owned server remained. No full-suite/native-UI acceptance is claimed; inherited release edits and deferred broad failures are unchanged. Parent remains unchecked pending separate per-session-lock conversion.
+  - [x] **Per-session conversion/lifecycle repair (2026-10-29).** Brief registry lookups clone repository handles across command, watcher, notification, config and commit-completion paths; repository construction happens outside the registry. Published snapshots serve positional/resync reads (including the existing initial-unacked fallback) and prompt routing without locking another repository. Same-view blocked-Git resync and B's resize/resync/outline/unstage while A is gated pass; ordered same-repo mutations remain covered. Shutdown drains/joins watchers outside their registry, breaking the callback→Shared→watcher ownership cycle that retained the writer and caused shutdown timeouts; late watcher starts are refused after terminal cleanup. Progress is client-gated, with no server capability claim or production delay hooks. Exact focused verification exited 0: `cargo test --lib server:: && make test-rust FILTER="--test server_async --test editor_bridge --test plain_harness" && git diff --check` (11 unit + 27 async + 26 editor bridge + 12 harness = 76 tests). Real-file cancellation/terminal and 96d42bb outbound/progress regressions pass. Process inspection after verification found no magit-lsp server/editor/askpass/commit processes. **Broad gate remains failed, user-deferred:** `make test-rust` stopped at `errors::normal_and_piped_apply_failures_keep_original_details` (`tests/errors.rs:524`; `build/test-logs/rust.rUL2j1`). Explicit `make test-rust FILTER="--test errors --test log_commands --test views --no-fail-fast"` reconfirmed that failure, three log_commands failures (`current_log_opens_and_quit_returns_to_status`, `log_menu_opens_log_and_q_returns_to_status_in_each_profile`, `log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scope`) and `views::staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk` (`build/test-logs/rust.puCxlW`). Those unrelated files/release edits were not repaired; no broad/native-UI acceptance or larger same-session ack/resize redesign is claimed. This completes the parent's minimal scoped acceptance, superseding the earlier slice's pending-conversion status only.
 - [ ] **R-PLAIN-SYNC — Document store and sync mode.** URI-keyed sequential changes with negotiated encoding and bounds; incremental sync; cover multibyte, CRLF, invalid ranges and bundled clients. Verify: `make test-rust FILTER="--test plain_sync"`; `make test-lua`; `npm --prefix clients/vscode run test:integration`.
 - [ ] **R-PLAIN-CORE — Presentation seam and unified dispatcher.** Preserve rich behavior; absent presentation selects Plain. One semantic dispatcher serves custom key/invoke and Plain executeCommand. Acceptance includes concrete-view serving/stacking, parameterized stable-ID single/multi picker with caller restoration, provider-file message edits with finish/cancel callbacks, and fake-provider independence without jj implementation. Verify: `make test`; `make ui-test`.
 - [ ] **R-DIFF-SAFETY — Displayed-patch identity and filtered-mutation prerequisite.** Existing roadmap ownership/scope unchanged; R-PLAIN-TARGET depends on it. Verify identity and stale/filtered patch tests.
@@ -1658,7 +1659,7 @@ slice is scheduled and required before the Plain gate.
   - **Candidate paths:** `src/editor.rs`, `src/runner.rs`, `src/git.rs`, `src/server.rs`, `src/session.rs` (dispatch), `src/protocol.rs`, `lua/magit-lsp/edit.lua` and relevant init/view/buffer attachment/capabilities from R-EDIT-4, `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` if needed, `tests/editor_bridge.rs`, `tests/test_magit_lsp.lua`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
   - **Depends on:** Linux R-EDIT-2 acceptance, R-EDIT-3…R-EDIT-5 and R-EDIT-8; sole A11 implementation owner. R-EDIT-9/macOS execution is not a Linux client-cutover dependency.
   - **Done when:** remove realFile commit-message compatibility at cutover; Git keeps hooks/cleanup. Native acceptance covers save-stays-editing, normal close commits exactly saved message, dirty Save/Discard/Cancel, no hidden changes submitted, explicit abort versus close, disconnect across phases, stale/terminal cleanup without commits, and failed close recovery. Also cover pre-hook/editor-active/commit-msg/finalizing and finish-v-cancel (cancel before commit aborts; completed commit reports reality), stale/late/version/multi-root, exact HEAD/index/worktree and neighboring content, inherited pipes/bounded drain, TERM resistance, subsequent commit/no lock cleanup, lock warning/no foreign kills; preserve askpass/A29/text mode and document limits. Extend integration.js and native e2e/suite.js at the paths above; scripted widgets alone do not meet native acceptance. R-EDIT-8 verifies two-root ring ordering/dedup/eviction and current-draft restoration.
-  - **Completed (2026-10-28):** realFile commit-message compatibility is removed at cutover: `EditDocumentMode` is ManagedDraft-only with no realFile path in `src/`; the sole remaining `realFile` reference is a negative VSCode test case asserting such an effect is rejected. Git owns hooks/cleanup/comment-stripping; the server never runs `git commit -F` (drafts write through the editor-bridge helper, §3.10). One adversarial gap found during final acceptance was closed in `tests/server_async.rs`: disconnect during the commit-msg hook phase — `disconnect_during_commit_msg_hook_cancels_owned_hook_group_without_committing` proves EOF cancels the owned resistant hook group, leaves exact HEAD/index/write-tree/worktree and neighboring content, and allows a subsequent commit. macOS/Windows remain deferred (R-EDIT-9/R-EDIT-7); BUG-READ-1 probe remains ignored; minimal intake slice now scheduled under R-PLAIN-PREREQ.
+  - **Completed (2026-10-28):** realFile commit-message compatibility is removed at cutover: `EditDocumentMode` is ManagedDraft-only with no realFile path in `src/`; the sole remaining `realFile` reference is a negative VSCode test case asserting such an effect is rejected. Git owns hooks/cleanup/comment-stripping; the server never runs `git commit -F` (drafts write through the editor-bridge helper, §3.10). One adversarial gap found during final acceptance was closed in `tests/server_async.rs`: disconnect during the commit-msg hook phase — `disconnect_during_commit_msg_hook_cancels_owned_hook_group_without_committing` proves EOF cancels the owned resistant hook group, leaves exact HEAD/index/write-tree/worktree and neighboring content, and allows a subsequent commit. macOS/Windows remain deferred (R-EDIT-9/R-EDIT-7); BUG-READ-1's real-Git probe is now enabled and its minimal slice completed under R-PLAIN-PREREQ; the larger design remains deferred.
   - **Evidence:** Full managed-draft gate passed on 2026-10-28 (details in §3.10). It is not evidence for R-EDIT-REAL's spike, real-file behavior or Magit ring parity; these remain pending.
   - **Verify:** `cargo test --test editor_bridge --test server_async && make test-lua && make vscode-test && npm --prefix clients/vscode run test:integration && npm --prefix clients/vscode run test:e2e && make test && scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn && make ui-tour` on Linux; inspect relevant tour excerpts. Linux real-Git and both clients' native evidence are required; macOS remains unverified under later R-EDIT-9 and does not block Linux acceptance/cutover. No timeout inflation.
 - [ ] **R-EDIT-KINDS — Sequential editor-helper kinds**
@@ -1822,7 +1823,7 @@ These linked, bounded tasks are the release checklist, not a competing ledger.
 Release sprint begins only after **R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE**; no other
 feature work is scheduled in between. Each item stays unchecked until its own
 evidence is produced. Release readiness explicitly assesses and discloses
-BUG-READ-1's known limitation; the minimal prerequisite slice is scheduled, but
+BUG-READ-1's remaining limitations; the minimal prerequisite slice is complete, but
 its larger design is not a release gate.
 
 - [ ] **R-REL-1 — Reproducible artifacts and safe publication**
@@ -1951,9 +1952,9 @@ its larger design is not a release gate.
   badge targets and publication destinations without requiring live URLs. After
   approval, tagged CI publishes the binary release and all configured channels
   (crates.io, VS Code Marketplace, Open VSX), then verifies publication and live
-  badges. Explicitly disclose BUG-READ-1's known failing
-  read-responsiveness probe and keep claims bounded; it is not silently fixed or
-  converted into a release prerequisite. Do not make deferred Windows/macOS
+  badges. Explicitly disclose BUG-READ-1's remaining same-session intake
+  limitations and the completed minimal probe slice; keep claims bounded.
+  Its larger design is not a release prerequisite. Do not make deferred Windows/macOS
   acceptance, unrelated menus/views/branches/history, or build-only targets
   release gates.
   **Done when:** all scoped evidence is linked, limitations and platform matrix
@@ -2457,8 +2458,8 @@ the command line and real colours.
 
 Current implementation status is determined from source and tests, not this
 historical section. Relevant caveats: BUG-READ-1's minimal intake slice is
-scheduled in R-PLAIN-PREREQ, while its larger design remains deferred
-and its probe ignored; Phase 3E is partially complete (R-EDIT-2 Linux acceptance
+complete in R-PLAIN-PREREQ with its real-Git probe enabled, while its larger design
+remains deferred; Phase 3E is partially complete (R-EDIT-2 Linux acceptance
 only; R-EDIT-3 server integration and R-EDIT-8 history are complete, native
 adapters pending; A11 cutover is owned by R-EDIT-6; macOS/Windows remain
 unverified/deferred). See §§7 and 3.10, and the
@@ -2505,8 +2506,8 @@ Completed R-5.1 review, VSCode resolution, client/harness reviews and checked
 review/test tasks are archived at
 [`docs/archive/completed-roadmap-2026-10-28.md`](./docs/archive/completed-roadmap-2026-10-28.md).
 Detailed historical evidence remains at baseline commit `49efd16`; it is not
-current behavior or active scheduling. BUG-READ-1's probe remains ignored;
-the minimal intake slice is scheduled and the larger design remains deferred (§7).
+current behavior or active scheduling. BUG-READ-1's probe is enabled;
+the minimal intake slice is complete and the larger design remains deferred (§7).
 
 ### Test-review summary
 

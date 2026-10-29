@@ -16,8 +16,10 @@ fn repo_param(path: &std::path::Path) -> Value {
 
 #[test]
 fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_input() {
-    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", "initial\n")])
-        .staged_file("f.txt", "staged\n").build();
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .staged_file("f.txt", "staged\n")
+        .build();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let staged = tmp.git(&["ls-files", "--stage", "-z"]);
     let mut server = TestServer::spawn(&[]);
@@ -28,10 +30,17 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     let mut edit = None;
     while !response || edit.is_none() {
         let message = server.recv();
-        if message["id"] == 4 { response = true; }
+        if message["id"] == 4 {
+            response = true;
+        }
         if message["method"] == "view/effects" {
-            edit = message["params"]["effects"].as_array().unwrap().iter()
-                .find(|e| e["type"] == "editDocument").cloned().or(edit);
+            edit = message["params"]["effects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["type"] == "editDocument")
+                .cloned()
+                .or(edit);
         }
     }
     let edit = edit.unwrap();
@@ -53,7 +62,10 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     // Shutdown removes the run before late file sync; unrelated files are ignored.
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
-    assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
+    assert_eq!(
+        read(&tmp.path().join(".git/COMMIT_EDITMSG")),
+        edit["text"].as_str().unwrap()
+    );
     server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -450,6 +462,80 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     assert_eq!(staged["result"]["effects"], json!([]), "{staged}");
     assert!(hunk_count(&cached_diff(tmp.path())) >= 1, "staged");
 
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/close","params":{"viewId":view_id}}));
+    let _ = server.response_with_id(8);
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
+#[test]
+fn blocked_repository_does_not_serialize_unrelated_repository_operations() {
+    let (repo_a_tmp, _) = init_repo();
+    let (repo_b_tmp, _) = init_repo();
+    write(&repo_a_tmp.path().join("f.txt"), "changed A\n");
+    write(&repo_b_tmp.path().join("f.txt"), "changed B\n");
+    assert!(std::process::Command::new("git")
+        .args(["add", "-u"])
+        .current_dir(repo_b_tmp.path())
+        .status()
+        .unwrap()
+        .success());
+    let repo_a = repo_param(repo_a_tmp.path());
+    let repo_b = repo_param(repo_b_tmp.path());
+    let gate = GatedGit::arm("add");
+    let mut server = spawn_with_env(&gate.child_env());
+    server.auto_respond_to_progress_create();
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    let a = open_view(&mut server, 2, &repo_a);
+    let b = open_view(&mut server, 3, &repo_b);
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke",
+        "params":{"viewId":a,"command":"status.stage-all"}}));
+    loop {
+        let message = server.recv();
+        assert_ne!(
+            message["id"],
+            json!(4),
+            "A finished before entering the Git gate: {message}"
+        );
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("begin")
+        {
+            break;
+        }
+    }
+    gate.wait_entered();
+
+    // A read touching B's session must not wait on the registry or A's Git.
+    server.send(json!({"jsonrpc":"2.0","method":"view/resize",
+        "params":{"viewId":b,"cols":90,"rows":30}}));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync","params":{"viewId":b}}));
+    server.recv_timeout = Duration::from_secs(3);
+    let result_b = server.response_with_id(5);
+    assert_eq!(result_b["result"]["viewId"], json!(b), "{result_b}");
+    assert!(
+        !gate.is_released(),
+        "B responded only after A's gate was released"
+    );
+
+    // Positional reads must not scan and lock A's session before reaching B.
+    let uri_b = magit_lsp::session::status_uri(&repo_b_tmp.path().to_string_lossy());
+    let _ = first_hunk_line(&mut server, &uri_b);
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke",
+        "params":{"viewId":b,"command":"status.unstage-all"}}));
+    let staged_b = server.response_with_id(6);
+    assert_eq!(staged_b["result"]["effects"], json!([]), "{staged_b}");
+    assert!(cached_diff(repo_b_tmp.path()).is_empty());
+    assert!(!gate.is_released(), "B's mutation waited for A");
+
+    gate.release();
+    let result_a = server.response_with_id(4);
+    assert_eq!(result_a["result"]["effects"], json!([]), "{result_a}");
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/close","params":{"viewId":a}}));
+    let _ = server.response_with_id(8);
+    server.send(json!({"jsonrpc":"2.0","id":9,"method":"view/close","params":{"viewId":b}}));
+    let _ = server.response_with_id(9);
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
     assert!(status.success(), "server exited: {status:?}");
@@ -466,7 +552,9 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
 
     let create = loop {
         let message = server.recv();
-        if message["method"] == "window/workDoneProgress/create" { break message; }
+        if message["method"] == "window/workDoneProgress/create" {
+            break message;
+        }
     };
     let outbound_id = create["id"].clone();
     assert!(outbound_id.is_string() || outbound_id.is_number());
@@ -476,7 +564,9 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
     assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
     // The delayed response exercises correlation and the remote-error path.
-    server.send(json!({"jsonrpc":"2.0","id":outbound_id,"error":{"code":-32000,"message":"declined"}}));
+    server.send(
+        json!({"jsonrpc":"2.0","id":outbound_id,"error":{"code":-32000,"message":"declined"}}),
+    );
 
     // A duplicate/unknown response is ignored rather than completing another
     // request or being misrouted as a client request.
@@ -498,13 +588,21 @@ fn absent_or_false_progress_capability_emits_no_create_or_progress() {
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         gate.wait_entered();
-        server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
+        server
+            .send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
         assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
         assert!(!gate.is_released());
         gate.release();
         assert_eq!(server.response_with_id(3)["result"]["effects"], json!([]));
         shutdown_and_exit(&mut server);
-        assert!(!server.notifications.iter().any(|m| progress_event(m).is_some()), "{:?}", server.notifications);
+        assert!(
+            !server
+                .notifications
+                .iter()
+                .any(|m| progress_event(m).is_some()),
+            "{:?}",
+            server.notifications
+        );
         assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
         assert!(server.finish(Duration::from_secs(10)).success());
     }
@@ -524,16 +622,28 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         let create = loop {
             let message = server.recv_raw();
-            assert!(message["method"] != "$/progress", "begin before create success: {message}");
-            if message["method"] == "window/workDoneProgress/create" { break message; }
+            assert!(
+                message["method"] != "$/progress",
+                "begin before create success: {message}"
+            );
+            if message["method"] == "window/workDoneProgress/create" {
+                break message;
+            }
             server.notifications.push(message);
         };
         gate.wait_entered();
-        server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
+        server
+            .send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
         assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
         assert!(!gate.is_released());
-        assert!(!server.sent.iter().any(|m| m["id"] == create["id"]), "raw receive replied");
-        assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"));
+        assert!(
+            !server.sent.iter().any(|m| m["id"] == create["id"]),
+            "raw receive replied"
+        );
+        assert!(!server
+            .notifications
+            .iter()
+            .any(|m| m["method"] == "$/progress"));
         match reply {
             "success" => {
                 server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
@@ -550,8 +660,21 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
             server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
         }
         shutdown_and_exit(&mut server);
-        let phases: Vec<_> = server.notifications.iter().filter_map(progress_event).map(|(_, phase)| phase).collect();
-        assert_eq!(phases, if reply == "success" { vec!["begin", "end"] } else { vec![] }, "{reply}");
+        let phases: Vec<_> = server
+            .notifications
+            .iter()
+            .filter_map(progress_event)
+            .map(|(_, phase)| phase)
+            .collect();
+        assert_eq!(
+            phases,
+            if reply == "success" {
+                vec!["begin", "end"]
+            } else {
+                vec![]
+            },
+            "{reply}"
+        );
         assert!(hunk_count(&cached_diff(tmp.path())) >= 1, "{reply}");
         assert!(server.finish(Duration::from_secs(10)).success());
     }
@@ -1920,13 +2043,21 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
 
     fn start_time(pid: i32) -> Option<u64> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)?
+            .parse()
+            .ok()
     }
     fn live(pid: i32) -> bool {
         std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok().and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
-                !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
-            })).unwrap_or(false)
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(')')
+                    .map(|(_, tail)| !matches!(tail.trim_start().chars().next(), Some('Z' | 'X')))
+            })
+            .unwrap_or(false)
     }
 
     let mut server = TestServer::spawn(&[]);
@@ -1938,8 +2069,13 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     while edit.is_none() {
         let message = server.recv();
         if message["method"] == json!("view/effects") {
-            edit = message["params"]["effects"].as_array().unwrap().iter()
-                .find(|e| e["type"] == json!("editDocument")).cloned().or(edit);
+            edit = message["params"]["effects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["type"] == json!("editDocument"))
+                .cloned()
+                .or(edit);
         }
     }
     let edit = edit.unwrap();
@@ -1951,7 +2087,10 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     assert!(server.response_with_id(501).get("error").is_none());
     let deadline = Instant::now() + Duration::from_secs(10);
     while !ready.exists() {
-        assert!(Instant::now() < deadline, "commit-msg hook did not become ready");
+        assert!(
+            Instant::now() < deadline,
+            "commit-msg hook did not become ready"
+        );
         thread::sleep(Duration::from_millis(20));
     }
     let child: i32 = read(&child_pid).trim().parse().unwrap();
@@ -1960,7 +2099,9 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     impl Drop for Cleanup {
         fn drop(&mut self) {
             if start_time(self.0) == Some(self.1) && live(self.0) {
-                unsafe { libc::kill(self.0, libc::SIGKILL); }
+                unsafe {
+                    libc::kill(self.0, libc::SIGKILL);
+                }
             }
         }
     }
@@ -1970,10 +2111,18 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     // owned group rather than orphan it past the server's own exit.
     server.close_stdin();
     let exit = server.finish(Duration::from_secs(15));
-    assert!(exit.success(), "server exited cleanly on disconnect: {exit:?}");
+    assert!(
+        exit.success(),
+        "server exited cleanly on disconnect: {exit:?}"
+    );
     let deadline = Instant::now() + Duration::from_secs(3);
-    while live(child) && Instant::now() < deadline { thread::sleep(Duration::from_millis(20)); }
-    assert!(!live(child), "owned hook descendant survived the disconnect");
+    while live(child) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !live(child),
+        "owned hook descendant survived the disconnect"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
     assert_eq!(tmp.git(&["write-tree"]), tree);
