@@ -15,10 +15,7 @@ exports.run = async function run({ root, evidence, repo, action, port }) {
       await new Promise(resolve => setTimeout(resolve, 25));
     }
   };
-  const shot = name => {
-    const result = JSON.parse(execFileSync('node', [`${root}/clients/vscode/test/e2e/run.mjs`, '--cdp', String(port), 'Page.captureScreenshot', '{"format":"png"}'], { encoding: 'utf8' }));
-    fs.writeFileSync(`${evidence}/${name}.png`, Buffer.from(result.data, 'base64'));
-  };
+  const domText = () => JSON.parse(execFileSync('node', [`${root}/clients/vscode/test/e2e/run.mjs`, '--cdp', String(port), 'Runtime.evaluate', JSON.stringify({ expression: 'document.body.innerText' })], { encoding: 'utf8' })).result.value;
   record({ event: 'activate', workspace: vscode.workspace.workspaceFolders?.map(f => f.uri.toString()) });
   const { LanguageClient } = require(`${root}/clients/vscode/node_modules/vscode-languageclient/node`);
   for (const method of ['sendRequest', 'sendNotification']) {
@@ -44,7 +41,7 @@ exports.run = async function run({ root, evidence, repo, action, port }) {
   const old = fs.existsSync(`${evidence}/action.json`) ? JSON.parse(fs.readFileSync(`${evidence}/action.json`)) : undefined;
   if (old) {
     assert.equal(fs.readFileSync(new URL(old.uri), 'utf8'), old.text, 'saved file survived native action');
-    shot('after');
+    write('after-text', { text: domText() });
     write('resumed', { workspace: vscode.workspace.workspaceFolders?.map(f => f.uri.toString()), pid: process.pid });
     if (action !== 'reload-window') return;
   }
@@ -81,10 +78,9 @@ exports.run = async function run({ root, evidence, repo, action, port }) {
   assert.equal(fs.readFileSync(draft.uri.fsPath, 'utf8'), text);
   editor.revealRange(new vscode.Range(0, 0, 0, 0), vscode.TextEditorRevealType.AtTop);
   await wait(() => {
-    const rendered = JSON.parse(execFileSync('node', [`${root}/clients/vscode/test/e2e/run.mjs`, '--cdp', String(port), 'Runtime.evaluate', JSON.stringify({ expression: 'document.body.innerText' })], { encoding: 'utf8' }));
-    return rendered.result.value.replace(/\s+/g, ' ').includes(`Saved meaningful lifecycle ${action}`);
+    return domText().replace(/\s+/g, ' ').includes(`Saved meaningful lifecycle ${action}`);
   }, 'saved message painted in native editor');
-  shot('before');
+  write('before-text', { text: domText(), activeUri: vscode.window.activeTextEditor?.document.uri.toString(), dirty: vscode.window.activeTextEditor?.document.isDirty });
   write('ready', { hostPid: process.pid, runId: draft.runId, uri: draft.uri.toString(), version: draft.version, text, head: execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() });
   await wait(() => fs.existsSync(`${evidence}/go.json`), 'supervisor process census');
   write('action', JSON.parse(fs.readFileSync(`${evidence}/ready.json`)));

@@ -1,5 +1,14 @@
 # VSCode client notes
 
+## Current evidence policy
+
+Executable VSCode tests must remain no-vision: use DOM/accessibility text,
+editor/tab/dialog state, JSON, wire/API and Git state. Do not capture, render,
+read or inspect image artifacts. Lifecycle and spike checkpoints now retain
+text/JSON evidence, including native cancellation, save and process assertions.
+The screenshot descriptions in the dated sections below are historical records
+of prior runs only, not instructions or acceptance criteria for future work.
+
 ## R-VS-4 semantic highlighting and theme verification (2026-10-24)
 
 The user's away permission covered this isolated actual-host verification. Only

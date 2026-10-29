@@ -8,7 +8,6 @@ import { createServer } from 'node:net';
 const root = resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
 const editor = process.env.MAGIT_VSCODE_BIN;
 assert(editor && existsSync(editor) && process.env.DISPLAY && existsSync(`${root}/target/debug/magit-lsp`), 'MAGIT_VSCODE_BIN, DISPLAY and built server required');
-execFileSync('import', ['-version']);
 const directory = mkdtempSync('/tmp/opencode/real-file-lifecycle-');
 console.log(`Evidence: ${directory}`);
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -93,7 +92,7 @@ try {
       if (action === 'close-window') {
         assert.equal(json(`${base}/exit.json`).code, 0);
         await wait(() => census().length === 0, 'native window and owned processes exited', base, 10000);
-        execFileSync('import', ['-window', 'root', `${base}/after.png`]);
+        assert.equal(readFileSync(new URL(ready.uri), 'utf8'), ready.text, 'saved editor text survives native close');
       } else {
         assert(json(`${base}/resumed.json`).workspace.includes(`file://${base}/${action === 'workspace-change' ? 'other-workspace' : 'repo'}`));
         if (action === 'reload-window') await wait(() => existsSync(`${base}/fresh.json`), 'fresh run rejects late confirmation', base);

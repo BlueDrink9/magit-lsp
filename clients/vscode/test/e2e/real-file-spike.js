@@ -98,7 +98,7 @@ async function observeLifecycle(client) {
     `${root}/clients/vscode/test/e2e/real-file-spike.mjs`, '--cdp', process.env.MAGIT_REAL_FILE_CDP, method, JSON.stringify(params),
   ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 10000 }));
   await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.replace(/\s/g, ' ').includes('spike message'), 'painted lifecycle draft');
-  fs.writeFileSync(`${base}/pre-action.png`, Buffer.from(cdp('Page.captureScreenshot', { format: 'png' }).data, 'base64'));
+  fs.writeFileSync(`${base}/pre-action.json`, JSON.stringify({ text: cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value, uri: uri.toString(), dirty: vscode.window.activeTextEditor.document.isDirty }));
   const action = process.env.MAGIT_REAL_FILE_LIFECYCLE;
   const command = { 'close-window': 'workbench.action.closeWindow', 'reload-window': 'workbench.action.reloadWindow',
     'workspace-change': 'vscode.openFolder' }[action];
@@ -124,7 +124,6 @@ exports.run = async function run() {
   const cdp = (method, params = {}) => JSON.parse(execFileSync(process.execPath, [
     `${root}/clients/vscode/test/e2e/real-file-spike.mjs`, '--cdp', process.env.MAGIT_REAL_FILE_CDP, method, JSON.stringify(params),
   ], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 10000 }));
-  const shot = name => fs.writeFileSync(`${base}/${name}.png`, Buffer.from(cdp('Page.captureScreenshot', { format: 'png' }).data, 'base64'));
   try {
     ({ client } = await vscode.extensions.getExtension('spike.real-file-spike').activate());
     const windowId = await until(() => {
@@ -153,7 +152,6 @@ exports.run = async function run() {
     const doc = vscode.window.activeTextEditor.document;
     result.cases.language = doc.languageId;
     await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.replace(/\s/g, ' ').includes('spike message'), 'painted editor');
-    shot('01-open');
     const otherUri = vscode.Uri.file(`${base}/repo/other.txt`);
     fs.writeFileSync(otherUri.fsPath, 'unrelated file: switching is not closure\n');
     await vscode.window.showTextDocument(otherUri, { preview: false });
@@ -166,7 +164,6 @@ exports.run = async function run() {
     await vscode.commands.executeCommand('workbench.action.splitEditorRight');
     await until(() => matchingTabs().length === 2, 'same URI in two groups');
     assert.equal(vscode.window.tabGroups.all.filter(g => g.tabs.some(tab => tab.input?.uri?.toString() === uri.toString())).length, 2);
-    shot('01b-two-groups');
     await vscode.commands.executeCommand('workbench.action.focusFirstEditorGroup');
     await show();
     const eventsBefore = api().filter(item => item.event === 'tabs' && item.closed.some(tab => tab.isCommitEditMsg)).length;
@@ -174,7 +171,6 @@ exports.run = async function run() {
     await until(() => matchingTabs().length === 1 && api().filter(item => item.event === 'tabs' && item.closed.some(tab => tab.isCommitEditMsg)).length > eventsBefore, 'nonlast close observed');
     assert.equal(qualifiedClosures().length, 0, 'tab in another group prevents qualification');
     result.cases.nonlastClose = { matchingTabs: matchingTabs().length, qualifiedClosureDelta: 0 };
-    shot('01c-nonlast-close');
     await vscode.commands.executeCommand('workbench.action.focusNextGroup');
     await show();
     assert.equal(matchingTabs().length, 1, 'show focuses existing remaining tab');
@@ -190,7 +186,6 @@ exports.run = async function run() {
       qualifiedClosureDelta: qualifiedClosures().length - qualifiedBefore };
     result.cases.didCloseObservation = { delta: count('textDocument/didClose') - before,
       supportedFallbackWithoutDidClose: count('textDocument/didClose') === before };
-    shot('02-native-close');
     // Unrelated closed events while the draft is absent must not qualify.
     const otherTab = vscode.window.tabGroups.all.flatMap(g => g.tabs).find(tab => tab.input?.uri?.toString() === otherUri.toString());
     assert.ok(otherTab);
@@ -207,7 +202,6 @@ exports.run = async function run() {
     let closeSettled = false;
     const closing = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { closeSettled = true; });
     await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native dirty save dialog');
-    shot('03-dirty-dialog');
     result.cases.dirtyDialog = { dirty: editor.document.isDirty, closeSettled };
     cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -218,7 +212,6 @@ exports.run = async function run() {
     assert.equal(result.cases.dirtyCancel.dirty, true);
     assert.equal(result.cases.dirtyCancel.matchingTabs, 1);
     assert.equal(result.cases.dirtyCancel.qualifiedClosureDelta, 0);
-    shot('03b-dirty-cancel');
     const savedText = 'dirty native text\ndirty native text\nspike message\n';
     // Save by itself must not qualify; qualification is caused by tab closure.
     await editor.document.save();
@@ -234,7 +227,6 @@ exports.run = async function run() {
     let saveSettled = false;
     const savingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { saveSettled = true; });
     await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Save dialog');
-    shot('03c-dirty-save-dialog');
     cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await savingClose;
@@ -245,7 +237,6 @@ exports.run = async function run() {
     assert.equal(qualifiedClosures().at(-1).savedDiskText, savedText);
     assert.equal(result.cases.dirtySave.qualifiedClosureDelta, 1);
     assert.equal(result.cases.dirtySave.matchingTabs, 0);
-    shot('03d-dirty-save-closed');
     await show();
     await until(() => matchingTabs().length === 1, 'reopened for discard');
     const discardEditor = vscode.window.activeTextEditor;
@@ -264,7 +255,6 @@ exports.run = async function run() {
     let discardSettled = false;
     const discardingClose = vscode.commands.executeCommand('workbench.action.closeActiveEditor').then(() => { discardSettled = true; });
     await until(() => cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value.includes('Do you want to save'), 'native Discard dialog');
-    shot('03e-dirty-discard-dialog');
     // Tab from the default Save button to Don't Save, then activate it.
     // One forward tab from default Save wraps to Don't Save.
     for (let i = 0; i < 1; i++) {
@@ -283,7 +273,6 @@ exports.run = async function run() {
     assert.notEqual(result.cases.dirtyDiscard.unsavedText, discardText);
     assert.equal(result.cases.dirtyDiscard.qualifiedClosureDelta, 1);
     assert.equal(result.cases.dirtyDiscard.matchingTabs, 0);
-    shot('03f-dirty-discard-closed');
     await show();
     await until(() => matchingTabs().length === 1, 'reopened after discard');
     editor = vscode.window.activeTextEditor;
@@ -313,13 +302,12 @@ exports.run = async function run() {
     assert.equal(result.cases.languageChange.matchingTabs, 1);
     assert.equal(qualifiedClosures().length, process.env.MAGIT_REAL_FILE_NATIVE === '1' ? 3 : 1,
       'only actual last draft tab closes qualify');
-    shot('04-refresh-language');
+    fs.writeFileSync(`${base}/final-text.json`, JSON.stringify({ text: cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value, uri: editor.document.uri.toString(), dirty: editor.document.isDirty }));
     result.pending = ['shutdown', 'reload', 'workspace-change'];
     result.gate = 'pass';
   } catch (error) {
     result.error = error.stack;
     try { fs.writeFileSync(`${base}/failure-dom.txt`, cdp('Runtime.evaluate', { expression: 'document.body.innerText' }).result.value); } catch (_) { /* retain error */ }
-    try { shot('failure'); } catch (_) { /* retain original failure */ }
   } finally {
     fs.writeFileSync(`${base}/result.json`, JSON.stringify(result, null, 2));
     if (client) await client.stop();

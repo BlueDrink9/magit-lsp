@@ -9,6 +9,7 @@ const foldkeys = require('../lib/foldkeys');
 const prompt = require('../lib/prompt');
 const edit = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
+const noVisionPolicy = require('./no-vision');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -415,6 +416,8 @@ test('shared prompt vectors preserve protocol answer semantics', () => {
 });
 
 // summary ------------------------------------------------------------------
+
+test('executable VSCode e2e paths enforce no-vision policy', noVisionPolicy);
 
 if (failures.length > 0) {
   for (const failure of failures) {
