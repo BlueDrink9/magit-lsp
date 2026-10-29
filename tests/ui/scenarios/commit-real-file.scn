@@ -1,6 +1,7 @@
 # Saving the real Git message file does not commit; close confirms Git's saved file.
 fixture: staged-one-file
 ---
+sh: git rev-parse HEAD > .git/close-before; git write-tree > .git/close-index; git hash-object f.txt > .git/close-worktree; git rev-list --count HEAD > .git/close-count
 keys: :vsplit Enter
 keys: c
 wait
@@ -9,12 +10,103 @@ wait screen contains "Please enter the commit message"
 keys: g g d G
 keys: :write Enter
 snapshot: save-alone-does-not-commit
-sh: test "$(git rev-list --count HEAD)" = 1
+sh: test "$(git rev-list --count HEAD)" = "$(cat .git/close-count)" && test "$(git rev-parse HEAD)" = "$(cat .git/close-before)"
 keys: :q Enter
 wait screen contains "Commit aborted: empty message"
 wait
 snapshot: empty-message-aborted
-sh: test "$(git rev-list --count HEAD)" = 1 && test -n "$(git diff --cached --name-only)"
+sh: test "$(git rev-list --count HEAD)" = "$(cat .git/close-count)" && test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)" && test -n "$(git diff --cached --name-only)"
+# Native dirty refusal leaves the real message buffer editable; :wq saves and closes.
+keys: :vsplit Enter
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: g g d G i "Native saved message"
+keys: Escape
+keys: :q Enter
+wait screen contains "No write since last change"
+snapshot: dirty-native-refusal
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and vim.bo[r.buf].modified); print('Dirty draft retained')" Enter
+wait screen contains "Dirty draft retained"
+keys: Enter
+keys: :wq Enter
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait screen contains "Committed"
+wait
+snapshot: native-save-and-close
+sh: test "$(git log -1 --format=%B)" = 'Native saved message' && test "$(git rev-list --count HEAD)" = "$(( $(cat .git/close-count) + 1 ))" && printf '\nsecond\n' >> f.txt && git add f.txt && git rev-list --count HEAD > .git/close-count
+# A dirty :q! submits the last saved checkpoint, never unsaved synchronized text.
+keys standard: g
+keys vim: g r
+wait
+keys: :vsplit Enter
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: g g d G i "Prior checkpoint"
+keys: Escape
+keys: :write Enter
+keys: g g d G i "Unsaved must not commit"
+keys: Escape
+snapshot: unsaved-after-checkpoint
+keys: :q! Enter
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait screen contains "Committed"
+wait
+snapshot: native-discard-to-saved
+sh: test "$(git log -1 --format=%B)" = 'Prior checkpoint' && test "$(git rev-list --count HEAD)" = "$(( $(cat .git/close-count) + 1 ))" && printf '\nthird\n' >> f.txt && git add f.txt && git rev-parse HEAD > .git/close-before && git write-tree > .git/close-index && git hash-object f.txt > .git/close-worktree && git rev-list --count HEAD > .git/close-count
+# Explicit abort is distinct from native discard and leaves repository state alone.
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: i "Explicitly aborted"
+keys: Escape
+keys: ":lua local v=require('magit-lsp.view'); local r=v.current(); assert(r.previous_buf==v.views[r.base].buf, 'draft did not replace status'); assert(vim.api.nvim_buf_is_valid(r.previous_buf))" Enter
+keys: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
+wait screen contains "git commit"
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait
+snapshot: explicitly-aborted
+keys: ":lua local v=require('magit-lsp.view'); local r=v.status(); assert(vim.api.nvim_get_current_buf()==r.buf); print('Status restored')" Enter
+wait screen contains "Status restored"
+keys: Enter
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git rev-list --count HEAD)" = "$(cat .git/close-count)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)" && test -f .git/COMMIT_EDITMSG
+# A rejected close restores the same run and text; repairing the symlink permits retry.
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: g g d G i "Recovered failed close"
+keys: Escape
+keys: :write Enter
+sh: mv .git/COMMIT_EDITMSG .git/draft-original; printf 'sentinel\n' > .git/draft-sentinel; ln -s draft-sentinel .git/COMMIT_EDITMSG
+keys: ":lua local r=require('magit-lsp.view').current(); _G.failed_close_run=r.id; _G.failed_close_version=r.version" Enter
+keys: :bdelete Enter
+wait screen contains "commit draft:"
+snapshot: failed-close-retained
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r.sync_error and vim.bo[r.buf].modifiable and r.text=='Recovered failed close\n'); assert(r.id==_G.failed_close_run and r.version==_G.failed_close_version); assert(vim.fn.maparg('q','n')~=''); print('Recoverable draft retained')" Enter
+wait screen contains "Recoverable draft retained"
+snapshot: recovery-text
+keys: Enter
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git rev-list --count HEAD)" = "$(cat .git/close-count)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)" && test "$(cat .git/draft-sentinel)" = sentinel && rm .git/COMMIT_EDITMSG && mv .git/draft-original .git/COMMIT_EDITMSG
+keys: :write! Enter
+keys: :bdelete Enter
+wait screen contains "Committed"
+wait
+snapshot: recovered-close-committed
+sh: test "$(git log -1 --format=%B)" = 'Recovered failed close' && test "$(git rev-list --count HEAD)" = "$(( $(cat .git/close-count) + 1 ))" && test -z "$(git status --porcelain)"
+# Restore a staged change after each prior commit, then refresh via native input.
+sh: printf '\nfourth\n' >> f.txt; git add f.txt; git rev-parse HEAD > .git/close-before; git write-tree > .git/close-index; git hash-object f.txt > .git/close-worktree; git rev-list --count HEAD > .git/close-count
+keys standard: g
+keys vim: g r
+wait
+sh: test -n "$(git diff --cached --name-only)"
 sh: printf 'Configured commit template\n\n# Template comment\n' > .git/commit-template; git config commit.template .git/commit-template
 keys: :vsplit Enter
 keys: c
@@ -26,7 +118,7 @@ keys: :q Enter
 wait screen contains "Commit aborted: empty message"
 wait
 snapshot: untouched-template-aborted
-sh: test "$(git rev-list --count HEAD)" = 1 && test -n "$(git diff --cached --name-only)"
+sh: test "$(git rev-list --count HEAD)" = "$(cat .git/close-count)" && test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)" && test -n "$(git diff --cached --name-only)"
 keys: :vsplit Enter
 keys: c
 wait
@@ -39,5 +131,5 @@ keys: :q Enter
 wait screen contains "Committed: Real saved-file message"
 wait
 snapshot: real-file-committed
-sh: test "$(git log -1 --format=%B)" = 'Real saved-file message' && test -z "$(git status --porcelain)"
-expect no_message /E5108|Error executing lua/
+sh: test "$(git log -1 --format=%B)" = 'Real saved-file message' && test "$(git rev-list --count HEAD)" = "$(( $(cat .git/close-count) + 1 ))" && test -z "$(git status --porcelain)"
+expect no_message /E5108|Error executing lua|unexpected draft/
