@@ -24,7 +24,7 @@ Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
 log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
 advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
 the failed gates or release acceptance. HARNESS is now complete as test infrastructure;
-R-PLAIN-PREREQ's scoped acceptance and R-PLAIN-SYNC are complete; R-PLAIN-CORE is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
+R-PLAIN-PREREQ's scoped acceptance and R-PLAIN-SYNC are complete; R-DIFF-SAFETY is the first unchecked executable task; R-PLAIN-CORE remains an unchecked umbrella after its concrete prerequisites. The scoped R-EDIT-REAL lifecycle limits, native semantic,
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
@@ -98,8 +98,8 @@ Commands inherit support from the effects they emit. A CI test (R-PLAIN-PROMPT) 
 ## 3. Order of work
 
 1. R-ARGS and R-4.1-head-edit (amend, extend and reword) are complete. R-EDIT-REAL parent acceptance remains unchecked and deferred by explicit user authorization while Plain proceeds; it is not a prerequisite to starting R-PLAIN-HARNESS or R-PLAIN-PREREQ. R-PLAIN-DOC is complete. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
-2. R-PLAIN-SYNC (after R-EDIT-REAL), then R-PLAIN-CORE.
-3. R-DIFF-SAFETY, then R-PLAIN-TARGET. R-PLAIN-REPO after R-PLAIN-CORE.
+2. R-PLAIN-SYNC (after R-EDIT-REAL); its seam/negotiation/dispatch/rich-enforcement slices are groundwork, not umbrella acceptance.
+3. R-DIFF-SAFETY, then R-PLAIN-TARGET. R-PLAIN-CORE remains unchecked until concrete Plain rendering, actions, stack, prompt, picker and draft dependencies are complete; place its umbrella after R-PLAIN-DRAFT and before R-PLAIN-E2E. Preserve the user-authorized R-EDIT-REAL/broad-gate deferral. After concrete, well-implemented Plain protocol work, pause and summarize before the read-only evidence report/planning; do not expand speculative provider abstractions before that checkpoint. R-PLAIN-REPO after R-PLAIN-CORE.
 4. R-PLAIN-RENDER, then R-PLAIN-ACTIONS, then R-PLAIN-STACK, R-PLAIN-VIS and R-PLAIN-PROMPT (parallel), then R-PLAIN-SELECT.
 5. R-PLAIN-DRAFT (after R-EDIT-REAL and R-PLAIN-ACTIONS).
 6. R-PLAIN-E2E, R-PLAIN-HELIX, R-PLAIN-SPEC, then R-PLAIN-GATE.
