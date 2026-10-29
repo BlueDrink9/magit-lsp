@@ -92,6 +92,13 @@ fn action_targets(server: &mut stdio::TestServer, uri: &str, line: u32, id: i64)
     )).collect()
 }
 
+fn offered_for_range(server: &mut stdio::TestServer, uri: &str, range: Value, command: &str, id: i64) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}}));
+    server.response_with_id(id)["result"].as_array().unwrap().iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == command)
+        .map(|action| action["command"]["arguments"][0].clone()).unwrap_or(Value::Null)
+}
+
 #[test]
 fn titles_use_repository_style_configured_chord_and_structured_path() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -139,10 +146,9 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
 }
 
 #[test]
-fn nonempty_ranges_do_not_broaden_to_node_targets() {
-    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("a.txt", "one\n"), ("b.txt", "two\n")]).build();
-    fixtures::write(&repo.path().join("a.txt"), "changed-a\n");
-    fixtures::write(&repo.path().join("b.txt"), "changed-b\n");
+fn selection_range_offers_exact_target_and_stages_only_selected_change() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\nthree\n")]).build();
+    fixtures::write(&repo.path().join("f.txt"), "ONE\ntwo\nTHREE\n");
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
@@ -153,12 +159,33 @@ fn nonempty_ranges_do_not_broaden_to_node_targets() {
     let mut editor=FakeEditor::new(Profile::Standard); server.send(editor.open(&uri,"old"));
     let edit=next_apply(&mut server); for frame in editor.dispatch(&edit) { server.send(frame); }
     let text=editor.text(&uri).to_owned();
-    let first_row=text.lines().position(|line| line.contains("a.txt")).unwrap() as u32;
-    let second_row=text.lines().position(|line| line.contains("b.txt")).unwrap() as u32;
-    let first=action_ids(&mut server,&uri,json!({"start":{"line":first_row,"character":0},"end":{"line":second_row,"character":0}}),81);
-    let first_and_second=action_ids(&mut server,&uri,json!({"start":{"line":first_row,"character":0},"end":{"line":second_row,"character":1}}),82);
-    let second=action_ids(&mut server,&uri,json!({"start":{"line":second_row,"character":0},"end":{"line":second_row+1,"character":0}}),83);
-    assert!(first.is_empty() && first_and_second.is_empty() && second.is_empty(), "nonempty ranges must not become executable node actions");
+    let changed_rows: Vec<u32> = text.lines().enumerate().filter(|(_,line)| line.contains("one") || line.contains("ONE") || line.contains("three") || line.contains("THREE"))
+        .map(|(row,_)| row as u32).collect();
+    assert_eq!(changed_rows.len(),4,"{text}");
+    let args=offered_for_range(&mut server,&uri,json!({"start":{"line":changed_rows[0],"character":0},"end":{"line":changed_rows[1]+1,"character":0}}),"status.stage",81);
+    assert!(!args.is_null(), "selection action missing");
+    assert_eq!(args["target"]["selection"],json!({"startLine":changed_rows[0],"endLine":changed_rows[1]}));
+    assert!(repo_state(&repo).1.contains("one\ntwo\nthree\n"));
+    let mut forged=args.clone(); forged["target"]["selection"]["endLine"]=json!(changed_rows[3]);
+    let refused=execute_offered(&mut server,&mut editor,forged,84); assert_refused(&refused);
+    assert_eq!(repo.git(&["show",":f.txt"]),"one\ntwo\nthree\n");
+    let response=execute_offered(&mut server,&mut editor,args,82); assert!(response["error"].is_null());
+    assert_eq!(repo.git(&["show",":f.txt"]),"ONE\ntwo\nthree\n");
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")),"ONE\ntwo\nTHREE\n");
+    let staged_text=editor.text(&uri).to_owned();
+    let staged_rows: Vec<u32> = staged_text.lines().enumerate().filter(|(_,line)| line.ends_with("-one") || line.ends_with("+ONE"))
+        .map(|(row,_)| row as u32).collect();
+    assert_eq!(staged_rows.len(),2,"{staged_text}");
+    let unstage=offered_for_range(&mut server,&uri,json!({"start":{"line":staged_rows[0],"character":0},"end":{"line":staged_rows[1]+1,"character":0}}),"status.unstage",85);
+    assert!(!unstage.is_null());
+    let response=execute_offered(&mut server,&mut editor,unstage,86); assert!(response["error"].is_null());
+    assert_eq!(repo.git(&["show",":f.txt"]),"one\ntwo\nthree\n");
+    let refreshed=editor.text(&uri).to_owned();
+    let context_row=refreshed.lines().position(|line| line.trim_end().ends_with("two")).unwrap() as u32;
+    let context=offered_for_range(&mut server,&uri,json!({"start":{"line":context_row,"character":0},"end":{"line":context_row+1,"character":0}}),"status.stage",87);
+    assert!(!context.is_null());
+    let response=execute_offered(&mut server,&mut editor,context,88); assert!(response["error"].is_null());
+    assert_eq!(repo.git(&["show",":f.txt"]),"one\ntwo\nthree\n");
     server.shutdown_and_exit(); let (status,_)=server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 

@@ -1740,8 +1740,11 @@ fn execute_plain_action(
         target: crate::dispatch::DispatchTarget {
             view_id: view_id.clone(),
             version: Some(params.view_generation),
-            cursor: Some(Cursor { line, column: 0 }),
-            selection: None,
+            cursor: params.target.selection.is_none().then_some(Cursor { line, column: 0 }),
+            selection: params.target.selection.map(|selection| crate::protocol::Selection {
+                start_line: selection.start_line as usize,
+                end_line: selection.end_line as usize,
+            }),
             key: None,
         },
         action_target: Some(params.target),
@@ -2216,16 +2219,23 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         || (start.line, start.character) > (end.line, end.character) {
         return Value::Array(Vec::new());
     }
-    // Exact selection targets are implemented separately. Never broaden a
-    // non-empty range into one or more whole-node actions.
-    if start != end { return Value::Array(Vec::new()); }
+    let selection = if start != end {
+        let end_line = if end.character == 0 && end.line > start.line { end.line - 1 } else { end.line };
+        if start.line > end_line { return Value::Array(Vec::new()); }
+        Some((start.line, end_line))
+    } else { None };
     let Some(line_node) = tree.line_nodes.get(start.line as usize).and_then(|line| tree.node(&line.node)) else {
         return Value::Array(Vec::new());
     };
     let mut actions = Vec::new();
     for command in crate::commands::registry().iter() {
         if !command.scope.matches(&scope) { continue; }
-        if let Some(target) = crate::dispatch::offer_target(&tree, command.id, &line_node.id) {
+        let target = if let Some((start, end)) = selection {
+            crate::dispatch::offer_selection_target(&tree, command.id, start, end)
+        } else {
+            crate::dispatch::offer_target(&tree, command.id, &line_node.id)
+        };
+        if let Some(target) = target {
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,

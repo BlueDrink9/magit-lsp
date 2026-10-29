@@ -914,10 +914,20 @@ impl Session {
                 Some(version) if version == view.version => Some(&view.tree),
                 _ => None,
             };
-            let node = source.filter(|tree| crate::dispatch::offer_target(tree, &request.command, &offered.node_id).as_ref() == Some(offered))
-                .and_then(|tree| tree.node(&offered.node_id));
-            if let Some(node) = node.filter(|_| target.selection.is_none()) {
-                target.cursor = Some(Cursor { line: node.start_line, column: 0 });
+            let valid = source.is_some_and(|tree| {
+                if let Some(selection) = offered.selection {
+                    crate::dispatch::offer_selection_target(tree, &request.command, selection.start_line, selection.end_line).as_ref() == Some(offered)
+                } else {
+                    crate::dispatch::offer_target(tree, &request.command, &offered.node_id).as_ref() == Some(offered)
+                }
+            });
+            let node = source.and_then(|tree| tree.node(&offered.node_id));
+            if valid {
+                if let Some(selection) = offered.selection {
+                    target.selection = Some(Selection { start_line: selection.start_line as usize, end_line: selection.end_line as usize });
+                } else if let Some(node) = node {
+                    target.cursor = Some(Cursor { line: node.start_line, column: 0 });
+                }
             } else {
                 return Ok(InvokeResult {
                     effects: vec![Effect::message(MessageLevel::Warn, crate::errors::HUNK_CHANGED)],
