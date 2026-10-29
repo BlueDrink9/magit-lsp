@@ -60,6 +60,17 @@ fn every_profile_parses_and_covers_every_command() {
 }
 
 #[test]
+fn basic_modifier_mode_filters_delivery_and_resolution_but_full_keeps_bindings() {
+    let config = config_with(Profile::Standard, &[("status", &[("stage", &["ctrl+x", "meta+x", "shift+ctrl+x", "g ctrl+x"])])]);
+    let full = Keymap::resolve("status", Profile::Standard, &config).unwrap();
+    assert_eq!(full.lookup(&KeyChord::parse("meta+x").unwrap().0[..1], EditorMode::Normal), Match::Exact("status.stage".into()));
+    let basic = full.with_basic_modifiers(true);
+    assert_eq!(basic.command("status.stage").unwrap().keys, vec!["ctrl+x", "g ctrl+x"]);
+    assert_eq!(basic.lookup(&KeyChord::parse("meta+x").unwrap().0[..1], EditorMode::Normal), Match::None);
+    assert_eq!(basic.lookup(&KeyChord::parse("ctrl+x").unwrap().0[..1], EditorMode::Normal), Match::Exact("status.stage".into()));
+}
+
+#[test]
 fn every_profile_resolves_without_conflicts() {
     for profile in [Profile::Standard, Profile::Vim] {
         let config = Config {

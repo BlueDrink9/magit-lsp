@@ -195,6 +195,8 @@ pub struct OpenView {
     visibility_level: u8,
     /// Where the session publishes this view; consulted for resync markers.
     published: PublishedViews,
+    full_render: bool,
+    native_folds: bool,
 }
 
 impl OpenView {
@@ -301,6 +303,7 @@ impl OpenView {
         line: Option<usize>,
         command: VisibilityCommand,
     ) -> bool {
+        if self.native_folds { return true; }
         let changed = self.view.set_visibility(tree, line, command);
         if changed {
             self.visibility_level = match command {
@@ -354,6 +357,9 @@ impl OpenView {
             viewport: self.descriptor.viewport,
             pending: &pending,
         });
+        if self.native_folds && self.view.set_visibility(&tree, None, VisibilityCommand::ShowAll) {
+            tree = self.view.render(&Ctx { viewport: self.descriptor.viewport, pending: &pending });
+        }
         let version = old_version + 1;
         tree.version = version;
 
@@ -366,6 +372,7 @@ impl OpenView {
         // version; otherwise fall back to a full replace.
         let resynced = self.published.take_resynced(&self.descriptor.id);
         let base_version = (delivery == RenderDelivery::Acknowledged
+            && !self.full_render
             && !resynced
             && self.acked_version == Some(old_version))
         .then_some(old_version);
@@ -403,11 +410,16 @@ fn initialize_open_view(
     placement: Placement,
     viewport: Viewport,
     mut view: Box<dyn View>,
+    full_render: bool,
+    native_folds: bool,
 ) -> (ViewDescriptor, ViewRender, OpenView) {
     let mut tree = view.render(&Ctx {
         viewport,
         pending: &[],
     });
+    if native_folds && view.set_visibility(&tree, None, VisibilityCommand::ShowAll) {
+        tree = view.render(&Ctx { viewport, pending: &[] });
+    }
     let version = 1;
     tree.version = version;
     let descriptor = ViewDescriptor {
@@ -447,6 +459,8 @@ fn initialize_open_view(
         dirty: false,
         visibility_level: 4,
         published: PublishedViews::default(),
+        full_render,
+        native_folds,
     };
     (descriptor, render, open_view)
 }
@@ -659,6 +673,7 @@ impl Session {
         let view = self.views.get(view_id)?;
         let scope = view.descriptor().scope.as_str();
         let keymap = self.keymap_for(scope)?;
+        let keymap = keymap.clone().with_basic_modifiers(self.rich_capabilities.as_ref().is_some_and(|caps| caps.modifiers == "basic"));
         let text = view.mode() == ViewMode::Text;
         let bindings = if text {
             keymap.only(TOGGLE_TEXT_MODE)
@@ -730,7 +745,7 @@ impl Session {
         let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
         let placement = self.placement(placement);
         let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.rich_capabilities.as_ref().is_some_and(|caps| caps.render == "full"), self.rich_capabilities.as_ref().is_some_and(|caps| caps.folds == "native"));
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -921,7 +936,7 @@ impl Session {
             return self.menu_key(params, cursor_moved, ui);
         }
 
-        let keymap = self.keymap_for(&scope).cloned();
+        let keymap = self.keymap_for(&scope).cloned().map(|keymap| keymap.with_basic_modifiers(self.rich_capabilities.as_ref().is_some_and(|caps| caps.modifiers == "basic")));
 
         let resolution = {
             let view = self
@@ -1544,7 +1559,7 @@ impl Session {
         }
 
         let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.rich_capabilities.as_ref().is_some_and(|caps| caps.render == "full"), self.rich_capabilities.as_ref().is_some_and(|caps| caps.folds == "native"));
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))

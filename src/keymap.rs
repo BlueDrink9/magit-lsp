@@ -63,6 +63,10 @@ pub struct Keymap {
     /// keep-for: TASKS §3.9 complete keymap-payload decision; retained metadata despite no functional client reader.
     pub scope: String,
     pub bindings: Vec<Binding>,
+    #[serde(skip)]
+    parsed: BTreeMap<String, Vec<KeyChord>>,
+    #[serde(skip)]
+    basic_modifiers: bool,
 }
 
 /// The result of matching a key prefix against a keymap.
@@ -183,6 +187,7 @@ impl Keymap {
                 .push(key.clone());
         }
 
+        let parsed = keys_by_command.iter().map(|(command, keys)| ((*command).to_string(), keys.clone())).collect();
         let mut bindings = Vec::new();
         for command in &candidates {
             let Some(decl) = chosen.get(command.id) else {
@@ -202,6 +207,8 @@ impl Keymap {
         Ok(Keymap {
             scope: scope.to_string(),
             bindings,
+            parsed,
+            basic_modifiers: false,
         })
     }
 
@@ -212,10 +219,8 @@ impl Keymap {
             if !binding.modes.contains(&mode) {
                 continue;
             }
-            for key in &binding.keys {
-                let Ok(chord) = KeyChord::parse(key) else {
-                    continue;
-                };
+            for chord in self.parsed.get(&binding.command).into_iter().flatten() {
+                if self.basic_modifiers && !chord.steps().iter().all(basic_step) { continue; }
                 if chord.starts_with(prefix) {
                     if chord.steps().len() > prefix.len() {
                         return Match::Prefix;
@@ -230,6 +235,17 @@ impl Keymap {
             Some(command) => Match::Exact(command),
             None => Match::None,
         }
+    }
+
+    /// Select modifier fidelity for both key resolution and client delivery.
+    pub fn with_basic_modifiers(mut self, basic: bool) -> Self {
+        self.basic_modifiers = basic;
+        if basic {
+            for binding in &mut self.bindings {
+                binding.keys.retain(|key| self.parsed.get(&binding.command).is_some_and(|chords| chords.iter().any(|chord| chord.to_canonical() == *key && chord.steps().iter().all(basic_step))));
+            }
+        }
+        self
     }
 
     /// The resolved bindings.
@@ -252,6 +268,10 @@ impl Keymap {
             .cloned()
             .collect()
     }
+}
+
+fn basic_step(step: &KeyStep) -> bool {
+    !step.meta && !step.shift
 }
 
 #[derive(Clone)]
