@@ -104,7 +104,7 @@ impl PlainDocument {
         if let Some(flight) = self.in_flight.as_mut() {
             flight.echoed = flight.target.hash == observed.hash;
             flight.diverged |= !flight.echoed;
-            if flight.echoed && flight.response == Some(true) {
+            if flight.response == Some(true) {
                 self.in_flight = None;
                 self.state = DocumentState::Ready;
             }

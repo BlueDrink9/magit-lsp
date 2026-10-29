@@ -7,8 +7,126 @@ use magit_lsp::docstore::Encoding;
 use magit_lsp::presentation::plain::{hash_text, text_edits, DocumentState, PlainDocument};
 use serde_json::{json, Value};
 
+#[path = "common/stdio.rs"]
+mod stdio;
+#[path = "common/mod.rs"]
+mod fixtures;
+
 fn controller(encoding: Encoding, versioned: bool) -> PlainDocument {
     PlainDocument::new("file:///status", encoding, versioned)
+}
+
+fn next_edit(server: &mut stdio::TestServer) -> Value {
+    loop {
+        let frame = server.recv_raw();
+        assert_ne!(frame["method"], "view/render");
+        if frame["method"] == "workspace/applyEdit" { return frame; }
+    }
+}
+
+fn plain_server(root: &std::path::Path, apply: bool, versioned: bool) -> stdio::TestServer {
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":apply,"workspaceEdit":{"documentChanges":versioned}}});
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
+    server.send(init);
+    assert!(server.response_with_id(1)["result"].is_object());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    server
+}
+
+#[test]
+fn binary_profiles_watch_and_repair_divergence_in_both_response_orders() {
+    for profile in [Profile::Standard, Profile::DecomposedChanges, Profile::DebouncedDidChange,
+        Profile::ReorderEcho, Profile::NoDocumentChanges, Profile::NoShowDocument,
+        Profile::CrlfNormalise, Profile::Utf16] {
+        for response_first in [true, false] {
+            let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+            let path = repo.path().join(".magit");
+            fixtures::write(&path, "disk sentinel\n");
+            let uri = format!("file://{}", path.display());
+            let mut server = plain_server(repo.path(), true, profile != Profile::NoDocumentChanges);
+            let mut editor = FakeEditor::new(profile);
+            server.send(editor.open(&uri, "stale"));
+            let first = next_edit(&mut server);
+            assert_eq!(editor.apply_edit(&first["params"]["edit"])["applied"], true);
+            let expected = editor.text(&uri).to_owned();
+            let response = json!({"jsonrpc":"2.0","id":first["id"],"result":{"applied":true}});
+            let mut change = editor.edit(&uri, "divergent user text");
+            // The initial server edit has deliberately not been echoed, so
+            // this divergent snapshot replaces the still-stale accepted text.
+            change["params"]["contentChanges"] = json!([{"text":"divergent user text"}]);
+            if response_first { server.send(response.clone()); }
+            if profile == Profile::DebouncedDidChange {
+                for frame in editor.flush() { server.send(frame); }
+            } else { server.send(change); }
+            if !response_first { server.send(response); }
+            let repair = next_edit(&mut server);
+            for frame in editor.dispatch(&repair) { server.send(frame); }
+            for frame in editor.flush() { server.send(frame); }
+            assert_eq!(editor.text(&uri), expected);
+            // A real worktree write drives the native watcher, not a custom refresh.
+            fixtures::write(&repo.path().join("watcher-only.txt"), "watcher bytes\n");
+            let refreshed = next_edit(&mut server);
+            for frame in editor.dispatch(&refreshed) { server.send(frame); }
+            for frame in editor.flush() { server.send(frame); }
+            assert!(editor.text(&uri).contains("watcher-only.txt"));
+            assert_eq!(std::fs::read(&path).unwrap(), b"disk sentinel\n");
+            assert_eq!(std::fs::read(repo.path().join("watcher-only.txt")).unwrap(), b"watcher bytes\n");
+            server.shutdown_and_exit();
+            let (status, frames) = server.finish_with_messages(std::time::Duration::from_secs(10));
+            assert!(status.success());
+            assert!(frames.iter().all(|f| f["method"] != "view/render"));
+        }
+    }
+}
+
+#[test]
+fn binary_close_reopen_ignores_pending_reply_and_disconnect_terminates_pending_edit() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk sentinel");
+    let uri = format!("file://{}", path.display());
+    let mut server = plain_server(repo.path(), true, true);
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "old incarnation"));
+    let stale = next_edit(&mut server);
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":uri}}}));
+    server.send(editor.open(&uri, "new incarnation"));
+    server.send(json!({"jsonrpc":"2.0","id":stale["id"],"result":{"applied":true}}));
+    let current = next_edit(&mut server);
+    assert_ne!(stale["id"], current["id"]);
+    assert_eq!(current["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], 1);
+    assert_eq!(editor.apply_edit(&current["params"]["edit"])["applied"], true);
+    assert!(!editor.text(&uri).contains("incarnation"));
+    let (status, frames) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+    assert!(frames.iter().all(|f| f["method"] != "view/render" && f["method"] != "workspace/applyEdit"));
+    assert_eq!(std::fs::read(&path).unwrap(), b"disk sentinel");
+}
+
+#[test]
+fn binary_absent_apply_edit_reports_readable_unsupported_without_custom_delivery() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "untouched");
+    let uri = format!("file://{}", path.display());
+    let mut server = plain_server(repo.path(), false, true);
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "untouched"));
+    loop {
+        let frame = server.recv_raw();
+        assert_ne!(frame["method"], "view/render");
+        assert_ne!(frame["method"], "workspace/applyEdit");
+        if frame["method"] == "window/showMessage" {
+            assert!(frame["params"]["message"].as_str().unwrap().contains("workspace/applyEdit"));
+            break;
+        }
+    }
+    server.shutdown_and_exit();
+    assert!(server.finish(std::time::Duration::from_secs(10)).success());
+    assert_eq!(editor.text(&uri), "untouched");
+    assert_eq!(std::fs::read(&path).unwrap(), b"untouched");
 }
 
 #[test]
@@ -125,4 +243,52 @@ fn every_fake_editor_profile_can_be_driven_without_assuming_next_version() {
         }
         assert_eq!(c.state(), if profile == Profile::CrlfNormalise { DocumentState::Applying } else { DocumentState::Ready });
     }
+}
+
+#[test]
+fn actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file() {
+    use std::time::{Duration, Instant};
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+        .modify_standard()
+        .build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "stale disk text\n");
+    let disk_before = std::fs::read(&path).unwrap();
+    let uri = format!("file://{}", path.display());
+    let root_uri = format!("file://{}", repo.path().display());
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut initialize = stdio::initialize_message();
+    initialize["params"]["capabilities"] = json!({
+        "workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}},
+        "general": {"positionEncodings": ["utf-16"]}
+    });
+    initialize["params"]["workspaceFolders"] = json!([{"uri":root_uri,"name":"repo"}]);
+    server.send(initialize);
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    assert!(server.response_with_id(1)["result"]["capabilities"].is_object());
+
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "stale editor text\n"));
+    let request = loop {
+        let message = server.recv_raw();
+        if message["method"] == "workspace/applyEdit" { break message; }
+        assert_ne!(message["method"], "view/render", "Plain must not receive custom renders");
+    };
+    assert!(request["params"]["edit"]["documentChanges"].is_array());
+    let rendered = editor.dispatch(&request);
+    assert!(rendered.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+    assert!(editor.text(&uri).contains("line3 CHANGED"));
+    assert!(!editor.text(&uri).contains("stale"));
+    for frame in rendered { server.send(frame); }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        // The server's correlated response to applyEdit is observed through
+        // the same live stream; echoes are sent above in real client order.
+        if server.sent.iter().any(|frame| frame["method"] == "textDocument/didChange") { break; }
+        std::thread::yield_now();
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), disk_before);
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
 }

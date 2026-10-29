@@ -67,7 +67,12 @@ impl FakeEditor {
             for uri in uris {
                 let doc = &self.documents[&uri];
                 if doc.version != before[&uri].version {
-                    let echo = json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":doc.version},"contentChanges":[{"text":doc.text}]}});
+                    let changes = if matches!(self.profile, Profile::DecomposedChanges) {
+                        decomposed(&before[&uri].text, &doc.text, self.encoding)
+                    } else {
+                        vec![json!({"text":doc.text})]
+                    };
+                    let echo = json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":doc.version},"contentChanges":changes}});
                     if matches!(self.profile, Profile::DebouncedDidChange) { self.pending.push(echo); } else { echoes.push(echo); }
                 }
             }

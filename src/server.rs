@@ -3,6 +3,7 @@ use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
 use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
+use crate::presentation::plain::{ApplyEdit, PlainDocument};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -10,7 +11,7 @@ use crate::session::{Execution, InvokeResult, PublishedViews, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
-use crate::view::{ViewMode, Viewport};
+use crate::view::{ViewKind, ViewMode, Viewport};
 use crate::watcher::{Refresh, RepoWatcher, WatcherConfig};
 use crate::{Error, Result};
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
@@ -103,6 +104,7 @@ struct ClientCaps {
     encoding: Encoding,
     /// Git repositories discovered from initialize workspace roots for Plain resolution.
     workspace_repositories: Vec<crate::presentation::resolve::Repository>,
+    plain: Option<crate::presentation::PlainCapabilities>,
 }
 
 impl Default for ClientCaps {
@@ -115,6 +117,7 @@ impl Default for ClientCaps {
             work_done_progress: false,
             encoding: Encoding::Utf16,
             workspace_repositories: Vec::new(),
+            plain: None,
         }
     }
 }
@@ -122,6 +125,10 @@ impl Default for ClientCaps {
 /// Server state shared by concurrent request handlers.
 #[derive(Clone)]
 struct Shared {
+    /// Runtime captured on the transport thread for native watcher callbacks.
+    runtime: Option<tokio::runtime::Handle>,
+    /// Serializes Plain document acceptance, incarnation transitions and sends.
+    plain_lifecycle: Arc<Mutex<()>>,
     /// Trusted identity allocated for this transport, never read from client JSON.
     draft_owner: Arc<String>,
     repo_locks: RepoLocks,
@@ -141,6 +148,11 @@ struct Shared {
     /// Key delivery settings declared by the client in `initialize`.
     client: Arc<Mutex<ClientCaps>>,
     documents: Arc<Mutex<DocStore>>,
+    /// Plain document incarnations and their server-owned status views.
+    plain_documents: Arc<Mutex<HashMap<String, PlainEntry>>>,
+    /// Current open incarnation for each presentation URI, including bootstrap.
+    plain_incarnations: Arc<Mutex<HashMap<String, u64>>>,
+    next_plain_incarnation: Arc<AtomicU64>,
     /// Why the initial configuration load failed, if it did.
     startup_error: Option<String>,
     /// The writer channel, so a blocking command can send `view/prompt`.
@@ -162,6 +174,13 @@ struct Shared {
     mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
     /// Running repository watchers, keyed by repository root.
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
+}
+
+struct PlainEntry {
+    incarnation: u64,
+    repo: String,
+    view_id: String,
+    controller: PlainDocument,
 }
 
 #[derive(Clone)]
@@ -206,6 +225,8 @@ impl Shared {
         static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(0);
         let client = Arc::new(Mutex::new(ClientCaps::default()));
         Self {
+            runtime: tokio::runtime::Handle::try_current().ok(),
+            plain_lifecycle: Arc::new(Mutex::new(())),
             draft_owner: Arc::new(format!(
                 "connection-{}",
                 NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed)
@@ -219,6 +240,9 @@ impl Shared {
             edit_configs: Arc::new(Mutex::new(HashMap::new())),
             client: client.clone(),
             documents: Arc::new(Mutex::new(DocStore::default())),
+            plain_documents: Arc::new(Mutex::new(HashMap::new())),
+            plain_incarnations: Arc::new(Mutex::new(HashMap::new())),
+            next_plain_incarnation: Arc::new(AtomicU64::new(0)),
             startup_error,
             sender: sender.clone(),
             outbound: Arc::new(Mutex::new(HashMap::new())),
@@ -377,15 +401,20 @@ impl Shared {
                     }
                     let renders = {
                         match shared.session(&repo_for_handler) {
-                            Some(handle) => handle
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner())
-                                .refresh_all(),
+                            Some(handle) => {
+                                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                                session.refresh_all().into_iter().map(|render| {
+                                    let text = session.rendered_text(&render.view_id);
+                                    (render, text)
+                                }).collect()
+                            }
                             None => Vec::new(),
                         }
                     };
-                    for render in renders {
-                        let _ = shared.sender.send(custom_ui(&shared.client).render(render));
+                    for (render, text) in renders {
+                        if !route_plain_render(&shared, &render.view_id, text) {
+                            let _ = shared.sender.send(custom_ui(&shared.client).render(render));
+                        }
                     }
                 }
                 Refresh::IndexLocked => {
@@ -548,6 +577,7 @@ impl Shared {
 
     /// Stop new work and cancel every operation that can wait on the client.
     fn terminal_cleanup(&self) {
+        let _plain = self.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             // Serialize the terminal boundary with publication of begin.
@@ -555,6 +585,11 @@ impl Shared {
             progress.values().cloned().collect::<Vec<_>>()
         };
         self.cancel_outbound();
+        self.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        let mut documents = self.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        for entry in documents.values_mut() { entry.controller.close(); }
+        documents.clear();
+        drop(documents);
         for run in runs {
             run.cancel.cancel();
             if let Some(edit_id) = run.edit_id {
@@ -704,6 +739,176 @@ impl Shared {
             .collect();
         handles.into_iter().any(|session| session.is_text_uri(uri))
     }
+}
+
+/// Feed an authoritative logical-view render into its Plain document, if any.
+fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Message> {
+    let text = shared.published.lock().unwrap_or_else(|p| p.into_inner())
+        .values().find_map(|views| views.rendered_text(&render.view_id));
+    if route_plain_render(shared, &render.view_id, text) { None }
+    else { Some(custom_ui(&shared.client).render(render)) }
+}
+
+/// Feed an authoritative logical-view render into its Plain document, if any.
+fn route_plain_render(shared: &Shared, view_id: &str, text: Option<String>) -> bool {
+    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    if shared.closing.load(Ordering::SeqCst) { return true; }
+    let request = {
+        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        let Some((uri, entry)) = documents.iter_mut().find(|(_, entry)| entry.view_id == view_id) else {
+            return false;
+        };
+        text.and_then(|text| entry.controller.render(text).map(|request| {
+            (entry.incarnation, uri.clone(), request)
+        }))
+    };
+    if let Some((incarnation, uri, request)) = request {
+        send_plain_edit(shared, uri, incarnation, request);
+    }
+    true
+}
+
+/// Send one controller edit and reconcile its correlated standard-LSP reply.
+fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEdit) {
+    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) { return; }
+    let Ok((pending, receiver)) = shared.register_outbound(
+        "workspace/applyEdit",
+        serde_json::json!({ "edit": edit.edit }),
+    ) else {
+        return;
+    };
+    let shared = shared.clone();
+    let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+    runtime.spawn(async move {
+        let applied = shared.await_outbound(pending, receiver).await.ok()
+            .and_then(|response| response.response_result.ok())
+            .and_then(|value| value.get("applied").and_then(Value::as_bool))
+            .unwrap_or(false);
+        let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        let next = {
+            let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+            documents.get_mut(&uri).filter(|entry| entry.incarnation == incarnation)
+                .and_then(|entry| entry.controller.response(edit.id, applied))
+        };
+        if let Some(next) = next {
+            send_plain_edit(&shared, uri, incarnation, next);
+        }
+    });
+}
+
+/// Start an asynchronous bootstrap after the didOpen notification is accepted.
+fn schedule_plain_open(shared: &Shared, uri: String) {
+    if shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).is_none() { return; }
+    let Some(path) = file_uri_path(&uri) else { return; };
+    if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) { return; }
+    close_plain(shared, &uri);
+    let incarnation = shared.next_plain_incarnation.fetch_add(1, Ordering::Relaxed) + 1;
+    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).insert(uri.clone(), incarnation);
+    let shared = shared.clone();
+    tokio::spawn(async move { bootstrap_plain(&shared, uri, incarnation).await; });
+}
+
+async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
+    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) { return; }
+    let (caps, workspaces, encoding) = {
+        let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
+        (client.plain.clone(), client.workspace_repositories.iter().map(|r| r.root.clone()).collect::<Vec<_>>(), client.encoding)
+    };
+    let config = shared.config.config();
+    let Some(path) = file_uri_path(&uri) else { return; };
+    if !crate::config::is_presentation_file(&path, &config.presentation_files) { return; }
+    let Some(caps) = caps else { return; };
+    if !caps.apply_edit {
+        let _ = shared.sender.send(show_message(2, format!("magit-lsp: cannot render {} because the client does not support workspace/applyEdit", path.display())));
+        return;
+    }
+    let resolution = crate::presentation::resolve::resolve(None, &workspaces, path.parent());
+    let repository = match resolution {
+        crate::presentation::resolve::Resolution::Resolved(repository) => repository,
+        crate::presentation::resolve::Resolution::Choose(candidates) => {
+            let choices = candidates.iter().map(|item| item.root.display().to_string()).collect::<Vec<_>>().join(", ");
+            let _ = shared.sender.send(show_message(2, format!("magit-lsp: cannot choose a repository for {}; workspace roots are ambiguous: {choices}", path.display())));
+            return;
+        }
+        crate::presentation::resolve::Resolution::None => return,
+    };
+    let repo = repository.root.to_string_lossy().into_owned();
+    let handle = repository_session(shared, &repo);
+    let config = shared.config.for_repository(Path::new(&repo));
+    let view_id = shared.next_view_id();
+    let opened = {
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.set_keymaps(config.keymaps());
+        session.open(view_id.clone(), ViewKind::Status, crate::view::Placement::default(), Viewport::default())
+    };
+    // `open` uses (id, kind, placement, viewport); preserve the root session's
+    // authoritative Tree while keeping this logical view private to Plain.
+    let (descriptor, initial) = match opened {
+        Ok(opened) => opened,
+        Err(error) => { let _ = shared.sender.send(show_message(1, format!("magit-lsp: cannot render status: {error}"))); return; }
+    };
+    let authoritative = initial.text.unwrap_or_default().join("\n");
+    let published = handle.lock().unwrap_or_else(|p| p.into_inner()).published();
+    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) {
+        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        return;
+    }
+    let current = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).cloned();
+    let Some(current) = current else {
+        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        return;
+    };
+    let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes);
+    controller.render(authoritative);
+    let first = controller.open(current.version, current.text);
+    if !plain_incarnation_is_current(shared, &uri, incarnation) {
+        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        return;
+    }
+    {
+        shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).insert(uri.clone(), PlainEntry { incarnation, repo: repo.clone(), view_id: descriptor.id.clone(), controller });
+        shared.view_repos.lock().unwrap_or_else(|p| p.into_inner()).insert(descriptor.id, repo.clone());
+        shared.published.lock().unwrap_or_else(|p| p.into_inner()).entry(repo.clone()).or_insert(published);
+    }
+    shared.ensure_watcher(&repo);
+    if let Some(edit) = first { send_plain_edit(shared, uri, incarnation, edit); }
+}
+
+fn plain_incarnation_is_current(shared: &Shared, uri: &str, incarnation: u64) -> bool {
+    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).get(uri) == Some(&incarnation)
+}
+
+fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
+    if let Some(handle) = shared.session(repo) { return handle; }
+    let candidate = Arc::new(Mutex::new(Session::new(repo)));
+    let mut sessions = shared.sessions.lock().unwrap_or_else(|p| p.into_inner());
+    sessions.entry(repo.to_owned()).or_insert(candidate).clone()
+}
+
+fn plain_change(shared: &Shared, uri: &str) {
+    let snapshot = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).cloned();
+    let Some(snapshot) = snapshot else { return; };
+    let request = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri)
+        .and_then(|entry| entry.controller.change(snapshot.version, snapshot.text));
+    if let Some(edit) = request {
+        let incarnation = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).map(|entry| entry.incarnation);
+        if let Some(incarnation) = incarnation { send_plain_edit(shared, uri.to_owned(), incarnation, edit); }
+    }
+}
+
+fn close_plain(shared: &Shared, uri: &str) {
+    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).remove(uri);
+    let entry = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).remove(uri);
+    let Some(mut entry) = entry else { return; };
+    entry.controller.close();
+    if let Some(session) = shared.session(&entry.repo) {
+        let _ = session.lock().unwrap_or_else(|p| p.into_inner()).close(&entry.view_id);
+    }
+    shared.view_repos.lock().unwrap_or_else(|p| p.into_inner()).remove(&entry.view_id);
+    let shared = shared.clone();
+    let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+    runtime.spawn_blocking(move || shared.stop_watcher_if_idle(&entry.repo));
 }
 
 /// Whether the client wants the server to push every view's keymap.
@@ -1197,6 +1402,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let draft_run = editor::registry()
                         .run_for_uri(&shared.draft_owner, uri)
                         .ok();
+                    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
                     if let Err(error) = draft_notification(&shared, &notification) {
                         if notification.method == "textDocument/didChange" {
                             shared
@@ -1227,6 +1433,16 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             );
                         } else {
                             tracing::debug!(%error, "rejected document synchronization; repair required");
+                        }
+                        if notification.method == "textDocument/didClose" {
+                            close_plain(&shared, uri);
+                        }
+                    } else {
+                        match notification.method.as_str() {
+                            "textDocument/didOpen" => schedule_plain_open(&shared, uri.to_owned()),
+                            "textDocument/didChange" => plain_change(&shared, uri),
+                            "textDocument/didClose" => close_plain(&shared, uri),
+                            _ => {}
                         }
                     }
                 }
@@ -1681,9 +1897,11 @@ fn handle_view_notification(shared: &Shared, notification: &Notification) -> Vec
                 cols: params.cols,
                 rows: params.rows,
             };
-            match session.resize(&params.view_id, viewport) {
+            let resized = session.resize(&params.view_id, viewport);
+            drop(session);
+            match resized {
                 // A menu re-flows its columns for the new width.
-                Ok(Some(render)) => vec![custom_ui(&shared.client).render(render)],
+                Ok(Some(render)) => deliver_render(shared, render).into_iter().collect(),
                 Ok(None) => Vec::new(),
                 Err(error) => {
                     tracing::warn!(%error, "failed to resize view");
@@ -1725,6 +1943,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 client.delivery = delivery;
                 client.key_modifiers = key_modifiers;
                 client.presentation = Some(presentation);
+                client.plain = match client.presentation.as_ref() {
+                    Some(Presentation::Plain(caps)) => Some(caps.clone()),
+                    _ => None,
+                };
                 client.workspace_repositories = initialize_workspace_roots(&params);
                 client.encoding = params
                     .pointer("/capabilities/general/positionEncodings")
@@ -1996,7 +2218,7 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         .insert(id, repo.to_string());
     shared.ensure_watcher(repo);
 
-    let mut notifications = vec![custom_ui(&shared.client).render(render)];
+    let mut notifications: Vec<_> = deliver_render(shared, render).into_iter().collect();
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
@@ -2156,7 +2378,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
         spawn_commit(shared.clone(), repo.to_string(), operation);
     }
     if let Some(render) = outcome.render {
-        notifications.push(custom_ui(&shared.client).render(render));
+        notifications.extend(deliver_render(shared, render));
     }
     // A mode change replaces the binding set, so the client must see it even
     // when the scope's ordinary keymap would not change.
@@ -2205,7 +2427,7 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
     }
 
     for (render, keymap) in outcome.opened {
-        notifications.push(custom_ui(&shared.client).render(render));
+        notifications.extend(deliver_render(shared, render));
         if shared.delivery() == KeymapDelivery::Dynamic {
             if let Some(keymap) = keymap {
                 notifications.push(Message::Notification(Notification::new(
@@ -2357,7 +2579,7 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     messages.extend(
                         renders
                             .into_iter()
-                            .map(|render| custom_ui(&shared.client).render(render)),
+                            .filter_map(|render| deliver_render(&shared, render)),
                     );
                     // Replace the "Committing…" feedback with the outcome.
                     let subject = outcome

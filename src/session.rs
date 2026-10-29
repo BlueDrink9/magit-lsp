@@ -115,6 +115,11 @@ impl PublishedViews {
     }
 
     /// The latest published full text of `view_id`, without any session lock.
+    pub fn rendered_text(&self, view_id: &str) -> Option<String> {
+        self.lock().get(view_id).map(|view| view.lines.join("\n"))
+    }
+
+    /// The latest published full text of `view_id`, without any session lock.
     ///
     /// Marks the view so the session's next render replaces the client's text
     /// instead of diffing against content this resync replaced.
@@ -715,6 +720,11 @@ impl Session {
     /// The open views.
     pub fn views(&self) -> &ViewStack {
         &self.views
+    }
+
+    /// Return the current full rendered document text for a logical view.
+    pub fn rendered_text(&self, view_id: &str) -> Option<String> {
+        self.views.get(view_id).map(|view| view.tree.lines.join("\n"))
     }
 
     /// Open a view and return its descriptor plus the initial full render.

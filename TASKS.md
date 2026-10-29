@@ -1392,6 +1392,13 @@ remain historical and must not be rewritten as text-based evidence.
 
 ### Review
 
+- [x] **[P0] Make Plain rendering lifecycle and watcher delivery race-safe.**
+  The uncommitted R-PLAIN-RENDER bootstrap must use a valid runtime from native watcher callbacks, consistent session/published lock order, atomic incarnation validation/controller updates, and terminal invalidation. Route every render path through negotiated delivery; test watcher refresh, close/reopen and disconnect with requests pending.
+  - Completed scoped binary gate: captured transport runtime handles native watcher delivery; Plain acceptance/install/send/response/terminal transitions serialize by incarnation, published handles are obtained before the published registry lock, and watcher joins run outside the lifecycle boundary. All render call sites negotiate Plain delivery. Actual-binary tests cover all eight fake profiles, watcher-only worktree changes, divergent echoes in both response orders, pending close/reopen/disconnect and absent applyEdit, with disk preservation and no custom renders. Exact R-PLAIN-RENDER focused gate and `git diff --check` passed. Native P1/parent R-PLAIN-RENDER acceptance remains pending.
+- [ ] **[P1] Reconcile response-first divergent Plain echoes and prove live delivery.**
+  A successful applyEdit response followed by a nonmatching normalized/user echo must repair instead of remaining Applying forever. Extend actual-binary profile, divergence, absent-applyEdit and stale-response tests; retain one in-flight/newest coalescing and bounded retry behavior, then verify focused plugin-free native Neovim using text only.
+  - Response-first divergence now repairs and the scoped actual-binary matrix passes; plugin-free native Neovim acceptance has not been performed. Keep this item and R-PLAIN-RENDER unchecked.
+
 Task specifications and open checkboxes remain below; this index summarizes
 review status without duplicating the report ledger. A01–A10, A12, and actionable
 A13–A21/A24–A34 are complete; A22/A23 were withdrawn. A11 is owned by

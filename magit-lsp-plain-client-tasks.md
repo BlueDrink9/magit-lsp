@@ -527,6 +527,21 @@ claimed here.
 
 ### R-PLAIN-RENDER: bootstrap and versioned applyEdit pipeline (L)
 
+**Scoped bootstrap/lifecycle evidence (2026-10-30):** Recognized didOpen now
+resolves a repository and opens its Session status Tree, delivering standard
+applyEdit requests from accepted DocStore snapshots. Captured runtime ownership
+supports native watcher callbacks; serialized incarnation transitions cover
+install/send, accepted changes, replies, close/reopen and terminal detachment.
+Every server render path now negotiates Plain delivery. Actual-binary tests
+exercise all eight fake transport profiles (including decomposition, queued
+debounce and reordered replies), both divergent echo/response orders, native
+watcher-only changes, pending close/reopen/disconnect and absent applyEdit.
+Disk bytes remain untouched and custom render notifications are rejected.
+The exact focused R-PLAIN-RENDER verification command plus `git diff --check`
+passed. **Parent/native P1 acceptance remains pending:** no plugin-free native
+Neovim evidence is claimed. The controller-only/pending description below is
+historical context superseded for the scoped binary bootstrap evidence only.
+
 **Controller slice complete; parent task remains pending.** `PlainDocument` is
 a reusable Detached/Ready/Applying controller with bounded exact-text-hash
 snapshots, one in-flight edit and latest-render coalescing. It emits minimal
