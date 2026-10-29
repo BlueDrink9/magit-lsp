@@ -527,7 +527,7 @@ claimed here.
 
 ### R-PLAIN-RENDER: bootstrap and versioned applyEdit pipeline (L)
 
-**Scoped bootstrap/lifecycle evidence (2026-10-30):** Recognized didOpen now
+**Completed bootstrap/lifecycle and native acceptance (2026-10-30):** Recognized didOpen now
 resolves a repository and opens its Session status Tree, delivering standard
 applyEdit requests from accepted DocStore snapshots. Captured runtime ownership
 supports native watcher callbacks; serialized incarnation transitions cover
@@ -537,34 +537,30 @@ exercise all eight fake transport profiles (including decomposition, queued
 debounce and reordered replies), both divergent echo/response orders, native
 watcher-only changes, pending close/reopen/disconnect and absent applyEdit.
 Disk bytes remain untouched and custom render notifications are rejected.
-The exact focused R-PLAIN-RENDER verification command plus `git diff --check`
-passed. **Parent/native P1 acceptance remains pending:** no plugin-free native
-Neovim evidence is claimed. The controller-only/pending description below is
-historical context superseded for the scoped binary bootstrap evidence only.
+The focused binary matrix passed. Plugin-free native Neovim then ran in an owned
+tmux server with `--listen` and standalone `vim.lsp.start`, without project Lua
+modules/runtimepath. Evidence shows stale disk presentation replacement,
+watcher-only worktree refresh, native typing and undo with increasing accepted
+LSP buffer versions, and final exact restoration to authoritative text. The
+presentation sentinel bytes remained unchanged; no `view/render` notification
+or project Lua module was observed. Owned tmux, Neovim, socket and server-child
+cleanup was verified. Retained text/JSON: `build/ui/plain-render/native.screen`
+and `build/ui/plain-render/native.json`. Exact verification passed:
+`cargo build --release && python3 scripts/test_plain_neovim.py && cargo test
+--test plain_render && git diff --check` (10 plain-render tests).
 
-**Controller slice complete; parent task remains pending.** `PlainDocument` is
+**Controller slice:** `PlainDocument` is
 a reusable Detached/Ready/Applying controller with bounded exact-text-hash
 snapshots, one in-flight edit and latest-render coalescing. It emits minimal
 UTF-8/16/32-positioned edits in versioned `documentChanges` or unversioned
 `changes`, reconciles exact text echoes on either side of the response, and
 recomputes after stale rejection or divergent edits. Closing invalidates the
 pending request. Deterministic fake-editor tests cover the applicable profile,
-encoding, CRLF, version, echo-order and detach cases. This is controller-only
-coverage, not actual-binary acceptance.
-
-**Still pending for R-PLAIN-RENDER:** ordinary didOpen bootstrap of the resolved
-Session/status Tree, transport wiring and standard applyEdit delivery, and
-actual-binary runtime tests. Repeated `applied:false` for an unchanged
-authoritative/client snapshot is held inert to avoid an unbounded retry loop;
-a fresh client change or new render makes the controller eligible again. This
-does not implement or test server transport. Remaining concrete gates are to
-connect recognized didOpen to the safely resolved repository and status Tree,
-feed accepted sequential DocStore changes plus apply responses to controllers
-with close/reopen/disconnect incarnation checks, and add actual-binary fake
-editor tests for request/echo ordering, stale rejection, coalescing, detach and
-the capability/encoding/newline profiles. Keep the parent unchecked until those
-runtime acceptance gates pass; controller profile loops are not live transport
-tests.
+encoding, CRLF, version, echo-order and detach cases; those tests complement,
+and do not substitute for, the binary and native transport evidence above.
+Repeated `applied:false` for an unchanged authoritative/client snapshot is held
+inert to avoid an unbounded retry loop; a fresh client change or new render
+makes the controller eligible again.
 
 - **Target Files:** `src/presentation/plain.rs` (new), `src/diff_text.rs`, `src/session.rs`, `tests/plain_render.rs` (new).
 - **Reference Files:** the handoff's state-machine and applyEdit results; TASKS §3.3.
