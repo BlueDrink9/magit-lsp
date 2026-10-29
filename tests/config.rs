@@ -2,7 +2,7 @@
 
 use magit_lsp::config::{
     default_config_path, load_config, resolve_config_path_from, ConfigError, ConfigService,
-    LoadOptions, Profile,
+    LoadOptions, Profile, TitleStyle,
 };
 use magit_lsp::keymap::Keymap;
 use std::ffi::OsStr;
@@ -399,6 +399,60 @@ fn profile_defaults_to_vim_and_typed_settings_parse() {
     assert!(!config.ui.confirm_discard);
     assert_eq!(config.log.default_args, vec!["--graph"]);
     assert_eq!(config.log.margin, Some(5));
+}
+
+#[test]
+fn actions_title_style_defaults_to_plain_and_round_trips_all_values() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("main.toml");
+    write(&main, "");
+    assert_eq!(load(&main).unwrap().actions.title_style, TitleStyle::Plain);
+
+    for (value, style) in [
+        ("plain", TitleStyle::Plain),
+        ("mnemonic", TitleStyle::Mnemonic),
+        ("path", TitleStyle::Path),
+        ("mnemonicPath", TitleStyle::MnemonicPath),
+    ] {
+        assert_eq!(TitleStyle::parse(value), Ok(style));
+        assert_eq!(style.as_str(), value);
+        write(&main, &format!("[actions]\ntitle_style = \"{value}\"\n"));
+        assert_eq!(load(&main).unwrap().actions.title_style, style);
+    }
+}
+
+#[test]
+fn invalid_actions_title_style_names_file_and_line() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("main.toml");
+    write(&main, "[diff]\ncontext = 7\n[actions]\ntitle_style = \"fancy\"\n");
+    let error = load(&main).unwrap_err();
+    assert!(
+        error.to_string().contains("main.toml:4: unknown title_style `fancy`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn repository_actions_title_style_overrides_the_user_layer() {
+    let dir = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let global = dir.path().join("global.toml");
+    write(
+        &global,
+        "trust_repo_config = true\n[actions]\ntitle_style = \"mnemonic\"\n",
+    );
+    write(
+        &repo.path().join(".magit-lsp.toml"),
+        "[actions]\ntitle_style = \"path\"\n",
+    );
+    let config = load_config(&LoadOptions {
+        config_path: Some(global),
+        repo_path: Some(repo.path().to_path_buf()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(config.actions.title_style, TitleStyle::Path);
 }
 
 #[test]

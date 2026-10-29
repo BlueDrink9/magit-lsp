@@ -162,6 +162,52 @@ pub struct LogSettings {
     pub margin: Option<u32>,
 }
 
+/// How action titles are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TitleStyle {
+    /// Titles are rendered without decoration.
+    #[default]
+    Plain,
+    /// Titles show a highlighted mnemonic character.
+    Mnemonic,
+    /// Titles show the action's path.
+    Path,
+    /// Titles show a path with a highlighted mnemonic character.
+    MnemonicPath,
+}
+
+impl TitleStyle {
+    /// The style name as written in config.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TitleStyle::Plain => "plain",
+            TitleStyle::Mnemonic => "mnemonic",
+            TitleStyle::Path => "path",
+            TitleStyle::MnemonicPath => "mnemonicPath",
+        }
+    }
+
+    /// Parse a title style name.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "plain" => Ok(TitleStyle::Plain),
+            "mnemonic" => Ok(TitleStyle::Mnemonic),
+            "path" => Ok(TitleStyle::Path),
+            "mnemonicPath" => Ok(TitleStyle::MnemonicPath),
+            other => Err(format!(
+                "unknown title_style `{other}`; expected `plain`, `mnemonic`, `path` or `mnemonicPath`"
+            )),
+        }
+    }
+}
+
+/// Action presentation settings.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActionsSettings {
+    /// How action titles are rendered.
+    pub title_style: TitleStyle,
+}
+
 /// The fully resolved configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -172,6 +218,7 @@ pub struct Config {
     pub sections: SectionSettings,
     pub ui: UiSettings,
     pub log: LogSettings,
+    pub actions: ActionsSettings,
     /// File basenames used for the Plain presentation document (default `.magit`).
     pub presentation_files: Vec<String>,
     /// Every file that contributed, for the watcher.
@@ -204,6 +251,7 @@ impl Default for Config {
                 default_args: Vec::new(),
                 margin: None,
             },
+            actions: ActionsSettings::default(),
             presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
@@ -399,6 +447,7 @@ struct Layered {
     ui_confirm_discard: Option<bool>,
     log_default_args: Option<Vec<String>>,
     log_margin: Option<u32>,
+    actions_title_style: Option<TitleStyle>,
     presentation_files: Option<Vec<String>>,
     files: Vec<PathBuf>,
 }
@@ -431,6 +480,9 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     }
     if let Some(margin) = layered.log_margin {
         config.log.margin = Some(margin);
+    }
+    if let Some(style) = layered.actions_title_style {
+        config.actions.title_style = style;
     }
     if let Some(names) = layered.presentation_files {
         config.presentation_files = names;
@@ -625,6 +677,23 @@ fn apply_document(
                             layered.log_margin = Some(integer(value, "log.margin", file, line)?)
                         }
                         other => return Err(unknown_key(file, line, "log", other)),
+                    }
+                }
+            }
+            "actions" => {
+                let table = settings_table(item, "actions", file, line)?;
+                for (name, value) in table.iter() {
+                    let line = item_line(source, value);
+                    match name {
+                        "title_style" => {
+                            let text = string(value, "actions.title_style", file, line)?;
+                            layered.actions_title_style = Some(
+                                TitleStyle::parse(&text).map_err(|message| {
+                                    ConfigError::new(message).at_file_line(file, line)
+                                })?,
+                            );
+                        }
+                        other => return Err(unknown_key(file, line, "actions", other)),
                     }
                 }
             }
