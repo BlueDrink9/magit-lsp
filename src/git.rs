@@ -10,6 +10,50 @@ use std::time::Instant;
 
 const RECOMMENDED_GIT_VERSION: &str = include_str!("../RECOMMENDED_GIT_VERSION");
 
+// Hash only this path's subtree. Never follow symlinks (including directory
+// links), and include sorted membership so collapsed untracked directories are
+// as strongly bound to their render as individual files.
+fn worktree_identity(path: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok("missing".into()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut hash = Sha256::new();
+    if metadata.file_type().is_symlink() {
+        hash.update(b"link\0");
+        hash.update(std::fs::read_link(path)?.as_os_str().as_encoded_bytes());
+    } else {
+        hash.update(format!("{:?}\0", metadata.permissions()));
+        if metadata.is_file() {
+            hash.update(b"file\0");
+            let mut file = std::fs::File::open(path)?;
+            let mut buffer = [0; 65536];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 { break; }
+                hash.update(&buffer[..count]);
+            }
+        } else if metadata.is_dir() {
+            hash.update(b"directory\0");
+            let mut children = std::fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+            children.sort_by_key(|child| child.file_name());
+            for child in children {
+                let name = child.file_name();
+                let bytes = name.as_encoded_bytes();
+                hash.update((bytes.len() as u64).to_le_bytes());
+                hash.update(bytes);
+                hash.update(worktree_identity(&child.path())?);
+            }
+        } else {
+            return Err(Error::new(format!("Cannot snapshot special file {}", path.display())));
+        }
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 /// A single changed file: its display status char and its diff hunks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -30,6 +74,8 @@ pub struct FileMutationIdentity {
     pub head: String,
     pub index: String,
     pub worktree: String,
+    /// Rename/copy source, including the state of that endpoint.
+    pub original: Option<(String, Box<FileMutationIdentity>)>,
 }
 
 /// Repository status: branch plus the staged and unstaged file lists.
@@ -545,23 +591,25 @@ impl GitRepo {
         ])?;
         let mut status = self.parse_status(&raw, repo_path)?;
         for file in status.staged.iter_mut().chain(&mut status.unstaged).chain(&mut status.untracked) {
-            file.mutation_identity = Some(self.file_mutation_identity(&file.path)?);
+            file.mutation_identity = Some(self.file_mutation_identity(&file.path, file.orig_path.as_deref(), true)?);
         }
         Ok(status)
     }
 
-    pub fn file_mutation_identity(&self, path: &str) -> Result<FileMutationIdentity> {
-        let head = self.run(&["ls-tree", "-z", "HEAD", "--", path]).unwrap_or_default();
-        let index = self.run(&["ls-files", "--stage", "-z", "--", path]).unwrap_or_default();
-        let target = self.root.join(path);
-        let worktree = match std::fs::symlink_metadata(&target) {
-            Ok(metadata) if metadata.file_type().is_symlink() => format!("link:{:?}:{:?}", metadata.permissions(), std::fs::read_link(&target)?),
-            Ok(metadata) if metadata.is_file() => format!("file:{:?}:{:?}", metadata.permissions(), std::fs::read(&target)?),
-            Ok(metadata) => format!("other:{:?}:{:?}", metadata.file_type(), metadata.permissions()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "missing".into(),
-            Err(error) => return Err(Error::new(format!("failed to inspect {path}: {error}"))),
+    /// Capture blobs/modes for both endpoints, optionally including non-following
+    /// worktree content. Unstage authorization does not inspect the worktree.
+    pub fn file_mutation_identity(&self, path: &str, original: Option<&str>, worktree: bool) -> Result<FileMutationIdentity> {
+        let head = match self.run(&["rev-parse", "--verify", "--quiet", "HEAD"]) {
+            Ok(_) => self.run(&["ls-tree", "-r", "-z", "HEAD", "--", path])?,
+            Err(error) if error.git.as_ref().is_some_and(|failure| failure.exit_code == 1 && failure.stderr.is_empty()) => String::new(),
+            Err(error) => return Err(error),
         };
-        Ok(FileMutationIdentity { head, index, worktree })
+        let literal = format!(":(literal){path}");
+        let index = self.run(&["ls-files", "--stage", "-z", "--", &literal])?;
+        let original = original.map(|origin| self.file_mutation_identity(origin, None, worktree)
+            .map(|identity| (origin.to_string(), Box::new(identity)))).transpose()?;
+        let worktree = if worktree { worktree_identity(&self.root.join(path))? } else { String::new() };
+        Ok(FileMutationIdentity { head, index, worktree, original })
     }
 
     fn parse_status(&self, raw: &str, repo_path: String) -> Result<Status> {
@@ -808,9 +856,10 @@ impl GitRepo {
         let status = self.status_listing()?;
         if status.untracked.iter().any(|file| file.path == path) {
             let full = self.root.join(path);
-            if full.is_dir() {
+            let metadata = std::fs::symlink_metadata(&full)?;
+            if metadata.is_dir() {
                 std::fs::remove_dir_all(full)?;
-            } else if full.exists() {
+            } else {
                 std::fs::remove_file(full)?;
             }
             return Ok(());

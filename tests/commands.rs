@@ -722,6 +722,316 @@ fn an_unknown_command_is_a_protocol_error() {
     assert!(error.message.contains("unknown command"), "{error}");
 }
 
+// Independent byte/mode snapshots, including symlink targets and directory
+// membership. Do not use the production identity routine to prove no mutation.
+fn identity_worktree(path: &std::path::Path) -> Vec<(std::path::PathBuf, u32, Vec<u8>)> {
+    use std::os::unix::fs::PermissionsExt;
+    fn visit(root: &std::path::Path, path: &std::path::Path, out: &mut Vec<(std::path::PathBuf, u32, Vec<u8>)>) {
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        let bytes = if metadata.file_type().is_symlink() {
+            std::fs::read_link(path).unwrap().as_os_str().as_encoded_bytes().to_vec()
+        } else if metadata.is_file() { std::fs::read(path).unwrap() } else { Vec::new() };
+        out.push((path.strip_prefix(root).unwrap().to_path_buf(), metadata.permissions().mode(), bytes));
+        if metadata.is_dir() {
+            let mut children: Vec<_> = std::fs::read_dir(path).unwrap().map(|entry| entry.unwrap().path()).collect();
+            children.sort();
+            for child in children {
+                if child.file_name().unwrap() != ".git" { visit(root, &child, out); }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    visit(path, path, &mut out);
+    out
+}
+
+fn change_identity_file(root: &std::path::Path, kind: &str, later: bool) {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let path = root.join("f.txt");
+    match kind {
+        "binary" => std::fs::write(path, if later { b"later\0bytes" } else { b"shown\0bytes" }).unwrap(),
+        "mode" | "text-mode" | "added-mode" => {
+            if kind != "mode" { std::fs::write(&path, "shown text\n").unwrap(); }
+            let executable = if kind == "added-mode" { later } else { !later };
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(if executable { 0o755 } else { 0o644 })).unwrap();
+        }
+        "type" => {
+            std::fs::remove_file(&path).unwrap();
+            symlink(if later { "later-target" } else { "shown-target" }, path).unwrap();
+        }
+        "untracked-link" => {
+            if later { std::fs::remove_file(&path).unwrap(); }
+            symlink(if later { "later-target" } else { "missing-target" }, path).unwrap();
+        }
+        "directory" => {
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join(if later { "new-member" } else { "shown-member" }), "member\n").unwrap();
+        }
+        _ => std::fs::write(path, if later { "later text\n" } else { "shown text\n" }).unwrap(),
+    }
+}
+
+fn file_identity_matrix(action: &str, stale: bool, selection: bool) {
+    use magit_lsp::protocol::{PromptValue, Selection, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for kind in ["binary", "mode", "text-mode", "added-mode", "type", "collapsed", "untracked", "untracked-link", "directory"] {
+        let untracked = matches!(kind, "untracked" | "untracked-link" | "directory");
+        if untracked && action == "unstage" { continue; }
+        if untracked && selection { continue; }
+        let initial = if kind == "binary" { "base\0bytes" } else { "base text\n" };
+        let (tmp, _) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+        tmp.git(&["config", "core.fileMode", "true"]);
+        if !untracked {
+            std::fs::write(tmp.path().join("f.txt"), initial).unwrap();
+            tmp.git(&["add", "f.txt"]);
+            tmp.git(&["commit", "-m", "tracked base"]);
+        }
+        change_identity_file(tmp.path(), kind, false);
+        if action == "unstage" { tmp.git(&["add", "f.txt"]); }
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let section = if action == "unstage" { "staged" } else if untracked { "untracked" } else { "unstaged" };
+        let path = if kind == "directory" { "f.txt/" } else { "f.txt" };
+        let mut line = test.goto_file(section, path);
+        if kind == "collapsed" {
+            test.invoke_at("common.hide-section", Cursor { line, column: 0 });
+            line = test.goto_file(section, path);
+            assert!(test.tree().nodes.iter().find(|node| node.start_line == line
+                && node.kind == magit_lsp::tree::NodeKind::File).unwrap().children.is_empty());
+        }
+        let version = test.version();
+        if stale {
+            change_identity_file(tmp.path(), kind, true);
+            if action == "unstage" { tmp.git(&["add", "f.txt"]); }
+        } else {
+            // Single-file authorization must not fingerprint the repository;
+            // unstage must also ignore edits to this file's worktree side.
+            std::fs::write(tmp.path().join("base.txt"), "unrelated edit\n").unwrap();
+            if action == "unstage" { change_identity_file(tmp.path(), kind, true); }
+        }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+        let index_entries = tmp.git(&["ls-files", "--stage", "-z"]);
+        let worktree = identity_worktree(tmp.path());
+        let step = test.session.start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(), command: format!("status.{action}"), version: Some(version),
+            cursor: if selection { None } else { Some(Cursor { line, column: 0 }) },
+            selection: selection.then_some(Selection { start_line: line, end_line: line }), args: None,
+        }).unwrap();
+        let result = match step {
+            Execution::Prompt(prompt) => {
+                assert!(action == "discard" && (!stale || selection), "{kind}/{action}: stale file action prompted");
+                let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap()
+                    else { panic!("discard completed"); };
+                result
+            }
+            Execution::Done(result) => {
+                assert!(stale || action != "discard", "{kind}: fresh discard did not prompt");
+                result
+            }
+        };
+        let messages = message_texts(&result.effects);
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{kind}/{action}: HEAD");
+        if stale {
+            assert!(messages.iter().any(|text| text.contains("changed")), "{kind}/{action}: {messages:?}");
+            assert!(result.render.is_some(), "{kind}/{action}: stale rejection must refresh");
+            assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), index, "{kind}/{action}: index");
+            assert_eq!(identity_worktree(tmp.path()), worktree, "{kind}/{action}: worktree");
+        } else {
+            assert!(!messages.iter().any(|text| text.contains("changed") || text.contains("failed")), "{kind}/{action}: {messages:?}");
+            assert_eq!(std::fs::read_to_string(tmp.path().join("base.txt")).unwrap(), "unrelated edit\n");
+            match action {
+                "stage" => {
+                    assert_eq!(identity_worktree(tmp.path()), worktree, "{kind}: stage worktree");
+                    if kind == "directory" {
+                        assert_eq!(tmp.git(&["show", ":f.txt/shown-member"]), "member\n");
+                        assert_eq!(tmp.git(&["ls-files", "f.txt/"]), "f.txt/shown-member\n");
+                    } else {
+                        let expected = match kind {
+                            "binary" => "shown\0bytes", "mode" => initial,
+                            "type" => "shown-target", "untracked-link" => "missing-target", _ => "shown text\n",
+                        };
+                        assert_eq!(tmp.git(&["show", ":f.txt"]), expected, "{kind}: stage bytes");
+                        let mode = if matches!(kind, "type" | "untracked-link") { "120000" }
+                            else if matches!(kind, "mode" | "text-mode") { "100755" } else { "100644" };
+                        assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]).split_whitespace().next(), Some(mode));
+                    }
+                }
+                "unstage" => {
+                    assert_eq!(identity_worktree(tmp.path()), worktree, "{kind}: unstage worktree");
+                    assert_eq!(tmp.git(&["show", ":f.txt"]), initial, "{kind}: unstage bytes");
+                    assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]).split_whitespace().next(), Some("100644"));
+                    assert_eq!(tmp.git(&["write-tree"]), tmp.git(&["rev-parse", "HEAD^{tree}"]));
+                }
+                "discard" => {
+                    // Git restore legitimately updates the index stat cache,
+                    // but must preserve every staged path/blob/mode.
+                    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index_entries, "{kind}: discard index");
+                    if untracked { assert!(std::fs::symlink_metadata(tmp.path().join("f.txt")).is_err()); }
+                    else {
+                        use std::os::unix::fs::PermissionsExt;
+                        let metadata = std::fs::symlink_metadata(tmp.path().join("f.txt")).unwrap();
+                        assert!(metadata.is_file());
+                        assert_eq!(metadata.permissions().mode() & 0o777, 0o644);
+                        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), initial.as_bytes());
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
+fn complete_file_stage_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("stage", false, selection);
+        file_identity_matrix("stage", true, selection);
+    }
+}
+
+#[test]
+fn complete_file_unstage_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("unstage", false, selection);
+        file_identity_matrix("unstage", true, selection);
+    }
+}
+
+#[test]
+fn complete_file_discard_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("discard", false, selection);
+        file_identity_matrix("discard", true, selection);
+    }
+}
+
+#[test]
+fn file_discard_decline_and_open_prompt_changes_preserve_exact_state() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for kind in ["binary", "mode", "added-mode", "type", "collapsed", "untracked", "untracked-link", "directory"] {
+        for accept in [false, true] {
+            let (tmp, _) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+            tmp.git(&["config", "core.fileMode", "true"]);
+            let untracked = matches!(kind, "untracked" | "untracked-link" | "directory");
+            if !untracked {
+                std::fs::write(tmp.path().join("f.txt"), "base\n").unwrap();
+                tmp.git(&["add", "f.txt"]);
+                tmp.git(&["commit", "-m", "base"]);
+            }
+            change_identity_file(tmp.path(), kind, false);
+            let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+            test.ack();
+            let line = test.goto_file(if untracked { "untracked" } else { "unstaged" },
+                if kind == "directory" { "f.txt/" } else { "f.txt" });
+            let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(), command: "status.discard".into(), version: Some(test.version()),
+                cursor: Some(Cursor { line, column: 0 }), selection: None, args: None,
+            }).unwrap() else { panic!("{kind}: expected confirmation"); };
+            if accept { change_identity_file(tmp.path(), kind, true); }
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+            let worktree = identity_worktree(tmp.path());
+            let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(accept))).unwrap()
+                else { panic!("{kind}: completion"); };
+            if accept { assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")), "{kind}"); }
+            assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{kind}");
+            assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), index, "{kind}");
+            assert_eq!(identity_worktree(tmp.path()), worktree, "{kind}");
+            assert!(!test.session.has_pending_prompt());
+        }
+    }
+}
+
+#[test]
+fn stale_binary_whole_file_selection_validates_all_members_before_mutation() {
+    use magit_lsp::protocol::{PromptValue, Selection, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for action in ["stage", "unstage", "discard"] {
+        let (tmp, _) = RepoFixture::new().commit("init", [("a.bin", "base\0a"), ("b.bin", "base\0b")]).build();
+        write(&tmp.path().join("a.bin"), "shown\0a");
+        write(&tmp.path().join("b.bin"), "shown\0b");
+        if action == "unstage" { tmp.git(&["add", "."]); }
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let section = if action == "unstage" { "staged" } else { "unstaged" };
+        let start_line = test.goto_file(section, "a.bin");
+        let end_line = test.goto_file(section, "b.bin");
+        let version = test.version();
+        write(&tmp.path().join("b.bin"), "later\0b");
+        if action == "unstage" { tmp.git(&["add", "b.bin"]); }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+        let worktree = identity_worktree(tmp.path());
+        let step = test.session.start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(), command: format!("status.{action}"), version: Some(version),
+            cursor: None, selection: Some(Selection { start_line, end_line }), args: None,
+        }).unwrap();
+        let result = match step {
+            Execution::Done(result) => result,
+            Execution::Prompt(prompt) => {
+                let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap()
+                    else { panic!("expected completion"); };
+                result
+            }
+        };
+        assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")), "{action}");
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{action}");
+        assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), index, "{action}");
+        assert_eq!(identity_worktree(tmp.path()), worktree, "{action}");
+    }
+}
+
+#[test]
+fn discarding_an_untracked_directory_symlink_never_deletes_its_target() {
+    use std::os::unix::fs::symlink;
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new().commit("init", [("target/kept", "keep\n")]).build();
+    symlink("target", tmp.path().join("link")).unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("untracked", "link");
+    let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
+        view_id: test.view_id().to_string(), command: "status.discard".into(), version: Some(test.version()),
+        cursor: Some(Cursor { line, column: 0 }), selection: None, args: None,
+    }).unwrap() else { panic!("expected confirmation"); };
+    test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap();
+    assert!(std::fs::symlink_metadata(tmp.path().join("link")).is_err());
+    assert_eq!(std::fs::read_to_string(tmp.path().join("target/kept")).unwrap(), "keep\n");
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn renamed_file_unstage_validates_the_source_index_but_ignores_source_worktree_edits() {
+    for stale in [false, true] {
+        let (tmp, _) = RepoFixture::new().commit("init", [("old.txt", "rename bytes\n")])
+            .rename("old.txt", "new.txt").build();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let line = test.goto_file("staged", "new.txt");
+        let version = test.version();
+        write(&tmp.path().join("old.txt"), "external source\n");
+        if stale { tmp.git(&["add", "old.txt"]); }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+        let worktree = identity_worktree(tmp.path());
+        let result = test.invoke_at_version("status.unstage", version, Some(Cursor { line, column: 0 }), None, None);
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(identity_worktree(tmp.path()), worktree);
+        if stale {
+            assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+            assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), index);
+        } else {
+            assert!(message_texts(&result.effects).is_empty());
+            assert_eq!(tmp.git(&["ls-files"]), "old.txt\n");
+            assert_eq!(tmp.git(&["show", ":old.txt"]), "rename bytes\n");
+            assert_eq!(tmp.git(&["write-tree"]), tmp.git(&["rev-parse", "HEAD^{tree}"]));
+        }
+    }
+}
+
 #[test]
 fn status_command_in_menu_reports_scope_mismatch_without_changing_anything() {
     let (tmp, _repo) = RepoFixture::new()

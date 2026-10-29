@@ -115,7 +115,9 @@ pub struct Node {
     /// Line in the new (worktree) file this node visits, 1-based.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_line: Option<u32>,
-    /// Exact text `common.copy-value` yields for this node, if it is copyable.
+    /// Raw source for hunk/line copies. File rows reserve this slot for an
+    /// internal render identity, omitted from the wire; copying a file always
+    /// uses its structured path, never this payload.
     #[serde(skip_serializing_if = "is_file_identity")]
     pub copy: Option<String>,
     /// Full commit object ID for structured commit selection.

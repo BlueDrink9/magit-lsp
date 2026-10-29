@@ -251,7 +251,8 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
                 return Ok(CommandOutcome::default());
             }
             if let dispatch::Resolution::DiscardFile { path } = &resolution {
-                if !displayed_file_is_current(&repo, &tree, path, "unstaged")? {
+                let section = file_worktree_section(&tree, path);
+                if !displayed_file_is_current(&repo, &tree, path, section)? {
                     ctx.info(errors::HUNK_CHANGED);
                     return Ok(CommandOutcome { refresh: true, ..Default::default() });
                 }
@@ -1580,10 +1581,7 @@ fn stage_or_unstage_at(
         let section = if matches!(resolution, dispatch::Resolution::UnstageFile { .. }) {
             "staged"
         } else {
-            source.nodes.iter().find(|node| node.kind == NodeKind::File
-                && node.path.as_deref() == Some(path)
-                && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
-                .and_then(|node| node.section.as_deref()).unwrap_or("unstaged")
+            file_worktree_section(source, path)
         };
         if !displayed_file_is_current(&repo, source, path, section)? {
             return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
@@ -1598,10 +1596,7 @@ fn stage_or_unstage_at(
             | dispatch::Resolution::DiscardSelection { .. }
     ) {
         if let dispatch::Resolution::DiscardFile { path } = &resolution {
-            let section = source.nodes.iter().find(|node| node.kind == NodeKind::File
-                && node.path.as_deref() == Some(path)
-                && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
-                .and_then(|node| node.section.as_deref()).unwrap_or("unstaged");
+            let section = file_worktree_section(source, path);
             if !displayed_file_is_current(&repo, source, path, section)? {
                 return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
             }
@@ -1661,9 +1656,24 @@ fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &
         .and_then(|json| serde_json::from_str::<crate::git::FileMutationIdentity>(json).ok()) else {
         return Ok(false);
     };
-    let current = repo.file_mutation_identity(path)?;
-    Ok(captured.head == current.head && captured.index == current.index
-        && (section == "staged" || captured.worktree == current.worktree))
+    let current = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), section != "staged")?;
+    fn matches(captured: &crate::git::FileMutationIdentity, current: &crate::git::FileMutationIdentity, staged: bool) -> bool {
+        captured.head == current.head && captured.index == current.index
+            && (staged || captured.worktree == current.worktree)
+            && match (&captured.original, &current.original) {
+                (None, None) => true,
+                (Some((a, before)), Some((b, now))) => a == b && matches(before, now, staged),
+                _ => false,
+            }
+    }
+    Ok(matches(&captured, &current, section == "staged"))
+}
+
+fn file_worktree_section<'a>(tree: &'a Tree, path: &str) -> &'a str {
+    tree.nodes.iter().find(|node| node.kind == NodeKind::File
+        && node.path.as_deref() == Some(path)
+        && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
+        .and_then(|node| node.section.as_deref()).unwrap_or("unstaged")
 }
 
 /// Run a whole-section operation against `repo_path`.

@@ -1447,6 +1447,76 @@ authority. Completed history is in the
 
   - [x] **Native reset-author acceptance (2026-10-29):** Reused Rust acceptance from `9002cbd`; typed `-R` in Neovim Reword (both profiles, both sizes) and VSCode Amend/clean Extend/staged Reword. Exact before/after author/date, message/tree/index/worktree, parents/count and applicable committer-date checks pass; real saved native closure is inspected. `cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check` exited 0. Retained Neovim `reset-author-{option,saved,result}.screen` and `reset-author-evidence.json` under all four `build/ui/commit-head-operations/{standard,vim}-{100x30,80x24}/` variants; VSCode `/tmp/opencode/vscode-review-nmM2OM/` records eight original plus three reset-author cases and 39 named screenshots. Inspected screens/JSON and verified owned cleanup. Failed fixture/assertion/schema attempts are diagnosed in `docs/evidence/commit-head-operations.md`. R-4.1-head-edit's stated typed-operation, guard, Rust state, and both-client native criteria are complete; broad gates remain failed as documented.
 
+#### R-DIFF-SAFETY — Review corrections completed (2026-10-30)
+
+Scope: this commit and its R-DIFF-SAFETY completion claims only. Static source
+and existing test inspection establish the findings below; no tests or native
+UI scenarios were run during this review. Section-header operations deliberately
+resolve to repository-wide `*All*` operations under IMM-6 (§2); explicit
+`status.stage-all`/`status.unstage-all` likewise remain bulk commands. Their
+unrestricted scope is not, by itself, a defect in this commit. Discard's prompt
+fingerprint protects changes after the question opens, not changes between the
+originating render and the invocation. Do not silently turn bulk commands into
+displayed-file selections while addressing these findings.
+
+**Correction evidence (2026-10-30):** Audited `83b0bc0` and `6e45fb5`;
+completed the render identity with SHA-256 non-following worktree snapshots,
+sorted recursive directory membership/content/modes and both rename endpoints.
+The ticket's `status-file-identity.scn` is the implemented name for the
+`file-mutation-safety.scn` originally proposed in the review criteria below.
+Index/HEAD lookup failures no longer silently become empty identities (only
+Git's explicit unborn-HEAD result does). Unstage validates HEAD/index without
+reading/comparing the worktree. Fixed untracked discard continuation's section
+and removal of dangling/directory symlinks without following their targets.
+The server-only file identity remains attached to the retained tree, including
+collapsed rows; wire serialization and file copying never expose it.
+
+Exact verification passed: `cargo test --test commands --test dispatch --test patch_cases --test status_render && scripts/ui run tests/ui/scenarios/status-file-identity.scn && git diff --check`
+(89 Rust tests; native standard/vim, 100x30/80x24; current release binary built
+with `cargo build --release`). Public session matrices exercise fresh/stale
+binary, mode-only, text plus executable-bit addition/removal, type-change and
+collapsed rows for stage/unstage/confirmed discard, both file and whole-file
+visual-selection paths; untracked regular/symlink/directory fresh/stale stage
+and discard; declined and changed-open-prompt discards; stale multi-file binary
+selections; rename-source index changes and unrelated worktree edits. Stale
+cases assert exact HEAD/index bytes and recursive worktree bytes/modes/targets;
+successful discard checks index blobs/modes (Git may update its stat cache).
+Inspected `build/ui/status-file-identity/{standard,vim}-{100x30,80x24}/`
+`untracked-staged.screen`, `collapsed-before-stage.screen`,
+`collapsed-staged.screen`, `stale-mode-rejected.screen` and
+`untracked-discarded.screen`. Actual `s` keys stage untracked/collapsed rows;
+an exact captured-version native request rejects an added executable bit,
+asserting index/HEAD/worktree preservation; native confirmation deletes only
+the targeted untracked file. Runner-owned sessions/servers were stopped;
+process inspection found none remaining. The initial native attempt required
+acknowledging Neovim's multi-line warning before its idle wait; corrected and
+rerun across all four combinations.
+
+**Limits:** This is render-bound revalidation, not a filesystem transaction
+against edits racing after validation. Regular files, symlinks and directory
+rows are covered; unsupported special files fail snapshot capture rather than
+being opened or followed. Permission checks are conservative (not only Git's
+executable bit). Explicit IMM-6 section/all operations remain deliberately
+bulk; hunk/line identity and exact request-version semantics are unchanged.
+No new Plain protocol, VSCode native acceptance or broad regression-gate
+closure is claimed; the previously authorized unrelated gate deferrals remain.
+
+- [x] **[P0] Validate complete tracked-file mutation identity, not just visible hunk IDs** (`src/commands.rs:253-261,1575-1595,1644-1658,1715-1719`)
+  - **Problem:** `displayed_file_is_current()` ignores diff headers and binary content: `FileLayout::from_diff()` accepts header-only diffs (`src/patch.rs:288-315`), so a binary row compares two empty hunk lists and passes even after its bytes change. A text file with unchanged hunks plus a newly added executable-bit change also passes; file discard then captures the already-changed repository at prompt creation and can destroy work never represented by the originating render. Conversely, unchanged collapsed text rows are deliberately rejected by the new test, and unchanged regular-file/symlink type changes always fail the single-layout parser, regressing IMM-6's whole-file actions and the existing whole-file-only type-change contract (`tests/patch_cases.rs:194-237`).
+  - **Why it matters:** Correctness/data loss: hunk equality is neither sufficient proof of a whole-file mutation's identity nor a necessary condition for a valid whole-file action. Binary and mode-only rows do **not** always reject; the zero-hunk success is the safety hole.
+  - **Change:** Capture a backend-owned, per-file mutation identity alongside the status/render snapshot, retain it with the originating tree through folds, retained versions and `PromptAction::Discard`, and compare it with fresh backend state before whole-file stage/unstage/discard. Include the relevant before/after content, modes/types and rename endpoints; detect binary changes without requiring parsed text hunks. Keep this server-internal (no new client targeting protocol). Use the same complete-file validation for `SelectionOp::WholeFile` in `execute_displayed_selection()` rather than leaving its equivalent hunk-only check. Base authorization on the captured file snapshot, not `file.children`, so unchanged collapsed and multi-section type-change rows still work. Replace `collapsed_file_row_cannot_stage_its_hidden_patch_body` with unchanged-success and post-render-change-rejection regressions; retain the existing stale textual-patch tests. Keep hunk/line actions content-addressed and tolerant of unrelated hunk shifts.
+  - **Done when:** Public `TestSession` command tests demonstrate that post-render binary-byte changes and executable-bit additions to an otherwise identical text patch reject stage/unstage/discard as applicable, refresh with a readable message, and preserve exact pre-invocation HEAD/index/worktree bytes and modes (discard must reject even when the later confirmation would say yes). An invalid whole-file member prevents any file in a visual selection from mutating. Positive tests prove unchanged binary, mode-only, collapsed text and regular-file/symlink type-change rows can stage/unstage/discard as applicable, with discard confirmation preserved. An unrelated file edit does not invalidate a valid single-file action; existing harmless-hunk-shift tests pass. Add a focused native Neovim `tests/ui/scenarios/file-mutation-safety.scn` showing successful folded-file staging and stale-file rejection, with text/structured and Git-state assertions.
+  - **Constraints:** Do not weaken `parse_file_diff()`'s refusal to treat a multi-section type change as one text patch. Do not reconstruct the original identity from fresh Git state at invocation or prompt creation, hash the whole repository per row, parse rendered text, change bulk-command semantics, or narrow the documented whole-file contract to expanded text files. Preserve inherited release edits; use no images or screenshots.
+  - **Verification:** `cargo test --test commands --test patch_cases && cargo build --release && scripts/ui run tests/ui/scenarios/file-mutation-safety.scn && git diff --check`. Inspect only focused text/structured evidence and ensure owned UI/server processes stop.
+
+- [x] **[P1] Preserve untracked-file staging and confirmed discard in the new guard** (`src/commands.rs:1575-1594,1644-1653,253-254`)
+  - **Problem:** Both an untracked file's `StageFile` and its `DiscardFile` are validated against the hardcoded `"unstaged"` section. The source row exists only in `"untracked"`, so the guard returns false before `git add` or even the discard question; correcting only the section string is insufficient because ordinary `git diff` has no patch for an untracked file (`src/status_view.rs:49-87`; `src/dispatch.rs:152-175`; `src/git.rs:774-785,936-941`).
+  - **Why it matters:** Correctness: fresh, legitimate untracked file actions now always report a misleading stale-hunk warning. The existing untracked test exercises only unstage, so it cannot catch this regression.
+  - **Change:** Do after: **Validate complete tracked-file mutation identity, not just visible hunk IDs**. Preserve the originating file row's section in file-action preparation and discard continuation; validate untracked rows with a backend-owned untracked identity captured in that render, not the tracked-diff parser. Extend the same internal identity mechanism to untracked bytes/type (and membership/content for directory rows returned by the existing status listing). An unchanged untracked row must reach existing `stage_file()` or confirmed `discard_file()`; an external change since rendering must refresh/reject with no mutation. Preserve the existing untracked-unstage informational no-op.
+  - **Done when:** Public `TestSession` tests stage a fresh untracked file from its file row and assert exact index contents; confirmed discard removes only the targeted untracked path, while declined discard changes nothing. Post-render file-content changes, and new members in an untracked directory row, reject without staging/deleting anything. Changes during an open discard prompt still reject via the existing continuation guard. The untracked-unstage test remains green. Extend `tests/ui/scenarios/file-mutation-safety.scn` to press the actual stage key on an untracked file row and verify that it moves to Staged without the stale-hunk warning, retaining text/structured and Git-state evidence.
+  - **Constraints:** Do not bypass stale-state validation for all untracked files, substitute the untracked section's bulk command for a file action, change unrelated dispatch semantics, add a client-side workaround, or modify inherited release edits. No images or screenshots.
+  - **Verification:** `cargo test --test commands --test patch_cases && cargo build --release && scripts/ui run tests/ui/scenarios/file-mutation-safety.scn && git diff --check`; inspect focused text/structured evidence and verify owned-process cleanup.
+
 ### Active bugfix / UX
 
 - [x] **[P1] BUG-STATUS-FOLD — Fold a hunk from its body**
@@ -1611,7 +1681,7 @@ deferred. Release requires R-4.1a, R-7.3a, R-CLIENT-SPEC and R-PLAIN-GATE.
   - [x] **Per-session conversion/lifecycle repair (2026-10-29).** Brief registry lookups clone repository handles across command, watcher, notification, config and commit-completion paths; repository construction happens outside the registry. Published snapshots serve positional/resync reads (including the existing initial-unacked fallback) and prompt routing without locking another repository. Same-view blocked-Git resync and B's resize/resync/outline/unstage while A is gated pass; ordered same-repo mutations remain covered. Shutdown drains/joins watchers outside their registry, breaking the callback→Shared→watcher ownership cycle that retained the writer and caused shutdown timeouts; late watcher starts are refused after terminal cleanup. Progress is client-gated, with no server capability claim or production delay hooks. Exact focused verification exited 0: `cargo test --lib server:: && make test-rust FILTER="--test server_async --test editor_bridge --test plain_harness" && git diff --check` (11 unit + 27 async + 26 editor bridge + 12 harness = 76 tests). Real-file cancellation/terminal and 96d42bb outbound/progress regressions pass. Process inspection after verification found no magit-lsp server/editor/askpass/commit processes. **Broad gate remains failed, user-deferred:** `make test-rust` stopped at `errors::normal_and_piped_apply_failures_keep_original_details` (`tests/errors.rs:524`; `build/test-logs/rust.rUL2j1`). Explicit `make test-rust FILTER="--test errors --test log_commands --test views --no-fail-fast"` reconfirmed that failure, three log_commands failures (`current_log_opens_and_quit_returns_to_status`, `log_menu_opens_log_and_q_returns_to_status_in_each_profile`, `log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scope`) and `views::staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk` (`build/test-logs/rust.puCxlW`). Those unrelated files/release edits were not repaired; no broad/native-UI acceptance or larger same-session ack/resize redesign is claimed. This completes the parent's minimal scoped acceptance, superseding the earlier slice's pending-conversion status only.
 - [x] **R-PLAIN-SYNC — Document store and sync mode (2026-10-29).** URI-keyed atomic sequential ranged/rangeless updates negotiate UTF-8/16/32, validate Unicode/CRLF boundaries and permit skipped increasing versions. Invalid/stale/malformed or registry-rejected changes retain accepted snapshots and require a newer full replacement or validated reopen before synchronized confirmation; versionless save text cannot replace live content or repair/bypass the barrier. Commit registry security/version policy stays separate; failed native close detaches for same-run reopen. Verified: `make test-rust FILTER="--test plain_sync --test editor_bridge" && make test-lua && git diff --check` (6 sync + 27 editor tests). Native `scripts/ui run tests/ui/scenarios/commit-real-file.scn tests/ui/scenarios/commit-confirm.scn` passed across standard/vim at 100x30/80x24; inspected Save/Discard/recovered-close screens in `build/ui/commit-real-file/{standard,vim}-{100x30,80x24}/`. Only byte-exact rustfmt-of-HEAD spillover was restored; inherited release/config/fake-Git edits were retained.
   - [x] **VSCode scripted regression fixture repair.** The earlier integration attempt failed because the empty-capability fake received no progress, so `idle()` returned before Discard confirmation and progress cancellation had no token. The earlier attribution of a user-authorized upcoming-overhaul deferral was unsupported and is withdrawn. The integration-local client now explicitly advertises the work-done progress it implements, acknowledges/validates unique create→begin→end lifecycles, binds each commit to its observed active token, and waits for its actual draft queue and terminal progress. Saved Discard, dirty Save, Cancel and progress-cancel HEAD/index assertions remain substantive. `npm --prefix clients/vscode run test:integration && git diff --check` passed, including 240 real-Git selection cases. No shared initialization helper or production capability/synchronization/native behavior changed. This is scripted VSCode regression evidence, not native VSCode/full-regression acceptance; existing user-authorized broad errors/log/views/UI gate deferrals remain unchanged.
-- [x] **R-DIFF-SAFETY — Displayed-patch identity and filtered-mutation prerequisite.** Existing roadmap ownership/scope unchanged; R-PLAIN-TARGET depends on it. Verified request-tree identity, stale/filtered file mutations, multi-file atomic validation, and harmless hunk shifts with focused real-Git tests.
+- [x] **R-DIFF-SAFETY — Displayed-patch identity and filtered-mutation prerequisite.** Existing roadmap ownership/scope unchanged; R-PLAIN-TARGET depends on it. **Review corrections completed 2026-10-30:** full tracked/untracked file identity and confirmed-discard availability are verified by the 89-test focused gate and native `status-file-identity` scenario in both profiles/sizes. See the two completed R-DIFF-SAFETY review tasks in §7 for exact evidence and limits; collapsed rows succeed unchanged and reject post-render changes.
 - [ ] **R-PLAIN-TARGET — Content-addressed action targets.** Revalidate node identity plus mutation hash against fresh backend state; stale means refresh/no mutation; cover rich and Plain paths. Verify: `make test-rust FILTER="--test commands"` plus patch proptests.
 - [ ] **R-PLAIN-REPO — Repository/document resolution.** Resolve explicit/workspace/document context without guessing among ambiguous candidates; exclude presentation docs from untracked/watcher noise. Verify: `make test-rust FILTER="--test plain_repo"`.
 - [ ] **R-PLAIN-RENDER — Bootstrap and versioned applyEdit pipeline.** Authoritative tree text, minimal encoding-correct edits, serialized/coalesced apply, echo reconciliation, divergence repair and stale retry. Verify: `make test-rust FILTER="--test plain_render"`.
@@ -2074,6 +2144,8 @@ for the affected behavior; tests are named with each slice or shared rule.
       filtered-mutation prerequisite for status-diff actions. *Done when:*
       mutations target the displayed patch identity, not a fresh reconstructed
       selection. *Verify:* identity and stale/filtered patch tests.
+      **Review corrections completed 2026-10-30:** tracked/untracked whole-file
+      matrices and native status-file-identity pass; see §7 evidence and limits.
 - [ ] R-5.5 — M. Depends on: R-DIFF-SAFETY. Diff argument plumbing across
       views, including context/whitespace/rename/word arguments; wire context
       configuration rather than hardcoded `-U3`. *Done when:* options propagate

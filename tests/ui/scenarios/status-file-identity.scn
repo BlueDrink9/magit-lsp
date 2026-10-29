@@ -1,0 +1,51 @@
+# Native keys, server-owned collapsed rows and exact-version stale authorization.
+# Every combination runs in its owned fixture and is stopped by the runner.
+fixture: clean
+---
+sh: printf 'new file\n' > new.txt; sed -i '3s/$/ SHOWN/' f.txt; git rev-parse HEAD > .git/identity-head
+keys standard: g
+keys vim: g r
+wait screen contains "? new.txt"
+goto "? new.txt"
+keys: s
+wait screen contains "A new.txt"
+expect screen contains "Staged changes (1)"
+expect no_message /changed since|failed|E5108/
+sh: test "$(git show :new.txt)" = 'new file' && test "$(git show :f.txt)" = "$(git show HEAD:f.txt)" && test "$(git rev-parse HEAD)" = "$(cat .git/identity-head)"
+snapshot: untracked-staged
+goto "M f.txt"
+keys: Tab
+wait
+expect screen not-contains "+line3 SHOWN"
+snapshot: collapsed-before-stage
+keys: s
+wait screen contains "Staged changes (2)"
+sh: test "$(git show :f.txt)" = "$(cat f.txt)" && test -z "$(git diff -- f.txt)" && test "$(git rev-parse HEAD)" = "$(cat .git/identity-head)"
+snapshot: collapsed-staged
+goto "M f.txt"
+keys: u
+wait screen contains "Unstaged changes (1)"
+goto "M f.txt"
+# Write and submit in one native event-loop turn: watcher refreshes cannot
+# silently substitute a new version/row for this explicitly captured request.
+keys: ":lua local v=require('magit-lsp.view').current(); local p={viewId=v.id,version=v.version,command='status.stage',cursor={line=vim.api.nvim_win_get_cursor(0)[1]-1,column=0}}; local i=vim.fn.readfile('.git/index','b'); local h=vim.fn.system({'git','rev-parse','HEAD'}); assert((vim.uv or vim.loop).fs_chmod('f.txt',493)); local r=vim.lsp.get_client_by_id(v.client_id):request_sync('view/invoke',p,10000); assert(r and not r.err); local changed=false; for _,e in ipairs(r.result.effects) do if e.type=='message' and e.text:find('changed since',1,true) then changed=true end end; assert(changed,'missing stale rejection'); assert(vim.deep_equal(i,vim.fn.readfile('.git/index','b'))); assert(h==vim.fn.system({'git','rev-parse','HEAD'})); assert((vim.uv or vim.loop).fs_stat('f.txt').mode%512==493); require('magit-lsp.view').apply_effects(r.result.effects,v)" Enter
+# The warning is deliberately multi-line; acknowledge Neovim's native
+# hit-enter message before waiting for the next interaction.
+keys: Enter
+wait
+sh: test "$(git show :f.txt)" = "$(git show HEAD:f.txt)" && grep -q 'line3 SHOWN' f.txt && test -x f.txt && test "$(git rev-parse HEAD)" = "$(cat .git/identity-head)"
+expect no_message /E5108|Error executing lua|missing stale rejection/
+snapshot: stale-mode-rejected
+sh: printf 'discard only me\n' > delete.txt
+wait screen contains "? delete.txt"
+goto "? delete.txt"
+keys standard: Delete
+keys vim: x
+wait prompt
+snapshot: untracked-discard-confirm
+keys: 2 Enter
+wait
+sh: test ! -e delete.txt && test "$(cat new.txt)" = 'new file' && test "$(git show :new.txt)" = 'new file' && test -x f.txt && test "$(git rev-parse HEAD)" = "$(cat .git/identity-head)"
+expect screen not-contains "? delete.txt"
+expect no_message /E5108|Error executing lua|failed/
+snapshot: untracked-discarded
