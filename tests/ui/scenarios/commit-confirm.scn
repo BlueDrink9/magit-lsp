@@ -9,7 +9,7 @@
 # status-scoped), so the declined branch asserts the status view directly and
 # reopens the menu with `c` for the accepted branch. After Yes the commit
 # editor opens: `wait` cannot be used while the editor bridge holds the commit,
-# so the scenario waits for the visible instruction and cancels with `q`.
+# so the scenario waits for the visible instruction and explicitly aborts.
 fixture: modified-two-files
 ---
 wait
@@ -33,7 +33,9 @@ snapshot: accepted
 keys: Enter
 wait screen contains "Please enter the commit message"
 snapshot: editor
-keys: q
+keys: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
+wait screen contains "git commit"
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
 wait
 keys standard: g
 keys vim: g r

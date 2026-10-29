@@ -574,6 +574,18 @@ local function on_wiped(key)
   if not view or view.closing then
     return
   end
+  if view.document then
+    -- Retain the run and its last full snapshot until terminal progress. A
+    -- rejected saved-file close must still have a recovery owner.
+    if view.on_closed then view.on_closed(view) end
+    hooks.schedule(function()
+      if view.win and vim.api.nvim_win_is_valid(view.win)
+        and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
+        restore_document(view)
+      end
+    end)
+    return
+  end
   M.views[key] = nil
   M.pending_render[key] = nil
   M.pending_keymap[key] = nil
@@ -582,19 +594,6 @@ local function on_wiped(key)
   remove_from_order(key)
   if not view.document then
     hooks.view_close(key)
-  end
-  if view.document then
-    if view.on_closed then
-      view.on_closed(view)
-    end
-    -- Native deletion chooses a replacement after BufDelete/BufWipeout.
-    hooks.schedule(function()
-      if view.win and vim.api.nvim_win_is_valid(view.win)
-        and not view_for_buf(vim.api.nvim_win_get_buf(view.win)) then
-        restore_document(view)
-      end
-    end)
-    return
   end
   local c = client(view.client_id)
   if c then
@@ -807,6 +806,9 @@ function M.close(id, focus_previous_window, client_id)
   local win = view.win
   local restored = false
   if view.document then
+    -- Only explicit/terminal teardown reaches here. Native dirty refusal must
+    -- remain untouched, but accepted confirm/abort may discard this buffer.
+    if vim.api.nvim_buf_is_valid(view.buf) then vim.bo[view.buf].modified = false end
     restored = restore_document(view)
   end
   if view.placement == 'main' and view.previous then

@@ -3,6 +3,7 @@ local view = require('magit-lsp.view')
 local hooks = require('magit-lsp.hooks')
 local M = {}
 local progress = {}
+local attach
 
 local function live(record)
   return record and view.views[record.key] == record and not record.closing
@@ -131,39 +132,6 @@ function M.confirm(key)
   if begin(record) then finish(record, 'confirm') end
 end
 
---- Explicit user close selects Save/Discard/Cancel before any native teardown.
----@param key string
-function M.close(key)
-  local record = view.views[key]
-  if not begin(record) then return end
-  local function choose(choice)
-    if not live(record) then return end
-    if choice == 'Save' then
-      checkpoint(record, function() finish(record, 'normal-close') end)
-    elseif choice == 'Discard' then
-      -- Even when discarding, a rejected sync must not release the helper.
-      if record.sync_error then
-        fail(record, record.sync_error)
-      else
-        finish(record, 'normal-close')
-      end
-    else
-      unlock(record)
-    end
-  end
-  if record.text == record.saved_text and not record.sync_error then
-    finish(record, 'normal-close')
-  else
-    hooks.prompt_started()
-    vim.ui.select({ 'Save', 'Discard', 'Cancel' }, {
-      prompt = 'Close commit draft: Save, Discard changes, or Cancel?',
-    }, function(choice)
-      hooks.prompt_finished()
-      choose(choice)
-    end)
-  end
-end
-
 --- Abort explicitly without sending a close that might race as confirmation.
 ---@param key string
 function M.cancel(key)
@@ -179,7 +147,10 @@ end
 --- Ordinary buffer teardown confirms saved disk text by the accepted LSP assumption.
 ---@param record table
 function M.on_closed(record)
-  if record.closing or record.disconnected or record.detached then return end
+  if record.closing or record.disconnected or record.detached or vim.v.exiting ~= vim.NIL then return end
+  -- Capture edits even when native teardown precedes the scheduled on_lines
+  -- flush. Saved-file confirmation still reads disk, never this snapshot.
+  M.flush(record)
   record.detached = true
   notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
 end
@@ -223,6 +194,17 @@ end
 function M.on_error(notice, client_id)
   for _, record in pairs(view.views) do
     if record.document and record.client_id == client_id and record.uri == notice.uri then
+      if record.detached and not vim.api.nvim_buf_is_valid(record.buf) then
+        local value, saved, version = record.text, record.saved_text, record.saved_version
+        record.win = M.place(record)
+        record.saved_text, record.saved_version = saved, version
+        replace(record, value)
+        vim.bo[record.buf].filetype = 'gitcommit'
+        vim.bo[record.buf].modified = true
+        record.detached = false
+        attach(record)
+        view.apply_keymap(record.keymap, record.client_id)
+      end
       fail(record, notice.message)
     end
   end
@@ -235,7 +217,7 @@ function M.disconnected(client_id)
     if record.document and record.client_id == client_id then
       record.disconnected = true
       fail(record, 'server disconnected; copy this draft before restarting')
-      vim.bo[record.buf].modified = true
+      if vim.api.nvim_buf_is_valid(record.buf) then vim.bo[record.buf].modified = true end
     end
   end
 end
@@ -250,7 +232,7 @@ function M.place(record)
   vim.fn.bufload(buf)
   record.buf = buf
   vim.bo[buf].buftype = ''
-  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].swapfile = false
   vim.bo[buf].fixendofline = false
   replace(record, record.text)
@@ -290,7 +272,7 @@ local function keymap_options(record)
   local commands = {
     ['common.confirm'] = function() M.confirm(record.key) end,
     ['common.cancel'] = function() M.cancel(record.key) end,
-    ['common.quit'] = function() M.close(record.key) end,
+    ['common.quit'] = function() vim.cmd.bdelete() end,
   }
   for _, command in ipairs({ 'commit-message.history-prev', 'commit-message.history-next' }) do
     commands[command] = function() M.history(record.key, command) end
@@ -323,6 +305,11 @@ function M.open(effect, source)
   notify(record, 'textDocument/didOpen', { textDocument = {
     uri = record.uri, languageId = 'gitcommit', version = record.version, text = record.text,
   } })
+  attach(record)
+  return record
+end
+
+attach = function(record)
   vim.api.nvim_buf_attach(record.buf, false, {
     on_lines = function()
       if record.applying or record.closing then return end
@@ -339,29 +326,10 @@ function M.open(effect, source)
   })
   vim.api.nvim_create_autocmd('BufUnload', {
     buffer = record.buf, callback = function()
-      -- Unload is ambiguous: let an in-progress wipe/delete finish and cancel
-      -- through on_closed, and cancel a plain unload once the buffer is free.
+      -- Native teardown confirms disk bytes, except during editor shutdown.
       if not record.closing and not record.disconnected then M.on_closed(record) end
     end,
   })
-  -- Command-line maps are buffer-local, not global command overrides. Native
-  -- API closes and commands executed by plugins remain ambiguous and cancel.
-  vim.keymap.set('c', '<CR>', function()
-    if vim.fn.getcmdtype() == ':' then
-      local ok, cmd = pcall(vim.api.nvim_parse_cmd, vim.fn.getcmdline(), {})
-      if ok and cmd.nextcmd == '' and #cmd.args == 0
-        and (cmd.cmd == 'quit' or cmd.cmd == 'close' or cmd.cmd == 'bdelete'
-          or cmd.cmd == 'bwipeout' or cmd.cmd == 'wq' or cmd.cmd == 'xit') then
-        hooks.schedule(function()
-          if cmd.cmd == 'wq' or cmd.cmd == 'xit' then M.confirm(record.key)
-          else M.close(record.key) end
-        end)
-        return '<C-U><C-C>'
-      end
-    end
-    return '<CR>'
-  end, { buffer = record.buf, expr = true, replace_keycodes = true })
-  return record
 end
 
 return M

@@ -2386,11 +2386,14 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     CALLER_WIDTH, CALLER_HEIGHT = vim.api.nvim_win_get_width(0), vim.api.nvim_win_get_height(0)
     CALLER_COUNT = #vim.api.nvim_list_wins()
     CHECK_WINDOW = function(draft)
-      assert(vim.api.nvim_get_current_win() == CALLER_WIN)
-      assert(#vim.api.nvim_list_wins() == CALLER_COUNT)
-      assert(vim.api.nvim_win_get_width(0) == CALLER_WIDTH)
-      assert(vim.api.nvim_win_get_height(0) == CALLER_HEIGHT)
-      if not draft then assert(vim.api.nvim_get_current_buf() == CALLER_BUF) end
+      if draft then
+        assert(vim.api.nvim_get_current_win() == CALLER_WIN)
+        assert(#vim.api.nvim_list_wins() == CALLER_COUNT)
+        assert(vim.api.nvim_win_get_width(0) == CALLER_WIDTH)
+        assert(vim.api.nvim_win_get_height(0) == CALLER_HEIGHT)
+      else
+        assert(not vim.api.nvim_buf_is_valid(DOC.buf))
+      end
     end
     DOC = OPEN_DRAFT('draft', 'α\n\n')
     CHECK_WINDOW(true)
@@ -2487,7 +2490,7 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
   MiniTest.expect.equality(child.lua_get('DISCONNECTED'), true)
 end
 
-T['real managed commit save stays editing and normal close selects acknowledged checkpoint'] = function()
+T['native commit buffer close refuses dirty text and recovers a rejected saved close'] = function()
   setup_child()
   git_out({ 'add', 'f.txt' })
   child.lua([[
@@ -2495,33 +2498,29 @@ T['real managed commit save stays editing and normal close selects acknowledged 
     VIEW.invoke('commit.create', {}, STATUS.key)
     assert(vim.wait(5000, function() return VIEW.current().document == true end, 10))
     DOC = VIEW.current()
-    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'managed β', '', 'body' })
-    vim.bo[DOC.buf].endofline = false
+    assert(vim.bo[DOC.buf].bufhidden == 'wipe')
+    assert(vim.fn.maparg('<CR>', 'c') == '')
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'native checkpoint' })
+    local ok, err = pcall(vim.cmd, 'bdelete')
+    assert(not ok and err:match('E89'), err)
+    assert(VIEW.current() == DOC and vim.bo[DOC.buf].modified)
     vim.cmd.write()
-    assert(vim.wait(5000, function() return not DOC.busy end, 10))
-    assert(not DOC.sync_error, DOC.sync_error)
-    SAVE_STATE = { open = VIEW.current() == DOC, modified = vim.bo[DOC.buf].modified,
-      saved = DOC.saved_text, attached = vim.lsp.buf_is_attached(DOC.buf,DOC.client_id) }
+    PATH = vim.uri_to_fname(DOC.uri)
+    assert(vim.uv.fs_rename(PATH, PATH .. '.original'))
+    assert(vim.uv.fs_symlink(PATH .. '.original', PATH))
+    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'recover unsaved text' })
+    vim.cmd('bdelete!')
+    assert(vim.wait(5000, function() return DOC.sync_error ~= nil end, 10))
+    assert(VIEW.current() == DOC and vim.api.nvim_buf_is_valid(DOC.buf))
+    assert(vim.bo[DOC.buf].modifiable and vim.bo[DOC.buf].modified)
+    assert(vim.api.nvim_buf_get_lines(DOC.buf, 0, -1, false)[1] == 'recover unsaved text')
+    assert(vim.uv.fs_unlink(PATH))
+    assert(vim.uv.fs_rename(PATH .. '.original', PATH))
+    EDIT.cancel(DOC.key)
+    assert(vim.wait(5000, function() return require('magit-lsp.debug').idle() end, 10))
+    assert(vim.api.nvim_get_current_buf() == STATUS.buf)
   ]])
   MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%s' }), 'init\n')
-  MiniTest.expect.equality(child.lua_get('SAVE_STATE'), {
-    open = true, modified = false, saved = 'managed β\n\nbody', attached = false,
-  })
-  child.lua([[
-    vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'not submitted' })
-    vim.ui.select = function(items, _, callback)
-      assert(vim.deep_equal(items, { 'Save', 'Discard', 'Cancel' }))
-      callback('Cancel')
-    end
-    EDIT.close(DOC.key)
-    CANCEL_CLOSE = VIEW.current() == DOC and not DOC.busy and vim.bo[DOC.buf].modifiable
-    vim.ui.select = function(_, _, callback) callback('Discard') end
-    EDIT.close(DOC.key)
-    assert(vim.wait(5000, function() return VIEW.views[DOC.key] == nil end, 10))
-    assert(vim.wait(5000, function() return require('magit-lsp.debug').idle() end, 10))
-  ]])
-  MiniTest.expect.equality(child.lua_get('CANCEL_CLOSE'), true)
-  MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%B' }), 'managed β\n\nbody\n\n')
 end
 
 T['descriptor queues, deferred renders and resync preserve client identity and text mode'] = function()

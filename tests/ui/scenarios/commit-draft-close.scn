@@ -1,51 +1,29 @@
-# Typed :q/:close/:bd arbitrate dirty intent before teardown. Ordinary API
-# deletion confirms saved disk bytes too; the unchanged empty initial template
-# in that case below lets Git abort without submitting unsaved text.
+# Native quit of a file while another real window keeps the editor alive.
+# Last-window :q/:wq exits Neovim and cancels via shutdown, not confirmation.
 fixture: staged-one-file
 ---
+keys: :vsplit Enter
 keys: c
 wait
 keys: c
 wait screen contains "Please enter the commit message"
-keys: g g d G i "Clean native close"
+keys: g g d G i "Native saved message"
 keys: Escape
-keys: :write Enter
-keys: ":lua local r=require('magit-lsp.view').current(); assert(vim.wait(2000,function() return not r.busy end,10)); assert(not r.sync_error and not vim.bo[r.buf].modified); print('Saved before native close')" Enter
-wait screen contains "Saved before native close"
-snapshot: clean-saved
 keys: :q Enter
+wait screen contains "No write since last change"
+snapshot: dirty-native-refusal
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and vim.bo[r.buf].modified); print('Dirty draft retained')" Enter
+wait screen contains "Dirty draft retained"
+keys: :wq Enter
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
 wait screen contains "Committed"
 wait
-sh: test "$(git log -1 --format=%B)" = 'Clean native close'; printf '\nsecond\n' >> f.txt; git add f.txt
+snapshot: native-save-and-close
+sh: test "$(git log -1 --format=%B)" = 'Native saved message'; printf '\nsecond\n' >> f.txt; git add f.txt
 keys standard: g
 keys vim: g r
 wait
-keys: c
-wait
-keys: c
-wait screen contains "Please enter the commit message"
-keys: g g d G i "Dirty close saved"
-keys: Escape
-keys: :close Enter
-wait prompt
-expect screen contains "Save"
-expect screen contains "Discard"
-expect screen contains "Cancel"
-snapshot: dirty-close-choice
-keys: 3 Enter
-wait screen contains "Dirty close saved"
-keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and not r.busy and vim.bo[r.buf].modified); print('Cancel retained draft')" Enter
-wait screen contains "Cancel retained draft"
-snapshot: dirty-cancel-retained
-keys: :close Enter
-wait prompt
-keys: 1 Enter
-wait screen contains "Committed"
-wait
-sh: test "$(git log -1 --format=%B)" = 'Dirty close saved'; printf '\nthird\n' >> f.txt; git add f.txt
-keys standard: g
-keys vim: g r
-wait
+keys: :vsplit Enter
 keys: c
 wait
 keys: c
@@ -53,17 +31,14 @@ wait screen contains "Please enter the commit message"
 keys: g g d G i "Prior checkpoint"
 keys: Escape
 keys: :write Enter
-keys: ":lua local r=require('magit-lsp.view').current(); assert(vim.wait(2000,function() return not r.busy end,10)); assert(not r.sync_error and r.saved_text=='Prior checkpoint\n')" Enter
-keys: g g d G i "Hidden unsaved must not commit"
+keys: g g d G i "Unsaved must not commit"
 keys: Escape
-keys: :bd Enter
-wait prompt
-snapshot: dirty-discard-choice
-keys: 2 Enter
+snapshot: unsaved-after-checkpoint
+keys: :q! Enter
 wait screen contains "Committed"
 wait
-snapshot: discarded-to-checkpoint
-sh: test "$(git log -1 --format=%B)" = 'Prior checkpoint'; printf '\nfourth\n' >> f.txt; git add f.txt; git rev-parse HEAD > .git/close-before; git write-tree > .git/close-index; git hash-object f.txt > .git/close-worktree
+snapshot: native-discard-to-saved
+sh: test "$(git log -1 --format=%B)" = 'Prior checkpoint'; printf '\nthird\n' >> f.txt; git add f.txt; git rev-parse HEAD > .git/close-before; git write-tree > .git/close-index; git hash-object f.txt > .git/close-worktree
 keys standard: g
 keys vim: g r
 wait
@@ -73,24 +48,14 @@ keys: c
 wait screen contains "Please enter the commit message"
 keys: i "Explicitly aborted"
 keys: Escape
-keys standard: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
-keys vim: Z Q
+keys: ":lua local v=require('magit-lsp.view'); local r=v.current(); assert(r.previous_buf==v.views[r.base].buf, 'draft did not replace status'); assert(vim.api.nvim_buf_is_valid(r.previous_buf))" Enter
+keys: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
 wait screen contains "git commit"
 sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
 wait
 snapshot: explicitly-aborted
-keys: c
-wait
-keys: c
-wait screen contains "Please enter the commit message"
-keys: i "Ambiguous API deletion"
-keys: Escape
-keys: ":lua local r=require('magit-lsp.view').current(); vim.api.nvim_buf_delete(r.buf,{force=true})" Enter
-wait screen contains "git commit"
-sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
-wait
-expect screen contains "Staged changes (1)"
-snapshot: api-close-saved-empty-aborted-by-git
+keys: ":lua local v=require('magit-lsp.view'); local r=v.status(); assert(vim.api.nvim_get_current_buf()==r.buf, vim.inspect({current=vim.api.nvim_get_current_buf(),status=r.buf,win=r.win,buffers=vim.api.nvim_list_bufs()})); print('Status restored')" Enter
+wait screen contains "Status restored"
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)"
 keys: c
 wait
@@ -99,9 +64,8 @@ wait screen contains "Please enter the commit message"
 keys: g g d G i "Recovered failed close"
 keys: Escape
 keys: :write Enter
-keys: ":lua local r=require('magit-lsp.view').current(); assert(vim.wait(2000,function() return not r.busy end,10)); assert(not r.sync_error)" Enter
 sh: mv .git/COMMIT_EDITMSG .git/draft-original; printf 'sentinel\n' > .git/draft-sentinel; ln -s draft-sentinel .git/COMMIT_EDITMSG
-keys: :q Enter
+keys: :bdelete Enter
 wait screen contains "commit draft:"
 snapshot: failed-close-retained
 sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
@@ -109,12 +73,10 @@ keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r
 wait screen contains "Recoverable draft retained"
 snapshot: recovery-text
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(cat .git/draft-sentinel)" = sentinel; rm .git/COMMIT_EDITMSG; mv .git/draft-original .git/COMMIT_EDITMSG
-keys: :write Enter
-keys: ":lua local r=require('magit-lsp.view').current(); assert(vim.wait(2000,function() return not r.busy end,10)); assert(not r.sync_error and not vim.bo[r.buf].modified)" Enter
-keys: :q Enter
+keys: :write! Enter
+keys: :bdelete Enter
 wait screen contains "Committed"
 wait
-expect screen contains "Staged changes (0)"
 snapshot: recovered-close-committed
-sh: test "$(git log -1 --format=%B)" = 'Recovered failed close' && test "$(git rev-list --count HEAD)" = 5 && test -z "$(git status --porcelain)"
+sh: test "$(git log -1 --format=%B)" = 'Recovered failed close' && test "$(git rev-list --count HEAD)" = 4 && test -z "$(git status --porcelain)"
 expect no_message /E5108|Error executing lua|unexpected draft/
