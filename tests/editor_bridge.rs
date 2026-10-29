@@ -1075,7 +1075,8 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     let repo = json!(tmp.path().to_string_lossy());
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
     let status = open_status(&mut server, 2, &repo);
 
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
@@ -1143,7 +1144,8 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     let repo = json!(tmp.path().to_string_lossy());
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
     let status = open_status(&mut server, 2, &repo);
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let mut token = None;
@@ -1260,7 +1262,8 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
             std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let mut server = TestServer::spawn(&[]);
-        server.initialize(json!({}));
+        server.auto_respond_to_progress_create();
+        server.initialize(json!({"window":{"workDoneProgress":true}}));
         let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
         server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
         let mut token = None;

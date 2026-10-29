@@ -159,6 +159,18 @@ struct ProgressRun {
     visible: bool,
 }
 
+/// Removes an outbound request if its waiter future is abandoned.
+struct PendingOutbound {
+    outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>>,
+    key: String,
+}
+
+impl Drop for PendingOutbound {
+    fn drop(&mut self) {
+        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.key);
+    }
+}
+
 impl Shared {
     fn new(
         config: Arc<ConfigService>,
@@ -196,18 +208,27 @@ impl Shared {
         let id = RequestId::from(format!("magit-lsp/outbound/{next}"));
         let key = serde_json::to_string(&id).map_err(|e| Error::new(e.to_string()))?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone(), tx);
-        if self.sender.send(Message::Request(Request::new(id, method.to_string(), params))).is_err() {
-            self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        let mut outbound = self.outbound.lock().unwrap_or_else(|p| p.into_inner());
+        if self.closing.load(Ordering::SeqCst) {
             return Err(Error::new("client request transport is closed"));
         }
+        outbound.insert(key.clone(), tx);
+        if self.sender.send(Message::Request(Request::new(id, method.to_string(), params))).is_err() {
+            outbound.remove(&key);
+            return Err(Error::new("client request transport is closed"));
+        }
+        drop(outbound);
         Ok((key, rx))
     }
 
     /// Await a registered request, removing it on response, timeout or cancellation.
     async fn await_outbound(&self, key: String, rx: tokio::sync::oneshot::Receiver<Response>) -> Result<Response> {
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx).await;
-        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        let _guard = PendingOutbound { outbound: self.outbound.clone(), key };
+        self.await_outbound_for(rx, std::time::Duration::from_secs(30)).await
+    }
+
+    async fn await_outbound_for(&self, rx: tokio::sync::oneshot::Receiver<Response>, duration: std::time::Duration) -> Result<Response> {
+        let response = tokio::time::timeout(duration, rx).await;
         match response {
             Ok(Ok(response)) => match &response.response_result {
                 Ok(_) => Ok(response),
@@ -407,6 +428,7 @@ impl Shared {
 
     /// Stop new work and cancel every operation that can wait on the client.
     fn terminal_cleanup(&self) {
+        self.closing.store(true, Ordering::SeqCst);
         self.cancel_outbound();
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
@@ -2106,6 +2128,27 @@ fn from_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T> {
 #[cfg(test)]
 mod commit_tests {
     use super::*;
+
+    #[test]
+    fn abandoned_outbound_waiter_removes_its_pending_entry() {
+        let outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        outbound.lock().unwrap().insert("\"request\"".into(), tx);
+        {
+            let _guard = PendingOutbound { outbound: outbound.clone(), key: "\"request\"".into() };
+            assert_eq!(outbound.lock().unwrap().len(), 1);
+        }
+        assert!(outbound.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn terminal_outbound_cleanup_discards_late_replies() {
+        let outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        outbound.lock().unwrap().insert("\"id\"".into(), tx);
+        outbound.lock().unwrap().clear();
+        assert!(rx.blocking_recv().is_err());
+    }
 
     #[test]
     fn commit_edit_releases_registry_and_repository_config_together() {

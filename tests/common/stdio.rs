@@ -22,6 +22,8 @@ pub struct TestServer {
     pub sent: Vec<Value>,
     /// Maximum wait for each incoming frame.
     pub recv_timeout: Duration,
+    /// Automatically answer progress-create requests when explicitly enabled.
+    pub auto_respond_progress_create: bool,
 }
 
 impl TestServer {
@@ -66,6 +68,7 @@ impl TestServer {
             notifications: Vec::new(),
             sent: Vec::new(),
             recv_timeout: Duration::from_secs(10),
+            auto_respond_progress_create: false,
             stderr: log,
             stderr_reader: Some(stderr_reader),
         }
@@ -130,7 +133,7 @@ impl TestServer {
                 )
             }
         };
-        if message["method"] == "window/workDoneProgress/create" {
+        if self.auto_respond_progress_create && message["method"] == "window/workDoneProgress/create" {
             let response = json!({"jsonrpc":"2.0", "id":message["id"], "result":null});
             self.send(response);
         }
@@ -152,12 +155,14 @@ impl TestServer {
     pub fn initialize(&mut self, capabilities: Value) -> Value {
         let mut message = initialize_message();
         message["params"]["capabilities"] = capabilities;
-        if message["params"]["capabilities"].get("window").is_none() {
-            message["params"]["capabilities"]["window"] = json!({"workDoneProgress": true});
-        }
         self.send(message);
         self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
         self.response_with_id(1)
+    }
+
+    /// Enable automatic responses for progress-create requests in this client.
+    pub fn auto_respond_to_progress_create(&mut self) {
+        self.auto_respond_progress_create = true;
     }
 
     /// Collect incoming notifications until a 400ms quiet window.

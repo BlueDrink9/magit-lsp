@@ -383,7 +383,8 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
 
     let gate = GatedGit::arm("add");
     let mut server = spawn_with_env(&gate.child_env());
-    server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
     let view_id = open_view(&mut server, 2, &repo);
 
     server.send(json!({
@@ -459,7 +460,7 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
     let mut server = spawn_with_env(&[]);
-    server.initialize(json!({}));
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
     let view = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
 
@@ -512,7 +513,8 @@ fn mutations_for_one_repository_apply_in_request_order() {
     // so the second mutation is provably submitted while the first one runs.
     let gate = GatedGit::arm("add");
     let mut server = spawn_with_env(&gate.child_env());
-    let response = server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -1555,7 +1557,8 @@ fn a_mutation_reports_work_done_progress() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -1647,7 +1650,8 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     install_failing_pre_commit_hook(&tmp);
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -1740,7 +1744,8 @@ fn a_cancel_notification_aborts_a_slow_mutation() {
     let gate = GatedGit::arm("add");
     let repo = repo_param(tmp.path());
     let mut server = spawn_with_env(&gate.child_env());
-    let response = server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -1855,7 +1860,8 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     }
 
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    server.initialize(json!({"window":{"workDoneProgress":true}}));
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let mut edit = None;
