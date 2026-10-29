@@ -73,14 +73,14 @@ Commands inherit support from the effects they emit. A CI test (R-PLAIN-PROMPT) 
 
 ## 3. Order of work
 
-1. R-EDIT-REAL parent acceptance (production cutover implemented), plus in parallel R-PLAIN-DOC (complete), R-PLAIN-HARNESS and R-PLAIN-PREREQ. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
+1. R-ARGS, then R-4.1-head-edit (amend, extend and reword), must complete before R-EDIT-REAL parent acceptance (production cutover implemented); also in parallel R-PLAIN-DOC (complete), R-PLAIN-HARNESS and R-PLAIN-PREREQ. R-EDIT-REAL and R-PLAIN-PREREQ both touch `src/server.rs`; coordinate merges.
 2. R-PLAIN-SYNC (after R-EDIT-REAL), then R-PLAIN-CORE.
 3. R-DIFF-SAFETY, then R-PLAIN-TARGET. R-PLAIN-REPO after R-PLAIN-CORE.
 4. R-PLAIN-RENDER, then R-PLAIN-ACTIONS, then R-PLAIN-STACK, R-PLAIN-VIS and R-PLAIN-PROMPT (parallel), then R-PLAIN-SELECT.
 5. R-PLAIN-DRAFT (after R-EDIT-REAL and R-PLAIN-ACTIONS).
 6. R-PLAIN-E2E, R-PLAIN-HELIX, R-PLAIN-SPEC, then R-PLAIN-GATE.
 
-The existing release-slice chain (R-ARGS, R-SELECT-OPS, R-EDIT-KINDS, R-OP-STATE, R-TODO, then R-4.1a and R-7.3a) is unchanged and can run in parallel. R-PLAIN-GATE re-runs those slices through Plain mode. The release sprint (R-REL-1 to R-REL-4) starts after R-PLAIN-GATE.
+R-ARGS is moved ahead of R-EDIT-REAL; R-4.1-head-edit follows it and precedes parent acceptance. The remaining release-slice chain (R-SELECT-OPS, R-EDIT-KINDS, R-OP-STATE, R-TODO, then R-4.1a and R-7.3a) is unchanged and can run in parallel. R-PLAIN-GATE re-runs those slices through Plain mode. The release sprint (R-REL-1 to R-REL-4) starts after R-PLAIN-GATE.
 
 Verification follows AGENTS.md: narrowest relevant check per task; full `make test` at R-EDIT-REAL, R-PLAIN-CORE and R-PLAIN-GATE.
 
@@ -183,8 +183,8 @@ integration and native Codium runs. The canonical Neovim scenario is now
 `commit-real-file.scn` (both profiles at 100x30 and 80x24), retaining empty/template/
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
-scenarios remain. **Still missing:** amend command and unchanged-message amend
-parity coverage, policy resolution for the ring differences documented in
+scenarios remain. **Still missing:** R-ARGS then R-4.1-head-edit (amend, extend
+and reword) before parent acceptance, policy resolution for ring differences documented in
 `docs/evidence/commit-message-ring-parity.md`, broader native/adversarial and
 full-phase gates. Inherited full `make test` fails
 `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` at 477,
