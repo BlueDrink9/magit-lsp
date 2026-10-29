@@ -203,7 +203,7 @@ impl Shared {
     }
 
     /// Register before sending so a fast response cannot arrive before its waiter exists.
-    fn register_outbound(&self, method: &str, params: Value) -> Result<(String, tokio::sync::oneshot::Receiver<Response>)> {
+    fn register_outbound(&self, method: &str, params: Value) -> Result<(PendingOutbound, tokio::sync::oneshot::Receiver<Response>)> {
         let next = self.next_outbound.fetch_add(1, Ordering::Relaxed) + 1;
         let id = RequestId::from(format!("magit-lsp/outbound/{next}"));
         let key = serde_json::to_string(&id).map_err(|e| Error::new(e.to_string()))?;
@@ -218,16 +218,15 @@ impl Shared {
             return Err(Error::new("client request transport is closed"));
         }
         drop(outbound);
-        Ok((key, rx))
+        Ok((PendingOutbound { outbound: self.outbound.clone(), key }, rx))
     }
 
     /// Await a registered request, removing it on response, timeout or cancellation.
-    async fn await_outbound(&self, key: String, rx: tokio::sync::oneshot::Receiver<Response>) -> Result<Response> {
-        let _guard = PendingOutbound { outbound: self.outbound.clone(), key };
-        self.await_outbound_for(rx, std::time::Duration::from_secs(30)).await
+    async fn await_outbound(&self, pending: PendingOutbound, rx: tokio::sync::oneshot::Receiver<Response>) -> Result<Response> {
+        self.await_outbound_for(pending, rx, std::time::Duration::from_secs(30)).await
     }
 
-    async fn await_outbound_for(&self, rx: tokio::sync::oneshot::Receiver<Response>, duration: std::time::Duration) -> Result<Response> {
+    async fn await_outbound_for(&self, _pending: PendingOutbound, rx: tokio::sync::oneshot::Receiver<Response>, duration: std::time::Duration) -> Result<Response> {
         let response = tokio::time::timeout(duration, rx).await;
         match response {
             Ok(Ok(response)) => match &response.response_result {
@@ -399,17 +398,22 @@ impl Shared {
             let token = token.clone();
             let command = command.to_string();
             tokio::spawn(async move {
-                let waiting = shared.register_outbound("window/workDoneProgress/create", serde_json::json!({ "token": token }));
-                let Ok((key, rx)) = waiting else { return; };
-                if shared.await_outbound(key, rx).await.is_err() { return; }
-                let mut runs = shared.progress.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(run) = runs.get_mut(&token) {
-                    run.visible = true;
-                    let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
-                }
+                shared.create_progress(&sender, &token, &command).await;
             });
         }
         (token, handle)
+    }
+
+    /// Publish progress only after successful creation, while its owner is live.
+    async fn create_progress(&self, sender: &mpsc::UnboundedSender<Message>, token: &str, command: &str) {
+        let Ok((pending, rx)) = self.register_outbound("window/workDoneProgress/create", serde_json::json!({ "token": token })) else { return; };
+        if self.await_outbound(pending, rx).await.is_err() { return; }
+        let mut runs = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+        if self.closing.load(Ordering::SeqCst) { return; }
+        if let Some(run) = runs.get_mut(token) {
+            run.visible = true;
+            let _ = sender.send(Message::Notification(Notification::new("$/progress".to_string(), serde_json::json!({ "token": token, "value": { "kind": "begin", "title": "Git", "message": command, "cancellable": true } }))));
+        }
     }
 
     /// Finish the progress sequence started by [`Self::begin_progress`].
@@ -428,13 +432,13 @@ impl Shared {
 
     /// Stop new work and cancel every operation that can wait on the client.
     fn terminal_cleanup(&self) {
-        self.closing.store(true, Ordering::SeqCst);
-        self.cancel_outbound();
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+            // Serialize the terminal boundary with publication of begin.
             self.closing.store(true, Ordering::SeqCst);
             progress.values().cloned().collect::<Vec<_>>()
         };
+        self.cancel_outbound();
         for run in runs {
             run.cancel.cancel();
             if let Some(edit_id) = run.edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
@@ -2129,25 +2133,200 @@ fn from_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T> {
 mod commit_tests {
     use super::*;
 
-    #[test]
-    fn abandoned_outbound_waiter_removes_its_pending_entry() {
-        let outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, _rx) = tokio::sync::oneshot::channel();
-        outbound.lock().unwrap().insert("\"request\"".into(), tx);
-        {
-            let _guard = PendingOutbound { outbound: outbound.clone(), key: "\"request\"".into() };
-            assert_eq!(outbound.lock().unwrap().len(), 1);
-        }
-        assert!(outbound.lock().unwrap().is_empty());
+    fn test_shared() -> (Shared, mpsc::UnboundedReceiver<Message>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "").unwrap();
+        let config = ConfigService::load(LoadOptions { config_path: Some(path), ..Default::default() }).unwrap();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (Shared::new(Arc::new(config), None, sender), receiver)
+    }
+
+    async fn poll_pending<F: std::future::Future>(mut future: std::pin::Pin<&mut F>) {
+        std::future::poll_fn(|cx| {
+            assert!(future.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        }).await;
+    }
+
+    fn request_id(receiver: &mut mpsc::UnboundedReceiver<Message>) -> RequestId {
+        let Message::Request(request) = receiver.try_recv().expect("outbound request") else { panic!("expected request") };
+        request.id
+    }
+
+    #[tokio::test]
+    async fn outbound_resolves_out_of_order_and_ignores_unknown_duplicate_and_late_ids() {
+        let (shared, mut messages) = test_shared();
+        let (first, rx1) = shared.register_outbound("first", Value::Null).unwrap();
+        let (second, rx2) = shared.register_outbound("second", Value::Null).unwrap();
+        let id1 = request_id(&mut messages);
+        let id2 = request_id(&mut messages);
+        assert_ne!(id1, id2);
+        shared.resolve_outbound(Response::new_ok(RequestId::from("unknown".to_string()), Value::Null));
+        assert_eq!(shared.outbound.lock().unwrap().len(), 2);
+        shared.resolve_outbound(Response::new_ok(id2.clone(), serde_json::json!("second result")));
+        shared.resolve_outbound(Response::new_err(id2, -32000, "duplicate".into()));
+        assert_eq!(shared.outbound.lock().unwrap().len(), 1);
+        assert_eq!(shared.await_outbound(second, rx2).await.unwrap().response_result.unwrap(), serde_json::json!("second result"));
+        shared.resolve_outbound(Response::new_err(id1.clone(), -32000, "declined".into()));
+        assert!(shared.await_outbound(first, rx1).await.unwrap_err().to_string().contains("declined"));
+        shared.resolve_outbound(Response::new_ok(id1, Value::Null));
+        assert!(shared.outbound.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn outbound_timeout_and_unpolled_await_remove_registered_entries() {
+        let (shared, mut messages) = test_shared();
+        let (pending, rx) = shared.register_outbound("timeout", Value::Null).unwrap();
+        let id = request_id(&mut messages);
+        assert!(shared.await_outbound_for(pending, rx, std::time::Duration::ZERO).await.unwrap_err().to_string().contains("timed out"));
+        assert!(shared.outbound.lock().unwrap().is_empty());
+        shared.resolve_outbound(Response::new_ok(id, Value::Null));
+        let (pending, rx) = shared.register_outbound("unpolled", Value::Null).unwrap();
+        drop(shared.await_outbound(pending, rx));
+        assert!(shared.outbound.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn aborted_outbound_await_removes_registered_entry() {
+        let (shared, _messages) = test_shared();
+        let worker = shared.clone();
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (pending, rx) = worker.register_outbound("aborted", Value::Null).unwrap();
+            ready.send(()).unwrap();
+            worker.await_outbound(pending, rx).await
+        });
+        started.await.unwrap();
+        assert_eq!(shared.outbound.lock().unwrap().len(), 1);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(shared.outbound.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn terminal_cleanup_rejects_registration_and_releases_waiter() {
+        let (shared, mut messages) = test_shared();
+        let (pending, rx) = shared.register_outbound("waiting", Value::Null).unwrap();
+        let id = request_id(&mut messages);
+        shared.terminal_cleanup();
+        assert!(shared.await_outbound(pending, rx).await.unwrap_err().to_string().contains("disconnected"));
+        shared.resolve_outbound(Response::new_ok(id, Value::Null));
+        assert!(shared.register_outbound("too late", Value::Null).is_err());
+        assert!(messages.try_recv().is_err());
+        assert!(shared.outbound.lock().unwrap().is_empty());
     }
 
     #[test]
-    fn terminal_outbound_cleanup_discards_late_replies() {
-        let outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        outbound.lock().unwrap().insert("\"id\"".into(), tx);
-        outbound.lock().unwrap().clear();
-        assert!(rx.blocking_recv().is_err());
+    fn registration_racing_terminal_cleanup_leaves_no_pending_work() {
+        for _ in 0..32 {
+            let (shared, _messages) = test_shared();
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            std::thread::scope(|scope| {
+                let worker = shared.clone();
+                let barrier2 = barrier.clone();
+                let registration = scope.spawn(move || {
+                    barrier2.wait();
+                    worker.register_outbound("racing", Value::Null)
+                });
+                barrier.wait();
+                shared.terminal_cleanup();
+                if let Ok((_pending, mut rx)) = registration.join().unwrap() {
+                    assert!(matches!(rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed)));
+                }
+            });
+            assert!(shared.outbound.lock().unwrap().is_empty());
+            assert!(shared.register_outbound("after shutdown", Value::Null).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_success_waits_for_create_and_ends_once() {
+        let (shared, mut messages) = test_shared();
+        let (token, _) = shared.begin_progress(&shared.sender, "stage", None, None);
+        let create = shared.create_progress(&shared.sender, &token, "stage");
+        tokio::pin!(create);
+        poll_pending(create.as_mut()).await;
+        let id = request_id(&mut messages);
+        assert!(messages.try_recv().is_err(), "no begin before reply");
+        shared.resolve_outbound(Response::new_ok(id, Value::Null));
+        create.await;
+        shared.end_progress(&shared.sender, &token);
+        shared.end_progress(&shared.sender, &token);
+        for phase in ["begin", "end"] {
+            let Message::Notification(notice) = messages.try_recv().unwrap() else { panic!("expected progress") };
+            assert_eq!(notice.method, "$/progress");
+            assert_eq!(notice.params["token"], token);
+            assert_eq!(notice.params["value"]["kind"], phase);
+        }
+        assert!(messages.try_recv().is_err());
+        assert!(shared.outbound.lock().unwrap().is_empty());
+        assert!(shared.progress.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn completed_or_terminal_progress_never_begins_after_create_reply() {
+        for terminal in [false, true] {
+            let (shared, mut messages) = test_shared();
+            let (token, _) = shared.begin_progress(&shared.sender, "stage", None, None);
+            let create = shared.create_progress(&shared.sender, &token, "stage");
+            tokio::pin!(create);
+            poll_pending(create.as_mut()).await;
+            let id = request_id(&mut messages);
+            // Resolve before cleanup but leave the awakened task unpolled: this
+            // is the success-response/terminal race, not just a closed receiver.
+            shared.resolve_outbound(Response::new_ok(id, Value::Null));
+            if terminal { shared.terminal_cleanup(); }
+            else { shared.end_progress(&shared.sender, &token); }
+            create.await;
+            shared.end_progress(&shared.sender, &token);
+            assert!(messages.try_recv().is_err(), "no orphan begin/end");
+            assert!(shared.outbound.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_or_disconnected_create_keeps_tracking_without_visible_progress() {
+        for disconnected in [false, true] {
+            let (shared, mut messages) = test_shared();
+            let (token, _) = shared.begin_progress(&shared.sender, "stage", None, None);
+            let create = shared.create_progress(&shared.sender, &token, "stage");
+            tokio::pin!(create);
+            poll_pending(create.as_mut()).await;
+            let id = request_id(&mut messages);
+            if disconnected { shared.terminal_cleanup(); }
+            else { shared.resolve_outbound(Response::new_err(id, -32000, "declined".into())); }
+            create.await;
+            assert!(shared.progress.lock().unwrap().contains_key(&token));
+            assert!(!shared.progress.lock().unwrap()[&token].visible);
+            shared.end_progress(&shared.sender, &token);
+            assert!(messages.try_recv().is_err());
+            assert!(shared.outbound.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn disabled_progress_keeps_terminal_ownership_without_wire_messages() {
+        let (shared, mut messages) = test_shared();
+        let (token, cancel) = shared.begin_progress(&shared.sender, "stage", None, Some("repo"));
+        assert!(!cancel.is_cancelled());
+        assert!(shared.progress.lock().unwrap().contains_key(&token));
+        assert!(!shared.progress.lock().unwrap()[&token].visible);
+        shared.terminal_cleanup();
+        assert!(cancel.is_cancelled());
+        shared.end_progress(&shared.sender, &token);
+        shared.end_progress(&shared.sender, &token);
+        assert!(shared.progress.lock().unwrap().is_empty());
+        assert!(shared.outbound.lock().unwrap().is_empty());
+        assert!(messages.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_outbound_send_removes_registration() {
+        let (shared, messages) = test_shared();
+        drop(messages);
+        assert!(shared.register_outbound("disconnected", Value::Null).is_err());
+        assert!(shared.outbound.lock().unwrap().is_empty());
     }
 
     #[test]

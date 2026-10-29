@@ -1066,6 +1066,60 @@ fn a_cancel_creates_no_commit() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
+    for capabilities in [json!({}), json!({"window":{"workDoneProgress":false}}), json!({"window":{"workDoneProgress":true}})] {
+        for disconnect in [false, true] {
+            let (tmp, _) = staged_repo();
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let staged = tmp.git(&["ls-files", "--stage", "-z"]);
+            let tree = tmp.git(&["write-tree"]);
+            let worktree = read(&tmp.path().join("f.txt"));
+            let mut server = TestServer::spawn(&[]);
+            server.initialize(capabilities.clone());
+            let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+            server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
+            let enabled = capabilities["window"]["workDoneProgress"] == true;
+            let mut create = None;
+            let mut edit = None;
+            while edit.is_none() || (enabled && create.is_none()) {
+                let message = server.recv_raw();
+                if message["method"] == "window/workDoneProgress/create" { create = Some(message.clone()); }
+                if let Some(found) = edit_document(&message) { edit = Some(found); }
+                server.notifications.push(message);
+            }
+            // The real Git/editor worker is waiting, but no visible progress is
+            // needed for ownership, intake, or terminal cancellation.
+            server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync","params":{"viewId":status}}));
+            assert_eq!(server.response_with_id(5)["result"]["viewId"], status);
+            assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"));
+            assert_eq!(server.notifications.iter().filter(|m| m["method"] == "window/workDoneProgress/create").count(), usize::from(enabled));
+            if disconnect {
+                server.close_stdin();
+            } else {
+                server.send(json!({"jsonrpc":"2.0","id":90,"method":"shutdown","params":null}));
+                assert_eq!(server.response_with_id(90)["result"], Value::Null);
+                if let Some(create) = create {
+                    server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
+                    server.send(json!({"jsonrpc":"2.0","id":91,"method":"view/resync","params":{"viewId":status}}));
+                    assert!(server.response_with_id(91)["error"].is_object());
+                }
+                assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"), "terminal emitted orphan progress");
+                server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+            }
+            let (exit, remaining) = server.finish_with_messages(Duration::from_secs(10));
+            assert!(exit.success());
+            assert!(!remaining.iter().any(|m| m["method"] == "$/progress"), "orphan progress through EOF: {remaining:?}");
+            assert!(!remaining.iter().any(|m| m["method"] == "window/workDoneProgress/create"), "late create through EOF: {remaining:?}");
+            assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+            assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
+            assert_eq!(tmp.git(&["write-tree"]), tree);
+            assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn r_edit_2_progress_cancel_during_editor_releases_once() {
     let (tmp, _repo) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);

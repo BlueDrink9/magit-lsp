@@ -487,6 +487,76 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+#[test]
+fn absent_or_false_progress_capability_emits_no_create_or_progress() {
+    for capabilities in [json!({}), json!({"window":{"workDoneProgress":false}})] {
+        let (tmp, _) = init_repo();
+        write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+        let gate = GatedGit::arm("add");
+        let mut server = spawn_with_env(&gate.child_env());
+        server.initialize(capabilities);
+        let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+        server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
+        gate.wait_entered();
+        server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
+        assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
+        assert!(!gate.is_released());
+        gate.release();
+        assert_eq!(server.response_with_id(3)["result"]["effects"], json!([]));
+        shutdown_and_exit(&mut server);
+        assert!(!server.notifications.iter().any(|m| progress_event(m).is_some()), "{:?}", server.notifications);
+        assert!(hunk_count(&cached_diff(tmp.path())) >= 1);
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
+#[test]
+fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsive() {
+    for reply in ["success", "error", "never", "after-completion"] {
+        let (tmp, _) = init_repo();
+        write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+        let gate = GatedGit::arm("add");
+        let mut server = spawn_with_env(&gate.child_env());
+        // Raw receive must permit withholding even with the convenience pump on.
+        server.auto_respond_to_progress_create();
+        server.initialize(json!({"window":{"workDoneProgress":true}}));
+        let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+        server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
+        let create = loop {
+            let message = server.recv_raw();
+            assert!(message["method"] != "$/progress", "begin before create success: {message}");
+            if message["method"] == "window/workDoneProgress/create" { break message; }
+            server.notifications.push(message);
+        };
+        gate.wait_entered();
+        server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
+        assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
+        assert!(!gate.is_released());
+        assert!(!server.sent.iter().any(|m| m["id"] == create["id"]), "raw receive replied");
+        assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"));
+        match reply {
+            "success" => {
+                server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
+                let begin = server.recv();
+                assert_eq!(progress_event(&begin), Some((create["params"]["token"].as_str().unwrap().into(), "begin".into())));
+                server.notifications.push(begin);
+            }
+            "error" => server.send(json!({"jsonrpc":"2.0","id":create["id"],"error":{"code":-32000,"message":"declined"}})),
+            _ => {}
+        }
+        gate.release();
+        assert_eq!(server.response_with_id(3)["result"]["effects"], json!([]));
+        if reply == "after-completion" {
+            server.send(json!({"jsonrpc":"2.0","id":create["id"],"result":null}));
+        }
+        shutdown_and_exit(&mut server);
+        let phases: Vec<_> = server.notifications.iter().filter_map(progress_event).map(|(_, phase)| phase).collect();
+        assert_eq!(phases, if reply == "success" { vec!["begin", "end"] } else { vec![] }, "{reply}");
+        assert!(hunk_count(&cached_diff(tmp.path())) >= 1, "{reply}");
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
 /// The `(token, phase)` of a work-done progress message, if it is one.
 ///
 /// Records every phase of the LSP work-done handshake: `create`, then the

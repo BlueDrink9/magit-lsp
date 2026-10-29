@@ -117,6 +117,16 @@ impl TestServer {
 
     /// Receive the next frame with a bounded wait.
     pub fn recv(&mut self) -> Value {
+        let message = self.recv_raw();
+        if self.auto_respond_progress_create && message["method"] == "window/workDoneProgress/create" {
+            let response = json!({"jsonrpc":"2.0", "id":message["id"], "result":null});
+            self.send(response);
+        }
+        message
+    }
+
+    /// Receive a frame without replying, even when automatic replies are enabled.
+    pub fn recv_raw(&mut self) -> Value {
         let message = match self.responses.recv_timeout(self.recv_timeout) {
             Ok(Ok(message)) => message,
             Ok(Err(error)) => panic!("stdout is not clean LSP framing: {error}"),
@@ -133,10 +143,6 @@ impl TestServer {
                 )
             }
         };
-        if self.auto_respond_progress_create && message["method"] == "window/workDoneProgress/create" {
-            let response = json!({"jsonrpc":"2.0", "id":message["id"], "result":null});
-            self.send(response);
-        }
         message
     }
 
@@ -222,7 +228,12 @@ impl TestServer {
     }
 
     /// Close input, wait within the deadline, and validate remaining frames.
-    pub fn finish(mut self, timeout: Duration) -> ExitStatus {
+    pub fn finish(self, timeout: Duration) -> ExitStatus {
+        self.finish_with_messages(timeout).0
+    }
+
+    /// Finish and return every unread frame through EOF for terminal assertions.
+    pub fn finish_with_messages(mut self, timeout: Duration) -> (ExitStatus, Vec<Value>) {
         self.close_stdin();
         let status = self.wait_timeout(timeout);
         self.reader
@@ -235,10 +246,8 @@ impl TestServer {
             .expect("stderr reader")
             .join()
             .expect("stderr thread");
-        while let Ok(message) = self.responses.try_recv() {
-            message.expect("stdout is clean LSP framing through EOF");
-        }
-        status
+        let messages = self.responses.try_iter().map(|message| message.expect("stdout is clean LSP framing through EOF")).collect();
+        (status, messages)
     }
 }
 
