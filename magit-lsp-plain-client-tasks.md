@@ -187,9 +187,21 @@ criteria are complete in both clients (see TASKS §7 and `docs/evidence/commit-h
 `commit-real-file.scn` (both profiles at 100x30 and 80x24), retaining empty/template/
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
-scenarios remain. **Still missing:** broader native/adversarial acceptance,
-lifecycle/platform limits, policy resolution for ring differences documented in
-`docs/evidence/commit-message-ring-parity.md`, and full-phase gates. Historical
+scenarios remain. **Remaining checklist:** native duplicate/late delivery and
+multi-root isolation are not evidenced; same-URI fresh-run/stale-run handling is
+covered by `clients/vscode/test/e2e/real-file-lifecycle.js`. Rust unreadable saved
+file and exact-version rejection/recovery are covered by
+`tests/editor_drafts.rs::saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read`
+and `confirm_requires_exact_current_version_and_writes_without_a_checkpoint`,
+but lack native-client acceptance. Native saved-close/dirty choice is covered by
+`tests/ui/scenarios/commit-real-file.scn` and
+`clients/vscode/test/e2e/real-file-native.js`. Multi-root, duplicate/late native
+signals, and broader dirty shutdown/reload/workspace-change/cross-build and
+last-window exit remain unverified; scoped clean Codium observer results and
+Neovim extra-window close evidence are not universal lifecycle guarantees.
+Ring differences documented in `docs/evidence/commit-message-ring-parity.md`
+remain a recorded policy question, not an instruction to change the retained
+policy. Full-phase gates are not green. Historical
 phase failures: `make test` failed at
 `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` line 477
 (`build/test-logs/rust.P4rm85`); no-fail-fast Rust also failed `errors`,
@@ -197,10 +209,16 @@ phase failures: `make test` failed at
 was 42 PASS/6 FAIL (`build/test-logs/ui-test.R6BK0X`): log-select, log-view,
 process-log and three obsolete commit scenarios. The three commit scenarios
 subsequently passed focused repair; the other UI failures remain out of scope.
-`make ui-tour` was not run because the chained gate stopped on failure. Parent
-remains unchecked; no green full gate.
+Fresh `make ui-tour` succeeded; inspected `menu-commit`, `clean-commit-menu` and
+`clean-commit` excerpts in `build/ui/tour.md`. This is tour evidence only; parent
+remains unchecked and no full gate is green.
 
-**Native acceptance:** duplicate/late signals; reused `COMMIT_EDITMSG` with fresh run IDs; multi-root/session isolation; unreadable saved file; version mismatch; empty/comments/configured-template semantics; shutdown/reload/workspace change; saved close versus explicit exact-version confirmation; native Discard versus explicit Abort. Retain historical spike evidence without claiming fresh results.
+**Native acceptance still requested:** add native duplicate/late signal and
+multi-root/session-isolation cases, plus native unreadable-file/version-mismatch
+recovery. Preserve separate shutdown/reload/workspace-change assertions only for
+specified clients/platforms; do not infer universal lifecycle guarantees. Existing
+Rust coverage is not a substitute for these native cases. Exact existing coverage
+and limits are listed above.
 
 **Acceptance:**
 - Save alone never commits.
