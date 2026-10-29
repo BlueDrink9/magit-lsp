@@ -141,24 +141,11 @@ pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> O
 
 /// Offer a content-addressed target for an exact inclusive selection in a render.
 pub fn offer_selection_target(tree: &crate::tree::Tree, command: &str, start: u32, end: u32) -> Option<ActionTarget> {
-    use crate::tree::NodeKind;
     if !content_command(command) { return None; }
     let (start, end) = (start.min(end), start.max(end));
     let section = if command == "status.unstage" { "staged" } else { "unstaged" };
     if tree.line_nodes.get(start as usize).and_then(|line| line.section.as_deref()) != Some(section) { return None; }
-    let mut members = Vec::new();
-    for node in tree.nodes.iter().filter(|node| node.section.as_deref() == Some(section)) {
-        let included = match node.kind {
-            NodeKind::File => start as usize <= node.start_line && node.start_line <= end as usize,
-            NodeKind::Hunk => start as usize <= node.end_line && node.start_line <= end as usize,
-            _ => false,
-        };
-        if included {
-            let mut target = offer_target(tree, command, &node.id)?;
-            target.selection = None;
-            members.push((node.id.clone(), target.mutation_hash));
-        }
-    }
+    let members = selection_members(tree, command, start, end, section)?;
     if members.is_empty() { return None; }
     let node_id = members[0].0.clone();
     let intent = SelectionIntent { start_line: start, end_line: end };
@@ -167,26 +154,34 @@ pub fn offer_selection_target(tree: &crate::tree::Tree, command: &str, start: u3
     Some(ActionTarget { node_id, mutation_hash: hash, selection: Some(intent) })
 }
 
+/// Derive the exact constituent content targets bound by a displayed selection.
+fn selection_members(tree: &crate::tree::Tree, command: &str, start: u32, end: u32, section: &str) -> Option<Vec<(String, String)>> {
+    use crate::tree::NodeKind;
+    tree.nodes.iter().filter(|node| {
+        if node.section.as_deref() != Some(section) { return false; }
+        let included = match node.kind {
+            NodeKind::File => start as usize <= node.start_line && node.start_line <= end as usize,
+            NodeKind::Hunk => start as usize <= node.end_line && node.start_line <= end as usize,
+            _ => false,
+        };
+        included
+    }).map(|node| {
+        let mut target = offer_target(tree, command, &node.id)?;
+        target.selection = None;
+        Some((node.id.clone(), target.mutation_hash))
+    }).collect()
+}
+
 /// Re-derive an offered target from fresh Git state without using fresh rows.
 pub fn target_is_current(repo: &GitRepo, tree: &crate::tree::Tree, command: &str, target: &ActionTarget) -> Result<bool> {
     if let Some(intent) = target.selection {
         let Some(expected) = offer_selection_target(tree, command, intent.start_line, intent.end_line) else { return Ok(false); };
         if expected != *target { return Ok(false); }
-        let mut members = Vec::new();
-        for node in tree.nodes.iter() {
-            let member = offer_target(tree, command, &node.id);
-            let Some(mut member) = member else { continue; };
-            if member.node_id != node.id { continue; }
-            let overlaps = match node.kind {
-                crate::tree::NodeKind::File => intent.start_line as usize <= node.start_line && node.start_line <= intent.end_line as usize,
-                crate::tree::NodeKind::Hunk => intent.start_line as usize <= node.end_line && node.start_line <= intent.end_line as usize,
-                _ => false,
-            };
-            if overlaps {
-                member.selection = None;
-                if !target_is_current(repo, tree, command, &member)? { return Ok(false); }
-                members.push((node.id.clone(), member.mutation_hash));
-            }
+        let section = if command == "status.unstage" { "staged" } else { "unstaged" };
+        let Some(members) = selection_members(tree, command, intent.start_line, intent.end_line, section) else { return Ok(false); };
+        for (node_id, _) in &members {
+            let Some(member) = offer_target(tree, command, node_id) else { return Ok(false); };
+            if !target_is_current(repo, tree, command, &member)? { return Ok(false); }
         }
         use sha2::{Digest, Sha256};
         let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&(command, intent, &members)).unwrap_or_default()));

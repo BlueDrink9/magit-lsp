@@ -190,6 +190,104 @@ fn selection_range_offers_exact_target_and_stages_only_selected_change() {
 }
 
 #[test]
+fn file_and_hunk_header_selections_keep_imm2_precedence() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\ntwo\nthree\n")])
+        .build();
+    fixtures::write(&repo.path().join("f.txt"), "ONE\ntwo\nTHREE\n");
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let text = editor.text(&uri).to_owned();
+    let lines: Vec<_> = text.lines().collect();
+    let file_header = lines.iter().position(|line| line.contains("f.txt")).unwrap() as u32;
+    let changed: Vec<u32> = lines.iter().enumerate().filter(|(_, line)| line.ends_with("-one") || line.ends_with("+ONE") || line.ends_with("-three") || line.ends_with("+THREE")).map(|(i, _)| i as u32).collect();
+    assert_eq!(changed.len(), 4, "{text}");
+    let whole_file = offered_for_range(&mut server, &uri, json!({"start":{"line":file_header,"character":0},"end":{"line":file_header,"character":1}}), "status.stage", 101);
+    assert!(!whole_file.is_null());
+    assert_eq!(whole_file["target"]["selection"]["startLine"], file_header);
+    assert!(execute_offered(&mut server, &mut editor, whole_file, 102)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f.txt"]), "ONE\ntwo\nTHREE\n");
+
+    let staged = editor.text(&uri).to_owned();
+    let hunk = staged.lines().position(|line| line.trim_start().starts_with("@@")).unwrap() as u32;
+    let selected_hunk = offered_for_range(&mut server, &uri, json!({"start":{"line":hunk,"character":0},"end":{"line":hunk,"character":1}}), "status.unstage", 103);
+    assert!(!selected_hunk.is_null());
+    assert!(execute_offered(&mut server, &mut editor, selected_hunk, 104)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f.txt"]), "one\ntwo\nthree\n");
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn multi_file_selection_refuses_one_stale_member_without_mutation() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n"), ("g.txt", "two\n")]).build();
+    fixtures::write(&repo.path().join("f.txt"), "ONE\n");
+    fixtures::write(&repo.path().join("g.txt"), "TWO\n");
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let text = editor.text(&uri).to_owned();
+    let rows: Vec<u32> = text.lines().enumerate().filter(|(_, line)| line.ends_with("-one") || line.ends_with("+ONE") || line.ends_with("-two") || line.ends_with("+TWO")).map(|(i, _)| i as u32).collect();
+    assert_eq!(rows.len(), 4, "{text}");
+    let args = offered_for_range(&mut server, &uri, json!({"start":{"line":rows[0],"character":0},"end":{"line":rows[3]+1,"character":0}}), "status.stage", 111);
+    assert!(!args.is_null());
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let index_before = repo.git(&["write-tree"]);
+    fixtures::write(&repo.path().join("g.txt"), "changed-after-offer\n");
+    // Keep the old synced/rendered document: do not dispatch watcher applyEdits before this stale action.
+    let response = execute_offered(&mut server, &mut editor, args, 112);
+    assert_refused(&response);
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index_before);
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")), "ONE\n");
+    assert_eq!(fixtures::read(&repo.path().join("g.txt")), "changed-after-offer\n");
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn selection_endpoints_support_utf16_unicode_end_column_zero_and_crlf_content() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f-😀.txt", "first\r\nemoji 😀\r\nlast\r\n")]).build();
+    fixtures::write(&repo.path().join("f-😀.txt"), "FIRST\r\nemoji 😀\r\nlast\r\n");
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let text = editor.text(&uri).to_owned();
+    let lines: Vec<_> = text.lines().collect();
+    let minus = lines.iter().position(|line| line.ends_with("-first")).unwrap() as u32;
+    let plus = lines.iter().position(|line| line.ends_with("+FIRST")).unwrap() as u32;
+    // LSP's end position at column zero excludes the following rendered row.
+    let args = offered_for_range(&mut server, &uri, json!({"start":{"line":minus,"character":0},"end":{"line":plus+1,"character":0}}), "status.stage", 121);
+    assert!(!args.is_null());
+    assert_eq!(args["target"]["selection"]["startLine"], minus);
+    assert_eq!(args["target"]["selection"]["endLine"], plus);
+    // Validate a UTF-16 column after the supplementary-plane character in the diff row.
+    let emoji = lines.iter().position(|line| line.ends_with(" emoji 😀")).unwrap() as u32;
+    let unicode = offered_for_range(&mut server, &uri, json!({"start":{"line":emoji,"character":0},"end":{"line":emoji,"character":9}}), "status.stage", 122);
+    assert!(!unicode.is_null(), "UTF-16 range rejected for {text}");
+    assert!(execute_offered(&mut server, &mut editor, args, 123)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f-😀.txt"]), "FIRST\r\nemoji 😀\r\nlast\r\n");
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn selection_survives_independent_fresh_hunk_shift() {
+    let original = (1..=45).map(|n| format!("line-{n}\n")).collect::<String>();
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", original.as_str())]).build();
+    let changed = original.replace("line-5\n", "changed-five\n").replace("line-35\n", "changed-thirty-five\n");
+    fixtures::write(&repo.path().join("f.txt"), &changed);
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let text = editor.text(&uri).to_owned();
+    let rows: Vec<u32> = text.lines().enumerate().filter(|(_, line)| line.ends_with("-line-5") || line.ends_with("+changed-five")).map(|(i, _)| i as u32).collect();
+    assert_eq!(rows.len(), 2, "{text}");
+    let args = offered_for_range(&mut server, &uri, json!({"start":{"line":rows[0],"character":0},"end":{"line":rows[1]+1,"character":0}}), "status.stage", 131);
+    assert!(!args.is_null());
+    // Add an earlier independent change: Git shifts the later hunk's coordinates but
+    // the selected hunk's content identity remains unique. Keep the retained document.
+    let shifted = changed.replace("line-20\n", "new-independent-line\nline-20\n");
+    fixtures::write(&repo.path().join("f.txt"), &shifted);
+    let response = execute_offered(&mut server, &mut editor, args, 132);
+    assert!(response["error"].is_null(), "independent shift refused: {response}");
+    assert!(repo.git(&["show", ":f.txt"]).contains("changed-five\n"));
+    assert!(!repo.git(&["show", ":f.txt"]).contains("changed-thirty-five\n"));
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")), shifted);
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
 fn cursor_actions_target_file_or_owning_hunk_once() {
     let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("a.txt", "before\nkeep\nafter\n")]).build();
     fixtures::write(&repo.path().join("a.txt"), "changed\nkeep\nafter\n");
