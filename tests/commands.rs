@@ -804,6 +804,91 @@ fn offered_request(test: &TestSession, command: &str, node_id: &str) -> magit_ls
 }
 
 #[test]
+fn hunk_mode_metadata_is_render_bound_for_typed_cursor_and_visual_actions() {
+    use magit_lsp::protocol::Selection;
+    use magit_lsp::session::Execution;
+    use magit_lsp::tree::NodeKind;
+    use std::os::unix::fs::PermissionsExt;
+    for command in ["status.stage", "status.unstage"] {
+        for executable_head in [false, true] {
+            for displayed_transition in [false, true] {
+                for stale in [false, true] {
+                    for route in ["typed", "start", "cursor", "line", "visual-hunk", "visual-lines"] {
+                        let label = format!("{command}/{executable_head}/{displayed_transition}/{stale}/{route}");
+                        let original = lines(20).to_string();
+                        let changed = lines(20).with(5, "line5 CHANGED").to_string();
+                        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", original.clone())]).build();
+                        let path = tmp.path().join("f.txt");
+                        let set_mode = |executable| std::fs::set_permissions(&path,
+                            std::fs::Permissions::from_mode(if executable { 0o755 } else { 0o644 })).unwrap();
+                        set_mode(executable_head);
+                        tmp.git(&["add", "f.txt"]);
+                        tmp.git(&["commit", "--amend", "--no-edit"]);
+                        std::fs::write(&path, &changed).unwrap();
+                        set_mode(executable_head ^ displayed_transition);
+                        let staged = command == "status.unstage";
+                        if staged { tmp.git(&["add", "f.txt"]); }
+                        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+                        test.ack();
+                        let version = test.version();
+                        let hunk = test.tree().nodes.iter().find(|node| node.kind == NodeKind::Hunk
+                            && node.section.as_deref() == Some(if staged { "staged" } else { "unstaged" })).unwrap();
+                        let request = offered_request(&test, command, &hunk.id);
+                        let header = hunk.start_line;
+                        let changed_rows: Vec<_> = test.tree().nodes.iter().filter(|node| node.kind == NodeKind::Line
+                            && node.hunk_id == hunk.hunk_id && matches!(node.marker, Some('+') | Some('-')))
+                            .map(|node| node.start_line).collect();
+                        assert_eq!(changed_rows.len(), 2, "{label}");
+                        if stale {
+                            set_mode(executable_head ^ !displayed_transition);
+                            if staged { tmp.git(&["add", "f.txt"]); }
+                        } else if staged {
+                            // Unstage authorizes the index side, not the worktree.
+                            std::fs::write(&path, "independent worktree edit\n").unwrap();
+                            set_mode(!(executable_head ^ displayed_transition));
+                        }
+                        let index_before = tmp.git(&["ls-files", "--stage", "f.txt"]);
+                        let before = target_state(&tmp);
+                        let result = match route {
+                            "typed" => test.session.dispatch(request, &magit_lsp::ui::NullUi).unwrap(),
+                            "start" => match test.session.start_dispatch(request).unwrap() {
+                                Execution::Done(result) => result,
+                                _ => panic!("{label}: stage/unstage must not prompt"),
+                            },
+                            _ => {
+                                let selection = match route {
+                                    "visual-hunk" => Some(Selection { start_line: header, end_line: header }),
+                                    "visual-lines" => Some(Selection { start_line: changed_rows[1], end_line: changed_rows[0] }),
+                                    _ => None,
+                                };
+                                test.invoke_at_version(command, version, Some(Cursor {
+                                    line: if route == "line" { changed_rows[1] } else { header }, column: 0,
+                                }), selection, None)
+                            }
+                        };
+                        assert!(result.render.is_some(), "{label}: must refresh");
+                        if stale {
+                            let messages = message_texts(&result.effects);
+                            assert!(messages.iter().any(|text| text.contains("changed") && text.contains("refresh")), "{label}: {messages:?}");
+                            assert_eq!(target_state(&tmp), before, "{label}");
+                            assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]), index_before, "{label}");
+                        } else {
+                            assert!(message_texts(&result.effects).is_empty(), "{label}: {:?}", result.effects);
+                            let after = target_state(&tmp);
+                            assert_eq!(after.head, before.head, "{label}");
+                            assert_eq!(after.worktree, before.worktree, "{label}");
+                            assert_eq!(tmp.git(&["show", ":f.txt"]), if staged { &original } else { &changed }.to_string(), "{label}");
+                            let expected_mode = if executable_head ^ (!staged && displayed_transition) { "100755" } else { "100644" };
+                            assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]).split_whitespace().next(), Some(expected_mode), "{label}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn typed_targets_double_fire_and_edit_after_offer_preserve_exact_state() {
     use magit_lsp::tree::NodeKind;
     for command in ["status.stage", "status.unstage"] {

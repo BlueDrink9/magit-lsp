@@ -1740,8 +1740,18 @@ fn execute_displayed_selection(
         };
         let unchanged = ops[first_op..].iter().all(|op| match op {
             SelectionOp::WholeFile { .. } => whole_file,
-            SelectionOp::WholeHunk { hunk_id, .. } | SelectionOp::Lines { hunk_id, .. } =>
-                layout.hunks.iter().any(|h| &h.hunk.id == hunk_id),
+            SelectionOp::WholeHunk { hunk_id, .. } | SelectionOp::Lines { hunk_id, .. } => {
+                // Selection execution also consumes the fresh file header.
+                // Compare its semantics, not just content IDs or fresh rows.
+                let captured = hunks.iter().find(|node| node.hunk_id.as_ref() == Some(hunk_id))
+                    .and_then(|node| node.mutation.as_ref());
+                match captured {
+                    Some(crate::tree::MutationContent::Hunk { hunk, .. }) =>
+                        layout.hunks.iter().any(|h| &h.hunk.id == hunk_id
+                            && h.hunk.metadata == hunk.metadata),
+                    _ => false,
+                }
+            }
         });
         if !unchanged {
             return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);

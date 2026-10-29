@@ -52,6 +52,12 @@ impl PatchMetadata {
                 metadata.modes.push(("create".into(), value.into()));
             } else if let Some(value) = line.strip_prefix("deleted file mode ") {
                 metadata.modes.push(("delete".into(), value.into()));
+            } else if let Some(value) = line.strip_prefix("index ") {
+                // The optional mode is meaningful; blob IDs are not. Independent
+                // hunk edits change those IDs without changing this operation.
+                if let Some(mode) = value.split_whitespace().nth(1) {
+                    metadata.modes.push(("unchanged".into(), mode.into()));
+                }
             } else {
                 for prefix in ["rename from ", "rename to ", "copy from ", "copy to "] {
                     if let Some(value) = line.strip_prefix(prefix) {
@@ -655,6 +661,32 @@ pub fn selected_hunk_patch(h: &Hunk, selected: &[usize], reverse: bool) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hunk_metadata_captures_header_semantics_but_not_blob_ids_or_coordinates() {
+        let diff = |header: &str, row| format!("diff --git a/f b/f\n{header}--- a/f\n+++ b/f\n@@ -{row},1 +{row},1 @@\n-old\n+new\n");
+        let parsed = |header: &str, row| parse_file_diff(&diff(header, row)).unwrap().hunks.remove(0);
+        let original = parsed("index 1111111..2222222 100644\n", 1);
+        let shifted = parsed("index 3333333..4444444 100644\n", 20);
+        assert_eq!(original.id, shifted.id);
+        assert_eq!(original.metadata, shifted.metadata);
+        assert_eq!(original.metadata.modes, vec![("unchanged".into(), "100644".into())]);
+        for (header, modes, operations) in [
+            ("old mode 100644\nnew mode 100755\n", vec![("old", "100644"), ("new", "100755")], vec![]),
+            ("old mode 100644\nnew mode 120000\n", vec![("old", "100644"), ("new", "120000")], vec![]),
+            ("new file mode 100644\n", vec![("create", "100644")], vec![]),
+            ("deleted file mode 100755\n", vec![("delete", "100755")], vec![]),
+            ("rename from old\nrename to f\n", vec![], vec![("rename from", "old"), ("rename to", "f")]),
+            ("copy from old\ncopy to f\n", vec![], vec![("copy from", "old"), ("copy to", "f")]),
+        ] {
+            let current = parsed(header, 1);
+            assert_eq!(current.id, original.id, "header semantics are not hunk identity");
+            let owned = |items: Vec<(&str, &str)>| items.into_iter().map(|(a, b)| (a.into(), b.into())).collect::<Vec<(String, String)>>();
+            assert_eq!(current.metadata.modes, owned(modes));
+            assert_eq!(current.metadata.operations, owned(operations));
+            assert_ne!(current.metadata, original.metadata);
+        }
+    }
 
     const SAMPLE: &str = "diff --git a/f.txt b/f.txt\n\
 index 4083766..31cf455 100644\n\
