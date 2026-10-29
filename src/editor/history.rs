@@ -1,6 +1,5 @@
-//! Server-lifetime, bounded commit-message retention and per-draft navigation.
+//! Server-lifetime, bounded commit-message retention.
 
-use crate::protocol::DraftHistoryCommand;
 use crate::{Error, Result};
 use std::collections::VecDeque;
 
@@ -9,7 +8,7 @@ pub const MAX_HISTORY_ENTRIES: usize = 50;
 /// Maximum aggregate UTF-8 payload per canonical repository.
 pub const MAX_HISTORY_BYTES: usize = 1024 * 1024;
 
-/// Exact submitted messages, oldest first; never populated from logs or saves.
+/// Exact terminal saved messages, oldest first; never populated from Git logs.
 #[derive(Default)]
 pub struct History {
     entries: VecDeque<String>,
@@ -17,6 +16,12 @@ pub struct History {
 }
 
 impl History {
+    #[cfg(test)]
+    /// Inspect retention in private unit tests without a production recall API.
+    pub(super) fn entries(&self) -> &VecDeque<String> {
+        &self.entries
+    }
+
     /// Retain a nonempty, changed submission even if Git subsequently fails.
     /// Oversized retention fails visibly to the caller without truncation/eviction.
     pub fn retain(&mut self, text: &str, initial: &str) -> Result<()> {
@@ -42,51 +47,49 @@ impl History {
     }
 }
 
-/// A browsing snapshot survives ring eviction without changing navigation order.
-/// Returning to newest ends browsing; the next previous preserves the new draft.
-#[derive(Default)]
-pub(super) struct Navigation {
-    browsing: Option<Browse>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-struct Browse {
-    entries: Vec<String>,
-    position: usize,
-    unsent: String,
-}
+    #[test]
+    fn eligibility_and_exact_consecutive_dedup() {
+        let mut history = History::default();
+        for text in ["", "initial", "# comment\r\n", "# comment\r\n", " ", "# comment\r\n"] {
+            history.retain(text, "initial").unwrap();
+        }
+        assert_eq!(history.entries, ["# comment\r\n", " ", "# comment\r\n"]);
+        assert_eq!(history.bytes, 23);
+    }
 
-impl Navigation {
-    pub(super) fn recall(
-        &mut self,
-        history: &History,
-        command: DraftHistoryCommand,
-        current: &str,
-    ) -> String {
-        if self.browsing.is_none() && command == DraftHistoryCommand::Previous {
-            if history.entries.is_empty() {
-                return current.to_string();
-            }
-            self.browsing = Some(Browse {
-                entries: history.entries.iter().cloned().collect(),
-                position: history.entries.len(),
-                unsent: current.to_string(),
-            });
+    #[test]
+    fn count_cap_evicts_oldest_without_reordering() {
+        let mut history = History::default();
+        for i in 0..MAX_HISTORY_ENTRIES + 2 {
+            history.retain(&format!("message {i}"), "").unwrap();
         }
-        let Some(browse) = &mut self.browsing else {
-            return current.to_string();
-        };
-        match command {
-            DraftHistoryCommand::Previous => {
-                browse.position = browse.position.saturating_sub(1);
-            }
-            DraftHistoryCommand::Next => browse.position += 1,
-        }
-        if browse.position == browse.entries.len() {
-            let text = browse.unsent.clone();
-            self.browsing = None;
-            text
-        } else {
-            browse.entries[browse.position].clone()
-        }
+        assert_eq!(history.entries.len(), MAX_HISTORY_ENTRIES);
+        assert_eq!(history.entries.front().unwrap(), "message 2");
+        assert_eq!(history.entries.back().unwrap(), "message 51");
+        assert_eq!(history.bytes, history.entries.iter().map(String::len).sum::<usize>());
+    }
+
+    #[test]
+    fn utf8_byte_cap_and_oversize_rejection_are_atomic() {
+        let mut history = History::default();
+        let first = "🦀".repeat(MAX_HISTORY_BYTES / 8);
+        let second = "é".repeat(MAX_HISTORY_BYTES / 4);
+        history.retain(&first, "").unwrap();
+        history.retain(&second, "").unwrap();
+        assert_eq!(history.bytes, MAX_HISTORY_BYTES);
+        assert!(history.retain(&"🦀".repeat(MAX_HISTORY_BYTES / 4 + 1), "").is_err());
+        assert_eq!(history.entries, [first, second.clone()]);
+        assert_eq!(history.bytes, MAX_HISTORY_BYTES);
+        history.retain("x", "").unwrap();
+        assert_eq!(history.entries, [second, "x".into()]);
+        assert_eq!(history.bytes, MAX_HISTORY_BYTES / 2 + 1);
+        let limit = "é".repeat(MAX_HISTORY_BYTES / 2);
+        history.retain(&limit, "").unwrap();
+        assert_eq!(history.entries, [limit]);
+        assert_eq!(history.bytes, MAX_HISTORY_BYTES);
     }
 }

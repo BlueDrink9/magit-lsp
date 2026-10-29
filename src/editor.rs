@@ -24,7 +24,7 @@ use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock};
 pub mod draft;
 
 /// Bounded per-repository commit-message history, independent of Git log.
-pub mod history;
+mod history;
 
 /// Environment variable carrying the bridge socket path to Git and the helper.
 pub const SOCKET_ENV: &str = "MAGIT_LSP_SOCKET";
@@ -87,6 +87,99 @@ struct EditEntry {
     owner: String,
     completed: std_mpsc::Receiver<bool>,
     completion: std_mpsc::Sender<bool>,
+}
+
+#[cfg(all(test, unix))]
+mod editor_history_tests {
+    use super::*;
+    use crate::protocol::{DraftFinishParams, DraftFinishReason};
+
+    fn repository() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git").args(["init", "-q"])
+            .arg(dir.path()).status().unwrap().success());
+        std::fs::write(dir.path().join(".git/COMMIT_EDITMSG"), "initial\n").unwrap();
+        dir
+    }
+
+    fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
+        let run = registry.create(repo.to_str().unwrap(), "owner").unwrap();
+        let uri = registry.lock()[&run].draft.uri().to_string();
+        registry.apply("owner", &run, &uri, |draft, context| {
+            let token = draft.helper_token().to_string();
+            draft.accept_helper(context, &token, COMMIT_MESSAGE_KIND,
+                &repo.join(".git/COMMIT_EDITMSG"))?;
+            draft.did_open(context, 1, b"initial\n")
+        }).unwrap();
+        (run, uri)
+    }
+
+    fn retained(registry: &EditRegistry, repo: &Path) -> Vec<String> {
+        registry.history.lock().unwrap().get(&std::fs::canonicalize(repo).unwrap())
+            .map(|history| history.entries().iter().cloned().collect()).unwrap_or_default()
+    }
+
+    #[test]
+    fn saved_abort_and_finish_retention_are_repository_and_registry_isolated() {
+        let registry = EditRegistry::new();
+        let first = repository();
+        let second = repository();
+        let (run, uri) = opened(&registry, first.path());
+        registry.apply("owner", &run, &uri, |draft, context| {
+            draft.did_change(context, 2, b"saved abort\r\n# exact")?;
+            draft.save(context, 2)?;
+            draft.did_change(context, 3, b"unsaved never retained")
+        }).unwrap();
+        assert!(retained(&registry, first.path()).is_empty(), "save alone never retains");
+        assert!(registry.resolve(&run, Reply::Abort));
+        assert!(!registry.resolve(&run, Reply::Abort), "terminal arbitration is once-only");
+        assert_eq!(retained(&registry, first.path()), ["saved abort\r\n# exact"]);
+
+        let (run, uri) = opened(&registry, first.path());
+        registry.apply("owner", &run, &uri, |draft, context| {
+            draft.did_change(context, 2, b"confirmed even if Git later fails")
+        }).unwrap();
+        // Acknowledge helper completion without adding a production browsing API.
+        registry.lock()[&run].completion.send(true).unwrap();
+        registry.finish("owner", &DraftFinishParams {
+            run_id: run, uri, version: 2, reason: DraftFinishReason::Confirm,
+        }).unwrap();
+        assert_eq!(retained(&registry, first.path()),
+            ["saved abort\r\n# exact", "confirmed even if Git later fails"]);
+        assert_eq!(std::fs::read_to_string(first.path().join(".git/COMMIT_EDITMSG")).unwrap(),
+            "confirmed even if Git later fails");
+
+        let (run, uri) = opened(&registry, second.path());
+        registry.apply("owner", &run, &uri, |draft, context| {
+            draft.did_change(context, 2, b"second repository")?;
+            draft.save(context, 2).map(|_| ())
+        }).unwrap();
+        assert!(registry.resolve(&run, Reply::Abort));
+        assert_eq!(retained(&registry, second.path()), ["second repository"]);
+        assert_eq!(retained(&registry, first.path()),
+            ["saved abort\r\n# exact", "confirmed even if Git later fails"]);
+        let (run, _) = opened(&registry, second.path());
+        assert!(registry.resolve(&run, Reply::Abort));
+        assert_eq!(retained(&registry, second.path()), ["second repository"],
+            "unchanged template excluded");
+        assert!(retained(&EditRegistry::new(), first.path()).is_empty(), "server lifetime isolation");
+    }
+
+    #[test]
+    fn saved_file_close_retains_disk_not_unsaved_sync() {
+        let registry = EditRegistry::new();
+        let repo = repository();
+        let (run, uri) = opened(&registry, repo.path());
+        registry.apply("owner", &run, &uri, |draft, context| {
+            draft.did_change(context, 2, b"unsaved")
+        }).unwrap();
+        std::fs::write(repo.path().join(".git/COMMIT_EDITMSG"), "native saved\n").unwrap();
+        registry.lock()[&run].completion.send(true).unwrap();
+        registry.finish("owner", &DraftFinishParams {
+            run_id: run, uri, version: 2, reason: DraftFinishReason::NormalClose,
+        }).unwrap();
+        assert_eq!(retained(&registry, repo.path()), ["native saved\n"]);
+    }
 }
 
 /// The process-global map of edits Git is waiting on.
@@ -164,21 +257,6 @@ impl EditRegistry {
     #[cfg(not(unix))]
     pub fn run_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {
         Err(Error::new("commit message editing requires Unix"))
-    }
-
-    /// Recall under the lifecycle lock; validation precedes all navigation changes.
-    #[cfg(unix)]
-    pub(crate) fn history(&self, owner: &str, p: &crate::protocol::DraftHistoryParams) -> Result<crate::protocol::DraftResponse> {
-        self.apply(owner, &p.run_id, &p.uri, |draft, context| {
-            let histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
-            let empty = history::History::default();
-            let history = histories.get(context.repository).unwrap_or(&empty);
-            let snapshot = draft.history(context, p.version, p.command, history)?;
-            Ok(crate::protocol::DraftResponse::Replaced {
-                run_id: p.run_id.clone(), uri: p.uri.clone(), base_version: p.version,
-                version: snapshot.version(), text: snapshot.text().to_string(),
-            })
-        })
     }
 
     /// Retain only a validated submitted checkpoint, before Git's eventual result.

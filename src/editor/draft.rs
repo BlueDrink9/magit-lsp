@@ -8,8 +8,7 @@
 
 use super::{Reply, COMMIT_MESSAGE_KIND};
 use crate::git::GitRepo;
-use crate::protocol::{DraftFinishReason, DraftHistoryCommand};
-use super::history::{History, Navigation};
+use crate::protocol::DraftFinishReason;
 use crate::{Error, Result};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -58,7 +57,6 @@ struct Contents {
     saved: DraftSnapshot,
     attached: bool,
     opened: bool,
-    navigation: Navigation,
 }
 
 /// One pending helper/run, bound permanently to its owner, URI and repository.
@@ -149,7 +147,6 @@ impl Draft {
             initial,
             attached: false,
             opened: false,
-            navigation: Navigation::default(),
         });
         Ok(())
     }
@@ -214,26 +211,6 @@ impl Draft {
             text: contents.live.text.clone(),
         };
         Ok(version)
-    }
-
-    /// Replace only live editable text after exact identity/base-version checks.
-    /// Every accepted recall advances once, even at a clamp; never saves/writes.
-    pub fn history(
-        &mut self,
-        context: DraftContext<'_>,
-        version: i32,
-        command: DraftHistoryCommand,
-        history: &History,
-    ) -> Result<&DraftSnapshot> {
-        let contents = self.pending(context)?;
-        if !contents.attached || version != contents.live.version {
-            return Err(Error::new("History requires the exact attached commit draft version"));
-        }
-        let version = version.checked_add(1)
-            .ok_or_else(|| Error::new("Commit draft version is exhausted; history unchanged"))?;
-        let text = contents.navigation.recall(history, command, &contents.live.text);
-        contents.live = DraftSnapshot { version, text };
-        Ok(&contents.live)
     }
 
     /// Confirm exact live-version writeback, or independently read saved disk text

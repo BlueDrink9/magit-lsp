@@ -538,7 +538,11 @@ last matching `tabGroups` closed event across all groups. Explicit abort remains
 `view/invoke common.cancel` with `{runId}`. All terminal decisions use the registry
 lock. Safe-save inode replacement is accepted only in the pinned Git directory,
 with regular-file, no-symlink/no-hardlink and owner checks. History remains
-server-owned through the existing versioned `draft/history` barrier. Git owns
+in the bounded server ring; rich recall routes are removed and both history
+commands are planned under R-EDIT-HISTORY. Confirmation returns
+`{type:"confirmed",runId,uri,version}` after helper release, not Git success.
+`draft/error` recovery is deliberately unchanged pending the existing-effects
+recovery slice. Git owns
 templates, cleanup, effective-empty behavior and hooks.
 
 This is an implementation/integration slice, **not parent R-EDIT-REAL native or
@@ -558,6 +562,31 @@ adversarial acceptance**; that parent stays unchecked. The material below is the
     generated bindings, Node integration including 240 real-Git selection cases,
     `git diff --check`). Full native VSCode acceptance and full regression gate
     remain unrun; parent R-EDIT-REAL stays unchecked.
+
+- [x] **R-EDIT-REAL rich-history removal slice (2026-10-29).** Remove the obsolete
+  history route/types, per-draft navigation and rich-client recall commands;
+  retain the bounded server ring and saved finish/abort retention from 79384c2.
+  History commands are planned under R-EDIT-HISTORY. Semantic executeCommand
+  confirmation returns `type:"confirmed"`; no new custom method or compatibility
+  shim. Exact-version/full-sync/writeback, saved-file close, terminal arbitration
+  and e141e89's all-group owned-last-tab behavior are unchanged. `draft/error`
+  recovery is intentionally untouched for the next existing-effects slice.
+  - **Verification:** exact ticket gate passed: regenerated manifest/menu/parity
+    snapshots (keybindings and README parity unchanged), five private editor/ring
+    tests, Lua, VSCode unit/generated bindings, native `commit-confirm.scn` and
+    production Codium edit-only e2e. Supplemental unfiltered `editor_drafts`,
+    `editor_bridge`, `server_async`, `commands` suites passed all 73 cases;
+    Node integration passed, including 240 exact repository-state selection cases.
+  - **Inspected evidence:** `build/ui/commit-confirm/{standard,vim}-{100x30,80x24}/{editor,staged}.screen`
+    proves prompt decline/accept, native Git editor opening and explicit abort
+    retaining staged changes. `/tmp/opencode/vscode-review-DfgHFR/real-file-native-evidence.json`
+    and `real-file-native-trace.json`, plus `real-file-native-2-cancel-dialog.png`
+    and `real-file-native-3-committed.png`, verify actual native Save/Don't Save/
+    Cancel and all-group last-owned-tab semantics: exactly one saved-file
+    confirmation per run, exact saved subject/body, no unsaved-text submission.
+    Owned UI/server processes were absent after cleanup. No test deadline changed.
+  - **Limits:** parent R-EDIT-REAL remains unchecked; no broader lifecycle,
+    platform or deferred R-EDIT-HISTORY acceptance is claimed.
 
 **Target-versus-current:** the Plain-client target proposes Git's real
 `COMMIT_EDITMSG` provider-file session, pending R-EDIT-REAL acceptance. The
@@ -1676,15 +1705,15 @@ slice is scheduled and required before the Plain gate.
       **Verify:** focused Rust state tests and native scenarios in both clients;
       full regression gate at milestone boundary.
 - [x] **R-EDIT-8 — Server-owned commit-message history ring**
-  Completed server-only implementation and verification are summarized in §3.10 and the completed-roadmap archive. Native history recall/return-to-current-draft remains an explicit R-EDIT-4/5/6 obligation; no client history policy.
-- [x] **R-EDIT-4 — Neovim draft adapter**
+  Bounded server retention remains implemented, including saved finish/abort retention. Rich history browsing is superseded by R-EDIT-REAL; native recall is deferred to R-EDIT-HISTORY, not an R-EDIT-4/5/6 acceptance obligation. Private unit tests cover eligibility, exact deduplication, caps and isolation without a public browsing API.
+- [x] **R-EDIT-4 — Neovim draft adapter** (historical; superseded by R-EDIT-REAL)
   - **Candidate paths:** `lua/magit-lsp/edit.lua`, `lua/magit-lsp/init.lua`, `lua/magit-lsp/view.lua`, `lua/magit-lsp/buffer.lua` (only where sync/attachment/capabilities require), `tests/test_magit_lsp.lua`, `tests/ui/scenarios/commit-cancel-progress.scn`, `ui-test-plan.md`; not an exhaustive rewrite list.
   - **Depends on:** R-EDIT-3 and R-EDIT-8.
   - **Done when:** native acwrite/scratch syncs versions; save checkpoints only, explicit confirm flushes, normal user close confirms the saved checkpoint, and explicit abort/disconnect cancel (§3.10 defines dirty Save/Discard/Cancel and non-user-close/shutdown guards); status/text-mode unchanged. Native history-prev/next recall and return-to-current-draft behavior is covered.
   - **Completed (2026-10-28):** managed URI-owned acwrite buffer with one explicit full-sync stream and monotone versions; `:write` checkpoint stays editing; explicit confirm awaits save/finish; typed native close (`:q`/`:close`/`:bd`/`:wq`/`:xit`) is classified before teardown, clean close confirms the checkpoint, dirty close prompts Save/Discard/Cancel, ambiguous unload/API deletion and disconnect cancel, and failed barriers retain a recoverable buffer. Server-owned history prev/next restores the unsent draft without echo or dirty save. Exact version/identity/owner checks and history policy remain server-owned. Status readonly/A29/text mode unchanged.
   - **Evidence:** `make test-lua`; real native `commit-cancel-progress.scn`, `commit-draft-history.scn`, `commit-draft-close.scn` and `commit-owned-cancel.scn` screens/state/history/close inspected, owned sessions stopped; `git diff --check` clean (see §3.10).
   - **Verify:** `make test-lua`; `scripts/ui run tests/ui/scenarios/commit-cancel-progress.scn`; `scripts/ui run tests/ui/scenarios/commit-draft-history.scn`; `scripts/ui run tests/ui/scenarios/commit-draft-close.scn`; `scripts/ui run tests/ui/scenarios/commit-owned-cancel.scn`; inspect screens/state and stop owned UI, including native history recall/return-to-current-draft behavior.
-- [x] **R-EDIT-5 — VSCode draft adapter**
+- [x] **R-EDIT-5 — VSCode draft adapter** (historical; superseded by R-EDIT-REAL)
   - **Candidate paths:** `clients/vscode/lib/edits.js`, `clients/vscode/lib/edit.js`, proposed `clients/vscode/lib/drafts.js` (writable provider if needed), `clients/vscode/package.json`, `clients/vscode/test/test.js`, `clients/vscode/test/integration.js`, `clients/vscode/test/e2e/suite.js`; not an exhaustive rewrite list.
   - **Depends on:** R-EDIT-3 and R-EDIT-8.
   - **Done when:** thin writable provider syncs exact versions; save never confirms; confirm barrier flushes; normal user close confirms the saved checkpoint, explicit abort/disconnect cancel (§3.10 defines dirty Save/Discard/Cancel and non-user-close/shutdown guards); close/recovery safe and status readonly. Native history-prev/next recall and return-to-current-draft behavior is covered.

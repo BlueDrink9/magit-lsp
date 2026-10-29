@@ -5,7 +5,7 @@
  *
  * The server owns the draft state, Git's operation and the versioned barriers.
  * This thin adapter opens Git's file, owns one full-sync stream and preserves
- * exact-version confirmation/history barriers. Only an actual last owned tab
+ * exact-version confirmation barriers. Only an actual last owned tab
  * closed event confirms saved disk text; document-close is never confirmation.
  */
 
@@ -317,8 +317,7 @@ async function operate(record, action) {
   }
   let ok = false;
   try {
-    // Native editors are gated before awaiting history/checkpoint/finish. API
-    // edits can still race, so every replacement also checks the native version.
+    // Gate native editing while awaiting exact-version confirmation.
     await vscode.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession', record.uri);
     await enqueue(record, async () => {
       ok = await action();
@@ -339,7 +338,7 @@ async function operate(record, action) {
  * @param {object} record
  */
 function scheduleFlush(record) {
-  if (!live(record) || record.busy || record.applying || record.disconnected) {
+  if (!live(record) || record.busy || record.disconnected) {
     return;
   }
   if (record.flushQueued) {
@@ -348,7 +347,7 @@ function scheduleFlush(record) {
   record.flushQueued = true;
   enqueue(record, async () => {
     record.flushQueued = false;
-    if (!live(record) || record.busy || record.applying || record.disconnected) {
+    if (!live(record) || record.busy || record.disconnected) {
       return;
     }
     await flush(record);
@@ -463,7 +462,7 @@ async function finish(record, reason) {
   if (!result) {
     return false;
   }
-  if (!acknowledged(result, 'draft/finished', record, reason === 'confirm' ? record.version : version)) {
+  if (!acknowledged(result, 'confirmed', record, reason === 'confirm' ? record.version : version)) {
     fail(record, 'unexpected commit draft finish acknowledgement');
     return false;
   }
@@ -530,7 +529,7 @@ async function cancel(record) {
   if (!live(record)) {
     return;
   }
-  // Abort must not wait behind an in-flight finish/history barrier. Invalidate
+  // Abort must not wait behind an in-flight confirmation. Invalidate
   // callbacks first; the server owns finish-versus-cancel arbitration.
   record.generation += 1;
   record.closing = true;
@@ -550,84 +549,6 @@ async function cancel(record) {
   }
   record.closing = false;
   await forget(record);
-}
-
-/**
- * Replace the whole live document with server-owned recalled text.
- *
- * @param {object} record
- * @param {string} text
- */
-async function replace(record, text, nativeBase) {
-  const document = record.document;
-  await vscode.commands.executeCommand('workbench.action.files.resetActiveEditorReadonlyInSession', record.uri);
-  if (!live(record) || document.version !== nativeBase) return false;
-  const lines = document.getText().split('\n');
-  const end = new vscode.Position(lines.length - 1, lines[lines.length - 1].length);
-  const replacement = new vscode.WorkspaceEdit();
-  replacement.replace(document.uri, new vscode.Range(new vscode.Position(0, 0), end), text);
-  const applied = await vscode.workspace.applyEdit(replacement);
-  if (!applied) {
-    throw new Error('the commit draft could not be replaced');
-  }
-  return true;
-}
-
-/**
- * Recall server-owned history at the exact applied base version.
- *
- * @param {object} record
- * @param {string} command
- */
-async function history(record, command) {
-  return operate(record, async () => {
-    if (!(await flush(record))) {
-      return false;
-    }
-    const base = record.version;
-    const before = record.text;
-    const document = record.document;
-    const nativeBase = document.version;
-    const result = await request(record, 'draft/history', {
-      runId: record.runId,
-      uri: record.uri.toString(),
-      version: base,
-      command,
-    });
-    if (!result) {
-      return false;
-    }
-    if (result.type !== 'draft/replaced'
-      || result.runId !== record.runId
-      || result.uri !== record.uri.toString()
-      || result.baseVersion !== base
-      || result.version !== base + 1
-      || typeof result.text !== 'string'
-      || !Object.keys(result).every((key) => ['type', 'runId', 'uri', 'baseVersion', 'version', 'text'].includes(key))) {
-      fail(record, 'unexpected commit draft history acknowledgement');
-      return false;
-    }
-    record.version = result.version;
-    if (record.document === document && document.version === nativeBase && document.getText() === before) {
-      record.applying = true;
-      try {
-        await replace(record, result.text, nativeBase);
-      } catch (error) {
-        record.applying = false;
-        fail(record, error);
-        return false;
-      }
-      record.applying = false;
-      record.text = result.text;
-      recover(record);
-      return flush(record);
-    }
-    // A native mutation raced the response: keep local text, forbid the stale
-    // replacement and reconcile through full sync above the returned version.
-    record.text = result.text;
-    recover(record);
-    return flush(record);
-  });
 }
 
 /**
@@ -663,7 +584,6 @@ async function open(effect, originViewId) {
     savedText: effect.text,
     attached: false,
     closing: false,
-    applying: false,
     busy: false,
     disconnected: false,
     changingLanguage: false,
@@ -735,8 +655,6 @@ async function handleInvoke(args) {
     await cancel(record);
   } else if (action === 'close') {
     await close(record);
-  } else if (action === 'history-prev' || action === 'history-next') {
-    await history(record, edit.historyCommand(action));
   } else if (command) {
     store.output.appendLine(`commit draft ignored command: ${command}`);
   }
@@ -878,7 +796,6 @@ exports.current = current;
 exports.disconnect = disconnect;
 exports.forUri = forUri;
 exports.handleInvoke = handleInvoke;
-exports.history = history;
 exports.onChanged = onChanged;
 exports.onClosed = onClosed;
 exports.onError = onError;

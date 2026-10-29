@@ -27,7 +27,7 @@ const LANGUAGES = {
  * it to the status view while the draft has focus.
  *
  * @param {string|undefined} command
- * @returns {'confirm'|'cancel'|'close'|'history-prev'|'history-next'|undefined}
+ * @returns {'confirm'|'cancel'|'close'|undefined}
  */
 function draftAction(command) {
   switch (command) {
@@ -37,29 +37,9 @@ function draftAction(command) {
       return 'cancel';
     case 'common.quit':
       return 'close';
-    case 'commit-message.history-prev':
-      return 'history-prev';
-    case 'commit-message.history-next':
-      return 'history-next';
     default:
       return undefined;
   }
-}
-
-/**
- * The history command a draft action names, if any.
- *
- * @param {'history-prev'|'history-next'|undefined} action
- * @returns {string|undefined}
- */
-function historyCommand(action) {
-  if (action === 'history-prev') {
-    return 'commit-message.history-prev';
-  }
-  if (action === 'history-next') {
-    return 'commit-message.history-next';
-  }
-  return undefined;
 }
 
 /**
@@ -134,7 +114,6 @@ module.exports = {
   SCHEME,
   draftAction,
   editingContext,
-  historyCommand,
   inactiveContext,
   isEditEffect,
   languageForKind,

@@ -863,7 +863,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 // Draft barriers and full-sync notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
-                if matches!(request.method.as_str(), "workspace/executeCommand" | "draft/history") {
+                if request.method == "workspace/executeCommand" {
                     let response = match draft_request(&shared, &request) {
                         Ok(result) => Response::new_ok(request.id, result),
                         Err(error) => {
@@ -1171,11 +1171,7 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                     },
                 )));
             }
-            DraftResponse::Finished { run_id: p.run_id, uri: p.uri, version: p.version }
-        }
-        "draft/history" => {
-            let p: DraftHistoryParams = from_params(request.params.clone())?;
-            editor::registry().history(&shared.draft_owner, &p)?
+            EditConfirmation::Confirmed { run_id: p.run_id, uri: p.uri, version: p.version }
         }
         _ => return Err(Error::new("Unknown commit draft request")),
     };

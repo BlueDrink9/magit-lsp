@@ -293,8 +293,6 @@ test('one generic dispatcher carries every contributed action binding', () => {
     'magit.cancelEdit',
     'magit.closeEdit',
     'magit.confirmEdit',
-    'magit.historyNext',
-    'magit.historyPrev',
     'magit.invoke',
     'magit.key',
     'magit.mirrorFoldShortcuts',
@@ -319,12 +317,13 @@ test('managed draft effects accept only the exact full-sync announcement', () =>
   const effect = { type: 'editDocument', mode: 'realFile', runId: 'run-1',
     uri: 'file:///repo/.git/COMMIT_EDITMSG', version: 1, text: 'exact\r\n', kind: 'commit-message' };
   assert(edit.isEditEffect(effect));
-  for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'managedDraft' },
+  for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'unsupported' },
     { ...effect, uri: 'magit-commit://other/message' }, { ...effect, version: 2 },
     { ...effect, requestId: 4 }]) assert(!edit.isEditEffect(invalid));
   assert.equal(edit.editingContext(effect)['magit.active'], false, 'native typing is not a view keymap');
   assert.equal(edit.draftAction('common.quit'), 'close');
-  assert.equal(edit.historyCommand(edit.draftAction('commit-message.history-prev')), 'commit-message.history-prev');
+  assert.equal(edit.draftAction('commit-message.history-prev'), undefined);
+  assert.equal(edit.draftAction('commit-message.history-next'), undefined);
 });
 
 const KEYBINDINGS_JSONC = `[

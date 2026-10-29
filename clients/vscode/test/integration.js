@@ -428,41 +428,18 @@ async function run() {
     draft = await startDraft();
     const unsent = 'exact unsent message\n\nbody ü\n';
     draft.document.replaceText(unsent);
-    await invokeGenerated('commit-message.history-prev');
-    assert.equal(draft.document.getText(), `${commitMessage}\n`);
-    const afterRecall = draft.version;
-    const changesAfterRecall = client.notes.filter((note) => note.method === 'textDocument/didChange').length;
-    await draft.queue;
-    assert.equal(client.notes.filter((note) => note.method === 'textDocument/didChange').length,
-      changesAfterRecall, 'history replacement does not echo');
-    await invokeGenerated('commit-message.history-next');
-    assert.equal(draft.document.getText(), unsent, 'next restores exact current unsent draft');
-    assert.equal(draft.version, afterRecall + 1);
-    await invokeGenerated('commit-message.history-next');
-    assert.equal(draft.document.getText(), unsent, 'next at newest is a no-op replacement');
-
-    // A raced API edit must win over the recalled replacement, including an
-    // edit-and-undo back to identical text with a newer native version.
+    await waitFor(() => draft.text === unsent && !draft.flushQueued, 'synchronized native text');
     const sendRequest = client.sendRequest.bind(client);
-    client.sendRequest = async (method, params) => {
-      const result = await sendRequest(method, params);
-      if (method === 'draft/history') draft.document.replaceText('raced local text\n');
-      return result;
-    };
-    await invokeGenerated('commit-message.history-prev');
-    client.sendRequest = sendRequest;
-    assert.equal(draft.document.getText(), 'raced local text\n');
-    assert.equal(client.notes.at(-1).params.textDocument.version, draft.version);
-    assert.equal(client.notes.at(-1).params.contentChanges[0].text, 'raced local text\n');
-
-    const finishCount = client.requests.filter((request) => request.method === 'draft/finish').length;
+    const finishCount = client.requests.filter((request) => request.method === 'workspace/executeCommand').length;
     client.sendNotification('textDocument/didChange', { textDocument: { uri: draft.effect.uri,
       version: draft.version }, contentChanges: [{ text: 'stale text must not replace native text' }] });
     await waitFor(() => draft.syncError, 'readable version error');
-    assert.equal(draft.document.getText(), 'raced local text\n', 'sync errors retain native text');
-    assert.equal(client.requests.filter((request) => request.method === 'draft/finish').length, finishCount);
-    await assert.rejects(sendRequest('draft/save', { runId: draft.runId, uri: draft.effect.uri,
-      version: draft.version, text: 'not a second text channel' }));
+    assert.equal(draft.document.getText(), unsent, 'sync errors retain native text');
+    assert.equal(client.requests.filter((request) => request.method === 'workspace/executeCommand').length, finishCount);
+    await assert.rejects(sendRequest('workspace/executeCommand', { command: 'magit.command', arguments: [{
+      command: 'common.confirm', runId: draft.runId, uri: draft.effect.uri,
+      version: draft.version, source: 'synchronized', text: 'not a second text channel',
+    }] }));
     await draft.document.save();
     assert.equal(draft.syncError, undefined, 'retry resynchronizes above the rejected version');
     draft.document.replaceText('explicit confirmed text\n');

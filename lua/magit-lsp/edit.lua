@@ -93,7 +93,7 @@ local function finish(record, reason)
   local payload = params(record, reason == 'confirm' and record.version or record.saved_version)
   payload.command = 'common.confirm'
   payload.source = reason == 'confirm' and 'synchronized' or 'saved-file'
-  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'draft/finished', function()
+  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'confirmed', function()
     view.close(record.key, false)
     view.focus(record.base)
   end)
@@ -153,39 +153,6 @@ function M.on_closed(record)
   M.flush(record)
   record.detached = true
   notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
-end
-
---- Recall server-owned history with the exact live base and no replacement echo.
----@param key string
----@param command string
-function M.history(key, command)
-  local record = view.views[key]
-  if not begin(record) then return end
-  local base, before = record.version, record.text
-  local generation = record.generation
-  local payload = params(record)
-  payload.command = command
-  view.request(record.buf, record.client_id, 'draft/history', payload, function(result, err)
-    if not live(record) or record.disconnected or record.generation ~= generation then return end
-    if err or type(result) ~= 'table' or result.type ~= 'draft/replaced'
-      or result.runId ~= record.id or result.uri ~= record.uri or result.baseVersion ~= base
-      or result.version ~= base + 1 or type(result.text) ~= 'string' then
-      fail(record, err or 'unexpected draft history acknowledgement')
-      return
-    end
-    record.version = result.version
-    vim.bo[record.buf].modifiable = true
-    if text(record) == before then
-      replace(record, result.text)
-    else
-      -- API mutation can bypass modifiable: preserve it above the returned base.
-      record.text = result.text
-      record.sync_error = nil
-      M.flush(record)
-    end
-    vim.bo[record.buf].modified = text(record) ~= record.saved_text
-    unlock(record)
-  end)
 end
 
 --- Display a readable sync rejection while preserving native user text.
@@ -274,9 +241,6 @@ local function keymap_options(record)
     ['common.cancel'] = function() M.cancel(record.key) end,
     ['common.quit'] = function() vim.cmd.bdelete() end,
   }
-  for _, command in ipairs({ 'commit-message.history-prev', 'commit-message.history-next' }) do
-    commands[command] = function() M.history(record.key, command) end
-  end
   return { press = function() end, command = function() end }, {
     folds = false, only_commands = true, commands = commands,
   }

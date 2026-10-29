@@ -8,7 +8,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 
 /** Requests this test records as evidence; notifications are not captured. */
 const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open',
-  'workspace/executeCommand', 'draft/history']);
+  'workspace/executeCommand']);
 
 /**
  * Resolve after `milliseconds`, only used to let a native widget mount.
@@ -1272,7 +1272,7 @@ async function run() {
     assert(registeredCommands.includes('magit.invoke'), 'generic dispatcher is not registered');
     assert.deepEqual(registeredMagitCommands, [
       'magit.cancelEdit', 'magit.closeEdit', 'magit.confirmEdit',
-      'magit.historyNext', 'magit.historyPrev', 'magit.invoke', 'magit.key',
+      'magit.invoke', 'magit.key',
       'magit.mirrorFoldShortcuts', 'magit.open',
     ], 'per-action VSCode command registrations exist');
     const contributed = extension.packageJSON.contributes;
@@ -1688,36 +1688,28 @@ async function run() {
     assert.equal(subject(), commitMessage);
     cases.push({ name: 'native-save-normal-close', message: commitMessage, head: head() });
 
-    let historyEditor = await startBridgeEdit();
+    const recoveryEditor = await startBridgeEdit();
     const unsent = 'native exact unsent\n\nbody ü\n';
-    await replaceDraft(historyEditor, unsent);
-    const base = draftFor(historyEditor).version;
-    await palette('Magit: Previous Commit Message');
-    await waitFor(() => historyEditor.document.getText() === commitMessage, 'native previous history');
-    shot('r-edit-5-history-previous.png');
-    await palette('Magit: Next Commit Message');
-    await waitFor(() => historyEditor.document.getText() === unsent, 'native current draft restored');
-    await palette('Magit: Next Commit Message');
-    await waitFor(() => draftFor(historyEditor).version >= base + 3, 'native no-op next adopted version');
-    assert.equal(historyEditor.document.getText(), unsent);
-    const record = draftFor(historyEditor);
+    await replaceDraft(recoveryEditor, unsent);
+    const record = draftFor(recoveryEditor);
+    await waitFor(() => record.text === unsent && !record.flushQueued, 'native recovery text synchronized');
     const checkpointBefore = record.savedVersion;
-    assert.equal(checkpointBefore, 1, 'history never checkpoints');
-    const uriHistory = record.uri.toString();
+    assert.equal(checkpointBefore, 1, 'unsaved edits never checkpoint');
+    const recoveryUri = record.uri.toString();
     await draftStore.client.sendNotification('textDocument/didChange', {
-      textDocument: { uri: uriHistory, version: record.version }, contentChanges: [{ text: 'stale update' }],
+      textDocument: { uri: recoveryUri, version: record.version }, contentChanges: [{ text: 'stale update' }],
     });
-    await waitFor(() => record.syncError && draftErrors.some((error) => error.uri === uriHistory), 'native readable version error');
-    assert.equal(historyEditor.document.getText(), unsent);
+    await waitFor(() => record.syncError && draftErrors.some((error) => error.uri === recoveryUri), 'native readable version error');
+    assert.equal(recoveryEditor.document.getText(), unsent);
     shot('r-edit-5-version-error-preserves-text.png');
-    assert(await historyEditor.document.save(), 'native retry checkpoint succeeds');
+    assert(await recoveryEditor.document.save(), 'native retry checkpoint succeeds');
     await waitFor(() => record.syncError === undefined, 'native retry sync recovery');
     assert.equal(head(), cases[0].head, 'sync error/retry did not finish');
-    await replaceDraft(historyEditor, 'native explicit confirm\n');
+    await replaceDraft(recoveryEditor, 'native explicit confirm\n');
     await palette('Magit: Confirm Commit Draft');
     await progressIdle();
     assert.equal(subject(), 'native explicit confirm');
-    cases.push({ name: 'history-restore-no-op-version-recovery-confirm', head: head(),
+    cases.push({ name: 'version-recovery-confirm', head: head(),
       errors: draftErrors.slice(), unsent });
     shot('r-edit-5-confirmed.png');
 

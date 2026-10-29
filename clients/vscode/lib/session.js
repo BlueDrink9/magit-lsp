@@ -86,14 +86,6 @@ function activate(context) {
        const draft = drafts.current();
        if (draft) return drafts.close(draft);
      }),
-     vscode.commands.registerCommand('magit.historyPrev', () => {
-       const draft = drafts.current();
-       if (draft) return drafts.history(draft, 'commit-message.history-prev');
-     }),
-     vscode.commands.registerCommand('magit.historyNext', () => {
-       const draft = drafts.current();
-       if (draft) return drafts.history(draft, 'commit-message.history-next');
-     }),
     vscode.commands.registerCommand('magit.mirrorFoldShortcuts', commands.mirrorFoldShortcuts),
      vscode.workspace.onDidCloseTextDocument(edits.onDocumentClosed),
      vscode.workspace.onDidChangeTextDocument(drafts.onChanged),

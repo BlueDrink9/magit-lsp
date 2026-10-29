@@ -2342,7 +2342,7 @@ T['two repositories get independent status views'] = function()
   )
 end
 
-T['managed drafts own full sync, exact bytes, checkpoints and history without auto attachment'] = function()
+T['commit files own full sync, exact bytes and native saves without auto attachment'] = function()
   setup_child()
   child.lua([[
     EDIT = require('magit-lsp.edit')
@@ -2367,7 +2367,6 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
         capture = false, bindings = {
           { command = 'common.confirm', keys = { 'Z Z' }, modes = { 'normal' } },
           { command = 'common.cancel', keys = { 'Z Q' }, modes = { 'normal' } },
-          { command = 'commit-message.history-prev', keys = { '[ m' }, modes = { 'normal' } },
         },
       }, STATUS.client_id)
       local path = STATUS.root .. '/' .. id .. '/COMMIT_EDITMSG'
@@ -2408,15 +2407,10 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     vim.cmd.write()
     SAVE_PENDING = VIEW.current() == DOC
     SAVE_STAYS = VIEW.current() == DOC and not DOC.busy and not vim.bo[DOC.buf].modified
-    EDIT.history(DOC.key, 'commit-message.history-prev')
-    BARRIERS[1].callback({ type = 'draft/replaced', runId = DOC.id, uri = DOC.uri,
-      baseVersion = 2, version = 3, text = 'recalled\n\n' })
-    HISTORY = { version = DOC.version, text = DOC.text, dirty = vim.bo[DOC.buf].modified,
-      notifications = #SYNCS }
     vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'finish β' })
     EDIT.confirm(DOC.key)
     FINISH_PENDING = VIEW.views[DOC.key] == DOC
-    ACK(2, 'draft/finished')
+    ACK(1, 'confirmed')
     CONFIRMED = VIEW.views[DOC.key] == nil
     CHECK_WINDOW(false)
   ]])
@@ -2426,18 +2420,15 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     attached = false, server_views = 1, pending_empty = true, eol = true, lines = { 'α', '' },
   })
   MiniTest.expect.equality(child.lua_get('SAVE_PENDING and SAVE_STAYS and FINISH_PENDING and CONFIRMED'), true)
-  MiniTest.expect.equality(child.lua_get('HISTORY'), {
-    version = 3, text = 'recalled\n\n', dirty = true, notifications = 2,
-  })
   MiniTest.expect.equality(child.lua_get('SYNCS'), {
     { 'textDocument/didOpen', { textDocument = { uri = child.lua_get('DOC.uri'),
       languageId = 'gitcommit', version = 1, text = 'α\n\n' } } },
     { 'textDocument/didChange', { textDocument = { uri = child.lua_get('DOC.uri'), version = 2 },
       contentChanges = { { text = 'β\n' } } } },
-    { 'textDocument/didChange', { textDocument = { uri = child.lua_get('DOC.uri'), version = 4 },
-      contentChanges = { { text = 'finish β\n' } } } },
+    { 'textDocument/didChange', { textDocument = { uri = child.lua_get('DOC.uri'), version = 3 },
+      contentChanges = { { text = 'finish β' } } } },
   })
-  MiniTest.expect.equality(child.lua_get('BARRIERS[2].payload.arguments[1].source'), 'synchronized')
+  MiniTest.expect.equality(child.lua_get('BARRIERS[1].payload.arguments[1].source'), 'synchronized')
   child.lua([[
     vim.notify = function() end
     BARRIERS = {}
@@ -2458,20 +2449,12 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
     CHECK_WINDOW(false)
 
     BARRIERS = {}
-    DOC = OPEN_DRAFT('raced-history', 'before')
-    EDIT.history(DOC.key, 'commit-message.history-prev')
-    vim.bo[DOC.buf].modifiable = true
+    DOC = OPEN_DRAFT('rejected-sync', 'before')
     vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'newer local text' })
-    BARRIERS[1].callback({ type = 'draft/replaced', runId = DOC.id, uri = DOC.uri,
-      baseVersion = 1, version = 2, text = 'server history' })
-    HISTORY_RACE = DOC.version == 3 and DOC.text == 'newer local text'
-      and vim.api.nvim_buf_get_lines(DOC.buf, 0, -1, false)[1] == 'newer local text'
-      and SYNCS[#SYNCS][2].textDocument.version == 3
-      and SYNCS[#SYNCS][2].contentChanges[1].text == 'newer local text'
     EDIT.confirm(DOC.key)
-    EDIT.on_error({ uri = DOC.uri, version = 3, message = 'sync rejected' }, DOC.client_id)
-    ACK(2, 'draft/finished')
-    BLOCKED_FINISH = #BARRIERS == 2 and VIEW.current() == DOC
+    EDIT.on_error({ uri = DOC.uri, version = 2, message = 'sync rejected' }, DOC.client_id)
+    ACK(1, 'confirmed')
+    BLOCKED_FINISH = #BARRIERS == 1 and VIEW.current() == DOC
       and DOC.sync_error == 'sync rejected' and vim.bo[DOC.buf].modifiable
     vim.api.nvim_buf_delete(DOC.buf, { force = true })
     AMBIGUOUS_CANCEL = SYNCS[#SYNCS][1] == 'textDocument/didClose'
@@ -2486,7 +2469,7 @@ T['managed drafts own full sync, exact bytes, checkpoints and history without au
       and vim.bo[DOC.buf].modified and #BARRIERS == count
   ]])
   MiniTest.expect.equality(child.lua_get('FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH'), true)
-  MiniTest.expect.equality(child.lua_get('HISTORY_RACE and BLOCKED_FINISH and AMBIGUOUS_CANCEL'), true)
+  MiniTest.expect.equality(child.lua_get('BLOCKED_FINISH and AMBIGUOUS_CANCEL'), true)
   MiniTest.expect.equality(child.lua_get('DISCONNECTED'), true)
 end
 

@@ -136,16 +136,6 @@
         "icon": "$(close)"
       },
       {
-        "command": "magit.historyPrev",
-        "title": "Magit: Previous Commit Message",
-        "enablement": "resourceScheme == magit-commit"
-      },
-      {
-        "command": "magit.historyNext",
-        "title": "Magit: Next Commit Message",
-        "enablement": "resourceScheme == magit-commit"
-      },
-      {
         "command": "magit.open",
         "title": "Open Status",
         "category": "Magit"
@@ -182,14 +172,6 @@
         },
         {
           "command": "magit.cancelEdit",
-          "when": "resourceScheme == magit-commit"
-        },
-        {
-          "command": "magit.historyPrev",
-          "when": "resourceScheme == magit-commit"
-        },
-        {
-          "command": "magit.historyNext",
           "when": "resourceScheme == magit-commit"
         }
       ]

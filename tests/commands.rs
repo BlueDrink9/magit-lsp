@@ -261,10 +261,7 @@ fn the_registry_lists_every_named_command_once() {
     for id in ["commit-message.history-prev", "commit-message.history-next"] {
         let command = registry().get(id).expect("registered");
         assert_eq!(command.scope, Scope::CommitMessage);
-        assert_eq!(command.status, CommandStatus::Implemented);
-        let wire: magit_lsp::protocol::DraftHistoryCommand =
-            serde_json::from_value(serde_json::json!(id)).expect("history wire command");
-        assert_eq!(serde_json::to_value(wire).unwrap(), id);
+        assert_eq!(command.status, CommandStatus::Planned { roadmap_id: "R-EDIT-HISTORY" });
     }
 
     // The status scope (§5.2) consists of the `status.*` actions and every

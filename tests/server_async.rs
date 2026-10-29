@@ -38,15 +38,13 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     let messages = [
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":7},"contentChanges":[{"text":"Saved but never confirmed\n"}]}}),
-        json!({"jsonrpc":"2.0","id":10,"method":"draft/history","params":{"runId":edit["runId"],"uri":edit["uri"],"version":6,"command":"commit-message.history-prev"}}),
     ];
     server.send_raw(&messages.into_iter().flat_map(frame).collect::<Vec<_>>());
-    assert!(server.response_with_id(10)["error"].is_object());
     let messages = [
         json!({"jsonrpc":"2.0","id":19,"method":"shutdown","params":null}),
         json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":8},"contentChanges":[{"text":"Too late\n"}]}}),
-        json!({"jsonrpc":"2.0","id":20,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":8}}),
-        json!({"jsonrpc":"2.0","id":21,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":7,"reason":"normal-close"}}),
+        json!({"jsonrpc":"2.0","id":20,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":8,"source":"synchronized"}]}}),
+        json!({"jsonrpc":"2.0","id":21,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":7,"source":"saved-file"}]}}),
     ];
     server.send_raw(&messages.into_iter().flat_map(frame).collect::<Vec<_>>());
     assert_eq!(server.response_with_id(19)["result"], Value::Null);
