@@ -27,6 +27,7 @@ fn hunk(id: &str, lines: Vec<(char, &str)>) -> Hunk {
                 no_newline: false,
             })
             .collect(),
+        metadata: Default::default(),
         id: id.to_string(),
     }
 }

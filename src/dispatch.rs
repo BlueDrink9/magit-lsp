@@ -84,6 +84,7 @@ fn mutation_hash(
         // to the complete file state so removing one cannot retarget another.
         serde_json::json!([command, hunk.id, identical,
             hunk.lines.iter().map(|line| (line.marker, &line.text, line.no_newline)).collect::<Vec<_>>(),
+            &hunk.metadata,
             identity.original.as_ref().map(|(path, _)| path),
             if identical > 1 || command == "status.discard" { Some(&identity) } else { None }])
     } else { serde_json::json!([command, identity]) };

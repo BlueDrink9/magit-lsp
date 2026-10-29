@@ -549,6 +549,34 @@ fn mode_only_change_after_render_is_rejected_without_staging() {
     assert!(tmp.git(&["diff", "--cached"]).is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn unique_hunk_target_rejects_executable_mode_added_after_render() {
+    use std::os::unix::fs::PermissionsExt;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", lines(20).to_string())]).modify("f.txt", lines(20).with(5, "line5 CHANGED").to_string()).build();
+    let path = tmp.path().join("f.txt");
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o644);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let line = test.tree().nodes.iter().find(|node| node.kind == magit_lsp::tree::NodeKind::Hunk
+        && node.path.as_deref() == Some("f.txt") && node.section.as_deref() == Some("unstaged")).unwrap().start_line;
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_index = tmp.git(&["hash-object", ".git/index"]);
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    let after_worktree = std::fs::read(&path).unwrap();
+    let outcome = test.invoke_at_version("status.stage", version, Some(Cursor { line, column: 0 }), None, None);
+    assert!(message_texts(&outcome.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert_eq!(std::fs::read(&path).unwrap(), after_worktree);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]).split_whitespace().next(), Some("100644"));
+}
+
 #[test]
 fn binary_content_change_after_render_is_rejected_without_staging() {
     let (tmp, _) = RepoFixture::new().commit("init", [("f.bin", "old\0binary")]).build();

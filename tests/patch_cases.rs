@@ -179,6 +179,7 @@ fn mode_and_content_change_keeps_mode_lines_in_hunk_headers() {
         layout.header
     );
     let hunk_id = layout.hunks[0].hunk.id.clone();
+    assert_eq!(layout.hunks[0].hunk.metadata.modes, vec![("old".into(), "100644".into()), ("new".into(), "100755".into())]);
     repo.stage_lines("f.txt", &hunk_id, 2, 3)
         .expect("stage lines");
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "f.txt"]);

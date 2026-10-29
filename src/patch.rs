@@ -24,8 +24,44 @@ pub struct Hunk {
     pub new_start: u32,
     pub new_count: u32,
     pub lines: Vec<DiffLine>,
+    /// Mutation-affecting file header semantics captured alongside this hunk.
+    #[serde(default)]
+    pub metadata: PatchMetadata,
     /// Stable content id; line numbers are excluded so it survives shifts.
     pub id: String,
+}
+
+/// Typed file-patch metadata that can change what applying a hunk mutates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchMetadata {
+    /// Old/new mode transitions, including creation and deletion modes.
+    pub modes: Vec<(String, String)>,
+    /// File identity operations such as rename/copy and creation/deletion.
+    pub operations: Vec<(String, String)>,
+}
+
+impl PatchMetadata {
+    fn from_header(header: &str) -> Self {
+        let mut metadata = Self::default();
+        for line in header.lines() {
+            if let Some(value) = line.strip_prefix("old mode ") {
+                metadata.modes.push(("old".into(), value.into()));
+            } else if let Some(value) = line.strip_prefix("new mode ") {
+                metadata.modes.push(("new".into(), value.into()));
+            } else if let Some(value) = line.strip_prefix("new file mode ") {
+                metadata.modes.push(("create".into(), value.into()));
+            } else if let Some(value) = line.strip_prefix("deleted file mode ") {
+                metadata.modes.push(("delete".into(), value.into()));
+            } else {
+                for prefix in ["rename from ", "rename to ", "copy from ", "copy to "] {
+                    if let Some(value) = line.strip_prefix(prefix) {
+                        metadata.operations.push((prefix.trim_end().into(), value.into()));
+                    }
+                }
+            }
+        }
+        metadata
+    }
 }
 
 impl Hunk {
@@ -314,6 +350,8 @@ pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
         header.push_str(line);
         header.push('\n');
     }
+    let metadata = PatchMetadata::from_header(&header);
+    for hunk in &mut hunks { hunk.metadata = metadata.clone(); }
     Some(FileDiff {
         path: diff_path(diff)?,
         header,
@@ -500,6 +538,7 @@ pub fn parse_unified_diff(diff: &str) -> Vec<Hunk> {
                     new_start,
                     new_count,
                     lines: Vec::new(),
+                    metadata: PatchMetadata::default(),
                     id: String::new(),
                 });
             }
