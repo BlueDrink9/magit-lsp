@@ -9,7 +9,7 @@ wait screen contains "Please enter the commit message"
 snapshot: editor-active
 keys: i "Never submitted"
 keys: Escape
-keys: ":lua local v=assert(require('magit-lsp.view').current()); assert(v.document and vim.bo[v.buf].buftype=='acwrite' and not vim.lsp.buf_is_attached(v.buf,v.client_id)); local t; for token,p in pairs(require('magit-lsp.debug').state.progress) do if p.title=='Git' and p.message=='commit' then assert(not t); t=token end end; assert(t); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
+keys: ":lua local v=assert(require('magit-lsp.view').current()); assert(v.uri:match('COMMIT_EDITMSG$') and vim.bo[v.buf].buftype==''); local t; for token,p in pairs(require('magit-lsp.debug').state.progress) do if p.title=='Git' and p.message=='commit' then assert(not t); t=token end end; assert(t); assert(vim.lsp.get_client_by_id(v.client_id):notify('window/workDoneProgress/cancel',{token=t}))" Enter
 wait screen contains "git commit"
 snapshot: cancellation-feedback
 sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi

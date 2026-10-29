@@ -26,7 +26,7 @@ keys: c
 wait
 keys: c
 wait screen contains "Please enter the commit message"
-keys: ":lua local r=require('magit-lsp.view').current(); assert(r.document and r.uri:match('^magit%-commit://') and vim.bo[r.buf].buftype=='acwrite' and not vim.lsp.buf_is_attached(r.buf,r.client_id))" Enter
+keys: ":lua local r=require('magit-lsp.view').current(); assert(r.uri:match('COMMIT_EDITMSG$') and vim.bo[r.buf].buftype=='' and not vim.lsp.buf_is_attached(r.buf,r.client_id))" Enter
 keys: i After
 keys: " progress cancellation"
 keys: Escape

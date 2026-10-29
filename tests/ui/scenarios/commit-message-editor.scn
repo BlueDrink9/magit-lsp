@@ -2,8 +2,8 @@
 #
 # The commit menu's `c` starts `git commit` through the editor bridge, so the
 # client stays busy while Git waits and waits use `wait screen contains`. Git's
-# COMMIT_EDITMSG opens as a bottom-split `gitcommit` buffer in the same
-# instance; the message is typed in insert mode and confirmed with the
+# COMMIT_EDITMSG opens as a real, normal buffer in the current window in the
+# same instance; the message is typed in insert mode and confirmed with the
 # commit-message scope's confirm key (`ctrl+Enter` in standard, `Z Z` in vim).
 # Confirming leaves a clean tree, reports the committed subject and records the
 # `git commit` invocation in the process log.
@@ -15,8 +15,9 @@ keys: c
 wait
 keys: c
 wait screen contains "Please enter the commit message"
-expect windows.count == 2
-expect windows.1.filetype == gitcommit
+expect windows.count == 1
+expect windows.0.filetype == gitcommit
+keys: ":lua assert(vim.api.nvim_buf_get_name(0):match('COMMIT_EDITMSG$') and vim.bo.buftype=='')" Enter
 snapshot: editor
 keys: i A commit from the UI
 keys: Escape
