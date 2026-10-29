@@ -9,6 +9,7 @@ mod common;
 
 use common::*;
 use magit_lsp::config::Profile;
+use magit_lsp::git::{CommitOperation, CommitOptions};
 use magit_lsp::protocol::{Effect, MessageLevel, PromptKind};
 use magit_lsp::session::InvokeResult;
 
@@ -104,8 +105,8 @@ fn unstaged_changes_prompt_then_stage_and_commit() {
         "Nothing staged. Stage all changes and commit?"
     );
     assert_eq!(
-        outcome.commit.as_deref(),
-        Some(tmp.path().to_string_lossy().as_ref()),
+        outcome.commit,
+        Some(CommitOperation::Create(CommitOptions::default())),
         "the commit continues after staging"
     );
     assert_eq!(
@@ -169,8 +170,8 @@ fn staged_changes_commit_without_a_prompt() {
         "a staged tree needs no prompt"
     );
     assert_eq!(
-        outcome.commit.as_deref(),
-        Some(tmp.path().to_string_lossy().as_ref()),
+        outcome.commit,
+        Some(CommitOperation::Create(CommitOptions::default())),
         "the commit worker is started"
     );
 }
