@@ -1,5 +1,4 @@
---- Managed commit drafts: one explicit full-sync stream, versioned barriers and
---- positively classified native close intent. No Git path is opened or written.
+--- Native COMMIT_EDITMSG editing with bounded full sync and semantic confirmation.
 local view = require('magit-lsp.view')
 local hooks = require('magit-lsp.hooks')
 local M = {}
@@ -76,7 +75,7 @@ local function barrier(record, method, payload, expected, done)
     if not live(record) or record.disconnected or record.generation ~= generation then return end
     if err or type(result) ~= 'table' or result.type ~= expected
       or result.runId ~= record.id or result.uri ~= record.uri
-      or result.version ~= payload.version or record.version ~= base then
+      or result.version ~= (payload.version or payload.arguments[1].version) or record.version ~= base then
       fail(record, err or 'unexpected draft acknowledgement')
       return
     end
@@ -90,10 +89,10 @@ local function unlock(record)
 end
 
 local function finish(record, reason)
-  local payload = params(record, record.saved_version)
-  payload.reason = reason
-  barrier(record, 'draft/finish', payload, 'draft/finished', function()
-    notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
+  local payload = params(record, reason == 'confirm' and record.version or record.saved_version)
+  payload.command = 'common.confirm'
+  payload.source = reason == 'confirm' and 'synchronized' or 'saved-file'
+  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'draft/finished', function()
     view.close(record.key, false)
     view.focus(record.base)
   end)
@@ -101,13 +100,13 @@ end
 
 local function checkpoint(record, done)
   local value = record.text
-  barrier(record, 'draft/save', params(record), 'draft/checkpointed', function()
-    record.saved_version = record.version
-    record.saved_text = value
-    record.sync_error = nil
-    vim.bo[record.buf].modified = text(record) ~= value
-    done()
-  end)
+  local ok, err = pcall(vim.api.nvim_buf_call, record.buf, function() vim.cmd('silent write') end)
+  if not ok then fail(record, err); return end
+  record.saved_version = record.version
+  record.saved_text = value
+  record.sync_error = nil
+  vim.bo[record.buf].modified = text(record) ~= value
+  done()
 end
 
 local function begin(record)
@@ -118,18 +117,18 @@ local function begin(record)
   return true
 end
 
---- Native :write checkpoints the exact live version and stays in the editor.
+--- Native :write saves disk text and stays in the editor.
 ---@param key string
 function M.save(key)
   local record = view.views[key]
   if begin(record) then checkpoint(record, function() unlock(record) end) end
 end
 
---- Explicit confirmation flushes, checkpoints, awaits finish, then closes.
+--- Explicit confirmation flushes the exact version, awaits safe writeback, then closes.
 ---@param key string
 function M.confirm(key)
   local record = view.views[key]
-  if begin(record) then checkpoint(record, function() finish(record, 'confirm') end) end
+  if begin(record) then finish(record, 'confirm') end
 end
 
 --- Explicit user close selects Save/Discard/Cancel before any native teardown.
@@ -165,7 +164,7 @@ function M.close(key)
   end
 end
 
---- Abort explicitly; never infer confirmation from buffer lifetime events.
+--- Abort explicitly without sending a close that might race as confirmation.
 ---@param key string
 function M.cancel(key)
   local record = view.views[key]
@@ -173,19 +172,16 @@ function M.cancel(key)
   if record.base and view.views[record.base] then
     view.invoke('common.cancel', { args = { runId = record.id } }, record.base)
   end
-  notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
   view.close(record.key, false)
   view.focus(record.base)
 end
 
---- Ambiguous API deletion/unload is cancellation, never native close intent.
+--- Ordinary buffer teardown confirms saved disk text by the accepted LSP assumption.
 ---@param record table
 function M.on_closed(record)
-  if record.closing then return end
+  if record.closing or record.disconnected or record.detached then return end
+  record.detached = true
   notify(record, 'textDocument/didClose', { textDocument = { uri = record.uri } })
-  if record.base and view.views[record.base] then
-    view.invoke('common.cancel', { args = { runId = record.id } }, record.base)
-  end
 end
 
 --- Recall server-owned history with the exact live base and no replacement echo.
@@ -244,16 +240,16 @@ function M.disconnected(client_id)
   end
 end
 
---- Place a URI-owned acwrite scratch buffer with exact UTF-8/newline bytes.
+--- Place the real native file buffer with exact UTF-8/newline bytes.
 ---@param record table
 ---@return integer
 function M.place(record)
   local win = vim.api.nvim_get_current_win()
   record.previous_buf = vim.api.nvim_win_get_buf(win)
-  local buf = vim.api.nvim_create_buf(true, false)
+  local buf = vim.fn.bufadd(vim.uri_to_fname(record.uri))
+  vim.fn.bufload(buf)
   record.buf = buf
-  vim.api.nvim_buf_set_name(buf, record.uri)
-  vim.bo[buf].buftype = 'acwrite'
+  vim.bo[buf].buftype = ''
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].fixendofline = false
@@ -264,7 +260,7 @@ function M.place(record)
   return win
 end
 
---- Register the managed-draft placement.
+--- Register the real commit-file placement.
 function M.setup()
   view.register_placement('edit', { place = M.place })
   vim.api.nvim_create_autocmd('LspProgress', {
@@ -304,14 +300,14 @@ local function keymap_options(record)
   }
 end
 
---- Open the announced managed draft without Neovim's duplicate auto-LSP sync.
+--- Open the announced native file with one explicit full-sync stream.
 ---@param effect table
 ---@param source table|nil
 ---@return table|nil
 function M.open(effect, source)
-  if type(effect) ~= 'table' or effect.mode ~= 'managedDraft'
+  if type(effect) ~= 'table' or effect.mode ~= 'realFile'
     or type(effect.runId) ~= 'string' or type(effect.uri) ~= 'string'
-    or not effect.uri:match('^magit%-commit://') or type(effect.text) ~= 'string'
+    or not effect.uri:match('^file://.*/COMMIT_EDITMSG$') or type(effect.text) ~= 'string'
     or effect.version ~= 1 or effect.kind ~= 'commit-message' then return nil end
   source = source and source.key and source or view.last_for_client(source and source.client_id)
   local base = source and (source.document and source.base or source.key)
@@ -334,23 +330,18 @@ function M.open(effect, source)
       hooks.schedule(function() if live(record) and not record.busy then M.flush(record) end end)
     end,
   })
-  vim.api.nvim_create_autocmd('BufWriteCmd', {
-    buffer = record.buf, callback = function() M.save(record.key) end,
+  vim.api.nvim_create_autocmd('BufWritePost', {
+    buffer = record.buf, callback = function()
+      if not record.busy and not M.flush(record) then return end
+      record.saved_text, record.saved_version = record.text, record.version
+      record.sync_error = nil
+    end,
   })
   vim.api.nvim_create_autocmd('BufUnload', {
     buffer = record.buf, callback = function()
       -- Unload is ambiguous: let an in-progress wipe/delete finish and cancel
       -- through on_closed, and cancel a plain unload once the buffer is free.
-      hooks.schedule(function()
-        if live(record) and not vim.bo[record.buf].loaded then M.cancel(record.key) end
-      end)
-    end,
-  })
-  vim.api.nvim_create_autocmd('BufHidden', {
-    buffer = record.buf, callback = function()
-      hooks.schedule(function()
-        if live(record) and vim.fn.bufwinid(record.buf) == -1 then M.cancel(record.key) end
-      end)
+      if not record.closing and not record.disconnected then M.on_closed(record) end
     end,
   })
   -- Command-line maps are buffer-local, not global command overrides. Native

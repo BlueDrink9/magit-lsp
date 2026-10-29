@@ -1,9 +1,9 @@
-//! Bounded server-owned commit drafts used by the production editor registry.
+//! Bounded full-sync commit documents used by the production editor registry.
 //!
 //! The caller must serialize this object with the run's sole lifecycle owner,
 //! derive `owner`/`repository` from the authenticated connection, and forward a
 //! returned terminal reply to the helper. Text travels only through full-sync
-//! didOpen/didChange; save and finish carry versions, not text. Errors never
+//! didOpen/didChange; explicit confirmation carries a version, not text. Errors never
 //! include message bodies/tokens.
 
 use super::{Reply, COMMIT_MESSAGE_KIND};
@@ -57,6 +57,7 @@ struct Contents {
     live: DraftSnapshot,
     saved: DraftSnapshot,
     attached: bool,
+    opened: bool,
     navigation: Navigation,
 }
 
@@ -82,7 +83,7 @@ impl Draft {
         Ok(Self {
             owner: owner.into(),
             repository: std::fs::canonicalize(repo.root())?,
-            uri: format!("magit-commit://{run_id}/message"),
+            uri: file_uri(&repo.commit_message_path()?),
             run_id,
             helper_token: opaque_id()?,
             expected: repo.commit_message_path()?,
@@ -96,7 +97,7 @@ impl Draft {
         &self.run_id
     }
 
-    /// Sole full-sync document URI for this run; never a Git filesystem URI.
+    /// Canonical Git file URI; the separate run identity guards path reuse.
     pub fn uri(&self) -> &str {
         &self.uri
     }
@@ -147,6 +148,7 @@ impl Draft {
             },
             initial,
             attached: false,
+            opened: false,
             navigation: Navigation::default(),
         });
         Ok(())
@@ -157,11 +159,14 @@ impl Draft {
     pub fn did_open(&mut self, context: DraftContext<'_>, version: i32, text: &[u8]) -> Result<()> {
         let contents = self.pending(context)?;
         let text = checked_text(text)?;
-        if contents.attached || version != contents.live.version || text != contents.live.text {
+        if contents.attached || version < 0 || text != contents.live.text
+            || (contents.opened && version != contents.live.version) {
             return Err(Error::new(
                 "Open the commit draft with its current version and exact text",
             ));
         }
+        contents.live.version = version;
+        contents.opened = true;
         contents.attached = true;
         Ok(())
     }
@@ -231,9 +236,8 @@ impl Draft {
         Ok(&contents.live)
     }
 
-    /// Write the named saved checkpoint before returning helper success. Confirm
-    /// additionally requires current live == saved version; normal-close can discard
-    /// newer live changes. Write failure retains all draft/helper state for retry.
+    /// Confirm exact live-version writeback, or independently read saved disk text
+    /// on close. Read/write failure retains all draft/helper state for retry.
     pub fn finish(
         &mut self,
         context: DraftContext<'_>,
@@ -241,14 +245,18 @@ impl Draft {
         reason: DraftFinishReason,
     ) -> Result<Reply> {
         let contents = self.pending(context)?;
-        if version != contents.saved.version
-            || (reason == DraftFinishReason::Confirm && version != contents.live.version)
-        {
+        if reason == DraftFinishReason::Confirm && version != contents.live.version {
             return Err(Error::new(
-                "Finish must name the selected saved commit draft checkpoint",
+                "Confirm must name the exact synchronized commit message version",
             ));
         }
-        contents.target.write(contents.saved.text.as_bytes())?;
+        let text = if reason == DraftFinishReason::Confirm {
+            contents.target.write(contents.live.text.as_bytes())?;
+            contents.live.text.clone()
+        } else {
+            contents.target.read()?
+        };
+        contents.saved = DraftSnapshot { version, text };
         self.terminal = true;
         Ok(Reply::Ok)
     }
@@ -322,7 +330,19 @@ fn opaque_id() -> Result<String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-// Pin the validated directory and inode. openat + NOFOLLOW avoid final-component
+fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut uri = String::from("file://");
+    for byte in path.as_os_str().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'.' | b'_' | b'~' => uri.push(*byte as char),
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
+}
+
+// Pin the validated directory and owner. openat + NOFOLLOW avoid final-component
 // symlink races; NONBLOCK prevents a substituted FIFO from blocking the owner.
 // Hardlinks are rejected too, so a neighboring file cannot alias our write target.
 struct Target {
@@ -351,7 +371,7 @@ impl Target {
         })
     }
 
-    fn write(&mut self, bytes: &[u8]) -> Result<()> {
+    fn current(&self, write: bool) -> Result<File> {
         let parent = self.path.parent().unwrap();
         if std::fs::canonicalize(parent)? != parent
             || !same_file(&std::fs::metadata(parent)?, &self.directory.metadata()?)
@@ -360,13 +380,24 @@ impl Target {
                 "Commit draft Git directory changed; retry after recovery",
             ));
         }
-        let mut file = open_message(&self.directory, true)?;
+        let file = open_message(&self.directory, write)?;
         regular_unlinked(&file)?;
-        if !same_file(&file.metadata()?, &self.file.metadata()?) {
+        if file.metadata()?.uid() != self.file.metadata()?.uid() {
             return Err(Error::new(
                 "Commit draft target changed; retry after recovery",
             ));
         }
+        Ok(file)
+    }
+
+    fn read(&self) -> Result<String> {
+        let mut bytes = Vec::new();
+        self.current(false)?.take(MAX_DRAFT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+        Ok(checked_text(&bytes)?.to_string())
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<()> {
+        let mut file = self.current(true)?;
         file.seek(SeekFrom::Start(0))?;
         file.write_all(bytes)?;
         file.set_len(bytes.len() as u64)?;
@@ -401,7 +432,8 @@ fn open_message(directory: &File, write: bool) -> Result<File> {
 
 fn regular_unlinked(file: &File) -> Result<()> {
     let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.nlink() != 1 {
+    // SAFETY: geteuid has no arguments or memory access requirements.
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(Error::new(
             "Commit draft target must be a regular file without hardlinks",
         ));

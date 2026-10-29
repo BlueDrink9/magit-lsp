@@ -92,12 +92,14 @@ pub struct ServerOptions {
 #[derive(Debug, Clone, Copy)]
 struct ClientCaps {
     delivery: KeymapDelivery,
+    close_confirms: bool,
 }
 
 impl Default for ClientCaps {
     fn default() -> Self {
         Self {
             delivery: KeymapDelivery::Dynamic,
+            close_confirms: true,
         }
     }
 }
@@ -861,15 +863,18 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 // Draft barriers and full-sync notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
-                if matches!(request.method.as_str(), "draft/save" | "draft/finish" | "draft/history") {
+                if matches!(request.method.as_str(), "workspace/executeCommand" | "draft/history") {
                     let response = match draft_request(&shared, &request) {
                         Ok(result) => Response::new_ok(request.id, result),
                         Err(error) => {
                             let mut response = Response::new_err(request.id, ErrorCode::InvalidParams as i32, error.to_string());
                             if let Err(error) = &mut response.response_result {
+                                let params = if request.method == "workspace/executeCommand" {
+                                    request.params.pointer("/arguments/0").unwrap_or(&request.params)
+                                } else { &request.params };
                                 error.data = Some(serde_json::json!({
-                                    "runId": request.params.get("runId"), "uri": request.params.get("uri"),
-                                    "version": request.params.get("version"), "recoverable": true,
+                                    "runId": params.get("runId"), "uri": params.get("uri"),
+                                    "version": params.get("version"), "recoverable": true,
                                 }));
                             }
                             response
@@ -922,7 +927,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 "textDocument/didOpen" | "textDocument/didChange" | "textDocument/didClose" => {
                     let uri = notification.params.pointer("/textDocument/uri").and_then(Value::as_str).unwrap_or("");
-                    if uri.starts_with("magit-commit:") {
+                    if editor::registry().run_for_uri(&shared.draft_owner, uri).is_ok() {
                         if let Err(error) = draft_notification(&shared, &notification) {
                             let _ = sender.send(Message::Notification(Notification::new("draft/error".to_string(), serde_json::json!({
                                 "uri": uri, "version": notification.params.pointer("/textDocument/version"),
@@ -1143,14 +1148,22 @@ async fn dispatch_response(
 #[cfg(unix)]
 fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
     let response = match request.method.as_str() {
-        "draft/save" => {
-            let p: DraftSaveParams = from_params(request.params.clone())?;
-            let version = editor::registry().apply(&shared.draft_owner, &p.run_id, &p.uri,
-                |draft, context| draft.save(context, p.version))?;
-            DraftResponse::Checkpointed { run_id: p.run_id, uri: p.uri, version }
-        }
-        "draft/finish" => {
-            let p: DraftFinishParams = from_params(request.params.clone())?;
+        "workspace/executeCommand" => {
+            let params: lsp_types::ExecuteCommandParams = from_params(request.params.clone())?;
+            if params.command != "magit.command" || params.arguments.len() != 1 {
+                return Err(Error::new("Expected magit.command with one semantic command"));
+            }
+            let command: EditConfirmParams = from_params(params.arguments[0].clone())?;
+            if command.command != "common.confirm" {
+                return Err(Error::new("Only common.confirm is supported here"));
+            }
+            let p = DraftFinishParams {
+                run_id: command.run_id, uri: command.uri, version: command.version,
+                reason: match command.source {
+                    EditConfirmSource::Synchronized => DraftFinishReason::Confirm,
+                    EditConfirmSource::SavedFile => DraftFinishReason::NormalClose,
+                },
+            };
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
                 let _ = shared.sender.send(Message::Notification(Notification::new(
                     VIEW_EFFECTS.to_string(), ViewEffectsParams {
@@ -1169,7 +1182,7 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
     serde_json::to_value(response).map_err(|error| Error::new(error.to_string()))
 }
 
-/// Apply only standard full-sync LSP text; close detaches without confirming.
+/// Apply full-sync text; ordinary clients confirm saved disk text on didClose.
 #[cfg(unix)]
 fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
     use lsp_types::{DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams};
@@ -1197,8 +1210,16 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
             let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
             let uri = p.text_document.uri.as_str();
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            editor::registry().apply(&shared.draft_owner, &run, uri,
-                |draft, context| draft.did_close(context))
+            let close_confirms = shared.client.lock().unwrap_or_else(|p| p.into_inner()).close_confirms;
+            if close_confirms {
+                editor::registry().finish(&shared.draft_owner, &DraftFinishParams {
+                    run_id: run, uri: uri.to_string(), version: 0, reason: DraftFinishReason::NormalClose,
+                })?;
+                Ok(())
+            } else {
+                editor::registry().apply(&shared.draft_owner, &run, uri,
+                    |draft, context| draft.did_close(context))
+            }
         }
         _ => Err(Error::new("Unknown commit draft notification")),
     }
@@ -1299,6 +1320,8 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
+                client.close_confirms = !params.pointer("/clientInfo/name").and_then(Value::as_str)
+                    .is_some_and(|name| name.to_ascii_lowercase().contains("visual studio code") || name.to_ascii_lowercase().contains("codium"));
             }
             tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
             let init = params
@@ -1892,6 +1915,7 @@ fn capabilities() -> Result<Value> {
     // server advertises the window features it drives so thin clients can
     // enable them without a second handshake.
     if let Some(object) = capabilities.as_object_mut() {
+        object.insert("executeCommandProvider".to_string(), serde_json::json!({ "commands": ["magit.command"] }));
         object.insert(
             "textDocumentSync".to_string(),
             serde_json::json!({ "openClose": true, "change": 1 }),

@@ -522,6 +522,43 @@ keys keep them). Implementation per client:
 
 ### 3.10 Editor bridge (open Git's editor inside the user's editor)
 
+**Production real-file implementation slice (2026-10-29).** The server and both
+bundled adapters now open the canonical actual-gitdir `COMMIT_EDITMSG` file
+(`editDocument.mode: "realFile"`, `file:` URI, separate opaque `runId`). The old
+virtual provider and wire `draft/save`/`draft/finish` methods are removed. Native
+save writes disk and keeps editing. Full-sync versions remain bounded to 1 MiB.
+Explicit confirmation is `workspace/executeCommand` with command `magit.command`
+and one argument `{command:"common.confirm",runId,uri,version,
+source:"synchronized"}`: exact latest version validation and safe writeback precede
+helper release. `source:"saved-file"` instead reads bounded saved disk bytes and
+never writes unsaved synchronized text. Default `didClose` uses saved-file
+confirmation; VSCode is the known exception (identified by clientInfo), ignoring
+didClose as confirmation and sending run-aware saved-file intent only on an actual
+last matching `tabGroups` closed event across all groups. Explicit abort remains
+`view/invoke common.cancel` with `{runId}`. All terminal decisions use the registry
+lock. Safe-save inode replacement is accepted only in the pinned Git directory,
+with regular-file, no-symlink/no-hardlink and owner checks. History remains
+server-owned through the existing versioned `draft/history` barrier. Git owns
+templates, cleanup, effective-empty behavior and hooks.
+
+This is an implementation/integration slice, **not parent R-EDIT-REAL native or
+adversarial acceptance**; that parent stays unchecked. The material below is the
+**archived pre-cutover managed-draft design**, not today's wire contract.
+
+- [x] **R-EDIT-REAL implementation/integration slice.** Real file server/client
+  cutover and focused integration verification; parent native/adversarial
+  acceptance and Magit message-ring parity remain pending.
+  - Focused production Neovim evidence: `commit-draft-history.scn` and
+    `commit-draft-close.scn` passed with the debug server; saved/recalled/restored,
+    discarded-to-saved and recovered-close screens inspected in `build/ui/`.
+    Native VSCode production suite was updated but **not run** in this slice;
+    native dirty choices/multi-group/lifecycle adversarial acceptance remains
+    for the orchestrator. Spike results are not reused as production evidence.
+  - Verification: exact ticket gate passed (68 Rust tests, Lua, VSCode unit and
+    generated bindings, Node integration including 240 real-Git selection cases,
+    `git diff --check`). Full native VSCode acceptance and full regression gate
+    remain unrun; parent R-EDIT-REAL stays unchecked.
+
 **Target-versus-current:** the Plain-client target proposes Git's real
 `COMMIT_EDITMSG` provider-file session, pending R-EDIT-REAL acceptance. The
 explicit decision is to assume that `didClose` is an acceptable confirmation

@@ -1,4 +1,6 @@
-# Native typed :q/:close/:bd classify intent BEFORE teardown, unlike API deletion.
+# Typed :q/:close/:bd arbitrate dirty intent before teardown. Ordinary API
+# deletion confirms saved disk bytes too; the unchanged empty initial template
+# in that case below lets Git abort without submitting unsaved text.
 fixture: staged-one-file
 ---
 keys: c
@@ -88,7 +90,7 @@ wait screen contains "git commit"
 sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
 wait
 expect screen contains "Staged changes (1)"
-snapshot: ambiguous-close-cancelled
+snapshot: api-close-saved-empty-aborted-by-git
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/close-before)" && test "$(git write-tree)" = "$(cat .git/close-index)" && test "$(git hash-object f.txt)" = "$(cat .git/close-worktree)"
 keys: c
 wait

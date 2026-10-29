@@ -1,13 +1,12 @@
 'use strict';
 
 /**
- * Managed commit drafts for VSCode (§3.10).
+ * Native commit-message files for VSCode (§3.10).
  *
  * The server owns the draft state, Git's operation and the versioned barriers.
- * This module is the thin native adapter: a writable in-memory document, one
- * explicit full-sync stream (`didOpen`/`didChange`/`didClose`), `draft/save`,
- * `draft/finish` and `draft/history` correlated by JSON-RPC id, and positively
- * classified close intent. It never opens or writes a Git filesystem path.
+ * This thin adapter opens Git's file, owns one full-sync stream and preserves
+ * exact-version confirmation/history barriers. Only an actual last owned tab
+ * closed event confirms saved disk text; document-close is never confirmation.
  */
 
 const vscode = require('vscode');
@@ -20,11 +19,6 @@ const { message } = require('./util');
 /** Maximum live or saved UTF-8 draft size (§3.10). */
 const MAX_BYTES = 1024 * 1024;
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-/** Fires when a draft's writable content changes through the provider. */
-const fileChanged = new vscode.EventEmitter();
 
 /**
  * Set several context keys in one call.
@@ -60,7 +54,7 @@ function live(record) {
     && !record.closing
     && !store.disposing
     && Boolean(record.document)
-    && !record.document.isClosed;
+    && (!record.document.isClosed || record.nativeClosed);
 }
 
 /**
@@ -388,16 +382,8 @@ function acknowledged(result, type, record, version) {
 async function checkpoint(record) {
   const version = record.version;
   const text = record.text;
-  const result = await request(record, 'draft/save', {
-    runId: record.runId,
-    uri: record.uri.toString(),
-    version,
-  });
-  if (!result) {
-    return false;
-  }
-  if (!acknowledged(result, 'draft/checkpointed', record, version)) {
-    fail(record, 'unexpected commit draft checkpoint acknowledgement');
+  if (!(await record.document.save()) || record.document.getText() !== text) {
+    fail(record, 'the commit message changed while saving');
     return false;
   }
   record.savedVersion = version;
@@ -440,10 +426,7 @@ async function forget(record) {
     store.activeDraftId = undefined;
   }
   await setContext(edit.inactiveContext());
-  if (record.attached) {
-    await notify(record, 'textDocument/didClose', { textDocument: { uri: record.uri.toString() } }, true);
-    record.attached = false;
-  }
+  record.attached = false;
   // Revert only after a positively acknowledged finish/abort, so the native
   // workbench does not offer a second Save dialog during terminal teardown.
   record.discarding = true;
@@ -470,16 +453,17 @@ async function forget(record) {
  */
 async function finish(record, reason) {
   const version = record.savedVersion;
-  const result = await request(record, 'draft/finish', {
+  const result = await request(record, 'workspace/executeCommand', { command: 'magit.command', arguments: [{
+    command: 'common.confirm',
     runId: record.runId,
     uri: record.uri.toString(),
-    version,
-    reason,
-  });
+    version: reason === 'confirm' ? record.version : version,
+    source: reason === 'confirm' ? 'synchronized' : 'saved-file',
+  }] });
   if (!result) {
     return false;
   }
-  if (!acknowledged(result, 'draft/finished', record, version)) {
+  if (!acknowledged(result, 'draft/finished', record, reason === 'confirm' ? record.version : version)) {
     fail(record, 'unexpected commit draft finish acknowledgement');
     return false;
   }
@@ -497,8 +481,7 @@ async function finish(record, reason) {
 async function confirm(record) {
   return operate(record, async () => {
     if (!(await flush(record))) return false;
-    if (!(await checkpoint(record))) return false;
-    if (record.version === record.savedVersion && record.document.getText() === record.text) {
+    if (record.document.getText() === record.text) {
       return finish(record, 'confirm');
     }
     fail(record, 'the commit draft changed while confirming; save or retry confirm');
@@ -743,6 +726,8 @@ async function open(effect, originViewId) {
     record.document = document;
     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
     record.document = document;
+    record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
   } catch (error) {
     store.output.appendLine(`commit draft document failed: ${message(error)}`);
     store.drafts.delete(record.runId);
@@ -817,8 +802,7 @@ function onError(notice) {
 }
 
 /**
- * Ambiguous document teardown (tab close, language change, shutdown) cancels;
- * it never confirms. Native intent must have been recorded before teardown.
+ * Ignore document teardown as confirmation (including language changes).
  *
  * @param {vscode.TextDocument} document
  * @returns {boolean} whether the document belonged to a managed draft
@@ -836,144 +820,65 @@ async function onClosed(document) {
     return true;
   }
   if (store.disposing || record.disconnected) {
-    await forget(record);
     return true;
   }
-  // The editor no longer exists: detach transport, then abort the run. A
-  // native close cannot be distinguished from shutdown or an API deletion.
-  if (record.attached) {
-    await notify(record, 'textDocument/didClose', { textDocument: { uri: record.uri.toString() } }, true);
-    record.attached = false;
-  }
-  const viewId = baseViewId(record);
-  if (viewId) {
-    try {
-      await record.client.sendRequest('view/invoke', {
-        viewId, command: 'common.cancel', args: { runId: record.runId },
-        cursor: { line: 0, column: 0 },
-      });
-    } catch (error) {
-      store.output.appendLine(`commit draft close-cancel failed: ${message(error)}`);
-    }
-  }
-  await forget(record);
+  // Document close is also emitted by language changes; only a real last-tab
+  // event below supplies semantic saved-file confirmation.
   return true;
 }
 
 /**
- * Detect a managed draft's editor tab being closed without explicit intent.
+ * Confirm saved disk text only for an actual last owned tab closure.
  *
- * VSCode retains virtual `magit-commit` documents after their tab closes, so
- * `onDidCloseTextDocument` never fires for a raw workbench tab close. A live,
- * attached draft whose URI is absent from every tab group is gone; that
- * ambiguous teardown must cancel the run, never confirm.
+ * Match tab identity as well as URI/run, and inspect every native tab group.
+ * Focus switches, nonlast closes and stale events for reused paths cannot finish.
  *
  * @returns {void}
  */
-function onTabsChanged() {
+function onTabsChanged(event) {
+  if (store.disposing || !event?.closed?.length) return;
+  const closed = new Set(event.closed.filter((tab) => tab.input?.uri)
+    .map((tab) => tab.input.uri.toString()));
   const open = new Set(vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
     .filter((tab) => tab.input && tab.input.uri)
     .map((tab) => tab.input.uri.toString()));
   for (const record of store.drafts.values()) {
-    if (!live(record) || !record.attached || record.closing
+    const ownedClose = event.closed.some((tab) => record.tabs?.has(tab));
+    record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
+    if (!ownedClose || !closed.has(record.uri.toString()) || !record.attached || record.closing
       || record.changingLanguage || record.disconnected) {
       continue;
     }
     if (open.has(record.uri.toString())) {
       continue;
     }
-    void onClosed(record.document);
+    record.nativeClosed = true;
+    void enqueue(record, () => finish(record, 'normal-close'));
   }
 }
 
 /**
- * Native save through the writable provider: checkpoint, never confirm.
- *
- * @param {vscode.Uri} uri
- * @param {Uint8Array} content
- */
-async function writeFile(uri, content) {
-  const record = forUri(uri);
-  if (!record) {
-    throw vscode.FileSystemError.FileNotFound(uri);
-  }
-  const text = decoder.decode(content);
-  if (text !== record.document?.getText() && record.document) {
-    // VSCode passes the document text; a divergence means a stale save.
-    throw new Error('the commit draft changed before saving; retry the save');
-  }
-  record.mtime = Date.now();
-  if (!(await save(record, text))) {
-    throw new Error('the commit draft could not be saved; your text was kept');
-  }
-}
-
-/** A writable, in-memory document provider; no Git path is ever touched. */
-const provider = {
-  onDidChangeFile: fileChanged.event,
-
-  watch() {
-    return { dispose() {} };
-  },
-
-  /**
-   * @param {vscode.Uri} uri
-   * @returns {{type: number, ctime: number, mtime: number, size: number}}
-   */
-  stat(uri) {
-    const record = forUri(uri);
-    if (!record) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    return {
-      type: vscode.FileType.File,
-      ctime: record.mtime,
-      mtime: record.mtime,
-      size: Buffer.byteLength(record.savedText, 'utf8'),
-    };
-  },
-
-  /**
-   * @param {vscode.Uri} uri
-   * @returns {Uint8Array}
-   */
-  readFile(uri) {
-    const record = forUri(uri);
-    if (!record) {
-      throw vscode.FileSystemError.FileNotFound(uri);
-    }
-    return encoder.encode(record.savedText);
-  },
-
-  writeFile,
-  readDirectory() {
-    return [];
-  },
-  createDirectory() {
-    throw vscode.FileSystemError.NoPermissions('managed commit drafts are flat documents');
-  },
-  delete() {
-    throw vscode.FileSystemError.NoPermissions('managed commit drafts are server-owned');
-  },
-  rename() {
-    throw vscode.FileSystemError.NoPermissions('managed commit drafts cannot be renamed');
-  },
-};
-
-/**
- * Register the writable draft scheme. Call once per extension activation.
+ * Register native save observation and actual tab-close confirmation.
  *
  * @param {vscode.ExtensionContext} context
  */
 function setup(context) {
   store.disposing = false;
-  context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider(edit.SCHEME, provider, {
-      isCaseSensitive: true,
-      isReadonly: false,
-    })
-  );
+  if (vscode.workspace.onDidSaveTextDocument) {
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
+      const record = forUri(document.uri);
+      if (!live(record)) return;
+      void enqueue(record, async () => {
+        if (await flush(record)) {
+          record.savedText = document.getText();
+          record.savedVersion = record.version;
+          recover(record);
+        }
+      });
+    }));
+  }
   // Virtual documents are retained after their tab closes, so a raw workbench
   // close never fires `onDidCloseTextDocument`; watch the tabs instead for the
   // ambiguous teardown that must cancel (§3.10).

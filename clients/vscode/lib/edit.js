@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Pure helpers for managed commit drafts (§3.10).
+ * Pure helpers for native commit-message editing (§3.10).
  *
  * The server announces a mutable, server-owned draft and owns its text; the
  * client only provides a writable document and the versioned barriers. Nothing
@@ -9,8 +9,8 @@
  * wire-shape and command rules directly.
  */
 
-/** Virtual-document scheme for managed commit drafts. */
-const SCHEME = 'magit-commit';
+/** Native document scheme for commit-message files. */
+const SCHEME = 'file';
 
 /** The only editor-bridge kind the server announces today. */
 const KIND = 'commit-message';
@@ -65,9 +65,8 @@ function historyCommand(action) {
 /**
  * Whether an effect announces a managed commit draft.
  *
- * Only the exact §3.10 shape is accepted: a `magit-commit:` URI, the initial
- * version, the commit-message kind and the exact template. There is no path or
- * real-file mode, and no compatibility shim for the replaced adapter.
+ * Accept the real-file effect only, with the initial version and Git template.
+ * The server validates the canonical path; no virtual-provider shim is retained.
  *
  * @param {object|undefined} effect
  * @returns {boolean}
@@ -76,11 +75,12 @@ function isEditEffect(effect) {
   return Boolean(
     effect
     && effect.type === 'editDocument'
-    && effect.mode === 'managedDraft'
+    && effect.mode === 'realFile'
     && typeof effect.runId === 'string'
     && effect.runId.length > 0
     && typeof effect.uri === 'string'
-    && effect.uri === `${SCHEME}://${effect.runId}/message`
+    && effect.uri.startsWith('file:///')
+    && effect.uri.endsWith('/COMMIT_EDITMSG')
     && typeof effect.text === 'string'
     && effect.version === 1
     && effect.kind === KIND

@@ -2,7 +2,7 @@
 //!
 //! Git cannot open an editor itself: it runs a helper process, which joins the
 //! server over a Unix socket, forwards the file Git wants edited, and blocks
-//! until a validated `draft/finish` or cancellation. All state
+//! until validated semantic confirmation, saved-file close or cancellation. All state
 //! stays here in the server; the helper only connects, forwards and exits.
 //!
 //! Three parties share [`EditRegistry`] through a process-global map keyed by
@@ -19,7 +19,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock};
 
-/// Managed commit-draft state and validated writeback.
+/// Bounded commit-message synchronization and validated native-file writeback.
 #[cfg(unix)]
 pub mod draft;
 
@@ -158,6 +158,12 @@ impl EditRegistry {
     pub fn run_for_uri(&self, owner: &str, uri: &str) -> Result<String> {
         self.lock().iter().find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
             .map(|(id, _)| id.clone()).ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
+    }
+
+    /// No editor-helper file synchronization is available outside Unix yet.
+    #[cfg(not(unix))]
+    pub fn run_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {
+        Err(Error::new("commit message editing requires Unix"))
     }
 
     /// Recall under the lifecycle lock; validation precedes all navigation changes.
@@ -569,7 +575,7 @@ fn handle_edit(
             run_id: hello.edit_id.clone(), uri,
             text: entry.draft.initial().unwrap().to_string(), version: 1,
             kind: hello.kind, title: metadata.title.to_string(),
-            mode: EditDocumentMode::ManagedDraft, scope: metadata.scope.to_string(),
+            mode: EditDocumentMode::RealFile, scope: metadata.scope.to_string(),
         }]);
         (replies, entry.completion.clone())
     };

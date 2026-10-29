@@ -1,4 +1,5 @@
-# Server-owned ring: recall both entries and restore the exact unsent draft.
+# Server-owned ring on the real COMMIT_EDITMSG file: recall both entries and
+# restore the exact unsent draft, keeping native disk save separate from confirm.
 fixture: staged-one-file
 ---
 sh: git rev-parse HEAD > .git/history-before

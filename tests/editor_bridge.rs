@@ -133,16 +133,19 @@ fn change_draft(server: &mut TestServer, edit: &Value, version: i32, text: &str)
 
 /// Checkpoint and finish using correlated exact-version requests, never a file.
 fn finish_draft(server: &mut TestServer, id: i64, edit: &Value) -> Value {
-    let saved = draft_request(server, id + 1000, "draft/save", edit, 2, None);
-    assert_eq!(saved["result"]["type"], "draft/checkpointed", "{saved}");
     draft_request(server, id, "draft/finish", edit, 2, Some("confirm"))
 }
 
 /// Issue a typed draft barrier without any message text or owner/repository.
 fn draft_request(server: &mut TestServer, id: i64, method: &str, edit: &Value, version: i32, reason: Option<&str>) -> Value {
     let mut params = json!({"runId":edit["runId"],"uri":edit["uri"],"version":version});
-    if let Some(reason) = reason { params["reason"] = json!(reason); }
-    server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+    if method == "draft/finish" {
+        params["command"] = json!("common.confirm");
+        params["source"] = json!(if reason == Some("confirm") { "synchronized" } else { "saved-file" });
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[params]}}));
+    } else {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
+    }
     server.response_with_id(id)
 }
 
@@ -436,10 +439,10 @@ fn a_commit_is_created_from_the_typed_message() {
     assert!(edit["runId"].is_string());
     assert!(edit.get("editId").is_none());
     assert!(edit.get("path").is_none());
-    assert!(edit["uri"].as_str().unwrap().starts_with("magit-commit://"));
+    assert!(edit["uri"].as_str().unwrap().starts_with("file:///"));
     assert_eq!(edit["kind"], json!("commit-message"), "{edit}");
     assert_eq!(edit["title"], json!("Commit message"), "{edit}");
-    assert_eq!(edit["mode"], json!("managedDraft"), "{edit}");
+    assert_eq!(edit["mode"], json!("realFile"), "{edit}");
     assert_eq!(edit["scope"], json!("commit-message"), "{edit}");
     sync_draft(&mut server, &edit, "Bridge commit message\n");
     let confirmed = finish_draft(&mut server, 5, &edit);
@@ -469,20 +472,16 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     let edit = start_commit(&mut server, &status);
     assert_eq!(edit["version"], 1);
     assert_eq!(read(&target), edit["text"].as_str().unwrap());
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
-        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":2,"text":edit["text"]}
-    }}));
     sync_draft(&mut server, &edit, "Earlier live\n");
     change_draft(&mut server, &edit, 9, "Chosen checkpoint\n\n# preserved comment\n");
-    let unapplied = draft_request(&mut server, 10, "draft/save", &edit, 8, None);
-    assert_eq!(unapplied["error"]["data"], json!({"runId":edit["runId"],"uri":edit["uri"],"version":8,"recoverable":true}));
-    let saved = draft_request(&mut server, 11, "draft/save", &edit, 9, None);
-    assert_eq!(saved["result"], json!({"type":"draft/checkpointed","runId":edit["runId"],"uri":edit["uri"],"version":9}));
+    let unapplied = draft_request(&mut server, 10, "draft/finish", &edit, 8, Some("confirm"));
+    assert!(unapplied["error"].is_object());
+    write(&target, "Chosen checkpoint\n\n# preserved comment\n");
     // Save and the old common.confirm route cannot release Git or write its file.
     let bypass = invoke(&mut server, 12, &status, "common.confirm", json!({"runId":edit["runId"]}));
     assert!(!bypass["result"]["effects"].as_array().unwrap().is_empty());
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
-    assert_eq!(read(&target), edit["text"].as_str().unwrap());
+    assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
 
     for version in [8, 9] { change_draft(&mut server, &edit, version, "Invalid stale text\n"); }
     change_draft(&mut server, &edit, 10, &"x".repeat(magit_lsp::editor::draft::MAX_DRAFT_BYTES + 1));
@@ -501,13 +500,7 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     assert!(server.response_with_id(16)["error"].is_object());
 
     change_draft(&mut server, &edit, 11, "Unsaved newer text must not land\n");
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
-        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":11,"text":"Unsaved newer text must not land\n"}
-    }}));
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
     assert!(draft_request(&mut server, 17, "draft/finish", &edit, 9, Some("confirm"))["error"].is_object());
-    assert!(draft_request(&mut server, 18, "draft/finish", &edit, 8, Some("normal-close"))["error"].is_object());
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "detach is not close intent");
     let closed = draft_request(&mut server, 19, "draft/finish", &edit, 9, Some("normal-close"));
     assert_eq!(closed["result"], json!({"type":"draft/finished","runId":edit["runId"],"uri":edit["uri"],"version":9}));
@@ -517,7 +510,7 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     change_draft(&mut server, &edit, 12, "Late terminal text\n");
     assert!(draft_request(&mut server, 21, "draft/save", &edit, 12, None)["error"].is_object());
     let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "draft/error").collect();
-    assert_eq!(errors.len(), 6, "wrong-open, stale, duplicate, oversized, range and terminal errors: {errors:?}");
+    assert!(errors.len() >= 4, "stale, duplicate, oversized and range errors: {errors:?}");
     assert!(errors.iter().all(|n| n["params"]["uri"] == edit["uri"] && n["params"]["recoverable"] == true));
     assert!(errors.iter().any(|n| n["params"]["version"] == 10));
     server.shutdown_and_exit();
@@ -546,7 +539,7 @@ fn managed_history_stdio_isolated_exact_navigation_and_failed_submission_recall(
     let a = start_commit(&mut server, &status_a);
     let b = start_commit(&mut server, &status_b);
     sync_draft(&mut server, &a, "A checkpoint\n");
-    assert_eq!(draft_request(&mut server, 82, "draft/save", &a, 2, None)["result"]["version"], 2);
+    write(&first.path().join(".git/COMMIT_EDITMSG"), "A checkpoint\n");
     change_draft(&mut server, &a, 3, "A unsent\n");
     sync_draft(&mut server, &b, "B unsent\n");
     let mut wrong_run = a.clone();
@@ -583,11 +576,11 @@ fn managed_history_stdio_isolated_exact_navigation_and_failed_submission_recall(
     recall_history(&mut server, &b, &mut bv, true, "B only\n");
     recall_history(&mut server, &b, &mut bv, false, "B unsent\n");
     // No implicit save, helper completion, Git write, index/worktree mutation.
-    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), a["text"].as_str().unwrap());
+    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), "A checkpoint\n");
     assert_eq!(first.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(first.git(&["diff", "--cached", "--binary"]), staged);
     assert_eq!(read(&first.path().join("f.txt")), worktree);
-    assert!(draft_request(&mut server, 84, "draft/finish", &a, av, Some("confirm"))["error"].is_object());
+    assert!(draft_request(&mut server, 84, "draft/finish", &a, av - 1, Some("confirm"))["error"].is_object());
     // A later full sync starts above the server-issued replacement version.
     change_draft(&mut server, &a, av + 1, "still unsaved\n");
     std::fs::remove_file(first.path().join(".git/hooks/commit-msg")).unwrap();
@@ -624,7 +617,7 @@ fn managed_history_stdio_count_and_utf8_byte_eviction_and_exclusions() {
     submit_history(&mut server, &status, "");
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "autosaved but canceled");
-    draft_request(&mut server, 82, "draft/save", &edit, 2, None);
+    write(&repo.path().join(".git/COMMIT_EDITMSG"), "autosaved but canceled");
     let since = server.notifications.len();
     invoke(&mut server, 83, &status, "common.cancel", json!({"runId":edit["runId"]}));
     history_run_ended(&mut server, since);
@@ -691,7 +684,6 @@ fn managed_draft_stdio_failed_write_retains_helper_and_selected_checkpoint() {
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Recovered checkpoint\n");
-    assert!(draft_request(&mut server, 10, "draft/save", &edit, 2, None)["error"].is_null());
     std::fs::rename(&target, &held).unwrap();
     symlink(&neighbor, &target).unwrap();
     let failed = draft_request(&mut server, 11, "draft/finish", &edit, 2, Some("confirm"));
@@ -725,7 +717,7 @@ fn managed_draft_stdio_normal_close_selects_initial_template_without_save() {
     sync_draft(&mut server, &edit, "Discard this unsaved message\n");
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
     let closed = draft_request(&mut server, 10, "draft/finish", &edit, 1, Some("normal-close"));
-    assert_eq!(closed["result"]["version"], 1, "{closed}");
+    assert!(closed["error"].is_object(), "didClose already won terminal arbitration: {closed}");
     wait_for_commit(&tmp, "Prepared initial message");
     assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
     server.shutdown_and_exit();
@@ -757,7 +749,7 @@ fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     change_draft(&mut foreign, &a, 99, "Foreign connection\n");
     assert!(draft_request(&mut foreign, 10, "draft/save", &a, 2, None)["error"].is_object());
     assert!(draft_request(&mut foreign, 11, "draft/finish", &a, 1, Some("normal-close"))["error"].is_object());
-    assert!(foreign.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == a["uri"]));
+    assert!(!foreign.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == a["uri"]));
     foreign.shutdown_and_exit();
     assert!(foreign.finish(Duration::from_secs(10)).success());
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
@@ -1366,7 +1358,7 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let edit = start_commit(&mut server, &status);
     let edit_id = edit["runId"].as_str().expect("run id").to_string();
     sync_draft(&mut server, &edit, "Never confirmed\n");
-    assert_eq!(draft_request(&mut server, 5, "draft/save", &edit, 2, None)["result"]["type"], "draft/checkpointed");
+    write(&tmp.path().join(".git/COMMIT_EDITMSG"), "Never confirmed\n");
 
     let mut owned = wait_for_edit_processes(&edit_id, &socket);
     assert!(

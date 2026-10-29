@@ -39,6 +39,7 @@ function createClient() {
         // The explicit provider maps dotted server types to legal VSCode IDs.
         provideDocumentSemanticTokens: () => null,
         initialize(params, second, third) {
+          params.clientInfo = { name: 'Visual Studio Code', version: vscode.version };
           params.capabilities = params.capabilities || {};
           params.capabilities.keymapDelivery = 'static';
           params.capabilities.keyModifiers = 'full';

@@ -1,6 +1,6 @@
 # External client implementation specification
 
-> **Current implementation below:** the custom `view/*` and managed-draft
+> **Current implementation below:** the custom `view/*` and real-file commit
 > wire contract is authoritative today. The Plain-mode section at the end is a
 > separate target design; it is not implemented or supported yet. See [Plain
 > mode](#plain-mode-standard-lsp-clients-target-specification-not-yet-implemented).
@@ -18,7 +18,7 @@ This guide describes the current Rust wire contract and bundled clients, plus th
 | Prompt/effect handling | Required when enabling operations that produce them | Reduced clients can explicitly allowlist directly invoked supported commands and avoid unrestricted key/menu forwarding. Hiding UI entries alone is not exclusion. |
 | Dynamic `view/keymap` | Optional alternative | `static` or `forwardAll` can replace it, with limitations below. |
 | Resize and setMode | Useful | Width-sensitive layout and text mode; not a prerequisite to core status. |
-| Managed draft bridge | Optional workflow, required for commit-message editing/history | If absent, exclude draft-producing commands in a reduced allowlist; never edit a Git path as a substitute. |
+| Commit editor bridge | Optional workflow, required for commit-message editing/history | Opens the exact announced real COMMIT_EDITMSG URI; exclude producing commands if unsupported. |
 | Companion/split views | Optional workflow-dependent | Descriptor placement is a hint. A single replaceable window does not automatically preserve simultaneous view lifetimes. |
 
 ## Methods and lifecycle
@@ -46,8 +46,9 @@ Direction is relative to the language server. Custom capabilities are client pre
 | `view/prompt` | server → client notification | Prompt request data; answer through `view/promptRespond`. |
 | `view/promptRespond` | client → server request | `{promptId,cancelled,value?}`; result is currently generic JSON value. |
 | `view/effects` | server → client notification | Asynchronous effects, e.g. draft editor opened after an action returned. |
-| `textDocument/didOpen`, `didChange`, `didClose` | client → server notifications | Standard full-sync managed draft stream only; didClose detaches, not finish intent. |
-| `draft/save`, `draft/finish`, `draft/history` | client → server requests | Versioned checkpoint, finish barrier, history replacement respectively; JSON-RPC request ID correlates result/error. |
+| `textDocument/didOpen`, `didChange`, `didClose` | client → server notifications | Full-sync commit file stream; ordinary didClose confirms saved disk bytes (VSCode exception below). |
+| `workspace/executeCommand` | client → server request | `magit.command` with one run-aware semantic common.confirm argument; see real-file contract below. |
+| `draft/history` | client → server request | Versioned history replacement; JSON-RPC request ID correlates result/error. |
 | `draft/error` | server → client notification | `{uri,version,method,message,recoverable}`; `version` is nullable (notably for didClose). |
 | `window/workDoneProgress/create` | server → client request | `{token}`; answer the matching JSON-RPC request ID (the server currently does not await the response). |
 | `$/progress` | server → client notification | `{token,value}`; value kinds are `begin`, `report`, and `end`. |
@@ -90,6 +91,42 @@ Cancellation is a client-to-server `window/workDoneProgress/cancel` notification
 Prompt kinds are `confirm` (boolean), `text` (string), `choice` (`{id}` or `{custom}`), and `multiChoice` (`{ids:[...]}`). All responses include `cancelled`; cancellation has no value requirement. Honor labels/defaults, choice item IDs and secret masking/no-history behavior where applicable (`src/protocol.rs`, `lua/magit-lsp/prompt.lua`, `clients/vscode/lib/prompt.js`).
 
 Effects serialize with camelCase `type` discriminators, e.g. `openView`, `pushView`, `popView`, `focusView`, `visitFile`, `editDocument`, `passThrough`, `clipboard`, `message`, `quit`—not Rust enum variant names. Messages carry level/text and optional hint/detail/processLogId. Visit-file uses a resolved file URI and zero-based location. Rendering is not an effect. Implement each effect used by enabled commands with readable errors.
+
+### Current real-file commit editing
+
+The effect is `{type:"editDocument",runId,uri,text,version:1,
+kind:"commit-message",title,mode:"realFile",scope:"commit-message"}`. Open the
+exact canonical `file:` URI in a permanent native editor, not a virtual provider.
+Use one full-sync stream (bounded UTF-8, 1 MiB, strictly increasing i32 versions).
+Native save writes the file and stays editing. Explicit confirmation sends
+`workspace/executeCommand {command:"magit.command",arguments:[{
+command:"common.confirm",runId,uri,version,source:"synchronized"}]}` after flushing
+the exact latest text. The server validates that version and writes it safely.
+For saved-file close use `source:"saved-file"` instead: the server reads saved disk
+bytes and never substitutes unsaved didChange text. Successful response is
+`{type:"draft/finished",runId,uri,version}`; Git success is reported separately.
+Only this semantic command is registered here, not the full Plain dispatcher.
+
+Ordinary `didClose` confirms saved disk bytes by accepted assumption, despite
+standard LSP's lack of run identity/reliability guarantees. VSCode identifies
+itself in clientInfo; its didClose is detach-only. Its adapter confirms only an
+actual closed event for an owned last matching URI tab across all groups, using
+the run-aware semantic saved-file command. Focus changes, nonlast tab closure,
+deactivation/disconnect and language changes do not confirm. No synthetic didClose
+or capability negotiation is used. Native dirty-close Save saves then confirms;
+Discard-unsaved confirms prior saved bytes; Cancel retains the editor. Explicit
+Abort uses existing `view/invoke common.cancel` with `args:{runId}`.
+
+Helper target/path/owner/run validation, exact-version errors and read/write
+failures retain the helper. Registry locking arbitrates terminal/abort decisions
+once. Native safe-save replacement in the pinned directory is permitted, but
+symlinks, hardlinks, foreign owners and unrelated paths are rejected. Git owns
+effective-empty/template/cleanup semantics. History remains `draft/history` with
+its existing versioned replacement response and native mutation race protection.
+Native production acceptance is still pending under parent R-EDIT-REAL; spike
+evidence is not production acceptance.
+
+### Historical managed-draft design (superseded)
 
 Managed drafts are an optional workflow, not a core requirement. The `editDocument` effect payload has all fields `{type:"editDocument",runId,uri,text,version,kind,title,mode,scope}`; current values include `kind:"commit-message"` and `mode:"managedDraft"`. Treat its `magit-commit://` URI as opaque. Open exactly the supplied text and version (currently version 1) with `textDocument/didOpen`; do not synthesize an initial change. Every `didChange` sends exactly one full-text content change, with monotonically increasing positive i32 versions and UTF-8 text no larger than 1 MiB. Save is `draft/save {runId,uri,version}`; history is `draft/history {runId,uri,version,command}`, where command is exactly `commit-message.history-prev` or `commit-message.history-next`; finish is `draft/finish {runId,uri,version,reason}`, with reason `confirm` or `normal-close`. These no-text barriers first require full synchronization, then pin run/URI/version and gate edits until response. Each successful response is an ordinary JSON-RPC result object: `{"type":"draft/checkpointed","runId":...,"uri":...,"version":...}`, `{"type":"draft/finished","runId":...,"uri":...,"version":...}`, or `{"type":"draft/replaced","runId":...,"uri":...,"baseVersion":...,"version":...,"text":...}`; these `type` values are not notification methods. Save checkpoints exactly live text/version without writing or releasing Git. Initial text/version is also the initial saved checkpoint. Confirm must name a version equal to both live and saved; normal-close names the saved version and may discard newer live text. Every accepted history request replaces live text at `baseVersion+1`, even at a history clamp, and leaves saved unchanged. Apply only when baseVersion matches, suppress its didChange echo, then full-sync strictly above returned version. If native text changed despite the editing gate, retain it and reconcile above the returned version rather than dropping it. See `src/protocol.rs:60-159`, `src/server.rs:1169-1213`, `src/editor/draft.rs:138-251,310-316`, `src/editor.rs:165-175`, `lua/magit-lsp/edit.lua:201-219`, `clients/vscode/lib/drafts.js:645-674`.
 

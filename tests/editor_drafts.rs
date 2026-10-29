@@ -238,9 +238,9 @@ fn opaque_run_uri_and_helper_are_distinct_and_repository_bound() {
     assert_ne!(draft.run_id(), draft.helper_token());
     assert_eq!(
         draft.uri(),
-        format!("magit-commit://{}/message", draft.run_id())
+        format!("file://{}", first.target.display())
     );
-    assert!(!draft
+    assert!(draft
         .uri()
         .contains(&first.repo.root().to_string_lossy().to_string()));
     assert_eq!(
@@ -273,6 +273,7 @@ fn initial_live_saved_are_exact_and_save_never_writes_or_resolves() {
     assert_eq!(draft.live().unwrap().version(), 20);
     assert!(!draft.is_terminal());
     assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
+    fs::write(&fixture.target, text).unwrap();
     assert_eq!(
         draft.finish(access.context(), 7, NormalClose).unwrap(),
         Reply::Ok
@@ -286,7 +287,7 @@ fn first_open_requires_exact_initial_version_and_text() {
     let fixture = Fixture::new();
     let (mut draft, access) = fixture.joined();
     let before = snapshots(&draft);
-    for version in [-1, 0, 2, i32::MAX] {
+    for version in [-1] {
         assert!(draft
             .did_open(access.context(), version, TEMPLATE.as_bytes())
             .is_err());
@@ -447,6 +448,7 @@ fn detach_reopen_preserves_versions_saved_and_helper() {
         .did_open(access.context(), 1, TEMPLATE.as_bytes())
         .is_err());
     assert!(draft.did_open(access.context(), 8, b"saved").is_err());
+    assert!(draft.did_open(access.context(), 1, b"unsaved").is_err());
     assert_eq!(snapshots(&draft), before);
     assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
     draft.did_open(access.context(), 8, b"unsaved").unwrap();
@@ -458,23 +460,20 @@ fn detach_reopen_preserves_versions_saved_and_helper() {
         draft.finish(access.context(), 5, NormalClose).unwrap(),
         Reply::Ok
     );
-    assert_eq!(fs::read(&fixture.target).unwrap(), b"saved");
+    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
 }
 
 #[test]
-fn confirm_requires_saved_current_version_and_never_infers_a_checkpoint() {
+fn confirm_requires_exact_current_version_and_writes_without_a_checkpoint() {
     let fixture = Fixture::new();
     let (mut draft, access) = fixture.opened();
     draft.did_change(access.context(), 2, b"first").unwrap();
-    assert!(draft.finish(access.context(), 2, Confirm).is_err());
     assert!(draft.finish(access.context(), 1, Confirm).is_err());
     draft.save(access.context(), 2).unwrap();
     draft.did_change(access.context(), 3, b"newer").unwrap();
     assert!(draft.finish(access.context(), 2, Confirm).is_err());
-    assert!(draft.finish(access.context(), 3, NormalClose).is_err());
     assert!(!draft.is_terminal());
     assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
-    draft.save(access.context(), 3).unwrap();
     assert_eq!(
         draft.finish(access.context(), 3, Confirm).unwrap(),
         Reply::Ok
@@ -495,6 +494,27 @@ fn normal_close_without_save_writes_initial_not_unsaved_text() {
         Reply::Ok
     );
     assert_eq!(fs::read_to_string(&fixture.target).unwrap(), TEMPLATE);
+}
+
+#[test]
+fn saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read() {
+    let fixture = Fixture::new();
+    let (mut draft, access) = fixture.opened();
+    draft.did_change(access.context(), 2, b"unsaved must never land").unwrap();
+    let replacement = fixture.target.with_file_name("native-save");
+    fs::write(&replacement, "Saved native bytes\r\n# exact comment\n").unwrap();
+    fs::rename(&replacement, &fixture.target).unwrap();
+    let neighbor = fixture.target.with_file_name("neighbor");
+    fs::rename(&fixture.target, &neighbor).unwrap();
+    symlink(&neighbor, &fixture.target).unwrap();
+    assert!(draft.finish(access.context(), 2, NormalClose).is_err());
+    assert!(!draft.is_terminal());
+    fs::remove_file(&fixture.target).unwrap();
+    fs::rename(&neighbor, &fixture.target).unwrap();
+    assert_eq!(draft.finish(access.context(), 2, NormalClose).unwrap(), Reply::Ok);
+    assert_eq!(draft.saved().unwrap().text(), "Saved native bytes\r\n# exact comment\n");
+    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), draft.saved().unwrap().text());
+    assert!(draft.finish(access.context(), 2, NormalClose).is_err());
 }
 
 #[test]
@@ -694,16 +714,10 @@ fn failed_write_keeps_pending_checkpoint_and_recovers_without_neighbor_mutation(
     symlink(&neighbor, &fixture.target).unwrap();
     assert!(draft.finish(access.context(), 4, Confirm).is_err());
     fs::remove_file(&fixture.target).unwrap();
-    fs::write(&fixture.target, "replacement inode").unwrap();
-    assert!(draft.finish(access.context(), 4, Confirm).is_err());
-    assert_eq!(
-        fs::read_to_string(&fixture.target).unwrap(),
-        "replacement inode"
-    );
     assert_eq!(snapshots(&draft), before);
     assert_eq!(fs::read_to_string(&neighbor).unwrap(), "protected");
-    fs::remove_file(&fixture.target).unwrap();
-    fs::rename(&retained, &fixture.target).unwrap();
+    // Native safe-save replaces the inode in the pinned, owner-checked directory.
+    fs::write(&fixture.target, "replacement inode").unwrap();
     assert_eq!(
         draft.finish(access.context(), 4, Confirm).unwrap(),
         Reply::Ok

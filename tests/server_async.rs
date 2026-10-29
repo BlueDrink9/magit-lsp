@@ -38,10 +38,10 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     let messages = [
         json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}),
         json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":7},"contentChanges":[{"text":"Saved but never confirmed\n"}]}}),
-        json!({"jsonrpc":"2.0","id":10,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":7}}),
+        json!({"jsonrpc":"2.0","id":10,"method":"draft/history","params":{"runId":edit["runId"],"uri":edit["uri"],"version":6,"command":"commit-message.history-prev"}}),
     ];
     server.send_raw(&messages.into_iter().flat_map(frame).collect::<Vec<_>>());
-    assert_eq!(server.response_with_id(10)["result"]["version"], 7);
+    assert!(server.response_with_id(10)["error"].is_object());
     let messages = [
         json!({"jsonrpc":"2.0","id":19,"method":"shutdown","params":null}),
         json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":8},"contentChanges":[{"text":"Too late\n"}]}}),
@@ -52,7 +52,7 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     assert_eq!(server.response_with_id(19)["result"], Value::Null);
     assert!(server.response_with_id(20)["error"].is_object());
     assert!(server.response_with_id(21)["error"].is_object());
-    assert!(server.notifications.iter().any(|n| n["method"] == "draft/error" && n["params"]["uri"] == edit["uri"] && n["params"]["version"] == 8));
+    // Shutdown removes the run before late file sync; unrelated files are ignored.
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
     assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
@@ -1841,9 +1841,7 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     // saved checkpoint (never a file or a guessed version).
     server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}})));
     server.send_raw(&frame(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":edit["uri"],"version":2},"contentChanges":[{"text":"Never submitted\n"}]}})));
-    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":500,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2}})));
-    assert_eq!(server.response_with_id(500)["result"]["type"], "draft/checkpointed");
-    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":501,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2,"reason":"confirm"}})));
+    server.send_raw(&frame(json!({"jsonrpc":"2.0","id":501,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":2,"source":"synchronized"}]}})));
     assert!(server.response_with_id(501).get("error").is_none());
     let deadline = Instant::now() + Duration::from_secs(10);
     while !ready.exists() {

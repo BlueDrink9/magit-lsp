@@ -316,10 +316,10 @@ test('one generic dispatcher carries every contributed action binding', () => {
 });
 
 test('managed draft effects accept only the exact full-sync announcement', () => {
-  const effect = { type: 'editDocument', mode: 'managedDraft', runId: 'run-1',
-    uri: 'magit-commit://run-1/message', version: 1, text: 'exact\r\n', kind: 'commit-message' };
+  const effect = { type: 'editDocument', mode: 'realFile', runId: 'run-1',
+    uri: 'file:///repo/.git/COMMIT_EDITMSG', version: 1, text: 'exact\r\n', kind: 'commit-message' };
   assert(edit.isEditEffect(effect));
-  for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'realFile' },
+  for (const invalid of [{ ...effect, path: '/tmp/message' }, { ...effect, mode: 'managedDraft' },
     { ...effect, uri: 'magit-commit://other/message' }, { ...effect, version: 2 },
     { ...effect, requestId: 4 }]) assert(!edit.isEditEffect(invalid));
   assert.equal(edit.editingContext(effect)['magit.active'], false, 'native typing is not a view keymap');

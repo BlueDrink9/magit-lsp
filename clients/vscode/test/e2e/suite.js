@@ -8,7 +8,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 
 /** Requests this test records as evidence; notifications are not captured. */
 const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open',
-  'draft/save', 'draft/finish', 'draft/history']);
+  'workspace/executeCommand', 'draft/history']);
 
 /**
  * Resolve after `milliseconds`, only used to let a native widget mount.
@@ -70,7 +70,7 @@ async function run() {
   const sendNotification = LanguageClient.prototype.sendNotification;
   LanguageClient.prototype.sendNotification = function (method, params, ...rest) {
     const name = typeof method === 'string' ? method : method.method;
-    if (params?.textDocument?.uri?.startsWith('magit-commit:') || name === 'window/workDoneProgress/cancel') {
+    if (params?.textDocument?.uri?.endsWith('/COMMIT_EDITMSG') || name === 'window/workDoneProgress/cancel') {
       draftNotes.push({ method: name, params });
     }
     return sendNotification.call(this, method, params, ...rest);
@@ -1647,12 +1647,12 @@ async function run() {
       const draft = [...draftStore.drafts.values()].find((record) => !prior.has(record.runId));
       const opens = draftNotes.filter((note) => note.method === 'textDocument/didOpen'
         && note.params.textDocument.uri === draft.effect.uri);
-      assert.equal(opens.length, 1, 'one explicit didOpen, not automatic LSP attachment');
-      assert.deepEqual(opens[0].params.textDocument, { uri: draft.effect.uri, languageId: 'gitcommit',
+      assert.equal(opens.length, draftProbe + 1, 'one explicit didOpen per reused-path run');
+      assert.deepEqual(opens.at(-1).params.textDocument, { uri: draft.effect.uri, languageId: 'gitcommit',
         version: 1, text: draft.effect.text });
       assert.equal(draft.document.getText(), draft.effect.text);
       assert.equal(draft.document.languageId, 'git-commit');
-      assert.equal(draft.document.uri.scheme, 'magit-commit');
+      assert.equal(draft.document.uri.scheme, 'file');
       await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
       await waitFor(() => observe().editorFocused, 'native draft editor focus');
       draftProbe += 1;
@@ -1662,7 +1662,8 @@ async function run() {
       const end = target.document.positionAt(target.document.getText().length);
       assert(await target.edit((builder) => builder.replace(new vscode.Range(new vscode.Position(0, 0), end), text)));
     };
-    const draftFor = (target) => draftStore.drafts.get(target.document.uri.authority);
+    const draftFor = (target) => [...draftStore.drafts.values()].find((record) =>
+      record.uri.toString() === target.document.uri.toString());
     const cases = [];
     const bridgeEditor = await startBridgeEdit();
     const commitMessage = `native managed draft ${Date.now()}`;
@@ -1704,7 +1705,7 @@ async function run() {
     assert.equal(historyEditor.document.getText(), unsent);
     shot('r-edit-5-version-error-preserves-text.png');
     assert(await historyEditor.document.save(), 'native retry checkpoint succeeds');
-    assert.equal(record.syncError, undefined);
+    await waitFor(() => record.syncError === undefined, 'native retry sync recovery');
     assert.equal(head(), cases[0].head, 'sync error/retry did not finish');
     await replaceDraft(historyEditor, 'native explicit confirm\n');
     await palette('Magit: Confirm Commit Draft');
@@ -1723,7 +1724,7 @@ async function run() {
       request.method === 'view/invoke' && request.params.command === 'common.refresh'),
     'status dispatch while bridge edit remains open');
     assert.equal(vscode.window.activeTextEditor.document.uri.toString(), uri.toString());
-    assert.equal(outstandingEditor.document.uri.scheme, 'magit-commit', 'managed draft tab remains open');
+    assert.equal(outstandingEditor.document.uri.scheme, 'file', 'native commit file tab remains open');
     await vscode.window.showTextDocument(outstandingEditor.document, { preserveFocus: false });
     const cancelHead = head();
     await palette('Magit: Abort Commit Draft');
@@ -1776,14 +1777,15 @@ async function run() {
     }
 
     const closeEditor = await startBridgeEdit();
-    const ambiguousHead = head();
+    await replaceDraft(closeEditor, 'native last tab saved close\n');
+    assert(await closeEditor.document.save());
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === uri.toString(),
-      'closing bridge editor cancels and restores status');
+      'closing the last native commit tab restores status');
     await progressIdle();
-    assert.equal(closeEditor.document.uri.scheme, 'magit-commit');
-    assert.equal(head(), ambiguousHead, 'ambiguous workbench close never confirms');
-    cases.push({ name: 'ambiguous-tab-close-cancels', head: head() });
+    assert.equal(closeEditor.document.uri.scheme, 'file');
+    assert.equal(subject(), 'native last tab saved close', 'native last tab close confirms saved disk');
+    cases.push({ name: 'native-last-tab-saved-file-close', head: head() });
 
     const progressEditor = await startBridgeEdit();
     const progressHead = head();
@@ -1794,16 +1796,17 @@ async function run() {
       'native commit progress cancellation');
     assert.equal(head(), progressHead);
     await vscode.commands.executeCommand('magit.cancelEdit');
-    assert.equal(progressEditor.document.uri.scheme, 'magit-commit');
+    assert.equal(progressEditor.document.uri.scheme, 'file');
     cases.push({ name: 'progress-cancel', token, head: head() });
     assert.equal(editor.document.uri.scheme, 'magit', 'status remains the read-only content provider');
     fs.writeFileSync(`${evidence}/r-edit-5-evidence.json`, JSON.stringify({
-      gate: 'R-EDIT-5', cases, requests: requests.filter((request) => request.method.startsWith('draft/')),
+      gate: 'R-EDIT-REAL', cases, requests: requests.filter((request) =>
+        request.method.startsWith('draft/') || request.method === 'workspace/executeCommand'),
       notes: draftNotes, progress: progressEvents,
-      closeIntent: 'Native command palette/editor-title close action confirms; raw tab X/Ctrl+W is ambiguous and aborts.',
+      closeIntent: 'Actual last-owned-tab closure confirms saved disk; explicit confirm validates synchronized version.',
     }, null, 2));
     fs.writeFileSync(`${evidence}/a07-evidence.json`, JSON.stringify({
-      gate: 'A07', adapter: 'managedDraft',
+      gate: 'A07', adapter: 'realFile',
       confirmedMessage: commitMessage,
       saveOnlyCheckpoints: true,
       statusCommandWithOpenEdit: 'common.refresh',
@@ -1887,7 +1890,8 @@ async function run() {
     fs.writeFileSync(path.join(repo, 'tracked.txt'), 'native disconnect probe\n');
     gitDraft('add', 'tracked.txt');
     await vscode.commands.executeCommand('magit.invoke', { command: 'commit.create' });
-    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'magit-commit', 'native disconnect draft');
+    await waitFor(() => vscode.window.activeTextEditor?.document.uri.scheme === 'file'
+      && vscode.window.activeTextEditor.document.uri.path.endsWith('/COMMIT_EDITMSG'), 'native disconnect draft');
     const disconnectEditor = vscode.window.activeTextEditor;
     const disconnectDraft = draftFor(disconnectEditor);
     await waitFor(() => disconnectDraft.attached, 'native disconnect attachment');

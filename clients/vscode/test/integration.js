@@ -20,6 +20,29 @@ const Module = require('node:module');
 const vscode = require('./fake/vscode');
 const { LanguageClient, instances } = require('./fake/languageclient');
 
+// Model VSCode's built-in local filesystem, not an extension draft provider.
+const savedHandlers = [];
+vscode.workspace.onDidSaveTextDocument = (handler) => {
+  savedHandlers.push(handler);
+  return { dispose() {} };
+};
+const nativeOpen = vscode.workspace.openTextDocument;
+vscode.workspace.openTextDocument = async (...args) => {
+  const document = await nativeOpen(...args);
+  if (!document.nativeSaveInstalled) {
+    document.nativeSaveInstalled = true;
+    const nativeSave = document.save.bind(document);
+    document.save = async () => {
+      const saved = await nativeSave();
+      for (const handler of savedHandlers) handler(document);
+      const record = require('../lib/drafts').forUri(document.uri);
+      if (record && !record.busy) await record.queue;
+      return saved;
+    };
+  }
+  return document;
+};
+
 /** Test root: `clients/vscode/test`. */
 const here = __dirname;
 
@@ -107,6 +130,10 @@ async function run() {
 
   const repo = createRepository();
   vscode.__test.reset();
+  vscode.workspace.registerFileSystemProvider('file', {
+    readFile: (uri) => fs.readFileSync(uri.fsPath),
+    writeFile: (uri, bytes) => fs.writeFileSync(uri.fsPath, bytes),
+  });
   vscode.__test.setWorkspaceFolder(repo);
   vscode.__test.setConfiguration({
     'magit-lsp.serverPath': binary,
@@ -336,12 +363,12 @@ async function run() {
       await waitFor(() => [...draftStore.drafts.values()].some((draft) =>
         !before.has(draft.runId) && draft.attached), 'attached managed draft');
       const draft = [...draftStore.drafts.values()].find((record) => !before.has(record.runId));
-      assert.equal(draft.document.uri.scheme, 'magit-commit');
+      assert.equal(draft.document.uri.scheme, 'file');
       assert.equal(draft.document.languageId, 'git-commit');
       const opens = client.notes.filter((note) => note.method === 'textDocument/didOpen'
         && note.params.textDocument.uri === draft.effect.uri);
-      assert.equal(opens.length, 1);
-      assert.deepEqual(opens[0].params.textDocument, { uri: draft.effect.uri,
+      assert.equal(opens.length, probe);
+      assert.deepEqual(opens.at(-1).params.textDocument, { uri: draft.effect.uri,
         languageId: 'gitcommit', version: 1, text: draft.effect.text });
       assert.equal(draft.document.getText(), draft.effect.text);
       assert.equal(vscode.__test.contextValues.get('magit.active'), false, 'native typing is not captured');
@@ -359,8 +386,8 @@ async function run() {
     await commands.get('magit.closeEdit')();
     await idle();
     assert.equal(subject(), commitMessage, 'normal close commits saved checkpoint');
-    assert(client.requests.some((request) => request.method === 'draft/finish'
-      && request.params.version === savedVersion && request.params.reason === 'normal-close'));
+    assert(client.requests.some((request) => request.method === 'workspace/executeCommand'
+      && request.params.arguments[0].version === savedVersion && request.params.arguments[0].source === 'saved-file'));
 
     draft = await startDraft();
     const unsent = 'exact unsent message\n\nbody ü\n';
@@ -433,7 +460,35 @@ async function run() {
     await idle();
     assert.equal(subject(), 'dirty save close');
 
-    for (const action of ['abort', 'ambiguous-close', 'progress-cancel']) {
+    // A native close confirms disk, never the unsaved synchronized snapshot.
+    // Keep real native acceptance separate: these are mocked tab API events.
+    draft = await startDraft();
+    draft.document.replaceText('native saved file close\n');
+    await draft.document.save();
+    draft.document.replaceText('unsaved text must not land\n');
+    await draft.queue;
+    const ownedTab = { input: { uri: draft.uri } };
+    draft.tabs = new Set([ownedTab]);
+    const closeHead = head();
+    require('../lib/drafts').onTabsChanged({ closed: [ownedTab] });
+    await draft.queue;
+    assert.equal(head(), closeHead, 'another matching tab still exists');
+    draft.tabs = new Set([ownedTab]);
+    await vscode.__test.closeDocument(draft.document);
+    require('../lib/drafts').onTabsChanged({ closed: [ownedTab] });
+    await draft.queue;
+    await idle();
+    assert.equal(subject(), 'native saved file close');
+    const staleTab = ownedTab;
+    draft = await startDraft();
+    const staleHead = head();
+    require('../lib/drafts').onTabsChanged({ closed: [staleTab] });
+    await draft.queue;
+    assert.equal(head(), staleHead, 'old tab event cannot confirm a reused URI');
+    await invokeGenerated('common.cancel');
+    await idle();
+
+    for (const action of ['abort', 'progress-cancel']) {
       draft = await startDraft();
       const priorHead = head();
       const priorIndex = unchangedIndex();

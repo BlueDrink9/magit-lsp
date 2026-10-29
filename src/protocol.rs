@@ -57,8 +57,7 @@ pub enum Effect {
         line: u32,
         column: u32,
     },
-    /// Open a managed commit draft; only full-sync LSP notifications carry edits.
-    /// Save checkpoints without releasing Git; versioned finish writes it back.
+    /// Open Git's real commit-message file, with full-sync document validation.
     EditDocument {
         #[serde(rename = "runId")]
         run_id: String,
@@ -76,36 +75,47 @@ pub enum Effect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EditDocumentMode {
-    /// Server-owned mutable document, never an editable Git filesystem path.
-    ManagedDraft,
+    /// Native Git COMMIT_EDITMSG file, synchronized using standard LSP.
+    RealFile,
 }
 
-/// Managed-draft finish intent (§3.10).
-/// LSP didClose is detach only and never supplies either intent.
+/// Run-aware semantic confirmation routed through `magit.command`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditConfirmParams {
+    /// Semantic command; only common.confirm is accepted by this dispatcher.
+    pub command: String,
+    /// Server-issued run, protecting a reused COMMIT_EDITMSG URI.
+    pub run_id: String,
+    /// Exact server-issued canonical file URI.
+    pub uri: String,
+    /// Exact synchronized version, or the close event's last observed version.
+    pub version: i32,
+    /// Select synchronized writeback versus independently read saved disk text.
+    pub source: EditConfirmSource,
+}
+
+/// The two intentionally distinct commit confirmation sources.
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EditConfirmSource {
+    /// Validate the exact live version, then safely write it before completion.
+    Synchronized,
+    /// Read saved disk bytes; never write an unsaved full-sync snapshot.
+    SavedFile,
+}
+
+/// Internal confirmation source after the server has validated dispatch input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DraftFinishReason {
-    /// Explicit confirm must name a saved checkpoint of the current live version.
+    /// Explicit confirm names the exact synchronized live version for writeback.
     Confirm,
-    /// Native Save/Discard selected the saved checkpoint, possibly older than live.
+    /// Normal close reads saved disk bytes independently of live text/version.
     NormalClose,
 }
 
-/// Exact applied full-sync checkpoint requested by `draft/save` (no text).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct DraftSaveParams {
-    /// Server-issued run, not a repository or owner supplied by the client.
-    pub run_id: String,
-    /// Exact opaque document URI announced for this run.
-    pub uri: String,
-    /// Exact applied live version to checkpoint.
-    pub version: i32,
-}
-
-/// Selected checkpoint and native intent requested by `draft/finish` (no text).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// Validated internal confirmation identity and source; not a wire method.
 pub struct DraftFinishParams {
     /// Server-issued run identity.
     pub run_id: String,
@@ -146,9 +156,6 @@ pub struct DraftHistoryParams {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum DraftResponse {
-    /// The exact applied live snapshot is now saved; Git remains pending.
-    #[serde(rename = "draft/checkpointed")]
-    Checkpointed { run_id: String, uri: String, version: i32 },
     /// The selected saved snapshot was written and the helper released.
     #[serde(rename = "draft/finished")]
     Finished { run_id: String, uri: String, version: i32 },
