@@ -142,11 +142,6 @@ fn command_confirm(server: &mut TestServer, id: i64, edit: &Value, version: i32,
     server.response_with_id(id)
 }
 
-fn obsolete_draft_route(server: &mut TestServer, id: i64, edit: &Value) -> Value {
-    server.send(json!({"jsonrpc":"2.0","id":id,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2}}));
-    server.response_with_id(id)
-}
-
 /// The first `editDocument` effect in a `view/effects` notification.
 fn edit_document(message: &Value) -> Option<Value> {
     if message["method"] != json!("view/effects") {
@@ -519,9 +514,14 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
     assert_eq!(read(&target), unchanged.1);
-    // Barrier payloads are not a second text channel.
-    server.send(json!({"jsonrpc":"2.0","id":16,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":9,"text":"Forbidden"}}));
-    assert!(server.response_with_id(16)["error"].is_object());
+    // Confirmation accepts only its schema; extra text cannot replace the synchronized message.
+    let args = json!({"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":9,"source":"synchronized","text":"Forbidden"});
+    server.send(json!({"jsonrpc":"2.0","id":16,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    let extra_text = server.response_with_id(16);
+    assert!(extra_text["error"].is_object() || extra_text["result"]["type"] == "confirmed", "{extra_text}");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
+    assert_eq!(read(&target), unchanged.1);
 
     change_draft(&mut server, &edit, 11, "Unsaved newer text must not land\n");
     assert!(command_confirm(&mut server, 17, &edit, 9, "synchronized")["error"].is_object());
@@ -534,7 +534,7 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
     assert!(command_confirm(&mut server, 20, &edit, 9, "saved-file")["error"].is_object());
     change_draft(&mut server, &edit, 12, "Late terminal text\n");
-    assert!(obsolete_draft_route(&mut server, 21, &edit)["error"].is_object());
+    assert!(command_confirm(&mut server, 21, &edit, 12, "saved-file")["error"].is_object());
     let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "view/effects")
         .flat_map(|n| n["params"]["effects"].as_array().into_iter().flatten())
         .filter(|effect| effect["type"] == "message" && effect["text"].as_str().unwrap_or("").contains("commit draft:"))

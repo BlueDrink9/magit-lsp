@@ -564,6 +564,13 @@ unchecked. Pre-cutover managed-wire acceptance is historical, not this contract.
   (65 tests), `cargo build --release`, focused native scenario (all four
   combinations), and `git diff --check`. Parent R-EDIT-REAL remains unchecked.
 
+- [x] **R-EDIT-REAL registered-confirmation payload test follow-up (2026-10-29).**
+  Test the actual `workspace/executeCommand` confirmation endpoint for extra text,
+  assert rejected confirmation leaves Git and the message file unchanged, and use
+  that endpoint for terminal behavior. The obsolete draft route is not used as
+  barrier evidence. Parent R-EDIT-REAL remains unchecked.
+  - **Verification:** `cargo test --test editor_bridge && git diff --check`.
+
 - [x] **R-EDIT-REAL existing-effects recovery slice (2026-10-29).** Remove the
   last obsolete draft error notification and both client handlers. Rejected
   open/change reports a readable message without overwriting native edits;
