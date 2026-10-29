@@ -2,6 +2,14 @@
 
 *Formerly "Level 0". Current phase working list linked from canonical TASKS.md §7, ahead of "Feature: release prerequisites". TASKS.md remains the canonical roadmap and design; this file preserves this phase's ticket boundaries, acceptance gates, dependencies and verification. Paths marked (new) are proposals; agents may rename files but must keep task boundaries. Updated 29 October 2026.*
 
+**Mandatory no-vision policy:** all agents, delegated workers and subagents must
+never use vision, inspect/render images, invoke image/screenshot tools, or capture
+screenshots. Native UI verification remains real, using text/structured state
+only (`.screen`, accessibility/DOM text, JSON, wire/API and Git state). Text
+snapshots remain allowed. Do not add image-snapshot tests or capture paths, or
+require image-based acceptance/inspection. Historical evidence descriptions are
+preserved as historical and do not assert that the original evidence was text.
+
 **Status:** R-PLAIN-DOC is complete in TASKS.md. This file is a concise working
 index; TASKS.md §7 is the canonical scanner-visible queue and this file retains
 ticket bodies, decisions, risks and deferred notes. All implementation, spike,
@@ -57,7 +65,7 @@ observations do not complete step 0 or the parent; see
 **Assumptions to confirm (cheap to reverse):**
 
 1. "Pull features out of the client-dependent stage" is read as: prompts, select mode, menus and commit get a Plain-mode implementation before the release sprint via the shared dispatcher.
-2. Evidence rule: Plain-mode acceptance is the fake-editor harness plus native runs of a plain Neovim LSP setup (no magit-lsp plugin) through the existing `scripts/ui`. Helix 25.07.1 is a manual smoke checklist, not a harness.
+2. Evidence rule: Plain-mode acceptance is the fake-editor harness plus native runs of a plain Neovim LSP setup (no magit-lsp plugin) through the existing `scripts/ui`, checked with text/structured state only. Helix 25.07.1 is a manual smoke checklist, not a harness. No image capture or inspection.
 3. BUG-READ-1's minimal first step is pulled forward (R-PLAIN-PREREQ), because `applyEdit` round-trips need an unblocked intake loop. The larger deferred design stays deferred.
 4. R-DIFF-SAFETY is pulled forward unchanged as a dependency of R-PLAIN-TARGET.
 5. Best-effort saved-file retention at abort is implemented; full Magit parity remains a gated R-EDIT-REAL acceptance requirement.
@@ -546,7 +554,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 - **Constraints:** the plain-Neovim init starts magit-lsp with `vim.lsp.start` and no `lua/magit-lsp` code. Neovim's built-in filetype is `gitcommit`, so this also exercises the URI-based draft rule.
 - **Acceptance:**
   - Harness slice on a real disposable repository: open, status, stage file, stage hunk, stale action rejected, unstage, commit menu, commit file, save, close, commit exists with exact message.
-  - Native plain-Neovim scenarios for status/stage and for commit editing; screens inspected; `scripts/ui stop` run; no orphan processes.
+  - Native plain-Neovim scenarios for status/stage and for commit editing; `.screen`/structured text state inspected; `scripts/ui stop` run; no orphan processes. No image capture or inspection.
 - **Verify:** `make test-rust FILTER="--test plain_e2e"`; `scripts/ui run tests/ui/scenarios/plain-status-stage.scn`; `scripts/ui run tests/ui/scenarios/plain-commit.scn`.
 
 ### R-PLAIN-HELIX: manual smoke on Helix 25.07.1 (S)

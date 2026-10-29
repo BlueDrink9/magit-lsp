@@ -1382,6 +1382,14 @@ truthfully. Historical task Verify command lists and recorded evidence describe
 what was required or run at that time; do not rewrite them to imply current
 policy or erase that evidence.
 
+**No-vision policy (mandatory for all agents and delegated workers):** under no
+circumstances use vision, inspect/render images, invoke image/screenshot tools,
+or capture screenshots. Native UI verification remains real, but uses text and
+structured state only (`.screen`, accessibility/DOM text, JSON, wire/API and Git
+state). Text snapshots are allowed. Do not add image-snapshot tests/capture paths
+or require image-based acceptance/inspection. Historical evidence descriptions
+remain historical and must not be rewritten as text-based evidence.
+
 ### Review
 
 Task specifications and open checkboxes remain below; this index summarizes
@@ -1390,6 +1398,13 @@ A13–A21/A24–A34 are complete; A22/A23 were withdrawn. A11 is owned by
 R-EDIT-6. [`REVIEW_REPORT.md`](./REVIEW_REPORT.md) is evidence, not scheduling
 authority. Completed history is in the
 [completed-roadmap archive](./docs/archive/completed-roadmap-2026-10-28.md).
+
+#### NO-VISION-TESTS — Remove executable screenshot paths
+
+- [ ] **[P0] Remove image/screenshot test paths and replace checkpoints with substantive text evidence.** This is the first-priority unchecked review task; this documentation change does not perform or claim the code removal. Preserve real native interactions and all nonvisual assertions, and retain text snapshots.
+  - **Exact affected executable files:** `clients/vscode/test/e2e/suite.js`, `clients/vscode/test/e2e/run.mjs`, `clients/vscode/test/e2e/head-operations.js`, `clients/vscode/test/e2e/real-file-native.js`, `clients/vscode/test/e2e/real-file-lifecycle.js`, `clients/vscode/test/e2e/real-file-lifecycle.mjs`, and `clients/vscode/test/e2e/real-file-spike.js`.
+  - **Done when:** all screenshot capture and image-snapshot executable paths are removed; meaningful native checkpoints use text/structured state (accessibility/DOM text, JSON, wire/API and Git state) while preserving interaction and nonvisual assertions. No image-based acceptance or future screenshot inspection remains.
+  - **Proportionate verification:** `npm --prefix clients/vscode run test:integration && git diff --check`; inspect textual/structured test output only. Do not inspect/render image artifacts.
 
 #### R-COPY-SOURCE — Raw source for structured diff yanks
 

@@ -4,6 +4,8 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
 
 **Why this exists.** Tasks have been accepted against server state and unit-level Neovim cases, so bugs that only show on screen (wrong keys, stacked menus, missing actions, "frozen" messages, lag) went unnoticed. From now on, **a task that changes what the user sees is not done until a scripted test has driven the real UI and its screen output has been checked.**
 
+**No-vision policy:** Never use vision, inspect/render images, invoke image or screenshot tools, or capture screenshots. This applies to every agent and delegated worker. Native UI interaction remains required where specified, but checkpoints and acceptance use text/structured evidence only: tmux `.screen`, accessibility/DOM text, JSON, wire/API and Git state. Text snapshots remain allowed. Do not add image-snapshot tests or screenshot capture paths, and do not require future image inspection. Historical evidence descriptions remain historical; they are not claims that evidence was text-based.
+
 **Status of the causes below.** The "suspected cause" lines are hypotheses written without reading the current code. Confirm each with a failing test before changing anything.
 
 ## 0. Rules

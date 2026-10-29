@@ -62,6 +62,8 @@ Start in these components:
 
 ## Working conventions
 
+- **No-vision policy (mandatory for every agent, including delegated workers and subagents):** never use vision, inspect or render images, or invoke image/screenshot tools, under any circumstances. Do not capture screenshots or add image-snapshot tests/capture paths. Native UI verification remains real and interactive, but evidence and acceptance must be text/structured state only (for example `.screen`, accessibility/DOM text, JSON, wire/API and Git state). Text snapshots are allowed. Do not impose image-based acceptance or future screenshot inspection requirements.
+
 - Keep changes scoped to the requested task. Do not take on unrelated unchecked
   roadmap or review backlog items.
 - Every external/public function and type needs a concise docstring (`///` in
@@ -76,7 +78,7 @@ Start in these components:
 - Never show raw JSON or Lua tables to users. Git failures are user-facing
   `Effect::Message`s with a readable summary (and optional hint/detail), not
   JSON-RPC errors. See TASKS.md IMM-3, §3.5 and `src/errors.rs`.
-- Choose verification proportionate to the change: run the narrowest relevant checks for each task, and ensure no orphan `magit-lsp` processes. For user-visible behavior, retain real native-UI evidence in the affected client using focused scenarios; Neovim-only evidence is not a substitute for VSCode changes, and unrelated client suites are not required.
+- Choose verification proportionate to the change: run the narrowest relevant checks for each task, and ensure no orphan `magit-lsp` processes. For user-visible behavior, retain real native-UI evidence in the affected client using focused scenarios and text/structured state only; Neovim-only evidence is not a substitute for VSCode changes, and unrelated client suites are not required. Never capture or inspect images.
 - Validate protocol input, user configuration and Git output at their boundaries. Once internal values are validated, trust their invariants: do not reparse canonical keys, invent fallback command statuses, reconstruct displayed selections from fresh diffs, or maintain alternate production paths solely for tests. Keep recovery where failure is genuinely external: lost render acknowledgements, editor buffer lifetime, Git failures and client disconnects.
 
 ## Verification
@@ -101,7 +103,7 @@ Start in these components:
   and keybindings JSON per profile, the commit menu at 60/140 columns) and the
   README parity block in place, preserving surrounding prose.
 - User-visible changes are not done until focused scripted native-UI scenario(s)
-  drive the affected client's real UI and their output is checked; do not run
+  drive the affected client's real UI and text/structured output is checked; do not run
   every scenario by default. VSCode-only changes require VSCode native evidence,
   not unrelated Neovim runs. Use the full UI suite for broad UI/shared lifecycle
   changes, phase completion, or suspected regressions. Follow inspect → act →
@@ -111,4 +113,4 @@ Start in these components:
   plain `scripts/ui screen`, not `--ansi`. See `ui-test-plan.md` §A and TASKS.md
   §8.8. At phase completion, run `make ui-tour` and inspect only relevant
   headings/excerpts in `build/ui/tour.md`; never read the entire file. Read a
-  scenario's `failure.screen` only if its inline screen output is insufficient.
+  scenario's `failure.screen` only if its inline text output is insufficient. Never use screenshot/image output.
