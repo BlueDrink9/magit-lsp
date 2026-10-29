@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "publisher": "magit-lsp",
   "private": true,
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.85.0"
   },
