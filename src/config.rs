@@ -172,8 +172,15 @@ pub struct Config {
     pub sections: SectionSettings,
     pub ui: UiSettings,
     pub log: LogSettings,
+    /// File basenames used for the Plain presentation document (default `.magit`).
+    pub presentation_files: Vec<String>,
     /// Every file that contributed, for the watcher.
     pub files: Vec<PathBuf>,
+}
+
+/// Whether a path is one of the configured Plain presentation documents.
+pub fn is_presentation_file(path: &Path, names: &[String]) -> bool {
+    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| names.iter().any(|candidate| candidate == name))
 }
 
 impl Default for Config {
@@ -197,6 +204,7 @@ impl Default for Config {
                 default_args: Vec::new(),
                 margin: None,
             },
+            presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
     }
@@ -391,6 +399,7 @@ struct Layered {
     ui_confirm_discard: Option<bool>,
     log_default_args: Option<Vec<String>>,
     log_margin: Option<u32>,
+    presentation_files: Option<Vec<String>>,
     files: Vec<PathBuf>,
 }
 
@@ -422,6 +431,9 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     }
     if let Some(margin) = layered.log_margin {
         config.log.margin = Some(margin);
+    }
+    if let Some(names) = layered.presentation_files {
+        config.presentation_files = names;
     }
     for file in layered.files {
         if !config.files.contains(&file) {
@@ -613,6 +625,22 @@ fn apply_document(
                             layered.log_margin = Some(integer(value, "log.margin", file, line)?)
                         }
                         other => return Err(unknown_key(file, line, "log", other)),
+                    }
+                }
+            }
+            "presentation" => {
+                let table = settings_table(item, "presentation", file, line)?;
+                for (name, value) in table.iter() {
+                    let line = item_line(source, value);
+                    match name {
+                        "files" => {
+                            let names = string_array(value, "presentation.files", file, source)?;
+                            if names.iter().any(|name| name.is_empty() || name.contains(['/', '\\', '\0']) || name == "." || name == "..") {
+                                return Err(ConfigError::new("`presentation.files` entries must be non-empty file basenames").at_file_line(file, line));
+                            }
+                            layered.presentation_files = Some(names);
+                        }
+                        other => return Err(unknown_key(file, line, "presentation", other)),
                     }
                 }
             }

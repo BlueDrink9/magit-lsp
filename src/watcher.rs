@@ -72,13 +72,21 @@ impl RepoWatcher {
     where
         F: FnMut(Refresh) + Send + 'static,
     {
+        Self::start_with_presentation_files(repo, config, vec![".magit".to_owned()], on_refresh)
+    }
+
+    /// Start a watcher using the shared presentation-file policy.
+    pub fn start_with_presentation_files<F>(repo: &Path, config: WatcherConfig, presentation_files: Vec<String>, on_refresh: F) -> notify::Result<Self>
+    where
+        F: FnMut(Refresh) + Send + 'static,
+    {
         let repo = repo.to_path_buf();
         let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
         let mut watcher = notify::recommended_watcher(tx)?;
         watcher.watch(&repo, RecursiveMode::Recursive)?;
         let thread = std::thread::Builder::new()
             .name("magit-lsp-watcher".to_string())
-            .spawn(move || RepoWatcher::run(repo, config, rx, on_refresh))?;
+            .spawn(move || RepoWatcher::run(repo, config, presentation_files, rx, on_refresh))?;
         Ok(Self {
             watcher: Some(watcher),
             thread: Some(thread),
@@ -89,6 +97,7 @@ impl RepoWatcher {
     fn run(
         repo: PathBuf,
         config: WatcherConfig,
+        presentation_files: Vec<String>,
         rx: mpsc::Receiver<notify::Result<Event>>,
         mut on_refresh: impl FnMut(Refresh),
     ) {
@@ -98,7 +107,7 @@ impl RepoWatcher {
         loop {
             match rx.recv_timeout(config.debounce) {
                 Ok(Ok(event)) => {
-                    if !relevant_event(&event, &repo) {
+                    if !relevant_event_excluding(&event, &repo, &presentation_files) {
                         continue;
                     }
                     let paths: Vec<PathBuf> =
@@ -181,9 +190,14 @@ fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 /// Access events (reads) are ignored. Everything else counts through the paths
 /// of [`relevant_path`].
 pub fn relevant_event(event: &Event, repo: &Path) -> bool {
+    relevant_event_excluding(event, repo, &[".magit".to_owned()])
+}
+
+/// Whether an event is relevant under configured presentation-file policy.
+pub fn relevant_event_excluding(event: &Event, repo: &Path, presentation_files: &[String]) -> bool {
     match event.kind {
         notify::event::EventKind::Access(_) => false,
-        _ => event.paths.iter().any(|path| relevant_path(path, repo)),
+        _ => event.paths.iter().any(|path| relevant_path_excluding(path, repo, presentation_files)),
     }
 }
 
@@ -194,6 +208,11 @@ pub fn relevant_event(event: &Event, repo: &Path) -> bool {
 /// merge/rebase/cherry-pick state); lock files and `objects/` are noise, and so
 /// is every other `.git` internal.
 pub fn relevant_path(path: &Path, repo: &Path) -> bool {
+    relevant_path_excluding(path, repo, &[".magit".to_owned()])
+}
+
+/// Whether a watched path is relevant under configured presentation-file policy.
+pub fn relevant_path_excluding(path: &Path, repo: &Path, presentation_files: &[String]) -> bool {
     let Ok(rel) = path.strip_prefix(repo) else {
         return false;
     };
@@ -201,7 +220,7 @@ pub fn relevant_path(path: &Path, repo: &Path) -> bool {
         .components()
         .map(|component| component.as_os_str())
         .collect();
-    if components.iter().any(|component| *component == OsStr::new(".magit")) {
+    if components.last().and_then(|name| name.to_str()).is_some_and(|name| presentation_files.iter().any(|candidate| candidate == name)) {
         return false;
     }
     match components.first() {

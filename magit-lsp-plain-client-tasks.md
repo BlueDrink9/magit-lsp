@@ -502,16 +502,20 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 
 ### R-PLAIN-REPO: repository and document resolution (M)
 
-**Resolution-state slice complete:** `presentation::resolve` uses Git-owned root,
-per-worktree git-dir and common-dir identity; initialize captures deduplicated
-workspace candidates. Explicit/workspace/document precedence is typed, with
-multiple roots retained as `Choose` rather than guessed. Default `.magit` files
-are excluded from untracked status and watcher refresh. Document-open routing,
-configurable presentation path policy, and candidate rendering/code actions are
-downstream of R-PLAIN-RENDER/ACTIONS and remain incomplete; this task does not
-claim a rendered chooser.
+**Complete:** bounded Git-owned discovery supplies canonical root, per-worktree
+git-dir and common-dir; initialize captures deduplicated workspace candidates
+using strictly validated local file URIs. Resolution has explicit/workspace/
+document precedence and returns typed `Choose` rather than guessing. Config
+validates `presentation.files` basename policy (default `.magit`); status and
+watcher filters use that policy. Actual-binary initialize/rich-open, UTF-8 and
+escaped URI cases, and real-Git resolution/status tests pass. No presentation
+layer performs Git discovery or `.git` recognition.
 
-- **Target Files:** `src/presentation/resolve.rs` (new), `src/server.rs`, `src/session.rs`, `src/git.rs`, `tests/plain_repo.rs` (new).
+**Downstream only:** Plain didOpen rendering, chooser rows/code actions and
+selection require R-PLAIN-RENDER/ACTIONS. No chooser UI or Plain mutation route is
+claimed here.
+
+- **Target Files:** `src/presentation/resolve.rs` (new), `src/presentation/mod.rs`, `src/server.rs`, `src/session.rs`, `src/git.rs`, `src/config.rs`, `src/watcher.rs`, `tests/plain_repo.rs` (new), `TASKS.md`, `magit-lsp-plain-client-tasks.md`.
 - **Constraints:** file content never selects the repository; never guess among candidates for any mutating command.
 - **Acceptance:**
   - Resolution order: explicit `repo_path` (rich, unchanged); a single unambiguous Git root from workspace folders; the document path if inside a repository; otherwise a choose-repository view whose rows are code actions over candidates.
@@ -519,7 +523,7 @@ claim a rendered chooser.
   - Canonical identity from `git rev-parse --git-dir --git-common-dir --show-toplevel`, handling linked worktrees (`.git` file) and symlinks.
   - Presentation documents (`.magit`, configurable) are excluded from Untracked and watcher noise.
   - Tests: no root, `/tmp` root, multi-root, nested, worktree, two repositories in one editor, and a mutating command refused while ambiguous.
-- **Verify:** `make test-rust FILTER="--test plain_repo --test plain_core --test server_async" && git diff --check`.
+- **Verify:** `make test-rust FILTER="--test plain_repo --test plain_core --test server_async --test config --test watcher" && git diff --check`.
 
 ### R-PLAIN-RENDER: bootstrap and versioned applyEdit pipeline (L)
 

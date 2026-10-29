@@ -347,6 +347,8 @@ impl std::fmt::Display for GitFailure {
 /// A Git repository driven through the `git` CLI.
 pub struct GitRepo {
     root: PathBuf,
+    git_dir: PathBuf,
+    common_dir: PathBuf,
 }
 
 impl GitRepo {
@@ -362,26 +364,43 @@ impl GitRepo {
 
     /// Open the repository containing `path`, resolving its working-tree root.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::discover(path)?.ok_or_else(|| Error::new("not inside a git repository"))
+    }
+
+    /// Discover a repository and its canonical worktree/Git identities.
+    pub fn discover<P: AsRef<Path>>(path: P) -> Result<Option<Self>> {
         let path = path.as_ref();
         let cwd = if path.is_dir() {
             path.to_path_buf()
         } else {
             path.parent().unwrap_or(path).to_path_buf()
         };
-        let out = Self::command_in(&cwd, &["rev-parse", "--show-toplevel"])?;
-        let root = out.trim().to_string();
-        if root.is_empty() {
-            return Err(Error::new("not inside a git repository"));
-        }
-        Ok(Self {
-            root: PathBuf::from(root),
-        })
+        let out = match Self::command_in(&cwd, &["rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"]) {
+            Ok(out) => out,
+            Err(error) if error.git.is_some() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut lines = out.lines();
+        let Some(root) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
+        let Some(git_dir) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
+        let Some(common_dir) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
+        Ok(Some(Self {
+            root: std::fs::canonicalize(root)?,
+            git_dir: std::fs::canonicalize(git_dir)?,
+            common_dir: std::fs::canonicalize(common_dir)?,
+        }))
     }
 
     /// The repository's working-tree root.
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    /// The per-worktree Git directory.
+    pub fn git_dir(&self) -> &Path { &self.git_dir }
+
+    /// The shared Git directory, identical across linked worktrees.
+    pub fn common_dir(&self) -> &Path { &self.common_dir }
 
     /// Resolve COMMIT_EDITMSG in this worktree's actual, canonical Git directory.
     /// Linked worktrees must not use the common repository's message file.
@@ -579,6 +598,15 @@ impl GitRepo {
 
     /// Compute the status without reading any file's diff.
     pub fn status_listing(&self) -> Result<Status> {
+        let options = crate::config::LoadOptions { repo_path: Some(self.root.clone()), ..Default::default() };
+        let policy = crate::config::load_config(&options)
+            .map(|config| config.presentation_files)
+            .unwrap_or_else(|_| vec![".magit".to_owned()]);
+        self.status_listing_excluding(&policy)
+    }
+
+    /// Read status while excluding configured presentation-document basenames.
+    pub fn status_listing_excluding(&self, presentation_files: &[String]) -> Result<Status> {
         let repo_path = self.root.to_string_lossy().into_owned();
         // `-z` keeps paths verbatim; `--no-optional-locks` keeps a read from
         // taking the index lock away from a concurrent mutation.
@@ -589,7 +617,7 @@ impl GitRepo {
             "-z",
             "--branch",
         ])?;
-        let mut status = self.parse_status(&raw, repo_path)?;
+        let mut status = self.parse_status(&raw, repo_path, presentation_files)?;
         for file in status.staged.iter_mut().chain(&mut status.unstaged).chain(&mut status.untracked) {
             file.mutation_identity = Some(self.file_mutation_identity(&file.path, file.orig_path.as_deref(), true)?);
         }
@@ -612,7 +640,7 @@ impl GitRepo {
         Ok(FileMutationIdentity { head, index, worktree, original })
     }
 
-    fn parse_status(&self, raw: &str, repo_path: String) -> Result<Status> {
+    fn parse_status(&self, raw: &str, repo_path: String, presentation_files: &[String]) -> Result<Status> {
         let mut status = Status::empty(repo_path);
 
         let mut tokens = raw.split('\0');
@@ -652,7 +680,7 @@ impl GitRepo {
                 b'?' => {
                     if let Some(path) = token.strip_prefix("? ") {
                         // Plain presentation documents are editor state, not repository content.
-                        if Path::new(path).file_name().is_some_and(|name| name == ".magit") {
+                        if crate::config::is_presentation_file(Path::new(path), presentation_files) {
                             continue;
                         }
                         status.untracked.push(FileEntry {
@@ -1508,12 +1536,14 @@ mod tests {
     fn header_repo() -> GitRepo {
         GitRepo {
             root: PathBuf::from("/nonexistent"),
+            git_dir: PathBuf::new(),
+            common_dir: PathBuf::new(),
         }
     }
 
     fn parse(raw: &str) -> Status {
         header_repo()
-            .parse_status(raw, "/repo".to_string())
+            .parse_status(raw, "/repo".to_string(), &[".magit".to_owned()])
             .expect("parse")
     }
 

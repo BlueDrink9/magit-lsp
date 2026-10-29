@@ -364,9 +364,11 @@ impl Shared {
         let shared = self.clone();
         let repo_key = repo.to_string();
         let repo_for_handler = repo_key.clone();
-        let result = RepoWatcher::start(
+        let presentation_files = self.config.config().presentation_files.clone();
+        let result = RepoWatcher::start_with_presentation_files(
             Path::new(repo),
             WatcherConfig::default(),
+            presentation_files,
             move |refresh: Refresh| match refresh {
                 Refresh::Changed(_paths) => {
                     // Only this repository's session serialises refresh and mutation.
@@ -1868,7 +1870,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 }
 
 fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolve::Repository> {
-    use crate::presentation::resolve::GitRepository;
+    use crate::git::GitRepo;
     let mut paths = Vec::new();
     if let Some(folders) = params.pointer("/workspaceFolders").and_then(Value::as_array) {
         paths.extend(folders.iter().filter_map(|folder| folder.get("uri").and_then(Value::as_str).and_then(file_uri_path)));
@@ -1880,7 +1882,7 @@ fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolv
     }
     let mut repositories = Vec::new();
     for path in paths {
-        if let Some(repository) = GitRepository::discover(&path) {
+        if let Some(repository) = GitRepo::discover(&path).ok().flatten().map(|repo| crate::presentation::resolve::Repository { root: repo.root().to_owned(), git_dir: repo.git_dir().to_owned(), common_dir: repo.common_dir().to_owned() }) {
             if !repositories.iter().any(|item: &crate::presentation::resolve::Repository| item.root == repository.root) {
                 repositories.push(repository);
             }
@@ -1890,9 +1892,42 @@ fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolv
 }
 
 fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
-    let encoded = uri.strip_prefix("file://")?;
-    let decoded = encoded.replace("%20", " ").replace("%23", "#").replace("%25", "%");
-    Some(std::path::PathBuf::from(decoded))
+    let rest = uri.strip_prefix("file://")?;
+    let path = if let Some(local) = rest.strip_prefix("localhost/") { format!("/{local}") }
+        else if rest.starts_with('/') { rest.to_owned() } else { return None };
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = *bytes.get(i + 1)?;
+            let lo = *bytes.get(i + 2)?;
+            decoded.push((hex(hi)? << 4) | hex(lo)?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(std::path::PathBuf::from(String::from_utf8(decoded).ok()?))
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte { b'0'..=b'9' => Some(byte - b'0'), b'a'..=b'f' => Some(byte - b'a' + 10), b'A'..=b'F' => Some(byte - b'A' + 10), _ => None }
+}
+
+#[cfg(test)]
+mod repository_uri_tests {
+    use super::file_uri_path;
+
+    #[test]
+    fn file_uri_decoding_is_complete_and_rejects_nonlocal_or_malformed_uris() {
+        assert_eq!(file_uri_path("file:///tmp/a%20%C3%A9%23%25").unwrap(), std::path::PathBuf::from("/tmp/a é#%"));
+        assert_eq!(file_uri_path("file://localhost/tmp/a%20b").unwrap(), std::path::PathBuf::from("/tmp/a b"));
+        for invalid in ["https://example.test/a", "file://remote/tmp/a", "file:///tmp/%Q0", "file:///tmp/%FF", "file:///tmp/%2"] {
+            assert!(file_uri_path(invalid).is_none(), "accepted {invalid}");
+        }
+    }
 }
 
 /// The last acked tree of the view showing `uri`.
