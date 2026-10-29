@@ -49,7 +49,7 @@ observations do not complete step 0 or the parent; see
 | Prompts | One document-backed prompt renderer for confirm/text/choice/multiChoice, with editable fields and `textDocument/completion`. |
 | Capability model | Declared once per effect type and prompt kind (section 2). No per-command annotations. |
 | Commit editing (implemented; Plain presentation remains target) | Git's real `COMMIT_EDITMSG` template and canonical file URI/runId. Default didClose confirms saved-file text by accepted assumption, not run-identity/reliability proof. VS Code uses owned last-matching-tab all-group run-aware `magit.command` confirmation, ignoring language-change didClose. Explicit confirm validates synchronized exact version and writes it back. Native dirty Save saves/confirms, Discard submits prior saved text, Cancel remains open. Explicit abort cancels. |
-| Message ring | Saved eligible finish text and best-effort abort file text feed the bounded server ring, not didSave. Pinned Magit source comparison documents differences in effective-message normalization, global dedup, scope and caps; policy remains unresolved. See `docs/evidence/commit-message-ring-parity.md` and TASKS §3.10. |
+| Message ring | Saved eligible finish text and best-effort abort file text feed the bounded server ring, not didSave. Retain existing eligibility, dedup and caps; pinned Magit source comparison documents differences in effective-message normalization, global dedup, scope and caps. These are documented policy differences, not a migration requirement. See `docs/evidence/commit-message-ring-parity.md` and TASKS §3.10. |
 | Close without saving | On an amend or reword, committing the unchanged message is Git's own behaviour and is kept. Abort is the explicit way out. |
 | History prev/next | Deferred to R-EDIT-HISTORY (server code action issuing a versioned `applyEdit`, identical for every client). |
 | Out of scope | Level 1 character input, launcher, diagnostics channel, discard recovery refs, direct `workspace/executeCommand` bindings (arguments come only from code actions), custom URIs, LSP 3.18 virtual content, the grace timer (section 6). |
@@ -211,8 +211,8 @@ are covered. Broader dirty shutdown/reload/workspace-change/cross-build and
 last-window exit remain unverified; scoped clean Codium observer results and
 Neovim extra-window close evidence are not universal lifecycle guarantees.
 Ring differences documented in `docs/evidence/commit-message-ring-parity.md`
-remain a recorded policy question, not an instruction to change the retained
-policy. Full-phase gates are not green. Historical
+remain documented differences under the retained policy, not an instruction to
+change implementation. Full-phase gates are not green. Historical
 phase failures: `make test` failed at
 `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` line 477
 (`build/test-logs/rust.P4rm85`); no-fail-fast Rust also failed `errors`,
