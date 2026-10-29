@@ -149,6 +149,10 @@ pub struct CommandOutcome {
 pub enum PromptAction {
     /// Stage the captured working tree before starting commit.
     Commit { fingerprint: RepositoryFingerprint, untracked: bool, operation: crate::git::CommitOperation },
+    /// Confirm rewriting a published HEAD without replaying menu arguments.
+    PublishedCommit { fingerprint: RepositoryFingerprint, operation: crate::git::CommitOperation },
+    /// Offer tracked `--all` for Extend without adding untracked files.
+    ExtendAll { fingerprint: RepositoryFingerprint, options: crate::git::CommitOptions },
     /// Apply the captured resolution against the displayed patch identities.
     Discard { fingerprint: RepositoryFingerprint, resolution: dispatch::Resolution, tree: Tree },
     /// Resolve a revision for the originating selection view.
@@ -207,6 +211,26 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
     use crate::protocol::PromptValue;
     let Some(answer) = answer else { return Ok(CommandOutcome::default()); };
     match action {
+        PromptAction::ExtendAll { fingerprint, mut options } => {
+            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if RepositoryFingerprint::capture(&repo)? != fingerprint {
+                ctx.info("Repository changed while the prompt was open; try again");
+                return Ok(CommandOutcome::default());
+            }
+            options.all = true;
+            prepare_head_commit(ctx, &repo, crate::git::CommitOperation::Extend(options))
+        }
+        PromptAction::PublishedCommit { fingerprint, operation } => {
+            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+            let repo = GitRepo::open(ctx.repo_path)?;
+            if RepositoryFingerprint::capture(&repo)? != fingerprint {
+                ctx.info("Repository changed while the prompt was open; try again");
+                return Ok(CommandOutcome::default());
+            }
+            ctx.info("Committing…");
+            Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
+        }
         PromptAction::Commit { fingerprint, untracked, operation } => {
             if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
             let repo = GitRepo::open(ctx.repo_path)?;
@@ -618,6 +642,9 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: commit_create,
         },
+        Command { id: "commit.amend", scope: Scope::MenuAction, doc: "Amend HEAD", status: CommandStatus::Implemented, run: commit_amend },
+        Command { id: "commit.extend", scope: Scope::MenuAction, doc: "Extend HEAD without editing its message", status: CommandStatus::Implemented, run: commit_extend },
+        Command { id: "commit.reword", scope: Scope::MenuAction, doc: "Reword HEAD", status: CommandStatus::Implemented, run: commit_reword },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
         Command {
@@ -800,6 +827,14 @@ fn open_commit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 /// Options are validated before mutation
 /// and captured with the operation across the staging prompt.
 fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_operation(ctx, crate::git::CommitKind::Create)
+}
+
+fn commit_amend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Amend) }
+fn commit_extend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Extend) }
+fn commit_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Reword) }
+
+fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> Result<CommandOutcome> {
     let repo = GitRepo::open(ctx.repo_path)?;
     let options = match commit_options(ctx.args, &repo) {
         Ok(options) => options,
@@ -809,8 +844,40 @@ fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         }
     };
     let status = repo.status_listing()?;
+    if kind != crate::git::CommitKind::Create && status.head.is_none() {
+        ctx.info("Cannot edit HEAD: this repository has no commit yet");
+        return Ok(CommandOutcome::default());
+    }
+    if kind != crate::git::CommitKind::Create && (options.reuse_message.is_some() || options.reedit_message.is_some() || options.reset_author) {
+        ctx.info("Message reuse, reedit and reset-author options conflict with HEAD edit actions");
+        return Ok(CommandOutcome::default());
+    }
+    if kind == crate::git::CommitKind::Reword && options.all {
+        ctx.info("Reword uses --only and cannot be combined with --all");
+        return Ok(CommandOutcome::default());
+    }
+    if kind == crate::git::CommitKind::Extend && status.staged.is_empty()
+        && !(options.all && !status.unstaged.is_empty())
+        && !(options.allow_empty || options.signoff || options.author.is_some() || options.date.is_some())
+    {
+        if status.unstaged.is_empty() {
+            ctx.info("Nothing staged (or unstaged) to extend");
+            return Ok(CommandOutcome::default());
+        }
+        return Ok(CommandOutcome { prompt: Some((head_commit_prompt(
+            "Nothing staged. Commit all tracked changes and extend HEAD?", None,
+        ), PromptAction::ExtendAll { fingerprint: RepositoryFingerprint::capture(&repo)?, options })), ..Default::default() });
+    }
     let ready = options.allow_empty || (options.all && !status.unstaged.is_empty());
-    let operation = crate::git::CommitOperation::Create(options);
+    let operation = match kind {
+        crate::git::CommitKind::Amend => crate::git::CommitOperation::Amend(options),
+        crate::git::CommitKind::Extend => crate::git::CommitOperation::Extend(options),
+        crate::git::CommitKind::Reword => crate::git::CommitOperation::Reword(options),
+        crate::git::CommitKind::Create => crate::git::CommitOperation::Create(options),
+    };
+    if kind != crate::git::CommitKind::Create {
+        return prepare_head_commit(ctx, &repo, operation);
+    }
     if status.staged.is_empty() && !ready {
         if status.unstaged.is_empty() && status.untracked.is_empty() {
             ctx.effects.push(Effect::Message {
@@ -850,6 +917,28 @@ fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         commit: Some(operation),
         ..Default::default()
     })
+}
+
+fn head_commit_prompt(title: &str, detail: Option<&str>) -> ViewPromptParams {
+    ViewPromptParams {
+        prompt_id: String::new(), kind: PromptKind::Confirm, title: title.into(),
+        detail: detail.map(str::to_string), yes_label: None, no_label: None,
+        destructive: Some(true), default: None, placeholder: None, secret: None,
+        items: None, allow_custom: None, preselected: None, min: None, max: None,
+    }
+}
+
+fn prepare_head_commit(ctx: &mut CommandCtx<'_>, repo: &GitRepo, operation: crate::git::CommitOperation) -> Result<CommandOutcome> {
+    if repo.head_is_published()? {
+        let prompt = head_commit_prompt("Rewrite published HEAD?", Some(
+            "HEAD is reachable from a remote-tracking branch. Rewriting it may require a force push.",
+        ));
+        return Ok(CommandOutcome { prompt: Some((prompt, PromptAction::PublishedCommit {
+            fingerprint: RepositoryFingerprint::capture(repo)?, operation,
+        })), ..Default::default() });
+    }
+    ctx.info("Committing…");
+    Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
 }
 
 /// Validate structured commit-menu input once, before staging or launching Git.

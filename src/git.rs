@@ -128,12 +128,38 @@ pub struct CommitOutcome {
 pub enum CommitOperation {
     /// Create a new commit using validated menu options.
     Create(CommitOptions),
+    /// Amend HEAD while editing its message.
+    Amend(CommitOptions),
+    /// Amend staged changes without editing the message.
+    Extend(CommitOptions),
+    /// Amend only the message, excluding staged changes from the resulting tree.
+    Reword(CommitOptions),
+}
+
+/// Typed commit action selected from the commit menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitKind {
+    /// Create a new commit.
+    Create,
+    /// Amend HEAD with an editor.
+    Amend,
+    /// Amend HEAD without an editor.
+    Extend,
+    /// Edit only HEAD's message.
+    Reword,
 }
 
 impl CommitOperation {
     /// Render the captured operation as individual Git arguments.
     pub fn argv(&self) -> Vec<String> {
-        match self { Self::Create(options) => options.argv() }
+        let (mut args, options) = match self {
+            Self::Create(options) => (vec![], options),
+            Self::Amend(options) => (vec!["--amend".into()], options),
+            Self::Extend(options) => (vec!["--amend".into(), "--no-edit".into()], options),
+            Self::Reword(options) => (vec!["--amend".into(), "--only".into(), "--allow-empty".into()], options),
+        };
+        args.extend(options.argv());
+        args
     }
 }
 
@@ -325,6 +351,19 @@ impl GitRepo {
             return Err(Error::new("Git returned a relative editor directory"));
         }
         Ok(std::fs::canonicalize(path)?.join("COMMIT_EDITMSG"))
+    }
+
+    /// Read HEAD's committer timestamp for Magit-style metadata-preserving amendments.
+    pub fn head_committer_date(&self) -> Result<String> {
+        let date = self.run(&["show", "-s", "--format=%cI", "HEAD"])?;
+        let date = date.trim();
+        if date.is_empty() { return Err(Error::new("Cannot read HEAD committer date")); }
+        Ok(date.to_string())
+    }
+
+    /// Whether any fetched remote-tracking branch contains the current HEAD.
+    pub fn head_is_published(&self) -> Result<bool> {
+        Ok(!self.run(&["for-each-ref", "--format=%(refname)", "--contains=HEAD", "refs/remotes/"])?.trim().is_empty())
     }
 
     /// Return a coherent page of log records; filtering values are individual

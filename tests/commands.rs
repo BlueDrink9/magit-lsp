@@ -125,7 +125,7 @@ fn commit_arguments_are_typed_and_invalid_input_never_stages() {
         "switches": ["-a", "-e", "-v", "-n", "-s", "-R"],
         "options": {"=D": "2001-02-03T04:05:06+00:00", "=S": "", "=c": "HEAD"}
     }));
-    let CommitOperation::Create(options) = result.commit.expect("typed operation");
+    let CommitOperation::Create(options) = result.commit.expect("typed operation") else { panic!("expected create operation") };
     assert!(options.all && options.allow_empty && options.verbose && options.no_verify && options.signoff && options.reset_author);
     assert_eq!(options.signing_key.as_deref(), Some(""));
     assert_eq!(options.reedit_message.as_deref(), Some(tmp.git(&["rev-parse", "HEAD"]).trim()));

@@ -161,12 +161,16 @@ fn start_commit(server: &mut TestServer, status: &str) -> Value {
 
 /// Start a real editor-backed commit with structured menu arguments.
 fn start_commit_with_args(server: &mut TestServer, status: &str, args: Value) -> Value {
+    start_head_operation(server, status, "commit.create", args)
+}
+
+fn start_head_operation(server: &mut TestServer, status: &str, command: &str, args: Value) -> Value {
     eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
         "jsonrpc": "2.0",
         "id": 4,
         "method": "view/invoke",
-        "params": {"viewId": status, "command": "commit.create", "args": args},
+        "params": {"viewId": status, "command": command, "args": args},
     }));
     let mut response = None;
     let mut edit = None;
@@ -203,6 +207,110 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
         .commit("init", [("f.txt", TEN_LINES)])
         .staged_file("f.txt", standard_changes())
         .build()
+}
+
+#[test]
+fn head_operations_real_git_tree_message_date_and_saved_close() {
+    for command in ["commit.amend", "commit.extend", "commit.reword"] {
+        for state in ["staged", "unstaged", "all", "clean", "cancel"] {
+            if command == "commit.reword" && state == "all" { continue; }
+            if command == "commit.extend" && state == "cancel" { continue; }
+            let (tmp, repo) = RepoFixture::new().commit("original message", [("f.txt", TEN_LINES)]).build();
+            // Make date preservation observable independently of wall-clock speed.
+            let output = Command::new("git").args(["commit", "--amend", "--no-edit"])
+                .current_dir(tmp.path()).env("GIT_COMMITTER_DATE", "2001-02-03T04:05:06+00:00").output().unwrap();
+            assert!(output.status.success());
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let head_tree = tmp.git(&["rev-parse", "HEAD^{tree}"]);
+            let date = repo.head_committer_date().unwrap();
+            let message = tmp.git(&["log", "-1", "--format=%B"]);
+            if state != "clean" {
+                write(&tmp.path().join("f.txt"), "staged content\n");
+                if state == "staged" || state == "cancel" { tmp.git(&["add", "f.txt"]); }
+                write(&tmp.path().join("f.txt"), "unstaged content\n");
+            }
+            if state != "clean" { write(&tmp.path().join("untracked.txt"), "never implicitly added\n"); }
+            let index = tmp.git(&["ls-files", "--stage", "-z"]);
+            let index_tree = tmp.git(&["write-tree"]);
+            let worktree = read(&tmp.path().join("f.txt"));
+            let mut server = TestServer::spawn(&[]);
+            server.initialize(json!({}));
+            let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+            let args = json!({"switches": if state == "all" { vec!["-a"] }
+                else if command == "commit.extend" && state == "clean" { vec!["-e"] } else { vec![] }, "options": {}});
+            if command == "commit.extend" {
+                server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{
+                    "viewId":status,"command":command,"args":args
+                }}));
+                if state == "unstaged" {
+                    let prompt = server.prompt();
+                    server.respond_prompt(5, prompt["params"]["promptId"].as_str().unwrap(), false, json!(true));
+                }
+            } else {
+                let edit = start_head_operation(&mut server, &status, command, args);
+                assert!(edit["text"].as_str().unwrap().starts_with("original message\n"));
+                assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "editor alone must not commit");
+                assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+                if state == "cancel" {
+                    let response = invoke(&mut server, 5, &status, "common.cancel", json!({"runId":edit["runId"]}));
+                    assert!(response.get("error").is_none(), "{response}");
+                } else {
+                    // Amend deliberately closes the unchanged, saved Git message.
+                    // Reword saves different bytes, but never commits the index tree.
+                    if command == "commit.reword" { write(&tmp.path().join(".git/COMMIT_EDITMSG"), "reworded message\n"); }
+                    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+                        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}
+                    }}));
+                    let response = command_confirm(&mut server, 5, &edit, 1, "saved-file");
+                    assert_eq!(response["result"]["type"], "confirmed", "{response}");
+                }
+            }
+            let outcome = loop {
+                let frame = server.recv();
+                assert!(edit_document(&frame).is_none(), "Extend must not open an editor");
+                if frame["method"] == "view/effects" {
+                    if let Some(effect) = frame["params"]["effects"].as_array().unwrap().iter().find(|effect|
+                        effect["type"] == "message" && effect["text"] != "Committing…") {
+                        break effect.clone();
+                    }
+                }
+            };
+            if state == "cancel" {
+                assert_eq!(outcome["level"], "error", "{outcome}");
+                assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+                assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+            } else {
+                assert!(outcome["text"].as_str().unwrap().starts_with("Committed:"), "{command}/{state}: {outcome}");
+                let expected_message = if command == "commit.reword" { "reworded message\n\n" } else { &message };
+                assert_eq!(tmp.git(&["log", "-1", "--format=%B"]), expected_message);
+                if command == "commit.reword" {
+                    assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+                    assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), head_tree);
+                    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+                } else if state == "all" || (command == "commit.extend" && state == "unstaged") {
+                    assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), worktree);
+                    assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+                    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+                    assert!(tmp.git(&["diff"]).is_empty());
+                } else {
+                    assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), index_tree);
+                    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+                    if state == "staged" { assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head); }
+                }
+                if command == "commit.extend" && state == "clean" {
+                    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "identical preserved metadata may retain the OID");
+                }
+                if command != "commit.amend" { assert_eq!(repo.head_committer_date().unwrap(), date); }
+                else { assert_ne!(repo.head_committer_date().unwrap(), date); }
+            }
+            assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), "1\n");
+            assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+            if state != "clean" { assert_eq!(read(&tmp.path().join("untracked.txt")), "never implicitly added\n"); }
+            assert!(!tmp.git(&["ls-files"]).contains("untracked.txt"));
+            server.shutdown_and_exit();
+            assert!(server.finish(Duration::from_secs(10)).success());
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

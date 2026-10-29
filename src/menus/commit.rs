@@ -43,9 +43,9 @@ pub fn definition() -> MenuDef {
             group(
                 "Edit HEAD",
                 vec![
-                    action("e", "commit.extend", "Extend", "magit-commit-extend", "R-4.1"),
-                    action("a", "commit.amend", "Amend", "magit-commit-amend", "R-4.1"),
-                    action("w", "commit.reword", "Reword", "magit-commit-reword", "R-4.1"),
+                    action("e", "commit.extend", "Extend", "magit-commit-extend", ""),
+                    action("a", "commit.amend", "Amend", "magit-commit-amend", ""),
+                    action("w", "commit.reword", "Reword", "magit-commit-reword", ""),
                     action(
                         "d",
                         "commit.reshelve",

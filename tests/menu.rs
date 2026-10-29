@@ -37,11 +37,33 @@ fn commit_options_survive_menu_pop_and_staging_prompt() {
         if !staged { test.ui().reply_confirm(true); }
         let result = test.press_ui("c");
         assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView {view_id} if view_id == &menu.id)));
-        let CommitOperation::Create(options) = result.commit.expect("operation survives ancestor routing and prompt");
+        let CommitOperation::Create(options) = result.commit.expect("operation survives ancestor routing and prompt") else { panic!("expected create operation") };
         assert!(options.signoff && options.no_verify);
         assert_eq!(options.author.as_deref(), Some("Captured <captured@example.com>"));
         assert!(tmp.git(&["diff", "--cached"]).contains("changed"));
         assert_eq!(tmp.git(&["log", "-1", "--format=%s"]).trim(), "init");
+    }
+}
+
+#[test]
+fn head_actions_route_from_both_profile_menus_with_captured_options() {
+    for profile in [Profile::Vim, Profile::Standard] {
+        for (key, flags) in [
+            ("a", vec!["--amend", "--no-verify"]),
+            ("e", vec!["--amend", "--no-edit", "--no-verify"]),
+            ("w", vec!["--amend", "--only", "--allow-empty", "--no-verify"]),
+        ] {
+            let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
+                .staged_file("f.txt", "staged\n").build();
+            let (mut test, _) = TestSession::open_status(&tmp, profile);
+            let (menu, _) = test.open_via_command("open.commit");
+            test.press("- n");
+            let result = test.press_ui(key);
+            assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu.id)));
+            assert_eq!(result.commit.expect("typed HEAD action").argv(), flags);
+            assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), TEN_LINES);
+            assert_eq!(tmp.git(&["show", ":f.txt"]), "staged\n");
+        }
     }
 }
 

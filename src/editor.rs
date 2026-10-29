@@ -403,7 +403,11 @@ pub fn commit(repo_path: &str, edit_id: &str, socket: &Path, operation: &crate::
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
     let token = registry().helper_token(edit_id)?;
-    let env = [
+    let committer_date = match operation {
+        crate::git::CommitOperation::Extend(_) | crate::git::CommitOperation::Reword(_) => Some(repo.head_committer_date()?),
+        _ => None,
+    };
+    let mut env = vec![
         ("GIT_EDITOR", editor.as_str()),
         ("EDITOR", editor.as_str()),
         ("VISUAL", editor.as_str()),
@@ -411,6 +415,7 @@ pub fn commit(repo_path: &str, edit_id: &str, socket: &Path, operation: &crate::
         (EDIT_ID_ENV, edit_id),
         (HELPER_TOKEN_ENV, token.as_str()),
     ];
+    if let Some(date) = &committer_date { env.push(("GIT_COMMITTER_DATE", date.as_str())); }
     let args = operation.argv();
     repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
 }
