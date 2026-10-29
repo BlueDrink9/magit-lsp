@@ -21,6 +21,7 @@ pub mod menu;
 pub mod menus;
 pub mod parity;
 pub mod patch;
+pub mod presentation;
 pub mod process_log;
 pub mod protocol;
 pub mod runner;

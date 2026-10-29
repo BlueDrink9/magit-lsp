@@ -404,6 +404,16 @@ gate deferrals remain unchanged.
 
 ### R-PLAIN-CORE: presentation seam and unified dispatcher (L)
 
+**Capability-model prerequisite (2026-10-29; scoped complete, parent remains pending):**
+`src/presentation/mod.rs` now validates initialize's sole selector: absent selects
+Plain, while a present `experimental.magit` must be a complete supported v1
+declaration. It separately represents mandatory core behavior and declared
+optional effects/prompts/placements, and extracts standard Plain capabilities
+with support reasons. `tests/plain_core.rs` covers negotiation, allowed values,
+invalid declarations and missing standard capabilities. This does not route
+production requests, enforce rich declarations, deliver a Plain document, change
+clients, or implement the seam/dispatcher; none of those behaviors are claimed.
+
 - **Target Files:** `src/presentation/{mod,custom}.rs` (new), `src/session.rs`, `src/server.rs`, `src/protocol.rs`, `lua/magit-lsp/init.lua`, `clients/vscode/lib/session.js` (init options only).
 - **Reference Files:** AGENTS.md architecture flow; TASKS §3.2, §3.5.
 - **Constraints:** no wire or behaviour change for rich clients; no shims.
