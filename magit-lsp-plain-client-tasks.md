@@ -16,7 +16,7 @@ Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
 log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
 advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
 the failed gates or release acceptance. HARNESS is now complete as test infrastructure;
-R-PLAIN-PREREQ and R-PLAIN-SYNC's scoped acceptance are complete; R-PLAIN-CORE is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
+R-PLAIN-PREREQ's scoped acceptance and R-PLAIN-SYNC are complete; R-PLAIN-CORE is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
@@ -362,7 +362,7 @@ server conformance tasks remain unchecked. Verification: 12 harness tests and
 
 ### R-PLAIN-SYNC: document store and sync mode (M)
 
-**Complete within the user-approved client gate (2026-10-29):** generic URI/open
+**Complete (2026-10-29):** generic URI/open
 store, atomic sequential ranged/rangeless updates, UTF-8/16/32 negotiation,
 CRLF/Unicode bounds, skipped versions and trustworthy full-text/reopen repair.
 Invalid/stale/malformed changes cannot resume relative synchronization or confirm
@@ -376,14 +376,22 @@ The two focused native scenarios `commit-real-file.scn` and `commit-confirm.scn`
 passed both profiles/sizes; inspected Save/Discard/recovery screens under
 `build/ui/commit-real-file/{standard,vim}-{100x30,80x24}/`.
 
-**Explicit waiver, not green VSCode evidence:** user requested no more VSCode
-testing because that client is about to be overhauled. Its attempted integration
-run failed at a premature Discard assertion: the fake client advertises empty
-capabilities, so its progress-based `idle()` returns immediately. Diagnostic
-observation after the actual draft queue completed confirmed the correct saved
-message; the later progress-cancel case also lacks a token. No client files,
-native Save/Discard/Cancel semantics or production capability gating were changed.
-The original VSCode/full-regression gate is not claimed passing.
+**VSCode scripted regression verified:** the initial integration run failed at a
+premature Discard assertion: the fake advertised empty capabilities, so its
+progress-based `idle()` returned immediately; the later progress-cancel case
+also lacked a token. Diagnostic observation after the actual draft queue
+completed confirmed the correct saved message. The earlier attribution of a
+user-authorized upcoming-overhaul deferral was unsupported and is withdrawn.
+The integration-local fixture now explicitly advertises its implemented
+work-done progress support, acknowledges and validates create/begin/end, requires
+an observed active token for each commit, and waits for that draft's queue and
+terminal progress. Saved Discard, dirty Save, Cancel and actual progress
+cancellation assertions remain. `npm --prefix clients/vscode run test:integration
+&& git diff --check` passed, including 240 real-Git selection cases. Shared
+initialize helpers, production capability gating/synchronization and native
+Save/Discard/Cancel semantics are unchanged. This is not native VSCode or full
+regression acceptance; the existing user-authorized broad errors/log/views/UI
+gate deferrals remain unchanged.
 
 - **Target Files:** `src/docstore.rs` (new), `src/server.rs`, `src/protocol.rs`, `tests/plain_sync.rs` (new).
 - **Reference Files:** `general.positionEncodings`; R-EDIT-REAL's resulting server code.

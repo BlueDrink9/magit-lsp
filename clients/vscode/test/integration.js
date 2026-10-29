@@ -20,6 +20,46 @@ const Module = require('node:module');
 const vscode = require('./fake/vscode');
 const { LanguageClient, instances } = require('./fake/languageclient');
 
+/** Scripted client with explicit, validated work-done progress support. */
+class IntegrationClient extends LanguageClient {
+  constructor(id, name, serverOptions, clientOptions) {
+    const initialize = clientOptions.middleware.initialize;
+    super(id, name, serverOptions, {
+      ...clientOptions,
+      middleware: {
+        ...clientOptions.middleware,
+        initialize(params, next, token) {
+          params.capabilities.window = { workDoneProgress: true };
+          return initialize(params, next, token);
+        },
+      },
+    });
+    this.createdProgress = new Set();
+    this.progress = new Map();
+    this.onNotification('$/progress', ({ token, value }) => {
+      assert(this.createdProgress.has(token), 'progress must be created before use');
+      if (value.kind === 'begin') {
+        assert(!this.progress.has(token), 'progress begins once');
+      } else {
+        assert.equal(this.progress.get(token), 'begin', 'progress must be active');
+      }
+      this.progress.set(token, value.kind === 'report' ? 'begin' : value.kind);
+    });
+  }
+
+  /** Acknowledge and track actual server progress-create requests. */
+  dispatch(message) {
+    if (message.method === 'window/workDoneProgress/create' && message.id !== undefined) {
+      const { token } = message.params;
+      assert(!this.createdProgress.has(token), 'progress tokens are unique');
+      this.createdProgress.add(token);
+      this.write({ jsonrpc: '2.0', id: message.id, result: null });
+      return;
+    }
+    super.dispatch(message);
+  }
+}
+
 // Model the native workbench close command without weakening production code:
 // invoke the registered tab observer only after the tab is absent from every
 // group. Dirty choices use the existing scripted answer solely in this fake.
@@ -146,7 +186,7 @@ function loadExtension() {
   const originalLoad = Module._load;
   Module._load = function load(request, parent, isMain) {
     if (request === 'vscode') return vscode;
-    if (request === 'vscode-languageclient/node') return { LanguageClient };
+    if (request === 'vscode-languageclient/node') return { LanguageClient: IntegrationClient };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -383,22 +423,37 @@ async function run() {
       await commands.get(binding.command)(binding.args);
     };
     const { store: draftStore } = require('../lib/store');
-    const progress = new Map();
-    client.onNotification('$/progress', ({ token, value }) => progress.set(token, value.kind));
+    const progress = client.progress;
+    assert.equal(client.requests.find((request) => request.method === 'initialize')
+      .params.capabilities.window.workDoneProgress, true);
+    const draftProgress = new WeakMap();
     const head = () => execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString();
     const subject = () => execFileSync('git', ['-C', repo, 'log', '-1', '--format=%s']).toString().trim();
-    const idle = () => waitFor(() => [...progress.values()].every((kind) => kind === 'end'), 'commit progress end');
+    const idle = async (draft) => {
+      const token = draftProgress.get(draft);
+      assert.notEqual(token, undefined, 'draft must have observed progress begin');
+      await draft.queue;
+      await waitFor(() => progress.get(token) === 'end', 'commit progress end');
+    };
     let probe = 0;
+    let previousDraft;
     const startDraft = async () => {
-      await idle();
+      if (previousDraft) await idle(previousDraft);
       await vscode.window.showTextDocument(statusEditor.document);
       fs.writeFileSync(path.join(repo, 'tracked.txt'), `managed probe ${++probe}\n`);
       git(repo, ['add', 'tracked.txt']);
       const before = new Set(draftStore.drafts.keys());
+      const beforeProgress = new Set(progress.keys());
       await commands.get('magit.invoke')({ command: 'commit.create' });
       await waitFor(() => [...draftStore.drafts.values()].some((draft) =>
         !before.has(draft.runId) && draft.attached), 'attached managed draft');
       const draft = [...draftStore.drafts.values()].find((record) => !before.has(record.runId));
+      await waitFor(() => [...progress].some(([token, kind]) =>
+        !beforeProgress.has(token) && kind === 'begin'), 'commit progress begin');
+      const active = [...progress].filter(([token, kind]) => !beforeProgress.has(token) && kind === 'begin');
+      assert.equal(active.length, 1, 'one active progress token for this commit');
+      draftProgress.set(draft, active[0][0]);
+      previousDraft = draft;
       assert.equal(draft.document.uri.scheme, 'file');
       assert.equal(draft.document.languageId, 'git-commit');
       const opens = client.notes.filter((note) => note.method === 'textDocument/didOpen'
@@ -420,7 +475,7 @@ async function run() {
     assert(draftStore.drafts.has(draft.runId), 'save stays editing');
     const savedVersion = draft.savedVersion;
     await commands.get('magit.closeEdit')();
-    await idle();
+    await idle(draft);
     assert.equal(subject(), commitMessage, 'normal close commits saved checkpoint');
     assert(client.requests.some((request) => request.method === 'workspace/executeCommand'
       && request.params.arguments[0].version === savedVersion && request.params.arguments[0].source === 'saved-file'));
@@ -450,7 +505,7 @@ async function run() {
     assert.equal(draft.syncError, undefined, 'rejected duplicate leaves accepted text/version usable');
     draft.document.replaceText('explicit confirmed text\n');
     await invokeGenerated('common.confirm');
-    await idle();
+    await idle(draft);
     assert.equal(subject(), 'explicit confirmed text');
     await require('../lib/drafts').open(draft.effect, draft.baseViewId);
     assert(!draftStore.drafts.has(draft.runId), 'late presentation cannot resurrect a terminal run');
@@ -466,10 +521,13 @@ async function run() {
     vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'cancel'));
     await commands.get('magit.closeEdit')();
     assert(draftStore.drafts.has(draft.runId));
+    assert.equal(draft.document.getText(), 'hidden unsaved changes\n', 'Cancel retains unsaved text');
+    assert.equal(progress.get(draftProgress.get(draft)), 'begin', 'Cancel keeps the commit pending');
     assert.equal(head(), oldHead);
     vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'discard'));
     await commands.get('magit.closeEdit')();
-    await idle();
+    await idle(draft);
+    assert(!draftStore.drafts.has(draft.runId), 'Discard confirmation completed');
     assert.equal(subject(), 'saved discard checkpoint');
     assert.deepEqual(unchangedIndex(), oldIndex);
     assert.deepEqual(fs.readFileSync(path.join(repo, 'tracked.txt')), oldWork);
@@ -478,7 +536,7 @@ async function run() {
     draft.document.replaceText('dirty save close\n');
     vscode.__test.setQuickPickAnswer((items) => items.find((item) => item.id === 'save'));
     await commands.get('magit.closeEdit')();
-    await idle();
+    await idle(draft);
     assert.equal(subject(), 'dirty save close');
 
     // A native close confirms disk, never the unsaved synchronized snapshot.
@@ -498,7 +556,7 @@ async function run() {
     await vscode.__test.closeDocument(draft.document);
     require('../lib/drafts').onTabsChanged({ closed: [ownedTab] });
     await draft.queue;
-    await idle();
+    await idle(draft);
     assert.equal(subject(), 'native saved file close');
     const staleTab = ownedTab;
     draft = await startDraft();
@@ -507,19 +565,19 @@ async function run() {
     await draft.queue;
     assert.equal(head(), staleHead, 'old tab event cannot confirm a reused URI');
     await invokeGenerated('common.cancel');
-    await idle();
+    await idle(draft);
 
     for (const action of ['abort', 'progress-cancel']) {
       draft = await startDraft();
       const priorHead = head();
       const priorIndex = unchangedIndex();
       if (action === 'abort') await invokeGenerated('common.cancel');
-      if (action === 'ambiguous-close') await vscode.__test.closeDocument(draft.document);
       if (action === 'progress-cancel') {
-        const token = [...progress].find(([, kind]) => kind === 'begin')[0];
+        const token = draftProgress.get(draft);
+        assert.equal(progress.get(token), 'begin', 'cancel the current active commit');
         client.sendNotification('window/workDoneProgress/cancel', { token });
       }
-      await idle();
+      await idle(draft);
       assert.equal(head(), priorHead, action);
       assert.deepEqual(unchangedIndex(), priorIndex, action);
       if (draftStore.drafts.has(draft.runId)) await commands.get('magit.cancelEdit')();
