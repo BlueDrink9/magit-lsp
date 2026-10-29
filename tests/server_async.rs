@@ -454,6 +454,38 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+#[test]
+fn outbound_request_responses_are_correlated_without_blocking_intake() {
+    let (tmp, _repo) = init_repo();
+    write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
+    let mut server = spawn_with_env(&[]);
+    server.initialize(json!({}));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
+
+    let create = loop {
+        let message = server.recv();
+        if message["method"] == "window/workDoneProgress/create" { break message; }
+    };
+    let outbound_id = create["id"].clone();
+    assert!(outbound_id.is_string() || outbound_id.is_number());
+
+    // The reader continues serving ordinary requests while the client holds
+    // the server request open.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/resync","params":{"viewId":view}}));
+    assert_eq!(server.response_with_id(4)["result"]["viewId"], view);
+    // The delayed response exercises correlation and the remote-error path.
+    server.send(json!({"jsonrpc":"2.0","id":outbound_id,"error":{"code":-32000,"message":"declined"}}));
+
+    // A duplicate/unknown response is ignored rather than completing another
+    // request or being misrouted as a client request.
+    server.send(json!({"jsonrpc":"2.0","id":outbound_id,"result":null}));
+    server.send(json!({"jsonrpc":"2.0","id":"unknown-outbound-id","result":null}));
+    assert_eq!(server.response_with_id(3)["result"]["effects"], json!([]));
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 /// The `(token, phase)` of a work-done progress message, if it is one.
 ///
 /// Records every phase of the LSP work-done handshake: `create`, then the

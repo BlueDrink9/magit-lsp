@@ -129,6 +129,10 @@ struct Shared {
     startup_error: Option<String>,
     /// The writer channel, so a blocking command can send `view/prompt`.
     sender: mpsc::UnboundedSender<Message>,
+    /// Requests sent to the client, keyed by their JSON-RPC ID.
+    outbound: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Response>>>>,
+    /// Unique IDs for server-initiated requests.
+    next_outbound: Arc<AtomicU64>,
     /// The prompt transport, shared with the editor bridge.
     prompts: Arc<PromptBridge>,
     /// Running mutations keyed by their progress token, so a client cancel can
@@ -171,6 +175,8 @@ impl Shared {
             client: Arc::new(Mutex::new(ClientCaps::default())),
             startup_error,
             sender: sender.clone(),
+            outbound: Arc::new(Mutex::new(HashMap::new())),
+            next_outbound: Arc::new(AtomicU64::new(0)),
             prompts: Arc::new(PromptBridge::new(&sender)),
             progress: Arc::new(Mutex::new(HashMap::new())),
             closing: Arc::new(AtomicBool::new(false)),
@@ -179,6 +185,47 @@ impl Shared {
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Register before sending so a fast response cannot arrive before its waiter exists.
+    fn register_outbound(&self, method: &str, params: Value) -> Result<(String, tokio::sync::oneshot::Receiver<Response>)> {
+        let next = self.next_outbound.fetch_add(1, Ordering::Relaxed) + 1;
+        let id = RequestId::from(format!("magit-lsp/outbound/{next}"));
+        let key = serde_json::to_string(&id).map_err(|e| Error::new(e.to_string()))?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).insert(key.clone(), tx);
+        if self.sender.send(Message::Request(Request::new(id, method.to_string(), params))).is_err() {
+            self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+            return Err(Error::new("client request transport is closed"));
+        }
+        Ok((key, rx))
+    }
+
+    /// Await a registered request, removing it on response, timeout or cancellation.
+    async fn await_outbound(&self, key: String, rx: tokio::sync::oneshot::Receiver<Response>) -> Result<Response> {
+        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx).await;
+        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key);
+        match response {
+            Ok(Ok(response)) => match &response.response_result {
+                Ok(_) => Ok(response),
+                Err(error) => Err(Error::new(error.message.clone())),
+            },
+            Ok(Err(_)) => Err(Error::new("client disconnected while awaiting response")),
+            Err(_) => Err(Error::new("client request timed out")),
+        }
+    }
+
+    /// Resolve a matching response; unknown and late IDs are ignored.
+    fn resolve_outbound(&self, response: Response) {
+        let Ok(key) = serde_json::to_string(&response.id) else { return; };
+        if let Some(sender) = self.outbound.lock().unwrap_or_else(|p| p.into_inner()).remove(&key) {
+            let _ = sender.send(response);
+        }
+    }
+
+    /// Cancel every request still awaiting a client response.
+    fn cancel_outbound(&self) {
+        self.outbound.lock().unwrap_or_else(|p| p.into_inner()).clear();
     }
 
     /// Reserve the next mutation slot for `repo_path`.
@@ -321,11 +368,12 @@ impl Shared {
             handle.cancel();
             if let Some(edit_id) = edit_id { editor::registry().resolve(&edit_id, editor::Reply::Abort); }
         }
-        let _ = sender.send(Message::Request(Request::new(
-            RequestId::from(format!("workDoneProgress/{next}")),
-            "window/workDoneProgress/create".to_string(),
-            serde_json::json!({ "token": token }),
-        )));
+        let shared = self.clone();
+        let params = serde_json::json!({ "token": token });
+        let waiting = self.register_outbound("window/workDoneProgress/create", params);
+        tokio::spawn(async move {
+            if let Ok((key, rx)) = waiting { let _ = shared.await_outbound(key, rx).await; }
+        });
         let _ = sender.send(Message::Notification(Notification::new(
             "$/progress".to_string(),
             serde_json::json!({
@@ -351,6 +399,7 @@ impl Shared {
 
     /// Stop new work and cancel every operation that can wait on the client.
     fn terminal_cleanup(&self) {
+        self.cancel_outbound();
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             self.closing.store(true, Ordering::SeqCst);
@@ -944,7 +993,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // not needed to keep view state in sync.
                 _ => {}
             },
-            Ok(Some(Message::Response(_))) => {}
+            Ok(Some(Message::Response(response))) => shared.resolve_outbound(response),
             Ok(None) => {
                 // The client disconnected without a goodbye: every pending
                 // edit must abort so Git never hangs (§3.10 step 7), and the
