@@ -19,6 +19,17 @@ pub struct FileEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orig_path: Option<String>,
     pub hunks: Vec<Hunk>,
+    /// Render-time index, HEAD and worktree state used to validate file actions.
+    #[serde(skip)]
+    pub mutation_identity: Option<FileMutationIdentity>,
+}
+
+/// Exact repository state relevant to a rendered file row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileMutationIdentity {
+    pub head: String,
+    pub index: String,
+    pub worktree: String,
 }
 
 /// Repository status: branch plus the staged and unstaged file lists.
@@ -532,7 +543,25 @@ impl GitRepo {
             "-z",
             "--branch",
         ])?;
-        self.parse_status(&raw, repo_path)
+        let mut status = self.parse_status(&raw, repo_path)?;
+        for file in status.staged.iter_mut().chain(&mut status.unstaged).chain(&mut status.untracked) {
+            file.mutation_identity = Some(self.file_mutation_identity(&file.path)?);
+        }
+        Ok(status)
+    }
+
+    pub fn file_mutation_identity(&self, path: &str) -> Result<FileMutationIdentity> {
+        let head = self.run(&["ls-tree", "-z", "HEAD", "--", path]).unwrap_or_default();
+        let index = self.run(&["ls-files", "--stage", "-z", "--", path]).unwrap_or_default();
+        let target = self.root.join(path);
+        let worktree = match std::fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => format!("link:{:?}:{:?}", metadata.permissions(), std::fs::read_link(&target)?),
+            Ok(metadata) if metadata.is_file() => format!("file:{:?}:{:?}", metadata.permissions(), std::fs::read(&target)?),
+            Ok(metadata) => format!("other:{:?}:{:?}", metadata.file_type(), metadata.permissions()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => "missing".into(),
+            Err(error) => return Err(Error::new(format!("failed to inspect {path}: {error}"))),
+        };
+        Ok(FileMutationIdentity { head, index, worktree })
     }
 
     fn parse_status(&self, raw: &str, repo_path: String) -> Result<Status> {
@@ -569,6 +598,7 @@ impl GitRepo {
                         status: "U".to_string(),
                         orig_path: None,
                         hunks: Vec::new(),
+                        mutation_identity: None,
                     });
                 }
                 b'?' => {
@@ -578,6 +608,7 @@ impl GitRepo {
                             status: "?".to_string(),
                             orig_path: None,
                             hunks: Vec::new(),
+                            mutation_identity: None,
                         });
                     }
                 }
@@ -627,6 +658,7 @@ impl GitRepo {
                 status: staged,
                 orig_path: orig_path.clone(),
                 hunks: Vec::new(),
+                mutation_identity: None,
             });
         }
         if let Some(unstaged) = side_status(bytes.get(1).copied()) {
@@ -635,6 +667,7 @@ impl GitRepo {
                 status: unstaged,
                 orig_path,
                 hunks: Vec::new(),
+                mutation_identity: None,
             });
         }
         Ok(())

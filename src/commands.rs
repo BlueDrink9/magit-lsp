@@ -1577,7 +1577,15 @@ fn stage_or_unstage_at(
         dispatch::Resolution::StageFile { path } | dispatch::Resolution::UnstageFile { path } => Some(path.as_str()),
         _ => None,
     } {
-        if !displayed_file_is_current(&repo, source, path, if matches!(resolution, dispatch::Resolution::UnstageFile { .. }) { "staged" } else { "unstaged" })? {
+        let section = if matches!(resolution, dispatch::Resolution::UnstageFile { .. }) {
+            "staged"
+        } else {
+            source.nodes.iter().find(|node| node.kind == NodeKind::File
+                && node.path.as_deref() == Some(path)
+                && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
+                .and_then(|node| node.section.as_deref()).unwrap_or("unstaged")
+        };
+        if !displayed_file_is_current(&repo, source, path, section)? {
             return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
         }
     }
@@ -1590,7 +1598,11 @@ fn stage_or_unstage_at(
             | dispatch::Resolution::DiscardSelection { .. }
     ) {
         if let dispatch::Resolution::DiscardFile { path } = &resolution {
-            if !displayed_file_is_current(&repo, source, path, "unstaged")? {
+            let section = source.nodes.iter().find(|node| node.kind == NodeKind::File
+                && node.path.as_deref() == Some(path)
+                && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
+                .and_then(|node| node.section.as_deref()).unwrap_or("unstaged");
+            if !displayed_file_is_current(&repo, source, path, section)? {
                 return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
             }
         }
@@ -1638,24 +1650,20 @@ fn stage_or_unstage_at(
     Ok((effects, None))
 }
 
-/// Check that a whole-file request still denotes exactly the hunks visible in
-/// its originating render. A file row is not permission to include later,
-/// undisplayed changes.
+/// Check the complete file state captured by the originating render.
 fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &str) -> Result<bool> {
     let Some(file) = tree.nodes.iter().find(|node| node.kind == NodeKind::File
         && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section)) else {
         return Ok(false);
     };
-    let displayed: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Hunk
-        && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section))
-        .filter_map(|node| node.hunk_id.as_deref()).collect();
-    let diff = if section == "staged" { repo.diff_staged(path)? } else { repo.diff_unstaged(path)? };
-    let Some(layout) = FileLayout::from_diff(&diff, 0) else { return Ok(false); };
-    // A collapsed body has no captured patch identities; reject rather than
-    // treating an empty visible subset as the complete file patch.
-    Ok(file.children.len() == displayed.len()
-        && displayed.len() == layout.hunks.len()
-        && displayed.iter().zip(&layout.hunks).all(|(old, new)| *old == new.hunk.id))
+    let Some(captured) = file.copy.as_deref()
+        .and_then(|identity| identity.strip_prefix("file-identity:"))
+        .and_then(|json| serde_json::from_str::<crate::git::FileMutationIdentity>(json).ok()) else {
+        return Ok(false);
+    };
+    let current = repo.file_mutation_identity(path)?;
+    Ok(captured.head == current.head && captured.index == current.index
+        && (section == "staged" || captured.worktree == current.worktree))
 }
 
 /// Run a whole-section operation against `repo_path`.
@@ -1706,17 +1714,24 @@ fn execute_displayed_selection(
             }
         }
         if ops.len() == first_op { continue; }
+        let whole_file = ops[first_op..].iter().any(|op| matches!(op, SelectionOp::WholeFile { .. }));
+        if whole_file && !displayed_file_is_current(repo, tree, path, section)? {
+            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+        }
         let diff = if staged { repo.diff_staged(path)? } else { repo.diff_unstaged(path)? };
         // Layout rows are deliberately unused: operations already contain the
         // request tree's identities and line_index offsets, not fresh rows.
-        let Some(layout) = FileLayout::from_diff(&diff, 0) else {
+        let layout = if whole_file {
+            FileLayout::from_diff(&diff, 0).unwrap_or_else(|| FileLayout {
+                path: path.to_string(), header: String::new(), header_line: 0, hunks: Vec::new(),
+            })
+        } else if let Some(layout) = FileLayout::from_diff(&diff, 0) {
+            layout
+        } else {
             return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
         };
         let unchanged = ops[first_op..].iter().all(|op| match op {
-            SelectionOp::WholeFile { .. } => {
-                hunks.len() == layout.hunks.len() && hunks.iter().zip(&layout.hunks)
-                    .all(|(old, new)| old.hunk_id.as_deref() == Some(new.hunk.id.as_str()))
-            }
+            SelectionOp::WholeFile { .. } => whole_file,
             SelectionOp::WholeHunk { hunk_id, .. } | SelectionOp::Lines { hunk_id, .. } =>
                 layout.hunks.iter().any(|h| &h.hunk.id == hunk_id),
         });

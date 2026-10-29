@@ -528,7 +528,73 @@ fn file_row_does_not_stage_changes_added_after_its_render() {
 }
 
 #[test]
-fn collapsed_file_row_cannot_stage_its_hidden_patch_body() {
+fn mode_only_change_after_render_is_rejected_without_staging() {
+    use std::os::unix::fs::PermissionsExt;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", "bytes\n")]).build();
+    let path = tmp.path().join("f.txt");
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let line = test.goto_file("unstaged", "f.txt");
+    let before = tmp.git(&["hash-object", ".git/index"]);
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_mode(0o644);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    let outcome = test.invoke_at_version("status.stage", version, Some(Cursor { line, column: 0 }), None, None);
+    assert!(message_texts(&outcome.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn binary_content_change_after_render_is_rejected_without_staging() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.bin", "old\0binary")]).build();
+    write(&tmp.path().join("f.bin"), "shown\0binary");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let line = test.goto_file("unstaged", "f.bin");
+    let before = tmp.git(&["hash-object", ".git/index"]);
+    write(&tmp.path().join("f.bin"), "new\0binary");
+    let outcome = test.invoke_at_version("status.stage", version, Some(Cursor { line, column: 0 }), None, None);
+    assert!(message_texts(&outcome.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before);
+    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+}
+
+#[test]
+fn unchanged_binary_file_row_stages_successfully() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.bin", "old\0binary")]).build();
+    write(&tmp.path().join("f.bin"), "new\0binary");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("unstaged", "f.bin");
+    let outcome = test.invoke_at("status.stage", Cursor { line, column: 0 });
+    assert!(message_texts(&outcome.effects).is_empty());
+    assert_eq!(tmp.git(&["show", ":f.bin"]), "new\0binary");
+    assert!(tmp.git(&["diff"]).is_empty());
+}
+
+#[test]
+fn unchanged_type_change_file_row_stages_successfully() {
+    use std::os::unix::fs::symlink;
+    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", "regular\n")]).build();
+    std::fs::remove_file(tmp.path().join("f.txt")).unwrap();
+    symlink("missing-target", tmp.path().join("f.txt")).unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("unstaged", "f.txt");
+    let outcome = test.invoke_at("status.stage", Cursor { line, column: 0 });
+    assert!(message_texts(&outcome.effects).is_empty());
+    assert_eq!(tmp.git(&["ls-files", "--stage", "f.txt"]).split_whitespace().next(), Some("120000"));
+    assert!(tmp.git(&["diff"]).is_empty());
+}
+
+#[test]
+fn collapsed_file_row_stages_the_complete_unchanged_file() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", lines(40).to_string())])
         .modify("f.txt", two_hunk_changes())
@@ -547,10 +613,40 @@ fn collapsed_file_row_cannot_stage_its_hidden_patch_body() {
     let before_index = tmp.git(&["hash-object", ".git/index"]);
 
     let result = test.invoke_at_version("status.stage", version, Some(Cursor { line: file_line, column: 0 }), None, None);
-    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert!(message_texts(&result.effects).is_empty());
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
-    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before_index);
-    assert!(tmp.git(&["diff", "--cached"]).is_empty());
+    assert_ne!(tmp.git(&["hash-object", ".git/index"]), before_index);
+    assert!(tmp.git(&["diff", "--cached"]).contains("line5 CHANGED"));
+    assert!(tmp.git(&["diff"]).is_empty());
+}
+
+#[test]
+fn untracked_file_row_stages_fresh_content_but_rejects_stale_content() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+    write(&tmp.path().join("new.txt"), "initial\n");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let version = test.version();
+    let line = test.goto_file("untracked", "new.txt");
+    let before = tmp.git(&["hash-object", ".git/index"]);
+    write(&tmp.path().join("new.txt"), "later\n");
+    let result = test.invoke_at_version("status.stage", version, Some(Cursor { line, column: 0 }), None, None);
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("changed")));
+    assert_eq!(tmp.git(&["hash-object", ".git/index"]), before);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "?? new.txt\n");
+}
+
+#[test]
+fn untracked_file_row_stages_fresh_content() {
+    let (tmp, _) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+    write(&tmp.path().join("new.txt"), "content\n");
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("untracked", "new.txt");
+    let outcome = test.invoke_at("status.stage", Cursor { line, column: 0 });
+    assert!(message_texts(&outcome.effects).is_empty());
+    assert_eq!(tmp.git(&["show", ":new.txt"]), "content\n");
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "A  new.txt\n");
 }
 
 #[test]

@@ -66,12 +66,14 @@ fn old_parser_status() -> Status {
                 "old",
                 vec![(' ', "a"), ('-', "b"), ('+', "B"), (' ', "c")],
             )],
+            mutation_identity: None,
         }],
         untracked: vec![FileEntry {
             path: "new.txt".to_string(),
             status: "?".to_string(),
             orig_path: None,
             hunks: Vec::new(),
+            mutation_identity: None,
         }],
     }
 }

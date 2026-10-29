@@ -411,6 +411,7 @@ where
         file_node.section = Some(section.to_string());
         file_node.path = Some(file.path.clone());
         file_node.status = Some(file.status.clone());
+        file_node.copy = file.mutation_identity.as_ref().and_then(|identity| serde_json::to_string(identity).ok()).map(|identity| format!("file-identity:{identity}"));
         self.tree.nodes.push(file_node);
 
         let staged = section == "staged";

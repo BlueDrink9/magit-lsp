@@ -116,13 +116,17 @@ pub struct Node {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_line: Option<u32>,
     /// Exact text `common.copy-value` yields for this node, if it is copyable.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "is_file_identity")]
     pub copy: Option<String>,
     /// Full commit object ID for structured commit selection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     /// Ids of the child nodes, in document order.
     pub children: Vec<NodeId>,
+}
+
+fn is_file_identity(value: &Option<String>) -> bool {
+    value.as_deref().is_none_or(|value| value.starts_with("file-identity:"))
 }
 
 /// The node that owns one rendered line; this is the client's cursor map.
