@@ -114,6 +114,12 @@ async function run() {
       semanticRequests.push({ method, params });
     }
     const result = sendRequest.call(this, method, params, ...rest);
+    if (process.env.MAGIT_VSCODE_HEAD_ONLY === '1' && ['view/key', 'view/invoke'].includes(method)) {
+      return Promise.resolve(result).then((response) => {
+        draftMessages.push(...(response?.effects || []).filter((effect) => effect.type === 'message'));
+        return response;
+      });
+    }
     if (method === 'view/open') {
       return Promise.resolve(result).then((descriptor) => {
         openedViews.push(descriptor);
@@ -300,6 +306,11 @@ async function run() {
     if (process.env.MAGIT_VSCODE_EDIT_ONLY === '1') {
       await require('./real-file-native').run({ extension, evidence, repo, cdp, waitFor, shot,
         requests, draftNotes });
+      return;
+    }
+    if (process.env.MAGIT_VSCODE_HEAD_ONLY === '1') {
+      await require('./head-operations').run({ extension, evidence, repo, cdp, waitFor, shot,
+        requests, draftMessages, draftNotes });
       return;
     }
 

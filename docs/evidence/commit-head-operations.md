@@ -9,7 +9,7 @@ are the source basis. Git flag semantics are defined by
 [`git-commit`](https://git-scm.com/docs/git-commit) (`--amend`, `--only`,
 `--no-edit`, `--allow-empty`). Exact argv and date preservation are implemented;
 focused real-Git acceptance is recorded by the Rust suites. Native Neovim
-acceptance is recorded below; VS Code native acceptance remains pending.
+acceptance and focused VS Code native acceptance are recorded below.
 
 * **Amend:** Magit invokes `git commit --amend` plus transient commit arguments
   with `magit-run-git-with-editor`. Git prepares an editor message; staged
@@ -86,7 +86,7 @@ manifest/keybinding snapshots unchanged. VSCode bundled declarations were
 already current. Unrelated inherited release/license changes are not part of
 this slice.
 
-**Remaining after the Neovim slice below:** VS Code native commit-menu/real
+**Remaining at the implementation handoff (completed below):** VS Code native commit-menu/real
 COMMIT_EDITMSG acceptance for all three actions. R-4.1-head-edit and the broader
 R-EDIT-REAL parent remain unchecked. This is not a green full-suite claim:
 the inherited `tests/errors.rs:477` failure remains recorded in TASKS.md.
@@ -158,5 +158,78 @@ exiting the editor, matching `commit-real-file.scn`.
 
 The runner stopped all owned sessions; no owned server/Neovim process remained.
 Inherited release/license work is untouched. This completes only the focused
-Neovim slice: VS Code native evidence, broader real-file acceptance and
+Neovim slice (VS Code evidence follows): broader real-file acceptance and
 remaining phase gates are still required. No full `make test` success is claimed.
+
+## Native VS Code HEAD-only slice (2026-10-29)
+
+The exact ticket command exited 0:
+
+```sh
+MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
+```
+
+Retained evidence: `/tmp/opencode/vscode-review-tAX9dE/`, especially
+`head-operations-evidence.json` (pass, eight isolated cases, 26 named screenshots)
+and `head-operations-trace.json` (requests, effects, draft notifications and
+document-open observations). This is a normal production extension host, not an
+extension-test host. Missing prerequisites fail the focused mode; the existing
+180-second host bound and 15-second condition deadlines are unchanged.
+
+The harness types `a`, `w`, `e`, `- a`, and `- e` into the real focused commit
+QuickPick using native renderer input. Production menu routing supplies the
+requests; exact server activation steps and captured option state are asserted.
+No synthetic selections or direct HEAD-action invocation are used. Real
+Git-generated COMMIT_EDITMSG files are saved, then their last native tabs closed
+with the workbench. Each completion records exactly one saved-file confirmation;
+save alone leaves HEAD unchanged. Extend opens no draft or draft-document
+traffic. Explicit abort uses the production `magit.cancelEdit` command.
+
+The nonempty baseline has a real parent, exact subject/body and committer date
+`2001-01-01T00:00:00Z`. Every replacement retains the original parent list and
+total commit count **2**, rather than creating a descendant:
+
+| Case | Result HEAD | Exact state checked |
+| --- | --- | --- |
+| Staged Amend | `d954c60e702ea5465d2812654211d2b1ae48f2fb` | Unchanged saved message, index-derived tree, clean status |
+| Clean Amend | `e338f885ac9f5584ebe7e8ff13f373032e37a4d0` | Unchanged saved message/tree/index/worktree |
+| Edited Reword | `0d47d7ca4c363b42bcdfc75660b544a09e2662d5` | Exact edited subject/body, original HEAD tree, genuinely nonempty differing index retained, prior committer date |
+| Staged Extend | `647fc66cda8d87a9350bb623fe32ea97fc9b8749` | No editor, exact retained message/date, index-derived tree |
+| Tracked `--all` Extend | `4670b9533ace3b589db6e21c78bba1221af53dad` | Expected tracked tree/index entries, untracked sentinel hash preserved/excluded, only `?? untracked.txt` remains |
+| Clean Extend guard | `637ac23c0d168912c8751416cb811804c1733c9d` | Readable refusal, exact state unchanged |
+| Clean `--allow-empty` Extend | same baseline OID | Positive Committed effect, no editor, byte-identical HEAD/index/worktree |
+| Explicit Amend abort | same baseline OID | Dirty edited draft, no confirmation, exact HEAD/index/worktree and `MM tracked.txt` retained |
+
+JSON stores untrimmed Git `%B` output (including its formatting newline), tree
+OIDs, full index entries, tracked/untracked content hashes, porcelain, parents,
+count and `%cI` dates before/after each case. Reword's saved file is exactly
+`Native reworded message\n\nExact edited body.\n`; unchanged operations retain
+`Native HEAD baseline\n\nExact retained body.\n`. Amend does not promise date retention.
+
+Inspected current screenshots `head-amend-clean-saved.png`,
+`head-amend-staged-status.png`, `head-reword-{saved,status}.png`,
+`head-extend-tracked-all-status.png`, `head-extend-clean-guard-status.png`,
+`head-extend-clean-allowed-menu.png`, and `head-amend-abort-edited.png`.
+They show real COMMIT_EDITMSG subject/body, retained Reword staging, tracked-all
+untracked exclusion, the readable guard, allow-empty **on**, and dirty abort.
+Native editor paint is polled against document lines before non-menu captures.
+Earlier pass `/tmp/opencode/vscode-review-DBc9Fp/` additionally had inspected
+staged Amend, editor-free Extend, both option menus and aborted staged/unstaged
+status screenshots.
+
+**Harness diagnosis:** inherited `Fwpubz` recorded just one queued Amend request
+and zero completed drafts; `drafts.size === 0` before attachment was not
+completion evidence. The older menu timeout and `key is not a function` trace
+likewise proved no operation. Arrow-navigation probes left the QuickPick on its
+initial row; the final scenario uses its supported typed-menu route. Large
+screenshots exposed immediate subprocess exit truncating CDP JSON; awaiting
+stdout drain fixes that harness transport. Reword legitimately holds Git's index
+lock while editing, so save-alone checks read HEAD without write-tree during
+the operation. Clean refusal is a response effect, not a notification; both are
+now observed transparently. No production changes, added sleeps, deadline
+inflation, lock deletion, synthetic didClose or fabricated dialogs were needed.
+
+The suite deactivated its client and the runner terminated its owned host;
+process inspection found no remaining magit-lsp or owned host. Only this focused
+slice is complete: parent HEAD-edit and R-EDIT-REAL remain unchecked until phase
+gates. Inherited release/license work is untouched. No full-suite claim is made.
