@@ -576,6 +576,8 @@ makes the controller eligible again.
 
 ### R-PLAIN-ACTIONS: code actions and executeCommand (M)
 
+**Scoped coverage slice (2026-10-30; parent remains unchecked):** a six-entry retention unit test verifies oldest eviction and newest generation; a data-driven binary test locates two modified-file offering rows in actual text and verifies half-open end-at-column-zero exclusion, non-zero inclusion, and distinct node IDs. This is not completion of title styles, contextual `Unavailable` policy, general `executeCommand`, IMM-6 or the parent acceptance.
+
 - **Target Files:** `src/server.rs`, `src/commands.rs`, `src/protocol.rs`, `src/presentation/plain.rs`, `tests/plain_actions.rs` (new).
 - **Reference Files:** TASKS §3.18 (config layers).
 - **Constraints:** `codeAction` is side-effect free and does no Git subprocess; actions are discoverable without relying on custom kinds.

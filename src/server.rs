@@ -403,16 +403,15 @@ impl Shared {
                         match shared.session(&repo_for_handler) {
                             Some(handle) => {
                                 let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                                session.refresh_all().into_iter().map(|render| {
-                                    let text = session.rendered_text(&render.view_id);
-                                    (render, text)
-                                }).collect()
+                                session.refresh_all()
                             }
                             None => Vec::new(),
                         }
                     };
-                    for (render, text) in renders {
-                        if !route_plain_render(&shared, &render.view_id, text) {
+                    for render in renders {
+                        let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
+                            .get(&repo_for_handler).and_then(|views| views.current_snapshot(&render.view_id));
+                        if !route_plain_render(&shared, &render.view_id, snapshot) {
                             let _ = shared.sender.send(custom_ui(&shared.client).render(render));
                         }
                     }
@@ -743,14 +742,14 @@ impl Shared {
 
 /// Feed an authoritative logical-view render into its Plain document, if any.
 fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Message> {
-    let text = shared.published.lock().unwrap_or_else(|p| p.into_inner())
-        .values().find_map(|views| views.rendered_text(&render.view_id));
-    if route_plain_render(shared, &render.view_id, text) { None }
+    let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
+        .values().find_map(|views| views.current_snapshot(&render.view_id));
+    if route_plain_render(shared, &render.view_id, snapshot) { None }
     else { Some(custom_ui(&shared.client).render(render)) }
 }
 
 /// Feed an authoritative logical-view render into its Plain document, if any.
-fn route_plain_render(shared: &Shared, view_id: &str, text: Option<String>) -> bool {
+fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::tree::Tree, u64, String)>) -> bool {
     let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
     if shared.closing.load(Ordering::SeqCst) { return true; }
     let request = {
@@ -758,7 +757,7 @@ fn route_plain_render(shared: &Shared, view_id: &str, text: Option<String>) -> b
         let Some((uri, entry)) = documents.iter_mut().find(|(_, entry)| entry.view_id == view_id) else {
             return false;
         };
-        text.and_then(|text| entry.controller.render(text).map(|request| {
+        snapshot.and_then(|(tree, generation, scope)| entry.controller.render_actions(tree, view_id.to_owned(), generation, scope).map(|request| {
             (entry.incarnation, uri.clone(), request)
         }))
     };
@@ -847,7 +846,6 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
         Ok(opened) => opened,
         Err(error) => { let _ = shared.sender.send(show_message(1, format!("magit-lsp: cannot render status: {error}"))); return; }
     };
-    let authoritative = initial.text.unwrap_or_default().join("\n");
     let published = handle.lock().unwrap_or_else(|p| p.into_inner()).published();
     let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
     if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) {
@@ -860,7 +858,12 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
         return;
     };
     let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes);
-    controller.render(authoritative);
+    if let Some((tree, generation, scope)) = published.current_snapshot(&descriptor.id) {
+        controller.render_actions(tree, descriptor.id.clone(), generation, scope);
+    } else {
+        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        return;
+    }
     let first = controller.open(current.version, current.text);
     if !plain_incarnation_is_current(shared, &uri, incarnation) {
         let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
@@ -2036,6 +2039,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 .unwrap_or_default();
             Ok(Dispatched::value(serde_json::to_value(symbols)?))
         }
+        "textDocument/codeAction" => {
+            let p: lsp_types::CodeActionParams = from_params(params)?;
+            Ok(Dispatched::value(plain_code_actions(shared, &p)))
+        }
         "textDocument/definition" => {
             let p: lsp_types::GotoDefinitionParams = from_params(params)?;
             let position = p.text_document_position_params;
@@ -2089,6 +2096,69 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         }
         other => Err(Error::new(format!("unknown method: {other}"))),
     }
+}
+
+fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
+    let uri = params.text_document.uri.as_str();
+    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
+    let text = document.text.as_str();
+    let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
+    let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(text) else { return Value::Array(Vec::new()); };
+    if tree.lines.join("\n") != text || view_id != entry.view_id { return Value::Array(Vec::new()); }
+    let start = params.range.start;
+    let end = params.range.end;
+    let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding;
+    if !plain_position_valid(text, start, encoding)
+        || !plain_position_valid(text, end, encoding)
+        || (start.line, start.character) > (end.line, end.character) {
+        return Value::Array(Vec::new());
+    }
+    let end_line = if end.character == 0 && end.line > start.line { end.line - 1 } else { end.line };
+    let start_line = start.line as usize;
+    let end_line = end_line as usize;
+    let mut actions = Vec::new();
+    for command in crate::commands::registry().iter() {
+        if !command.scope.matches(scope) { continue; }
+        for node in &tree.nodes {
+            if node.end_line < start_line || node.start_line > end_line { continue; }
+            let Some(target) = crate::dispatch::offer_target(tree, command.id, &node.id) else { continue; };
+            let args = serde_json::json!({
+                "command": command.id,
+                "documentUri": uri,
+                "target": target,
+                "viewGeneration": generation,
+            });
+            let disabled = Some(lsp_types::CodeActionDisabled { reason: "Plain command execution is not yet supported".to_string() });
+            let action = lsp_types::CodeAction {
+                title: command.doc.to_string(), kind: None, diagnostics: None, is_preferred: None,
+                disabled, edit: None, command: Some(lsp_types::Command {
+                    title: command.doc.to_string(), command: "magit.command".to_string(), arguments: Some(vec![args]),
+                }), data: None,
+            };
+            actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
+        }
+    }
+    Value::Array(actions)
+}
+
+fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Encoding) -> bool {
+    let Some(line) = text.split('\n').nth(position.line as usize) else { return false; };
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let mut units = 0u32;
+    if position.character == 0 { return true; }
+    for ch in line.chars() {
+        units = match encoding {
+            Encoding::Utf8 => units.saturating_add(ch.len_utf8() as u32),
+            Encoding::Utf16 => units.saturating_add(ch.len_utf16() as u32),
+            Encoding::Utf32 => units.saturating_add(1),
+        };
+        if units == position.character { return true; }
+        if units > position.character { return false; }
+    }
+    units == position.character
 }
 
 fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolve::Repository> {
@@ -2683,6 +2753,7 @@ fn is_request_method(method: &str) -> bool {
         method,
         "initialize"
             | "shutdown"
+            | "textDocument/codeAction"
             | "textDocument/documentSymbol"
             | "textDocument/definition"
             | "textDocument/documentLink"

@@ -57,6 +57,8 @@ struct PublishedView {
     acked: Option<Tree>,
     version: u64,
     lines: Arc<Vec<String>>,
+    tree: Tree,
+    scope: String,
     mode: ViewMode,
     pending: String,
     menu: Option<Menu>,
@@ -104,6 +106,8 @@ impl PublishedViews {
                         .then(|| view.acked.clone().unwrap_or_else(|| view.tree.clone())),
                     version: view.version,
                     lines,
+                    tree: view.tree.clone(),
+                    scope: view.descriptor.kind.as_str().to_string(),
                     mode: view.mode,
                     pending: view.pending(),
                     menu: view.menu(),
@@ -117,6 +121,13 @@ impl PublishedViews {
     /// The latest published full text of `view_id`, without any session lock.
     pub fn rendered_text(&self, view_id: &str) -> Option<String> {
         self.lock().get(view_id).map(|view| view.lines.join("\n"))
+    }
+
+    /// Return an atomic current render snapshot, including its structured tree.
+    pub fn current_snapshot(&self, view_id: &str) -> Option<(Tree, u64, String)> {
+        let map = self.lock();
+        let view = map.get(view_id)?;
+        Some((view.tree.clone(), view.version, view.scope.clone()))
     }
 
     /// The latest published full text of `view_id`, without any session lock.

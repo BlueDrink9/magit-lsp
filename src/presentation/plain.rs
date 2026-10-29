@@ -33,6 +33,15 @@ struct Snapshot {
 }
 
 #[derive(Clone, Debug)]
+struct ActionSnapshot {
+    hash: [u8; 32],
+    view_id: String,
+    generation: u64,
+    scope: String,
+    tree: crate::tree::Tree,
+}
+
+#[derive(Clone, Debug)]
 struct InFlight {
     request: ApplyEdit,
     target: Snapshot,
@@ -53,6 +62,7 @@ pub struct PlainDocument {
     authoritative: Option<Snapshot>,
     client: Option<Snapshot>,
     snapshots: VecDeque<Snapshot>,
+    action_snapshots: VecDeque<ActionSnapshot>,
     snapshot_limit: usize,
     in_flight: Option<InFlight>,
     /// A rejected target is not retried until the client or render advances.
@@ -67,6 +77,7 @@ impl PlainDocument {
             uri: uri.into(), encoding, document_changes,
             state: DocumentState::Detached, authoritative: None, client: None,
             snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, rejected: None, next_id: 0,
+            action_snapshots: VecDeque::new(),
         }
     }
 
@@ -83,6 +94,23 @@ impl PlainDocument {
         self.authoritative = Some(self.snapshot_for(text.into(), 0));
         self.rejected = None;
         self.prepare()
+    }
+
+    /// Retain the exact structured snapshot associated with an authoritative render.
+    pub fn render_actions(&mut self, tree: crate::tree::Tree, view_id: String, generation: u64, scope: String) -> Option<ApplyEdit> {
+        let text = tree.lines.join("\n");
+        let hash = hash_text(&text);
+        self.action_snapshots.retain(|snapshot| snapshot.hash != hash);
+        self.action_snapshots.push_back(ActionSnapshot { hash, view_id, generation, scope, tree });
+        while self.action_snapshots.len() > self.snapshot_limit { self.action_snapshots.pop_front(); }
+        self.render(text)
+    }
+
+    /// Find a retained action snapshot only when its exact document text matches.
+    pub fn action_snapshot(&self, text: &str) -> Option<(&crate::tree::Tree, &str, u64, &str)> {
+        let hash = hash_text(text);
+        self.action_snapshots.iter().find(|snapshot| snapshot.hash == hash)
+            .map(|snapshot| (&snapshot.tree, snapshot.view_id.as_str(), snapshot.generation, snapshot.scope.as_str()))
     }
 
     /// Attach/reopen the document with its exact current editor snapshot.
@@ -175,6 +203,27 @@ impl PlainDocument {
         self.in_flight = Some(InFlight { request: request.clone(), target, echoed: false, diverged: false, response: None });
         self.state = DocumentState::Applying;
         Some(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::Tree;
+
+    fn tree(text: &str) -> Tree {
+        Tree { version: 0, lines: vec![text.to_owned()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] }
+    }
+
+    #[test]
+    fn action_snapshot_retention_is_bounded_and_keeps_generation() {
+        let mut document = PlainDocument::new("file:///test", Encoding::Utf16, false);
+        for generation in 0..7 {
+            document.render_actions(tree(&format!("render-{generation}")), "view".into(), generation, "scope".into());
+        }
+        assert!(document.action_snapshot("render-0").is_none());
+        let (_, _, generation, _) = document.action_snapshot("render-6").unwrap();
+        assert_eq!(generation, 6);
     }
 }
 
