@@ -1,5 +1,5 @@
 //! The editor bridge end to end (R-3.4): a real `git commit` waits for the
-//! client to synchronize/checkpoint a managed draft, then continues or aborts.
+//! client to confirm the real commit-message file, then continues or aborts.
 
 mod common;
 
@@ -131,21 +131,19 @@ fn change_draft(server: &mut TestServer, edit: &Value, version: i32, text: &str)
     }}));
 }
 
-/// Checkpoint and finish using correlated exact-version requests, never a file.
+/// Confirm through the registered workspace/executeCommand endpoint.
 fn finish_draft(server: &mut TestServer, id: i64, edit: &Value) -> Value {
-    draft_request(server, id, "draft/finish", edit, 2, Some("confirm"))
+    command_confirm(server, id, edit, 2, "synchronized")
 }
 
-/// Issue a typed draft barrier without any message text or owner/repository.
-fn draft_request(server: &mut TestServer, id: i64, method: &str, edit: &Value, version: i32, reason: Option<&str>) -> Value {
-    let mut params = json!({"runId":edit["runId"],"uri":edit["uri"],"version":version});
-    if method == "draft/finish" {
-        params["command"] = json!("common.confirm");
-        params["source"] = json!(if reason == Some("confirm") { "synchronized" } else { "saved-file" });
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[params]}}));
-    } else {
-        server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
-    }
+fn command_confirm(server: &mut TestServer, id: i64, edit: &Value, version: i32, source: &str) -> Value {
+    let args = json!({"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":version,"source":source});
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    server.response_with_id(id)
+}
+
+fn obsolete_draft_route(server: &mut TestServer, id: i64, edit: &Value) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"draft/finish","params":{"runId":edit["runId"],"uri":edit["uri"],"version":2}}));
     server.response_with_id(id)
 }
 
@@ -483,7 +481,7 @@ fn a_commit_is_created_from_the_typed_message() {
 }
 
 #[test]
-fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
+fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     let (tmp, _) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
@@ -496,7 +494,7 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     assert_eq!(read(&target), edit["text"].as_str().unwrap());
     sync_draft(&mut server, &edit, "Earlier live\n");
     change_draft(&mut server, &edit, 9, "Chosen checkpoint\n\n# preserved comment\n");
-    let unapplied = draft_request(&mut server, 10, "draft/finish", &edit, 8, Some("confirm"));
+    let unapplied = command_confirm(&mut server, 10, &edit, 8, "synchronized");
     assert!(unapplied["error"].is_object());
     write(&target, "Chosen checkpoint\n\n# preserved comment\n");
     // Save and the old common.confirm route cannot release Git or write its file.
@@ -510,27 +508,33 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":edit["uri"],"version":10},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"Not full sync"}]
     }}));
-    assert!(draft_request(&mut server, 13, "draft/save", &edit, 10, None)["error"].is_object());
+    let unchanged = (tmp.git(&["ls-files", "--stage", "-z"]), read(&target));
+    assert!(command_confirm(&mut server, 13, &edit, 10, "synchronized")["error"].is_object());
     let mut wrong = edit.clone();
     wrong["runId"] = json!("wrong-run");
-    assert!(draft_request(&mut server, 14, "draft/save", &wrong, 9, None)["error"].is_object());
+    assert!(command_confirm(&mut server, 14, &wrong, 9, "synchronized")["error"].is_object());
     wrong = edit.clone();
     wrong["uri"] = json!("magit-commit://wrong-run/message");
-    assert!(draft_request(&mut server, 15, "draft/save", &wrong, 9, None)["error"].is_object());
+    assert!(command_confirm(&mut server, 15, &wrong, 9, "synchronized")["error"].is_object());
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
+    assert_eq!(read(&target), unchanged.1);
     // Barrier payloads are not a second text channel.
     server.send(json!({"jsonrpc":"2.0","id":16,"method":"draft/save","params":{"runId":edit["runId"],"uri":edit["uri"],"version":9,"text":"Forbidden"}}));
     assert!(server.response_with_id(16)["error"].is_object());
 
     change_draft(&mut server, &edit, 11, "Unsaved newer text must not land\n");
-    assert!(draft_request(&mut server, 17, "draft/finish", &edit, 9, Some("confirm"))["error"].is_object());
+    assert!(command_confirm(&mut server, 17, &edit, 9, "synchronized")["error"].is_object());
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
+    assert_eq!(read(&target), unchanged.1);
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "detach is not close intent");
-    let closed = draft_request(&mut server, 19, "draft/finish", &edit, 9, Some("normal-close"));
+    let closed = command_confirm(&mut server, 19, &edit, 9, "saved-file");
     assert_eq!(closed["result"], json!({"type":"confirmed","runId":edit["runId"],"uri":edit["uri"],"version":9}));
     wait_for_commit(&tmp, "Chosen checkpoint");
     assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
-    assert!(draft_request(&mut server, 20, "draft/finish", &edit, 9, Some("normal-close"))["error"].is_object());
+    assert!(command_confirm(&mut server, 20, &edit, 9, "saved-file")["error"].is_object());
     change_draft(&mut server, &edit, 12, "Late terminal text\n");
-    assert!(draft_request(&mut server, 21, "draft/save", &edit, 12, None)["error"].is_object());
+    assert!(obsolete_draft_route(&mut server, 21, &edit)["error"].is_object());
     let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "view/effects")
         .flat_map(|n| n["params"]["effects"].as_array().into_iter().flatten())
         .filter(|effect| effect["type"] == "message" && effect["text"].as_str().unwrap_or("").contains("commit draft:"))
@@ -543,7 +547,7 @@ fn managed_draft_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() 
 
 #[cfg(unix)]
 #[test]
-fn managed_draft_stdio_failed_write_retains_helper_and_selected_checkpoint() {
+fn real_file_stdio_failed_write_retains_helper_and_selected_checkpoint() {
     use std::os::unix::fs::symlink;
     let (tmp, _) = staged_repo();
     let head = tmp.git(&["rev-parse", "HEAD"]);
@@ -558,14 +562,14 @@ fn managed_draft_stdio_failed_write_retains_helper_and_selected_checkpoint() {
     sync_draft(&mut server, &edit, "Recovered checkpoint\n");
     std::fs::rename(&target, &held).unwrap();
     symlink(&neighbor, &target).unwrap();
-    let failed = draft_request(&mut server, 11, "draft/finish", &edit, 2, Some("confirm"));
+    let failed = command_confirm(&mut server, 11, &edit, 2, "synchronized");
     assert_eq!(failed["error"]["data"]["recoverable"], true);
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(read(&neighbor), "Neighbor must survive\n");
     assert_eq!(read(&held), edit["text"].as_str().unwrap());
     std::fs::remove_file(&target).unwrap();
     std::fs::rename(&held, &target).unwrap();
-    let retried = draft_request(&mut server, 12, "draft/finish", &edit, 2, Some("confirm"));
+    let retried = command_confirm(&mut server, 12, &edit, 2, "synchronized");
     assert_eq!(retried["result"]["type"], "confirmed", "{retried}");
     wait_for_commit(&tmp, "Recovered checkpoint");
     assert_eq!(read(&neighbor), "Neighbor must survive\n");
@@ -615,7 +619,7 @@ fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
 
 #[cfg(unix)]
 #[test]
-fn managed_draft_stdio_normal_close_selects_initial_template_without_save() {
+fn real_file_stdio_normal_close_selects_initial_template_without_save() {
     use std::os::unix::fs::PermissionsExt;
     let (tmp, _) = staged_repo();
     let hook = tmp.path().join(".git/hooks/prepare-commit-msg");
@@ -628,7 +632,7 @@ fn managed_draft_stdio_normal_close_selects_initial_template_without_save() {
     assert!(edit["text"].as_str().unwrap().starts_with("Prepared initial message\n"));
     sync_draft(&mut server, &edit, "Discard this unsaved message\n");
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
-    let closed = draft_request(&mut server, 10, "draft/finish", &edit, 1, Some("normal-close"));
+    let closed = command_confirm(&mut server, 10, &edit, 1, "saved-file");
     assert!(closed["error"].is_object(), "didClose already won terminal arbitration: {closed}");
     wait_for_commit(&tmp, "Prepared initial message");
     assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
@@ -637,7 +641,7 @@ fn managed_draft_stdio_normal_close_selects_initial_template_without_save() {
 }
 
 #[test]
-fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
+fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     let (first, _) = staged_repo();
     let (second, _) = staged_repo();
     let first_head = first.git(&["rev-parse", "HEAD"]);
@@ -654,18 +658,20 @@ fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     sync_draft(&mut server, &b, "Second repository\n");
     let mut crossed = a.clone();
     crossed["uri"] = b["uri"].clone();
-    assert!(draft_request(&mut server, 10, "draft/save", &crossed, 2, None)["error"].is_object());
-    assert!(draft_request(&mut server, 11, "draft/finish", &crossed, 1, Some("normal-close"))["error"].is_object());
+    assert!(command_confirm(&mut server, 10, &crossed, 2, "synchronized")["error"].is_object());
+    assert!(command_confirm(&mut server, 11, &crossed, 1, "saved-file")["error"].is_object());
     let mut foreign = TestServer::spawn(&[]);
     foreign.initialize(json!({}));
     change_draft(&mut foreign, &a, 99, "Foreign connection\n");
-    assert!(draft_request(&mut foreign, 10, "draft/save", &a, 2, None)["error"].is_object());
-    assert!(draft_request(&mut foreign, 11, "draft/finish", &a, 1, Some("normal-close"))["error"].is_object());
+    assert!(command_confirm(&mut foreign, 10, &a, 2, "synchronized")["error"].is_object());
+    assert!(command_confirm(&mut foreign, 11, &a, 1, "saved-file")["error"].is_object());
     assert!(!foreign.notifications.iter().any(|n| n["method"] == "view/effects"));
     foreign.shutdown_and_exit();
     assert!(foreign.finish(Duration::from_secs(10)).success());
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
     assert_eq!(second.git(&["rev-parse", "HEAD"]), second_head);
+    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), a["text"].as_str().unwrap());
+    assert_eq!(read(&second.path().join(".git/COMMIT_EDITMSG")), b["text"].as_str().unwrap());
     assert!(finish_draft(&mut server, 12, &b)["error"].is_null());
     wait_for_commit(&second, "Second repository");
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
@@ -677,9 +683,50 @@ fn managed_draft_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+#[test]
+fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
+    let (tmp, _) = staged_repo();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+    let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+    let old = start_commit(&mut server, &status);
+    let old_uri = old["uri"].clone();
+    sync_draft(&mut server, &old, "First run\n");
+    assert_eq!(command_confirm(&mut server, 5, &old, 2, "synchronized")["result"]["type"], "confirmed");
+    wait_for_commit(&tmp, "First run");
+    write(&tmp.path().join("f.txt"), "second staged content\n");
+    git(tmp.path(), &["add", "f.txt"]);
+    let fresh = start_commit(&mut server, &status);
+    assert_eq!(fresh["uri"], old_uri);
+    assert_ne!(fresh["runId"], old["runId"]);
+    sync_draft(&mut server, &fresh, "Fresh run message\n");
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let file = read(&tmp.path().join(".git/COMMIT_EDITMSG"));
+    assert!(command_confirm(&mut server, 6, &old, 2, "synchronized")["error"].is_object());
+    server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/invoke","params":{"viewId":status,"command":"common.cancel","args":{"runId":old["runId"]}}}));
+    let cancel = server.response_with_id(7);
+    assert!(cancel.get("error").is_none(), "stale cancel request itself is valid: {cancel}");
+    assert!(cancel["result"]["effects"].as_array().unwrap().is_empty(), "stale cancel is ignored: {cancel}");
+    let mut old_duplicate = fresh.clone();
+    old_duplicate["runId"] = old["runId"].clone();
+    let second_terminal = command_confirm(&mut server, 8, &old_duplicate, 2, "synchronized");
+    assert!(second_terminal["error"].is_object(), "old terminal on reused URI: {second_terminal}");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), file);
+    assert_eq!(command_confirm(&mut server, 9, &fresh, 2, "synchronized")["result"]["type"], "confirmed");
+    wait_for_commit(&tmp, "Fresh run message");
+    assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), "3\n");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD^"]), head);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "");
+    server.shutdown_and_exit();
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[cfg(unix)]
 #[test]
-fn managed_draft_stdio_linked_worktree_writes_only_actual_gitdir() {
+fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
     let (main, _) = staged_repo();
     let main_head = main.git(&["rev-parse", "HEAD"]);
     let main_message = read(&main.path().join(".git/COMMIT_EDITMSG"));
@@ -707,7 +754,7 @@ fn managed_draft_stdio_linked_worktree_writes_only_actual_gitdir() {
 
 #[cfg(unix)]
 #[test]
-fn managed_draft_production_helper_rejects_spoofs_and_duplicate_join() {
+fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::{fs::PermissionsExt, net::UnixStream};
     let (tmp, _) = staged_repo();
@@ -1074,7 +1121,7 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
         // End is terminal: repeated confirms and cancellation cannot resurrect
         // the edit or its progress, nor overwrite the successful outcome.
         server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
-        let late = draft_request(&mut server, 6, "draft/finish", &edit, 2, Some("confirm"));
+        let late = command_confirm(&mut server, 6, &edit, 2, "synchronized");
         assert!(late["error"].is_object(), "ended edit accepted a duplicate finish: {late}");
         server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/resync","params":{"viewId":status}}));
         assert!(server.response_with_id(7).get("error").is_none());

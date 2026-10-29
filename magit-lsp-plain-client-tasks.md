@@ -184,7 +184,8 @@ integration and native Codium runs. The canonical Neovim scenario is now
 save-alone, dirty refusal/:wq, prior-saved :q!, exact-state abort and same-run
 rejected-close recovery. Old close/history scenarios are removed; cancellation
 scenarios remain. **Still missing:** amend command and unchanged-message amend
-parity coverage, Magit ring source-check/parity, broader native/adversarial and
+parity coverage, policy resolution for the ring differences documented in
+`docs/evidence/commit-message-ring-parity.md`, broader native/adversarial and
 full-phase gates. Inherited full `make test` fails
 `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details` at 477,
 log `build/test-logs/rust.xUBxoH`. Parent remains unchecked; no green full gate.
