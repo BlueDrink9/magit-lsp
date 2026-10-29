@@ -8,8 +8,8 @@ Source checked 2026-10-29 against Magit
 are the source basis. Git flag semantics are defined by
 [`git-commit`](https://git-scm.com/docs/git-commit) (`--amend`, `--only`,
 `--no-edit`, `--allow-empty`). Exact argv and date preservation are implemented;
-focused real-Git acceptance is recorded by the Rust suites. Native commit-menu
-acceptance in Neovim and VS Code remains pending.
+focused real-Git acceptance is recorded by the Rust suites. Native Neovim
+acceptance is recorded below; VS Code native acceptance remains pending.
 
 * **Amend:** Magit invokes `git commit --amend` plus transient commit arguments
   with `magit-run-git-with-editor`. Git prepares an editor message; staged
@@ -86,7 +86,77 @@ manifest/keybinding snapshots unchanged. VSCode bundled declarations were
 already current. Unrelated inherited release/license changes are not part of
 this slice.
 
-**Immediately next:** native commit-menu/real COMMIT_EDITMSG acceptance for all
-three actions in both Neovim and VS Code. R-4.1-head-edit and the broader
+**Remaining after the Neovim slice below:** VS Code native commit-menu/real
+COMMIT_EDITMSG acceptance for all three actions. R-4.1-head-edit and the broader
 R-EDIT-REAL parent remain unchecked. This is not a green full-suite claim:
 the inherited `tests/errors.rs:477` failure remains recorded in TASKS.md.
+
+## Native Neovim slice (2026-10-29)
+
+`tests/ui/scenarios/commit-head-operations.scn` drives Amend, Reword, and
+Extend from the rendered commit menu in both standard and vim profiles at
+100x30 and 80x24. The exact verification command passed with exit 0:
+
+```sh
+cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && git diff --check
+```
+
+The runner reported `1 PASS, 0 XFAIL, 0 FAIL` across all four combinations.
+The scenario creates a nonempty baseline commit with a real parent, exact
+subject/body and a fixed prior committer date. Fresh resets and checkpoints
+isolate these cases:
+
+* **Staged and clean Amend:** choose `a` from the real commit menu, save the
+  unchanged Git-generated COMMIT_EDITMSG, then native `:q`. Exact message bytes,
+  original parent list/count, index tree and worktree hash are asserted; HEAD
+  changes. Staged Amend consumes the index tree. Only Extend/Reword promise
+  preservation of the prior committer date.
+* **Reword:** choose `w`, replace and save the real message with exact subject
+  and body, assert save alone leaves HEAD unchanged, then close. The preflight
+  explicitly proves the index is nonempty and differs from HEAD's tree. Exact
+  edited message bytes, unchanged HEAD tree/index/worktree, original parents/
+  count, changed OID and prior committer timestamp (including offset) are checked.
+* **Extend:** choose `e` with staged content and assert exact retained message,
+  prior committer date, index-derived HEAD tree, parents/count, changed OID and
+  clean worktree. No editor input is sent; native screens remain status views
+  and the active view is asserted not to be an editor document.
+* **Captured `--all`:** toggle `- a` in the native menu, then Extend unstaged
+  tracked changes alongside an untracked sentinel. Exact expected tree and
+  worktree hashes prove tracked inclusion and untracked exclusion; message,
+  committer date, parents/count and changed OID are checked too.
+* **Clean Extend:** without options, readable refusal leaves exact HEAD/index/
+  worktree unchanged. Toggle `- e` (`--allow-empty`) in a fresh menu and succeed
+  without an editor. Exact identical HEAD OID proves all commit metadata and
+  tree are retained; index/worktree remain unchanged.
+* **Explicit cancel:** edit an Amend message with both staged and unstaged
+  changes present, then invoke the client's explicit abort. Exact HEAD OID,
+  count, index tree, worktree hash and porcelain state are unchanged. Native
+  feedback currently reads `` `git commit` failed. ``; no success is inferred
+  from that message.
+
+Inspected all 15 current named snapshots in each of
+`build/ui/commit-head-operations/{standard,vim}-{100x30,80x24}/`:
+`amend-menu`, `amend-{staged,clean}-draft`,
+`amend-{staged,clean}-unchanged`, `reword-{saved-draft,message}`,
+`extend-staged-no-editor`, `extend-all-option`, `extend-tracked-all`,
+`extend-clean-guard`, `extend-allow-empty-option`, `extend-clean-allowed`,
+`amend-cancel-draft`, and `amend-explicit-cancel`. Draft screens show the real
+COMMIT_EDITMSG filename and exact message/body. Option screens show `[x]` and
+`git commit --all` / `git commit --allow-empty`; resulting status screens show
+the expected staged/untracked counts. Earlier `failure.screen` files and old
+`amend-unchanged` snapshots are stale failed-attempt artifacts, not this pass.
+
+**Failure diagnosis:** the inherited scenario selected Create (`c`), not Amend
+(`a`), and deleted the message, explaining its empty-message abort. The release
+binary was rebuilt before testing. During completion, an incorrectly named
+checkpoint briefly overwrote the disposable fixture's `.git/index`; it was
+renamed `.git/head-index`. An empty baseline commit also made clean Amend fail
+Git's empty-commit guard; a nonempty baseline fixes that test setup. No source
+bug, production workaround, native quit interception, sleeps or deadline
+increase was needed. An actual extra Neovim window keeps native `:q` from
+exiting the editor, matching `commit-real-file.scn`.
+
+The runner stopped all owned sessions; no owned server/Neovim process remained.
+Inherited release/license work is untouched. This completes only the focused
+Neovim slice: VS Code native evidence, broader real-file acceptance and
+remaining phase gates are still required. No full `make test` success is claimed.

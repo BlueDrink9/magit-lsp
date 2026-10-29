@@ -1,0 +1,132 @@
+# Native commit-menu HEAD operations; each case checkpoints its own Git state.
+fixture: staged-one-file
+---
+# A real parent, exact body and a prior date distinct from the worker clock.
+sh: GIT_COMMITTER_DATE='2001-01-01T00:00:00+0000' git -c core.editor=true commit -m 'Native HEAD baseline' -m 'Exact retained body.' >/dev/null && git rev-parse HEAD > .git/baseline && printf '\nstaged amend sentinel\n' >> f.txt && git add f.txt
+# Staged Amend: keep Git's original message intact.
+sh: git rev-parse HEAD > .git/before; git rev-list --count HEAD > .git/count; git log -1 --format=%P > .git/parents; git write-tree > .git/head-index; git hash-object f.txt > .git/worktree; git log -1 --format=%B > .git/message
+keys standard: g
+keys vim: g r
+wait
+keys: :vsplit Enter
+keys: c
+wait screen contains "Reword"
+snapshot: amend-menu
+keys: a
+wait screen contains "Exact retained body."
+snapshot: amend-staged-draft
+keys: :write Enter
+keys: :q Enter
+wait screen contains "Committed"
+wait
+snapshot: amend-staged-unchanged
+sh: git log -1 --format=%B > .git/actual-message; cmp .git/message .git/actual-message && test "$(git log -1 --format=%T)" = "$(cat .git/head-index)" && test "$(git log -1 --format=%P)" = "$(cat .git/parents)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)" && test "$(git rev-parse HEAD)" != "$(cat .git/before)" && test -z "$(git status --porcelain)"
+# Clean unchanged Amend is also legal.
+sh: git reset --hard "$(cat .git/baseline)" >/dev/null && git rev-parse HEAD > .git/before && git write-tree > .git/head-index && git hash-object f.txt > .git/worktree && test -z "$(git status --porcelain)"
+keys standard: g
+keys vim: g r
+wait
+keys: :vsplit Enter
+keys: c
+wait screen contains "Reword"
+keys: a
+wait screen contains "Exact retained body."
+snapshot: amend-clean-draft
+keys: :write Enter
+keys: :q Enter
+wait screen contains "Committed"
+wait
+snapshot: amend-clean-unchanged
+sh: git log -1 --format=%B > .git/actual-message; cmp .git/message .git/actual-message && test "$(git log -1 --format=%T)" = "$(cat .git/head-index)" && test "$(git log -1 --format=%P)" = "$(cat .git/parents)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)" && test "$(git rev-parse HEAD)" != "$(cat .git/before)" && test -z "$(git status --porcelain)"
+# Reword must ignore an actually nonempty staged index.
+sh: git reset --hard "$(cat .git/baseline)" >/dev/null && printf '\nstaged reword sentinel\n' >> f.txt && git add f.txt && git rev-parse HEAD > .git/before && git write-tree > .git/head-index && git log -1 --format=%T > .git/tree && git log -1 --format=%cI > .git/date && git hash-object f.txt > .git/worktree && test -n "$(git diff --cached --name-only)" && test "$(cat .git/head-index)" != "$(cat .git/tree)"
+keys standard: g
+keys vim: g r
+wait
+keys: :vsplit Enter
+keys: c
+wait screen contains "Reword"
+keys: w
+wait screen contains "Exact retained body."
+keys: g g d G i "Native reworded message"
+keys: Enter Enter "Exact edited body."
+keys: Escape
+keys: :write Enter
+snapshot: reword-saved-draft
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/before)"
+keys: :q Enter
+wait screen contains "Committed"
+wait
+snapshot: reword-message
+sh: printf 'Native reworded message\n\nExact edited body.\n\n' > .git/expected-message; git log -1 --format=%B > .git/actual-message; cmp .git/expected-message .git/actual-message && test "$(git log -1 --format=%T)" = "$(cat .git/tree)" && test "$(git log -1 --format=%cI)" = "$(cat .git/date)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git log -1 --format=%P)" = "$(cat .git/parents)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)" && test "$(git rev-parse HEAD)" != "$(cat .git/before)" && test -n "$(git diff --cached --name-only)"
+# Staged Extend: no editor, exact original message and committer date.
+sh: git reset --hard "$(cat .git/baseline)" >/dev/null && printf '\nextended\n' >> f.txt && git add f.txt && git rev-parse HEAD > .git/before && git write-tree > .git/head-index && git hash-object f.txt > .git/worktree
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait screen contains "Reword"
+keys: e
+wait screen contains "Committed"
+wait
+expect screen not-contains "Please enter the commit message"
+snapshot: extend-staged-no-editor
+keys: ":lua assert(not require('magit-lsp.view').current().document)" Enter
+sh: git log -1 --format=%B > .git/actual-message; cmp .git/message .git/actual-message && test "$(git log -1 --format=%cI)" = "$(cat .git/date)" && test "$(git log -1 --format=%T)" = "$(cat .git/head-index)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git log -1 --format=%P)" = "$(cat .git/parents)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)" && test "$(git rev-parse HEAD)" != "$(cat .git/before)" && test -z "$(git status --porcelain)"
+# Capture --all in the menu: tracked edits are included, untracked are not.
+sh: git reset --hard "$(cat .git/baseline)" >/dev/null && printf '\ntracked all\n' >> f.txt && printf 'untracked sentinel\n' > untracked.txt && git rev-parse HEAD > .git/before && git hash-object f.txt > .git/worktree && git hash-object untracked.txt > .git/untracked && git add -u && git write-tree > .git/expected-tree && git reset --quiet HEAD && test -z "$(git diff --cached --name-only)" && test -n "$(git diff --name-only)"
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait screen contains "Reword"
+keys: - a
+wait
+snapshot: extend-all-option
+keys: e
+wait screen contains "Committed"
+wait
+snapshot: extend-tracked-all
+keys: ":lua assert(not require('magit-lsp.view').current().document)" Enter
+sh: git log -1 --format=%B > .git/actual-message; cmp .git/message .git/actual-message && test "$(git log -1 --format=%cI)" = "$(cat .git/date)" && test "$(git log -1 --format=%T)" = "$(cat .git/expected-tree)" && test "$(git write-tree)" = "$(cat .git/expected-tree)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git hash-object untracked.txt)" = "$(cat .git/untracked)" && test -z "$(git ls-files -- untracked.txt)" && test "$(git status --porcelain)" = '?? untracked.txt' && test "$(git log -1 --format=%P)" = "$(cat .git/parents)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)" && test "$(git rev-parse HEAD)" != "$(cat .git/before)"
+# Clean Extend guard, then --allow-empty permits an identical commit OID.
+sh: rm untracked.txt && git reset --hard "$(cat .git/baseline)" >/dev/null && git rev-parse HEAD > .git/before && git write-tree > .git/head-index && git hash-object f.txt > .git/worktree && test -z "$(git status --porcelain)"
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait screen contains "Reword"
+keys: e
+wait screen contains "Nothing staged (or unstaged) to extend"
+snapshot: extend-clean-guard
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/before)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test -z "$(git status --porcelain)"
+keys: c
+wait screen contains "Reword"
+keys: - e
+wait
+snapshot: extend-allow-empty-option
+keys: e
+wait screen contains "Committed"
+wait
+snapshot: extend-clean-allowed
+keys: ":lua assert(not require('magit-lsp.view').current().document)" Enter
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/before)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test -z "$(git status --porcelain)"
+# Explicit cancellation with staged AND unstaged changes preserves exact state.
+sh: printf '\ncancel staged\n' >> f.txt && git add f.txt && printf '\ncancel unstaged\n' >> f.txt && git rev-parse HEAD > .git/before && git write-tree > .git/head-index && git hash-object f.txt > .git/worktree && git status --porcelain > .git/status
+keys standard: g
+keys vim: g r
+wait
+keys: c
+wait screen contains "Reword"
+keys: a
+wait screen contains "Exact retained body."
+keys: g g d G i "Explicitly cancelled amendment"
+keys: Escape
+snapshot: amend-cancel-draft
+keys: ":lua require('magit-lsp.edit').cancel(require('magit-lsp.view').current().key)" Enter
+wait screen contains "git commit"
+sh: session=$(python3 -c 'import json; print(json.load(open("../state.json"))["tmux"])'); if tmux -L "$session" capture-pane -p -t magit | grep -Fq 'Press ENTER or type command to continue'; then tmux -L "$session" send-keys -t magit Enter; fi
+wait
+snapshot: amend-explicit-cancel
+sh: git status --porcelain > .git/status-after; cmp .git/status .git/status-after && test "$(git rev-parse HEAD)" = "$(cat .git/before)" && test "$(git write-tree)" = "$(cat .git/head-index)" && test "$(git hash-object f.txt)" = "$(cat .git/worktree)" && test "$(git rev-list --count HEAD)" = "$(cat .git/count)"
+expect no_message /E5108|Error executing lua|unexpected draft/
