@@ -1,0 +1,43 @@
+# Saving the real Git message file does not commit; close confirms Git's saved file.
+fixture: staged-one-file
+---
+keys: :vsplit Enter
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: g g d G
+keys: :write Enter
+snapshot: save-alone-does-not-commit
+sh: test "$(git rev-list --count HEAD)" = 1
+keys: :q Enter
+wait screen contains "Commit aborted: empty message"
+wait
+snapshot: empty-message-aborted
+sh: test "$(git rev-list --count HEAD)" = 1 && test -n "$(git diff --cached --name-only)"
+sh: printf 'Configured commit template\n\n# Template comment\n' > .git/commit-template; git config commit.template .git/commit-template
+keys: :vsplit Enter
+keys: c
+wait
+keys: c
+wait screen contains "Configured commit template"
+keys: :write Enter
+keys: :q Enter
+wait screen contains "Commit aborted: empty message"
+wait
+snapshot: untouched-template-aborted
+sh: test "$(git rev-list --count HEAD)" = 1 && test -n "$(git diff --cached --name-only)"
+keys: :vsplit Enter
+keys: c
+wait
+keys: c
+wait screen contains "Please enter the commit message"
+keys: g g d G i "Real saved-file message"
+keys: Escape
+keys: :write Enter
+keys: :q Enter
+wait screen contains "Committed: Real saved-file message"
+wait
+snapshot: real-file-committed
+sh: test "$(git log -1 --format=%B)" = 'Real saved-file message' && test -z "$(git status --porcelain)"
+expect no_message /E5108|Error executing lua/

@@ -552,6 +552,18 @@ This is an implementation/integration slice, **not parent R-EDIT-REAL native or
 adversarial acceptance**; that parent stays unchecked. The material below is the
 **archived pre-cutover managed-draft design**, not today's wire contract.
 
+- [x] **R-EDIT-REAL Git empty-message semantics and native saved-file scenario.**
+  Real-Git stdio covers initial comments/status/configured template, empty/comments/
+  whitespace and untouched-template aborts with unchanged HEAD/index/worktree,
+  and edited-template cleanup/exact HEAD message. Native evidence inspected in
+  `build/ui/commit-real-file/{standard,vim}-{100x30,80x24}/`: save-alone shows
+  `0L, 0B written` and staged changes; empty/untouched-template close shows
+  `Commit aborted: empty message`; final saved close shows
+  `Committed: Real saved-file message` and `Working tree clean`.
+  Verified: `cargo test --test editor_bridge --test editor_drafts --test server_async`
+  (65 tests), `cargo build --release`, focused native scenario (all four
+  combinations), and `git diff --check`. Parent R-EDIT-REAL remains unchecked.
+
 - [x] **R-EDIT-REAL existing-effects recovery slice (2026-10-29).** Remove the
   last obsolete draft error notification and both client handlers. Rejected
   open/change reports a readable message without overwriting native edits;

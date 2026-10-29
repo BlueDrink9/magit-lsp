@@ -10,6 +10,9 @@ pub const HUNK_CHANGED: &str =
 /// Shown when positional input refers to a render the server no longer retains.
 pub const STALE_VIEW: &str = "This view is stale; please retry on the current view.";
 
+/// Git's effective-empty commit-message abort, shown as informational feedback.
+pub const EMPTY_COMMIT_MESSAGE: &str = "Commit aborted: empty message";
+
 /// A Git failure explained in terms a user can act on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +111,17 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
 impl Effect {
     /// Build an error notification from a structured Git failure.
     pub fn from_git_failure(failure: &GitFailure) -> Effect {
+        if failure.subcommand == "commit"
+            && failure.stderr.lines().any(|line| {
+                matches!(
+                    line.trim(),
+                    "Aborting commit due to empty commit message."
+                        | "Aborting commit; you did not edit the message."
+                )
+            })
+        {
+            return Effect::message(MessageLevel::Info, EMPTY_COMMIT_MESSAGE);
+        }
         let user = failure.user_error();
         Effect::Message {
             level: MessageLevel::Error,

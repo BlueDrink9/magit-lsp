@@ -362,6 +362,81 @@ fn bridge_refuses_preexisting_directory_and_symlink() {
 }
 
 #[test]
+fn real_git_saved_file_empty_and_template_semantics() {
+    for (name, saved, template, expected) in [
+        ("empty", Some(""), false, None),
+        ("comments", Some("# Only a comment\n# Another comment\n"), false, None),
+        ("whitespace", Some(" \t\n\n \n"), false, None),
+        ("untouched template", None, true, None),
+        (
+            "edited template",
+            Some("  Edited template subject  \n\n# Git removes this comment\nBody with trailing space  \n\n\n"),
+            true,
+            Some("  Edited template subject\n\nBody with trailing space\n\n"),
+        ),
+    ] {
+        let (tmp, _) = staged_repo();
+        if template {
+            write(&tmp.path().join(".git/test-template"), "Configured subject\n\n# Template comment\n");
+            tmp.git(&["config", "commit.template", ".git/test-template"]);
+        }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = tmp.git(&["ls-files", "--stage", "-z"]);
+        let tree = tmp.git(&["write-tree"]);
+        let patch = tmp.git(&["diff", "--cached", "--binary"]);
+        let worktree = read(&tmp.path().join("f.txt"));
+        let mut server = TestServer::spawn(&[]);
+        server.initialize(json!({}));
+        let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+        let edit = start_commit(&mut server, &status);
+        let initial = edit["text"].as_str().unwrap();
+        assert!(initial.contains("# Please enter the commit message"), "{name}: {initial}");
+        assert!(initial.contains("# Changes to be committed:"), "{name}: {initial}");
+        assert!(initial.contains("f.txt"), "{name}: {initial}");
+        if template {
+            assert!(initial.starts_with("Configured subject\n\n# Template comment\n"), "{initial}");
+        }
+        let target = tmp.path().join(".git/COMMIT_EDITMSG");
+        assert_eq!(read(&target), initial);
+        // Native save is disk-only and cannot release the waiting Git editor.
+        if let Some(text) = saved { write(&target, text); }
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "save alone: {name}");
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":initial}
+        }}));
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+            "textDocument":{"uri":edit["uri"]}
+        }}));
+        let outcome = loop {
+            let message = server.recv();
+            if message["method"] == "view/effects" {
+                if let Some(effect) = message["params"]["effects"].as_array().unwrap().iter().find(|effect|
+                    effect["type"] == "message" && effect["text"] != "Committing…") {
+                    break effect.clone();
+                }
+            }
+        };
+        assert_eq!(outcome["level"], "info", "{name}: {outcome}");
+        if let Some(message) = expected {
+            assert!(outcome["text"].as_str().unwrap().starts_with("Committed:"), "{outcome}");
+            assert_eq!(tmp.git(&["log", "-1", "--format=%B"]), message, "{name}");
+            assert_eq!(tmp.git(&["rev-parse", "HEAD^"]), head);
+            assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), tree);
+            assert_eq!(tmp.git(&["status", "--porcelain"]), "");
+        } else {
+            assert_eq!(outcome["text"], "Commit aborted: empty message", "{name}: {outcome}");
+            assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{name}");
+            assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index, "{name}");
+            assert_eq!(tmp.git(&["write-tree"]), tree, "{name}");
+            assert_eq!(tmp.git(&["diff", "--cached", "--binary"]), patch, "{name}");
+        }
+        assert_eq!(read(&tmp.path().join("f.txt")), worktree, "{name}");
+        server.shutdown_and_exit();
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
+#[test]
 fn a_commit_is_created_from_the_typed_message() {
     let (tmp, _repo) = staged_repo();
     assert!(
