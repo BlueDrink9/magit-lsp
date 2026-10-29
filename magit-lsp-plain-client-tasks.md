@@ -502,6 +502,15 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
 
 ### R-PLAIN-REPO: repository and document resolution (M)
 
+**Resolution-state slice complete:** `presentation::resolve` uses Git-owned root,
+per-worktree git-dir and common-dir identity; initialize captures deduplicated
+workspace candidates. Explicit/workspace/document precedence is typed, with
+multiple roots retained as `Choose` rather than guessed. Default `.magit` files
+are excluded from untracked status and watcher refresh. Document-open routing,
+configurable presentation path policy, and candidate rendering/code actions are
+downstream of R-PLAIN-RENDER/ACTIONS and remain incomplete; this task does not
+claim a rendered chooser.
+
 - **Target Files:** `src/presentation/resolve.rs` (new), `src/server.rs`, `src/session.rs`, `src/git.rs`, `tests/plain_repo.rs` (new).
 - **Constraints:** file content never selects the repository; never guess among candidates for any mutating command.
 - **Acceptance:**
@@ -510,7 +519,7 @@ Owned by the existing roadmap entry: mutations target the displayed patch identi
   - Canonical identity from `git rev-parse --git-dir --git-common-dir --show-toplevel`, handling linked worktrees (`.git` file) and symlinks.
   - Presentation documents (`.magit`, configurable) are excluded from Untracked and watcher noise.
   - Tests: no root, `/tmp` root, multi-root, nested, worktree, two repositories in one editor, and a mutating command refused while ambiguous.
-- **Verify:** `make test-rust FILTER="--test plain_repo"`.
+- **Verify:** `make test-rust FILTER="--test plain_repo --test plain_core --test server_async" && git diff --check`.
 
 ### R-PLAIN-RENDER: bootstrap and versioned applyEdit pipeline (L)
 

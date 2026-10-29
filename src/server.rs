@@ -101,6 +101,8 @@ struct ClientCaps {
     close_confirms: bool,
     work_done_progress: bool,
     encoding: Encoding,
+    /// Git repositories discovered from initialize workspace roots for Plain resolution.
+    workspace_repositories: Vec<crate::presentation::resolve::Repository>,
 }
 
 impl Default for ClientCaps {
@@ -112,6 +114,7 @@ impl Default for ClientCaps {
             close_confirms: true,
             work_done_progress: false,
             encoding: Encoding::Utf16,
+            workspace_repositories: Vec::new(),
         }
     }
 }
@@ -1720,6 +1723,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 client.delivery = delivery;
                 client.key_modifiers = key_modifiers;
                 client.presentation = Some(presentation);
+                client.workspace_repositories = initialize_workspace_roots(&params);
                 client.encoding = params
                     .pointer("/capabilities/general/positionEncodings")
                     .and_then(Value::as_array)
@@ -1861,6 +1865,34 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
         }
         other => Err(Error::new(format!("unknown method: {other}"))),
     }
+}
+
+fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolve::Repository> {
+    use crate::presentation::resolve::GitRepository;
+    let mut paths = Vec::new();
+    if let Some(folders) = params.pointer("/workspaceFolders").and_then(Value::as_array) {
+        paths.extend(folders.iter().filter_map(|folder| folder.get("uri").and_then(Value::as_str).and_then(file_uri_path)));
+    }
+    if paths.is_empty() {
+        if let Some(path) = params.get("rootUri").and_then(Value::as_str).and_then(file_uri_path) {
+            paths.push(path);
+        }
+    }
+    let mut repositories = Vec::new();
+    for path in paths {
+        if let Some(repository) = GitRepository::discover(&path) {
+            if !repositories.iter().any(|item: &crate::presentation::resolve::Repository| item.root == repository.root) {
+                repositories.push(repository);
+            }
+        }
+    }
+    repositories
+}
+
+fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
+    let encoded = uri.strip_prefix("file://")?;
+    let decoded = encoded.replace("%20", " ").replace("%23", "#").replace("%25", "%");
+    Some(std::path::PathBuf::from(decoded))
 }
 
 /// The last acked tree of the view showing `uri`.

@@ -201,6 +201,9 @@ pub fn relevant_path(path: &Path, repo: &Path) -> bool {
         .components()
         .map(|component| component.as_os_str())
         .collect();
+    if components.iter().any(|component| *component == OsStr::new(".magit")) {
+        return false;
+    }
     match components.first() {
         None => false,
         Some(first) if *first == OsStr::new(".git") => relevant_git_path(&components[1..]),

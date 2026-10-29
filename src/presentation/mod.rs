@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 mod custom;
+pub mod resolve;
 pub use custom::{CustomRender, Ui};
 
 /// Presentation selected by `capabilities.experimental.magit` during initialize.

@@ -651,6 +651,10 @@ impl GitRepo {
                 }
                 b'?' => {
                     if let Some(path) = token.strip_prefix("? ") {
+                        // Plain presentation documents are editor state, not repository content.
+                        if Path::new(path).file_name().is_some_and(|name| name == ".magit") {
+                            continue;
+                        }
                         status.untracked.push(FileEntry {
                             path: path.to_string(),
                             status: "?".to_string(),
