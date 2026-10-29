@@ -7,6 +7,7 @@ pub mod commands;
 pub mod config;
 pub mod diff_text;
 pub mod dispatch;
+pub mod docstore;
 pub mod editor;
 pub mod errors;
 pub mod git;

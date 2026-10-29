@@ -16,7 +16,7 @@ Plain”: defer the known R-EDIT-REAL Rust errors/log_commands/views and UI
 log-select/log-view/process-log gate failures, leave R-EDIT-REAL unchecked, and
 advance to R-PLAIN-HARNESS. This is scheduling authorization, not acceptance of
 the failed gates or release acceptance. HARNESS is now complete as test infrastructure;
-R-PLAIN-PREREQ's minimal scoped acceptance is complete; R-PLAIN-SYNC is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
+R-PLAIN-PREREQ and R-PLAIN-SYNC's scoped acceptance are complete; R-PLAIN-CORE is the first unchecked active feature task. The scoped R-EDIT-REAL lifecycle limits, native semantic,
 recovery and two-repository evidence, and finite uncovered criteria remain
 recorded below. The ring's pinned parity differences remain documented policy,
 not a change request or a missing source-research blocker.
@@ -361,6 +361,29 @@ server conformance tasks remain unchecked. Verification: 12 harness tests and
 - **Verify:** `make test-rust FILTER="--test server_async"`; `make test-rust`.
 
 ### R-PLAIN-SYNC: document store and sync mode (M)
+
+**Complete within the user-approved client gate (2026-10-29):** generic URI/open
+store, atomic sequential ranged/rangeless updates, UTF-8/16/32 negotiation,
+CRLF/Unicode bounds, skipped versions and trustworthy full-text/reopen repair.
+Invalid/stale/malformed changes cannot resume relative synchronization or confirm
+an old snapshot; rejected registry updates never install store snapshots.
+Versionless `didSave.text` validates rather than replacing same-version live text
+or clearing repair. Real stdio commit tests exercise accepted incremental edits,
+registry byte-limit rejection, malformed ranges, same-run rejected/valid reopen,
+and save/confirmation barriers. `make test-rust FILTER="--test plain_sync --test
+editor_bridge" && make test-lua && git diff --check` passed (6 sync, 27 editor).
+The two focused native scenarios `commit-real-file.scn` and `commit-confirm.scn`
+passed both profiles/sizes; inspected Save/Discard/recovery screens under
+`build/ui/commit-real-file/{standard,vim}-{100x30,80x24}/`.
+
+**Explicit waiver, not green VSCode evidence:** user requested no more VSCode
+testing because that client is about to be overhauled. Its attempted integration
+run failed at a premature Discard assertion: the fake client advertises empty
+capabilities, so its progress-based `idle()` returns immediately. Diagnostic
+observation after the actual draft queue completed confirmed the correct saved
+message; the later progress-cancel case also lacks a token. No client files,
+native Save/Discard/Cancel semantics or production capability gating were changed.
+The original VSCode/full-regression gate is not claimed passing.
 
 - **Target Files:** `src/docstore.rs` (new), `src/server.rs`, `src/protocol.rs`, `tests/plain_sync.rs` (new).
 - **Reference Files:** `general.positionEncodings`; R-EDIT-REAL's resulting server code.

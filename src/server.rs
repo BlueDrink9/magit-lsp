@@ -1,4 +1,5 @@
 use crate::config::{ConfigService, LoadOptions};
+use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
 use crate::protocol::*;
@@ -95,6 +96,7 @@ struct ClientCaps {
     delivery: KeymapDelivery,
     close_confirms: bool,
     work_done_progress: bool,
+    encoding: Encoding,
 }
 
 impl Default for ClientCaps {
@@ -103,6 +105,7 @@ impl Default for ClientCaps {
             delivery: KeymapDelivery::Dynamic,
             close_confirms: true,
             work_done_progress: false,
+            encoding: Encoding::Utf16,
         }
     }
 }
@@ -128,6 +131,7 @@ struct Shared {
     edit_configs: Arc<Mutex<HashMap<String, Arc<ConfigService>>>>,
     /// Key delivery settings declared by the client in `initialize`.
     client: Arc<Mutex<ClientCaps>>,
+    documents: Arc<Mutex<DocStore>>,
     /// Why the initial configuration load failed, if it did.
     startup_error: Option<String>,
     /// The writer channel, so a blocking command can send `view/prompt`.
@@ -204,6 +208,7 @@ impl Shared {
             config,
             edit_configs: Arc::new(Mutex::new(HashMap::new())),
             client: Arc::new(Mutex::new(ClientCaps::default())),
+            documents: Arc::new(Mutex::new(DocStore::default())),
             startup_error,
             sender: sender.clone(),
             outbound: Arc::new(Mutex::new(HashMap::new())),
@@ -1081,7 +1086,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     )));
                     continue;
                 }
-                // Draft barriers and full-sync notifications execute on the
+                // Draft barriers and document notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
                 if request.method == "workspace/executeCommand" {
                     let response = match draft_request(&shared, &request) {
@@ -1154,14 +1159,34 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 "window/workDoneProgress/cancel" => {
                     shared.cancel_progress(&notification.params);
                 }
-                "textDocument/didOpen" | "textDocument/didChange" | "textDocument/didClose" => {
+                "textDocument/didOpen"
+                | "textDocument/didChange"
+                | "textDocument/didClose"
+                | "textDocument/didSave" => {
                     let uri = notification
                         .params
                         .pointer("/textDocument/uri")
                         .and_then(Value::as_str)
                         .unwrap_or("");
-                    if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
-                        if let Err(error) = draft_notification(&shared, &notification) {
+                    let draft_run = editor::registry()
+                        .run_for_uri(&shared.draft_owner, uri)
+                        .ok();
+                    if let Err(error) = draft_notification(&shared, &notification) {
+                        if notification.method == "textDocument/didChange" {
+                            shared
+                                .documents
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .require_repair(
+                                    uri,
+                                    notification
+                                        .params
+                                        .pointer("/textDocument/version")
+                                        .and_then(Value::as_i64)
+                                        .and_then(|v| i32::try_from(v).ok()),
+                                );
+                        }
+                        if let Some(run) = draft_run {
                             editor::registry().notification_failure(
                                 &shared.draft_owner,
                                 &run,
@@ -1175,6 +1200,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                     )));
                                 },
                             );
+                        } else {
+                            tracing::debug!(%error, "rejected document synchronization; repair required");
                         }
                     }
                 }
@@ -1414,6 +1441,15 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                     EditConfirmSource::SavedFile => DraftFinishReason::NormalClose,
                 },
             };
+            if p.reason == DraftFinishReason::Confirm {
+                let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+                if !documents
+                    .get(&p.uri)
+                    .is_some_and(|doc| !doc.repair && doc.version == p.version)
+                {
+                    return Err(Error::new("Wait for the exact synchronized document version; full-text repair may be required"));
+                }
+            }
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
                 let _ = shared.sender.send(Message::Notification(Notification::new(
                     VIEW_EFFECTS.to_string(),
@@ -1433,7 +1469,7 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
     serde_json::to_value(response).map_err(|error| Error::new(error.to_string()))
 }
 
-/// Apply full-sync text; ordinary clients confirm saved disk text on didClose.
+/// Apply synchronized text and forward accepted snapshots to any pending draft.
 #[cfg(unix)]
 fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
     use lsp_types::{
@@ -1447,34 +1483,78 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
             let p: DidOpenTextDocumentParams = from_params(notification.params.clone())?;
             let doc = p.text_document;
             let uri = doc.uri.as_str();
-            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
-                draft.did_open(context, doc.version, doc.text.as_bytes())
-            })
+            if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
+                editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                    draft.did_open(context, doc.version, doc.text.as_bytes())
+                })?;
+            }
+            shared
+                .documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .open(uri, doc.text, doc.version);
+            Ok(())
         }
         "textDocument/didChange" => {
             let p: DidChangeTextDocumentParams = from_params(notification.params.clone())?;
-            if p.content_changes.len() != 1
-                || p.content_changes[0].range.is_some()
-                || p.content_changes[0].range_length.is_some()
+            let uri = p.text_document.uri.as_str();
+            let encoding = shared
+                .client
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .encoding;
+            let changes = p
+                .content_changes
+                .iter()
+                .map(|change| StoredChange {
+                    start: change.range.map(|r| (r.start.line, r.start.character)),
+                    end: change.range.map(|r| (r.end.line, r.end.character)),
+                    text: change.text.clone(),
+                })
+                .collect::<Vec<_>>();
+            let mut docs = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+            let mut candidate = docs.clone();
+            if candidate
+                .change(uri, p.text_document.version, &changes, encoding)
+                .is_err()
             {
+                let stale_full_text =
+                    p.content_changes.len() == 1 && p.content_changes[0].range.is_none();
+                drop(docs);
+                if stale_full_text {
+                    return Err(Error::new(
+                        "Commit draft change is detached, stale or duplicated",
+                    ));
+                }
                 return Err(Error::new(
-                    "Commit drafts require exactly one full-sync text change",
+                    "Invalid document change or stale or duplicated version; document requires repair",
                 ));
             }
-            let uri = p.text_document.uri.as_str();
-            let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
-            editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
-                draft.did_change(
-                    context,
-                    p.text_document.version,
-                    p.content_changes[0].text.as_bytes(),
-                )
-            })
+            let Some(text) = candidate.get(uri).map(|doc| doc.text.clone()) else {
+                return Err(Error::new("Document is not open"));
+            };
+            if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
+                editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
+                    draft.did_change(context, p.text_document.version, text.as_bytes())
+                })?;
+            }
+            *docs = candidate;
+            Ok(())
         }
         "textDocument/didClose" => {
             let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
             let uri = p.text_document.uri.as_str();
+            shared
+                .documents
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .close(uri);
+            if editor::registry()
+                .run_for_uri(&shared.draft_owner, uri)
+                .is_err()
+            {
+                return Ok(());
+            }
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
             let close_confirms = shared
                 .client
@@ -1482,21 +1562,42 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
                 .unwrap_or_else(|p| p.into_inner())
                 .close_confirms;
             if close_confirms {
-                editor::registry().finish(
+                let result = editor::registry().finish(
                     &shared.draft_owner,
                     &DraftFinishParams {
-                        run_id: run,
+                        run_id: run.clone(),
                         uri: uri.to_string(),
                         version: 0,
                         reason: DraftFinishReason::NormalClose,
                     },
-                )?;
+                );
+                if result.is_err() {
+                    editor::registry().apply(
+                        &shared.draft_owner,
+                        &run,
+                        uri,
+                        |draft, context| draft.did_close(context),
+                    )?;
+                }
+                result?;
                 Ok(())
             } else {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     draft.did_close(context)
                 })
             }
+        }
+        "textDocument/didSave" => {
+            let p: lsp_types::DidSaveTextDocumentParams = from_params(notification.params.clone())?;
+            if let Some(text) = p.text {
+                shared
+                    .documents
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .save_text(p.text_document.uri.as_str(), &text)
+                    .map_err(|_| Error::new("Save text does not match an open document; synchronize changes before saving"))?;
+            }
+            Ok(())
         }
         _ => Err(Error::new("Unknown commit draft notification")),
     }
@@ -1594,6 +1695,21 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
+                client.encoding = params
+                    .pointer("/capabilities/general/positionEncodings")
+                    .and_then(Value::as_array)
+                    .and_then(|encodings| {
+                        encodings
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .find_map(|value| match value {
+                                "utf-8" => Some(Encoding::Utf8),
+                                "utf-16" => Some(Encoding::Utf16),
+                                "utf-32" => Some(Encoding::Utf32),
+                                _ => None,
+                            })
+                    })
+                    .unwrap_or(Encoding::Utf16);
                 client.work_done_progress = params
                     .pointer("/capabilities/window/workDoneProgress")
                     .and_then(Value::as_bool)
@@ -1622,7 +1738,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             }
             tracing::debug!(files = ?shared.config.files(), "configuration ready");
             Ok(Dispatched::with(
-                serde_json::json!({ "capabilities": capabilities()? }),
+                serde_json::json!({ "capabilities": capabilities(shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding)? }),
                 notifications,
             ))
         }
@@ -2192,7 +2308,7 @@ fn show_message(kind: u8, message: String) -> Message {
     ))
 }
 
-fn capabilities() -> Result<Value> {
+fn capabilities(encoding: Encoding) -> Result<Value> {
     let mut capabilities = serde_json::to_value(ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         definition_provider: Some(OneOf::Left(true)),
@@ -2220,7 +2336,15 @@ fn capabilities() -> Result<Value> {
         );
         object.insert(
             "textDocumentSync".to_string(),
-            serde_json::json!({ "openClose": true, "change": 1 }),
+            serde_json::json!({ "openClose": true, "change": 2, "save": { "includeText": true } }),
+        );
+        object.insert(
+            "positionEncoding".to_string(),
+            serde_json::json!(match encoding {
+                Encoding::Utf8 => "utf-8",
+                Encoding::Utf16 => "utf-16",
+                Encoding::Utf32 => "utf-32",
+            }),
         );
     }
     // The legend carries a suggested theme group per token type, so a client

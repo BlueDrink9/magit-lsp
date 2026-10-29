@@ -653,7 +653,7 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
     let mut server = TestServer::spawn(&[]);
     let initialized = server.initialize(json!({}));
-    assert_eq!(initialized["result"]["capabilities"]["textDocumentSync"], json!({"openClose":true,"change":1}));
+    assert_eq!(initialized["result"]["capabilities"]["textDocumentSync"], json!({"openClose":true,"change":2,"save":{"includeText":true}}));
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     assert_eq!(edit["version"], 1);
@@ -714,6 +714,149 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     assert!(errors.iter().all(|n| n["text"].as_str().unwrap().contains("Your text is retained")));
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state() {
+    for (encoding, lambda_end, astral_end) in [("utf-8", 3, 5), ("utf-16", 2, 3), ("utf-32", 2, 2)]
+    {
+        let (tmp, _) = staged_repo();
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let target = tmp.path().join(".git/COMMIT_EDITMSG");
+        let mut server = TestServer::spawn(&[]);
+        let initialized = server.initialize(json!({"general":{"positionEncodings":[encoding]}}));
+        assert_eq!(
+            initialized["result"]["capabilities"]["positionEncoding"],
+            encoding
+        );
+        let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+        let edit = start_commit(&mut server, &status);
+        sync_draft(&mut server, &edit, "aλ\r\nz😀\n");
+        // Skipped versions and multiple ranges, including a dependent range.
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":5},"contentChanges":[
+                {"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":lambda_end}},"text":"λ!"},
+                {"range":{"start":{"line":0,"character":lambda_end+1},"end":{"line":0,"character":lambda_end+1}},"text":"?"},
+                {"range":{"start":{"line":1,"character":astral_end},"end":{"line":1,"character":astral_end}},"text":"!"}
+            ]
+        }}));
+        // Failed native close re-presents precisely the accepted incremental
+        // snapshot, not a reconstruction from the original template or disk.
+        let held = tmp.path().join(".git/held-sync-message");
+        std::fs::rename(&target, &held).unwrap();
+        server.send(
+            json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+                "textDocument":{"uri":edit["uri"]}
+            }}),
+        );
+        let recovery = loop {
+            if let Some(effect) = edit_document(&server.recv()) {
+                break effect;
+            }
+        };
+        assert_eq!(recovery["runId"], edit["runId"]);
+        assert_eq!(recovery["version"], 5);
+        assert_eq!(recovery["text"], "aλ!?\r\nz😀!\n");
+        std::fs::rename(&held, &target).unwrap();
+        // A rejected reopen must not install a different store snapshot or
+        // prevent the same pending run from accepting its trustworthy reopen.
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":edit["uri"],"languageId":"text","version":99,"text":"wrong reopen"}
+        }}));
+        assert!(command_confirm(&mut server, 20, &edit, 99, "synchronized")["error"].is_object());
+        assert!(command_confirm(&mut server, 21, &edit, 5, "synchronized")["error"].is_object());
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":edit["uri"],"languageId":"text","version":5,"text":recovery["text"]}
+        }}));
+        let (line, column) = match encoding {
+            "utf-8" => (0, 2),  // inside λ
+            "utf-16" => (1, 2), // inside 😀
+            _ => (0, 5),        // past the CRLF line boundary
+        };
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":6},"contentChanges":[
+                {"range":{"start":{"line":line,"character":column},"end":{"line":line,"character":column}},"text":"invalid boundary"}
+            ]
+        }}));
+        // Invalid notification must not partially apply its first valid edit.
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":7},"contentChanges":[
+                {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"text":"BAD"},
+                {"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"text":"invalid"}
+            ]
+        }}));
+        assert!(command_confirm(&mut server, 10, &edit, 7, "synchronized")["error"].is_object());
+        assert!(command_confirm(&mut server, 11, &edit, 5, "synchronized")["error"].is_object());
+        // didSave text is not a second unversioned synchronization channel.
+        server.send(
+            json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{
+                "textDocument":{"uri":edit["uri"]},"text":"aλ!?\r\nz😀!\n"
+            }}),
+        );
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":8},"contentChanges":[
+                {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}},"text":"unknown"}
+            ]
+        }}));
+        assert!(command_confirm(&mut server, 12, &edit, 8, "synchronized")["error"].is_object());
+        // The registry's byte limit rejects an otherwise valid store update.
+        // Neither that rejection nor malformed range JSON may advance its base.
+        change_draft(
+            &mut server,
+            &edit,
+            9,
+            &"x".repeat(magit_lsp::editor::draft::MAX_DRAFT_BYTES + 1),
+        );
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":10},"contentChanges":[
+                {"range":{"start":{"line":0,"character":-1},"end":{"line":0,"character":0}},"text":"malformed"}
+            ]
+        }}));
+        assert!(command_confirm(&mut server, 14, &edit, 9, "synchronized")["error"].is_object());
+        std::fs::rename(&target, &held).unwrap();
+        server.send(
+            json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+                "textDocument":{"uri":edit["uri"]}
+            }}),
+        );
+        let retained = loop {
+            if let Some(effect) = edit_document(&server.recv()) {
+                break effect;
+            }
+        };
+        assert_eq!(retained["runId"], edit["runId"]);
+        assert_eq!(
+            retained["version"], 5,
+            "rejected changes never advance registry/store snapshots"
+        );
+        assert_eq!(retained["text"], recovery["text"]);
+        std::fs::rename(&held, &target).unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":edit["uri"],"languageId":"text","version":5,"text":retained["text"]}
+        }}));
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(read(&target), edit["text"].as_str().unwrap());
+        // Full replacement reestablishes a trustworthy base for relative edits.
+        change_draft(&mut server, &edit, 12, "aλ!?\r\nz😀!\n");
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":15},"contentChanges":[
+                {"range":{"start":{"line":1,"character":astral_end+1},"end":{"line":1,"character":astral_end+1}},"text":"?"}
+            ]
+        }}));
+        server.send(
+            json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{
+                "textDocument":{"uri":edit["uri"]},"text":"must not overwrite live text"
+            }}),
+        );
+        // The rejected save did not corrupt the live snapshot or its version.
+        assert!(command_confirm(&mut server, 15, &edit, 12, "synchronized")["error"].is_object());
+        let confirmed = command_confirm(&mut server, 13, &edit, 15, "synchronized");
+        assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
+        wait_for_commit(&tmp, "aλ!?\nz😀!?");
+        assert_eq!(read(&target), "aλ!?\r\nz😀!?\n");
+        server.shutdown_and_exit();
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
 }
 
 #[cfg(unix)]
@@ -778,6 +921,9 @@ fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "unreadable saved file cannot confirm");
     std::fs::rename(&held, &target).unwrap();
     write(&target, "Restored saved disk message\n");
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":recovery["uri"],"languageId":"gitcommit","version":recovery["version"],"text":recovery["text"]}
+    }}));
     // The same pending helper accepts subsequent synchronization, but native
     // retry still commits disk rather than those newer unsaved bytes.
     change_draft(&mut server, &edit, 3, "Newer unsaved recovery edits\n");
