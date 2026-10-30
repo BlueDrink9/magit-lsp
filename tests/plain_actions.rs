@@ -47,6 +47,11 @@ fn offered_stage(server: &mut stdio::TestServer, editor: &FakeEditor, uri: &str,
         .unwrap_or_else(|| panic!("no stage action offered: {response}"))
 }
 
+fn offered_section(server: &mut stdio::TestServer, editor: &FakeEditor, uri: &str, section: &str, command: &str, id: i64) -> Value {
+    let row = editor.text(uri).lines().position(|line| line.starts_with(section)).expect("section row") as u32;
+    offered_for_range(server, uri, json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}), command, id)
+}
+
 /// Execute an offered Plain action, acknowledging any render edits it causes.
 fn execute_offered(server: &mut stdio::TestServer, editor: &mut FakeEditor, args: Value, id: i64) -> Value {
     server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
@@ -389,6 +394,66 @@ fn offered_stage_action_executes_and_mutates_its_target() {
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
+}
+
+#[test]
+fn section_stage_is_fresh_bulk_and_rejects_tampered_side() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "base\n"), ("g.txt", "base-g\n")]).modify("f.txt", "offered\n").modify("g.txt", "staged-g\n").build();
+    repo.git(&["add", "g.txt"]);
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let args = offered_section(&mut server, &editor, &uri, "Unstaged", "status.stage", 601);
+    assert!(!args.is_null());
+    let mut forged = args.clone();
+    let staged_section = offered_section(&mut server, &editor, &uri, "Staged", "status.unstage", 604);
+    forged["target"]["node_id"] = staged_section["target"]["node_id"].clone();
+    let before = repo_state(&repo);
+    let index_before = repo.git(&["ls-files", "--stage"]);
+    assert_refused(&execute_offered(&mut server, &mut editor, forged, 602));
+    assert_eq!(repo_state(&repo), before);
+    assert_eq!(repo.git(&["ls-files", "--stage"]), index_before);
+    fixtures::write(&repo.path().join("f.txt"), "arrived\n");
+    let result = execute_offered(&mut server, &mut editor, args, 603);
+    assert!(result["error"].is_null(), "{result}");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), before.0);
+    assert_eq!(repo.git(&["show", ":f.txt"]), "arrived\n");
+    assert_eq!(repo.git(&["show", ":g.txt"]), "staged-g\n");
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")), "arrived\n");
+    assert_eq!(fixtures::read(&repo.path().join("g.txt")), "staged-g\n");
+    server.shutdown_and_exit();
+    assert!(server.finish_with_messages(std::time::Duration::from_secs(10)).0.success());
+}
+
+#[test]
+fn section_untracked_stage_and_staged_unstage_are_fresh_bulk() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "base\n")]).build();
+    fixtures::write(&repo.path().join("new.txt"), "first\n");
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let args = offered_section(&mut server, &editor, &uri, "Untracked", "status.stage", 611);
+    assert!(!args.is_null());
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    fixtures::write(&repo.path().join("later.txt"), "later\n");
+    let result = execute_offered(&mut server, &mut editor, args, 612);
+    assert!(result["error"].is_null(), "{result}");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["show", ":new.txt"]), "first\n");
+    assert_eq!(repo.git(&["show", ":later.txt"]), "later\n");
+    assert_eq!(fixtures::read(&repo.path().join("new.txt")), "first\n");
+    assert_eq!(fixtures::read(&repo.path().join("later.txt")), "later\n");
+    let staged = offered_section(&mut server, &editor, &uri, "Staged", "status.unstage", 613);
+    assert!(!staged.is_null());
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    fixtures::write(&repo.path().join("f.txt"), "changed\n");
+    repo.git(&["add", "f.txt"]);
+    let result = execute_offered(&mut server, &mut editor, staged, 614);
+    assert!(result["error"].is_null(), "{result}");
+    assert_eq!(repo.git(&["ls-files"]), "f.txt\n");
+    assert_eq!(repo.git(&["show", ":f.txt"]), "base\n");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")), "changed\n");
+    assert_eq!(fixtures::read(&repo.path().join("new.txt")), "first\n");
+    assert_eq!(fixtures::read(&repo.path().join("later.txt")), "later\n");
+    server.shutdown_and_exit();
+    assert!(server.finish_with_messages(std::time::Duration::from_secs(10)).0.success());
 }
 
 #[test]

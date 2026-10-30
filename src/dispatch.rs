@@ -125,6 +125,18 @@ pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> O
     use crate::tree::{MutationContent, NodeKind};
     if !content_command(command) { return None; }
     let mut node = tree.node(node_id)?;
+    if node.kind == NodeKind::Section {
+        let section = node.section.as_deref()?;
+        let applicable = match command {
+            "status.stage" => matches!(section, "unstaged" | "untracked"),
+            "status.unstage" => section == "staged",
+            _ => false,
+        };
+        if !applicable { return None; }
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&(command, section)).ok()?));
+        return Some(ActionTarget { node_id: node.id.clone(), mutation_hash: hash, selection: None });
+    }
     if node.kind == NodeKind::Line {
         node = tree.nodes.iter().find(|hunk| hunk.kind == NodeKind::Hunk
             && hunk.path == node.path && hunk.section == node.section && hunk.hunk_id == node.hunk_id)?;
@@ -190,6 +202,9 @@ pub fn target_is_current(repo: &GitRepo, tree: &crate::tree::Tree, command: &str
     use crate::tree::MutationContent;
     let Some(node) = tree.node(&target.node_id) else { return Ok(false); };
     if offer_target(tree, command, &node.id).as_ref() != Some(target) { return Ok(false); }
+    if node.kind == crate::tree::NodeKind::Section {
+        return Ok(target.selection.is_none());
+    }
     let Some(captured) = file_identity(tree, node) else { return Ok(false); };
     let Some(path) = node.path.as_deref() else { return Ok(false); };
     let identity = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), command != "status.unstage")?;
