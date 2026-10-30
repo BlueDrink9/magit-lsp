@@ -599,7 +599,7 @@ makes the controller eligible again.
   - Titles follow `actions.title_style` (`plain`, `mnemonic`, `path`, `mnemonicPath`), set per user and per repository. Stable command IDs are unaffected by titles.
   - Arguments are `{command, documentUri, target: ActionTarget, viewGeneration}`. `executeCommand` re-validates through the dispatcher.
   - Selection conversion from half-open LSP ranges to inclusive selections (end at column 0 means the previous line).
-  - Tests: every IMM-6 row through code actions, stale or out-of-sync returns none, a latency smoke test on a large view.
+  - Tests: every IMM-6 row through code actions, stale or out-of-sync returns none, a latency smoke test on a large view. 2026-10-30 smoke evidence: actual-binary 48-file/100-line modified fixture; 13,370 rendered bytes/919 lines; repeated cursor/file/hunk requests plus selection; repeated file-row command/target payloads match, offers are bounded and duplicate-free, independent HEAD/index/worktree invariants unchanged. Refined command `cargo test --test plain_actions large_retained_view_repeated_code_actions_report_latency_without_mutation -- --nocapture && git diff --check` passed. Observed cursor latency 2.80–5.24 ms and selection latency 3.29 ms, diagnostics only, not an SLA. Parent remains open for downstream adapter completeness/native action evidence.
 - **Verify:** `make test-rust FILTER="--test plain_actions"`.
 
 ### R-PLAIN-STACK: view stack and menus in one document (M)

@@ -474,6 +474,62 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
 }
 
 #[test]
+fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
+    use std::time::Instant;
+
+    let files: Vec<_> = (0..48)
+        .map(|index| (format!("large/file-{index:03}.txt"), fixtures::lines(100).to_string()))
+        .collect();
+    let mut fixture = fixtures::RepoFixture::new().commit("large baseline", files.clone());
+    for (name, content) in files {
+        let mut lines: Vec<_> = content.lines().map(str::to_owned).collect();
+        lines[10] = "changed near start".into();
+        lines[85] = "changed near end".into();
+        fixture = fixture.modify(name, format!("{}\n", lines.join("\n")));
+    }
+    let (repo, _) = fixture.build();
+    let (mut server, editor, uri) = open_plain(&repo);
+    let rendered = editor.text(&uri).to_owned();
+    let rendered_bytes = rendered.len();
+    let rendered_lines = rendered.lines().count();
+    let file_row = rendered.lines().position(|line| line.contains("file-000.txt")).unwrap();
+    let hunk_row = rendered.lines().position(|line| line.contains("@@")).expect("fixture renders real hunks") as u32;
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let index = repo.git(&["write-tree"]);
+    let worktree = repo.git(&["diff", "--binary"]);
+    let mut first_file_payload = None;
+    for (request_id, row) in [(101, file_row as u32), (102, hunk_row), (103, file_row as u32), (104, file_row as u32)] {
+        let started = Instant::now();
+        server.send(json!({"jsonrpc":"2.0","id":request_id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+        let response = server.response_with_id(request_id);
+        let elapsed = started.elapsed();
+        let actions = response["result"].as_array().expect("code actions");
+        assert!(!actions.is_empty());
+        assert!(actions.len() <= 8, "bounded offers: {}", actions.len());
+        let identities: Vec<_> = actions.iter().map(|action| action["data"]["command"].as_str().or_else(|| action["command"]["arguments"][0]["command"].as_str()).unwrap().to_owned()).collect();
+        let mut sorted = identities.clone(); sorted.sort();
+        sorted.dedup();
+        assert_eq!(identities.len(), sorted.len(), "duplicate command offers");
+        assert!(actions.iter().any(|action| action["command"]["arguments"][0]["target"]["node_id"].is_string()), "content target missing");
+        let payload: Vec<_> = actions.iter().map(|action| action.get("command").cloned().unwrap_or_else(|| action["data"].clone())).collect();
+        if request_id == 101 { first_file_payload = Some(payload.clone()); }
+        if request_id == 103 { assert_eq!(&payload, first_file_payload.as_ref().unwrap(), "repeated file-row offers must retain identical command/target payloads"); }
+        eprintln!("plain codeAction id={request_id} elapsed={elapsed:?} rendered_bytes={rendered_bytes} rendered_lines={rendered_lines} offers={}", actions.len());
+    }
+    let selection_started = Instant::now();
+    server.send(json!({"jsonrpc":"2.0","id":105,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":file_row as u32,"character":0},"end":{"line":file_row as u32+1,"character":0}},"context":{"diagnostics":[]}}}));
+    let selection = server.response_with_id(105);
+    eprintln!("plain codeAction selection elapsed={:?} rendered_bytes={rendered_bytes} rendered_lines={rendered_lines}", selection_started.elapsed());
+    assert!(selection["result"].as_array().unwrap().iter().any(|action| action["command"]["arguments"][0]["target"]["selection"].is_object()), "selection target missing");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index);
+    assert_eq!(repo.git(&["diff", "--binary"]), worktree);
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
 fn offered_stage_action_executes_and_mutates_its_target() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\ntwo\n")])
