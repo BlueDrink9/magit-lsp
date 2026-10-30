@@ -2240,10 +2240,11 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let symbols = tree_for_positional_request(shared, uri)
-                .map(|tree| tree.document_symbols())
-                .unwrap_or_default();
-            Ok(Dispatched::value(serde_json::to_value(symbols)?))
+            let result = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.document_symbols()) }
+                else { tree_for_positional_request(shared, uri).map(|tree| tree.document_symbols()) };
+            let Some(result) = result else { return Ok(Dispatched::value(Value::Null)); };
+            let result = serde_json::to_value(result)?;
+            Ok(Dispatched::value(result))
         }
         "textDocument/codeAction" => {
             let p: lsp_types::CodeActionParams = from_params(params)?;
@@ -2256,10 +2257,13 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let location = tree_for_positional_request(shared, uri).and_then(|tree| {
+            let location = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).and_then(|(tree, repo, text)| {
+                if !plain_position_valid(&text, position.position, Encoding::Utf16) { return None; }
+                tree.definition(&repo, position.position)
+            }) } else { tree_for_positional_request(shared, uri).and_then(|tree| {
                 let repo = shared.repo_for_uri(uri)?;
                 tree.definition(&repo, position.position)
-            });
+            }) };
             Ok(Dispatched::value(serde_json::to_value(location)?))
         }
         "textDocument/documentLink" => {
@@ -2268,13 +2272,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let links = tree_for_positional_request(shared, uri).and_then(|tree| {
-                let repo = shared.repo_for_uri(uri)?;
-                Some(tree.document_links(&repo))
-            });
-            Ok(Dispatched::value(serde_json::to_value(
-                links.unwrap_or_default(),
-            )?))
+            let links = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, repo, _)| tree.document_links(&repo)) } else { tree_for_positional_request(shared, uri).and_then(|tree| Some(tree.document_links(&shared.repo_for_uri(uri)?))) };
+            let Some(links) = links else { return Ok(Dispatched::value(Value::Null)); };
+            Ok(Dispatched::value(serde_json::to_value(links)?))
         }
         "textDocument/foldingRange" => {
             let p: lsp_types::FoldingRangeParams = from_params(params)?;
@@ -2282,9 +2282,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let ranges = tree_for_positional_request(shared, uri)
-                .map(|tree| tree.folding_ranges())
-                .unwrap_or_default();
+            let ranges = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.folding_ranges()) } else { tree_for_positional_request(shared, uri).map(|tree| tree.folding_ranges()) };
             Ok(Dispatched::value(serde_json::to_value(ranges)?))
         }
         "textDocument/semanticTokens/full" => {
@@ -2293,12 +2291,12 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let tokens = tree_for_positional_request(shared, uri)
-                .map(|tree| semantic_tokens::encode(&tree))
-                .unwrap_or_default();
-            Ok(Dispatched::value(serde_json::to_value(
-                SemanticTokensResult::Tokens(tokens),
-            )?))
+            let plain = is_plain_provider_uri(shared, uri);
+            let tokens = if plain { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| semantic_tokens::encode(&tree)) }
+                else { Some(tree_for_positional_request(shared, uri).map(|tree| semantic_tokens::encode(&tree)).unwrap_or_default()) };
+            let Some(tokens) = tokens else { return Ok(Dispatched::value(Value::Null)); };
+            let result = serde_json::to_value(SemanticTokensResult::Tokens(tokens))?;
+            Ok(Dispatched::value(result))
         }
         other => Err(Error::new(format!("unknown method: {other}"))),
     }
@@ -2546,6 +2544,25 @@ mod repository_uri_tests {
 /// The last acked tree of the view showing `uri`.
 fn tree_for_positional_request(shared: &Shared, uri: &str) -> Option<Tree> {
     shared.view_tree_for_uri(uri)
+}
+
+fn plain_provider_snapshot(shared: &Shared, uri: &str) -> Option<(Tree, String, String)> {
+    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+    let document = documents.get(uri).filter(|doc| !doc.repair)?;
+    let text = document.text.clone();
+    let entries = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+    let entry = entries.get(uri)?;
+    let (tree, view_id, _, _, _) = entry.controller.action_snapshot(&text)?;
+    if view_id != entry.view_id { return None; }
+    Some((tree.clone(), entry.repo.clone(), text))
+}
+
+fn is_plain_provider_uri(shared: &Shared, uri: &str) -> bool {
+    let negotiated = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.is_some();
+    negotiated && file_uri_path(uri).is_some_and(|path| {
+        crate::config::is_presentation_file(&path, &shared.config.config().presentation_files)
+    })
 }
 
 fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
