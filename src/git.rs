@@ -375,19 +375,26 @@ impl GitRepo {
         } else {
             path.parent().unwrap_or(path).to_path_buf()
         };
-        let out = match Self::command_in(&cwd, &["rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"]) {
+        let out = match Self::command_in(&cwd, &["rev-parse", "--show-toplevel"]) {
             Ok(out) => out,
-            Err(error) if error.git.is_some() => return Ok(None),
+            Err(error) if error.git.as_ref().is_some_and(|failure| failure.stderr.to_lowercase().contains("not a git repository")) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let mut lines = out.lines();
-        let Some(root) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
-        let Some(git_dir) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
-        let Some(common_dir) = lines.next().filter(|line| !line.is_empty()) else { return Ok(None) };
+        let root = out.trim();
+        if root.is_empty() { return Ok(None); }
+        let root = std::fs::canonicalize(root)?;
+        let git_dir = Self::command_in(&root, &["rev-parse", "--git-dir"])?;
+        let common_dir = Self::command_in(&root, &["rev-parse", "--git-common-dir"])?;
+        let resolve_dir = |value: &str| {
+            let path = Path::new(value.trim());
+            std::fs::canonicalize(if path.is_absolute() { path.to_path_buf() } else { root.join(path) })
+        };
+        let git_dir = resolve_dir(&git_dir)?;
+        let common_dir = resolve_dir(&common_dir)?;
         Ok(Some(Self {
-            root: std::fs::canonicalize(root)?,
-            git_dir: std::fs::canonicalize(git_dir)?,
-            common_dir: std::fs::canonicalize(common_dir)?,
+            root,
+            git_dir,
+            common_dir,
         }))
     }
 
