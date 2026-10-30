@@ -6,12 +6,16 @@ use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
 
 fn setup_with(profile: Profile, initial: &str) -> (fixtures::RepoFixture, stdio::TestServer, FakeEditor, String, String) {
-    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).modify("f.txt", "ONE\ntwo\nthree\n").build();
+    setup_with_encoding(profile, initial, "utf-16")
+}
+
+fn setup_with_encoding(profile: Profile, initial: &str, encoding: &str) -> (fixtures::RepoFixture, stdio::TestServer, FakeEditor, String, String) {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n"), ("😀.txt", "one\ntwo\n")]).modify("f.txt", "ONE\ntwo\nthree\n").modify("😀.txt", "ONE\ntwo\nthree\n").build();
     let uri = format!("file://{}/.magit", repo.path().display());
     if profile == Profile::CrlfNormalise { fixtures::write(&repo.path().join(".magit"), "disk\r\n"); }
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
-    init["params"]["capabilities"] = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":false}},"textDocument":{"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
+    init["params"]["capabilities"] = json!({"general":{"positionEncodings":[encoding]},"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":false}},"textDocument":{"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init); assert!(server.response_with_id(1)["error"].is_null());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -21,6 +25,53 @@ fn setup_with(profile: Profile, initial: &str) -> (fixtures::RepoFixture, stdio:
     for frame in editor.dispatch(&edit) { server.send(frame); }
     let text = editor.text(&uri).to_owned();
     (repo, server, editor, uri, text)
+}
+
+#[test]
+fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invalid_columns() {
+    for (encoding, expected) in [("utf-8", 8), ("utf-16", 6), ("utf-32", 5)] {
+        let (_repo, mut server, mut editor, uri, text) = setup_with_encoding(Profile::Standard, "old\n", encoding);
+        let links = request(&mut server, "textDocument/documentLink", 101, json!({"textDocument":{"uri":uri}}));
+        let link = links.as_array().unwrap().iter().find(|link| link["target"].as_str().is_some_and(|s| s.ends_with("/%F0%9F%98%80.txt"))).unwrap();
+        assert_eq!(link["range"]["end"]["character"].as_u64().unwrap() - link["range"]["start"]["character"].as_u64().unwrap(), expected);
+        let symbols = request(&mut server, "textDocument/documentSymbol", 102, json!({"textDocument":{"uri":uri}}));
+        let symbol = symbols.as_array().unwrap().iter().flat_map(|s| s["children"].as_array().into_iter().flatten()).find(|s| s["name"] == "😀.txt").unwrap();
+        assert_eq!(symbol["selectionRange"]["end"]["character"].as_u64().unwrap() - symbol["selectionRange"]["start"]["character"].as_u64().unwrap(), expected);
+        let tokens = request(&mut server, "textDocument/semanticTokens/full", 103, json!({"textDocument":{"uri":uri}}));
+        assert!(tokens["data"].as_array().is_some_and(|v| !v.is_empty()));
+        let file_line = text.lines().position(|line| line.contains("😀.txt")).unwrap() as u64;
+        let data = tokens["data"].as_array().unwrap();
+        assert_eq!(data.len() % 5, 0, "semantic tokens use five-u32 LSP groups");
+        let mut token_line = 0u64;
+        let mut token_start = 0u64;
+        let mut filename_token_length = None;
+        for group in data.chunks_exact(5) {
+            let delta_line = group[0].as_u64().unwrap();
+            token_line += delta_line;
+            token_start = if delta_line == 0 { token_start + group[1].as_u64().unwrap() } else { group[1].as_u64().unwrap() };
+            if token_line == file_line && group[3].as_u64() == Some(2) {
+                assert!(token_start <= text.lines().nth(file_line as usize).unwrap().chars().count() as u64);
+                filename_token_length = group[2].as_u64();
+                break;
+            }
+        }
+        assert_eq!(filename_token_length, Some(expected), "filename semantic-token length under {encoding}");
+        let def = request(&mut server, "textDocument/definition", 104, json!({"textDocument":{"uri":uri},"position":{"line":file_line,"character":0}}));
+        assert!(def["uri"].as_str().unwrap().ends_with("/%F0%9F%98%80.txt"));
+        assert!(request(&mut server, "textDocument/definition", 105, json!({"textDocument":{"uri":uri},"position":{"line":file_line,"character":999}})).is_null());
+        let final_row = text.lines().count() as u64;
+        assert!(request(&mut server, "textDocument/definition", 107, json!({"textDocument":{"uri":uri},"position":{"line":final_row,"character":0}})).is_null(), "terminal phantom row resolved under {encoding}");
+        if encoding != "utf-32" {
+            let row = text.lines().nth(file_line as usize).unwrap();
+            let prefix = row.find('😀').unwrap();
+            let column = match encoding { "utf-8" => prefix as u64 + 1, "utf-16" => row[..prefix].encode_utf16().count() as u64 + 1, _ => unreachable!() };
+            assert!(request(&mut server, "textDocument/definition", 106, json!({"textDocument":{"uri":uri},"position":{"line":file_line,"character":column}})).is_null(), "interior scalar boundary accepted under {encoding}");
+        }
+        server.send(editor.close(&uri));
+        server.shutdown_and_exit();
+        let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+        assert!(status.success());
+    }
 }
 
 fn request(server: &mut stdio::TestServer, method: &str, id: i64, params: Value) -> Value {

@@ -9,6 +9,7 @@ use lsp_types::{
     DocumentLink, DocumentSymbol, FoldingRange, FoldingRangeKind, Location, Position, Range,
     SymbolKind, Uri,
 };
+use crate::docstore::Encoding;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -266,22 +267,27 @@ impl Tree {
     /// A section is a `NAMESPACE`, a file is a `FILE` and a hunk is a `METHOD`:
     /// hunks are the smallest navigable unit inside a file, like a method body.
     pub fn document_symbols(&self) -> Vec<DocumentSymbol> {
+        self.document_symbols_with_encoding(Encoding::Utf16)
+    }
+
+    /// The tree's symbols encoded in the negotiated position unit.
+    pub fn document_symbols_with_encoding(&self, encoding: Encoding) -> Vec<DocumentSymbol> {
         self.symbols
             .iter()
-            .map(|symbol| self.document_symbol(symbol))
+            .map(|symbol| self.document_symbol(symbol, encoding))
             .collect()
     }
 
     #[allow(deprecated)]
-    fn document_symbol(&self, symbol: &Symbol) -> DocumentSymbol {
+    fn document_symbol(&self, symbol: &Symbol, encoding: Encoding) -> DocumentSymbol {
         DocumentSymbol {
             name: symbol.name.clone(),
             detail: symbol.detail.clone(),
             kind: symbol_kind(&symbol.kind),
             tags: None,
             deprecated: None,
-            range: self.line_range(symbol.start_line, symbol.end_line),
-            selection_range: self.selection_range(symbol),
+            range: self.line_range(symbol.start_line, symbol.end_line, encoding),
+            selection_range: self.selection_range(symbol, encoding),
             children: if symbol.children.is_empty() {
                 None
             } else {
@@ -289,7 +295,7 @@ impl Tree {
                     symbol
                         .children
                         .iter()
-                        .map(|child| self.document_symbol(child))
+                        .map(|child| self.document_symbol(child, encoding))
                         .collect(),
                 )
             },
@@ -298,11 +304,16 @@ impl Tree {
 
     /// The file-path links of the rendered document, as `DocumentLink`s.
     pub fn document_links(&self, repo_root: &str) -> Vec<DocumentLink> {
+        self.document_links_with_encoding(repo_root, Encoding::Utf16)
+    }
+
+    /// The tree's file links encoded in the negotiated position unit.
+    pub fn document_links_with_encoding(&self, repo_root: &str, encoding: Encoding) -> Vec<DocumentLink> {
         self.links
             .iter()
             .filter_map(|link| {
                 Some(DocumentLink {
-                    range: self.link_range(link),
+                    range: self.link_range(link, encoding),
                     target: Some(file_uri(repo_root, &link.path)?),
                     tooltip: Some(link.path.clone()),
                     data: None,
@@ -333,6 +344,13 @@ impl Tree {
             uri: file_uri(repo_root, path)?,
             range: Range::new(Position::new(new_line, 0), Position::new(new_line, 0)),
         })
+    }
+
+    /// Resolve a definition position after validating its negotiated character boundary.
+    pub fn definition_with_encoding(&self, repo_root: &str, position: Position, encoding: Encoding) -> Option<Location> {
+        let text = self.lines.get(position.line as usize)?;
+        if !valid_column(text, position.character, encoding) { return None; }
+        self.definition(repo_root, position)
     }
 
     /// Fold ranges for each section and file block (0-based, LSP convention).
@@ -428,18 +446,18 @@ impl Tree {
     }
 
     /// A full-line LSP range from the first to the last line of a symbol.
-    fn line_range(&self, start_line: usize, end_line: usize) -> Range {
+    fn line_range(&self, start_line: usize, end_line: usize, encoding: Encoding) -> Range {
         let last = self.lines.len().saturating_sub(1);
         let end = end_line.min(last);
         let start = start_line.min(end);
         Range::new(
             Position::new(start as u32, 0),
-            Position::new(end as u32, self.line_utf16_len(end)),
+            Position::new(end as u32, self.line_len(end, encoding)),
         )
     }
 
     /// The range to reveal when a symbol is picked: its name or path.
-    fn selection_range(&self, symbol: &Symbol) -> Range {
+    fn selection_range(&self, symbol: &Symbol, encoding: Encoding) -> Range {
         let line = symbol.start_line;
         if symbol.kind == "file" {
             if let Some(link) = self
@@ -447,25 +465,25 @@ impl Tree {
                 .iter()
                 .find(|link| link.line == line && link.path == symbol.name)
             {
-                return self.link_range(link);
+                return self.link_range(link, encoding);
             }
         }
         if symbol.kind == "section" {
             let start = Position::new(line as u32, 0);
             let end = Position::new(
                 line as u32,
-                self.line_utf16_len(line).min(utf16_len(&symbol.name)),
+                self.line_len(line, encoding).min(column_len(&symbol.name, encoding)),
             );
             return Range::new(start, end);
         }
-        self.line_range(line, line)
+        self.line_range(line, line, encoding)
     }
 
     /// A link's byte offsets as an LSP range.
-    fn link_range(&self, link: &Link) -> Range {
+    fn link_range(&self, link: &Link, encoding: Encoding) -> Range {
         let text = self.lines.get(link.line).map(String::as_str).unwrap_or("");
-        let start = utf16_col(text, link.start);
-        let end = utf16_col(text, link.start.saturating_add(link.length));
+        let start = encoded_col(text, link.start, encoding);
+        let end = encoded_col(text, link.start.saturating_add(link.length), encoding);
         Range::new(
             Position::new(link.line as u32, start),
             Position::new(link.line as u32, end),
@@ -473,10 +491,10 @@ impl Tree {
     }
 
     /// Length of line `line` in UTF-16 code units.
-    fn line_utf16_len(&self, line: usize) -> u32 {
+    fn line_len(&self, line: usize, encoding: Encoding) -> u32 {
         self.lines
             .get(line)
-            .map(|text| utf16_len(text))
+            .map(|text| column_len(text, encoding))
             .unwrap_or(0)
     }
 }
@@ -514,13 +532,26 @@ fn utf16_len(text: &str) -> u32 {
     text.encode_utf16().count() as u32
 }
 
-/// UTF-16 column of a byte offset into `text`.
-fn utf16_col(text: &str, byte: usize) -> u32 {
-    let mut byte = byte.min(text.len());
-    while !text.is_char_boundary(byte) {
-        byte -= 1;
+fn column_len(text: &str, encoding: Encoding) -> u32 {
+    match encoding { Encoding::Utf8 => text.len() as u32, Encoding::Utf16 => utf16_len(text), Encoding::Utf32 => text.chars().count() as u32 }
+}
+
+fn encoded_col(text: &str, byte: usize, encoding: Encoding) -> u32 {
+    let byte = byte.min(text.len());
+    let byte = (0..=byte).rev().find(|index| text.is_char_boundary(*index)).unwrap_or(0);
+    column_len(&text[..byte], encoding)
+}
+
+fn valid_column(text: &str, column: u32, encoding: Encoding) -> bool {
+    let text = text.strip_suffix('\r').unwrap_or(text);
+    if column == 0 { return true; }
+    let mut count = 0u32;
+    for ch in text.chars() {
+        count += match encoding { Encoding::Utf8 => ch.len_utf8() as u32, Encoding::Utf16 => ch.len_utf16() as u32, Encoding::Utf32 => 1 };
+        if count == column { return true; }
+        if count > column { return false; }
     }
-    utf16_len(&text[..byte])
+    count == column
 }
 
 /// The last non-blank line in `start..end`, if any.

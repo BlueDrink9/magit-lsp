@@ -5,6 +5,7 @@
 //! encoding, so the rest of the server never touches either.
 
 use crate::tree::{Token, Tree};
+use crate::docstore::Encoding;
 use lsp_types::{SemanticToken, SemanticTokens, SemanticTokensLegend};
 
 /// Token types the status view can emit, in legend order.
@@ -99,9 +100,14 @@ pub fn token_groups() -> serde_json::Value {
 
 /// Encode every token of `tree` as a full-document semantic-token response.
 pub fn encode(tree: &Tree) -> SemanticTokens {
+    encode_with_encoding(tree, Encoding::Utf16)
+}
+
+/// Encode all tokens using the negotiated position unit.
+pub fn encode_with_encoding(tree: &Tree, encoding: Encoding) -> SemanticTokens {
     SemanticTokens {
         result_id: None,
-        data: encode_lines(&tree.lines, &tree.tokens),
+        data: encode_lines_with_encoding(&tree.lines, &tree.tokens, encoding),
     }
 }
 
@@ -111,6 +117,11 @@ pub fn encode(tree: &Tree) -> SemanticTokens {
 /// the same line is dropped, because LSP requires sorted, non-overlapping
 /// ranges. Types outside the legend cannot be encoded and are skipped.
 pub fn encode_lines(lines: &[String], tokens: &[Token]) -> Vec<SemanticToken> {
+    encode_lines_with_encoding(lines, tokens, Encoding::Utf16)
+}
+
+/// Delta-encode tokens using the negotiated position unit.
+pub fn encode_lines_with_encoding(lines: &[String], tokens: &[Token], encoding: Encoding) -> Vec<SemanticToken> {
     let mut ordered: Vec<&Token> = tokens.iter().collect();
     ordered.sort_by_key(|token| (token.line, token.start));
 
@@ -137,8 +148,8 @@ pub fn encode_lines(lines: &[String], tokens: &[Token]) -> Vec<SemanticToken> {
             }
         }
 
-        let start = utf16_len(&text[..start_byte]);
-        let length = utf16_len(&text[start_byte..end_byte]);
+        let start = column_len(&text[..start_byte], encoding);
+        let length = column_len(&text[start_byte..end_byte], encoding);
         if length == 0 {
             continue;
         }
@@ -188,6 +199,10 @@ fn modifier_bitset(modifiers: &[String]) -> u32 {
 /// Length of `text` in UTF-16 code units, the unit LSP columns use.
 fn utf16_len(text: &str) -> u32 {
     text.encode_utf16().count() as u32
+}
+
+fn column_len(text: &str, encoding: Encoding) -> u32 {
+    match encoding { Encoding::Utf8 => text.len() as u32, Encoding::Utf16 => utf16_len(text), Encoding::Utf32 => text.chars().count() as u32 }
 }
 
 /// `index` moved back to the nearest UTF-8 character boundary within `text`.

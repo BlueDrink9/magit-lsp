@@ -2240,7 +2240,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let result = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.document_symbols()) }
+            let result = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.document_symbols_with_encoding(encoding)) }
                 else { tree_for_positional_request(shared, uri).map(|tree| tree.document_symbols()) };
             let Some(result) = result else { return Ok(Dispatched::value(Value::Null)); };
             let result = serde_json::to_value(result)?;
@@ -2257,9 +2257,9 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let location = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).and_then(|(tree, repo, text)| {
-                if !plain_position_valid(&text, position.position, Encoding::Utf16) { return None; }
-                tree.definition(&repo, position.position)
+            let location = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).and_then(|(tree, repo, text)| {
+                if !plain_position_valid(&text, position.position, encoding) { return None; }
+                tree.definition_with_encoding(&repo, position.position, encoding)
             }) } else { tree_for_positional_request(shared, uri).and_then(|tree| {
                 let repo = shared.repo_for_uri(uri)?;
                 tree.definition(&repo, position.position)
@@ -2272,7 +2272,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let links = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, repo, _)| tree.document_links(&repo)) } else { tree_for_positional_request(shared, uri).and_then(|tree| Some(tree.document_links(&shared.repo_for_uri(uri)?))) };
+            let links = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, repo, _)| tree.document_links_with_encoding(&repo, encoding)) } else { tree_for_positional_request(shared, uri).and_then(|tree| Some(tree.document_links(&shared.repo_for_uri(uri)?))) };
             let Some(links) = links else { return Ok(Dispatched::value(Value::Null)); };
             Ok(Dispatched::value(serde_json::to_value(links)?))
         }
@@ -2292,7 +2292,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 return Ok(Dispatched::value(Value::Null));
             }
             let plain = is_plain_provider_uri(shared, uri);
-            let tokens = if plain { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| semantic_tokens::encode(&tree)) }
+            let tokens = if plain { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, _, _)| semantic_tokens::encode_with_encoding(&tree, encoding)) }
                 else { Some(tree_for_positional_request(shared, uri).map(|tree| semantic_tokens::encode(&tree)).unwrap_or_default()) };
             let Some(tokens) = tokens else { return Ok(Dispatched::value(Value::Null)); };
             let result = serde_json::to_value(SemanticTokensResult::Tokens(tokens))?;
