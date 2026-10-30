@@ -227,7 +227,36 @@ pub enum Support {
     Missing(&'static str),
 }
 
+/// Availability of a Plain content action, shared by offer and execution paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlainContentAction {
+    /// The action may be offered and dispatched.
+    Supported,
+    /// The client lacks required standard LSP capabilities.
+    MissingCapabilities(&'static str),
+    /// Discard confirmation is not yet backed by a Plain document prompt.
+    ConfirmationUnavailable(&'static str),
+}
+
 impl PlainCapabilities {
+    /// Decide whether a Plain stage/unstage/discard action can run.
+    pub fn content_action(&self, command: &str) -> Option<PlainContentAction> {
+        if !matches!(command, "status.stage" | "status.unstage" | "status.discard") {
+            return None;
+        }
+        if !self.apply_edit || !self.code_actions || !self.execute_command {
+            return Some(PlainContentAction::MissingCapabilities(
+                "workspace.applyEdit, textDocument.codeAction, and workspace.executeCommand are required",
+            ));
+        }
+        if command == "status.discard" {
+            return Some(PlainContentAction::ConfirmationUnavailable(
+                "Discard is unavailable in Plain mode until document-backed confirmation is supported",
+            ));
+        }
+        Some(PlainContentAction::Supported)
+    }
+
     fn from_lsp(caps: &Value) -> Self {
         let b = |path: &str| caps.pointer(path).and_then(Value::as_bool) == Some(true);
         let present = |path: &str| {

@@ -18,13 +18,17 @@ fn next_apply(server: &mut stdio::TestServer) -> Value {
 
 /// Open the repository's `.magit` status document as a Plain client.
 fn open_plain(repo: &fixtures::RepoFixture) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_with_capabilities(repo, json!({
+        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
+        "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
+    }))
+}
+
+fn open_plain_with_capabilities(repo: &fixtures::RepoFixture, capabilities: Value) -> (stdio::TestServer, FakeEditor, String) {
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
-    init["params"]["capabilities"] = json!({
-        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
-        "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
-    });
+    init["params"]["capabilities"] = capabilities;
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init);
     assert!(server.response_with_id(1)["result"].is_object());
@@ -34,6 +38,54 @@ fn open_plain(repo: &fixtures::RepoFixture) -> (stdio::TestServer, FakeEditor, S
     let edit = next_apply(&mut server);
     for frame in editor.dispatch(&edit) { server.send(frame); }
     (server, editor, uri)
+}
+
+#[test]
+fn discard_is_disabled_and_forged_execution_refuses_without_prompt_or_git_changes() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
+    let (mut server, mut editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":91,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let actions = server.response_with_id(91)["result"].as_array().unwrap().clone();
+    let discard = actions.iter().find(|action| action["data"]["command"] == "status.discard").expect("disabled discard offer");
+    assert!(discard["disabled"]["reason"].as_str().unwrap().contains("confirmation"));
+    assert!(discard["command"].is_null());
+    let forged = discard["data"].clone();
+    let before = repo_state(&repo);
+    let response = execute_offered(&mut server, &mut editor, forged, 92);
+    assert!(response["result"]["effects"][0]["text"].as_str().unwrap().contains("confirmation"));
+    assert_eq!(repo_state(&repo), before);
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn unavailable_actions_are_omitted_without_disabled_support() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
+    let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":93,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let response = server.response_with_id(93);
+    let actions = response["result"].as_array().unwrap();
+    assert!(actions.iter().any(|action| action["command"]["arguments"][0]["command"] == "status.stage"));
+    assert!(!actions.iter().any(|action| action["data"]["command"] == "status.discard" || action["command"]["arguments"][0]["command"] == "status.discard"));
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn missing_execute_command_capability_disables_actions_with_reason() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
+    let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":94,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let response = server.response_with_id(94);
+    let actions = response["result"].as_array().unwrap();
+    let stage = actions.iter().find(|action| action["data"]["command"] == "status.stage").expect("disabled stage offer");
+    assert!(stage["disabled"]["reason"].as_str().unwrap().contains("workspace.executeCommand"));
+    assert!(stage["command"].is_null());
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 
 /// Request code actions on the `f.txt` row and return the offered stage argument.
@@ -127,7 +179,7 @@ fn titles_use_repository_style_configured_chord_and_structured_path() {
         else { let _ = std::fs::remove_file(&repo_config); }
         let mut server = stdio::TestServer::spawn(&[(magit_lsp::config::CONFIG_ENV, config_path.to_str().unwrap())]);
         let mut init = stdio::initialize_message();
-        init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
+        init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
         init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
         server.send(init); assert!(server.response_with_id(1)["result"].is_object());
         server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -157,7 +209,7 @@ fn selection_range_offers_exact_target_and_stages_only_selected_change() {
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
-    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}}});
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init); assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
@@ -299,7 +351,7 @@ fn cursor_actions_target_file_or_owning_hunk_once() {
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
-    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}}});
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init); assert!(server.response_with_id(1)["result"].is_object());
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));

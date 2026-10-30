@@ -1693,11 +1693,29 @@ fn plain_stale_message() -> Result<Dispatched> {
     })?))
 }
 
+/// Refuse an unsupported Plain action without entering dispatch or registering prompts.
+fn plain_unsupported_message(reason: &'static str) -> Result<Dispatched> {
+    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse {
+        effects: vec![Effect::message(MessageLevel::Warn, reason)],
+    })?))
+}
+
 /// Execute a Plain action only while its retained offer still matches live state.
 fn execute_plain_action(
     shared: &Shared,
     params: crate::dispatch::PlainActionParams,
 ) -> Result<Dispatched> {
+    let caps = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
+    if let Some(caps) = caps {
+        match caps.content_action(&params.command) {
+            Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)
+                | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason)) =>
+                    return plain_unsupported_message(reason),
+            _ => {}
+        }
+    } else {
+        return plain_unsupported_message("Plain action capabilities are unavailable");
+    }
     let uri = params.document_uri.as_str();
     let text = {
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
@@ -2209,6 +2227,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         (text, tree.clone(), generation, scope.to_owned(), entry.repo.clone())
     };
     let config = shared.config.for_repository(std::path::Path::new(&repo));
+    let capabilities = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
     let style = config.config().actions.title_style;
     let keymap = config.keymap(&scope);
     let start = params.range.start;
@@ -2236,6 +2255,16 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             crate::dispatch::offer_target(&tree, command.id, &line_node.id)
         };
         if let Some(target) = target {
+            let availability = capabilities.as_ref().and_then(|caps| caps.content_action(command.id));
+            let unavailable = match availability {
+                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)
+                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason)) => Some(reason),
+                Some(crate::presentation::PlainContentAction::Supported) => None,
+                None => continue,
+            };
+            if unavailable.is_some() && !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) {
+                continue;
+            }
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
@@ -2245,9 +2274,10 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
             let action = lsp_types::CodeAction {
                 title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                disabled: None, edit: None, command: Some(lsp_types::Command {
-                    title, command: "magit.command".to_string(), arguments: Some(vec![args]),
-                }), data: None,
+                disabled: unavailable.map(|reason| lsp_types::CodeActionDisabled { reason: reason.to_owned() }), edit: None,
+                command: unavailable.is_none().then(|| lsp_types::Command {
+                    title, command: "magit.command".to_string(), arguments: Some(vec![args.clone()]),
+                }), data: unavailable.map(|_| args),
             };
             actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
         }
