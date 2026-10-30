@@ -5,7 +5,7 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, Scope, SelectionOperation};
+use crate::commands::{self, SelectionOperation};
 use crate::diff_text;
 use crate::git::GitLogOptions;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
@@ -1481,7 +1481,7 @@ impl Session {
                     .and_then(|view| view.menu())
                     .map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
-                if registered.scope.matches(&scope) {
+                if registered.applies_to(&scope) {
                     return self.dispatch(crate::dispatch::DispatchRequest {
                         action_target: None,
                         command: registered.id.to_string(),
@@ -1496,7 +1496,7 @@ impl Session {
                 // any menus stacked above it) and run the command there, so
                 // e.g. an action that refreshes the status buffer never runs
                 // against a menu.
-                let target = match self.matching_ancestor(view_id, registered.scope) {
+                let target = match self.matching_ancestor(view_id, registered) {
                     Some(target) => target,
                     None => {
                         return Ok(InvokeResult {
@@ -1564,12 +1564,12 @@ impl Session {
         Ok(result)
     }
 
-    /// The nearest view below `view_id` that a command in `scope` applies to.
-    fn matching_ancestor(&self, view_id: &str, scope: Scope) -> Option<String> {
+    /// The nearest view below `view_id` to which `command` applies.
+    fn matching_ancestor(&self, view_id: &str, command: &commands::Command) -> Option<String> {
         let mut current = self.views.previous_of(view_id);
         while let Some(view) = current {
             let id = view.descriptor().id.clone();
-            if scope.matches(view.descriptor().scope.as_str()) {
+            if command.applies_to(view.descriptor().scope.as_str()) {
                 return Some(id);
             }
             current = self.views.previous_of(&id);
@@ -1851,7 +1851,7 @@ impl Session {
                 None => return Err(Error::new(format!("unknown command: {command_id}"))),
             }
 
-            if !command.scope.matches(view.descriptor().scope.as_str()) {
+            if !command.applies_to(view.descriptor().scope.as_str()) {
                 return Ok(InvokeResult {
                     effects: vec![Effect::message(
                         MessageLevel::Info,

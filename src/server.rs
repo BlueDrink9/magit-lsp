@@ -1794,7 +1794,8 @@ fn execute_plain_action(
             }
             crate::dispatch::PlainActionTarget::View(target) => {
                 let supported = matches!(params.command.as_str(), "open.commit" | "open.log" | "common.cancel");
-                if !supported || target.view_id != view_id || !((matches!(params.command.as_str(), "open.commit" | "open.log") && scope == "status") || (params.command == "common.cancel" && scope != "status")) {
+                let applies = crate::commands::registry().get(&params.command).is_some_and(|command| command.applies_to(&scope));
+                if !supported || target.view_id != view_id || !(applies || (params.command == "common.cancel" && scope != "status")) {
                     return plain_stale_message();
                 }
                 0
@@ -2365,10 +2366,10 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         }
     }
     for command in crate::commands::registry().iter() {
-        if !command.scope.matches(&scope) { continue; }
+        if !command.applies_to(&scope) { continue; }
         let registry_availability = crate::commands::registry().availability(command.id);
         if !crate::dispatch::content_command(command.id) {
-            let semantic = (matches!(command.id, "open.commit" | "open.log") && scope == "status")
+            let semantic = (matches!(command.id, "open.commit" | "open.log") && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
                 let args = serde_json::json!({

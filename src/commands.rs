@@ -105,6 +105,14 @@ pub struct Command {
     pub run: RunFn,
 }
 
+impl Command {
+    /// Whether this command applies to a view scope, including command-specific exceptions.
+    pub fn applies_to(&self, view_scope: &str) -> bool {
+        self.scope.matches(view_scope)
+            || (self.id == "open.commit" && view_scope == "log")
+    }
+}
+
 /// The operation requested for a commit selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionOperation {
@@ -376,7 +384,7 @@ impl Registry {
     /// Whether a registered command is both in scope and implemented.
     pub fn is_runnable_in(&self, id: &str, view_scope: &str) -> bool {
         self.get(id).is_some_and(|command| {
-            command.scope.matches(view_scope)
+            command.applies_to(view_scope)
                 && self.availability(id) == Some(Availability::Implemented)
         })
     }
@@ -407,6 +415,8 @@ mod availability_tests {
         assert!(commands.is_runnable_in("common.confirm", "status"));
         assert!(!commands.is_runnable_in("status.apply", "commit"));
         assert!(!commands.is_runnable_in("status.reverse", "status"));
+        assert!(commands.is_runnable_in("open.commit", "log"));
+        assert!(!commands.is_runnable_in("status.stage", "log"));
     }
 }
 

@@ -101,6 +101,8 @@ fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
 fn plain_menu_switches_use_retained_targets_and_restore_caller() {
     let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).commit("second", [("f.txt", "one\ntwo\nthree\n")]).modify("f.txt", "ONE\ntwo\nthree\n").build();
     let uri = format!("file://{}/.magit", repo.path().display());
+    let presentation_path = repo.path().join(".magit");
+    let presentation_before = std::fs::read(&presentation_path).ok();
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
@@ -143,6 +145,7 @@ fn plain_menu_switches_use_retained_targets_and_restore_caller() {
     let refused = execute(&mut server, &mut editor, forged_view, 261);
     assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
     assert_eq!(state(&repo), before);
+    assert_eq!(std::fs::read(&presentation_path).ok(), presentation_before);
     let mut unsupported = off.clone(); unsupported["target"]["itemKey"] = json!("=A");
     let refused = execute(&mut server, &mut editor, unsupported, 27);
     assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
@@ -193,7 +196,6 @@ fn plain_menu_switches_use_retained_targets_and_restore_caller() {
     let refused = execute(&mut server, &mut editor, switch_as_action, 354);
     assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
     assert_eq!(editor.text(&uri), on_menu);
-    let stale = concrete.clone();
     let mut wrong_item = concrete.clone(); wrong_item["target"]["itemKey"] = json!("o");
     let refused = execute(&mut server, &mut editor, wrong_item, 351);
     assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
@@ -208,8 +210,29 @@ fn plain_menu_switches_use_retained_targets_and_restore_caller() {
     assert!(!log_text.ends_with('\n'));
     assert!(log_text.contains("initial"), "concrete log missing commit: {log_text}");
     assert!(log_text.lines().any(|line| line.contains("*")), "captured graph switch argument did not affect log output: {log_text}");
-    let refused = execute(&mut server, &mut editor, stale, 361);
+    let log_view = code_actions(&mut server, &uri, 0, 371);
+    let commit_action = offered(&log_view, "open.commit");
+    let log_view_id = commit_action["target"]["viewId"].clone();
+    let stale_commit = commit_action.clone();
+    execute(&mut server, &mut editor, commit_action, 372);
+    let commit_menu = editor.text(&uri).to_owned();
+    assert!(commit_menu.lines().any(|line| line.contains("git commit")));
+    let switch = offered_switch(&code_actions(&mut server, &uri, 0, 373));
+    assert_eq!(switch["target"]["itemKey"], "-a");
+    execute(&mut server, &mut editor, switch, 374);
+    assert!(editor.text(&uri).contains("git commit --all"));
+    let mut forged_commit = stale_commit.clone();
+    forged_commit["target"]["viewId"] = json!("forged-view");
+    let refused = execute(&mut server, &mut editor, forged_commit, 375);
     assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    let stale = execute(&mut server, &mut editor, stale_commit, 376);
+    assert!(stale["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert_eq!(state(&repo), before);
+    let back = offered(&code_actions(&mut server, &uri, 0, 377), "common.cancel");
+    execute(&mut server, &mut editor, back, 378);
+    assert_eq!(editor.text(&uri), log_text, "Back did not restore the exact concrete log");
+    assert_eq!(code_actions(&mut server, &uri, 0, 379).iter().find(|a| a["command"]["arguments"][0]["command"] == "open.commit").unwrap()["command"]["arguments"][0]["target"]["viewId"], log_view_id);
+    assert_eq!(state(&repo), before);
     let back = offered(&code_actions(&mut server, &uri, 0, 37), "common.cancel");
     execute(&mut server, &mut editor, back, 38);
     assert_eq!(editor.text(&uri), caller);

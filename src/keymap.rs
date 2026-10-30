@@ -122,7 +122,7 @@ impl Keymap {
 
         let candidates: Vec<&Command> = registry
             .iter()
-            .filter(|command| command.scope.matches(scope))
+            .filter(|command| command.applies_to(scope))
             .collect();
 
         // Choose the highest-precedence declaration per command.

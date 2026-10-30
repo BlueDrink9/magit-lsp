@@ -1524,3 +1524,24 @@ fn status_command_in_menu_reports_scope_mismatch_without_changing_anything() {
         worktree_before
     );
 }
+
+#[test]
+fn rich_dispatch_opens_commit_menu_from_log_without_widening_status_scope() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first log entry", [("f.txt", TEN_LINES)])
+        .commit("second log entry", [("f.txt", "changed\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    test.press("g l");
+    test.invoke("log.current");
+    let log = test.text_of(test.view_id()).join("\n");
+    assert!(log.contains("first log entry"), "expected concrete log before dispatch: {log}");
+    let log_id = test.view_id().to_owned();
+    let refused = test.invoke("status.stage");
+    assert!(message_texts(&refused.effects).iter().any(|message| message.contains("Not available")));
+    assert_eq!(test.view_id(), log_id);
+
+    let (commit, _) = test.open_via_command("open.commit");
+    assert!(test.text_of(&commit.id).join("\n").contains("git commit"));
+}
