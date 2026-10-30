@@ -3,6 +3,7 @@ vim.opt.swapfile = false
 vim.opt.undofile = false
 vim.opt.shortmess:append('I')
 vim.g.plain_smoke_rich_notifications = 0
+vim.lsp.log.set_level('trace')
 vim.lsp.handlers['view/render'] = function()
   vim.g.plain_smoke_rich_notifications = vim.g.plain_smoke_rich_notifications + 1
 end

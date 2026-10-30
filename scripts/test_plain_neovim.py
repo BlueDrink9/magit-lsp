@@ -27,18 +27,20 @@ def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def main() -> None:
+def run_variant(final_newline: bool) -> None:
     for executable in ("nvim", "tmux", "git"):
         if not shutil.which(executable):
             raise RuntimeError(f"required executable not found: {executable}")
     binary = ROOT / "target/release/magit-lsp"
     if not binary.exists():
         raise RuntimeError(f"release binary missing: {binary}")
-    EVIDENCE.mkdir(parents=True, exist_ok=True)
     name = "plain-" + uuid.uuid4().hex[:10]
+    run_evidence = EVIDENCE / ("with-final-newline" if final_newline else "without-final-newline")
+    run_evidence.mkdir(parents=True, exist_ok=True)
+    trace_path = run_evidence / "state/nvim/lsp.log"
     socket = f"/tmp/{name}.sock"
     server_id = name
-    report: dict[str, object] = {"tmux_server": server_id, "nvim_socket": socket}
+    report: dict[str, object] = {"tmux_server": server_id, "nvim_socket": socket, "final_newline": final_newline}
     failure: BaseException | None = None
 
     def rpc(expr: str) -> str:
@@ -52,6 +54,7 @@ def main() -> None:
             "for _,x in ipairs(c) do names[#names+1]=x.name end; "
             "return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'), "
             "name=vim.api.nvim_buf_get_name(b), modified=vim.bo[b].modified, clients=names, "
+            "endofline=vim.bo[b].endofline, fixeol=vim.bo[b].fixeol, fileformat=vim.bo[b].fileformat, "
             "rtp=vim.o.runtimepath, version=vim.lsp.util.buf_versions[b], pid=vim.fn.getpid(), "
             "server_pid=c[1] and c[1].rpc.pid, "
             "capabilities=c[1] and c[1].config.capabilities, server_capabilities=c[1] and c[1].server_capabilities, "
@@ -70,7 +73,7 @@ def main() -> None:
             home = temp / "home"
             home.mkdir()
             env = os.environ.copy()
-            env.update({"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "PLAIN_REPO": str(repo), "PLAIN_SERVER": str(binary)})
+            env.update({"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "XDG_STATE_HOME": str(run_evidence / "state"), "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "PLAIN_REPO": str(repo), "PLAIN_SERVER": str(binary)})
             run(["git", "init", "-q"], cwd=repo, env=env)
             run(["git", "config", "user.name", "Plain Smoke"], cwd=repo, env=env)
             run(["git", "config", "user.email", "plain@example.invalid"], cwd=repo, env=env)
@@ -78,9 +81,7 @@ def main() -> None:
             run(["git", "add", "tracked.txt"], cwd=repo, env=env)
             run(["git", "commit", "-qm", "initial"], cwd=repo, env=env)
             presentation = repo / ".magit"
-            # Match the server's no-final-newline presentation text. Stock
-            # Neovim preserves this native file option through applyEdit.
-            disk_before = b"stale presentation sentinel"
+            disk_before = b"stale presentation sentinel\n" if final_newline else b"stale presentation sentinel"
             presentation.write_bytes(disk_before)
             config = ROOT / "tests/ui/plain_init.lua"
             run(["tmux", "-L", server_id, "new-session", "-d", "-x", "120", "-y", "100", "-s", "plain", "nvim", "--listen", socket, "-u", str(config), str(presentation)], cwd=repo, env=env)
@@ -96,7 +97,7 @@ def main() -> None:
                 if time.monotonic() >= deadline:
                     diagnostics: dict[str, object] = {"last_state": locals().get("initial", {}), "rpc_error": rpc_error}
                     diagnostics["tmux"] = subprocess.run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"], capture_output=True, text=True).stdout
-                    (EVIDENCE / "failure.json").write_text(json.dumps(diagnostics, indent=2) + "\n")
+                    (run_evidence / "failure.json").write_text(json.dumps(diagnostics, indent=2) + "\n")
                     raise RuntimeError(f"timed out waiting for Plain didOpen rendering; diagnostics: {diagnostics}")
             report["bootstrap"] = initial
             report["plugin_free"] = not any("magit-lsp" in entry for entry in initial["rtp"].split(","))
@@ -178,15 +179,15 @@ def main() -> None:
                 page = 0
                 while True:
                     screen = run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"]).stdout
-                    (EVIDENCE / f"{label}.screen").write_text(screen)
+                    (run_evidence / f"{label}.screen").write_text(screen)
                     visible = re.findall(r"^\s*(\d+): (.+)$", screen, re.MULTILINE)
                     offered_by_number.update(visible)
                     maximum = max((int(number) for number, _ in visible), default=0)
                     if "Type number" in screen:
-                        (EVIDENCE / f"{label}-page-{page}.screen").write_text(screen)
+                        (run_evidence / f"{label}-page-{page}.screen").write_text(screen)
                         break
                     if screen.rstrip().endswith("-- More --") and maximum > last_page_max:
-                        (EVIDENCE / f"{label}-page-{page}.screen").write_text(screen)
+                        (run_evidence / f"{label}-page-{page}.screen").write_text(screen)
                         last_page_max = maximum
                         page += 1
                         run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Space"])
@@ -212,7 +213,7 @@ def main() -> None:
                             run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Enter"])
                             acknowledged = True
                     elif "Type number" not in closed and not closed.rstrip().endswith("-- More --"):
-                        (EVIDENCE / f"{label}-closed.screen").write_text(closed)
+                        (run_evidence / f"{label}-closed.screen").write_text(closed)
                         break
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f"native picker did not close ({label}):\n{closed}")
@@ -257,7 +258,7 @@ def main() -> None:
             assert final["rtp"] == initial["rtp"]
             report["action_git_states"] = {"before": before, "file_staged": after_stage, "partial": partial}
             report["actions_final"] = final
-            (EVIDENCE / "actions-final.screen").write_text(final["text"] + "\n")
+            (run_evidence / "actions-final.screen").write_text(final["text"] + "\n")
             report["presentation_disk_unchanged"] = presentation.read_bytes() == disk_before
             report["presentation_disk_bytes"] = presentation.read_bytes().decode()
             report["custom_notifications"] = edited["rich_notifications"]
@@ -283,8 +284,19 @@ def main() -> None:
         report["cleanup"]["cleanup_verified"] = not report["cleanup"]["tmux_sessions_remain"] and not os.path.exists(socket) and not report["cleanup"]["server_remaining"]
         if "native_edit_undo_repair" in report:
             final = report["native_edit_undo_repair"]["after_undo"]
-            (EVIDENCE / "native.screen").write_text(str(final["text"]) + "\n")
-        (EVIDENCE / ("failure.json" if failure else "native.json")).write_text(json.dumps({**report, "error": str(failure) if failure else None}, indent=2, sort_keys=True) + "\n")
+            (run_evidence / "native.screen").write_text(str(final["text"]) + "\n")
+        (run_evidence / ("failure.json" if failure else "native.json")).write_text(json.dumps({**report, "error": str(failure) if failure else None}, indent=2, sort_keys=True) + "\n")
+        if trace_path.exists():
+            trace_lines = trace_path.read_text(errors="replace").splitlines()
+            changes = [index for index, line in enumerate(trace_lines) if "textDocument/didChange" in line]
+            edits = [index for index, line in enumerate(trace_lines) if '"method = "workspace/applyEdit"' in line]
+            keep = {index for index, line in enumerate(trace_lines) if "textDocument/didOpen" in line or '"magit-lsp/outbound/1"' in line}
+            keep.update(changes[:20])
+            keep.update(changes[-10:])
+            keep.update(edits[:8])
+            keep.update(edits[-3:])
+            selected = [line for index, line in enumerate(trace_lines) if index in keep]
+            (run_evidence / "trace-excerpts.log").write_text("\n".join(selected) + "\n")
     if failure:
         raise failure
     if not report["cleanup"]["cleanup_verified"]:
@@ -292,4 +304,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    errors: list[str] = []
+    for with_final_newline in (False, True):
+        try:
+            run_variant(with_final_newline)
+        except BaseException as error:
+            errors.append(f"{with_final_newline=}: {error}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
