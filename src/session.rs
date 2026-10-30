@@ -1542,6 +1542,28 @@ impl Session {
         }
     }
 
+    /// Execute an exact retained, read-only Plain menu action through normal menu semantics.
+    pub fn run_plain_menu_action(&mut self, view_id: &str, generation: u64, menu_id: &str, key: &str, ui: &dyn PromptUi) -> Result<InvokeResult> {
+        let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
+            && view.menu().is_some_and(|menu| menu.id == menu_id
+                && matches!(menu.item(key), Some(crate::menu::Item::Action { command, status: MenuStatus::Implemented, .. })
+                    if command == "log.current")));
+        if !valid { return Ok(unbound(key)); }
+        let result = self.menu_action(view_id, key, &ViewKeyParams { view_id: view_id.to_string(), version: generation, key: key.to_string(), editor_mode: crate::keymap::EditorMode::Normal, cursor: Cursor { line: 0, column: 0 }, selection: None }, ui)?;
+        self.publish();
+        Ok(result)
+    }
+
+    /// Pop the exact retained concrete log view and focus its caller.
+    pub fn back_from_plain_log(&mut self, view_id: &str, generation: u64) -> Result<InvokeResult> {
+        let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
+            && view.descriptor().scope.as_str() == "log");
+        if !valid { return Ok(unbound("common.cancel")); }
+        let result = self.pop_view(view_id)?;
+        self.publish();
+        Ok(result)
+    }
+
     /// The nearest view below `view_id` that a command in `scope` applies to.
     fn matching_ancestor(&self, view_id: &str, scope: Scope) -> Option<String> {
         let mut current = self.views.previous_of(view_id);

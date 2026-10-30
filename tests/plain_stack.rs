@@ -41,7 +41,7 @@ fn state(repo: &fixtures::RepoFixture) -> (String, String, String) {
 
 #[test]
 fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
-    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).modify("f.txt", "ONE\ntwo\n").build();
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).commit("second", [("f.txt", "one\ntwo\nthree\n")]).modify("f.txt", "ONE\ntwo\nthree\n").build();
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
@@ -99,7 +99,7 @@ fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
 
 #[test]
 fn plain_menu_switches_use_retained_targets_and_restore_caller() {
-    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).modify("f.txt", "ONE\ntwo\n").build();
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).commit("second", [("f.txt", "one\ntwo\nthree\n")]).modify("f.txt", "ONE\ntwo\nthree\n").build();
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(&[]);
     let mut init = stdio::initialize_message();
@@ -155,6 +155,63 @@ fn plain_menu_switches_use_retained_targets_and_restore_caller() {
     assert_eq!(state(&repo), before);
     let back = offered(&code_actions(&mut server, &uri, 0, 29), "common.cancel");
     execute(&mut server, &mut editor, back, 30);
+    assert_eq!(editor.text(&uri), caller);
+    assert_eq!(state(&repo), before);
+    let status_row = caller.lines().position(|line| line.contains("f.txt") || line.contains("ONE")).unwrap();
+    let log_menu = offered(&code_actions(&mut server, &uri, status_row, 31), "open.log");
+    let opened_log = execute(&mut server, &mut editor, log_menu, 32);
+    assert!(opened_log["error"].is_null(), "open log failed: {opened_log}");
+    let menu_text = editor.text(&uri).to_owned();
+    assert!(!menu_text.ends_with('\n'));
+    let log_actions = code_actions(&mut server, &uri, 0, 33);
+    let log_switch = log_actions.iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "menu.toggle-switch"
+            && action["command"]["arguments"][0]["target"]["itemKey"] == "-g").unwrap_or_else(|| panic!("log menu actions: {log_actions:#?}"))["command"]["arguments"][0].clone();
+    let toggled = execute(&mut server, &mut editor, log_switch, 34);
+    assert!(toggled["error"].is_null(), "log switch failed: {toggled}");
+    let off_menu = editor.text(&uri).to_owned();
+    assert!(off_menu.lines().any(|line| line.contains("Show graph") && line.contains("[ ]")), "graph switch is not off: {off_menu}");
+    assert!(off_menu.lines().any(|line| line.trim_start().starts_with("git log") && !line.contains("--graph")), "graph-off preview missing: {off_menu}");
+    let log_switch = code_actions(&mut server, &uri, 0, 341).into_iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "menu.toggle-switch"
+            && action["command"]["arguments"][0]["target"]["itemKey"] == "-g")
+        .unwrap()["command"]["arguments"][0].clone();
+    execute(&mut server, &mut editor, log_switch, 342);
+    let on_menu = editor.text(&uri).to_owned();
+    assert!(on_menu.lines().any(|line| line.contains("Show graph") && line.contains("[x]")), "graph switch is not on: {on_menu}");
+    assert!(on_menu.lines().any(|line| line.trim_start().starts_with("git log") && line.contains("--graph")), "graph-on preview missing: {on_menu}");
+    let concrete = offered(&code_actions(&mut server, &uri, 0, 35), "menu.run-action");
+    assert_eq!(concrete["target"]["itemKey"], "l");
+    let mut action_as_switch = concrete.clone();
+    action_as_switch["command"] = json!("menu.toggle-switch");
+    let refused = execute(&mut server, &mut editor, action_as_switch, 353);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert_eq!(editor.text(&uri), on_menu);
+    let mut switch_as_action = concrete.clone();
+    switch_as_action["command"] = json!("menu.run-action");
+    switch_as_action["target"]["itemKey"] = json!("-g");
+    let refused = execute(&mut server, &mut editor, switch_as_action, 354);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert_eq!(editor.text(&uri), on_menu);
+    let stale = concrete.clone();
+    let mut wrong_item = concrete.clone(); wrong_item["target"]["itemKey"] = json!("o");
+    let refused = execute(&mut server, &mut editor, wrong_item, 351);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    let mut forged_menu = concrete.clone(); forged_menu["target"]["menuId"] = json!("commit");
+    let refused = execute(&mut server, &mut editor, forged_menu, 352);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    let completed = execute(&mut server, &mut editor, concrete.clone(), 36);
+    assert!(completed["error"].is_null(), "log.current failed: {completed}");
+    assert!(completed["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["type"] == "pushView"), "log.current did not push a concrete view: {completed}; args={concrete}");
+    let log_text = editor.text(&uri).to_owned();
+    assert_ne!(log_text, menu_text);
+    assert!(!log_text.ends_with('\n'));
+    assert!(log_text.contains("initial"), "concrete log missing commit: {log_text}");
+    assert!(log_text.lines().any(|line| line.contains("*")), "captured graph switch argument did not affect log output: {log_text}");
+    let refused = execute(&mut server, &mut editor, stale, 361);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    let back = offered(&code_actions(&mut server, &uri, 0, 37), "common.cancel");
+    execute(&mut server, &mut editor, back, 38);
     assert_eq!(editor.text(&uri), caller);
     assert_eq!(state(&repo), before);
     server.shutdown_and_exit();

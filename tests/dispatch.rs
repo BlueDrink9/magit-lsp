@@ -8,6 +8,17 @@ use magit_lsp::protocol::{Effect, MessageLevel};
 use rstest::rstest;
 
 #[test]
+fn semantic_menu_item_target_roundtrips_without_losing_item_identity() {
+    let target = dispatch::SemanticMenuItemTarget {
+        view_id: "log-menu".into(),
+        menu_id: "log".into(),
+        item_key: "l".into(),
+    };
+    let encoded = serde_json::to_value(&target).unwrap();
+    assert_eq!(serde_json::from_value::<dispatch::SemanticMenuItemTarget>(encoded).unwrap(), target);
+}
+
+#[test]
 fn hunk_section_compatibility_preserves_only_the_staged_stage_noop() {
     use magit_lsp::dispatch::hunk_section_compatible;
     assert!(hunk_section_compatible("status.stage", Some("unstaged")));

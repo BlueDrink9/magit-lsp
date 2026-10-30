@@ -1541,7 +1541,7 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
         crate::commands::Availability::Planned(_) => Some("This command is planned and cannot run in Plain mode"),
         crate::commands::Availability::Implemented
             if !crate::dispatch::content_command(command)
-                && !matches!(command, "open.commit" | "common.cancel") =>
+                && !matches!(command, "open.commit" | "open.log" | "menu.run-action" | "common.cancel") =>
             Some("This command requires a Plain client adapter that is not available"),
         crate::commands::Availability::Implemented => None,
     }
@@ -1770,7 +1770,7 @@ fn execute_plain_action(
             _ => return plain_stale_message(),
         }
     };
-    let (repo, view_id, line) = {
+    let (repo, view_id, line, scope) = {
         let documents = shared
             .plain_documents
             .lock()
@@ -1793,18 +1793,21 @@ fn execute_plain_action(
                 node.start_line
             }
             crate::dispatch::PlainActionTarget::View(target) => {
-                let supported = matches!(params.command.as_str(), "open.commit" | "common.cancel");
-                if !supported || target.view_id != view_id || !((params.command == "open.commit" && scope == "status") || (params.command == "common.cancel" && scope != "status")) {
+                let supported = matches!(params.command.as_str(), "open.commit" | "open.log" | "common.cancel");
+                if !supported || target.view_id != view_id || !((matches!(params.command.as_str(), "open.commit" | "open.log") && scope == "status") || (params.command == "common.cancel" && scope != "status")) {
                     return plain_stale_message();
                 }
                 0
             }
-            crate::dispatch::PlainActionTarget::MenuSwitch(target) => {
-                let valid = params.command == "menu.toggle-switch"
-                    && target.view_id == view_id
-                    && menu.is_some_and(|menu| menu.id == target.menu_id && matches!(
-                        menu.item(&target.item_key), Some(crate::menu::Item::Switch { status: crate::menu::MenuStatus::Implemented, .. })
-                    ));
+            crate::dispatch::PlainActionTarget::MenuItem(target) => {
+                let valid = target.view_id == view_id && menu.as_ref().is_some_and(|menu| {
+                    if menu.id != target.menu_id { return false; }
+                    match (params.command.as_str(), menu.item(&target.item_key)) {
+                        ("menu.toggle-switch", Some(crate::menu::Item::Switch { status: crate::menu::MenuStatus::Implemented, .. })) => true,
+                        ("menu.run-action", Some(crate::menu::Item::Action { command, status: crate::menu::MenuStatus::Implemented, .. })) => command == "log.current",
+                        _ => false,
+                    }
+                });
                 if !valid { return plain_stale_message(); }
                 0
             }
@@ -1814,7 +1817,7 @@ fn execute_plain_action(
         }
         let repo = entry.repo.clone();
         let view_id = entry.view_id.clone();
-        (repo, view_id, line)
+        (repo, view_id, line, scope.to_string())
     };
     if shared.cancellation_pending(&repo) {
         return cancelling_response();
@@ -1822,10 +1825,23 @@ fn execute_plain_action(
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new("Plain action session closed"))?;
-    if let crate::dispatch::PlainActionTarget::MenuSwitch(target) = &params.target {
+    if params.command == "common.cancel" && scope == "log" && matches!(params.target, crate::dispatch::PlainActionTarget::View(_)) {
+        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
+            .back_from_plain_log(&view_id, params.view_generation)?;
+        return dispatched_outcome(shared, &repo, result);
+    }
+    if let crate::dispatch::PlainActionTarget::MenuItem(target) = &params.target {
+      if params.command == "menu.toggle-switch" {
         let result = handle.lock().unwrap_or_else(|p| p.into_inner())
             .toggle_menu_switch(&view_id, params.view_generation, &target.menu_id, &target.item_key)?;
         return dispatched_outcome(shared, &repo, result);
+      }
+      if params.command == "menu.run-action" {
+        let ui = ServerUi::new(shared);
+        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
+            .run_plain_menu_action(&view_id, params.view_generation, &target.menu_id, &target.item_key, &ui)?;
+        return dispatched_outcome(shared, &repo, result);
+      }
     }
     let request = crate::dispatch::DispatchRequest {
         command: params.command,
@@ -2341,12 +2357,18 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 data: (!implemented).then_some(args),
             }).unwrap_or(Value::Null));
         }
+        for item in menu.groups.iter().flat_map(|group| &group.items) {
+            let crate::menu::Item::Action { key, command, label, status: crate::menu::MenuStatus::Implemented, .. } = item else { continue; };
+            if command != "log.current" { continue; }
+            let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
+            actions.push(serde_json::to_value(lsp_types::CodeAction { title: format!("Open {label}"), kind:None, diagnostics:None, is_preferred:None, disabled:None, edit:None, command:Some(lsp_types::Command { title:format!("Open {label}"), command:"magit.command".into(), arguments:Some(vec![args]) }), data:None }).unwrap_or(Value::Null));
+        }
     }
     for command in crate::commands::registry().iter() {
         if !command.scope.matches(&scope) { continue; }
         let registry_availability = crate::commands::registry().availability(command.id);
         if !crate::dispatch::content_command(command.id) {
-            let semantic = (command.id == "open.commit" && scope == "status")
+            let semantic = (matches!(command.id, "open.commit" | "open.log") && scope == "status")
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
                 let args = serde_json::json!({
