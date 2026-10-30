@@ -269,6 +269,26 @@ def run_variant(final_newline: bool) -> None:
             assert "-a  Stage all modified and deleted files (--all)  [ ]" in menu_off["text"]
             assert "git commit --all" not in menu_off["text"]
             assert snapshot() == before
+            # Undo only after the server has transitioned to this menu. The
+            # intermediate native undo must be observed before server repair,
+            # so a pre-existing already-correct buffer cannot satisfy this.
+            menu_before_undo = state()
+            run(["nvim", "--server", socket, "--remote-send", "gg0iNATIVE-MENU-UNDO<Esc>"], timeout=8)
+            menu_typed = wait_state("native edit in active menu", lambda current:
+                                    current["version"] > menu_before_undo["version"]
+                                    and "NATIVE-MENU-UNDO" in current["text"])
+            run(["nvim", "--server", socket, "--remote-send", "u"], timeout=8)
+            native_undo = wait_state("actual native undo in active menu", lambda current:
+                                     current["version"] > menu_typed["version"]
+                                     and "NATIVE-MENU-UNDO" not in current["text"])
+            repaired_menu = wait_state("authoritative active-menu repair", lambda current:
+                                       current["version"] >= native_undo["version"]
+                                       and current["text"] == menu_off["text"])
+            assert repaired_menu["text"] == menu_off["text"]
+            report["transition_undo_repair"] = {"menu_before": menu_before_undo,
+                                                  "typed": menu_typed,
+                                                  "native_undo": native_undo,
+                                                  "repaired": repaired_menu}
             picker("menu-back", f"{last_menu_row}G0", "Cancel the current operation")
             restored = wait_text("+THREE")
             assert restored["text"] == rendered["text"], (rendered, restored)

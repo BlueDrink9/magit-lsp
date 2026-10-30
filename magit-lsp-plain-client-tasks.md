@@ -659,6 +659,8 @@ The scoped child **Serve Plain status-to-menu and Back transitions in the same d
 
 **Native log/nested commit-menu restoration child complete (2026-10-30):** fresh `native.json` and text/trace evidence for both EOF variants under `build/ui/plain-render/{without-final-newline,with-final-newline}/` records the checked graph argument preview, concrete graph log, nested `-a` menu toggle, exact Back restoration to that same log and original status, and subsequent content actions. Each run reports no error, unchanged independent Git snapshots and presentation bytes, no project Lua modules/custom render notifications, verified owned cleanup, and 13 distinct request IDs. Exact command `cargo build --release && python3 scripts/test_plain_neovim.py && cargo test --test plain_stack && git diff --check` passed (2 stack tests). Options/prompts and broader R-PLAIN-STACK acceptance remain open.
 
+**Native undo after view transition child complete (2026-10-30):** both EOF variants now perform a native edit and undo inside the active commit-menu view after its switch transitions. Fresh structured evidence distinguishes typed and undone versions/text, then proves server repair to the exact active-menu text before the existing stock picker invokes Back and restores the caller. Independent Git, presentation bytes, and owned cleanup remain checked. Exact verification: `cargo build --release && python3 scripts/test_plain_neovim.py && cargo test --test plain_stack && git diff --check`.
+
 ### R-PLAIN-VIS: visibility, folding fallback, standard providers (S)
 
 - **Target Files:** `src/status_view.rs`, `src/tree.rs`, `src/presentation/plain.rs`, `src/config.rs`.
