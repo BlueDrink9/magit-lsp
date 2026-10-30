@@ -586,6 +586,25 @@ makes the controller eligible again.
 
 **Bound Plain format-drift guard (2026-10-30):** Controller regressions cover format-only LF/CRLF/EOF echoes in both response orders, exact delayed echo after an intermediate decomposed-format change, one warning/suspension, blocked action snapshots, repeated render/change, and reopen recovery. Actual-binary stdio coverage verifies one standard `window/showMessage`, no follow-up edit, empty code-action result while suspended, and successful reopen synchronization. Focused gate: `cargo test --test plain_render --test plain_actions --test plain_sync && cargo test --lib presentation:: && git diff --check`. This does not claim the parent native dual-EOF acceptance; no new native evidence was collected in this slice.
 
+**Plain EOF repair parent accepted (2026-10-30; bugfix only):** Rebuilt-release
+native smoke passed both EOF variants with
+`cargo build --release && python3 scripts/test_plain_neovim.py && git diff --check`.
+Fresh `native.json` plus per-variant `.screen` and `trace-excerpts.log` evidence
+shows bootstrap at version 4, final action render at version 12, no error, and
+all five interactions: discard visibly unavailable, file stage, file unstage,
+exact selected-lines stage, then a subsequent request. HEAD is unchanged; file
+stage/unstage and partial-index/worktree bytes match the expected exact states.
+Both variants preserve exact presentation-file bytes and report no project Lua
+modules, no rich notifications/custom renders, and verified owned tmux/editor/
+server cleanup. The structured trace count is 12 matching applyEdit log
+occurrences (including request/handler log entries), not a deduplicated outbound
+request count; it reports 7 didChange occurrences and zero empty-insert changes.
+The newline case now converges without the former repeating terminal deletion/
+empty insertion. The earlier failed native reproduction remains preserved above
+as historical diagnostic evidence. This closes the EOF bugfix parent only; it is
+not Plain milestone acceptance and does not complete persistent format-drift
+acceptance or gather the deferred evidence report.
+
 **Scoped coverage slice (2026-10-30; parent remains unchecked):** a six-entry retention unit test verifies oldest eviction and newest generation; a data-driven binary test locates two modified-file offering rows in actual text and verifies half-open end-at-column-zero exclusion, non-zero inclusion, and distinct node IDs. This is not completion of title styles, contextual `Unavailable` policy, the full IMM-6 matrix or the parent acceptance.
 
 **Plain action title composition (2026-10-30; scoped slice, parent remains unchecked):** offers use the retained snapshot scope, repository-resolved `actions.title_style` and keymap, plus the structured node path; outer and nested titles are identical. Missing mnemonic/path parts are omitted, and command IDs/arguments are unchanged. Isolated real-binary tests cover all four styles, configured user binding `z`, a trusted repository override, and stable action identity; pure helper tests cover missing components. Verified with `cargo test --test plain_actions --test config && git diff --check` (7 Plain-action and 24 config tests passed). Contextual `Planned`/`Unavailable` reasons, the full IMM-6 applicability matrix and latency smoke test remain open; no broad gate is claimed green.
