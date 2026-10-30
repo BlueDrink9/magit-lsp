@@ -1,13 +1,14 @@
 # magit-lsp — Roadmap
 
-Last review: 200a95ef52e2e1104505fe7731285ec5238d9567
+Last review: dd92f90cdb11d827606a689a88a280f480d7508d
 
-Checkpoint: accumulated Plain stack/menu changes reviewed; no substantiated P0–P2
-findings remain after correcting the target-decoding review claim against the
-existing `deny_unknown_fields` declaration. Native nested menus and transition
-undo repair passed for both EOF variants. `make ui-tour` and `git diff --check`
-passed; focused menu-commit tour text was inspected; no `magit-lsp` processes
-remained. `make test` stopped at the user-deferred
+Checkpoint: accumulated Plain visibility/provider changes reviewed; no
+substantiated P0–P2 findings. Exact synchronized snapshots, negotiated position
+encodings, bounded sections and typed visibility controls have focused tests;
+native summary/expand/hide/show and all five providers passed for both EOF
+variants with unchanged Git/presentation state and verified owned cleanup.
+`make ui-tour` and `git diff --check` passed; focused menu-commit tour text was
+inspected; no `magit-lsp` processes remained. `make test` stopped at the user-deferred
 `errors::normal_and_piped_apply_failures_keep_original_details`; later suites
 were not reached. No lint target was found. This is not full-gate acceptance.
 
