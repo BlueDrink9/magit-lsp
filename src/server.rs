@@ -3,7 +3,7 @@ use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
 use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
-use crate::presentation::plain::{ApplyEdit, PlainDocument};
+use crate::presentation::plain::{ApplyEdit, DocumentFormat, PlainDocument};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -797,17 +797,21 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
 
 /// Start an asynchronous bootstrap after the didOpen notification is accepted.
 fn schedule_plain_open(shared: &Shared, uri: String) {
-    if shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).is_none() { return; }
+    let format = {
+        let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(document) = documents.get(&uri) else { return; };
+        DocumentFormat::from_text(&document.text)
+    };
     let Some(path) = file_uri_path(&uri) else { return; };
     if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) { return; }
     close_plain(shared, &uri);
     let incarnation = shared.next_plain_incarnation.fetch_add(1, Ordering::Relaxed) + 1;
     shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).insert(uri.clone(), incarnation);
     let shared = shared.clone();
-    tokio::spawn(async move { bootstrap_plain(&shared, uri, incarnation).await; });
+    tokio::spawn(async move { bootstrap_plain(&shared, uri, incarnation, format).await; });
 }
 
-async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
+async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format: DocumentFormat) {
     if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) { return; }
     let (caps, workspaces, encoding) = {
         let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
@@ -842,7 +846,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
     };
     // `open` uses (id, kind, placement, viewport); preserve the root session's
     // authoritative Tree while keeping this logical view private to Plain.
-    let (descriptor, initial) = match opened {
+    let (descriptor, _) = match opened {
         Ok(opened) => opened,
         Err(error) => { let _ = shared.sender.send(show_message(1, format!("magit-lsp: cannot render status: {error}"))); return; }
     };
@@ -857,7 +861,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64) {
         let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
         return;
     };
-    let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes);
+    let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes, format);
     if let Some((tree, generation, scope)) = published.current_snapshot(&descriptor.id) {
         controller.render_actions(tree, descriptor.id.clone(), generation, scope);
     } else {
@@ -2253,7 +2257,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
         let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
-        if tree.lines.join("\n") != text || view_id != entry.view_id { return Value::Array(Vec::new()); }
+        if view_id != entry.view_id { return Value::Array(Vec::new()); }
         (text, tree.clone(), generation, scope.to_owned(), entry.repo.clone())
     };
     let config = shared.config.for_repository(std::path::Path::new(&repo));

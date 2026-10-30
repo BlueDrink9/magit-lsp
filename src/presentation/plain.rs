@@ -25,6 +25,31 @@ pub struct ApplyEdit {
     pub edit: Value,
 }
 
+/// Immutable line ending and EOF convention captured from the accepted didOpen text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DocumentFormat {
+    /// Whether serialized rows use CRLF rather than LF separators.
+    pub crlf: bool,
+    /// Whether serialized text ends with the captured final line terminator.
+    pub final_terminator: bool,
+}
+
+impl DocumentFormat {
+    /// Infer the document's newline convention without changing its accepted text.
+    pub fn from_text(text: &str) -> Self {
+        let crlf = text.contains("\r\n");
+        Self { crlf, final_terminator: text.ends_with('\n') }
+    }
+
+    /// Serialize structured Tree rows using this document's immutable newline convention.
+    pub fn serialize(self, tree: &crate::tree::Tree) -> String {
+        let separator = if self.crlf { "\r\n" } else { "\n" };
+        let mut text = tree.lines.join(separator);
+        if self.final_terminator { text.push_str(separator); }
+        text
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Snapshot {
     hash: [u8; 32],
@@ -57,6 +82,7 @@ struct InFlight {
 pub struct PlainDocument {
     uri: String,
     encoding: Encoding,
+    format: DocumentFormat,
     document_changes: bool,
     state: DocumentState,
     authoritative: Option<Snapshot>,
@@ -72,9 +98,9 @@ pub struct PlainDocument {
 
 impl PlainDocument {
     /// Create a detached controller for one document URI.
-    pub fn new(uri: impl Into<String>, encoding: Encoding, document_changes: bool) -> Self {
+    pub fn new(uri: impl Into<String>, encoding: Encoding, document_changes: bool, format: DocumentFormat) -> Self {
         Self {
-            uri: uri.into(), encoding, document_changes,
+            uri: uri.into(), encoding, document_changes, format,
             state: DocumentState::Detached, authoritative: None, client: None,
             snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, rejected: None, next_id: 0,
             action_snapshots: VecDeque::new(),
@@ -98,7 +124,7 @@ impl PlainDocument {
 
     /// Retain the exact structured snapshot associated with an authoritative render.
     pub fn render_actions(&mut self, tree: crate::tree::Tree, view_id: String, generation: u64, scope: String) -> Option<ApplyEdit> {
-        let text = tree.lines.join("\n");
+        let text = self.format.serialize(&tree);
         let hash = hash_text(&text);
         self.action_snapshots.retain(|snapshot| snapshot.hash != hash);
         self.action_snapshots.push_back(ActionSnapshot { hash, view_id, generation, scope, tree });
@@ -217,7 +243,7 @@ mod tests {
 
     #[test]
     fn action_snapshot_retention_is_bounded_and_keeps_generation() {
-        let mut document = PlainDocument::new("file:///test", Encoding::Utf16, false);
+        let mut document = PlainDocument::new("file:///test", Encoding::Utf16, false, DocumentFormat::from_text(""));
         for generation in 0..7 {
             document.render_actions(tree(&format!("render-{generation}")), "view".into(), generation, "scope".into());
         }
