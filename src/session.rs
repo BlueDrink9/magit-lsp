@@ -5,7 +5,7 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, CommandStatus, Scope, SelectionOperation};
+use crate::commands::{self, Scope, SelectionOperation};
 use crate::diff_text;
 use crate::git::GitLogOptions;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
@@ -1801,8 +1801,8 @@ impl Session {
                 .get_mut(view_id)
                 .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
 
-            match &command.status {
-                CommandStatus::Planned { roadmap_id } => {
+            match commands::registry().availability(command.id) {
+                Some(commands::Availability::Planned(roadmap_id)) => {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
                             MessageLevel::Info,
@@ -1814,7 +1814,8 @@ impl Session {
                         ..InvokeResult::empty()
                     });
                 }
-                CommandStatus::Implemented => {}
+                Some(commands::Availability::Implemented) => {}
+                None => return Err(Error::new(format!("unknown command: {command_id}"))),
             }
 
             if !command.scope.matches(view.descriptor().scope.as_str()) {

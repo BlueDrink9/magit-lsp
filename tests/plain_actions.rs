@@ -88,6 +88,55 @@ fn missing_execute_command_capability_disables_actions_with_reason() {
     server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 
+#[test]
+fn scoped_planned_and_unavailable_commands_are_disabled_and_forged_requests_are_refused() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
+    let (mut server, mut editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":95,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let actions = server.response_with_id(95)["result"].as_array().unwrap().clone();
+    let planned = actions.iter().find(|action| action["data"]["command"] == "status.reverse").expect("scoped planned offer");
+    assert!(planned["disabled"]["reason"].as_str().unwrap().contains("R-3.6"));
+    assert!(planned["command"].is_null() && planned["data"]["target"].is_null());
+    let ids: Vec<_> = actions.iter().filter_map(|a| a["data"]["command"].as_str().or_else(|| a["command"]["arguments"][0]["command"].as_str())).collect();
+    let unique: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    assert_eq!(ids.len(), unique.len(), "duplicate command offer");
+    let before = repo_state(&repo);
+    let refused = execute_offered(&mut server, &mut editor, planned["data"].clone(), 96);
+    assert!(refused["result"]["effects"][0]["text"].as_str().unwrap().contains("planned"));
+    assert_eq!(repo_state(&repo), before);
+    let stage = offered_stage(&mut server, &editor, &uri, 97);
+    assert!(execute_offered(&mut server, &mut editor, stage, 98)["error"].is_null());
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn planned_and_unavailable_entries_are_omitted_without_disabled_support() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{}}});
+    let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":99,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    let response = server.response_with_id(99);
+    let actions = response["result"].as_array().unwrap();
+    assert!(!actions.iter().any(|a| a["data"]["command"] == "status.reverse" || a["data"]["command"] == "status.apply"));
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn malformed_plain_envelope_is_refused_without_claiming_rich_commands() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\n")]).modify("f.txt", "changed\n").build();
+    let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
+    let (mut server, _editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let before = repo_state(&repo);
+    server.send(json!({"jsonrpc":"2.0","id":101,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"status.reverse","documentUri":uri}]}}));
+    let response = server.response_with_id(101);
+    assert!(response["result"]["effects"][0]["text"].as_str().unwrap().contains("planned"));
+    assert_eq!(repo_state(&repo), before);
+    server.shutdown_and_exit(); let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
 /// Request code actions on the `f.txt` row and return the offered stage argument.
 fn offered_stage(server: &mut stdio::TestServer, editor: &FakeEditor, uri: &str, id: i64) -> Value {
     let row = editor.text(uri).lines().position(|line| line.contains("f.txt")).expect("file row") as u32;

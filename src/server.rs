@@ -1323,6 +1323,15 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 // Draft barriers and document notifications execute on the
                 // reader's ordered lane, never in unordered request tasks.
                 if request.method == "workspace/executeCommand" {
+                    if let Some(reason) = plain_unsupported_execute_reason(&request) {
+                        let (response, notifications) = match plain_unsupported_message(reason) {
+                            Ok(dispatched) => (Response::new_ok(request.id, dispatched.result), dispatched.notifications),
+                            Err(error) => (error_response(request.id, error), Vec::new()),
+                        };
+                        for message in notifications { let _ = sender.send(message); }
+                        let _ = sender.send(Message::Response(response));
+                        continue;
+                    }
                     if let Some(params) = plain_execute_params(&request) {
                         let (response, notifications) = match execute_plain_action(&shared, params) {
                             Ok(dispatched) => (Response::new_ok(request.id, dispatched.result), dispatched.notifications),
@@ -1501,6 +1510,27 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         return Err(error);
     }
     Ok(exit_code)
+}
+
+/// Find registered Plain commands that must be refused before target parsing or execution.
+fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
+    let params = request.params.as_object()?;
+    if params.get("command")?.as_str()? != "magit.command" {
+        return None;
+    }
+    let argument = request.params.pointer("/arguments/0")?;
+    // Rich commands such as common.confirm also use magit.command. Only
+    // classify requests carrying the Plain document/generation envelope.
+    if argument.get("documentUri").is_none() && argument.get("viewGeneration").is_none() {
+        return None;
+    }
+    let command = argument.get("command")?.as_str()?;
+    match crate::commands::registry().availability(command)? {
+        crate::commands::Availability::Planned(_) => Some("This command is planned and cannot run in Plain mode"),
+        crate::commands::Availability::Implemented if !crate::dispatch::content_command(command) =>
+            Some("This command requires a Plain client adapter that is not available"),
+        crate::commands::Availability::Implemented => None,
+    }
 }
 
 /// Own stdout: serialise every response through one channel so bytes never
@@ -2249,6 +2279,24 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     let mut actions = Vec::new();
     for command in crate::commands::registry().iter() {
         if !command.scope.matches(&scope) { continue; }
+        let registry_availability = crate::commands::registry().availability(command.id);
+        if !crate::dispatch::content_command(command.id) {
+            let reason = match registry_availability {
+                Some(crate::commands::Availability::Planned(roadmap)) => Some(format!("Planned: roadmap {roadmap}")),
+                Some(crate::commands::Availability::Implemented) => Some("Unavailable: Plain client adapter is not implemented".to_owned()),
+                None => continue,
+            };
+            if !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) { continue; }
+            let args = serde_json::json!({"command": command.id, "documentUri": uri, "viewGeneration": generation});
+            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
+            let action = lsp_types::CodeAction {
+                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
+                disabled: reason.map(|reason| lsp_types::CodeActionDisabled { reason }), edit: None,
+                command: None, data: Some(args),
+            };
+            actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
+            continue;
+        }
         let target = if let Some((start, end)) = selection {
             crate::dispatch::offer_selection_target(&tree, command.id, start, end)
         } else {

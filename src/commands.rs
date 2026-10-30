@@ -74,6 +74,15 @@ impl Scope {
     }
 }
 
+/// Pure availability shared by command dispatch and Plain action discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Availability {
+    /// The command handler is implemented.
+    Implemented,
+    /// The command is tracked by a roadmap item.
+    Planned(&'static str),
+}
+
 /// Whether a command can run, and what to say when it cannot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandStatus {
@@ -356,6 +365,22 @@ impl Registry {
         self.commands.iter().find(|command| command.id == id)
     }
 
+    /// Return a command's pure registry availability without invoking its handler.
+    pub fn availability(&self, id: &str) -> Option<Availability> {
+        self.get(id).map(|command| match command.status {
+            CommandStatus::Implemented => Availability::Implemented,
+            CommandStatus::Planned { roadmap_id } => Availability::Planned(roadmap_id),
+        })
+    }
+
+    /// Whether a registered command is both in scope and implemented.
+    pub fn is_runnable_in(&self, id: &str, view_scope: &str) -> bool {
+        self.get(id).is_some_and(|command| {
+            command.scope.matches(view_scope)
+                && self.availability(id) == Some(Availability::Implemented)
+        })
+    }
+
     /// Iterate over every command, in registration order.
     pub fn iter(&self) -> impl Iterator<Item = &Command> {
         self.commands.iter()
@@ -366,6 +391,22 @@ impl Registry {
         self.commands
             .iter()
             .filter(move |command| command.scope == scope)
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::{Availability, registry};
+
+    #[test]
+    fn availability_and_scope_are_pure_registry_metadata() {
+        let commands = registry();
+        assert!(matches!(commands.availability("status.reverse"), Some(Availability::Planned(_))));
+        assert_eq!(commands.availability("common.confirm"), Some(Availability::Implemented));
+        assert!(commands.is_runnable_in("common.confirm", "commit"));
+        assert!(commands.is_runnable_in("common.confirm", "status"));
+        assert!(!commands.is_runnable_in("status.apply", "commit"));
+        assert!(!commands.is_runnable_in("status.reverse", "status"));
     }
 }
 
