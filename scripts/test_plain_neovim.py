@@ -356,6 +356,156 @@ def run_variant(final_newline: bool) -> None:
             staged_row = next(i + 1 for i, line in enumerate(partial_render["text"].splitlines()) if "tracked.txt" in line)
             picker("subsequent-request", f"{staged_row}G0", None)
             assert snapshot() == partial
+
+            # Build an actual oversized unstaged section only after the
+            # established menu/stage assertions have completed.
+            large_base = "".join(f"base line {i:04d}\n" for i in range(430))
+            large_changed = "".join(f"changed line {i:04d}\n" for i in range(430))
+            (repo / "oversized.txt").write_text(large_base)
+            git("add", "oversized.txt")
+            git("commit", "-qm", "oversized baseline")
+            (repo / "oversized.txt").write_text(large_changed)
+            def full_git_state() -> dict[str, str]:
+                return {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
+                        "cached": git("diff", "--cached", "--binary", "HEAD"),
+                        "worktree": git("diff", "--binary"),
+                        "status": git("status", "--porcelain=v1", "-z")}
+
+            oversized = wait_text("more lines: expand")
+            summary_row = next(i + 1 for i, line in enumerate(oversized["text"].splitlines())
+                               if "more lines: expand" in line)
+            git_before_visibility = full_git_state()
+            report["visibility"] = {"summary": oversized, "git_before": git_before_visibility}
+
+            def provider(method: str, params: dict[str, object]) -> object:
+                # request() flushes pending native changes before resolving 0
+                # to a buffer number: pass the actual attached buffer explicitly.
+                lua = ("(function() local c=vim.lsp.get_clients()[1]; local p=vim.json.decode(" +
+                       json.dumps(json.dumps(params)) + "); "
+                       "p.textDocument.uri=vim.uri_from_bufnr(0); "
+                       "local r,e=c:request_sync(" + json.dumps(method) + ", p" +
+                       ", 5000, vim.api.nvim_get_current_buf()); assert(r, tostring(e)); return vim.json.encode(r.result) end)()")
+                return json.loads(rpc("luaeval(" + json.dumps(lua) + ")"))
+
+            def inspect_providers(current: dict[str, object], expanded: bool) -> dict[str, object]:
+                text = current["text"]
+                lines = text.splitlines()
+                params = {"textDocument": {"uri": current["name"]}}
+                deadline = time.monotonic() + 30
+                while True:
+                    symbols = provider("textDocument/documentSymbol", params)
+                    links = provider("textDocument/documentLink", params)
+                    folds = provider("textDocument/foldingRange", params)
+                    tokens = provider("textDocument/semanticTokens/full", params)
+                    if all(value is not None for value in (symbols, links, folds, tokens)):
+                        break
+                    latest = state()
+                    if latest["text"] != text or latest["version"] != current["version"]:
+                        raise AssertionError(f"document changed during provider synchronization: {current!r} -> {latest!r}")
+                    if time.monotonic() >= deadline:
+                        trace = trace_path.read_text(errors="replace") if trace_path.exists() else "<missing trace>"
+                        raise AssertionError(f"provider remained null for synchronized snapshot; trace tail:\n{trace[-5000:]}")
+                files = [i for i, line in enumerate(lines) if "oversized.txt" in line]
+                if expanded:
+                    assert len(files) == 1, (files, text)
+                else:
+                    files = [i for i, line in enumerate(lines) if "more lines: expand" in line]
+                    assert len(files) == 1, (files, text)
+                definition = provider("textDocument/definition", {"textDocument": {"uri": current["name"]},
+                                                                     "position": {"line": files[0], "character": 0}})
+                report["visibility"].setdefault("provider_observations", []).append({
+                    "snapshot": current, "fresh_snapshot": state(),
+                    "position": {"line": files[0], "character": 0}, "line_text": lines[files[0]],
+                    "symbols": symbols, "links": links, "folds": folds,
+                    "tokens": tokens, "definition": definition})
+                assert isinstance(symbols, list) and isinstance(links, list) and isinstance(folds, list), (symbols, links, folds)
+                assert isinstance(tokens, dict) and isinstance(tokens.get("data"), list), tokens
+                def walk_symbols(items: list[dict[str, object]]) -> list[dict[str, object]]:
+                    flattened = []
+                    for item in items:
+                        flattened.append(item)
+                        flattened.extend(walk_symbols(item.get("children", [])))
+                    return flattened
+                flat_symbols = walk_symbols(symbols)
+                def bounded_range(value: dict[str, object]) -> bool:
+                    start, end = value["start"], value["end"]
+                    return (0 <= start["line"] <= end["line"] < len(lines)
+                            and 0 <= start["character"] <= len(lines[start["line"]].encode("utf-8"))
+                            and 0 <= end["character"] <= len(lines[end["line"]].encode("utf-8"))
+                            and (start["line"], start["character"]) <= (end["line"], end["character"]))
+                assert all(bounded_range(item["range"]) for item in links)
+                assert all(bounded_range(item[key]) for item in flat_symbols for key in ("range", "selectionRange"))
+                assert all(0 <= item["range"]["start"]["line"] < len(lines) for item in links)
+                assert all(0 <= item["startLine"] <= item["endLine"] < len(lines) for item in folds)
+                assert all("range" in item and "selectionRange" in item for item in flat_symbols)
+                if expanded:
+                    locations = definition if isinstance(definition, list) else [definition] if definition else []
+                    assert locations and locations[0]["uri"] == (repo / "oversized.txt").as_uri()
+                    assert locations[0]["range"] == {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}
+                    assert any(item["name"] == "oversized.txt" for item in flat_symbols)
+                    assert any(item["target"] == (repo / "oversized.txt").as_uri() for item in links)
+                else:
+                    assert definition is None
+                assert ("more lines: expand" in text) != expanded
+                assert len(tokens["data"]) % 5 == 0, tokens
+                token_line = token_column = 0
+                for offset in range(0, len(tokens["data"]), 5):
+                    delta, column, length, kind, modifiers = tokens["data"][offset:offset + 5]
+                    token_line += delta
+                    token_column = token_column + column if delta == 0 else column
+                    assert 0 <= token_line < len(lines) and length > 0
+                    assert 0 <= token_column < token_column + length <= len(lines[token_line].encode("utf-8"))
+                    assert 0 <= kind < len(current["server_capabilities"]["semanticTokensProvider"]["legend"]["tokenTypes"])
+                fresh = state()
+                assert fresh["text"] == text and fresh["version"] == current["version"]
+                assert fresh["endofline"] == final_newline
+                assert (flat_symbols or links or folds or tokens["data"]), "no standard provider exposed structure"
+                if expanded:
+                    assert flat_symbols or links, "expanded file is absent from symbol/link snapshot"
+                return {"symbols": symbols, "links": links, "folds": folds,
+                        "tokens": tokens, "definition": definition}
+
+            report["visibility"]["summary_providers"] = inspect_providers(oversized, False)
+            picker("visibility-expand", f"{summary_row}G0", "Unfold the section at point")
+            expanded = wait_state("expanded oversized section", lambda current:
+                                  "more lines: expand" not in current["text"] and "changed line 0429" in current["text"])
+            report["visibility"]["expanded"] = expanded
+            report["visibility"]["expanded_providers"] = inspect_providers(expanded, True)
+            assert full_git_state() == git_before_visibility
+            (repo / "watcher-visibility.txt").write_text("visibility watcher\n")
+            watcher_expanded = wait_state("expanded visibility after watcher refresh", lambda current:
+                                          "watcher-visibility.txt" in current["text"] and "changed line 0429" in current["text"])
+            git_after_watcher_setup = full_git_state()
+            assert git_after_watcher_setup != git_before_visibility
+            assert (repo / "watcher-visibility.txt").read_text() == "visibility watcher\n"
+            assert b"watcher-visibility.txt" in git_after_watcher_setup["status"].encode()
+            report["visibility"]["watcher_expanded"] = watcher_expanded
+            report["visibility"]["git_after_watcher_setup"] = git_after_watcher_setup
+            # Explicitly hide then show using the same native stock picker.
+            expanded_rows = expanded["text"].splitlines()
+            section_row = next(i + 1 for i, line in enumerate(expanded_rows) if "Unstaged changes" in line)
+            picker("visibility-hide", f"{section_row}G0", "Fold the section at point")
+            hidden = wait_state("explicitly hidden section", lambda current:
+                                "Unstaged changes" in current["text"] and "oversized.txt" not in current["text"]
+                                and "changed line 0429" not in current["text"])
+            hidden_header = next(i + 1 for i, line in enumerate(hidden["text"].splitlines())
+                                 if "Unstaged changes" in line)
+            picker("visibility-show", f"{hidden_header}G0", "Unfold the section at point")
+            shown = wait_state("explicitly shown section", lambda current:
+                               "changed line 0429" in current["text"] and "oversized.txt" in current["text"])
+            shown_providers = inspect_providers(shown, True)
+            assert full_git_state() == git_after_watcher_setup
+            assert presentation.read_bytes() == disk_before
+            report["visibility"].update({"hidden": hidden, "shown": shown,
+                                         "shown_providers": shown_providers,
+                                         "git_after": full_git_state(),
+                                         "presentation_unchanged": presentation.read_bytes() == disk_before})
+            picker("visibility-subsequent-request", f"{hidden_header}G0", None)
+            after_visibility_request = state()
+            assert after_visibility_request["text"] == shown["text"]
+            assert full_git_state() == git_after_watcher_setup
+            report["visibility"]["after_subsequent_request"] = after_visibility_request
+            (run_evidence / "visibility.screen").write_text(shown["text"] + "\n")
             final = state()
             assert not final["project_modules"] and final["rich_notifications"] == 0
             assert final["rtp"] == initial["rtp"]
@@ -398,8 +548,9 @@ def run_variant(final_newline: bool) -> None:
             request_ids = {value for line in trace_lines for value in re.findall(r"request_id = (\d+)", line)}
             report["trace_counts"]["distinct_request_ids"] = len(request_ids)
             # Count outbound applyEdit requests once (not their log send/handler
-            # duplicates). 30 allows the established content sequence plus the
-            # eight native log/menu transitions; each awaited transition also
+            # duplicates). 30 allows the established content/log/menu sequence,
+            # oversized fixture refresh, expansion, watcher, Hide and Show (five
+            # added renders), with bounded refresh coalescing; each transition
             # has its own bounded no-progress deadline.
             if len(request_ids) > 100 or len(edits) > 30 or len(noop_eof_deletes) > 2:
                 failure = RuntimeError(f"unbounded Plain synchronization trace: {report['trace_counts']!r}")
