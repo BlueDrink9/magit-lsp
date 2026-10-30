@@ -212,6 +212,11 @@ pub trait View: Send {
     /// Render the current state. Must not touch the repository; refresh first.
     fn render(&mut self, ctx: &Ctx<'_>) -> Tree;
 
+    /// Set an optional maximum rendered section size for views that support it.
+    fn set_section_line_limit(&mut self, _limit: Option<usize>) -> bool {
+        false
+    }
+
     /// The structured menu model, for clients that prefer native widgets.
     fn menu(&self) -> Option<Menu> {
         None

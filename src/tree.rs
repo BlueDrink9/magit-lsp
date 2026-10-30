@@ -45,6 +45,11 @@ impl Visibility {
         self.states.get(id) != Some(&VisibilityState::Collapsed)
     }
 
+    /// Return an explicitly recorded state for `id`, if the user set one.
+    pub fn explicit_state(&self, id: &str) -> Option<VisibilityState> {
+        self.states.get(id).copied()
+    }
+
     /// Record `state` for `id`.
     pub fn set(&mut self, id: impl Into<NodeId>, state: VisibilityState) {
         self.states.insert(id.into(), state);

@@ -9,7 +9,7 @@ use lsp_types::{Position, SymbolKind};
 use magit_lsp::git::{FileEntry, Status};
 use magit_lsp::patch::{DiffLine, Hunk};
 use magit_lsp::status_view;
-use magit_lsp::tree::{NodeKind, Token, Tree};
+use magit_lsp::tree::{NodeKind, Token, Tree, Visibility, VisibilityState};
 
 fn hunk(id: &str, lines: Vec<(char, &str)>) -> Hunk {
     Hunk {
@@ -377,6 +377,66 @@ fn document_symbols_nest_sections_files_and_hunks() {
     assert_eq!(hunk.kind, SymbolKind::METHOD);
     assert_eq!(hunk.range.start, Position::new(6, 0));
     assert_eq!(hunk.range.end, Position::new(10, 6));
+}
+
+#[test]
+fn limited_sections_emit_a_structured_exact_overflow_row_at_the_boundary() {
+    let status = old_parser_status();
+    let full = status_view::build(&status);
+    let section = full.nodes.iter().find(|node| node.id == "section:unstaged").unwrap();
+    let body_lines = section.end_line - section.start_line;
+    let render = |limit| status_view::build_with_limit(&status, &Visibility::new(), Some(limit), |_, file| file.hunks.clone());
+
+    let below = render(body_lines - 1);
+    let collapsed = below.node("section:unstaged").unwrap();
+    let overflow_id = "section:unstaged:overflow";
+    assert_eq!(below.lines[collapsed.start_line + 1], format!("{body_lines} more lines: expand"));
+    assert_eq!(collapsed.children, vec![overflow_id.to_string()]);
+    assert_eq!(below.node(overflow_id).unwrap().kind, NodeKind::Message);
+    assert_eq!(below.line_nodes.len(), below.lines.len());
+    assert!(below.line_nodes.iter().all(|entry| below.node(&entry.node).is_some()));
+    assert!(below.tokens.iter().all(|token| token.line < below.lines.len()));
+    assert!(below.links.iter().all(|link| link.line < below.lines.len()));
+
+    let at = render(body_lines);
+    assert!(at.node("unstaged/f.txt").is_some());
+    assert!(at.node(overflow_id).is_none());
+    let above = render(body_lines + 1);
+    assert!(above.node("unstaged/f.txt").is_some());
+
+    let mut explicitly_expanded = Visibility::new();
+    explicitly_expanded.set("section:unstaged", VisibilityState::Expanded);
+    let expanded = status_view::build_with_limit(&status, &explicitly_expanded, Some(1), |_, file| file.hunks.clone());
+    assert!(expanded.node("unstaged/f.txt").is_some());
+    let mut explicitly_collapsed = Visibility::new();
+    explicitly_collapsed.set("section:unstaged", VisibilityState::Collapsed);
+    let collapsed = status_view::build_with_limit(&status, &explicitly_collapsed, Some(1), |_, file| file.hunks.clone());
+    assert!(collapsed.node("section:unstaged:overflow").is_none());
+    assert!(collapsed.node("unstaged/f.txt").is_none());
+
+    // Ordinary/rich rendering remains byte-for-byte the original full tree.
+    assert_eq!(full, status_view::build(&status));
+}
+
+#[test]
+fn one_oversized_file_is_summarized_without_partial_hunk_structure() {
+    let mut status = old_parser_status();
+    let lines = vec![('+', "large added line"); 1200];
+    status.unstaged[0].hunks = vec![hunk("large", lines)];
+    let full = status_view::build(&status);
+    let expected_hidden = {
+        let section = full.node("section:unstaged").unwrap();
+        section.end_line - section.start_line
+    };
+    let tree = status_view::build_with_limit(&status, &Visibility::new(), Some(100), |_, file| file.hunks.clone());
+    let row = tree.node("section:unstaged:overflow").unwrap();
+    assert_eq!(tree.lines[row.start_line], format!("{expected_hidden} more lines: expand"));
+    assert!(tree.node("unstaged/f.txt").is_none());
+    assert!(tree.nodes.iter().all(|node| node.kind != NodeKind::Hunk));
+    assert_eq!(tree.line_nodes.len(), tree.lines.len());
+    assert!(tree.symbols.iter().any(|symbol| symbol.node == "section:unstaged" && symbol.children.is_empty()));
+    assert!(tree.tokens.iter().all(|token| token.line < tree.lines.len()));
+    assert!(tree.links.iter().all(|link| link.line < tree.lines.len()));
 }
 
 #[test]

@@ -30,6 +30,8 @@ pub struct StatusView {
     visibility: Visibility,
     /// The last visibility level set by `more-detail`/`less-detail`.
     level: u8,
+    /// Optional maximum rendered line count for a section.
+    section_line_limit: Option<usize>,
 }
 
 impl StatusView {
@@ -43,6 +45,7 @@ impl StatusView {
             hunks: HashMap::new(),
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
+            section_line_limit: None,
         })
     }
 
@@ -78,7 +81,7 @@ impl StatusView {
         let status = &self.status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
-        build_with(status, visibility, |section, file| {
+        build_with_limit(status, visibility, self.section_line_limit, |section, file| {
             if section == "untracked" {
                 return Vec::new();
             }
@@ -231,6 +234,11 @@ impl View for StatusView {
         self.render_tree()
     }
 
+    fn set_section_line_limit(&mut self, limit: Option<usize>) -> bool {
+        self.section_line_limit = limit.filter(|limit| *limit > 0);
+        true
+    }
+
     fn on_refresh(&mut self) -> Result<()> {
         self.status = self.repo.status_listing()?;
         // Hunk bodies are reloaded lazily from the fresh listing.
@@ -295,14 +303,36 @@ pub(crate) fn build_with<F>(status: &Status, visibility: &Visibility, mut load: 
 where
     F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
 {
-    let mut builder = Builder::new(visibility, &mut load);
-    builder.header(status);
-    builder.section("staged", "Staged changes", &status.staged);
-    builder.section("unstaged", "Unstaged changes", &status.unstaged);
-    builder.section("untracked", "Untracked files", &status.untracked);
-    if status.staged.is_empty() && status.unstaged.is_empty() && status.untracked.is_empty() {
-        builder.message();
+    build_with_limit(status, visibility, None, &mut load)
+}
+
+/// Build with an optional rendered-line bound per section.
+pub fn build_with_limit<F>(status: &Status, visibility: &Visibility, limit: Option<usize>, mut load: F) -> Tree
+where
+    F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
+{
+    let full = Builder::new(visibility, &mut load, &HashMap::new()).build(status);
+    let Some(limit) = limit else {
+        return full;
+    };
+    let summaries: HashMap<String, usize> = full
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Section)
+        .filter_map(|section| {
+            if visibility.explicit_state(&section.id) == Some(VisibilityState::Expanded) {
+                return None;
+            }
+            let body_lines = section.end_line.saturating_sub(section.start_line);
+            (body_lines > limit)
+                .then(|| (section.section.clone().unwrap_or_default(), body_lines))
+        })
+        .collect();
+    if summaries.is_empty() {
+        return full;
     }
+    let mut builder = Builder::new(visibility, &mut load, &summaries);
+    builder.populate(status);
     builder.finish()
 }
 
@@ -310,13 +340,14 @@ struct Builder<'a, F> {
     tree: Tree,
     visibility: &'a Visibility,
     load: &'a mut F,
+    summaries: &'a HashMap<String, usize>,
 }
 
 impl<'a, F> Builder<'a, F>
 where
     F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
 {
-    fn new(visibility: &'a Visibility, load: &'a mut F) -> Self {
+    fn new(visibility: &'a Visibility, load: &'a mut F, summaries: &'a HashMap<String, usize>) -> Self {
         Self {
             tree: Tree {
                 version: 0,
@@ -329,6 +360,22 @@ where
             },
             visibility,
             load,
+            summaries,
+        }
+    }
+
+    fn build(mut self, status: &Status) -> Tree {
+        self.populate(status);
+        self.finish()
+    }
+
+    fn populate(&mut self, status: &Status) {
+        self.header(status);
+        self.section("staged", "Staged changes", &status.staged);
+        self.section("unstaged", "Unstaged changes", &status.unstaged);
+        self.section("untracked", "Untracked files", &status.untracked);
+        if status.staged.is_empty() && status.unstaged.is_empty() && status.untracked.is_empty() {
+            self.message();
         }
     }
 
@@ -384,7 +431,15 @@ where
             modifiers: Vec::new(),
         });
 
-        if self.visibility.is_expanded(&section_id) {
+        if let Some(hidden) = self.summaries.get(key).copied() {
+            let id = format!("{section_id}:overflow");
+            let text = format!("{hidden} more lines: expand");
+            let row = self.tree.lines.len();
+            self.tree.lines.push(text.clone());
+            self.tree.line_nodes.push(line_node(&id, NodeKind::Message));
+            self.tree.nodes.push(node(&id, NodeKind::Message, text, row));
+            self.tree.nodes[index].children = vec![id];
+        } else if self.visibility.is_expanded(&section_id) {
             let children = files
                 .iter()
                 .map(|file| self.file(key, file))
