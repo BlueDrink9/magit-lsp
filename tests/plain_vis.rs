@@ -27,6 +27,40 @@ fn setup_with_encoding(profile: Profile, initial: &str, encoding: &str) -> (fixt
     (repo, server, editor, uri, text)
 }
 
+fn setup_large(limit: Option<u32>) -> (fixtures::RepoFixture, stdio::TestServer, FakeEditor, String, String) {
+    let content = fixtures::lines(600).to_string();
+    let changed = content.lines().map(|line| format!("changed-{line}")).collect::<Vec<_>>().join("\n") + "\n";
+    let mut initial = vec![("large.txt".to_owned(), content), ("small.txt".to_owned(), "before\nafter\n".to_owned())];
+    if let Some(limit) = limit { initial.push((".magit-lsp.toml".to_owned(), format!("[plain]\nmax_section_lines = {limit}\n"))); }
+    let (repo, _) = fixtures::RepoFixture::new().commit("large", initial).modify("large.txt", changed).modify("small.txt", "changed\nafter\n").build();
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let config_dir = tempfile::tempdir().unwrap();
+    let config_path = config_dir.path().join("user.toml");
+    let env = if limit.is_some() {
+        std::fs::write(&config_path, "trust_repo_config = true\n").unwrap();
+        vec![(magit_lsp::config::CONFIG_ENV, config_path.to_str().unwrap())]
+    } else { Vec::new() };
+    let mut server = stdio::TestServer::spawn(&env);
+    let mut init = stdio::initialize_message();
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix","refactor"]}}}}});
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    server.send(init); assert!(server.response_with_id(1)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "old\n"));
+    let edit = server.recv(); assert_eq!(edit["method"], "workspace/applyEdit");
+    for frame in editor.dispatch(&edit) { server.send(frame); }
+    let text = editor.text(&uri).to_owned();
+    (repo, server, editor, uri, text)
+}
+
+fn next_edit(server: &mut stdio::TestServer) -> Value {
+    loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" { return message; }
+    }
+}
+
 #[test]
 fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invalid_columns() {
     for (encoding, expected) in [("utf-8", 8), ("utf-16", 6), ("utf-32", 5)] {
@@ -77,6 +111,51 @@ fn plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invali
 fn request(server: &mut stdio::TestServer, method: &str, id: i64, params: Value) -> Value {
     server.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
     server.response_with_id(id)["result"].clone()
+}
+
+#[test]
+fn bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots() {
+    for (limit, summarized) in [(None, true), (Some(2000), false), (Some(20), true)] {
+        let (_repo, mut server, mut editor, uri, text) = setup_large(limit);
+        let overflow = text.lines().position(|line| line.contains("more lines: expand"));
+        assert_eq!(overflow.is_some(), summarized, "limit={limit:?}");
+        if summarized {
+            let row = overflow.unwrap() as u64;
+            let symbols = request(&mut server, "textDocument/documentSymbol", 190, json!({"textDocument":{"uri":uri}}));
+            assert!(symbols.as_array().is_some_and(|items| !items.is_empty()), "summary symbol metadata absent: {symbols}");
+            let links = request(&mut server, "textDocument/documentLink", 191, json!({"textDocument":{"uri":uri}}));
+            assert!(links.as_array().is_some_and(|items| items.iter().all(|link| link["range"]["start"]["line"].as_u64().unwrap() < text.lines().count() as u64)), "links outside snapshot: {links}");
+            let definition = request(&mut server, "textDocument/definition", 192, json!({"textDocument":{"uri":uri},"position":{"line":row,"character":0}}));
+            assert!(definition.is_null(), "hidden content must not resolve from summary row: {definition}");
+            let folds = request(&mut server, "textDocument/foldingRange", 193, json!({"textDocument":{"uri":uri}}));
+            assert!(folds.as_array().is_some_and(|items| items.iter().all(|fold| fold["endLine"].as_u64().unwrap() < text.lines().count() as u64)), "folds outside snapshot: {folds}");
+            fixtures::write(&_repo.path().join("watcher-refresh.txt"), "refresh\n");
+            let edit = next_edit(&mut server);
+            for frame in editor.dispatch(&edit) { server.send(frame); }
+            let refreshed = editor.text(&uri).to_owned();
+            assert!(refreshed.contains("watcher-refresh.txt"));
+            assert!(refreshed.contains("more lines: expand"), "section limit lost on refresh: {refreshed}");
+            let links = request(&mut server, "textDocument/documentLink", 194, json!({"textDocument":{"uri":uri}}));
+            assert!(links.as_array().is_some_and(|items| items.iter().all(|link| link["range"]["start"]["line"].as_u64().unwrap() < refreshed.lines().count() as u64)), "refreshed links outside snapshot: {links}");
+            if limit == Some(20) {
+                let config_row = refreshed.lines().position(|line| line.contains("watcher-refresh.txt")).unwrap() as u64;
+                let actions = request(&mut server, "textDocument/codeAction", 195, json!({"textDocument":{"uri":uri},"range":{"start":{"line":config_row,"character":0},"end":{"line":config_row,"character":0}},"context":{"diagnostics":[]}}));
+                let open = actions.as_array().unwrap().iter().find(|action| action["command"]["arguments"][0]["command"] == "open.commit").expect("commit menu offer on visible file")["command"]["arguments"][0].clone();
+                server.send(json!({"jsonrpc":"2.0","id":196,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[open]}}));
+                loop { let message = server.recv(); if message["method"] == "workspace/applyEdit" { for frame in editor.dispatch(&message) { server.send(frame); } } else if message["id"] == 196 { assert!(message["error"].is_null(), "menu open failed: {message}"); break; } }
+                assert!(editor.text(&uri).contains("Commit"));
+                let back_actions = request(&mut server, "textDocument/codeAction", 197, json!({"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}));
+                let back = back_actions.as_array().unwrap().iter().find(|action| action["command"]["arguments"][0]["command"] == "common.cancel").expect("Back offer")["command"]["arguments"][0].clone();
+                server.send(json!({"jsonrpc":"2.0","id":198,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[back]}}));
+                loop { let message = server.recv(); if message["method"] == "workspace/applyEdit" { for frame in editor.dispatch(&message) { server.send(frame); } } else if message["id"] == 198 { assert!(message["error"].is_null(), "Back failed: {message}"); break; } }
+                assert!(editor.text(&uri).contains("more lines: expand"), "Back lost the bounded Plain status policy");
+            }
+        }
+        server.send(editor.close(&uri));
+        server.shutdown_and_exit();
+        let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+        assert!(status.success());
+    }
 }
 
 fn state(repo: &fixtures::RepoFixture) -> (String, String, String) {

@@ -846,7 +846,7 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
     let opened = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         session.set_keymaps(config.keymaps());
-        session.open(view_id.clone(), ViewKind::Status, crate::view::Placement::default(), Viewport::default())
+        session.open_with_section_line_limit(view_id.clone(), ViewKind::Status, crate::view::Placement::default(), Viewport::default(), config.config().plain.max_section_lines as usize)
     };
     // `open` uses (id, kind, placement, viewport); preserve the root session's
     // authoritative Tree while keeping this logical view private to Plain.

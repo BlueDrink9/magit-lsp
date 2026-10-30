@@ -25,8 +25,12 @@ fn open_plain(repo: &fixtures::RepoFixture) -> (stdio::TestServer, FakeEditor, S
 }
 
 fn open_plain_with_capabilities(repo: &fixtures::RepoFixture, capabilities: Value) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_with_capabilities_and_env(repo, capabilities, &[])
+}
+
+fn open_plain_with_capabilities_and_env(repo: &fixtures::RepoFixture, capabilities: Value, env: &[(&str, &str)]) -> (stdio::TestServer, FakeEditor, String) {
     let uri = format!("file://{}/.magit", repo.path().display());
-    let mut server = stdio::TestServer::spawn(&[]);
+    let mut server = stdio::TestServer::spawn(env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = capabilities;
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
@@ -507,12 +511,22 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         lines[85] = "changed near end".into();
         fixture = fixture.modify(name, format!("{}\n", lines.join("\n")));
     }
+    fixture = fixture.commit("trusted fixture config", [(".magit-lsp.toml", "[plain]\nmax_section_lines = 5000\n")]);
     let (repo, _) = fixture.build();
-    let (mut server, editor, uri) = open_plain(&repo);
+    // Repository configuration requires explicit trust; this isolated user
+    // config opts the latency fixture into its genuinely expanded view.
+    let config_dir = tempfile::tempdir().unwrap();
+    let config_path = config_dir.path().join("user.toml");
+    std::fs::write(&config_path, "trust_repo_config = true\n").unwrap();
+    let config_value = config_path.to_str().unwrap();
+    let (mut server, editor, uri) = open_plain_with_capabilities_and_env(&repo, json!({
+        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
+        "textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}
+    }), &[(magit_lsp::config::CONFIG_ENV, config_value)]);
     let rendered = editor.text(&uri).to_owned();
     let rendered_bytes = rendered.len();
     let rendered_lines = rendered.lines().count();
-    let file_row = rendered.lines().position(|line| line.contains("file-000.txt")).unwrap();
+    let file_row = rendered.lines().position(|line| line.contains("file-000.txt")).unwrap_or_else(|| panic!("expanded large fixture omitted first file: {}", rendered.lines().take(12).collect::<Vec<_>>().join("\\n")));
     let hunk_row = rendered.lines().position(|line| line.contains("@@")).expect("fixture renders real hunks") as u32;
     let head = repo.git(&["rev-parse", "HEAD"]);
     let index = repo.git(&["write-tree"]);

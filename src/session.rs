@@ -749,6 +749,18 @@ impl Session {
         self.open_with_args(id, kind, placement, viewport, None)
     }
 
+    /// Open a view with a section line limit applied before its initial render.
+    pub fn open_with_section_line_limit(
+        &mut self,
+        id: impl Into<String>,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        limit: usize,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        self.open_internal(id.into(), kind, placement, viewport, None, Some(limit))
+    }
+
     /// Open a view with kind-specific arguments (e.g. preset menu arguments).
     pub fn open_with_args(
         &mut self,
@@ -758,12 +770,26 @@ impl Session {
         viewport: Viewport,
         args: Option<&Value>,
     ) -> Result<(ViewDescriptor, ViewRender)> {
-        let id = id.into();
+        self.open_internal(id.into(), kind, placement, viewport, args, None)
+    }
+
+    fn open_internal(
+        &mut self,
+        id: String,
+        kind: ViewKind,
+        placement: Placement,
+        viewport: Viewport,
+        args: Option<&Value>,
+        section_line_limit: Option<usize>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
         if self.views.get(&id).is_some() {
             return Err(Error::new(format!("view already open: {id}")));
         }
 
-        let view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
+        if let Some(limit) = section_line_limit {
+            view.set_section_line_limit(Some(limit));
+        }
         let placement = self.placement(placement);
         let (descriptor, render, mut open_view) =
             initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.rich_capabilities.as_ref().is_some_and(|caps| caps.render == "full"), self.rich_capabilities.as_ref().is_some_and(|caps| caps.folds == "native"));
