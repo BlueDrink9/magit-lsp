@@ -51,8 +51,39 @@ pub enum PlainActionTarget {
     Content(ActionTarget),
     /// Identity of the exact logical view that offered a semantic transition.
     View(SemanticViewTarget),
+    /// Exact node identity in the retained status view for visibility actions.
+    Node(SemanticNodeTarget),
     /// Exact item identity in the retained structured menu.
     MenuItem(SemanticMenuItemTarget),
+}
+
+/// Semantic status-node identity used by local and global visibility actions.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SemanticNodeTarget {
+    /// Logical view identity in the offering render.
+    pub view_id: String,
+    /// Existing node identity in the offering tree.
+    pub node_id: String,
+}
+
+/// Classify implemented visibility commands without side effects.
+pub fn visibility_command(command: &str) -> Option<crate::view::VisibilityCommand> {
+    use crate::view::VisibilityCommand as V;
+    Some(match command {
+        "common.toggle-section" => V::Toggle { recursive: false },
+        "common.show-section" => V::Show { recursive: false },
+        "common.hide-section" => V::Hide { recursive: false },
+        "common.show-all" => V::ShowAll,
+        "common.hide-all" => V::HideAll,
+        "common.more-detail" => V::MoreDetail,
+        "common.less-detail" => V::LessDetail,
+        "common.detail-level-1" => V::SetDetail(1),
+        "common.detail-level-2" => V::SetDetail(2),
+        "common.detail-level-3" => V::SetDetail(3),
+        "common.detail-level-4" => V::SetDetail(4),
+        _ => return None,
+    })
 }
 
 /// Semantic view identity used for supported menu and Back transitions.

@@ -113,6 +113,25 @@ fn request(server: &mut stdio::TestServer, method: &str, id: i64, params: Value)
     server.response_with_id(id)["result"].clone()
 }
 
+fn action_at(server: &mut stdio::TestServer, uri: &str, text: &str, line: usize, command: &str, id: i64) -> Value {
+    let actions = request(server, "textDocument/codeAction", id, json!({"textDocument":{"uri":uri},"range":{"start":{"line":line,"character":0},"end":{"line":line,"character":0}},"context":{"diagnostics":[]}}));
+    actions.as_array().unwrap().iter().find(|action| action["command"]["arguments"][0]["command"] == command)
+        .unwrap_or_else(|| panic!("missing {command} at line {line} in {text}")).to_owned()
+}
+
+fn execute_action(server: &mut stdio::TestServer, editor: &mut FakeEditor, action: Value, id: i64) -> Value {
+    execute_args(server, editor, action["command"]["arguments"][0].clone(), id)
+}
+
+fn execute_args(server: &mut stdio::TestServer, editor: &mut FakeEditor, args: Value, id: i64) -> Value {
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
+    loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" { for frame in editor.dispatch(&message) { server.send(frame); } }
+        else if message["id"] == id { assert!(message["error"].is_null(), "action RPC failed: {message}"); return message["result"].clone(); }
+    }
+}
+
 #[test]
 fn bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots() {
     for (limit, summarized) in [(None, true), (Some(2000), false), (Some(20), true)] {
@@ -156,6 +175,102 @@ fn bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots() 
         let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
         assert!(status.success());
     }
+}
+
+#[test]
+fn retained_overflow_action_expands_section_and_keeps_providers_bounded() {
+    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20));
+    let git = (repo.git(&["rev-parse", "HEAD"]), repo.git(&["write-tree"]), repo.git(&["diff", "--binary"]));
+    let row = text.lines().position(|line| line.contains("more lines: expand")).unwrap() as u64;
+    let actions = request(&mut server, "textDocument/codeAction", 301, json!({"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}));
+    let action = actions.as_array().unwrap().iter().find(|action| action["command"]["arguments"][0]["command"] == "common.toggle-section").expect("toggle action from overflow row");
+    let args = action["command"]["arguments"][0].clone();
+    assert!(!args["target"]["viewId"].as_str().unwrap().is_empty());
+    assert!(args["target"]["nodeId"].as_str().unwrap().ends_with(":overflow"));
+    let result = execute_action(&mut server, &mut editor, action.clone(), 302);
+    assert!(result["effects"].as_array().is_some_and(|e| e.is_empty()), "visibility refused: {result}");
+    let expanded = editor.text(&uri).to_owned();
+    assert!(!expanded.contains("more lines: expand"), "visibility action did not expand retained overflow: {expanded}");
+    assert!(expanded.contains("large.txt") && expanded.lines().count() > text.lines().count());
+    let links = request(&mut server, "textDocument/documentLink", 303, json!({"textDocument":{"uri":uri}}));
+    assert!(links.as_array().unwrap().iter().all(|link| link["range"]["start"]["line"].as_u64().unwrap() < expanded.lines().count() as u64));
+    assert_eq!(git, (repo.git(&["rev-parse", "HEAD"]), repo.git(&["write-tree"]), repo.git(&["diff", "--binary"])));
+    server.send(editor.close(&uri)); server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
+}
+
+#[test]
+fn plain_visibility_local_global_detail_and_forgery_matrix() {
+    let (repo, mut server, mut editor, uri, text) = setup_large(Some(20));
+    let mut git = (repo.git(&["rev-parse", "HEAD"]), repo.git(&["write-tree"]), repo.git(&["diff", "--binary"]));
+    let overflow = text.lines().position(|line| line.contains("more lines: expand")).unwrap();
+    let expand = action_at(&mut server, &uri, &text, overflow, "common.show-section", 310);
+    execute_action(&mut server, &mut editor, expand, 311);
+    let mut text = editor.text(&uri).to_owned();
+    let file = text.lines().position(|line| line.contains("large.txt")).unwrap();
+    let hide_file = action_at(&mut server, &uri, &text, file, "common.hide-section", 312);
+    execute_action(&mut server, &mut editor, hide_file, 313);
+    text = editor.text(&uri).to_owned();
+    assert!(!text.contains("changed-line1"), "file body remained visible after hide: {text}");
+    fixtures::write(&repo.path().join("visibility-refresh.txt"), "refresh\n");
+    let refresh = next_edit(&mut server);
+    for frame in editor.dispatch(&refresh) { server.send(frame); }
+    text = editor.text(&uri).to_owned();
+    assert!(text.contains("visibility-refresh.txt"));
+    assert!(!text.contains("changed-line1"), "explicit file hide was lost on watcher refresh");
+    git = (repo.git(&["rev-parse", "HEAD"]), repo.git(&["write-tree"]), repo.git(&["diff", "--binary"]));
+    let file = text.lines().position(|line| line.contains("large.txt")).unwrap();
+    let show_file = action_at(&mut server, &uri, &text, file, "common.show-section", 314);
+    execute_action(&mut server, &mut editor, show_file, 315);
+    text = editor.text(&uri).to_owned();
+    let hunk = text.lines().position(|line| line.contains("@@")).unwrap();
+    let hide_hunk = action_at(&mut server, &uri, &text, hunk, "common.hide-section", 316);
+    execute_action(&mut server, &mut editor, hide_hunk, 317);
+    text = editor.text(&uri).to_owned();
+    assert!(!text.contains("changed-line1"), "hunk body remained visible after hide");
+    let hunk = text.lines().position(|line| line.contains("@@")).unwrap();
+    let show_hunk = action_at(&mut server, &uri, &text, hunk, "common.show-section", 318);
+    execute_action(&mut server, &mut editor, show_hunk, 319);
+    text = editor.text(&uri).to_owned();
+    assert!(text.contains("changed-line1"));
+
+    let section = text.lines().position(|line| line.starts_with("Unstaged changes")).unwrap();
+    let hide_all = action_at(&mut server, &uri, &text, section, "common.hide-all", 320);
+    execute_action(&mut server, &mut editor, hide_all, 321);
+    text = editor.text(&uri).to_owned();
+    assert!(!text.contains("large.txt"));
+    let section = text.lines().position(|line| line.starts_with("Unstaged changes")).unwrap();
+    let show_all = action_at(&mut server, &uri, &text, section, "common.show-all", 322);
+    execute_action(&mut server, &mut editor, show_all, 323);
+    text = editor.text(&uri).to_owned();
+    assert!(text.contains("large.txt"));
+    let section = text.lines().position(|line| line.starts_with("Unstaged changes")).unwrap();
+    let detail_one = action_at(&mut server, &uri, &text, section, "common.detail-level-1", 324);
+    execute_action(&mut server, &mut editor, detail_one, 325);
+    text = editor.text(&uri).to_owned();
+    assert!(!text.contains("large.txt"));
+    let section = text.lines().position(|line| line.starts_with("Unstaged changes")).unwrap();
+    let detail_four = action_at(&mut server, &uri, &text, section, "common.detail-level-4", 326);
+    execute_action(&mut server, &mut editor, detail_four, 327);
+    text = editor.text(&uri).to_owned();
+    assert!(text.contains("changed-line1"));
+    let symbols = request(&mut server, "textDocument/documentSymbol", 328, json!({"textDocument":{"uri":uri}}));
+    assert!(symbols.as_array().unwrap().iter().all(|symbol| symbol["range"]["end"]["line"].as_u64().unwrap() < text.lines().count() as u64));
+
+    let local = action_at(&mut server, &uri, &text, text.lines().position(|line| line.contains("large.txt")).unwrap(), "common.hide-section", 329);
+    let mut stale = local["command"]["arguments"][0].clone();
+    stale["viewGeneration"] = json!(stale["viewGeneration"].as_u64().unwrap() + 1);
+    let refused = execute_args(&mut server, &mut editor, stale, 330);
+    assert_eq!(refused["effects"][0]["text"], magit_lsp::errors::STALE_VIEW);
+    let mut forged = local["command"]["arguments"][0].clone(); forged["target"]["nodeId"] = json!("made-up-node");
+    let refused = execute_args(&mut server, &mut editor, forged, 331);
+    assert_eq!(refused["effects"][0]["text"], magit_lsp::errors::STALE_VIEW);
+    let mut wrong = local["command"]["arguments"][0].clone(); wrong["command"] = json!("status.stage");
+    let refused = execute_args(&mut server, &mut editor, wrong, 332);
+    assert_eq!(refused["effects"][0]["text"], magit_lsp::errors::STALE_VIEW);
+    assert_eq!(git, (repo.git(&["rev-parse", "HEAD"]), repo.git(&["write-tree"]), repo.git(&["diff", "--binary"])));
+    server.send(editor.close(&uri)); server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 
 fn state(repo: &fixtures::RepoFixture) -> (String, String, String) {

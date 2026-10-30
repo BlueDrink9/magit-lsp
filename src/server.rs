@@ -1541,6 +1541,7 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
         crate::commands::Availability::Planned(_) => Some("This command is planned and cannot run in Plain mode"),
         crate::commands::Availability::Implemented
             if !crate::dispatch::content_command(command)
+                && crate::dispatch::visibility_command(command).is_none()
                 && !matches!(command, "open.commit" | "open.log" | "menu.run-action" | "common.cancel") =>
             Some("This command requires a Plain client adapter that is not available"),
         crate::commands::Availability::Implemented => None,
@@ -1800,6 +1801,18 @@ fn execute_plain_action(
                 }
                 0
             }
+            crate::dispatch::PlainActionTarget::Node(target) => {
+                if !crate::dispatch::visibility_command(&params.command).is_some()
+                    || target.view_id != view_id || scope != "status" {
+                    return plain_stale_message();
+                }
+                let Some(node) = tree.node(&target.node_id) else { return plain_stale_message(); };
+                if matches!(params.command.as_str(), "common.toggle-section" | "common.show-section" | "common.hide-section")
+                    && tree.collapsible_ancestor(&node.id).is_none() {
+                    return plain_stale_message();
+                }
+                node.start_line
+            }
             crate::dispatch::PlainActionTarget::MenuItem(target) => {
                 let valid = target.view_id == view_id && menu.as_ref().is_some_and(|menu| {
                     if menu.id != target.menu_id { return false; }
@@ -1849,7 +1862,7 @@ fn execute_plain_action(
         target: crate::dispatch::DispatchTarget {
             view_id: view_id.clone(),
             version: Some(params.view_generation),
-            cursor: matches!(params.target, crate::dispatch::PlainActionTarget::Content(_)).then_some(Cursor { line, column: 0 }),
+            cursor: matches!(params.target, crate::dispatch::PlainActionTarget::Content(_) | crate::dispatch::PlainActionTarget::Node(_)).then_some(Cursor { line, column: 0 }),
             selection: match &params.target { crate::dispatch::PlainActionTarget::Content(target) => target.selection.map(|selection| crate::protocol::Selection {
                 start_line: selection.start_line as usize,
                 end_line: selection.end_line as usize,
@@ -2366,6 +2379,30 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     for command in crate::commands::registry().iter() {
         if !command.applies_to(&scope) { continue; }
         let registry_availability = crate::commands::registry().availability(command.id);
+        if crate::dispatch::visibility_command(command.id).is_some() {
+            if scope != "status" { continue; }
+            let local = matches!(command.id, "common.toggle-section" | "common.show-section" | "common.hide-section");
+            // Offer global controls from section headers; their typed target is
+            // still any retained status node when a client invokes them.
+            if !local && line_node.kind != crate::tree::NodeKind::Section { continue; }
+            if local && tree.collapsible_ancestor(&line_node.id).is_none() { continue; }
+            let args = serde_json::json!({
+                "command": command.id,
+                "documentUri": uri,
+                "target": { "viewId": view_id, "nodeId": line_node.id },
+                "viewGeneration": generation,
+            });
+            let title = plain_action_title(style, command.doc,
+                keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str),
+                line_node.path.as_deref());
+            actions.push(serde_json::to_value(lsp_types::CodeAction {
+                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
+                disabled: None, edit: None,
+                command: Some(lsp_types::Command { title, command: "magit.command".into(), arguments: Some(vec![args]) }),
+                data: None,
+            }).unwrap_or(Value::Null));
+            continue;
+        }
         if !crate::dispatch::content_command(command.id) {
             let semantic = (matches!(command.id, "open.commit" | "open.log") && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");

@@ -175,7 +175,13 @@ impl StatusView {
             return false;
         };
         let state = state.unwrap_or_else(|| {
-            if self.visibility.is_expanded(&target.id) {
+            let displayed_collapsed = target.children.iter().any(|child_id| {
+                tree.node(child_id).is_some_and(|child| child.kind == NodeKind::Message)
+            });
+            let expanded = self.visibility.explicit_state(&target.id)
+                .map(|state| state == VisibilityState::Expanded)
+                .unwrap_or(!displayed_collapsed);
+            if expanded {
                 VisibilityState::Collapsed
             } else {
                 VisibilityState::Expanded
@@ -255,6 +261,11 @@ impl View for StatusView {
         match command {
             VisibilityCommand::ShowAll => {
                 self.visibility.show_all();
+                // A Plain size summary is renderer-imposed, not a stored
+                // collapsed override; show-all must explicitly reveal it.
+                for section in tree.nodes.iter().filter(|node| node.kind == NodeKind::Section) {
+                    self.visibility.set(section.id.clone(), VisibilityState::Expanded);
+                }
                 self.level = LEVEL_MAX;
                 true
             }

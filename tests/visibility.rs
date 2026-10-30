@@ -8,10 +8,38 @@ use magit_lsp::diff_text;
 use magit_lsp::git::diff_invocation_count;
 use magit_lsp::protocol::Cursor;
 use magit_lsp::tree::{NodeKind, Tree};
+use magit_lsp::view::{Ctx, View, VisibilityCommand, Viewport};
+use magit_lsp::status_view::StatusView;
 use serde_json::json;
 
 fn count_kind(tree: &Tree, kind: NodeKind) -> usize {
     tree.nodes.iter().filter(|node| node.kind == kind).count()
+}
+
+#[test]
+fn rich_status_toggle_and_show_all_reveal_automatic_summary() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut view = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
+    assert!(view.set_section_line_limit(Some(1)));
+    let ctx = Ctx { viewport: Viewport::default(), pending: &[] };
+    let mut tree = view.render(&ctx);
+    let summary = tree.node("section:unstaged:overflow").expect("automatic summary");
+    assert!(view.set_visibility(&tree, Some(summary.start_line), VisibilityCommand::Toggle { recursive: false }));
+    tree = view.render(&ctx);
+    assert!(tree.node("section:unstaged:overflow").is_none(), "toggle expands displayed summary");
+    assert!(tree.node("unstaged/f.txt").is_some());
+
+    view.on_refresh().unwrap();
+    tree = view.render(&ctx);
+    assert!(tree.node("unstaged/f.txt").is_some(), "explicit expansion survives refresh");
+    assert!(view.set_visibility(&tree, Some(tree.node("section:unstaged").unwrap().start_line), VisibilityCommand::HideAll));
+    tree = view.render(&ctx);
+    assert!(view.set_visibility(&tree, Some(tree.node("section:unstaged").unwrap().start_line), VisibilityCommand::ShowAll));
+    tree = view.render(&ctx);
+    assert!(tree.node("unstaged/f.txt").is_some(), "show-all overrides renderer-imposed summary");
 }
 
 #[test]
