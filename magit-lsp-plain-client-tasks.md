@@ -643,6 +643,8 @@ acceptance or gather the deferred evidence report.
   - Scenario: status, commit menu, toggle `-a`, back; log, then commit; undo after a transition is repaired.
 - **Verify:** `make test-rust FILTER="--test plain_stack"`.
 
+The scoped child **Serve Plain status-to-menu and Back transitions in the same document** is complete: binary coverage verifies status-to-commit-menu and Back via semantic view targets, retaining the same document URI and caller identity. This does not complete the broader STACK parent: native menu switches/options, prompt behavior and the remaining scenario are still open.
+
 ### R-PLAIN-VIS: visibility, folding fallback, standard providers (S)
 
 - **Target Files:** `src/status_view.rs`, `src/tree.rs`, `src/presentation/plain.rs`, `src/config.rs`.

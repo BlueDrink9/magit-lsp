@@ -1539,7 +1539,9 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
     let command = argument.get("command")?.as_str()?;
     match crate::commands::registry().availability(command)? {
         crate::commands::Availability::Planned(_) => Some("This command is planned and cannot run in Plain mode"),
-        crate::commands::Availability::Implemented if !crate::dispatch::content_command(command) =>
+        crate::commands::Availability::Implemented
+            if !crate::dispatch::content_command(command)
+                && !matches!(command, "open.commit" | "common.cancel") =>
             Some("This command requires a Plain client adapter that is not available"),
         crate::commands::Availability::Implemented => None,
     }
@@ -1748,12 +1750,14 @@ fn execute_plain_action(
     params: crate::dispatch::PlainActionParams,
 ) -> Result<Dispatched> {
     let caps = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
-    if let Some(caps) = caps {
+    if let Some(caps) = caps.as_ref() {
+        if crate::dispatch::content_command(&params.command) {
         match caps.content_action(&params.command) {
             Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)
                 | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason)) =>
                     return plain_unsupported_message(reason),
             _ => {}
+        }
         }
     } else {
         return plain_unsupported_message("Plain action capabilities are unavailable");
@@ -1772,21 +1776,35 @@ fn execute_plain_action(
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let Some(entry) = documents.get(uri) else { return plain_stale_message(); };
-        let Some((tree, view_id, generation, _scope)) = entry.controller.action_snapshot(&text)
+        let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text)
         else {
             return plain_stale_message();
         };
         if view_id != entry.view_id || generation != params.view_generation {
             return plain_stale_message();
         }
-        let Some(node) = tree.node(&params.target.node_id) else { return plain_stale_message(); };
-        let line = node.start_line;
-        let repo = entry.repo.clone();
-        let view_id = entry.view_id.clone();
-        let git = crate::git::GitRepo::open(&repo)?;
-        if !crate::dispatch::target_is_current(&git, tree, &params.command, &params.target)? {
+        let line = match &params.target {
+            crate::dispatch::PlainActionTarget::Content(target) => {
+                let Some(node) = tree.node(&target.node_id) else { return plain_stale_message(); };
+                let git = crate::git::GitRepo::open(&entry.repo)?;
+                if !crate::dispatch::target_is_current(&git, tree, &params.command, target)? {
+                    return plain_stale_message();
+                }
+                node.start_line
+            }
+            crate::dispatch::PlainActionTarget::View(target) => {
+                let supported = matches!(params.command.as_str(), "open.commit" | "common.cancel");
+                if !supported || target.view_id != view_id || !((params.command == "open.commit" && scope == "status") || (params.command == "common.cancel" && scope != "status")) {
+                    return plain_stale_message();
+                }
+                0
+            }
+        };
+        if matches!(params.target, crate::dispatch::PlainActionTarget::Content(_)) && !crate::dispatch::content_command(&params.command) {
             return plain_stale_message();
         }
+        let repo = entry.repo.clone();
+        let view_id = entry.view_id.clone();
         (repo, view_id, line)
     };
     if shared.cancellation_pending(&repo) {
@@ -1800,14 +1818,14 @@ fn execute_plain_action(
         target: crate::dispatch::DispatchTarget {
             view_id: view_id.clone(),
             version: Some(params.view_generation),
-            cursor: params.target.selection.is_none().then_some(Cursor { line, column: 0 }),
-            selection: params.target.selection.map(|selection| crate::protocol::Selection {
+            cursor: matches!(params.target, crate::dispatch::PlainActionTarget::Content(_)).then_some(Cursor { line, column: 0 }),
+            selection: match &params.target { crate::dispatch::PlainActionTarget::Content(target) => target.selection.map(|selection| crate::protocol::Selection {
                 start_line: selection.start_line as usize,
                 end_line: selection.end_line as usize,
-            }),
+            }), _ => None },
             key: None,
         },
-        action_target: Some(params.target),
+        action_target: match params.target { crate::dispatch::PlainActionTarget::Content(target) => Some(target), _ => None },
         args: None,
     };
     let step = handle
@@ -2257,7 +2275,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 
 fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
     let uri = params.text_document.uri.as_str();
-    let (text, tree, generation, scope, repo) = {
+    let (text, tree, view_id, generation, scope, repo) = {
         let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
@@ -2266,7 +2284,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
         let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
         if view_id != entry.view_id { return Value::Array(Vec::new()); }
-        (text, tree.clone(), generation, scope.to_owned(), entry.repo.clone())
+        (text, tree.clone(), view_id.to_owned(), generation, scope.to_owned(), entry.repo.clone())
     };
     let config = shared.config.for_repository(std::path::Path::new(&repo));
     let capabilities = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
@@ -2293,6 +2311,24 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         if !command.scope.matches(&scope) { continue; }
         let registry_availability = crate::commands::registry().availability(command.id);
         if !crate::dispatch::content_command(command.id) {
+            let semantic = (command.id == "open.commit" && scope == "status")
+                || (command.id == "common.cancel" && scope != "status");
+            if semantic {
+                let args = serde_json::json!({
+                    "command": command.id,
+                    "documentUri": uri,
+                    "target": { "viewId": view_id },
+                    "viewGeneration": generation,
+                });
+                let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
+                actions.push(serde_json::to_value(lsp_types::CodeAction {
+                    title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
+                    disabled: None, edit: None,
+                    command: Some(lsp_types::Command { title, command: "magit.command".to_string(), arguments: Some(vec![args]) }),
+                    data: None,
+                }).unwrap_or(Value::Null));
+                continue;
+            }
             let reason = match registry_availability {
                 Some(crate::commands::Availability::Planned(roadmap)) => Some(format!("Planned: roadmap {roadmap}")),
                 Some(crate::commands::Availability::Implemented) => Some("Unavailable: Plain client adapter is not implemented".to_owned()),
@@ -2328,7 +2364,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
-                "target": target,
+                "target": target.clone(),
                 "viewGeneration": generation,
             });
             let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
@@ -2674,20 +2710,6 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
         // lock: it waits for the user to edit and confirm.
         spawn_commit(shared.clone(), repo.to_string(), operation);
     }
-    if let Some(render) = outcome.render {
-        notifications.extend(deliver_render(shared, render));
-    }
-    // A mode change replaces the binding set, so the client must see it even
-    // when the scope's ordinary keymap would not change.
-    if shared.delivery() == KeymapDelivery::Dynamic {
-        if let Some(keymap) = outcome.keymap {
-            notifications.push(Message::Notification(Notification::new(
-                VIEW_KEYMAP.to_string(),
-                keymap,
-            )));
-        }
-    }
-
     // Views pushed or popped by an effect must be routable before the client
     // can send a key for them.
     let mut repo_view_pushed = false;
@@ -2712,6 +2734,48 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
                 }
                 _ => {}
             }
+        }
+    }
+    // Plain presents the stack's active logical view in one stable URI. Update
+    // that routing identity before any render from this outcome is delivered.
+    let mut plain_focus = Vec::new();
+    {
+        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        for effect in &outcome.effects {
+            match effect {
+                Effect::PushView { descriptor } | Effect::OpenView { descriptor } => {
+                    if let Some(entry) = documents.values_mut().find(|entry| entry.repo == repo) {
+                        entry.view_id = descriptor.id.clone();
+                    }
+                }
+                Effect::FocusView { view_id } => {
+                    if let Some(entry) = documents.values_mut().find(|entry| entry.repo == repo) {
+                        entry.view_id = view_id.clone();
+                        plain_focus.push(view_id.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for view_id in plain_focus {
+        let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
+            .values().find_map(|views| views.current_snapshot(&view_id));
+        route_plain_render(shared, &view_id, snapshot);
+    }
+    if let Some(render) = outcome.render {
+        notifications.extend(deliver_render(shared, render));
+    }
+    // A mode change replaces the binding set, so the client must see it even
+    // when the scope's ordinary keymap would not change. Keep the established
+    // render-before-keymap order for rich clients.
+    if shared.delivery() == KeymapDelivery::Dynamic {
+        if let Some(keymap) = outcome.keymap {
+            notifications.push(Message::Notification(Notification::new(
+                VIEW_KEYMAP.to_string(),
+                keymap,
+            )));
         }
     }
     // The watcher lifecycle rides the same effects: a new view arms the

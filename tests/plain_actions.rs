@@ -192,12 +192,27 @@ fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) 
         .filter_map(|a| a["command"]["arguments"][0]["target"]["node_id"].as_str().map(str::to_owned)).collect()
 }
 
-fn action_targets(server: &mut stdio::TestServer, uri: &str, line: u32, id: i64) -> Vec<(String, String)> {
+#[derive(Debug)]
+struct OfferedTarget {
+    command: String,
+    content_node: Option<String>,
+    semantic_view: Option<String>,
+}
+
+fn action_targets(server: &mut stdio::TestServer, uri: &str, line: u32, id: i64) -> Vec<OfferedTarget> {
     server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":line,"character":0},"end":{"line":line,"character":0}},"context":{"diagnostics":[]}}}));
-    server.response_with_id(id)["result"].as_array().unwrap().iter().map(|action| (
-        action["command"]["arguments"][0]["command"].as_str().unwrap().to_owned(),
-        action["command"]["arguments"][0]["target"]["node_id"].as_str().unwrap().to_owned(),
-    )).collect()
+    server.response_with_id(id)["result"].as_array().unwrap().iter().map(|action| {
+        let args = &action["command"]["arguments"][0];
+        let target = &args["target"];
+        let content_node = target["node_id"].as_str().map(str::to_owned);
+        let semantic_view = target["viewId"].as_str().map(str::to_owned);
+        assert_ne!(content_node.is_some(), semantic_view.is_some(), "target must be exactly one typed variant: {target}");
+        OfferedTarget {
+            command: args["command"].as_str().unwrap().to_owned(),
+            content_node,
+            semantic_view,
+        }
+    }).collect()
 }
 
 fn offered_for_range(server: &mut stdio::TestServer, uri: &str, range: Value, command: &str, id: i64) -> Value {
@@ -416,14 +431,17 @@ fn cursor_actions_target_file_or_owning_hunk_once() {
     let file_actions = action_targets(&mut server,&uri,file,91);
     let changed_actions = action_targets(&mut server,&uri,changed,92);
     let context_actions = action_targets(&mut server,&uri,context,93);
-    let file_target = file_actions.iter().find(|(command,_)| command == "status.stage").unwrap().1.clone();
-    for (actions,label) in [(&changed_actions,"changed line"),(&context_actions,"context line")] {
-        let stage: Vec<_> = actions.iter().filter(|(command,_)| command == "status.stage").collect();
-        assert_eq!(stage.len(),1,"{label} must offer stage once");
-        assert_ne!(stage[0].1,file_target,"{label} must target hunk, not whole file");
+    for actions in [&file_actions, &changed_actions, &context_actions] {
+        assert!(actions.iter().any(|action| action.command == "open.commit" && action.semantic_view.is_some()), "semantic menu action missing: {actions:?}");
     }
-    assert_eq!(changed_actions.iter().filter(|(command,_)| command == "status.stage").count(),1);
-    assert_eq!(context_actions.iter().filter(|(command,_)| command == "status.stage").count(),1);
+    let file_target = file_actions.iter().find(|action| action.command == "status.stage").unwrap().content_node.as_ref().unwrap().clone();
+    for (actions,label) in [(&changed_actions,"changed line"),(&context_actions,"context line")] {
+        let stage: Vec<_> = actions.iter().filter(|action| action.command == "status.stage").collect();
+        assert_eq!(stage.len(),1,"{label} must offer stage once");
+        assert_ne!(stage[0].content_node.as_ref().unwrap(),&file_target,"{label} must target hunk, not whole file");
+    }
+    assert_eq!(changed_actions.iter().filter(|action| action.command == "status.stage").count(),1);
+    assert_eq!(context_actions.iter().filter(|action| action.command == "status.stage").count(),1);
     server.shutdown_and_exit(); let (status,_)=server.finish_with_messages(std::time::Duration::from_secs(10)); assert!(status.success());
 }
 

@@ -37,10 +37,28 @@ pub struct PlainActionParams {
     pub command: String,
     /// Open document URI the action was offered in.
     pub document_uri: String,
-    /// Content-addressed target from the offering render.
-    pub target: ActionTarget,
+    /// Typed target from the offering render.
+    pub target: PlainActionTarget,
     /// Render generation the action was offered from.
     pub view_generation: u64,
+}
+
+/// A content mutation target or a non-mutating logical-view target.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum PlainActionTarget {
+    /// Content-addressed target from a status tree.
+    Content(ActionTarget),
+    /// Identity of the exact logical view that offered a semantic transition.
+    View(SemanticViewTarget),
+}
+
+/// Semantic view identity used for supported menu and Back transitions.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticViewTarget {
+    /// Logical view identity in the offering render.
+    pub view_id: String,
 }
 
 /// The displayed view location and input context bound to a dispatch request.
