@@ -325,6 +325,45 @@ fn initialization_options_override_user_config() {
 }
 
 #[test]
+fn plain_section_limit_defaults_and_obeys_configuration_layers() {
+    let dir = TempDir::new().unwrap();
+    let repo = TempDir::new().unwrap();
+    let global = dir.path().join("config.toml");
+    write(&global, "trust_repo_config = true\n[plain]\nmax_section_lines = 300\n");
+    write(&repo.path().join(".magit-lsp.toml"), "[plain]\nmax_section_lines = 100\n");
+    let default = load_config(&LoadOptions::default()).unwrap();
+    assert_eq!(default.plain.max_section_lines, 400);
+    let config = load_config(&LoadOptions {
+        config_path: Some(global.clone()), repo_path: Some(repo.path().to_path_buf()),
+        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})), ..Default::default()
+    }).unwrap();
+    assert_eq!(config.plain.max_section_lines, 100);
+    let config = load_config(&LoadOptions {
+        config_path: Some(global),
+        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})), ..Default::default()
+    }).unwrap();
+    assert_eq!(config.plain.max_section_lines, 200);
+}
+
+#[test]
+fn invalid_plain_section_limits_are_rejected() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("config.toml");
+    for value in ["0", "-1", "1.5", "\"4\"", "4294967296"] {
+        write(&main, &format!("[plain]\nmax_section_lines = {value}\n"));
+        let error = load(&main).unwrap_err();
+        assert!(error.message.contains("plain.max_section_lines"), "{error}");
+    }
+    for value in [serde_json::json!(0), serde_json::json!(-1), serde_json::json!(1.5), serde_json::json!("4"), serde_json::json!(u64::MAX)] {
+        let error = load_config(&LoadOptions {
+            initialization: Some(serde_json::json!({"plain":{"max_section_lines":value}})),
+            ..Default::default()
+        }).unwrap_err();
+        assert!(error.message.contains("plain.max_section_lines"), "{error}");
+    }
+}
+
+#[test]
 fn per_repo_config_is_ignored_without_trust() {
     let dir = TempDir::new().unwrap();
     let repo = TempDir::new().unwrap();

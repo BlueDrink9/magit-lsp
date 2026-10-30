@@ -654,6 +654,7 @@ acceptance or gather the deferred evidence report.
   - `documentSymbol`, `definition`, `documentLink`, `foldingRange` and `semanticTokens/full` are served for Plain documents from the matching snapshot, and return null when out of sync. Fold ranges are valid and bounded.
 - **Verify:** `make test-rust FILTER="--test plain_vis"`.
 - **Provider snapshot evidence:** Actual-binary tests cover status and active-menu snapshots, all-five-null invalid/unmatched/format-suspended/closed cases, bounded structural ranges including the final-newline phantom row, and UTF-8/16/32 supplementary-character symbol/link/token positions with invalid definition boundaries. Focused verification: `cargo test --test plain_vis --test navigation --test semantic_tokens --test plain_render && git diff --check`. Visibility controls and native acceptance stay in the parent VIS item.
+- **Completed prerequisite — Configure the Plain section expansion limit:** Typed `plain.max_section_lines` configuration defaults to 400 and follows user, initialization and trusted-repository precedence, with readable rejection of invalid values. Verification: `cargo test --test config && git diff --check`. This does not implement bounded rendering or expansion actions; those remain in the unchecked VIS acceptance above.
 
 ### R-PLAIN-PROMPT: document-backed prompts, completion, support table (L)
 

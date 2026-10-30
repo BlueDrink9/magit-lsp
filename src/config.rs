@@ -208,6 +208,13 @@ pub struct ActionsSettings {
     pub title_style: TitleStyle,
 }
 
+/// Settings for the Plain presentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlainSettings {
+    /// Maximum section size before Plain rendering should collapse it.
+    pub max_section_lines: u32,
+}
+
 /// The fully resolved configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -219,6 +226,8 @@ pub struct Config {
     pub ui: UiSettings,
     pub log: LogSettings,
     pub actions: ActionsSettings,
+    /// Plain presentation settings.
+    pub plain: PlainSettings,
     /// File basenames used for the Plain presentation document (default `.magit`).
     pub presentation_files: Vec<String>,
     /// Every file that contributed, for the watcher.
@@ -252,6 +261,7 @@ impl Default for Config {
                 margin: None,
             },
             actions: ActionsSettings::default(),
+            plain: PlainSettings { max_section_lines: 400 },
             presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
@@ -448,6 +458,7 @@ struct Layered {
     log_default_args: Option<Vec<String>>,
     log_margin: Option<u32>,
     actions_title_style: Option<TitleStyle>,
+    plain_max_section_lines: Option<u32>,
     presentation_files: Option<Vec<String>>,
     files: Vec<PathBuf>,
 }
@@ -483,6 +494,9 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     }
     if let Some(style) = layered.actions_title_style {
         config.actions.title_style = style;
+    }
+    if let Some(max) = layered.plain_max_section_lines {
+        config.plain.max_section_lines = max;
     }
     if let Some(names) = layered.presentation_files {
         config.presentation_files = names;
@@ -710,6 +724,22 @@ fn apply_document(
                             layered.presentation_files = Some(names);
                         }
                         other => return Err(unknown_key(file, line, "presentation", other)),
+                    }
+                }
+            }
+            "plain" => {
+                let table = settings_table(item, "plain", file, line)?;
+                for (name, value) in table.iter() {
+                    let line = item_line(source, value);
+                    match name {
+                        "max_section_lines" => {
+                            let max = integer(value, "plain.max_section_lines", file, line)?;
+                            if max == 0 {
+                                return Err(ConfigError::new("`plain.max_section_lines` must be a positive integer").at_file_line(file, line));
+                            }
+                            layered.plain_max_section_lines = Some(max);
+                        }
+                        other => return Err(unknown_key(file, line, "plain", other)),
                     }
                 }
             }
@@ -941,6 +971,21 @@ fn apply_initialization(
     }
     if let Some(keys) = value.get("keys") {
         config.keys.merge(keys_from_json(keys, &label)?);
+    }
+    if let Some(plain) = value.get("plain") {
+        let Some(plain) = plain.as_object() else {
+            return Err(ConfigError::new("`plain` must be an object").at_file(&label));
+        };
+        for (name, value) in plain {
+            if name != "max_section_lines" {
+                return Err(ConfigError::new(format!("unknown setting `plain.{name}`")).at_file(&label));
+            }
+            let max = value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| ConfigError::new("`plain.max_section_lines` must be a positive representable integer").at_file(&label))?;
+            if max == 0 {
+                return Err(ConfigError::new("`plain.max_section_lines` must be a positive integer").at_file(&label));
+            }
+            config.plain.max_section_lines = max;
+        }
     }
     Ok(())
 }
