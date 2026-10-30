@@ -237,6 +237,34 @@ def run_variant(final_newline: bool) -> None:
             assert before["index"] == base and before["head_text"] == base and before["worktree"] == changed
             picker("file-discard-unavailable", file_keys(rendered), None)
             assert snapshot() == before
+
+            # Exercise the server-owned menu through stock Neovim code actions.
+            # Use different menu rows for the on/off offers and Back.
+            status_row = next(i + 1 for i, line in enumerate(rendered["text"].splitlines()) if "tracked.txt" in line)
+            picker("menu-open", f"{status_row}G0", "Open the commit menu")
+            menu = wait_text("git commit")
+            assert snapshot() == before
+            menu_rows = menu["text"].splitlines()
+            assert len(menu_rows) > 1, menu
+            first_menu_row, last_menu_row = 1, len(menu_rows)
+            picker("menu-switch-on", f"{first_menu_row}G0", "Toggle Stage all modified and deleted files")
+            menu_on = wait_text("git commit --all")
+            (run_evidence / "menu-on.screen").write_text(menu_on["text"] + "\n")
+            assert "-a  Stage all modified and deleted files (--all)  [x]" in menu_on["text"]
+            assert snapshot() == before
+            picker("menu-switch-off", f"{last_menu_row}G0", "Toggle Stage all modified and deleted files")
+            menu_off = wait_text("git commit")
+            (run_evidence / "menu-off.screen").write_text(menu_off["text"] + "\n")
+            assert "-a  Stage all modified and deleted files (--all)  [ ]" in menu_off["text"]
+            assert "git commit --all" not in menu_off["text"]
+            assert snapshot() == before
+            picker("menu-back", f"{last_menu_row}G0", "Cancel the current operation")
+            restored = wait_text("+THREE")
+            assert restored["text"] == rendered["text"], (rendered, restored)
+            assert snapshot() == before
+            report["menu"] = {"caller_text": rendered["text"], "on": menu_on, "off": menu_off,
+                               "restored": restored, "git_before_after": [before, snapshot()],
+                               "distinct_rows": [first_menu_row, last_menu_row]}
             picker("file-stage", file_keys(state()), "Stage the change at point")
             staged = wait_text("Staged changes (1)")
             after_stage = snapshot()
