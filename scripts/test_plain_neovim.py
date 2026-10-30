@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import traceback
 import uuid
 from pathlib import Path
 
@@ -168,7 +169,17 @@ def run_variant(final_newline: bool) -> None:
                     if needle in current["text"]:
                         return current
                     if time.monotonic() >= deadline:
-                        raise RuntimeError(f"render missing {needle!r}: {current!r}")
+                        raise RuntimeError(f"render missing {needle!r}; actual state: {current!r}")
+
+            def wait_state(label: str, predicate: object) -> dict[str, object]:
+                deadline = time.monotonic() + 30
+                current: dict[str, object] = {}
+                while True:
+                    current = state()
+                    if predicate(current):
+                        return current
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"timed out waiting for {label}; actual state: {current!r}")
 
             actions: list[dict[str, object]] = []
             report["actions"] = actions
@@ -262,9 +273,47 @@ def run_variant(final_newline: bool) -> None:
             restored = wait_text("+THREE")
             assert restored["text"] == rendered["text"], (rendered, restored)
             assert snapshot() == before
+            # Follow the retained native log-menu action into the concrete log,
+            # then exercise a nested commit menu and restore each exact caller.
+            picker("log-menu-open", f"{status_row}G0", "Open the log menu")
+            log_menu = wait_text("Show graph")
+            assert "git log" in log_menu["text"]
+            if "-g  Show graph (--graph)  [x]" not in log_menu["text"]:
+                picker("log-graph-on", "1G0", "Toggle Show graph")
+            graph_on = wait_state("log graph switch and argument preview", lambda current:
+                                  "-g  Show graph (--graph)  [x]" in current["text"]
+                                  and "--graph" in current["text"])
+            picker("log-current", "1G0", "Open current")
+            concrete_log = wait_state("concrete current log", lambda current:
+                                      "initial" in current["text"] and "*" in current["text"])
+            assert any(line.lstrip().startswith("*") for line in concrete_log["text"].splitlines()), concrete_log
+            assert "git log --graph" in graph_on["text"]
+            picker("log-commit-menu", "1G0", "Open the commit menu")
+            commit_menu = wait_text("git commit")
+            assert "git commit --all" not in commit_menu["text"]
+            picker("nested-commit-switch", "1G0", "Toggle Stage all modified and deleted files")
+            nested_on = wait_state("nested commit switch", lambda current:
+                                   "-a  Stage all modified and deleted files (--all)  [x]" in current["text"]
+                                   and "git commit --all" in current["text"])
+            assert "-a  Stage all modified and deleted files (--all)  [x]" in nested_on["text"]
+            assert snapshot() == before
+            picker("nested-commit-back", "1G0", "Cancel the current operation")
+            log_restored = wait_state("restored concrete log", lambda current:
+                                      current["text"] == concrete_log["text"])
+            assert log_restored["text"] == concrete_log["text"], (concrete_log, log_restored)
+            picker("log-menu-back", "1G0", "Cancel the current operation")
+            status_restored = wait_state("restored original status", lambda current:
+                                         current["text"] == rendered["text"])
+            assert status_restored["text"] == rendered["text"], (rendered, status_restored)
+            assert snapshot() == before
             report["menu"] = {"caller_text": rendered["text"], "on": menu_on, "off": menu_off,
-                               "restored": restored, "git_before_after": [before, snapshot()],
-                               "distinct_rows": [first_menu_row, last_menu_row]}
+                                "restored": restored, "git_before_after": [before, snapshot()],
+                                "distinct_rows": [first_menu_row, last_menu_row]}
+            report["nested_log"] = {"log_menu": log_menu, "graph_on": graph_on,
+                                    "concrete_log": concrete_log, "commit_menu": commit_menu,
+                                    "nested_on": nested_on, "log_restored": log_restored,
+                                    "status_restored": status_restored,
+                                    "git_before_after": [before, snapshot()]}
             picker("file-stage", file_keys(state()), "Stage the change at point")
             staged = wait_text("Staged changes (1)")
             after_stage = snapshot()
@@ -302,6 +351,7 @@ def run_variant(final_newline: bool) -> None:
                 raise AssertionError("custom view/render notification received")
     except BaseException as error:
         failure = error
+        report["traceback"] = traceback.format_exc()
     finally:
         killed = subprocess.run(["tmux", "-L", server_id, "kill-server"], capture_output=True, text=True)
         # Neovim owns its stdio LSP child; killing the owned tmux server stops
@@ -322,10 +372,16 @@ def run_variant(final_newline: bool) -> None:
         if trace_path.exists():
             trace_lines = trace_path.read_text(errors="replace").splitlines()
             changes = [index for index, line in enumerate(trace_lines) if "textDocument/didChange" in line]
-            edits = [index for index, line in enumerate(trace_lines) if 'method = "workspace/applyEdit"' in line]
+            edits = [index for index, line in enumerate(trace_lines) if '"server_request"\t"workspace/applyEdit"' in line]
             noop_eof_deletes = [line for line in trace_lines if "textDocument/didChange" in line and "rangeLength = 0, text = \"\"" in line]
             report["trace_counts"] = {"lines": len(trace_lines), "did_change": len(changes), "apply_edit": len(edits), "empty_insert_changes": len(noop_eof_deletes)}
-            if len(changes) > 80 or len(edits) > 20 or len(noop_eof_deletes) > 2:
+            request_ids = {value for line in trace_lines for value in re.findall(r"request_id = (\d+)", line)}
+            report["trace_counts"]["distinct_request_ids"] = len(request_ids)
+            # Count outbound applyEdit requests once (not their log send/handler
+            # duplicates). 30 allows the established content sequence plus the
+            # eight native log/menu transitions; each awaited transition also
+            # has its own bounded no-progress deadline.
+            if len(request_ids) > 100 or len(edits) > 30 or len(noop_eof_deletes) > 2:
                 failure = RuntimeError(f"unbounded Plain synchronization trace: {report['trace_counts']!r}")
             keep = {index for index, line in enumerate(trace_lines) if "textDocument/didOpen" in line or '"magit-lsp/outbound/1"' in line}
             keep.update(changes[:20])
