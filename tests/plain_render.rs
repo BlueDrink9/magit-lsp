@@ -330,12 +330,61 @@ fn every_fake_editor_profile_can_be_driven_without_assuming_next_version() {
         assert!(c.change(actual_version as i32, editor.text("file:///status")).is_none());
         let followup = c.response(request.id, true);
         if profile == Profile::CrlfNormalise {
-            assert!(followup.is_some());
+            assert!(followup.is_none());
+            assert!(c.take_format_warning());
+            assert!(c.render("a\r\nb").is_none());
+            assert!(c.change(actual_version as i32 + 1, "a\nb").is_none());
+            assert!(!c.action_snapshot("a\r\nb").is_some());
+            assert!(!c.take_format_warning());
+            assert!(c.open(actual_version as i32 + 2, "a\nb").is_some());
+            assert_eq!(c.state(), DocumentState::Applying);
         } else {
             assert!(followup.is_none());
+            assert_eq!(c.state(), DocumentState::Ready);
         }
-        assert_eq!(c.state(), if profile == Profile::CrlfNormalise { DocumentState::Applying } else { DocumentState::Ready });
     }
+}
+
+#[test]
+fn format_drift_suspends_once_in_either_response_echo_order_and_reopens() {
+    for (authoritative, drifted) in [("authoritative\r\n", "authoritative\n"), ("authoritative\n", "authoritative")] {
+        for response_first in [true, false] {
+            let mut c = PlainDocument::new("file:///status", Encoding::Utf16, true, DocumentFormat::from_text(authoritative));
+            c.render(authoritative);
+            let edit = c.open(1, "stale").unwrap();
+            if response_first { assert!(c.response(edit.id, true).is_none()); }
+            assert!(c.change(2, drifted).is_none());
+            if !response_first { assert!(c.response(edit.id, true).is_none()); }
+            assert!(c.take_format_warning());
+            assert!(!c.take_format_warning());
+            assert!(c.render_actions(magit_lsp::tree::Tree { version: 0, lines: vec!["authoritative".into()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] }, "view".into(), 1, "scope".into()).is_none());
+            assert!(c.action_snapshot(authoritative).is_none());
+            assert!(c.change(3, drifted).is_none());
+            assert!(!c.take_format_warning());
+            assert!(c.open(4, drifted).is_some());
+            assert_eq!(c.state(), DocumentState::Applying);
+        }
+    }
+}
+
+#[test]
+fn delayed_exact_echo_clears_intermediate_format_drift_diagnosis() {
+    let mut c = PlainDocument::new("file:///status", Encoding::Utf16, true, DocumentFormat::from_text("old\n"));
+    c.render("authoritative\n");
+    let edit = c.open(1, "stale\n").unwrap();
+    assert!(c.change(2, "authoritative\r\n").is_none());
+    assert!(c.change(3, "authoritative\n").is_none());
+    assert!(c.response(edit.id, true).is_none());
+    assert!(!c.take_format_warning());
+    assert_eq!(c.state(), DocumentState::Ready);
+
+    let mut rows = PlainDocument::new("file:///status", Encoding::Utf16, true, DocumentFormat::from_text("old\n"));
+    rows.render("authoritative\n\n");
+    let edit = rows.open(1, "stale\n").unwrap();
+    assert!(rows.response(edit.id, true).is_none());
+    let repair = rows.change(2, "authoritative\n").expect("a missing structured blank row is ordinary divergence");
+    assert!(!rows.take_format_warning());
+    assert!(repair.edit.is_object());
 }
 
 #[test]
@@ -384,4 +433,45 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
     assert_eq!(std::fs::read(&path).unwrap(), disk_before);
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn binary_format_drift_warns_once_refuses_actions_and_recovers_on_reopen() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).modify("f.txt", "changed\n").build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk\r\n");
+    let uri = format!("file://{}", path.display());
+    let mut server = plain_server(repo.path(), true, true);
+    let mut editor = FakeEditor::new(Profile::CrlfNormalise);
+    server.send(editor.open(&uri, "stale\r\n"));
+    let first = next_edit(&mut server);
+    let mut frames = editor.dispatch(&first);
+    if frames[0]["result"]["applied"] == true { server.send(frames.remove(0)); }
+    for frame in frames { server.send(frame); }
+    let warning = loop {
+        let frame = server.recv();
+        if frame["method"] == "window/showMessage" { break frame; }
+        assert_ne!(frame["method"], "workspace/applyEdit", "format drift must not trigger a second repair");
+    };
+    let warning_text = warning["params"]["message"].as_str().unwrap();
+    assert!(warning_text.contains("line endings or final newline"));
+    assert!(warning_text.contains("close and reopen"));
+
+    for version in [3, 4] {
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":editor.text(&uri)}]}}));
+    }
+    server.send(json!({"jsonrpc":"2.0","id":41,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
+    assert!(server.response_with_id(41)["result"].as_array().unwrap().is_empty());
+    assert!(!server.notifications.iter().any(|message| message["method"] == "workspace/applyEdit" || message["method"] == "window/showMessage"));
+
+    server.send(editor.close(&uri));
+    server.send(editor.open(&uri, "stale\n"));
+    let reopened = next_edit(&mut server);
+    assert_eq!(editor.apply_edit(&reopened["params"]["edit"])["applied"], true);
+    server.send(json!({"jsonrpc":"2.0","id":reopened["id"],"result":{"applied":true}}));
+    let reopened_text = editor.text(&uri).to_owned();
+    server.send(editor.edit(&uri, &reopened_text));
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
 }

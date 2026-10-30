@@ -786,11 +786,15 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
         let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
         let next = {
             let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-            documents.get_mut(&uri).filter(|entry| entry.incarnation == incarnation)
-                .and_then(|entry| entry.controller.response(edit.id, applied))
+            documents.get_mut(&uri).filter(|entry| entry.incarnation == incarnation).map(|entry| {
+                let next = entry.controller.response(edit.id, applied);
+                let warning = entry.controller.take_format_warning();
+                (next, warning)
+            })
         };
-        if let Some(next) = next {
-            send_plain_edit(&shared, uri, incarnation, next);
+        if let Some((next, warning)) = next {
+            if warning { let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into())); }
+            if let Some(next) = next { send_plain_edit(&shared, uri, incarnation, next); }
         }
     });
 }
@@ -896,8 +900,12 @@ fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
 fn plain_change(shared: &Shared, uri: &str) {
     let snapshot = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).cloned();
     let Some(snapshot) = snapshot else { return; };
-    let request = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri)
-        .and_then(|entry| entry.controller.change(snapshot.version, snapshot.text));
+    let (request, warning) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri)
+        .map(|entry| {
+            let request = entry.controller.change(snapshot.version, snapshot.text);
+            (request, entry.controller.take_format_warning())
+        }).unwrap_or((None, false));
+    if warning { let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into())); }
     if let Some(edit) = request {
         let incarnation = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).map(|entry| entry.incarnation);
         if let Some(incarnation) = incarnation { send_plain_edit(shared, uri.to_owned(), incarnation, edit); }

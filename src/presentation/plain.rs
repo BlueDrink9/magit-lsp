@@ -73,6 +73,7 @@ struct InFlight {
     echoed: bool,
     diverged: bool,
     response: Option<bool>,
+    format_drift: bool,
 }
 
 /// Serializes authoritative rendered text into standard workspace edits.
@@ -94,6 +95,8 @@ pub struct PlainDocument {
     /// A rejected target is not retried until the client or render advances.
     rejected: Option<([u8; 32], [u8; 32])>,
     next_id: u64,
+    format_suspended: bool,
+    warning_pending: bool,
 }
 
 impl PlainDocument {
@@ -103,7 +106,7 @@ impl PlainDocument {
             uri: uri.into(), encoding, document_changes, format,
             state: DocumentState::Detached, authoritative: None, client: None,
             snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, rejected: None, next_id: 0,
-            action_snapshots: VecDeque::new(),
+            action_snapshots: VecDeque::new(), format_suspended: false, warning_pending: false,
         }
     }
 
@@ -134,14 +137,22 @@ impl PlainDocument {
 
     /// Find a retained action snapshot only when its exact document text matches.
     pub fn action_snapshot(&self, text: &str) -> Option<(&crate::tree::Tree, &str, u64, &str)> {
+        if self.format_suspended { return None; }
         let hash = hash_text(text);
         self.action_snapshots.iter().find(|snapshot| snapshot.hash == hash)
             .map(|snapshot| (&snapshot.tree, snapshot.view_id.as_str(), snapshot.generation, snapshot.scope.as_str()))
     }
 
+    /// Consume the one user-facing warning caused by persistent format drift.
+    pub fn take_format_warning(&mut self) -> bool {
+        std::mem::replace(&mut self.warning_pending, false)
+    }
+
     /// Attach/reopen the document with its exact current editor snapshot.
     pub fn open(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
         self.in_flight = None;
+        self.format_suspended = false;
+        self.warning_pending = false;
         self.client = Some(self.snapshot_for(text.into(), version));
         self.rejected = None;
         self.state = DocumentState::Ready;
@@ -157,8 +168,10 @@ impl PlainDocument {
         self.rejected = None;
         if let Some(flight) = self.in_flight.as_mut() {
             flight.echoed = flight.target.hash == observed.hash;
+            flight.format_drift = !flight.echoed && format_equivalent(&flight.target.text, &observed.text);
             flight.diverged |= !flight.echoed;
             if flight.response == Some(true) {
+                if flight.format_drift { self.suspend_for_format_drift(); return None; }
                 self.in_flight = None;
                 self.state = DocumentState::Ready;
             }
@@ -181,6 +194,7 @@ impl PlainDocument {
             self.state = DocumentState::Ready;
             return self.prepare();
         }
+        if flight.format_drift { self.suspend_for_format_drift(); return None; }
         if flight.echoed || flight.diverged {
             self.in_flight = None;
             self.state = DocumentState::Ready;
@@ -195,6 +209,8 @@ impl PlainDocument {
         self.client = None;
         self.in_flight = None;
         self.rejected = None;
+        self.format_suspended = false;
+        self.warning_pending = false;
     }
 
     fn snapshot_for(&mut self, text: String, version: i32) -> Snapshot {
@@ -207,7 +223,7 @@ impl PlainDocument {
     }
 
     fn prepare(&mut self) -> Option<ApplyEdit> {
-        if self.state == DocumentState::Detached || self.in_flight.is_some() { return None; }
+        if self.state == DocumentState::Detached || self.in_flight.is_some() || self.format_suspended { return None; }
         let (Some(authoritative), Some(client)) = (&self.authoritative, &self.client) else { return None; };
         if authoritative.hash == client.hash {
             self.state = DocumentState::Ready;
@@ -226,10 +242,25 @@ impl PlainDocument {
         };
         let request = ApplyEdit { id: self.next_id, edit };
         let target = authoritative.clone();
-        self.in_flight = Some(InFlight { request: request.clone(), target, echoed: false, diverged: false, response: None });
+        self.in_flight = Some(InFlight { request: request.clone(), target, echoed: false, diverged: false, response: None, format_drift: false });
         self.state = DocumentState::Applying;
         Some(request)
     }
+
+    fn suspend_for_format_drift(&mut self) {
+        self.in_flight = None;
+        self.state = DocumentState::Ready;
+        self.format_suspended = true;
+        self.warning_pending = true;
+    }
+}
+
+fn format_equivalent(expected: &str, observed: &str) -> bool {
+    fn logical(text: &str) -> String {
+        let normalized = text.replace("\r\n", "\n");
+        normalized.strip_suffix('\n').unwrap_or(&normalized).to_owned()
+    }
+    expected != observed && logical(expected) == logical(observed)
 }
 
 #[cfg(test)]
