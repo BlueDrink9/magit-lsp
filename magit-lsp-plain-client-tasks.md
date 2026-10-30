@@ -653,6 +653,7 @@ acceptance or gather the deferred evidence report.
   - `common.toggle-section`, `show-section`, `hide-section` and `detail-level-N` are code actions on any node. Expansion survives refresh via node ID.
   - `documentSymbol`, `definition`, `documentLink`, `foldingRange` and `semanticTokens/full` are served for Plain documents from the matching snapshot, and return null when out of sync. Fold ranges are valid and bounded.
 - **Verify:** `make test-rust FILTER="--test plain_vis"`.
+- **Provider snapshot evidence:** Actual-binary tests cover status and active-menu snapshots, all-five-null invalid/unmatched/format-suspended/closed cases, and bounded structural ranges including the final-newline phantom row. Focused verification: `cargo test --test plain_vis --test navigation --test semantic_tokens --test plain_render --test plain_stack && git diff --check`. Remaining encoding, controls and native acceptance stay in the parent VIS item.
 
 ### R-PLAIN-PROMPT: document-backed prompts, completion, support table (L)
 
