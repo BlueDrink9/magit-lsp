@@ -1678,6 +1678,14 @@ these are not active acceptance queues. Canonical contracts remain in §§0–6
 and 8–9. R-3.4b, R-UI-7, R-VS-1, R-NV-1…R-NV-4, and R-3.5…R-3.7 are
 completed. Historical evidence and caveats are archived.
 
+### Bugfix
+
+- [x] **Restore readable non-repository discovery errors.**
+  - **Problem:** The accumulated `make test` gate found a new failure in `errors::not_a_repository_returns_a_message_effect`: repository discovery now returns `not inside a git repository`, bypassing the established readable error normalization.
+  - **Change:** Restore the established non-repository message at the Git/error boundary without changing discovery candidate semantics or unrelated error handling.
+  - **Done when:** The existing binary non-repository regression and focused repository/core/async checks pass. Preserve the separately user-deferred `normal_and_piped_apply_failures_keep_original_details`, log/view/UI failures and inherited release changes; do not claim the full gate passes.
+  - **Constraints:** No images, sleeps, formatting commands or unrelated repairs; commit scoped changes and this checkoff.
+
 ### Feature — Plain-client phase (target; pending implementation, before release prerequisites)
 
 Canonical acceptance and verification bodies are in the linked [Plain-client

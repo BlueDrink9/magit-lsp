@@ -364,7 +364,7 @@ impl GitRepo {
 
     /// Open the repository containing `path`, resolving its working-tree root.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Self::discover(path)?.ok_or_else(|| Error::new("not inside a git repository"))
+        Self::discover(path)?.ok_or_else(|| Error::new("This folder is not inside a Git repository."))
     }
 
     /// Discover a repository and its canonical worktree/Git identities.
