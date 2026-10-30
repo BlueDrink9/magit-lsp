@@ -1,6 +1,12 @@
 # magit-lsp — Roadmap
 
-Last review: 52ae2143303276cb10c0574ba6d53968fcc5202d
+Last review: d686516f84bc21fcf2d7c8bfffa677958d68a1ce
+
+Checkpoint: accumulated Plain action/EOF changes reviewed; no remaining P0–P2
+findings. `make ui-tour` and `git diff --check` passed; no `magit-lsp` processes
+remained. `make test` stopped at the user-deferred
+`errors::normal_and_piped_apply_failures_keep_original_details`; later suites
+were not reached. No lint target was found. This is not full-gate acceptance.
 
 Canonical roadmap, design, protocol and backlog. Terms are in §1, protocol
 shapes in §§3–4, and live tasks state their acceptance gates. Read selectively
