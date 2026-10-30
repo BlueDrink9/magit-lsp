@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Focused plugin-free native Neovim smoke for standard Plain rendering."""
+"""Plugin-free native Neovim smoke for standard Plain rendering and actions."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -51,7 +52,9 @@ def main() -> None:
             "for _,x in ipairs(c) do names[#names+1]=x.name end; "
             "return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'), "
             "name=vim.api.nvim_buf_get_name(b), modified=vim.bo[b].modified, clients=names, "
-            "rtp=vim.o.runtimepath, version=vim.lsp.util.buf_versions[b], "
+            "rtp=vim.o.runtimepath, version=vim.lsp.util.buf_versions[b], pid=vim.fn.getpid(), "
+            "server_pid=c[1] and c[1].rpc.pid, "
+            "capabilities=c[1] and c[1].config.capabilities, server_capabilities=c[1] and c[1].server_capabilities, "
             "project_modules=(function() local m={}; for k in pairs(package.loaded) do "
             "if tostring(k):match('magit%-lsp') then m[#m+1]=k end end; return m end)(), "
             "rich_notifications=vim.g.plain_smoke_rich_notifications}) end)()"
@@ -75,10 +78,12 @@ def main() -> None:
             run(["git", "add", "tracked.txt"], cwd=repo, env=env)
             run(["git", "commit", "-qm", "initial"], cwd=repo, env=env)
             presentation = repo / ".magit"
-            disk_before = b"stale presentation sentinel\n"
+            # Match the server's no-final-newline presentation text. Stock
+            # Neovim preserves this native file option through applyEdit.
+            disk_before = b"stale presentation sentinel"
             presentation.write_bytes(disk_before)
             config = ROOT / "tests/ui/plain_init.lua"
-            run(["tmux", "-L", server_id, "new-session", "-d", "-s", "plain", "nvim", "--listen", socket, "-u", str(config), str(presentation)], cwd=repo, env=env)
+            run(["tmux", "-L", server_id, "new-session", "-d", "-x", "120", "-y", "100", "-s", "plain", "nvim", "--listen", socket, "-u", str(config), str(presentation)], cwd=repo, env=env)
             deadline = time.monotonic() + 30
             rpc_error = ""
             while True:
@@ -129,6 +134,130 @@ def main() -> None:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f"timed out waiting for authoritative repair after native undo: {edited!r}")
             report["native_edit_undo_repair"] = {"before": before_edit, "typed": typed, "after_undo": edited}
+
+            def git(*args: str) -> str:
+                return run(["git", *args], cwd=repo, env=env).stdout
+
+            base = "one\ntwo\nthree\n"
+            changed = "ONE\ntwo\nTHREE\n"
+            # Keep both edits in one hunk: staging just the first replacement
+            # must not accidentally stage the owning hunk or file.
+            (repo / "tracked.txt").write_text(base)
+            git("add", "tracked.txt")
+            git("commit", "-qm", "action baseline")
+            (repo / "tracked.txt").write_text(changed)
+            head = git("rev-parse", "HEAD")
+
+            def snapshot() -> dict[str, str]:
+                return {"head": git("rev-parse", "HEAD"), "head_text": git("show", "HEAD:tracked.txt"),
+                        "index": git("show", ":tracked.txt"), "index_tree": git("write-tree"),
+                        "worktree": (repo / "tracked.txt").read_text(),
+                        "watcher": (repo / "watcher-only.txt").read_text()}
+
+            def wait_text(needle: str) -> dict[str, object]:
+                deadline = time.monotonic() + 30
+                while True:
+                    current = state()
+                    if needle in current["text"]:
+                        return current
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"render missing {needle!r}: {current!r}")
+
+            actions: list[dict[str, object]] = []
+            report["actions"] = actions
+
+            def picker(label: str, keys: str, title: str | None) -> str:
+                # Invoke the unmodified runtime picker. In visual mode <Cmd>
+                # preserves the actual native selection for code_action().
+                invocation = "<Cmd>lua vim.lsp.buf.code_action()<CR>" if "V" in keys else ":lua vim.lsp.buf.code_action()<CR>"
+                run(["tmux", "-L", server_id, "clear-history", "-t", "plain"])
+                run(["nvim", "--server", socket, "--remote-send", "<Esc>" + keys + invocation], timeout=8)
+                deadline = time.monotonic() + 30
+                offered_by_number: dict[str, str] = {}
+                last_page_max = 0
+                page = 0
+                while True:
+                    screen = run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"]).stdout
+                    (EVIDENCE / f"{label}.screen").write_text(screen)
+                    visible = re.findall(r"^\s*(\d+): (.+)$", screen, re.MULTILINE)
+                    offered_by_number.update(visible)
+                    maximum = max((int(number) for number, _ in visible), default=0)
+                    if "Type number" in screen:
+                        (EVIDENCE / f"{label}-page-{page}.screen").write_text(screen)
+                        break
+                    if screen.rstrip().endswith("-- More --") and maximum > last_page_max:
+                        (EVIDENCE / f"{label}-page-{page}.screen").write_text(screen)
+                        last_page_max = maximum
+                        page += 1
+                        run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Space"])
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"native picker timeout ({label}):\n{screen}")
+                offered = sorted(offered_by_number.items(), key=lambda item: int(item[0]))
+                assert offered, screen
+                discard = [text for _, text in offered if "discard" in text.lower()]
+                assert all("(disabled)" in text for text in discard), screen
+                matches = [(number, text) for number, text in offered if title and title in text and "(disabled)" not in text]
+                if title:
+                    assert len(matches) == 1, (title, offered)
+                choice = matches[0][0] if title else "0"
+                actions.append({"label": label, "offered": offered, "chosen": choice, "discard": discard})
+                # Actual inputlist number, never an invented command payload.
+                run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "-l", choice])
+                run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Enter"])
+                acknowledged = False
+                while True:
+                    closed = run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"]).stdout
+                    if "Press ENTER or type command to continue" in closed:
+                        if not acknowledged:
+                            run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Enter"])
+                            acknowledged = True
+                    elif "Type number" not in closed and not closed.rstrip().endswith("-- More --"):
+                        (EVIDENCE / f"{label}-closed.screen").write_text(closed)
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"native picker did not close ({label}):\n{closed}")
+                return screen
+
+            rendered = wait_text("+THREE")
+            # The test locates display rows only to drive native cursor motion;
+            # all action identity/range interpretation remains server-owned.
+            def file_keys(current: dict[str, object]) -> str:
+                rows = [i + 1 for i, line in enumerate(current["text"].splitlines()) if "tracked.txt" in line]
+                assert len(rows) == 1, current
+                return f"{rows[0]}G0"
+
+            before = snapshot()
+            assert before["index"] == base and before["head_text"] == base and before["worktree"] == changed
+            picker("file-discard-unavailable", file_keys(rendered), None)
+            assert snapshot() == before
+            picker("file-stage", file_keys(state()), "Stage the change at point")
+            staged = wait_text("Staged changes (1)")
+            after_stage = snapshot()
+            assert after_stage["index"] == changed, after_stage
+            assert after_stage["head"] == head and after_stage["head_text"] == base and after_stage["worktree"] == changed
+            assert after_stage["watcher"] == before["watcher"]
+            picker("file-unstage", file_keys(staged), "Unstage the change at point")
+            unstaged = wait_text("Unstaged changes (1)")
+            assert snapshot() == before
+            rows = [i + 1 for i, line in enumerate(unstaged["text"].splitlines()) if line.endswith("-one") or line.endswith("+ONE")]
+            assert len(rows) == 2 and rows[1] == rows[0] + 1, unstaged
+            picker("selected-lines-stage", f"{rows[0]}G0Vj", "Stage")
+            partial_render = wait_text("Staged changes (1)")
+            partial = snapshot()
+            assert partial["index"] == "ONE\ntwo\nthree\n", partial
+            assert partial["head"] == head and partial["head_text"] == base and partial["worktree"] == changed
+            assert partial["watcher"] == before["watcher"]
+            # A subsequent native request demonstrates the server remains
+            # responsive after unavailable, file and selection interactions.
+            staged_row = next(i + 1 for i, line in enumerate(partial_render["text"].splitlines()) if "tracked.txt" in line)
+            picker("subsequent-request", f"{staged_row}G0", None)
+            assert snapshot() == partial
+            final = state()
+            assert not final["project_modules"] and final["rich_notifications"] == 0
+            assert final["rtp"] == initial["rtp"]
+            report["action_git_states"] = {"before": before, "file_staged": after_stage, "partial": partial}
+            report["actions_final"] = final
+            (EVIDENCE / "actions-final.screen").write_text(final["text"] + "\n")
             report["presentation_disk_unchanged"] = presentation.read_bytes() == disk_before
             report["presentation_disk_bytes"] = presentation.read_bytes().decode()
             report["custom_notifications"] = edited["rich_notifications"]

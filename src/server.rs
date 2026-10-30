@@ -2933,6 +2933,7 @@ fn capabilities(encoding: Encoding) -> Result<Value> {
     .map_err(|e| Error::new(e.to_string()))?;
     // Work-done progress is a client capability, not a server advertisement.
     if let Some(object) = capabilities.as_object_mut() {
+        object.insert("codeActionProvider".to_string(), serde_json::json!(true));
         object.insert(
             "executeCommandProvider".to_string(),
             serde_json::json!({ "commands": ["magit.command"] }),

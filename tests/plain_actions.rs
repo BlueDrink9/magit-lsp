@@ -31,7 +31,9 @@ fn open_plain_with_capabilities(repo: &fixtures::RepoFixture, capabilities: Valu
     init["params"]["capabilities"] = capabilities;
     init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init);
-    assert!(server.response_with_id(1)["result"].is_object());
+    let initialized = server.response_with_id(1);
+    assert_eq!(initialized["result"]["capabilities"]["codeActionProvider"], true);
+    assert_eq!(initialized["result"]["capabilities"]["executeCommandProvider"]["commands"], json!(["magit.command"]));
     server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
     let mut editor = FakeEditor::new(Profile::Standard);
     server.send(editor.open(&uri, "old"));
