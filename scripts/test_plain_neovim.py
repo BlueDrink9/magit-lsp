@@ -37,7 +37,13 @@ def run_variant(final_newline: bool) -> None:
     name = "plain-" + uuid.uuid4().hex[:10]
     run_evidence = EVIDENCE / ("with-final-newline" if final_newline else "without-final-newline")
     run_evidence.mkdir(parents=True, exist_ok=True)
+    # A previous run must not leave success/failure artifacts behind.
+    for artifact in ("native.json", "failure.json"):
+        (run_evidence / artifact).unlink(missing_ok=True)
     trace_path = run_evidence / "state/nvim/lsp.log"
+    # Neovim appends to its shared state log; isolate this run's trace before launch.
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    trace_path.unlink(missing_ok=True)
     socket = f"/tmp/{name}.sock"
     server_id = name
     report: dict[str, object] = {"tmux_server": server_id, "nvim_socket": socket, "final_newline": final_newline}
@@ -285,11 +291,14 @@ def run_variant(final_newline: bool) -> None:
         if "native_edit_undo_repair" in report:
             final = report["native_edit_undo_repair"]["after_undo"]
             (run_evidence / "native.screen").write_text(str(final["text"]) + "\n")
-        (run_evidence / ("failure.json" if failure else "native.json")).write_text(json.dumps({**report, "error": str(failure) if failure else None}, indent=2, sort_keys=True) + "\n")
         if trace_path.exists():
             trace_lines = trace_path.read_text(errors="replace").splitlines()
             changes = [index for index, line in enumerate(trace_lines) if "textDocument/didChange" in line]
-            edits = [index for index, line in enumerate(trace_lines) if '"method = "workspace/applyEdit"' in line]
+            edits = [index for index, line in enumerate(trace_lines) if 'method = "workspace/applyEdit"' in line]
+            noop_eof_deletes = [line for line in trace_lines if "textDocument/didChange" in line and "rangeLength = 0, text = \"\"" in line]
+            report["trace_counts"] = {"lines": len(trace_lines), "did_change": len(changes), "apply_edit": len(edits), "empty_insert_changes": len(noop_eof_deletes)}
+            if len(changes) > 80 or len(edits) > 20 or len(noop_eof_deletes) > 2:
+                failure = RuntimeError(f"unbounded Plain synchronization trace: {report['trace_counts']!r}")
             keep = {index for index, line in enumerate(trace_lines) if "textDocument/didOpen" in line or '"magit-lsp/outbound/1"' in line}
             keep.update(changes[:20])
             keep.update(changes[-10:])
@@ -297,10 +306,13 @@ def run_variant(final_newline: bool) -> None:
             keep.update(edits[-3:])
             selected = [line for index, line in enumerate(trace_lines) if index in keep]
             (run_evidence / "trace-excerpts.log").write_text("\n".join(selected) + "\n")
+        (run_evidence / ("failure.json" if failure else "native.json")).write_text(json.dumps({**report, "error": str(failure) if failure else None}, indent=2, sort_keys=True) + "\n")
     if failure:
         raise failure
     if not report["cleanup"]["cleanup_verified"]:
         raise RuntimeError(f"owned process cleanup failed: {report['cleanup']!r}")
+    if not report.get("trace_counts"):
+        raise RuntimeError("Neovim LSP trace missing; synchronization bounds were not checked")
 
 
 if __name__ == "__main__":
