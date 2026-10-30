@@ -749,7 +749,7 @@ fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Message> {
 }
 
 /// Feed an authoritative logical-view render into its Plain document, if any.
-fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::tree::Tree, u64, String)>) -> bool {
+fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>) -> bool {
     let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
     if shared.closing.load(Ordering::SeqCst) { return true; }
     let request = {
@@ -757,7 +757,7 @@ fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::t
         let Some((uri, entry)) = documents.iter_mut().find(|(_, entry)| entry.view_id == view_id) else {
             return false;
         };
-        snapshot.and_then(|(tree, generation, scope)| entry.controller.render_actions(tree, view_id.to_owned(), generation, scope).map(|request| {
+        snapshot.and_then(|(tree, generation, scope, menu)| entry.controller.render_actions(tree, view_id.to_owned(), generation, scope, menu).map(|request| {
             (entry.incarnation, uri.clone(), request)
         }))
     };
@@ -866,8 +866,8 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
         return;
     };
     let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes, format);
-    if let Some((tree, generation, scope)) = published.current_snapshot(&descriptor.id) {
-        controller.render_actions(tree, descriptor.id.clone(), generation, scope);
+    if let Some((tree, generation, scope, menu)) = published.current_snapshot(&descriptor.id) {
+        controller.render_actions(tree, descriptor.id.clone(), generation, scope, menu);
     } else {
         let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
         return;
@@ -1776,7 +1776,7 @@ fn execute_plain_action(
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let Some(entry) = documents.get(uri) else { return plain_stale_message(); };
-        let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text)
+        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text)
         else {
             return plain_stale_message();
         };
@@ -1799,6 +1799,15 @@ fn execute_plain_action(
                 }
                 0
             }
+            crate::dispatch::PlainActionTarget::MenuSwitch(target) => {
+                let valid = params.command == "menu.toggle-switch"
+                    && target.view_id == view_id
+                    && menu.is_some_and(|menu| menu.id == target.menu_id && matches!(
+                        menu.item(&target.item_key), Some(crate::menu::Item::Switch { status: crate::menu::MenuStatus::Implemented, .. })
+                    ));
+                if !valid { return plain_stale_message(); }
+                0
+            }
         };
         if matches!(params.target, crate::dispatch::PlainActionTarget::Content(_)) && !crate::dispatch::content_command(&params.command) {
             return plain_stale_message();
@@ -1813,6 +1822,11 @@ fn execute_plain_action(
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new("Plain action session closed"))?;
+    if let crate::dispatch::PlainActionTarget::MenuSwitch(target) = &params.target {
+        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
+            .toggle_menu_switch(&view_id, params.view_generation, &target.menu_id, &target.item_key)?;
+        return dispatched_outcome(shared, &repo, result);
+    }
     let request = crate::dispatch::DispatchRequest {
         command: params.command,
         target: crate::dispatch::DispatchTarget {
@@ -2275,16 +2289,16 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 
 fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
     let uri = params.text_document.uri.as_str();
-    let (text, tree, view_id, generation, scope, repo) = {
+    let (text, tree, view_id, generation, scope, repo, menu) = {
         let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
         let text = document.text.clone();
         let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
-        let Some((tree, view_id, generation, scope)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
+        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
         if view_id != entry.view_id { return Value::Array(Vec::new()); }
-        (text, tree.clone(), view_id.to_owned(), generation, scope.to_owned(), entry.repo.clone())
+        (text, tree.clone(), view_id.to_owned(), generation, scope.to_owned(), entry.repo.clone(), menu.cloned())
     };
     let config = shared.config.for_repository(std::path::Path::new(&repo));
     let capabilities = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
@@ -2307,6 +2321,27 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         return Value::Array(Vec::new());
     };
     let mut actions = Vec::new();
+    if let Some(menu) = menu {
+        for item in menu.groups.iter().flat_map(|group| &group.items) {
+            let crate::menu::Item::Switch { key, label, status, .. } = item else { continue; };
+            let implemented = matches!(status, crate::menu::MenuStatus::Implemented);
+            if !implemented && !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) { continue; }
+            let args = serde_json::json!({
+                "command": "menu.toggle-switch",
+                "documentUri": uri,
+                "target": { "viewId": view_id, "menuId": menu.id, "itemKey": key },
+                "viewGeneration": generation,
+            });
+            let title = format!("Toggle {label}");
+            actions.push(serde_json::to_value(lsp_types::CodeAction {
+                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
+                disabled: (!implemented).then(|| lsp_types::CodeActionDisabled { reason: "Unavailable: menu switch is not implemented".into() }),
+                edit: None,
+                command: implemented.then(|| lsp_types::Command { title, command: "magit.command".into(), arguments: Some(vec![args.clone()]) }),
+                data: (!implemented).then_some(args),
+            }).unwrap_or(Value::Null));
+        }
+    }
     for command in crate::commands::registry().iter() {
         if !command.scope.matches(&scope) { continue; }
         let registry_availability = crate::commands::registry().availability(command.id);

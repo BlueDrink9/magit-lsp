@@ -51,14 +51,30 @@ pub enum PlainActionTarget {
     Content(ActionTarget),
     /// Identity of the exact logical view that offered a semantic transition.
     View(SemanticViewTarget),
+    /// Exact switch identity in the retained structured menu.
+    MenuSwitch(SemanticMenuSwitchTarget),
 }
 
 /// Semantic view identity used for supported menu and Back transitions.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct SemanticViewTarget {
     /// Logical view identity in the offering render.
     pub view_id: String,
+}
+
+/// Typed identity of a switch item in one logical menu view.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct SemanticMenuSwitchTarget {
+    /// Logical view identity in the offering render.
+    pub view_id: String,
+    /// Structured menu identity in the offering render.
+    pub menu_id: String,
+    /// Canonical switch key, such as `-a`.
+    pub item_key: String,
 }
 
 /// The displayed view location and input context bound to a dispatch request.

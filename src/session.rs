@@ -124,10 +124,10 @@ impl PublishedViews {
     }
 
     /// Return an atomic current render snapshot, including its structured tree.
-    pub fn current_snapshot(&self, view_id: &str) -> Option<(Tree, u64, String)> {
+    pub fn current_snapshot(&self, view_id: &str) -> Option<(Tree, u64, String, Option<Menu>)> {
         let map = self.lock();
         let view = map.get(view_id)?;
-        Some((view.tree.clone(), view.version, view.scope.clone()))
+        Some((view.tree.clone(), view.version, view.scope.clone(), view.menu.clone()))
     }
 
     /// The latest published full text of `view_id`, without any session lock.
@@ -1290,6 +1290,29 @@ impl Session {
         })
     }
 
+    /// Toggle an implemented switch in the exact logical menu and rerender it.
+    pub fn toggle_menu_switch(&mut self, view_id: &str, generation: u64, menu_id: &str, key: &str) -> Result<InvokeResult> {
+        let matches_menu = self.views.get(view_id).is_some_and(|view| view.version() == generation
+            && view.menu().is_some_and(|menu| menu.id == menu_id));
+        if !matches_menu { return Ok(unbound(key)); }
+        let result = self.menu_switch(view_id, key, Cursor { line: 0, column: 0 })?;
+        self.publish();
+        Ok(result)
+    }
+
+    fn menu_switch(&mut self, view_id: &str, key: &str, cursor: Cursor) -> Result<InvokeResult> {
+        let item = self.views.get(view_id).and_then(|view| view.menu())
+            .and_then(|menu| menu.item(key).cloned());
+        let Some(crate::menu::Item::Switch { status, label, .. }) = item else {
+            return Ok(unbound(key));
+        };
+        if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
+        let toggled = self.views.get_mut(view_id).and_then(|view| view.menu_mut())
+            .is_some_and(|menu| menu.toggle_switch(key));
+        if !toggled { return Ok(unbound(key)); }
+        self.menu_rerender(view_id, cursor)
+    }
+
     /// Run the item whose complete key was typed, then clear the pending state.
     fn menu_complete(
         &mut self,
@@ -1304,20 +1327,8 @@ impl Session {
             .and_then(|view| view.menu())
             .and_then(|menu| menu.item(key).cloned());
         match item {
-            Some(crate::menu::Item::Switch { status, label, .. }) => {
-                if let Some(result) = unsupported_menu_item(status, &label) {
-                    return Ok(result);
-                }
-                let toggled = self
-                    .views
-                    .get_mut(view_id)
-                    .and_then(|view| view.menu_mut())
-                    .map(|menu| menu.toggle_switch(key))
-                    .unwrap_or(false);
-                if !toggled {
-                    return Ok(unbound(key));
-                }
-                self.menu_rerender(view_id, params.cursor)
+            Some(crate::menu::Item::Switch { .. }) => {
+                self.menu_switch(view_id, key, params.cursor)
             }
             Some(crate::menu::Item::Option {
                 value,

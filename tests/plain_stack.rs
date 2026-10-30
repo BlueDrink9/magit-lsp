@@ -30,6 +30,11 @@ fn offered(actions: &[Value], command: &str) -> Value {
         .unwrap_or_else(|| panic!("missing {command} action in {actions:#?}"))["command"]["arguments"][0].clone()
 }
 
+fn offered_switch(actions: &[Value]) -> Value {
+    actions.iter().find(|action| action["command"]["arguments"][0]["command"] == "menu.toggle-switch")
+        .unwrap_or_else(|| panic!("missing switch action in {actions:#?}"))["command"]["arguments"][0].clone()
+}
+
 fn state(repo: &fixtures::RepoFixture) -> (String, String, String) {
     (repo.git(&["rev-parse", "HEAD"]), repo.git(&["show", ":f.txt"]), fixtures::read(&repo.path().join("f.txt")))
 }
@@ -87,6 +92,71 @@ fn commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets() {
     assert!(!methods.iter().any(|method| method.starts_with("magit/") || method.starts_with("view/")), "rich notification leaked: {methods:?}");
     let after = code_actions(&mut server, &uri, 0, 70);
     assert!(after.iter().any(|action| action["command"]["arguments"][0]["command"] == "open.commit"));
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn plain_menu_switches_use_retained_targets_and_restore_caller() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "one\ntwo\n")]).modify("f.txt", "ONE\ntwo\n").build();
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"dynamicRegistration":true},"general":{"positionEncodings":["utf-16"]}}});
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
+    server.send(init);
+    assert!(server.response_with_id(1)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "old"));
+    let initial = server.recv();
+    for frame in editor.dispatch(&initial) { server.send(frame); }
+    let caller = editor.text(&uri).to_owned();
+    let before = state(&repo);
+    let status_row = caller.lines().position(|line| line.contains("f.txt") || line.contains("ONE")).unwrap();
+    let open = offered(&code_actions(&mut server, &uri, status_row, 20), "open.commit");
+    execute(&mut server, &mut editor, open, 21);
+    let menu_text = editor.text(&uri).to_owned();
+    assert!(!menu_text.ends_with('\n'));
+    let last_row = menu_text.lines().count() - 1;
+    let on = offered_switch(&code_actions(&mut server, &uri, 0, 22));
+    assert_eq!(on["target"]["itemKey"], "-a");
+    let stale = on.clone();
+    let toggled = execute(&mut server, &mut editor, on.clone(), 23);
+    assert!(toggled["error"].is_null(), "toggle on failed: {toggled}");
+    let on_text = editor.text(&uri).to_owned();
+    assert!(on_text.lines().any(|line| line.contains("git commit --all")), "missing exact -a preview ({toggled}): {on_text}");
+    assert!(!on_text.ends_with('\n'));
+    assert!(editor.documents.contains_key(&uri));
+    let stale_result = execute(&mut server, &mut editor, stale, 24);
+    assert!(stale_result["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert!(editor.text(&uri).contains("git commit --all"));
+    let off = offered_switch(&code_actions(&mut server, &uri, last_row.min(on_text.lines().count() - 1), 25));
+    assert_eq!(off["target"]["viewId"], json!(on["target"]["viewId"]));
+    assert_eq!(off["target"]["menuId"], json!(on["target"]["menuId"]));
+    let mut forged = off.clone(); forged["target"]["menuId"] = json!("wrong-menu");
+    let refused = execute(&mut server, &mut editor, forged, 26);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert!(editor.text(&uri).contains("git commit --all"));
+    let mut forged_view = off.clone(); forged_view["target"]["viewId"] = json!("other-view");
+    let refused = execute(&mut server, &mut editor, forged_view, 261);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert_eq!(state(&repo), before);
+    let mut unsupported = off.clone(); unsupported["target"]["itemKey"] = json!("=A");
+    let refused = execute(&mut server, &mut editor, unsupported, 27);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["level"] == "warn"));
+    assert_eq!(state(&repo), before);
+    let toggled = execute(&mut server, &mut editor, off, 28);
+    assert!(toggled["error"].is_null(), "toggle off failed: {toggled}");
+    let off_text = editor.text(&uri).to_owned();
+    assert!(off_text.lines().any(|line| line.contains("git commit") && !line.contains("--all")), "unexpected off preview: {off_text}");
+    assert!(!off_text.ends_with('\n'));
+    assert_eq!(state(&repo), before);
+    let back = offered(&code_actions(&mut server, &uri, 0, 29), "common.cancel");
+    execute(&mut server, &mut editor, back, 30);
+    assert_eq!(editor.text(&uri), caller);
+    assert_eq!(state(&repo), before);
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());

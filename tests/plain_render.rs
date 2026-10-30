@@ -33,7 +33,7 @@ fn format_serializes_empty_unicode_and_final_rows_exactly() {
 fn retained_action_hash_uses_exact_serialized_eof_text() {
     let tree = magit_lsp::tree::Tree { version: 0, lines: vec!["α".into(), "row".into()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] };
     let mut doc = PlainDocument::new("file:///status", Encoding::Utf16, true, DocumentFormat::from_text("stale\r\n"));
-    doc.render_actions(tree, "view".into(), 7, "scope".into());
+    doc.render_actions(tree, "view".into(), 7, "scope".into(), None);
     let exact = "α\r\nrow\r\n";
     assert_eq!(doc.action_snapshot(exact).unwrap().2, 7);
     assert!(doc.action_snapshot("α\r\nrow").is_none());
@@ -54,14 +54,14 @@ fn controller_serializes_unicode_last_line_growth_and_shrink_without_eof_retry()
             for (generation, last) in [(1, "α😀"), (2, "α😀 grew"), (3, "α😀")] {
                 let target = tree(last, generation);
                 let expected = DocumentFormat::from_text(source).serialize(&target);
-                let request = doc.render_actions(target, "view".into(), generation, "scope".into()).unwrap();
+                let request = doc.render_actions(target, "view".into(), generation, "scope".into(), None).unwrap();
                 assert_eq!(editor.apply_edit(&request.edit)["applied"], true);
                 let echoed = editor.text(uri).to_owned();
                 assert_eq!(echoed, expected);
                 assert!(doc.response(request.id, true).is_none());
                 assert!(doc.change(generation as i32 + 1, echoed.clone()).is_none());
                 assert_eq!(doc.state(), DocumentState::Ready);
-                let (retained, _, retained_generation, _) = doc.action_snapshot(&echoed).unwrap();
+                let (retained, _, retained_generation, _, _) = doc.action_snapshot(&echoed).unwrap();
                 assert_eq!(retained.lines, vec!["header", last]);
                 assert_eq!(retained_generation, generation);
                 assert!(doc.action_snapshot(&(echoed.clone() + "\n")).is_none());
@@ -357,7 +357,7 @@ fn format_drift_suspends_once_in_either_response_echo_order_and_reopens() {
             if !response_first { assert!(c.response(edit.id, true).is_none()); }
             assert!(c.take_format_warning());
             assert!(!c.take_format_warning());
-            assert!(c.render_actions(magit_lsp::tree::Tree { version: 0, lines: vec!["authoritative".into()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] }, "view".into(), 1, "scope".into()).is_none());
+            assert!(c.render_actions(magit_lsp::tree::Tree { version: 0, lines: vec!["authoritative".into()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] }, "view".into(), 1, "scope".into(), None).is_none());
             assert!(c.action_snapshot(authoritative).is_none());
             assert!(c.change(3, drifted).is_none());
             assert!(!c.take_format_warning());

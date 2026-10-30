@@ -64,6 +64,7 @@ struct ActionSnapshot {
     generation: u64,
     scope: String,
     tree: crate::tree::Tree,
+    menu: Option<crate::menu::Menu>,
 }
 
 #[derive(Clone, Debug)]
@@ -126,21 +127,21 @@ impl PlainDocument {
     }
 
     /// Retain the exact structured snapshot associated with an authoritative render.
-    pub fn render_actions(&mut self, tree: crate::tree::Tree, view_id: String, generation: u64, scope: String) -> Option<ApplyEdit> {
+    pub fn render_actions(&mut self, tree: crate::tree::Tree, view_id: String, generation: u64, scope: String, menu: Option<crate::menu::Menu>) -> Option<ApplyEdit> {
         let text = self.format.serialize(&tree);
         let hash = hash_text(&text);
         self.action_snapshots.retain(|snapshot| snapshot.hash != hash);
-        self.action_snapshots.push_back(ActionSnapshot { hash, view_id, generation, scope, tree });
+        self.action_snapshots.push_back(ActionSnapshot { hash, view_id, generation, scope, tree, menu });
         while self.action_snapshots.len() > self.snapshot_limit { self.action_snapshots.pop_front(); }
         self.render(text)
     }
 
     /// Find a retained action snapshot only when its exact document text matches.
-    pub fn action_snapshot(&self, text: &str) -> Option<(&crate::tree::Tree, &str, u64, &str)> {
+    pub fn action_snapshot(&self, text: &str) -> Option<(&crate::tree::Tree, &str, u64, &str, Option<&crate::menu::Menu>)> {
         if self.format_suspended { return None; }
         let hash = hash_text(text);
         self.action_snapshots.iter().find(|snapshot| snapshot.hash == hash)
-            .map(|snapshot| (&snapshot.tree, snapshot.view_id.as_str(), snapshot.generation, snapshot.scope.as_str()))
+            .map(|snapshot| (&snapshot.tree, snapshot.view_id.as_str(), snapshot.generation, snapshot.scope.as_str(), snapshot.menu.as_ref()))
     }
 
     /// Consume the one user-facing warning caused by persistent format drift.
@@ -276,10 +277,10 @@ mod tests {
     fn action_snapshot_retention_is_bounded_and_keeps_generation() {
         let mut document = PlainDocument::new("file:///test", Encoding::Utf16, false, DocumentFormat::from_text(""));
         for generation in 0..7 {
-            document.render_actions(tree(&format!("render-{generation}")), "view".into(), generation, "scope".into());
+            document.render_actions(tree(&format!("render-{generation}")), "view".into(), generation, "scope".into(), None);
         }
         assert!(document.action_snapshot("render-0").is_none());
-        let (_, _, generation, _) = document.action_snapshot("render-6").unwrap();
+        let (_, _, generation, _, _) = document.action_snapshot("render-6").unwrap();
         assert_eq!(generation, 6);
     }
 }
