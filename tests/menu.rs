@@ -24,22 +24,40 @@ fn menu_switch(test: &TestSession, view: &str, key: &str) -> bool {
 fn commit_options_survive_menu_pop_and_staging_prompt() {
     use magit_lsp::git::CommitOperation;
     for staged in [false, true] {
-        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .build();
         std::fs::write(tmp.path().join("f.txt"), "changed\n").unwrap();
-        if staged { tmp.git(&["add", "f.txt"]); }
+        if staged {
+            tmp.git(&["add", "f.txt"]);
+        }
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
         let (menu, _) = test.open_via_command("open.commit");
         test.press("- s");
         test.press("- n");
-        test.ui().reply_text(Some("Captured <captured@example.com>".into()));
+        test.ui()
+            .reply_text(Some("Captured <captured@example.com>".into()));
         test.press_ui("=");
         test.press_ui("A");
-        if !staged { test.ui().reply_confirm(true); }
+        if !staged {
+            test.ui().reply_confirm(true);
+        }
         let result = test.press_ui("c");
-        assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView {view_id} if view_id == &menu.id)));
-        let CommitOperation::Create(options) = result.commit.expect("operation survives ancestor routing and prompt") else { panic!("expected create operation") };
+        assert!(result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PopView {view_id} if view_id == &menu.id)));
+        let CommitOperation::Create(options) = result
+            .commit
+            .expect("operation survives ancestor routing and prompt")
+        else {
+            panic!("expected create operation")
+        };
         assert!(options.signoff && options.no_verify);
-        assert_eq!(options.author.as_deref(), Some("Captured <captured@example.com>"));
+        assert_eq!(
+            options.author.as_deref(),
+            Some("Captured <captured@example.com>")
+        );
         assert!(tmp.git(&["diff", "--cached"]).contains("changed"));
         assert_eq!(tmp.git(&["log", "-1", "--format=%s"]).trim(), "init");
     }
@@ -51,15 +69,22 @@ fn head_actions_route_from_both_profile_menus_with_captured_options() {
         for (key, flags) in [
             ("a", vec!["--amend", "--no-verify"]),
             ("e", vec!["--amend", "--no-edit", "--no-verify"]),
-            ("w", vec!["--amend", "--only", "--allow-empty", "--no-verify"]),
+            (
+                "w",
+                vec!["--amend", "--only", "--allow-empty", "--no-verify"],
+            ),
         ] {
-            let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
-                .staged_file("f.txt", "staged\n").build();
+            let (tmp, _) = RepoFixture::new()
+                .commit("init", [("f.txt", TEN_LINES)])
+                .staged_file("f.txt", "staged\n")
+                .build();
             let (mut test, _) = TestSession::open_status(&tmp, profile);
             let (menu, _) = test.open_via_command("open.commit");
             test.press("- n");
             let result = test.press_ui(key);
-            assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu.id)));
+            assert!(result.effects.iter().any(
+                |effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu.id)
+            ));
             assert_eq!(result.commit.expect("typed HEAD action").argv(), flags);
             assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), TEN_LINES);
             assert_eq!(tmp.git(&["show", ":f.txt"]), "staged\n");
@@ -194,7 +219,11 @@ fn the_commit_menu_reflows_its_action_columns() {
         "the flag and marker continue on the next line"
     );
     for (text, length, token_type) in [
-        ("--reset-author", "--reset-author".len(), "magit.menu.flag.off"),
+        (
+            "--reset-author",
+            "--reset-author".len(),
+            "magit.menu.flag.off",
+        ),
         ("[ ]", 3, "magit.menu.switch.off"),
     ] {
         let start = tree.lines[flag_line].find(text).expect("continuation text");
@@ -576,8 +605,7 @@ fn pressing_a_set_option_again_clears_it_without_prompting() {
         .expect("the structured menu");
     match menu.item("=A") {
         Some(magit_lsp::menu::Item::Option {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         }) => assert_eq!(value, "Alice"),
         other => panic!("expected the set author option, got {other:?}"),
     }
@@ -642,8 +670,7 @@ fn opening_a_menu_with_saved_args_initializes_and_restores_the_arguments() {
     }
     match menu.item("=A") {
         Some(magit_lsp::menu::Item::Option {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         }) => assert_eq!(value, "Alice"),
         other => panic!("expected the saved author option, got {other:?}"),
     }
@@ -652,7 +679,9 @@ fn opening_a_menu_with_saved_args_initializes_and_restores_the_arguments() {
         test.menu(&descriptor.id).expect("the menu view").saved_args,
         magit_lsp::menu::Args {
             switches: vec!["-a".to_string()],
-            options: [("=A".to_string(), "Alice".to_string())].into_iter().collect(),
+            options: [("=A".to_string(), "Alice".to_string())]
+                .into_iter()
+                .collect(),
         },
         "the open args also become the reset defaults"
     );
@@ -669,8 +698,7 @@ fn opening_a_menu_with_saved_args_initializes_and_restores_the_arguments() {
     let menu = test.menu(&descriptor.id).expect("the menu view");
     match menu.item("=A") {
         Some(magit_lsp::menu::Item::Option {
-            value: Some(value),
-            ..
+            value: Some(value), ..
         }) => assert_eq!(value, "Alice"),
         other => panic!("expected the restored author option, got {other:?}"),
     }

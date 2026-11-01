@@ -2,11 +2,11 @@
 //! block. The README block is the only parity snapshot; the CLI output is
 //! compared against the generators directly.
 
+use expect_test::expect_file;
 use magit_lsp::commands::{registry, CommandStatus, Scope};
 use magit_lsp::menu::MenuStatus;
 use magit_lsp::menus::{self, ItemDef};
 use magit_lsp::parity;
-use expect_test::expect_file;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -102,7 +102,9 @@ fn every_action_matches_the_registry_and_the_menu_status() {
                 } else {
                     assert_eq!(
                         registered.status,
-                        CommandStatus::Planned { roadmap_id: roadmap },
+                        CommandStatus::Planned {
+                            roadmap_id: roadmap
+                        },
                         "{command}"
                     );
                     assert_eq!(

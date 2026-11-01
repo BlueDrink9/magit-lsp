@@ -76,7 +76,12 @@ impl RepoWatcher {
     }
 
     /// Start a watcher using the shared presentation-file policy.
-    pub fn start_with_presentation_files<F>(repo: &Path, config: WatcherConfig, presentation_files: Vec<String>, on_refresh: F) -> notify::Result<Self>
+    pub fn start_with_presentation_files<F>(
+        repo: &Path,
+        config: WatcherConfig,
+        presentation_files: Vec<String>,
+        on_refresh: F,
+    ) -> notify::Result<Self>
     where
         F: FnMut(Refresh) + Send + 'static,
     {
@@ -110,8 +115,7 @@ impl RepoWatcher {
                     if !relevant_event_excluding(&event, &repo, &presentation_files) {
                         continue;
                     }
-                    let paths: Vec<PathBuf> =
-                        event.paths.iter().cloned().collect();
+                    let paths: Vec<PathBuf> = event.paths.iter().cloned().collect();
                     match pending.as_mut() {
                         Some(batch) => batch.extend(paths),
                         None => pending = (!paths.is_empty()).then_some(paths),
@@ -197,7 +201,10 @@ pub fn relevant_event(event: &Event, repo: &Path) -> bool {
 pub fn relevant_event_excluding(event: &Event, repo: &Path, presentation_files: &[String]) -> bool {
     match event.kind {
         notify::event::EventKind::Access(_) => false,
-        _ => event.paths.iter().any(|path| relevant_path_excluding(path, repo, presentation_files)),
+        _ => event
+            .paths
+            .iter()
+            .any(|path| relevant_path_excluding(path, repo, presentation_files)),
     }
 }
 
@@ -220,7 +227,11 @@ pub fn relevant_path_excluding(path: &Path, repo: &Path, presentation_files: &[S
         .components()
         .map(|component| component.as_os_str())
         .collect();
-    if components.last().and_then(|name| name.to_str()).is_some_and(|name| presentation_files.iter().any(|candidate| candidate == name)) {
+    if components
+        .last()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| presentation_files.iter().any(|candidate| candidate == name))
+    {
         return false;
     }
     match components.first() {
@@ -254,7 +265,9 @@ fn relevant_git_path(rel: &[&OsStr]) -> bool {
                     | "rebase-apply"
                     | "sequencer"
             ) || (first == "refs"
-                && !rel.iter().any(|name| name.to_string_lossy().ends_with(".lock")))
+                && !rel
+                    .iter()
+                    .any(|name| name.to_string_lossy().ends_with(".lock")))
         }
     }
 }
@@ -273,7 +286,10 @@ mod tests {
         assert!(relevant_path(&path("f.txt"), Path::new("/repo")));
         assert!(relevant_path(&path("dir/sub/g.txt"), Path::new("/repo")));
         assert!(!relevant_path(&path(".git"), Path::new("/repo")));
-        assert!(!relevant_path(Path::new("/other/f.txt"), Path::new("/repo")));
+        assert!(!relevant_path(
+            Path::new("/other/f.txt"),
+            Path::new("/repo")
+        ));
     }
 
     #[test]
@@ -310,8 +326,8 @@ mod tests {
 
     #[test]
     fn access_events_never_refresh() {
-        let event = Event::new(notify::event::EventKind::Access(AccessKind::Read))
-            .add_path(path("f.txt"));
+        let event =
+            Event::new(notify::event::EventKind::Access(AccessKind::Read)).add_path(path("f.txt"));
         assert!(!relevant_event(&event, Path::new("/repo")));
     }
 

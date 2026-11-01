@@ -235,11 +235,7 @@ impl KeyChord {
 
     /// The canonical string; `Self::parse(self.to_string()) == *self`.
     pub fn to_canonical(&self) -> String {
-        self.0
-            .iter()
-            .map(format_step)
-            .collect::<Vec<_>>()
-            .join(" ")
+        self.0.iter().map(format_step).collect::<Vec<_>>().join(" ")
     }
 
     /// The VSCode `keybindings.json` key string; chord steps are space-separated.
@@ -418,7 +414,10 @@ mod tests {
     #[test]
     fn rejects_invalid_keys() {
         for case in fixture().invalid_canonical {
-            assert!(KeyChord::parse(&case).is_err(), "expected rejection: {case:?}");
+            assert!(
+                KeyChord::parse(&case).is_err(),
+                "expected rejection: {case:?}"
+            );
         }
     }
 

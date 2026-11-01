@@ -127,7 +127,12 @@ impl PublishedViews {
     pub fn current_snapshot(&self, view_id: &str) -> Option<(Tree, u64, String, Option<Menu>)> {
         let map = self.lock();
         let view = map.get(view_id)?;
-        Some((view.tree.clone(), view.version, view.scope.clone(), view.menu.clone()))
+        Some((
+            view.tree.clone(),
+            view.version,
+            view.scope.clone(),
+            view.menu.clone(),
+        ))
     }
 
     /// The latest published full text of `view_id`, without any session lock.
@@ -319,7 +324,9 @@ impl OpenView {
         line: Option<usize>,
         command: VisibilityCommand,
     ) -> bool {
-        if self.native_folds { return true; }
+        if self.native_folds {
+            return true;
+        }
         let changed = self.view.set_visibility(tree, line, command);
         if changed {
             self.visibility_level = match command {
@@ -373,8 +380,15 @@ impl OpenView {
             viewport: self.descriptor.viewport,
             pending: &pending,
         });
-        if self.native_folds && self.view.set_visibility(&tree, None, VisibilityCommand::ShowAll) {
-            tree = self.view.render(&Ctx { viewport: self.descriptor.viewport, pending: &pending });
+        if self.native_folds
+            && self
+                .view
+                .set_visibility(&tree, None, VisibilityCommand::ShowAll)
+        {
+            tree = self.view.render(&Ctx {
+                viewport: self.descriptor.viewport,
+                pending: &pending,
+            });
         }
         let version = old_version + 1;
         tree.version = version;
@@ -434,7 +448,10 @@ fn initialize_open_view(
         pending: &[],
     });
     if native_folds && view.set_visibility(&tree, None, VisibilityCommand::ShowAll) {
-        tree = view.render(&Ctx { viewport, pending: &[] });
+        tree = view.render(&Ctx {
+            viewport,
+            pending: &[],
+        });
     }
     let version = 1;
     tree.version = version;
@@ -619,7 +636,10 @@ impl InvokeResult {
 
 fn unsupported_feature(feature: &str) -> InvokeResult {
     InvokeResult {
-        effects: vec![Effect::message(MessageLevel::Warn, format!("Client does not support {feature}"))],
+        effects: vec![Effect::message(
+            MessageLevel::Warn,
+            format!("Client does not support {feature}"),
+        )],
         ..InvokeResult::empty()
     }
 }
@@ -655,11 +675,15 @@ impl Session {
     }
 
     fn placement(&self, placement: Placement) -> Placement {
-        self.rich_capabilities.as_ref().map_or(placement, |caps| caps.placement(placement))
+        self.rich_capabilities
+            .as_ref()
+            .map_or(placement, |caps| caps.placement(placement))
     }
 
     fn unsupported_prompt(&self, request: &ViewPromptParams) -> bool {
-        self.rich_capabilities.as_ref().is_some_and(|caps| !caps.allows_prompt(request))
+        self.rich_capabilities
+            .as_ref()
+            .is_some_and(|caps| !caps.allows_prompt(request))
     }
 
     /// The shared snapshot handle that answers reads without the session lock.
@@ -689,7 +713,11 @@ impl Session {
         let view = self.views.get(view_id)?;
         let scope = view.descriptor().scope.as_str();
         let keymap = self.keymap_for(scope)?;
-        let keymap = keymap.clone().with_basic_modifiers(self.rich_capabilities.as_ref().is_some_and(|caps| caps.modifiers == "basic"));
+        let keymap = keymap.clone().with_basic_modifiers(
+            self.rich_capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.modifiers == "basic"),
+        );
         let text = view.mode() == ViewMode::Text;
         let bindings = if text {
             keymap.only(TOGGLE_TEXT_MODE)
@@ -735,7 +763,9 @@ impl Session {
 
     /// Return the current full rendered document text for a logical view.
     pub fn rendered_text(&self, view_id: &str) -> Option<String> {
-        self.views.get(view_id).map(|view| view.tree.lines.join("\n"))
+        self.views
+            .get(view_id)
+            .map(|view| view.tree.lines.join("\n"))
     }
 
     /// Open a view and return its descriptor plus the initial full render.
@@ -791,8 +821,20 @@ impl Session {
             view.set_section_line_limit(Some(limit));
         }
         let placement = self.placement(placement);
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.rich_capabilities.as_ref().is_some_and(|caps| caps.render == "full"), self.rich_capabilities.as_ref().is_some_and(|caps| caps.folds == "native"));
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.rich_capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.render == "full"),
+            self.rich_capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.folds == "native"),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -899,8 +941,11 @@ impl Session {
                 action_target: None,
                 command: params.command.clone(),
                 target: crate::dispatch::DispatchTarget {
-                    view_id: params.view_id.clone(), version: params.version,
-                    cursor: params.cursor, selection: params.selection, key: None,
+                    view_id: params.view_id.clone(),
+                    version: params.version,
+                    cursor: params.cursor,
+                    selection: params.selection,
+                    key: None,
                 },
                 args: params.args.clone(),
             },
@@ -915,11 +960,18 @@ impl Session {
 
     /// Start a typed action through the same dispatcher and prompt lifecycle as
     /// rich input. Later Plain actions can reuse this without executeCommand.
-    pub fn start_dispatch(&mut self, request: crate::dispatch::DispatchRequest) -> Result<Execution> {
+    pub fn start_dispatch(
+        &mut self,
+        request: crate::dispatch::DispatchRequest,
+    ) -> Result<Execution> {
         let already_pending = self.pending_prompt.is_some();
         let result = self.dispatch(request, &crate::ui::NullUi)?;
         self.publish();
-        Ok(if already_pending { Execution::Done(result) } else { self.execution(result) })
+        Ok(if already_pending {
+            Execution::Done(result)
+        } else {
+            self.execution(result)
+        })
     }
 
     /// Execute a semantic command using its captured args and displayed target.
@@ -933,7 +985,9 @@ impl Session {
         }
         let mut target = request.target;
         if let Some(offered) = request.action_target.as_ref() {
-            let view = self.views.get(&target.view_id)
+            let view = self
+                .views
+                .get(&target.view_id)
                 .ok_or_else(|| Error::new(format!("unknown view: {}", target.view_id)))?;
             let source = match target.version {
                 Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
@@ -942,29 +996,52 @@ impl Session {
             };
             let valid = source.is_some_and(|tree| {
                 if let Some(selection) = offered.selection {
-                    crate::dispatch::offer_selection_target(tree, &request.command, selection.start_line, selection.end_line).as_ref() == Some(offered)
+                    crate::dispatch::offer_selection_target(
+                        tree,
+                        &request.command,
+                        selection.start_line,
+                        selection.end_line,
+                    )
+                    .as_ref()
+                        == Some(offered)
                 } else {
-                    crate::dispatch::offer_target(tree, &request.command, &offered.node_id).as_ref() == Some(offered)
+                    crate::dispatch::offer_target(tree, &request.command, &offered.node_id).as_ref()
+                        == Some(offered)
                 }
             });
             let node = source.and_then(|tree| tree.node(&offered.node_id));
             if valid {
                 if let Some(selection) = offered.selection {
-                    target.selection = Some(Selection { start_line: selection.start_line as usize, end_line: selection.end_line as usize });
+                    target.selection = Some(Selection {
+                        start_line: selection.start_line as usize,
+                        end_line: selection.end_line as usize,
+                    });
                 } else if let Some(node) = node {
-                    target.cursor = Some(Cursor { line: node.start_line, column: 0 });
+                    target.cursor = Some(Cursor {
+                        line: node.start_line,
+                        column: 0,
+                    });
                 }
             } else {
                 return Ok(InvokeResult {
-                    effects: vec![Effect::message(MessageLevel::Warn, crate::errors::HUNK_CHANGED)],
+                    effects: vec![Effect::message(
+                        MessageLevel::Warn,
+                        crate::errors::HUNK_CHANGED,
+                    )],
                     render: self.refresh(&target.view_id)?,
                     ..InvokeResult::empty()
                 });
             }
         }
         self.run_versioned_command(
-            &target.view_id, &request.command, target.version, target.cursor,
-            target.selection, request.args.as_ref(), target.key, ui,
+            &target.view_id,
+            &request.command,
+            target.version,
+            target.cursor,
+            target.selection,
+            request.args.as_ref(),
+            target.key,
+            ui,
         )
     }
 
@@ -1026,7 +1103,13 @@ impl Session {
             return self.menu_key(params, cursor_moved, ui);
         }
 
-        let keymap = self.keymap_for(&scope).cloned().map(|keymap| keymap.with_basic_modifiers(self.rich_capabilities.as_ref().is_some_and(|caps| caps.modifiers == "basic")));
+        let keymap = self.keymap_for(&scope).cloned().map(|keymap| {
+            keymap.with_basic_modifiers(
+                self.rich_capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.modifiers == "basic"),
+            )
+        });
 
         let resolution = {
             let view = self
@@ -1052,12 +1135,15 @@ impl Session {
                     action_target: None,
                     command,
                     target: crate::dispatch::DispatchTarget {
-                        view_id: params.view_id.clone(), version: Some(params.version),
-                        cursor: Some(params.cursor), selection: params.selection,
+                        view_id: params.view_id.clone(),
+                        version: Some(params.version),
+                        cursor: Some(params.cursor),
+                        selection: params.selection,
                         key: Some(chord),
                     },
                     args: None,
-                }, ui,
+                },
+                ui,
             ),
             Resolution::PassThrough { chord } => Ok(InvokeResult {
                 effects: vec![Effect::PassThrough { key: chord }],
@@ -1317,25 +1403,44 @@ impl Session {
     }
 
     /// Toggle an implemented switch in the exact logical menu and rerender it.
-    pub fn toggle_menu_switch(&mut self, view_id: &str, generation: u64, menu_id: &str, key: &str) -> Result<InvokeResult> {
-        let matches_menu = self.views.get(view_id).is_some_and(|view| view.version() == generation
-            && view.menu().is_some_and(|menu| menu.id == menu_id));
-        if !matches_menu { return Ok(unbound(key)); }
+    pub fn toggle_menu_switch(
+        &mut self,
+        view_id: &str,
+        generation: u64,
+        menu_id: &str,
+        key: &str,
+    ) -> Result<InvokeResult> {
+        let matches_menu = self.views.get(view_id).is_some_and(|view| {
+            view.version() == generation && view.menu().is_some_and(|menu| menu.id == menu_id)
+        });
+        if !matches_menu {
+            return Ok(unbound(key));
+        }
         let result = self.menu_switch(view_id, key, Cursor { line: 0, column: 0 })?;
         self.publish();
         Ok(result)
     }
 
     fn menu_switch(&mut self, view_id: &str, key: &str, cursor: Cursor) -> Result<InvokeResult> {
-        let item = self.views.get(view_id).and_then(|view| view.menu())
+        let item = self
+            .views
+            .get(view_id)
+            .and_then(|view| view.menu())
             .and_then(|menu| menu.item(key).cloned());
         let Some(crate::menu::Item::Switch { status, label, .. }) = item else {
             return Ok(unbound(key));
         };
-        if let Some(result) = unsupported_menu_item(status, &label) { return Ok(result); }
-        let toggled = self.views.get_mut(view_id).and_then(|view| view.menu_mut())
+        if let Some(result) = unsupported_menu_item(status, &label) {
+            return Ok(result);
+        }
+        let toggled = self
+            .views
+            .get_mut(view_id)
+            .and_then(|view| view.menu_mut())
             .is_some_and(|menu| menu.toggle_switch(key));
-        if !toggled { return Ok(unbound(key)); }
+        if !toggled {
+            return Ok(unbound(key));
+        }
         self.menu_rerender(view_id, cursor)
     }
 
@@ -1353,9 +1458,7 @@ impl Session {
             .and_then(|view| view.menu())
             .and_then(|menu| menu.item(key).cloned());
         match item {
-            Some(crate::menu::Item::Switch { .. }) => {
-                self.menu_switch(view_id, key, params.cursor)
-            }
+            Some(crate::menu::Item::Switch { .. }) => self.menu_switch(view_id, key, params.cursor),
             Some(crate::menu::Item::Option {
                 value,
                 reader,
@@ -1508,14 +1611,21 @@ impl Session {
                     .map(|menu| menu.args());
                 let serialized_args = menu_args.as_ref().map(serde_json::to_value).transpose()?;
                 if registered.applies_to(&scope) {
-                    return self.dispatch(crate::dispatch::DispatchRequest {
-                        action_target: None,
-                        command: registered.id.to_string(),
-                        target: crate::dispatch::DispatchTarget { view_id: view_id.to_string(),
-                            version: Some(params.version), cursor: Some(params.cursor),
-                            selection: params.selection, key: Some(key.to_string()) },
-                        args: serialized_args,
-                    }, ui);
+                    return self.dispatch(
+                        crate::dispatch::DispatchRequest {
+                            action_target: None,
+                            command: registered.id.to_string(),
+                            target: crate::dispatch::DispatchTarget {
+                                view_id: view_id.to_string(),
+                                version: Some(params.version),
+                                cursor: Some(params.cursor),
+                                selection: params.selection,
+                                key: Some(key.to_string()),
+                            },
+                            args: serialized_args,
+                        },
+                        ui,
+                    );
                 }
 
                 // The action belongs to an earlier view: close this menu (and
@@ -1551,13 +1661,21 @@ impl Session {
                         keymap = popped.keymap;
                     }
                 }
-                let mut run = self.dispatch(crate::dispatch::DispatchRequest {
-                    action_target: None,
-                    command: registered.id.to_string(),
-                    target: crate::dispatch::DispatchTarget { view_id: target, version: None,
-                        cursor: None, selection: None, key: Some(key.to_string()) },
-                    args: serialized_args,
-                }, ui)?;
+                let mut run = self.dispatch(
+                    crate::dispatch::DispatchRequest {
+                        action_target: None,
+                        command: registered.id.to_string(),
+                        target: crate::dispatch::DispatchTarget {
+                            view_id: target,
+                            version: None,
+                            cursor: None,
+                            selection: None,
+                            key: Some(key.to_string()),
+                        },
+                        args: serialized_args,
+                    },
+                    ui,
+                )?;
                 effects.extend(run.effects);
                 run.effects = effects;
                 if run.keymap.is_none() {
@@ -1569,22 +1687,46 @@ impl Session {
     }
 
     /// Execute an exact retained, read-only Plain menu action through normal menu semantics.
-    pub fn run_plain_menu_action(&mut self, view_id: &str, generation: u64, menu_id: &str, key: &str, ui: &dyn PromptUi) -> Result<InvokeResult> {
+    pub fn run_plain_menu_action(
+        &mut self,
+        view_id: &str,
+        generation: u64,
+        menu_id: &str,
+        key: &str,
+        ui: &dyn PromptUi,
+    ) -> Result<InvokeResult> {
         let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
             && view.menu().is_some_and(|menu| menu.id == menu_id
                 && matches!(menu.item(key), Some(crate::menu::Item::Action { command, status: MenuStatus::Implemented, .. })
                     if command == "log.current")));
-        if !valid { return Ok(unbound(key)); }
-        let result = self.menu_action(view_id, key, &ViewKeyParams { view_id: view_id.to_string(), version: generation, key: key.to_string(), editor_mode: crate::keymap::EditorMode::Normal, cursor: Cursor { line: 0, column: 0 }, selection: None }, ui)?;
+        if !valid {
+            return Ok(unbound(key));
+        }
+        let result = self.menu_action(
+            view_id,
+            key,
+            &ViewKeyParams {
+                view_id: view_id.to_string(),
+                version: generation,
+                key: key.to_string(),
+                editor_mode: crate::keymap::EditorMode::Normal,
+                cursor: Cursor { line: 0, column: 0 },
+                selection: None,
+            },
+            ui,
+        )?;
         self.publish();
         Ok(result)
     }
 
     /// Pop the exact retained concrete log view and focus its caller.
     pub fn back_from_plain_log(&mut self, view_id: &str, generation: u64) -> Result<InvokeResult> {
-        let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
-            && view.descriptor().scope.as_str() == "log");
-        if !valid { return Ok(unbound("common.cancel")); }
+        let valid = self.views.get(view_id).is_some_and(|view| {
+            view.version() == generation && view.descriptor().scope.as_str() == "log"
+        });
+        if !valid {
+            return Ok(unbound("common.cancel"));
+        }
         let result = self.pop_view(view_id)?;
         self.publish();
         Ok(result)
@@ -1684,8 +1826,20 @@ impl Session {
             suffix += 1;
         }
 
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.rich_capabilities.as_ref().is_some_and(|caps| caps.render == "full"), self.rich_capabilities.as_ref().is_some_and(|caps| caps.folds == "native"));
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.rich_capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.render == "full"),
+            self.rich_capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.folds == "native"),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))
@@ -1758,25 +1912,49 @@ impl Session {
         }
         if crate::dispatch::content_command(command_id) && view.mode() != ViewMode::Text {
             let source = view.command_source_tree().unwrap_or_else(|| view.tree());
-            if let Some(node) = cursor.and_then(|cursor| source.line_nodes.get(cursor.line))
-                .and_then(|line| source.node(&line.node)) {
+            if let Some(node) = cursor
+                .and_then(|cursor| source.line_nodes.get(cursor.line))
+                .and_then(|line| source.node(&line.node))
+            {
                 let hunk = if node.kind == crate::tree::NodeKind::Line {
-                    source.nodes.iter().find(|candidate| candidate.kind == crate::tree::NodeKind::Hunk
-                        && candidate.path == node.path && candidate.section == node.section
-                        && candidate.hunk_id == node.hunk_id)
-                } else { Some(node) };
-                if let Some(hunk) = hunk.filter(|node| matches!(node.kind, crate::tree::NodeKind::Hunk | crate::tree::NodeKind::Line)) {
-                    if !crate::dispatch::hunk_section_compatible(command_id, hunk.section.as_deref()) {
-                        let effects = if command_id == "status.stage" && hunk.section.as_deref() == Some("staged") {
+                    source.nodes.iter().find(|candidate| {
+                        candidate.kind == crate::tree::NodeKind::Hunk
+                            && candidate.path == node.path
+                            && candidate.section == node.section
+                            && candidate.hunk_id == node.hunk_id
+                    })
+                } else {
+                    Some(node)
+                };
+                if let Some(hunk) = hunk.filter(|node| {
+                    matches!(
+                        node.kind,
+                        crate::tree::NodeKind::Hunk | crate::tree::NodeKind::Line
+                    )
+                }) {
+                    if !crate::dispatch::hunk_section_compatible(
+                        command_id,
+                        hunk.section.as_deref(),
+                    ) {
+                        let effects = if command_id == "status.stage"
+                            && hunk.section.as_deref() == Some("staged")
+                        {
                             vec![]
                         } else {
-                            vec![Effect::message(MessageLevel::Info, match command_id {
-                                "status.stage" => crate::dispatch::NOTHING_TO_STAGE,
-                                "status.unstage" => crate::dispatch::NOTHING_TO_UNSTAGE,
-                                _ => crate::dispatch::NOTHING_TO_DISCARD,
-                            })]
+                            vec![Effect::message(
+                                MessageLevel::Info,
+                                match command_id {
+                                    "status.stage" => crate::dispatch::NOTHING_TO_STAGE,
+                                    "status.unstage" => crate::dispatch::NOTHING_TO_UNSTAGE,
+                                    _ => crate::dispatch::NOTHING_TO_DISCARD,
+                                },
+                            )]
                         };
-                        return Ok(InvokeResult { effects, render: None, ..InvokeResult::empty() });
+                        return Ok(InvokeResult {
+                            effects,
+                            render: None,
+                            ..InvokeResult::empty()
+                        });
                     }
                 }
             }
@@ -1786,7 +1964,12 @@ impl Session {
             for target in &targets {
                 match crate::dispatch::target_is_current(&repo, source, command_id, target) {
                     Ok(true) => continue,
-                    Ok(false) => rejection = Some(vec![Effect::message(MessageLevel::Warn, crate::errors::HUNK_CHANGED)]),
+                    Ok(false) => {
+                        rejection = Some(vec![Effect::message(
+                            MessageLevel::Warn,
+                            crate::errors::HUNK_CHANGED,
+                        )])
+                    }
                     Err(error) => {
                         view.request_tree = None;
                         rejection = Some(crate::errors::effects_for_result(Err(error))?);
@@ -1826,7 +2009,11 @@ impl Session {
         key: Option<String>,
         ui: &dyn PromptUi,
     ) -> Result<InvokeResult> {
-        if let Some(required) = self.rich_capabilities.as_ref().and_then(|caps| caps.command_requirement(command_id)) {
+        if let Some(required) = self
+            .rich_capabilities
+            .as_ref()
+            .and_then(|caps| caps.command_requirement(command_id))
+        {
             return Ok(unsupported_feature(required));
         }
         let Some(command) = commands::registry().get(command_id) else {

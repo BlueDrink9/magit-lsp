@@ -5,11 +5,11 @@
 //! ranges and the node hierarchy itself. Structure comes from this tree, never
 //! from parsing the rendered text.
 
+use crate::docstore::Encoding;
 use lsp_types::{
     DocumentLink, DocumentSymbol, FoldingRange, FoldingRangeKind, Location, Position, Range,
     SymbolKind, Uri,
 };
-use crate::docstore::Encoding;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -223,7 +223,9 @@ pub struct Tree {
 impl Tree {
     /// The immediate structural parent of a stable node identity.
     pub fn parent(&self, id: &str) -> Option<&Node> {
-        self.nodes.iter().find(|node| node.children.iter().any(|child| child == id))
+        self.nodes
+            .iter()
+            .find(|node| node.children.iter().any(|child| child == id))
     }
 
     /// Resolve a node to itself or its nearest collapsible ancestor by identity.
@@ -231,7 +233,10 @@ impl Tree {
     pub fn collapsible_ancestor(&self, id: &str) -> Option<&Node> {
         let mut node = self.node(id)?;
         loop {
-            if matches!(node.kind, NodeKind::Section | NodeKind::File | NodeKind::Hunk) {
+            if matches!(
+                node.kind,
+                NodeKind::Section | NodeKind::File | NodeKind::Hunk
+            ) {
                 return Some(node);
             }
             node = self.parent(&node.id)?;
@@ -253,12 +258,25 @@ impl Tree {
     pub fn sibling(&self, id: &str, forward: bool) -> Option<&Node> {
         let node = self.node(id)?;
         let siblings: Vec<&Node> = if let Some(parent) = self.parent(id) {
-            parent.children.iter().filter_map(|id| self.node(id)).collect()
+            parent
+                .children
+                .iter()
+                .filter_map(|id| self.node(id))
+                .collect()
         } else {
-            self.nodes.iter().filter(|candidate| candidate.kind == node.kind && self.parent(&candidate.id).is_none()).collect()
+            self.nodes
+                .iter()
+                .filter(|candidate| {
+                    candidate.kind == node.kind && self.parent(&candidate.id).is_none()
+                })
+                .collect()
         };
         let index = siblings.iter().position(|node| node.id == id)?;
-        let next = if forward { index.checked_add(1)? } else { index.checked_sub(1)? };
+        let next = if forward {
+            index.checked_add(1)?
+        } else {
+            index.checked_sub(1)?
+        };
         siblings.get(next).copied()
     }
 
@@ -313,7 +331,11 @@ impl Tree {
     }
 
     /// The tree's file links encoded in the negotiated position unit.
-    pub fn document_links_with_encoding(&self, repo_root: &str, encoding: Encoding) -> Vec<DocumentLink> {
+    pub fn document_links_with_encoding(
+        &self,
+        repo_root: &str,
+        encoding: Encoding,
+    ) -> Vec<DocumentLink> {
         self.links
             .iter()
             .filter_map(|link| {
@@ -352,9 +374,16 @@ impl Tree {
     }
 
     /// Resolve a definition position after validating its negotiated character boundary.
-    pub fn definition_with_encoding(&self, repo_root: &str, position: Position, encoding: Encoding) -> Option<Location> {
+    pub fn definition_with_encoding(
+        &self,
+        repo_root: &str,
+        position: Position,
+        encoding: Encoding,
+    ) -> Option<Location> {
         let text = self.lines.get(position.line as usize)?;
-        if !valid_column(text, position.character, encoding) { return None; }
+        if !valid_column(text, position.character, encoding) {
+            return None;
+        }
         self.definition(repo_root, position)
     }
 
@@ -477,7 +506,8 @@ impl Tree {
             let start = Position::new(line as u32, 0);
             let end = Position::new(
                 line as u32,
-                self.line_len(line, encoding).min(column_len(&symbol.name, encoding)),
+                self.line_len(line, encoding)
+                    .min(column_len(&symbol.name, encoding)),
             );
             return Range::new(start, end);
         }
@@ -538,23 +568,40 @@ fn utf16_len(text: &str) -> u32 {
 }
 
 fn column_len(text: &str, encoding: Encoding) -> u32 {
-    match encoding { Encoding::Utf8 => text.len() as u32, Encoding::Utf16 => utf16_len(text), Encoding::Utf32 => text.chars().count() as u32 }
+    match encoding {
+        Encoding::Utf8 => text.len() as u32,
+        Encoding::Utf16 => utf16_len(text),
+        Encoding::Utf32 => text.chars().count() as u32,
+    }
 }
 
 fn encoded_col(text: &str, byte: usize, encoding: Encoding) -> u32 {
     let byte = byte.min(text.len());
-    let byte = (0..=byte).rev().find(|index| text.is_char_boundary(*index)).unwrap_or(0);
+    let byte = (0..=byte)
+        .rev()
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or(0);
     column_len(&text[..byte], encoding)
 }
 
 fn valid_column(text: &str, column: u32, encoding: Encoding) -> bool {
     let text = text.strip_suffix('\r').unwrap_or(text);
-    if column == 0 { return true; }
+    if column == 0 {
+        return true;
+    }
     let mut count = 0u32;
     for ch in text.chars() {
-        count += match encoding { Encoding::Utf8 => ch.len_utf8() as u32, Encoding::Utf16 => ch.len_utf16() as u32, Encoding::Utf32 => 1 };
-        if count == column { return true; }
-        if count > column { return false; }
+        count += match encoding {
+            Encoding::Utf8 => ch.len_utf8() as u32,
+            Encoding::Utf16 => ch.len_utf16() as u32,
+            Encoding::Utf32 => 1,
+        };
+        if count == column {
+            return true;
+        }
+        if count > column {
+            return false;
+        }
     }
     count == column
 }

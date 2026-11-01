@@ -18,27 +18,57 @@ fn preflight_rejects_changed_head_index_or_worktree_and_closed_targets() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
     for change in ["head", "index", "worktree", "closed"] {
-        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).modify_standard().build();
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
         let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
         let view = test.view_id().to_string();
-        let step = test.session.start_invoke(&ViewInvokeParams {
-            view_id: view.clone(), command: "commit.create".to_string(), version: None,
-            cursor: None, selection: None, args: None,
-        }).unwrap();
-        let Execution::Prompt(prompt) = step else { panic!("expected preflight"); };
+        let step = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: view.clone(),
+                command: "commit.create".to_string(),
+                version: None,
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap();
+        let Execution::Prompt(prompt) = step else {
+            panic!("expected preflight");
+        };
         match change {
-            "head" => { tmp.git(&["commit", "--allow-empty", "-m", "external"]); }
-            "index" => { tmp.git(&["add", "f.txt"]); }
-            "worktree" => { std::fs::write(tmp.path().join("f.txt"), "external content\n").unwrap(); }
-            "closed" => { test.session.close(&view).unwrap(); }
+            "head" => {
+                tmp.git(&["commit", "--allow-empty", "-m", "external"]);
+            }
+            "index" => {
+                tmp.git(&["add", "f.txt"]);
+            }
+            "worktree" => {
+                std::fs::write(tmp.path().join("f.txt"), "external content\n").unwrap();
+            }
+            "closed" => {
+                test.session.close(&view).unwrap();
+            }
             _ => unreachable!(),
         }
         let before = tmp.git(&["diff", "--cached"]);
         let worktree = std::fs::read(tmp.path().join("f.txt")).unwrap();
-        let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap() else { panic!("expected completion"); };
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true)))
+            .unwrap()
+        else {
+            panic!("expected completion");
+        };
         assert!(result.commit.is_none(), "{change}");
         assert_eq!(tmp.git(&["diff", "--cached"]), before, "{change}");
-        assert_eq!(std::fs::read(tmp.path().join("f.txt")).unwrap(), worktree, "{change}");
+        assert_eq!(
+            std::fs::read(tmp.path().join("f.txt")).unwrap(),
+            worktree,
+            "{change}"
+        );
         assert!(!test.session.has_pending_prompt());
     }
 }
@@ -180,35 +210,49 @@ fn staged_changes_commit_without_a_prompt() {
 fn head_edits_reject_unborn_and_conflicting_options_without_mutation() {
     use serde_json::json;
     for unborn in [true, false] {
-        let fixture = if unborn { RepoFixture::new().unborn() } else {
+        let fixture = if unborn {
+            RepoFixture::new().unborn()
+        } else {
             RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
         };
-        let (tmp, _) = fixture.staged_file("f.txt", "staged\n").modify("f.txt", "unstaged\n").build();
+        let (tmp, _) = fixture
+            .staged_file("f.txt", "staged\n")
+            .modify("f.txt", "unstaged\n")
+            .build();
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
         let index = tmp.git(&["ls-files", "--stage"]);
         let status = tmp.git(&["status", "--porcelain"]);
         for command in ["commit.amend", "commit.extend", "commit.reword"] {
-            let arguments = if unborn { vec![json!(null)] } else { vec![
-                json!({"switches": [], "options": {"=C": "HEAD"}}),
-                json!({"switches": [], "options": {"=c": "HEAD"}}),
-                json!({"switches": ["-R"], "options": {"=C": "HEAD"}}),
-                json!({"switches": ["-R"], "options": {"=c": "HEAD"}}),
-                json!({"switches": ["-R"], "options": {"=A": "Explicit <explicit@example.com>"}}),
-                json!({"switches": ["--only"], "options": {}}),
-                json!({"switches": ["--no-edit"], "options": {}}),
-            ] };
+            let arguments = if unborn {
+                vec![json!(null)]
+            } else {
+                vec![
+                    json!({"switches": [], "options": {"=C": "HEAD"}}),
+                    json!({"switches": [], "options": {"=c": "HEAD"}}),
+                    json!({"switches": ["-R"], "options": {"=C": "HEAD"}}),
+                    json!({"switches": ["-R"], "options": {"=c": "HEAD"}}),
+                    json!({"switches": ["-R"], "options": {"=A": "Explicit <explicit@example.com>"}}),
+                    json!({"switches": ["--only"], "options": {}}),
+                    json!({"switches": ["--no-edit"], "options": {}}),
+                ]
+            };
             for args in arguments {
                 let result = test.invoke_args(command, args);
                 assert!(result.commit.is_none(), "{command}");
                 assert!(!message_effects(&result).is_empty());
-                if unborn { assert!(message_effects(&result)[0].1.contains("no commit yet")); }
+                if unborn {
+                    assert!(message_effects(&result)[0].1.contains("no commit yet"));
+                }
                 assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
                 assert_eq!(tmp.git(&["status", "--porcelain"]), status);
             }
         }
         if !unborn {
             let head = tmp.git(&["rev-parse", "HEAD"]);
-            assert!(test.invoke_args("commit.reword", json!({"switches": ["-a"], "options": {}})).commit.is_none());
+            assert!(test
+                .invoke_args("commit.reword", json!({"switches": ["-a"], "options": {}}))
+                .commit
+                .is_none());
             assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
         }
     }
@@ -219,8 +263,12 @@ fn reset_author_head_edits_start_without_staging_or_a_prompt() {
     use serde_json::json;
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
         for unstaged in [false, true] {
-            let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
-            if unstaged { write(&tmp.path().join("f.txt"), "unstaged\n"); }
+            let (tmp, _) = RepoFixture::new()
+                .commit("init", [("f.txt", TEN_LINES)])
+                .build();
+            if unstaged {
+                write(&tmp.path().join("f.txt"), "unstaged\n");
+            }
             let index = tmp.git(&["ls-files", "--stage"]);
             let status = tmp.git(&["status", "--porcelain"]);
             let head = tmp.git(&["rev-parse", "HEAD"]);
@@ -246,29 +294,62 @@ fn published_head_confirmation_captures_options_and_revalidates_state() {
     use magit_lsp::session::Execution;
     use serde_json::json;
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
-        for change in ["accept", "decline", "dismiss", "head", "index", "worktree", "closed"] {
-            let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
-                .staged_file("f.txt", "staged\n").modify("f.txt", "unstaged\n").build();
+        for change in [
+            "accept", "decline", "dismiss", "head", "index", "worktree", "closed",
+        ] {
+            let (tmp, _) = RepoFixture::new()
+                .commit("init", [("f.txt", TEN_LINES)])
+                .staged_file("f.txt", "staged\n")
+                .modify("f.txt", "unstaged\n")
+                .build();
             tmp.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
             let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
             let view = test.view_id().to_string();
-            let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
-                view_id: view.clone(), command: command.into(), version: None, cursor: None, selection: None,
-                args: Some(json!({"switches": ["-n", "-R"], "options": {}})),
-            }).unwrap() else { panic!("published HEAD must prompt: {command}"); };
+            let Execution::Prompt(prompt) = test
+                .session
+                .start_invoke(&ViewInvokeParams {
+                    view_id: view.clone(),
+                    command: command.into(),
+                    version: None,
+                    cursor: None,
+                    selection: None,
+                    args: Some(json!({"switches": ["-n", "-R"], "options": {}})),
+                })
+                .unwrap()
+            else {
+                panic!("published HEAD must prompt: {command}");
+            };
             assert!(prompt.title.contains("published HEAD"));
             match change {
-                "head" => { tmp.git(&["commit", "--allow-empty", "-m", "external"]); }
-                "index" => { tmp.git(&["add", "f.txt"]); }
-                "worktree" => { write(&tmp.path().join("f.txt"), "external\n"); }
-                "closed" => { test.session.close(&view).unwrap(); }
+                "head" => {
+                    tmp.git(&["commit", "--allow-empty", "-m", "external"]);
+                }
+                "index" => {
+                    tmp.git(&["add", "f.txt"]);
+                }
+                "worktree" => {
+                    write(&tmp.path().join("f.txt"), "external\n");
+                }
+                "closed" => {
+                    test.session.close(&view).unwrap();
+                }
                 _ => {}
             }
             let head = tmp.git(&["rev-parse", "HEAD"]);
             let index = tmp.git(&["ls-files", "--stage"]);
             let worktree = read(&tmp.path().join("f.txt"));
-            let answer = match change { "dismiss" => None, "decline" => Some(PromptValue::Bool(false)), _ => Some(PromptValue::Bool(true)) };
-            let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, answer).unwrap() else { panic!("completed"); };
+            let answer = match change {
+                "dismiss" => None,
+                "decline" => Some(PromptValue::Bool(false)),
+                _ => Some(PromptValue::Bool(true)),
+            };
+            let Execution::Done(result) = test
+                .session
+                .resume_prompt(&prompt.prompt_id, answer)
+                .unwrap()
+            else {
+                panic!("completed");
+            };
             if change == "accept" {
                 let operation = result.commit.expect("accepted captured operation");
                 let mut expected = match command {
@@ -278,7 +359,9 @@ fn published_head_confirmation_captures_options_and_revalidates_state() {
                 };
                 expected.extend(["--no-verify", "--reset-author"]);
                 assert_eq!(operation.argv(), expected);
-            } else { assert!(result.commit.is_none(), "{command}: {change}"); }
+            } else {
+                assert!(result.commit.is_none(), "{command}: {change}");
+            }
             assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
             assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
             assert_eq!(read(&tmp.path().join("f.txt")), worktree);
@@ -291,30 +374,62 @@ fn extend_clean_guard_and_tracked_all_prompt_never_stage_implicitly() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
     for change in ["accept", "decline", "head", "index", "worktree"] {
-        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .build();
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
         let clean = test.invoke_ui("commit.extend");
         assert!(clean.commit.is_none());
         assert!(message_effects(&clean)[0].1.contains("Nothing staged"));
         write(&tmp.path().join("f.txt"), "unstaged\n");
         write(&tmp.path().join("untracked.txt"), "not added\n");
-        let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
-            view_id: test.view_id().into(), command: "commit.extend".into(), version: None,
-            cursor: None, selection: None, args: None,
-        }).unwrap() else { panic!("tracked all prompt"); };
+        let Execution::Prompt(prompt) = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().into(),
+                command: "commit.extend".into(),
+                version: None,
+                cursor: None,
+                selection: None,
+                args: None,
+            })
+            .unwrap()
+        else {
+            panic!("tracked all prompt");
+        };
         match change {
-            "head" => { tmp.git(&["commit", "--allow-empty", "-m", "external"]); }
-            "index" => { tmp.git(&["add", "f.txt"]); }
-            "worktree" => { write(&tmp.path().join("f.txt"), "external\n"); }
+            "head" => {
+                tmp.git(&["commit", "--allow-empty", "-m", "external"]);
+            }
+            "index" => {
+                tmp.git(&["add", "f.txt"]);
+            }
+            "worktree" => {
+                write(&tmp.path().join("f.txt"), "external\n");
+            }
             _ => {}
         }
         let head = tmp.git(&["rev-parse", "HEAD"]);
         let index = tmp.git(&["ls-files", "--stage"]);
         let status = tmp.git(&["status", "--porcelain"]);
-        let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(change != "decline"))).unwrap()
-            else { panic!("completed"); };
-        if change == "accept" { assert_eq!(result.commit.unwrap().argv(), ["--amend", "--no-edit", "--all"]); }
-        else { assert!(result.commit.is_none()); }
+        let Execution::Done(result) = test
+            .session
+            .resume_prompt(
+                &prompt.prompt_id,
+                Some(PromptValue::Bool(change != "decline")),
+            )
+            .unwrap()
+        else {
+            panic!("completed");
+        };
+        if change == "accept" {
+            assert_eq!(
+                result.commit.unwrap().argv(),
+                ["--amend", "--no-edit", "--all"]
+            );
+        } else {
+            assert!(result.commit.is_none());
+        }
         assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
         assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
         assert_eq!(tmp.git(&["status", "--porcelain"]), status);

@@ -77,9 +77,9 @@ impl Item {
     /// The visible label.
     pub fn label(&self) -> &str {
         match self {
-            Item::Switch { label, .. } | Item::Option { label, .. } | Item::Action { label, .. } => {
-                label
-            }
+            Item::Switch { label, .. }
+            | Item::Option { label, .. }
+            | Item::Action { label, .. } => label,
         }
     }
 
@@ -226,7 +226,10 @@ impl Menu {
     pub fn toggle_switch(&mut self, key: &str) -> bool {
         for group in &mut self.groups {
             for item in &mut group.items {
-                if let Item::Switch { key: item_key, on, .. } = item {
+                if let Item::Switch {
+                    key: item_key, on, ..
+                } = item
+                {
                     if item_key == key {
                         *on = !*on;
                         return true;
@@ -279,9 +282,7 @@ impl Menu {
         for group in &self.groups {
             for item in &group.items {
                 match item {
-                    Item::Switch {
-                        flag, on: true, ..
-                    } => parts.push(flag.clone()),
+                    Item::Switch { flag, on: true, .. } => parts.push(flag.clone()),
                     Item::Option {
                         flag,
                         value: Some(value),
@@ -353,8 +354,7 @@ impl View for MenuView {
     }
 
     fn render(&mut self, ctx: &Ctx<'_>) -> Tree {
-        self.menu
-            .render_with_pending(ctx.viewport, ctx.pending)
+        self.menu.render_with_pending(ctx.viewport, ctx.pending)
     }
 
     fn menu(&self) -> Option<Menu> {
@@ -395,9 +395,7 @@ impl<'a> Builder<'a> {
         let line = self.tree.lines.len();
         let id = format!("menu:{}/title", self.menu.id);
         self.tree.lines.push(format!(" {}", self.menu.title));
-        self.tree
-            .line_nodes
-            .push(line_node(&id, NodeKind::Header));
+        self.tree.line_nodes.push(line_node(&id, NodeKind::Header));
         self.tree
             .nodes
             .push(node(&id, NodeKind::Header, self.menu.title.clone(), line));
@@ -554,16 +552,19 @@ impl<'a> Builder<'a> {
 
     /// The preview line follows the arguments it describes.
     fn preview(&mut self) {
-        if !self.menu.groups.iter().any(|group| group.title == "Arguments") {
+        if !self
+            .menu
+            .groups
+            .iter()
+            .any(|group| group.title == "Arguments")
+        {
             return;
         }
         let line = self.tree.lines.len();
         let text = self.menu.preview();
         let id = format!("menu:{}/preview", self.menu.id);
         self.tree.lines.push(format!(" {text}"));
-        self.tree
-            .line_nodes
-            .push(line_node(&id, NodeKind::Message));
+        self.tree.line_nodes.push(line_node(&id, NodeKind::Message));
         self.tree
             .nodes
             .push(node(&id, NodeKind::Message, text.clone(), line));
@@ -621,12 +622,7 @@ impl<'a> Builder<'a> {
                     let base = text.len();
                     if let Some(content) = content {
                         if line_offset == 0 {
-                            self.token(
-                                line,
-                                base + 1,
-                                block.group.title.len(),
-                                "magit.menu.group",
-                            );
+                            self.token(line, base + 1, block.group.title.len(), "magit.menu.group");
                         } else {
                             let item = &block.group.items[line_offset - 1];
                             tokens.extend(self.item_tokens(base, item));
@@ -655,7 +651,9 @@ impl<'a> Builder<'a> {
                         let group = &row[0];
                         let group_id =
                             format!("menu:{}/group:{}", self.menu.id, slug(&group.group.title));
-                        self.tree.line_nodes.push(line_node(&group_id, NodeKind::Section));
+                        self.tree
+                            .line_nodes
+                            .push(line_node(&group_id, NodeKind::Section));
                     }
                 }
             }
@@ -822,11 +820,13 @@ fn wrap_line(
                     let token_end = token_start + token_length;
                     let clipped_start = token_start.max(start);
                     let clipped_end = token_end.min(end);
-                    (clipped_start < clipped_end).then(|| (
-                        offset + (clipped_start - start),
-                        clipped_end - clipped_start,
-                        token_type,
-                    ))
+                    (clipped_start < clipped_end).then(|| {
+                        (
+                            offset + (clipped_start - start),
+                            clipped_end - clipped_start,
+                            token_type,
+                        )
+                    })
                 })
                 .collect();
             (line, line_tokens)

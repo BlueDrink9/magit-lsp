@@ -42,13 +42,23 @@ fn staging_headers_and_bodies_uses_source_siblings_and_final_section_fallback() 
     for body in [false, true] {
         let (tmp, _) = RepoFixture::new()
             .commit("init", [("f.txt", lines(40).to_string())])
-            .modify("f.txt", two_hunk_changes()).build();
+            .modify("f.txt", two_hunk_changes())
+            .build();
         let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
         test.ack();
-        let first = test.tree().nodes.iter().find(|node| node.kind == NodeKind::Hunk
-            && node.section.as_deref() == Some("unstaged")).unwrap().clone();
+        let first = test
+            .tree()
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged"))
+            .unwrap()
+            .clone();
         let next = test.tree().sibling(&first.id, true).unwrap().id.clone();
-        if body { test.goto_marker("f.txt", '+'); } else { test.goto(first.start_line); }
+        if body {
+            test.goto_marker("f.txt", '+');
+        } else {
+            test.goto(first.start_line);
+        }
         let result = test.invoke_here("status.stage");
         assert!(result.effects.is_empty());
         test.set_cursor(result.render.unwrap().cursor.unwrap());
@@ -57,7 +67,11 @@ fn staging_headers_and_bodies_uses_source_siblings_and_final_section_fallback() 
         let result = test.invoke_here("status.stage");
         assert!(result.effects.is_empty());
         test.set_cursor(result.render.unwrap().cursor.unwrap());
-        assert_eq!(test.focused_node().id, "section:unstaged", "must not follow staged relocation");
+        assert_eq!(
+            test.focused_node().id,
+            "section:unstaged",
+            "must not follow staged relocation"
+        );
         assert!(tmp.git(&["diff"]).is_empty());
     }
 }
@@ -67,11 +81,18 @@ fn staging_final_sibling_falls_back_to_surviving_source_file() {
     use magit_lsp::config::Profile;
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", lines(40).to_string())])
-        .modify("f.txt", two_hunk_changes()).build();
+        .modify("f.txt", two_hunk_changes())
+        .build();
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
-    let last = test.tree().nodes.iter().filter(|node| node.kind == NodeKind::Hunk
-        && node.section.as_deref() == Some("unstaged")).last().unwrap().start_line;
+    let last = test
+        .tree()
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged"))
+        .last()
+        .unwrap()
+        .start_line;
     test.goto(last);
     let result = test.invoke_here("status.stage");
     assert!(result.effects.is_empty());
@@ -83,8 +104,16 @@ fn staging_final_sibling_falls_back_to_surviving_source_file() {
 fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
     use magit_lsp::config::Profile;
     let (tmp, _repo) = RepoFixture::new()
-        .commit("init", [("f.txt", lines(40).to_string()), ("g.txt", lines(40).to_string())])
-        .modify("f.txt", two_hunk_changes()).modify("g.txt", two_hunk_changes()).build();
+        .commit(
+            "init",
+            [
+                ("f.txt", lines(40).to_string()),
+                ("g.txt", lines(40).to_string()),
+            ],
+        )
+        .modify("f.txt", two_hunk_changes())
+        .modify("g.txt", two_hunk_changes())
+        .build();
     let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let body = test.goto_marker("f.txt", '+');
@@ -118,7 +147,11 @@ fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
     test.ack();
     let result = test.invoke_here("common.parent-section");
     test.set_cursor(result.render.unwrap().cursor.unwrap());
-    assert_eq!(test.focused_node().id, "section:unstaged", "root has no parent");
+    assert_eq!(
+        test.focused_node().id,
+        "section:unstaged",
+        "root has no parent"
+    );
     test.ack();
     let result = test.invoke_here("common.next-sibling");
     test.set_cursor(result.render.unwrap().cursor.unwrap());
@@ -127,7 +160,13 @@ fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
     // Hunk siblings are scoped to the containing file, including from bodies.
     test.invoke("common.show-all");
     test.ack();
-    let hunks: Vec<_> = test.tree().nodes.iter().filter(|node| node.kind == NodeKind::Hunk && node.path.as_deref() == Some("f.txt")).cloned().collect();
+    let hunks: Vec<_> = test
+        .tree()
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Hunk && node.path.as_deref() == Some("f.txt"))
+        .cloned()
+        .collect();
     assert!(hunks.len() >= 2);
     test.goto_marker("f.txt", '+');
     let result = test.invoke_here("common.next-sibling");
@@ -140,7 +179,11 @@ fn common_hierarchy_navigation_uses_headers_bodies_and_folded_nodes() {
     test.ack();
     test.goto(0);
     let result = test.invoke_here("common.next-sibling");
-    assert_eq!(result.render.unwrap().cursor.unwrap().line, 0, "nonstructural header is inert");
+    assert_eq!(
+        result.render.unwrap().cursor.unwrap().line,
+        0,
+        "nonstructural header is inert"
+    );
 }
 
 #[test]
@@ -154,12 +197,17 @@ fn hierarchy_targets_use_retained_ids_after_refresh_and_reject_stale_coordinates
         ("common.prev-sibling", "b.txt", "untracked/b.txt"),
         ("common.parent-section", "b.txt", "section:untracked"),
     ] {
-        let (tmp, _repo) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("base.txt", "base\n")])
+            .build();
         write(&tmp.path().join("b.txt"), "b\n");
         write(&tmp.path().join("c.txt"), "c\n");
         let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
         test.ack();
-        let cursor = Cursor { line: test.goto_file("untracked", origin), column: 0 };
+        let cursor = Cursor {
+            line: test.goto_file("untracked", origin),
+            column: 0,
+        };
         write(&tmp.path().join("a.txt"), "inserted\n");
         test.refresh().unwrap();
         let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
@@ -168,7 +216,10 @@ fn hierarchy_targets_use_retained_ids_after_refresh_and_reject_stale_coordinates
         test.ack();
         let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
         assert!(result.render.is_none());
-        assert_eq!(message_texts(&result.effects), vec![magit_lsp::errors::STALE_VIEW]);
+        assert_eq!(
+            message_texts(&result.effects),
+            vec![magit_lsp::errors::STALE_VIEW]
+        );
     }
 }
 
@@ -190,13 +241,21 @@ fn visit_uses_the_requested_render_and_refuses_a_discarded_version() {
     let root = tmp.path().to_string_lossy();
     for (version, path) in [(test.version(), "a.txt"), (initial.version, "b.txt")] {
         let result = test.invoke_at_version("common.visit", version, Some(cursor), None, None);
-        assert_eq!(result.effects, vec![Effect::VisitFile {
-            uri: file_uri(&root, path), line: 0, column: 0,
-        }]);
+        assert_eq!(
+            result.effects,
+            vec![Effect::VisitFile {
+                uri: file_uri(&root, path),
+                line: 0,
+                column: 0,
+            }]
+        );
     }
     test.ack();
     let refused = test.invoke_at_version("common.visit", initial.version, Some(cursor), None, None);
-    assert_eq!(message_texts(&refused.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    assert_eq!(
+        message_texts(&refused.effects),
+        vec![magit_lsp::errors::STALE_VIEW]
+    );
     assert_eq!(tmp.git(&["diff", "--cached"]), "");
 }
 
@@ -212,34 +271,86 @@ fn jump_uses_structured_headers_and_exact_render_version() {
     for profile in [Profile::Standard, Profile::Vim] {
         let (mut test, _) = TestSession::open_status(&tmp, profile);
         let tree = test.tree().clone();
-        for (kind, node_kind) in [("section", NodeKind::Section), ("file", NodeKind::File), ("hunk", NodeKind::Hunk)] {
-            let headers: Vec<_> = tree.line_nodes.iter().enumerate()
-                .filter(|(line, owner)| owner.kind == node_kind && tree.node(&owner.node).expect("node").start_line == *line)
-                .map(|(line, _)| line).collect();
+        for (kind, node_kind) in [
+            ("section", NodeKind::Section),
+            ("file", NodeKind::File),
+            ("hunk", NodeKind::Hunk),
+        ] {
+            let headers: Vec<_> = tree
+                .line_nodes
+                .iter()
+                .enumerate()
+                .filter(|(line, owner)| {
+                    owner.kind == node_kind
+                        && tree.node(&owner.node).expect("node").start_line == *line
+                })
+                .map(|(line, _)| line)
+                .collect();
             assert!(headers.len() >= 2, "fixture needs multiple {kind} targets");
-            for from in [0, tree.lines.len() - 1].into_iter().chain(headers.iter().copied()) {
+            for from in [0, tree.lines.len() - 1]
+                .into_iter()
+                .chain(headers.iter().copied())
+            {
                 for dir in [1, -1] {
-                    let expected = if dir == 1 { headers.iter().copied().find(|line| *line > from) }
-                        else { headers.iter().rev().copied().find(|line| *line < from) }.unwrap_or(from);
+                    let expected = if dir == 1 {
+                        headers.iter().copied().find(|line| *line > from)
+                    } else {
+                        headers.iter().rev().copied().find(|line| *line < from)
+                    }
+                    .unwrap_or(from);
                     // Each invoke renders a new version; send the version actually displayed.
                     test.ack();
-                    let result = test.invoke_at_version("common.jump", test.version(),
-                        Some(Cursor { line: from, column: 0 }), None,
-                        Some(json!({"kind": kind, "dir": dir})));
+                    let result = test.invoke_at_version(
+                        "common.jump",
+                        test.version(),
+                        Some(Cursor {
+                            line: from,
+                            column: 0,
+                        }),
+                        None,
+                        Some(json!({"kind": kind, "dir": dir})),
+                    );
                     assert!(message_texts(&result.effects).is_empty(), "{kind} {dir}");
-                    assert_eq!(result.render.expect("jump render").cursor.expect("cursor").line, expected, "{kind} {dir} from {from}");
+                    assert_eq!(
+                        result
+                            .render
+                            .expect("jump render")
+                            .cursor
+                            .expect("cursor")
+                            .line,
+                        expected,
+                        "{kind} {dir} from {from}"
+                    );
                 }
             }
         }
         for (args, message) in [
-            (json!({"kind":"bogus","dir":1}), "Jump kind must be section, file or hunk"),
-            (json!({"kind":"hunk","dir":0}), "Jump direction must be 1 or -1"),
-            (json!({"kind":"file","dir":2}), "Jump direction must be 1 or -1"),
-            (json!({"kind":"section","dir":"-1"}), "Jump direction must be 1 or -1"),
+            (
+                json!({"kind":"bogus","dir":1}),
+                "Jump kind must be section, file or hunk",
+            ),
+            (
+                json!({"kind":"hunk","dir":0}),
+                "Jump direction must be 1 or -1",
+            ),
+            (
+                json!({"kind":"file","dir":2}),
+                "Jump direction must be 1 or -1",
+            ),
+            (
+                json!({"kind":"section","dir":"-1"}),
+                "Jump direction must be 1 or -1",
+            ),
             (json!({}), "Jump kind must be section, file or hunk"),
         ] {
             test.ack();
-            let result = test.invoke_at_version("common.jump", test.version(), Some(Cursor { line: 0, column: 0 }), None, Some(args));
+            let result = test.invoke_at_version(
+                "common.jump",
+                test.version(),
+                Some(Cursor { line: 0, column: 0 }),
+                None,
+                Some(args),
+            );
             assert_eq!(message_texts(&result.effects), vec![message]);
         }
     }
@@ -265,19 +376,62 @@ fn jump_uses_retained_render_until_ack_then_refuses_it() {
     let args = Some(json!({"kind":"file","dir":1}));
     let old_cursor = line_of(&old_tree, "b.txt", NodeKind::File, None, None).saturating_sub(1);
     let new_cursor = line_of(&new_tree, "a.txt", NodeKind::File, None, None);
-    let new_target = test.invoke_at_version("common.jump", test.version(),
-        Some(Cursor { line: new_cursor, column: 0 }), None, args.clone());
-    let old_target = test.invoke_at_version("common.jump", initial.version,
-        Some(Cursor { line: old_cursor, column: 0 }), None, args.clone());
-    let old_target = old_target.render.expect("old render").cursor.expect("old cursor").line;
-    let new_target = new_target.render.expect("new render").cursor.expect("new cursor").line;
-    assert_eq!(old_target, old_file, "retained old tree strictly advances to its file");
-    assert_eq!(new_target, new_file, "strict next from the shifted a file targets b");
+    let new_target = test.invoke_at_version(
+        "common.jump",
+        test.version(),
+        Some(Cursor {
+            line: new_cursor,
+            column: 0,
+        }),
+        None,
+        args.clone(),
+    );
+    let old_target = test.invoke_at_version(
+        "common.jump",
+        initial.version,
+        Some(Cursor {
+            line: old_cursor,
+            column: 0,
+        }),
+        None,
+        args.clone(),
+    );
+    let old_target = old_target
+        .render
+        .expect("old render")
+        .cursor
+        .expect("old cursor")
+        .line;
+    let new_target = new_target
+        .render
+        .expect("new render")
+        .cursor
+        .expect("new cursor")
+        .line;
+    assert_eq!(
+        old_target, old_file,
+        "retained old tree strictly advances to its file"
+    );
+    assert_eq!(
+        new_target, new_file,
+        "strict next from the shifted a file targets b"
+    );
     assert_ne!(old_target, new_target);
     test.ack();
-    let stale = test.invoke_at_version("common.jump", initial.version,
-        Some(Cursor { line: old_file, column: 0 }), None, args);
-    assert_eq!(message_texts(&stale.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    let stale = test.invoke_at_version(
+        "common.jump",
+        initial.version,
+        Some(Cursor {
+            line: old_file,
+            column: 0,
+        }),
+        None,
+        args,
+    );
+    assert_eq!(
+        message_texts(&stale.effects),
+        vec![magit_lsp::errors::STALE_VIEW]
+    );
 }
 
 #[test]

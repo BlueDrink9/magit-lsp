@@ -131,28 +131,54 @@ fn a_cancelled_identity_cannot_answer_a_later_menu_prompt() {
     use magit_lsp::keymap::EditorMode;
     use magit_lsp::protocol::{Cursor, ViewKeyParams};
     use magit_lsp::session::Execution;
-    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
     let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
     let (menu, _) = test.open_via_command("open.commit");
     let mut request = ViewKeyParams {
-        view_id: menu.id.clone(), version: test.version(), key: "=".to_string(),
-        editor_mode: EditorMode::Normal, cursor: Cursor { line: 0, column: 0 }, selection: None,
+        view_id: menu.id.clone(),
+        version: test.version(),
+        key: "=".to_string(),
+        editor_mode: EditorMode::Normal,
+        cursor: Cursor { line: 0, column: 0 },
+        selection: None,
     };
     test.session.start_key(&request).unwrap();
     request.key = "A".to_string();
-    let Execution::Prompt(first) = test.session.start_key(&request).unwrap() else { panic!("option prompt"); };
-    let Execution::Done(cancelled) = test.session.resume_prompt(&first.prompt_id, None).unwrap() else { panic!("cancelled"); };
+    let Execution::Prompt(first) = test.session.start_key(&request).unwrap() else {
+        panic!("option prompt");
+    };
+    let Execution::Done(cancelled) = test.session.resume_prompt(&first.prompt_id, None).unwrap()
+    else {
+        panic!("cancelled");
+    };
     assert!(cancelled.effects.is_empty());
     request.key = "=".to_string();
     test.session.start_key(&request).unwrap();
     request.key = "A".to_string();
-    let Execution::Prompt(second) = test.session.start_key(&request).unwrap() else { panic!("second prompt"); };
+    let Execution::Prompt(second) = test.session.start_key(&request).unwrap() else {
+        panic!("second prompt");
+    };
     assert_ne!(first.prompt_id, second.prompt_id);
-    test.session.resume_prompt(&first.prompt_id, Some(PromptValue::Text("stale".to_string()))).unwrap();
+    test.session
+        .resume_prompt(
+            &first.prompt_id,
+            Some(PromptValue::Text("stale".to_string())),
+        )
+        .unwrap();
     assert!(test.session.has_pending_prompt());
     assert_eq!(option_value(&test, &menu.id, "=A"), None);
-    test.session.resume_prompt(&second.prompt_id, Some(PromptValue::Text("Alice".to_string()))).unwrap();
-    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    test.session
+        .resume_prompt(
+            &second.prompt_id,
+            Some(PromptValue::Text("Alice".to_string())),
+        )
+        .unwrap();
+    assert_eq!(
+        option_value(&test, &menu.id, "=A").as_deref(),
+        Some("Alice")
+    );
 }
 
 #[test]
@@ -161,24 +187,47 @@ fn log_path_prompt_binds_the_menu_options_not_a_render_version() {
     use magit_lsp::protocol::{Cursor, ViewKeyParams};
     use magit_lsp::session::Execution;
     for close in [false, true] {
-        let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)]).build();
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .build();
         let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
         let (menu, _) = test.open_via_command("open.log");
-        let mut key = ViewKeyParams { view_id: menu.id.clone(), version: test.version(),
-            key: "=".to_string(), editor_mode: EditorMode::Normal,
-            cursor: Cursor { line: 0, column: 0 }, selection: None };
+        let mut key = ViewKeyParams {
+            view_id: menu.id.clone(),
+            version: test.version(),
+            key: "=".to_string(),
+            editor_mode: EditorMode::Normal,
+            cursor: Cursor { line: 0, column: 0 },
+            selection: None,
+        };
         test.session.start_key(&key).unwrap();
         key.key = "f".to_string();
-        let Execution::Prompt(prompt) = test.session.start_key(&key).unwrap() else { panic!("path prompt"); };
+        let Execution::Prompt(prompt) = test.session.start_key(&key).unwrap() else {
+            panic!("path prompt");
+        };
         test.session.resize(&menu.id, STATUS_VIEWPORT).unwrap();
         let refreshed = test.session.refresh(&menu.id).unwrap().unwrap();
         test.session.ack(&menu.id, refreshed.version).unwrap();
-        if close { test.session.close(&menu.id).unwrap(); }
-        let Execution::Done(_) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Text("f.txt".to_string()))).unwrap() else { panic!("path completion"); };
+        if close {
+            test.session.close(&menu.id).unwrap();
+        }
+        let Execution::Done(_) = test
+            .session
+            .resume_prompt(
+                &prompt.prompt_id,
+                Some(PromptValue::Text("f.txt".to_string())),
+            )
+            .unwrap()
+        else {
+            panic!("path completion");
+        };
         if close {
             assert!(test.session.views().get(&menu.id).is_none());
         } else {
-            assert_eq!(option_value(&test, &menu.id, "=f").as_deref(), Some("f.txt"));
+            assert_eq!(
+                option_value(&test, &menu.id, "=f").as_deref(),
+                Some("f.txt")
+            );
         }
         assert_eq!(tmp.git(&["status", "--porcelain"]), "");
     }

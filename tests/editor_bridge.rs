@@ -126,9 +126,11 @@ fn sync_draft(server: &mut TestServer, edit: &Value, text: &str) {
 
 /// Send the sole supported full-sync text channel.
 fn change_draft(server: &mut TestServer, edit: &Value, version: i32, text: &str) {
-    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
-        "textDocument":{"uri":edit["uri"],"version":version},"contentChanges":[{"text":text}]
-    }}));
+    server.send(
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":edit["uri"],"version":version},"contentChanges":[{"text":text}]
+        }}),
+    );
 }
 
 /// Confirm through the registered workspace/executeCommand endpoint.
@@ -136,7 +138,13 @@ fn finish_draft(server: &mut TestServer, id: i64, edit: &Value) -> Value {
     command_confirm(server, id, edit, 2, "synchronized")
 }
 
-fn command_confirm(server: &mut TestServer, id: i64, edit: &Value, version: i32, source: &str) -> Value {
+fn command_confirm(
+    server: &mut TestServer,
+    id: i64,
+    edit: &Value,
+    version: i32,
+    source: &str,
+) -> Value {
     let args = json!({"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":version,"source":source});
     server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
     server.response_with_id(id)
@@ -164,7 +172,12 @@ fn start_commit_with_args(server: &mut TestServer, status: &str, args: Value) ->
     start_head_operation(server, status, "commit.create", args)
 }
 
-fn start_head_operation(server: &mut TestServer, status: &str, command: &str, args: Value) -> Value {
+fn start_head_operation(
+    server: &mut TestServer,
+    status: &str,
+    command: &str,
+    args: Value,
+) -> Value {
     eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
         "jsonrpc": "2.0",
@@ -175,7 +188,11 @@ fn start_head_operation(server: &mut TestServer, status: &str, command: &str, ar
     let mut response = None;
     let mut edit = None;
     while response.is_none() || edit.is_none() {
-        eprintln!("editor-bridge phase=start-commit/wait response={} edit={}", response.is_some(), edit.is_some());
+        eprintln!(
+            "editor-bridge phase=start-commit/wait response={} edit={}",
+            response.is_some(),
+            edit.is_some()
+        );
         let message = server.recv();
         eprintln!("editor-bridge phase=start-commit/received frame={message}");
         if message["id"] == json!(4) {
@@ -212,20 +229,48 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
 #[test]
 fn head_operations_real_git_tree_message_date_and_saved_close() {
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
-        for state in ["staged", "unstaged", "all", "clean", "cancel", "reset-staged", "reset-clean", "reset-unstaged"] {
+        for state in [
+            "staged",
+            "unstaged",
+            "all",
+            "clean",
+            "cancel",
+            "reset-staged",
+            "reset-clean",
+            "reset-unstaged",
+        ] {
             let reset_author = state.starts_with("reset-");
             let state = state.strip_prefix("reset-").unwrap_or(state);
-            if command == "commit.reword" && state == "all" { continue; }
-            if command == "commit.extend" && state == "cancel" { continue; }
-            let fixture = if reset_author { RepoFixture::new().commit("parent", [("parent.txt", "parent\n")]) }
-                else { RepoFixture::new() };
-            let (tmp, repo) = fixture.commit("original message", [("f.txt", TEN_LINES)]).build();
+            if command == "commit.reword" && state == "all" {
+                continue;
+            }
+            if command == "commit.extend" && state == "cancel" {
+                continue;
+            }
+            let fixture = if reset_author {
+                RepoFixture::new().commit("parent", [("parent.txt", "parent\n")])
+            } else {
+                RepoFixture::new()
+            };
+            let (tmp, repo) = fixture
+                .commit("original message", [("f.txt", TEN_LINES)])
+                .build();
             if reset_author {
-                tmp.git(&["commit", "--amend", "--no-edit", "--author=Original Author <original@example.com>", "--date=1999-01-02T03:04:05+00:00"]);
+                tmp.git(&[
+                    "commit",
+                    "--amend",
+                    "--no-edit",
+                    "--author=Original Author <original@example.com>",
+                    "--date=1999-01-02T03:04:05+00:00",
+                ]);
             }
             // Make date preservation observable independently of wall-clock speed.
-            let output = Command::new("git").args(["commit", "--amend", "--no-edit"])
-                .current_dir(tmp.path()).env("GIT_COMMITTER_DATE", "2001-02-03T04:05:06+00:00").output().unwrap();
+            let output = Command::new("git")
+                .args(["commit", "--amend", "--no-edit"])
+                .current_dir(tmp.path())
+                .env("GIT_COMMITTER_DATE", "2001-02-03T04:05:06+00:00")
+                .output()
+                .unwrap();
             assert!(output.status.success());
             let head = tmp.git(&["rev-parse", "HEAD"]);
             let head_tree = tmp.git(&["rev-parse", "HEAD^{tree}"]);
@@ -235,41 +280,78 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
             let author_date = tmp.git(&["show", "-s", "--format=%aI", "HEAD"]);
             if state != "clean" {
                 write(&tmp.path().join("f.txt"), "staged content\n");
-                if state == "staged" || state == "cancel" { tmp.git(&["add", "f.txt"]); }
+                if state == "staged" || state == "cancel" {
+                    tmp.git(&["add", "f.txt"]);
+                }
                 write(&tmp.path().join("f.txt"), "unstaged content\n");
             }
-            if state != "clean" { write(&tmp.path().join("untracked.txt"), "never implicitly added\n"); }
+            if state != "clean" {
+                write(
+                    &tmp.path().join("untracked.txt"),
+                    "never implicitly added\n",
+                );
+            }
             let index = tmp.git(&["ls-files", "--stage", "-z"]);
             let index_tree = tmp.git(&["write-tree"]);
             let worktree = read(&tmp.path().join("f.txt"));
-            let mut server = TestServer::spawn(if reset_author { &[
-                ("GIT_AUTHOR_NAME", "New Committer"), ("GIT_AUTHOR_EMAIL", "new@example.com"),
-                ("GIT_AUTHOR_DATE", "2026-10-29T12:00:00+00:00"),
-            ] } else { &[] });
+            let mut server = TestServer::spawn(if reset_author {
+                &[
+                    ("GIT_AUTHOR_NAME", "New Committer"),
+                    ("GIT_AUTHOR_EMAIL", "new@example.com"),
+                    ("GIT_AUTHOR_DATE", "2026-10-29T12:00:00+00:00"),
+                ]
+            } else {
+                &[]
+            });
             server.initialize(json!({}));
             let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
             let args = json!({"switches": if reset_author { vec!["-R"] } else if state == "all" { vec!["-a"] }
                 else if command == "commit.extend" && state == "clean" { vec!["-e"] } else { vec![] }, "options": {}});
             if command == "commit.extend" {
-                server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{
-                    "viewId":status,"command":command,"args":args
-                }}));
+                server.send(
+                    json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{
+                        "viewId":status,"command":command,"args":args
+                    }}),
+                );
                 if state == "unstaged" && !reset_author {
                     let prompt = server.prompt();
-                    server.respond_prompt(5, prompt["params"]["promptId"].as_str().unwrap(), false, json!(true));
+                    server.respond_prompt(
+                        5,
+                        prompt["params"]["promptId"].as_str().unwrap(),
+                        false,
+                        json!(true),
+                    );
                 }
             } else {
                 let edit = start_head_operation(&mut server, &status, command, args);
-                assert!(edit["text"].as_str().unwrap().starts_with("original message\n"));
-                assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "editor alone must not commit");
+                assert!(edit["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("original message\n"));
+                assert_eq!(
+                    tmp.git(&["rev-parse", "HEAD"]),
+                    head,
+                    "editor alone must not commit"
+                );
                 assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
                 if state == "cancel" {
-                    let response = invoke(&mut server, 5, &status, "common.cancel", json!({"runId":edit["runId"]}));
+                    let response = invoke(
+                        &mut server,
+                        5,
+                        &status,
+                        "common.cancel",
+                        json!({"runId":edit["runId"]}),
+                    );
                     assert!(response.get("error").is_none(), "{response}");
                 } else {
                     // Amend deliberately closes the unchanged, saved Git message.
                     // Reword saves different bytes, but never commits the index tree.
-                    if command == "commit.reword" { write(&tmp.path().join(".git/COMMIT_EDITMSG"), "reworded message\n"); }
+                    if command == "commit.reword" {
+                        write(
+                            &tmp.path().join(".git/COMMIT_EDITMSG"),
+                            "reworded message\n",
+                        );
+                    }
                     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
                         "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}
                     }}));
@@ -279,10 +361,19 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
             }
             let outcome = loop {
                 let frame = server.recv();
-                assert!(edit_document(&frame).is_none(), "Extend must not open an editor");
+                assert!(
+                    edit_document(&frame).is_none(),
+                    "Extend must not open an editor"
+                );
                 if frame["method"] == "view/effects" {
-                    if let Some(effect) = frame["params"]["effects"].as_array().unwrap().iter().find(|effect|
-                        effect["type"] == "message" && effect["text"] != "Committing…") {
+                    if let Some(effect) = frame["params"]["effects"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|effect| {
+                            effect["type"] == "message" && effect["text"] != "Committing…"
+                        })
+                    {
                         break effect.clone();
                     }
                 }
@@ -292,14 +383,23 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
                 assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
                 assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
             } else {
-                assert!(outcome["text"].as_str().unwrap().starts_with("Committed:"), "{command}/{state}: {outcome}");
-                let expected_message = if command == "commit.reword" { "reworded message\n\n" } else { &message };
+                assert!(
+                    outcome["text"].as_str().unwrap().starts_with("Committed:"),
+                    "{command}/{state}: {outcome}"
+                );
+                let expected_message = if command == "commit.reword" {
+                    "reworded message\n\n"
+                } else {
+                    &message
+                };
                 assert_eq!(tmp.git(&["log", "-1", "--format=%B"]), expected_message);
                 if command == "commit.reword" {
                     assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
                     assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), head_tree);
                     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
-                } else if state == "all" || (command == "commit.extend" && state == "unstaged" && !reset_author) {
+                } else if state == "all"
+                    || (command == "commit.extend" && state == "unstaged" && !reset_author)
+                {
                     assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), worktree);
                     assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
                     assert!(tmp.git(&["diff", "--cached"]).is_empty());
@@ -307,24 +407,49 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
                 } else {
                     assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), index_tree);
                     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
-                    if state == "staged" { assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head); }
+                    if state == "staged" {
+                        assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+                    }
                 }
                 if command == "commit.extend" && state == "clean" && !reset_author {
-                    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "identical preserved metadata may retain the OID");
+                    assert_eq!(
+                        tmp.git(&["rev-parse", "HEAD"]),
+                        head,
+                        "identical preserved metadata may retain the OID"
+                    );
                 }
-                if command != "commit.amend" { assert_eq!(repo.head_committer_date().unwrap(), date); }
-                else { assert_ne!(repo.head_committer_date().unwrap(), date); }
+                if command != "commit.amend" {
+                    assert_eq!(repo.head_committer_date().unwrap(), date);
+                } else {
+                    assert_ne!(repo.head_committer_date().unwrap(), date);
+                }
                 if reset_author {
                     assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
-                    assert_eq!(tmp.git(&["show", "-s", "--format=%an <%ae>", "HEAD"]), "New Committer <new@example.com>\n");
-                    assert_ne!(tmp.git(&["show", "-s", "--format=%aI", "HEAD"]), author_date);
-                    assert!(tmp.git(&["show", "-s", "--format=%aI", "HEAD"]).starts_with("2026-10-29T12:00:00"));
+                    assert_eq!(
+                        tmp.git(&["show", "-s", "--format=%an <%ae>", "HEAD"]),
+                        "New Committer <new@example.com>\n"
+                    );
+                    assert_ne!(
+                        tmp.git(&["show", "-s", "--format=%aI", "HEAD"]),
+                        author_date
+                    );
+                    assert!(tmp
+                        .git(&["show", "-s", "--format=%aI", "HEAD"])
+                        .starts_with("2026-10-29T12:00:00"));
                     assert_eq!(tmp.git(&["show", "-s", "--format=%P", "HEAD"]), parents);
                 }
             }
-            assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), if reset_author { "2\n" } else { "1\n" });
+            assert_eq!(
+                tmp.git(&["rev-list", "--count", "HEAD"]),
+                if reset_author { "2\n" } else { "1\n" }
+            );
             assert_eq!(read(&tmp.path().join("f.txt")), worktree);
-            if state != "clean" { assert_eq!(read(&tmp.path().join("untracked.txt")), "never implicitly added\n"); }
+            if state != "clean" {
+                assert_eq!(
+                    read(&tmp.path().join("untracked.txt")),
+                    "never implicitly added\n"
+                );
+            }
             assert!(!tmp.git(&["ls-files"]).contains("untracked.txt"));
             server.shutdown_and_exit();
             assert!(server.finish(Duration::from_secs(10)).success());
@@ -339,13 +464,21 @@ fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
 
     fn start_time(pid: i32) -> Option<u64> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)?
+            .parse()
+            .ok()
     }
     fn live(pid: i32) -> bool {
         std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok().and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
-                !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
-            })).unwrap_or(false)
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(')')
+                    .map(|(_, tail)| !matches!(tail.trim_start().chars().next(), Some('Z' | 'X')))
+            })
+            .unwrap_or(false)
     }
 
     let (tmp, _repo) = staged_repo();
@@ -368,21 +501,50 @@ fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !marker.exists() {
-        assert!(Instant::now() < deadline, "pre-commit readiness marker missing");
+        assert!(
+            Instant::now() < deadline,
+            "pre-commit readiness marker missing"
+        );
         thread::sleep(Duration::from_millis(10));
     }
     let pid: i32 = read(&pidfile).trim().parse().unwrap();
     let identity = start_time(pid).expect("hook descendant identity");
     struct Cleanup(i32, u64);
-    impl Drop for Cleanup { fn drop(&mut self) { if start_time_for_cleanup(self.0) == Some(self.1) && process_live_for_cleanup(self.0) { unsafe { libc::kill(self.0, libc::SIGKILL); } } } }
-    fn start_time_for_cleanup(pid:i32)->Option<u64>{ let s=std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?; s.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok() }
-    fn process_live_for_cleanup(pid:i32)->bool{ std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|s|s.rsplit_once(')').map(|(_,t)|!matches!(t.trim_start().chars().next(),Some('Z'|'X')))).unwrap_or(false) }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if start_time_for_cleanup(self.0) == Some(self.1) && process_live_for_cleanup(self.0) {
+                unsafe {
+                    libc::kill(self.0, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    fn start_time_for_cleanup(pid: i32) -> Option<u64> {
+        let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        s.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)?
+            .parse()
+            .ok()
+    }
+    fn process_live_for_cleanup(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| {
+                s.rsplit_once(')')
+                    .map(|(_, t)| !matches!(t.trim_start().chars().next(), Some('Z' | 'X')))
+            })
+            .unwrap_or(false)
+    }
     let _owned = Cleanup(pid, identity);
     server.close_stdin();
     let exit = server.finish(Duration::from_secs(8));
     assert!(exit.success(), "server exited: {exit:?}");
     let deadline = Instant::now() + Duration::from_secs(3);
-    while live(pid) && Instant::now() < deadline { thread::sleep(Duration::from_millis(10)); }
+    while live(pid) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
     assert!(!live(pid), "owned hook descendant survived EOF");
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
@@ -621,19 +783,36 @@ fn typed_commit_options_reach_real_git_through_the_editor_worker() {
     server.initialize(json!({}));
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let author = "Typed ; $(not-a-shell) <typed@example.com>";
-    let edit = start_commit_with_args(&mut server, &status, json!({
-        "switches": ["-a", "-v", "-n", "-s"],
-        "options": {"=A": author, "=D": "2001-02-03T04:05:06+00:00"}
-    }));
-    let path = magit_lsp::git::GitRepo::open(tmp.path()).unwrap().commit_message_path().unwrap();
+    let edit = start_commit_with_args(
+        &mut server,
+        &status,
+        json!({
+            "switches": ["-a", "-v", "-n", "-s"],
+            "options": {"=A": author, "=D": "2001-02-03T04:05:06+00:00"}
+        }),
+    );
+    let path = magit_lsp::git::GitRepo::open(tmp.path())
+        .unwrap()
+        .commit_message_path()
+        .unwrap();
     let initial = read(&path);
     assert!(initial.contains("Signed-off-by:"), "{initial}");
-    assert!(initial.contains("diff --git"), "verbose diff reaches the real editor file: {initial}");
+    assert!(
+        initial.contains("diff --git"),
+        "verbose diff reaches the real editor file: {initial}"
+    );
     // Preserve Git's generated signoff and verbose cleanup/scissors content.
-    sync_draft(&mut server, &edit, &format!("Typed options message\n{initial}"));
+    sync_draft(
+        &mut server,
+        &edit,
+        &format!("Typed options message\n{initial}"),
+    );
     let confirmed = finish_draft(&mut server, 5, &edit);
     assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
-    wait_for_commit(&tmp, "Typed options message\n\nSigned-off-by: Test User <test@example.com>");
+    wait_for_commit(
+        &tmp,
+        "Typed options message\n\nSigned-off-by: Test User <test@example.com>",
+    );
     assert_eq!(tmp.git(&["log", "-1", "--format=%an <%ae>"]).trim(), author);
     assert_eq!(tmp.git(&["log", "-1", "--format=%at"]).trim(), "981173106");
     let message = tmp.git(&["log", "-1", "--format=%B"]);
@@ -653,24 +832,45 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
     let mut server = TestServer::spawn(&[]);
     let initialized = server.initialize(json!({}));
-    assert_eq!(initialized["result"]["capabilities"]["textDocumentSync"], json!({"openClose":true,"change":2,"save":{"includeText":true}}));
+    assert_eq!(
+        initialized["result"]["capabilities"]["textDocumentSync"],
+        json!({"openClose":true,"change":2,"save":{"includeText":true}})
+    );
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     assert_eq!(edit["version"], 1);
     assert_eq!(read(&target), edit["text"].as_str().unwrap());
     sync_draft(&mut server, &edit, "Earlier live\n");
-    change_draft(&mut server, &edit, 9, "Chosen checkpoint\n\n# preserved comment\n");
+    change_draft(
+        &mut server,
+        &edit,
+        9,
+        "Chosen checkpoint\n\n# preserved comment\n",
+    );
     let unapplied = command_confirm(&mut server, 10, &edit, 8, "synchronized");
     assert!(unapplied["error"].is_object());
     write(&target, "Chosen checkpoint\n\n# preserved comment\n");
     // Save and the old common.confirm route cannot release Git or write its file.
-    let bypass = invoke(&mut server, 12, &status, "common.confirm", json!({"runId":edit["runId"]}));
+    let bypass = invoke(
+        &mut server,
+        12,
+        &status,
+        "common.confirm",
+        json!({"runId":edit["runId"]}),
+    );
     assert!(!bypass["result"]["effects"].as_array().unwrap().is_empty());
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
 
-    for version in [8, 9] { change_draft(&mut server, &edit, version, "Invalid stale text\n"); }
-    change_draft(&mut server, &edit, 10, &"x".repeat(magit_lsp::editor::draft::MAX_DRAFT_BYTES + 1));
+    for version in [8, 9] {
+        change_draft(&mut server, &edit, version, "Invalid stale text\n");
+    }
+    change_draft(
+        &mut server,
+        &edit,
+        10,
+        &"x".repeat(magit_lsp::editor::draft::MAX_DRAFT_BYTES + 1),
+    );
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":edit["uri"],"version":10},"contentChanges":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"Not full sync"}]
     }}));
@@ -689,7 +889,10 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     let args = json!({"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":9,"source":"synchronized","text":"Forbidden"});
     server.send(json!({"jsonrpc":"2.0","id":16,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
     let extra_text = server.response_with_id(16);
-    assert!(extra_text["error"].is_object() || extra_text["result"]["type"] == "confirmed", "{extra_text}");
+    assert!(
+        extra_text["error"].is_object() || extra_text["result"]["type"] == "confirmed",
+        "{extra_text}"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
     assert_eq!(read(&target), unchanged.1);
@@ -698,20 +901,42 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     assert!(command_confirm(&mut server, 17, &edit, 9, "synchronized")["error"].is_object());
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), unchanged.0);
     assert_eq!(read(&target), unchanged.1);
-    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "detach is not close intent");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]),
+        head,
+        "detach is not close intent"
+    );
     let closed = command_confirm(&mut server, 19, &edit, 9, "saved-file");
-    assert_eq!(closed["result"], json!({"type":"confirmed","runId":edit["runId"],"uri":edit["uri"],"version":9}));
+    assert_eq!(
+        closed["result"],
+        json!({"type":"confirmed","runId":edit["runId"],"uri":edit["uri"],"version":9})
+    );
     wait_for_commit(&tmp, "Chosen checkpoint");
     assert_eq!(read(&target), "Chosen checkpoint\n\n# preserved comment\n");
     assert!(command_confirm(&mut server, 20, &edit, 9, "saved-file")["error"].is_object());
     change_draft(&mut server, &edit, 12, "Late terminal text\n");
     assert!(command_confirm(&mut server, 21, &edit, 12, "saved-file")["error"].is_object());
-    let errors: Vec<_> = server.notifications.iter().filter(|n| n["method"] == "view/effects")
+    let errors: Vec<_> = server
+        .notifications
+        .iter()
+        .filter(|n| n["method"] == "view/effects")
         .flat_map(|n| n["params"]["effects"].as_array().into_iter().flatten())
-        .filter(|effect| effect["type"] == "message" && effect["text"].as_str().unwrap_or("").contains("commit draft:"))
+        .filter(|effect| {
+            effect["type"] == "message"
+                && effect["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("commit draft:")
+        })
         .collect();
-    assert!(errors.len() >= 4, "stale, duplicate, oversized and range errors: {errors:?}");
-    assert!(errors.iter().all(|n| n["text"].as_str().unwrap().contains("Your text is retained")));
+    assert!(
+        errors.len() >= 4,
+        "stale, duplicate, oversized and range errors: {errors:?}"
+    );
+    assert!(errors.iter().all(|n| n["text"]
+        .as_str()
+        .unwrap()
+        .contains("Your text is retained")));
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -906,19 +1131,29 @@ fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
     std::fs::rename(&target, &held).unwrap();
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose",
         "params":{"textDocument":{"uri":edit["uri"]}}}));
-    let recovery = loop {
-        let message = server.recv();
-        if let Some(recovery) = edit_document(&message) {
-            assert!(message["params"]["effects"].as_array().unwrap().iter().any(|effect|
-                effect["type"] == "message" && effect["text"].as_str().unwrap().contains("Your text is retained")));
-            break recovery;
-        }
-    };
+    let recovery =
+        loop {
+            let message = server.recv();
+            if let Some(recovery) = edit_document(&message) {
+                assert!(message["params"]["effects"].as_array().unwrap().iter().any(
+                    |effect| effect["type"] == "message"
+                        && effect["text"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Your text is retained")
+                ));
+                break recovery;
+            }
+        };
     assert_eq!(recovery["runId"], edit["runId"]);
     assert_eq!(recovery["uri"], edit["uri"]);
     assert_eq!(recovery["version"], 2);
     assert_eq!(recovery["text"], "Unsaved retained local text\n");
-    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "unreadable saved file cannot confirm");
+    assert_eq!(
+        tmp.git(&["rev-parse", "HEAD"]),
+        head,
+        "unreadable saved file cannot confirm"
+    );
     std::fs::rename(&held, &target).unwrap();
     write(&target, "Restored saved disk message\n");
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
@@ -940,19 +1175,31 @@ fn real_file_stdio_normal_close_selects_initial_template_without_save() {
     use std::os::unix::fs::PermissionsExt;
     let (tmp, _) = staged_repo();
     let hook = tmp.path().join(".git/hooks/prepare-commit-msg");
-    write(&hook, "#!/bin/sh\nprintf 'Prepared initial message\\n# comment\\n' > \"$1\"\n");
+    write(
+        &hook,
+        "#!/bin/sh\nprintf 'Prepared initial message\\n# comment\\n' > \"$1\"\n",
+    );
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut server = TestServer::spawn(&[]);
     server.initialize(json!({}));
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
-    assert!(edit["text"].as_str().unwrap().starts_with("Prepared initial message\n"));
+    assert!(edit["text"]
+        .as_str()
+        .unwrap()
+        .starts_with("Prepared initial message\n"));
     sync_draft(&mut server, &edit, "Discard this unsaved message\n");
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":edit["uri"]}}}));
     let closed = command_confirm(&mut server, 10, &edit, 1, "saved-file");
-    assert!(closed["error"].is_object(), "didClose already won terminal arbitration: {closed}");
+    assert!(
+        closed["error"].is_object(),
+        "didClose already won terminal arbitration: {closed}"
+    );
     wait_for_commit(&tmp, "Prepared initial message");
-    assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), edit["text"].as_str().unwrap());
+    assert_eq!(
+        read(&tmp.path().join(".git/COMMIT_EDITMSG")),
+        edit["text"].as_str().unwrap()
+    );
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -982,20 +1229,35 @@ fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     change_draft(&mut foreign, &a, 99, "Foreign connection\n");
     assert!(command_confirm(&mut foreign, 10, &a, 2, "synchronized")["error"].is_object());
     assert!(command_confirm(&mut foreign, 11, &a, 1, "saved-file")["error"].is_object());
-    assert!(!foreign.notifications.iter().any(|n| n["method"] == "view/effects"));
+    assert!(!foreign
+        .notifications
+        .iter()
+        .any(|n| n["method"] == "view/effects"));
     foreign.shutdown_and_exit();
     assert!(foreign.finish(Duration::from_secs(10)).success());
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
     assert_eq!(second.git(&["rev-parse", "HEAD"]), second_head);
-    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), a["text"].as_str().unwrap());
-    assert_eq!(read(&second.path().join(".git/COMMIT_EDITMSG")), b["text"].as_str().unwrap());
+    assert_eq!(
+        read(&first.path().join(".git/COMMIT_EDITMSG")),
+        a["text"].as_str().unwrap()
+    );
+    assert_eq!(
+        read(&second.path().join(".git/COMMIT_EDITMSG")),
+        b["text"].as_str().unwrap()
+    );
     assert!(finish_draft(&mut server, 12, &b)["error"].is_null());
     wait_for_commit(&second, "Second repository");
     assert_eq!(first.git(&["rev-parse", "HEAD"]), first_head);
     assert!(finish_draft(&mut server, 13, &a)["error"].is_null());
     wait_for_commit(&first, "First repository");
-    assert_eq!(read(&first.path().join(".git/COMMIT_EDITMSG")), "First repository\n");
-    assert_eq!(read(&second.path().join(".git/COMMIT_EDITMSG")), "Second repository\n");
+    assert_eq!(
+        read(&first.path().join(".git/COMMIT_EDITMSG")),
+        "First repository\n"
+    );
+    assert_eq!(
+        read(&second.path().join(".git/COMMIT_EDITMSG")),
+        "Second repository\n"
+    );
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
 }
@@ -1009,7 +1271,10 @@ fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
     let old = start_commit(&mut server, &status);
     let old_uri = old["uri"].clone();
     sync_draft(&mut server, &old, "First run\n");
-    assert_eq!(command_confirm(&mut server, 5, &old, 2, "synchronized")["result"]["type"], "confirmed");
+    assert_eq!(
+        command_confirm(&mut server, 5, &old, 2, "synchronized")["result"]["type"],
+        "confirmed"
+    );
     wait_for_commit(&tmp, "First run");
     write(&tmp.path().join("f.txt"), "second staged content\n");
     git(tmp.path(), &["add", "f.txt"]);
@@ -1023,16 +1288,28 @@ fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
     assert!(command_confirm(&mut server, 6, &old, 2, "synchronized")["error"].is_object());
     server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/invoke","params":{"viewId":status,"command":"common.cancel","args":{"runId":old["runId"]}}}));
     let cancel = server.response_with_id(7);
-    assert!(cancel.get("error").is_none(), "stale cancel request itself is valid: {cancel}");
-    assert!(cancel["result"]["effects"].as_array().unwrap().is_empty(), "stale cancel is ignored: {cancel}");
+    assert!(
+        cancel.get("error").is_none(),
+        "stale cancel request itself is valid: {cancel}"
+    );
+    assert!(
+        cancel["result"]["effects"].as_array().unwrap().is_empty(),
+        "stale cancel is ignored: {cancel}"
+    );
     let mut old_duplicate = fresh.clone();
     old_duplicate["runId"] = old["runId"].clone();
     let second_terminal = command_confirm(&mut server, 8, &old_duplicate, 2, "synchronized");
-    assert!(second_terminal["error"].is_object(), "old terminal on reused URI: {second_terminal}");
+    assert!(
+        second_terminal["error"].is_object(),
+        "old terminal on reused URI: {second_terminal}"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
     assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), file);
-    assert_eq!(command_confirm(&mut server, 9, &fresh, 2, "synchronized")["result"]["type"], "confirmed");
+    assert_eq!(
+        command_confirm(&mut server, 9, &fresh, 2, "synchronized")["result"]["type"],
+        "confirmed"
+    );
     wait_for_commit(&tmp, "Fresh run message");
     assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]), "3\n");
     assert_eq!(tmp.git(&["rev-parse", "HEAD^"]), head);
@@ -1049,7 +1326,13 @@ fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
     let main_message = read(&main.path().join(".git/COMMIT_EDITMSG"));
     let linked_parent = TempDir::new().unwrap();
     let linked = linked_parent.path().join("linked");
-    main.git(&["worktree", "add", "-b", "draft-linked", linked.to_str().unwrap()]);
+    main.git(&[
+        "worktree",
+        "add",
+        "-b",
+        "draft-linked",
+        linked.to_str().unwrap(),
+    ]);
     write(&linked.join("f.txt"), "Linked staged content\n");
     git(&linked, &["add", "f.txt"]);
     let mut server = TestServer::spawn(&[]);
@@ -1057,14 +1340,23 @@ fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
     let status = open_status(&mut server, 2, &json!(linked.to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Linked worktree message\n");
-    assert_eq!(finish_draft(&mut server, 10, &edit)["result"]["type"], "confirmed");
-    let actual = magit_lsp::git::GitRepo::open(&linked).unwrap().commit_message_path().unwrap();
+    assert_eq!(
+        finish_draft(&mut server, 10, &edit)["result"]["type"],
+        "confirmed"
+    );
+    let actual = magit_lsp::git::GitRepo::open(&linked)
+        .unwrap()
+        .commit_message_path()
+        .unwrap();
     assert!(linked.join(".git").is_file());
     assert_ne!(actual, main.path().join(".git/COMMIT_EDITMSG"));
     assert_eq!(read(&actual), "Linked worktree message\n");
     server.shutdown_and_exit();
     assert!(server.finish(Duration::from_secs(10)).success());
-    assert_eq!(git(&linked, &["log", "-1", "--format=%B"]).trim(), "Linked worktree message");
+    assert_eq!(
+        git(&linked, &["log", "-1", "--format=%B"]).trim(),
+        "Linked worktree message"
+    );
     assert_eq!(main.git(&["rev-parse", "HEAD"]), main_head);
     assert_eq!(read(&main.path().join(".git/COMMIT_EDITMSG")), main_message);
 }
@@ -1088,7 +1380,10 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let deadline = Instant::now() + Duration::from_secs(10);
     while !tmp.path().join(".git/test-ready").exists() {
-        assert!(Instant::now() < deadline, "pre-commit helper test did not start");
+        assert!(
+            Instant::now() < deadline,
+            "pre-commit helper test did not start"
+        );
         thread::sleep(Duration::from_millis(10));
     }
     let run = read(&tmp.path().join(".git/test-run"));
@@ -1096,15 +1391,19 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     let hello = json!({"editId":run,"token":token,"kind":"commit-message","path":tmp.path().join(".git/COMMIT_EDITMSG")});
     let rejected = |value: &Value| {
         let mut stream = UnixStream::connect(&socket).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         writeln!(stream, "{value}").unwrap();
         let mut reply = String::new();
         BufReader::new(stream).read_line(&mut reply).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["ok"], false);
     };
     for (key, value) in [
-        ("editId", json!("wrong-run")), ("token", json!("wrong-token")),
-        ("kind", json!("merge-message")), ("path", json!(neighbor)),
+        ("editId", json!("wrong-run")),
+        ("token", json!("wrong-token")),
+        ("kind", json!("merge-message")),
+        ("path", json!(neighbor)),
         ("path", json!(other.path().join(".git/COMMIT_EDITMSG"))),
     ] {
         let mut invalid = hello.clone();
@@ -1116,15 +1415,25 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     let mut edit = None;
     while !response || edit.is_none() {
         let message = server.recv();
-        if message["id"] == 4 { response = true; }
-        if let Some(found) = edit_document(&message) { edit = Some(found); }
+        if message["id"] == 4 {
+            response = true;
+        }
+        if let Some(found) = edit_document(&message) {
+            edit = Some(found);
+        }
     }
     let edit = edit.unwrap();
     assert_eq!(edit["runId"], run);
-    assert!(!edit.to_string().contains(&token), "private helper token leaked in announcement");
+    assert!(
+        !edit.to_string().contains(&token),
+        "private helper token leaked in announcement"
+    );
     rejected(&hello); // one-shot credential cannot join a second socket
     sync_draft(&mut server, &edit, "Validated real helper\n");
-    assert_eq!(finish_draft(&mut server, 10, &edit)["result"]["type"], "confirmed");
+    assert_eq!(
+        finish_draft(&mut server, 10, &edit)["result"]["type"],
+        "confirmed"
+    );
     wait_for_commit(&tmp, "Validated real helper");
     assert_eq!(read(&neighbor), "Protected neighbor\n");
     server.shutdown_and_exit();
@@ -1213,7 +1522,11 @@ fn a_cancel_creates_no_commit() {
 #[cfg(target_os = "linux")]
 #[test]
 fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
-    for capabilities in [json!({}), json!({"window":{"workDoneProgress":false}}), json!({"window":{"workDoneProgress":true}})] {
+    for capabilities in [
+        json!({}),
+        json!({"window":{"workDoneProgress":false}}),
+        json!({"window":{"workDoneProgress":true}}),
+    ] {
         for disconnect in [false, true] {
             let (tmp, _) = staged_repo();
             let head = tmp.git(&["rev-parse", "HEAD"]);
@@ -1229,16 +1542,32 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
             let mut edit = None;
             while edit.is_none() || (enabled && create.is_none()) {
                 let message = server.recv_raw();
-                if message["method"] == "window/workDoneProgress/create" { create = Some(message.clone()); }
-                if let Some(found) = edit_document(&message) { edit = Some(found); }
+                if message["method"] == "window/workDoneProgress/create" {
+                    create = Some(message.clone());
+                }
+                if let Some(found) = edit_document(&message) {
+                    edit = Some(found);
+                }
                 server.notifications.push(message);
             }
             // The real Git/editor worker is waiting, but no visible progress is
             // needed for ownership, intake, or terminal cancellation.
-            server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/resync","params":{"viewId":status}}));
+            server.send(
+                json!({"jsonrpc":"2.0","id":5,"method":"view/resync","params":{"viewId":status}}),
+            );
             assert_eq!(server.response_with_id(5)["result"]["viewId"], status);
-            assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"));
-            assert_eq!(server.notifications.iter().filter(|m| m["method"] == "window/workDoneProgress/create").count(), usize::from(enabled));
+            assert!(!server
+                .notifications
+                .iter()
+                .any(|m| m["method"] == "$/progress"));
+            assert_eq!(
+                server
+                    .notifications
+                    .iter()
+                    .filter(|m| m["method"] == "window/workDoneProgress/create")
+                    .count(),
+                usize::from(enabled)
+            );
             if disconnect {
                 server.close_stdin();
             } else {
@@ -1249,13 +1578,27 @@ fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
                     server.send(json!({"jsonrpc":"2.0","id":91,"method":"view/resync","params":{"viewId":status}}));
                     assert!(server.response_with_id(91)["error"].is_object());
                 }
-                assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress"), "terminal emitted orphan progress");
+                assert!(
+                    !server
+                        .notifications
+                        .iter()
+                        .any(|m| m["method"] == "$/progress"),
+                    "terminal emitted orphan progress"
+                );
                 server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
             }
             let (exit, remaining) = server.finish_with_messages(Duration::from_secs(10));
             assert!(exit.success());
-            assert!(!remaining.iter().any(|m| m["method"] == "$/progress"), "orphan progress through EOF: {remaining:?}");
-            assert!(!remaining.iter().any(|m| m["method"] == "window/workDoneProgress/create"), "late create through EOF: {remaining:?}");
+            assert!(
+                !remaining.iter().any(|m| m["method"] == "$/progress"),
+                "orphan progress through EOF: {remaining:?}"
+            );
+            assert!(
+                !remaining
+                    .iter()
+                    .any(|m| m["method"] == "window/workDoneProgress/create"),
+                "late create through EOF: {remaining:?}"
+            );
             assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
             assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
             assert_eq!(tmp.git(&["write-tree"]), tree);
@@ -1284,10 +1627,14 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     let mut edit = None;
     while token.is_none() || edit.is_none() {
         let message = server.recv();
-        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("begin") {
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("begin")
+        {
             token = Some(message["params"]["token"].clone());
         }
-        if let Some(found) = edit_document(&message) { edit = Some(found); }
+        if let Some(found) = edit_document(&message) {
+            edit = Some(found);
+        }
     }
     let edit = edit.unwrap();
     let edit_id = edit["runId"].as_str().unwrap().to_string();
@@ -1300,16 +1647,34 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     let mut failed = false;
     while !failed || ends == 0 {
         let message = server.recv();
-        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("end") { ends += 1; }
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("end")
+        {
+            ends += 1;
+        }
         if message["method"] == json!("view/effects") {
-            failed |= message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|e| e["type"] == json!("message") && e["level"] == json!("error") && e["text"].as_str().is_some_and(|s| !s.is_empty())));
+            failed |= message["params"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects.iter().any(|e| {
+                        e["type"] == json!("message")
+                            && e["level"] == json!("error")
+                            && e["text"].as_str().is_some_and(|s| !s.is_empty())
+                    })
+                });
         }
     }
     owned.finished();
     assert_eq!(ends, 1, "progress must end exactly once");
     server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":status,"command":"common.confirm","args":{"runId":edit_id}}}));
     let late = server.response_with_id(5);
-    assert!(late["error"].is_object() || late["result"]["effects"].as_array().is_some_and(|e| !e.is_empty()), "late confirm must be rejected: {late}");
+    assert!(
+        late["error"].is_object()
+            || late["result"]["effects"]
+                .as_array()
+                .is_some_and(|e| !e.is_empty()),
+        "late confirm must be rejected: {late}"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
     assert_eq!(tmp.git(&["write-tree"]), tree);
@@ -1335,10 +1700,15 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     let ready = tmp.path().join("hook.ready");
     let child_pid = tmp.path().join("hook-child.pid");
     let hook = tmp.path().join(".git/hooks/commit-msg");
-    std::fs::write(&hook, format!(
-        "#!/bin/sh\ntrap '' TERM\n(sleep 1000) &\necho $! > '{}'\necho ready > '{}'\nwait\n",
-        child_pid.display(), ready.display()
-    )).expect("write commit-msg hook");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\ntrap '' TERM\n(sleep 1000) &\necho $! > '{}'\necho ready > '{}'\nwait\n",
+            child_pid.display(),
+            ready.display()
+        ),
+    )
+    .expect("write commit-msg hook");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let repo = json!(tmp.path().to_string_lossy());
@@ -1352,8 +1722,14 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     let mut edit = None;
     while token.is_none() || edit.is_none() {
         let message = server.recv();
-        if message["method"] == json!("$/progress") && message["params"]["value"]["kind"] == json!("begin") { token = Some(message["params"]["token"].clone()); }
-        if let Some(found) = edit_document(&message) { edit = Some(found); }
+        if message["method"] == json!("$/progress")
+            && message["params"]["value"]["kind"] == json!("begin")
+        {
+            token = Some(message["params"]["token"].clone());
+        }
+        if let Some(found) = edit_document(&message) {
+            edit = Some(found);
+        }
     }
     let edit = edit.unwrap();
     let edit_id = edit["runId"].as_str().unwrap().to_string();
@@ -1362,60 +1738,129 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
     let socket = server.socket_path();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !ready.exists() { assert!(Instant::now() < deadline, "commit-msg hook did not become ready"); thread::sleep(Duration::from_millis(20)); }
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "commit-msg hook did not become ready"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
     let processes = edit_processes(&edit_id, &socket).expect("/proc inspection");
-    assert!(!processes.is_empty(), "commit processes carry edit identity");
-    let mut owned = OwnedEdit { edit_id: edit_id.clone(), socket: socket.clone(), pids: processes.into_iter().map(|p| p.pid).collect() };
+    assert!(
+        !processes.is_empty(),
+        "commit processes carry edit identity"
+    );
+    let mut owned = OwnedEdit {
+        edit_id: edit_id.clone(),
+        socket: socket.clone(),
+        pids: processes.into_iter().map(|p| p.pid).collect(),
+    };
     let child: u32 = read(&child_pid).trim().parse().expect("hook child pid");
     let token = token.unwrap();
     let cancelled_at = Instant::now();
-    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.send(
+        json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}),
+    );
     server.recv_timeout = Duration::from_millis(500);
     loop {
         let message = server.recv();
-        assert_ne!(message["params"]["value"]["kind"], "end", "acknowledgement must precede terminal cleanup");
-        if message["method"] == "$/progress" && message["params"]["token"] == token && message["params"]["value"]["kind"] == "report" {
+        assert_ne!(
+            message["params"]["value"]["kind"], "end",
+            "acknowledgement must precede terminal cleanup"
+        );
+        if message["method"] == "$/progress"
+            && message["params"]["token"] == token
+            && message["params"]["value"]["kind"] == "report"
+        {
             assert_eq!(message["params"]["value"]["message"], "Cancelling…");
             assert_eq!(message["params"]["value"]["cancellable"], false);
             break;
         }
     }
-    assert!(cancelled_at.elapsed() < Duration::from_millis(500), "cancellation intent was not promptly acknowledged");
+    assert!(
+        cancelled_at.elapsed() < Duration::from_millis(500),
+        "cancellation intent was not promptly acknowledged"
+    );
     // Duplicate/foreign requests must not restart cleanup or release the repo.
-    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.send(
+        json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}),
+    );
     server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":"not-a-run"}}));
     server.send(json!({"jsonrpc":"2.0","id":55,"method":"view/invoke","params":{"viewId":status,"command":"status.stage-all"}}));
     let refused = server.response_with_id(55);
-    assert!(refused["result"]["effects"][0]["text"].as_str().is_some_and(|s| s.contains("Cancelling")), "mutation overlapped cleanup: {refused}");
-    assert!(cancelled_at.elapsed() < Duration::from_secs(1), "refusal waited for cleanup");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .is_some_and(|s| s.contains("Cancelling")),
+        "mutation overlapped cleanup: {refused}"
+    );
+    assert!(
+        cancelled_at.elapsed() < Duration::from_secs(1),
+        "refusal waited for cleanup"
+    );
     server.recv_timeout = Duration::from_secs(20);
     let mut ends = 0;
     let mut failed = false;
     let deadline = Instant::now() + Duration::from_secs(10);
     while !failed || ends == 0 {
-        assert!(Instant::now() < deadline, "cancellation did not finish promptly");
+        assert!(
+            Instant::now() < deadline,
+            "cancellation did not finish promptly"
+        );
         let message = server.recv();
         if message["method"] == "$/progress" && message["params"]["token"] == token {
-            assert_ne!(message["params"]["value"]["kind"], "report", "duplicate cancellation was acknowledged twice");
-            if message["params"]["value"]["kind"] == "end" { ends += 1; }
+            assert_ne!(
+                message["params"]["value"]["kind"], "report",
+                "duplicate cancellation was acknowledged twice"
+            );
+            if message["params"]["value"]["kind"] == "end" {
+                ends += 1;
+            }
         }
-        if message["method"] == json!("view/effects") { failed |= message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|e| e["type"] == json!("message") && e["level"] == json!("error") && e["text"].as_str().is_some_and(|s| !s.is_empty()))); }
+        if message["method"] == json!("view/effects") {
+            failed |= message["params"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects.iter().any(|e| {
+                        e["type"] == json!("message")
+                            && e["level"] == json!("error")
+                            && e["text"].as_str().is_some_and(|s| !s.is_empty())
+                    })
+                });
+        }
     }
     owned.finished();
     assert_eq!(ends, 1, "progress ends exactly once");
-    assert!(cancelled_at.elapsed() >= Duration::from_secs(2), "resistant hook lost its full TERM grace");
+    assert!(
+        cancelled_at.elapsed() >= Duration::from_secs(2),
+        "resistant hook lost its full TERM grace"
+    );
     server.notifications.clear();
-    server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    server.send(
+        json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}),
+    );
     server.send(json!({"jsonrpc":"2.0","id":56,"method":"view/resync","params":{"viewId":status}}));
     assert!(server.response_with_id(56).get("error").is_none());
     server.drain_notifications();
-    assert!(!server.notifications.iter().any(|m| m["method"] == "$/progress" && m["params"]["token"] == token), "late cancellation resurrected an ended token");
+    assert!(
+        !server
+            .notifications
+            .iter()
+            .any(|m| m["method"] == "$/progress" && m["params"]["token"] == token),
+        "late cancellation resurrected an ended token"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), staged);
     assert_eq!(tmp.git(&["write-tree"]), tree);
     assert_eq!(read(&tmp.path().join("f.txt")), worktree);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Path::new(&format!("/proc/{child}/stat")).exists() { assert!(Instant::now() < deadline, "hook descendant survived cancellation"); thread::sleep(Duration::from_millis(20)); }
+    while Path::new(&format!("/proc/{child}/stat")).exists() {
+        assert!(
+            Instant::now() < deadline,
+            "hook descendant survived cancellation"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
     std::fs::remove_file(&hook).expect("remove blocking commit-msg hook");
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Follow-up commit\n");
@@ -1434,14 +1879,24 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let (tmp, _repo) = staged_repo();
     let before = tmp.git(&["rev-parse", "HEAD"]);
     let cancel = magit_lsp::runner::CancelHandle::new();
-    let run = magit_lsp::editor::registry().create(tmp.path().to_str().unwrap(), "early-test").unwrap();
+    let run = magit_lsp::editor::registry()
+        .create(tmp.path().to_str().unwrap(), "early-test")
+        .unwrap();
     cancel.cancel();
     let error = magit_lsp::runner::with_cancel(Some(cancel), || {
-        magit_lsp::editor::commit(tmp.path().to_str().unwrap(), &run, &tmp.path().join("unused.sock"),
-            &magit_lsp::git::CommitOperation::Create(Default::default()))
-    }).expect_err("the pre-cancelled commit must fail");
+        magit_lsp::editor::commit(
+            tmp.path().to_str().unwrap(),
+            &run,
+            &tmp.path().join("unused.sock"),
+            &magit_lsp::git::CommitOperation::Create(Default::default()),
+        )
+    })
+    .expect_err("the pre-cancelled commit must fail");
     magit_lsp::editor::registry().remove(&run);
-    assert_eq!(error.git.expect("a structured Git failure").subcommand, "commit");
+    assert_eq!(
+        error.git.expect("a structured Git failure").subcommand,
+        "commit"
+    );
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before);
 }
 
@@ -1458,7 +1913,13 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
         let ready = tmp.path().join(".git/post-ready");
         let hook = tmp.path().join(".git/hooks/post-commit");
         if finalizing {
-            write(&hook, &format!("#!/bin/sh\ntouch '{}'\nwhile :; do sleep 0.02; done\n", ready.display()));
+            write(
+                &hook,
+                &format!(
+                    "#!/bin/sh\ntouch '{}'\nwhile :; do sleep 0.02; done\n",
+                    ready.display()
+                ),
+            );
             std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let mut server = TestServer::spawn(&[]);
@@ -1473,7 +1934,9 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
             if message["method"] == "$/progress" && message["params"]["value"]["kind"] == "begin" {
                 token = Some(message["params"]["token"].clone());
             }
-            if let Some(found) = edit_document(&message) { edit = Some(found); }
+            if let Some(found) = edit_document(&message) {
+                edit = Some(found);
+            }
         }
         let token = token.unwrap();
         let edit = edit.unwrap();
@@ -1490,31 +1953,72 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
             assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
             server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
         }
-        while !observed.iter().any(|m| m["method"] == "$/progress" && m["params"]["token"] == token && m["params"]["value"]["kind"] == "end") {
+        while !observed.iter().any(|m| {
+            m["method"] == "$/progress"
+                && m["params"]["token"] == token
+                && m["params"]["value"]["kind"] == "end"
+        }) {
             observed.push(server.recv());
         }
         // End is terminal: repeated confirms and cancellation cannot resurrect
         // the edit or its progress, nor overwrite the successful outcome.
         server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
         let late = command_confirm(&mut server, 6, &edit, 2, "synchronized");
-        assert!(late["error"].is_object(), "ended edit accepted a duplicate finish: {late}");
-        server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/resync","params":{"viewId":status}}));
+        assert!(
+            late["error"].is_object(),
+            "ended edit accepted a duplicate finish: {late}"
+        );
+        server.send(
+            json!({"jsonrpc":"2.0","id":7,"method":"view/resync","params":{"viewId":status}}),
+        );
         assert!(server.response_with_id(7).get("error").is_none());
         observed.extend(std::mem::take(&mut server.notifications));
         observed.extend(server.drain_notifications());
-        let progress: Vec<_> = observed.iter().filter(|m| m["method"] == "$/progress" && m["params"]["token"] == token).collect();
-        assert_eq!(progress.iter().filter(|m| m["params"]["value"]["kind"] == "end").count(), 1);
-        assert_eq!(progress.iter().filter(|m| m["params"]["value"]["kind"] == "report").count(), usize::from(finalizing));
-        let effects: Vec<_> = observed.iter().filter(|m| m["method"] == "view/effects")
-            .flat_map(|m| m["params"]["effects"].as_array().into_iter().flatten()).collect();
-        assert_eq!(effects.iter().filter(|e| e["text"].as_str().is_some_and(|s| s.starts_with("Committed:"))).count(), 1, "exactly one truthful completion: {effects:?}");
-        assert!(!effects.iter().any(|e| e["level"] == "error"), "recorded commit reported failure: {effects:?}");
+        let progress: Vec<_> = observed
+            .iter()
+            .filter(|m| m["method"] == "$/progress" && m["params"]["token"] == token)
+            .collect();
+        assert_eq!(
+            progress
+                .iter()
+                .filter(|m| m["params"]["value"]["kind"] == "end")
+                .count(),
+            1
+        );
+        assert_eq!(
+            progress
+                .iter()
+                .filter(|m| m["params"]["value"]["kind"] == "report")
+                .count(),
+            usize::from(finalizing)
+        );
+        let effects: Vec<_> = observed
+            .iter()
+            .filter(|m| m["method"] == "view/effects")
+            .flat_map(|m| m["params"]["effects"].as_array().into_iter().flatten())
+            .collect();
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|e| e["text"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("Committed:")))
+                .count(),
+            1,
+            "exactly one truthful completion: {effects:?}"
+        );
+        assert!(
+            !effects.iter().any(|e| e["level"] == "error"),
+            "recorded commit reported failure: {effects:?}"
+        );
         assert_eq!(tmp.git(&["rev-parse", "HEAD^"]), head);
         assert_eq!(tmp.git(&["rev-parse", "HEAD^{tree}"]), tree);
         assert_eq!(tmp.git(&["write-tree"]), tree);
         assert!(tmp.git(&["diff", "--cached", "--binary"]).is_empty());
         assert_eq!(read(&tmp.path().join("f.txt")), worktree);
-        if finalizing { std::fs::remove_file(hook).unwrap(); }
+        if finalizing {
+            std::fs::remove_file(hook).unwrap();
+        }
         write(&tmp.path().join("f.txt"), "Follow-up\n");
         tmp.git(&["add", "f.txt"]);
         let next = start_commit(&mut server, &status);

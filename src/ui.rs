@@ -34,7 +34,9 @@ pub fn answer(ui: &dyn PromptUi, request: &ViewPromptParams) -> Result<Option<Pr
         PromptKind::Confirm => Ok(ui.confirm(request)?.map(PromptValue::Bool)),
         PromptKind::Text => Ok(ui.text(request)?.map(PromptValue::Text)),
         PromptKind::Choice => Ok(ui.choice(request)?.map(PromptValue::Choice)),
-        PromptKind::MultiChoice => Ok(ui.multi_choice(request)?.map(|ids| PromptValue::Multi { ids })),
+        PromptKind::MultiChoice => Ok(ui
+            .multi_choice(request)?
+            .map(|ids| PromptValue::Multi { ids })),
     }
 }
 

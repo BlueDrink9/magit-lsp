@@ -4,8 +4,8 @@
 //! session owns instances; the protocol sends a [`ViewDescriptor`] so a client
 //! can create the matching buffer.
 
-use crate::menu::Menu;
 use crate::log_view::CommitSelection;
+use crate::menu::Menu;
 use crate::tree::Tree;
 use crate::Result;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

@@ -239,7 +239,9 @@ fn cancellation_after_exit_does_not_cancel_the_next_command() {
 
     runner::with_cancel(Some(handle), || {
         let first = runner::run_owned(
-            Command::new("sh").arg("-c").arg(format!("touch {}; exit 0", marker.display())),
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("touch {}; exit 0", marker.display())),
             None,
         )
         .expect("first command");

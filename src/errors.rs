@@ -65,7 +65,10 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
             ),
         )
     } else if text.contains("not a git repository") {
-        ("This folder is not inside a Git repository.".to_string(), None)
+        (
+            "This folder is not inside a Git repository.".to_string(),
+            None,
+        )
     } else if text.contains("would be overwritten") {
         (
             "Your local changes would be overwritten. Commit, stash or discard them first."
@@ -78,7 +81,10 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
             None,
         )
     } else if text.contains("authentication failed") || text.contains("permission denied") {
-        ("Git could not authenticate with the remote.".to_string(), None)
+        (
+            "Git could not authenticate with the remote.".to_string(),
+            None,
+        )
     } else if text.contains("conflict") {
         (
             "The operation stopped because of conflicts.".to_string(),

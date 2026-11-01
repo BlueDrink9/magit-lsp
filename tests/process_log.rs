@@ -17,8 +17,22 @@ use tempfile::TempDir;
 fn stderr_tokens_survive_semantic_token_encoding() {
     let repo = TempDir::new().unwrap();
     let cwd = repo.path().display().to_string();
-    runner::global_log().record(Path::new(&cwd), &["failed"], 1, Duration::ZERO, b"", b"failure text");
-    runner::global_log().record(Path::new(&cwd), &["warning"], 0, Duration::ZERO, b"", b"warning text");
+    runner::global_log().record(
+        Path::new(&cwd),
+        &["failed"],
+        1,
+        Duration::ZERO,
+        b"",
+        b"failure text",
+    );
+    runner::global_log().record(
+        Path::new(&cwd),
+        &["warning"],
+        0,
+        Duration::ZERO,
+        b"",
+        b"warning text",
+    );
 
     let mut test = TestSession::new(&cwd, Profile::Vim);
     test.open_view("pl", ViewKind::ProcessLog, Placement::Main, WIDE_VIEWPORT);
@@ -26,21 +40,59 @@ fn stderr_tokens_survive_semantic_token_encoding() {
     let encoded = semantic_tokens::encode(tree);
     let mut line = 0;
     let mut start = 0;
-    let decoded: Vec<_> = encoded.data.iter().map(|token| {
-        line += token.delta_line;
-        start = if token.delta_line == 0 { start + token.delta_start } else { token.delta_start };
-        (line, start, token.length, semantic_tokens::TOKEN_TYPES[token.token_type as usize])
-    }).collect();
-    let stderr: Vec<_> = decoded.into_iter().filter(|token| {
-        matches!(token.3, "magit.message.error" | "magit.message.warn")
-    }).collect();
+    let decoded: Vec<_> = encoded
+        .data
+        .iter()
+        .map(|token| {
+            line += token.delta_line;
+            start = if token.delta_line == 0 {
+                start + token.delta_start
+            } else {
+                token.delta_start
+            };
+            (
+                line,
+                start,
+                token.length,
+                semantic_tokens::TOKEN_TYPES[token.token_type as usize],
+            )
+        })
+        .collect();
+    let stderr: Vec<_> = decoded
+        .into_iter()
+        .filter(|token| matches!(token.3, "magit.message.error" | "magit.message.warn"))
+        .collect();
     assert_eq!(stderr.len(), 2, "encoded stderr tokens: {stderr:?}");
-    for (message, token_type) in [("failure text", "magit.message.error"), ("warning text", "magit.message.warn")] {
-        let expected_line = tree.lines.iter().position(|line| line == &format!("  stderr: {message}")).unwrap() as u32;
-        assert!(stderr.contains(&(expected_line, 0, format!("  stderr: {message}").len() as u32, token_type)));
+    for (message, token_type) in [
+        ("failure text", "magit.message.error"),
+        ("warning text", "magit.message.warn"),
+    ] {
+        let expected_line = tree
+            .lines
+            .iter()
+            .position(|line| line == &format!("  stderr: {message}"))
+            .unwrap() as u32;
+        assert!(stderr.contains(&(
+            expected_line,
+            0,
+            format!("  stderr: {message}").len() as u32,
+            token_type
+        )));
     }
-    assert_eq!(semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES.iter().position(|t| *t == "magit.message.error").unwrap()], "ErrorMsg");
-    assert_eq!(semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES.iter().position(|t| *t == "magit.message.warn").unwrap()], "WarningMsg");
+    assert_eq!(
+        semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES
+            .iter()
+            .position(|t| *t == "magit.message.error")
+            .unwrap()],
+        "ErrorMsg"
+    );
+    assert_eq!(
+        semantic_tokens::TOKEN_GROUPS[semantic_tokens::TOKEN_TYPES
+            .iter()
+            .position(|t| *t == "magit.message.warn")
+            .unwrap()],
+        "WarningMsg"
+    );
 }
 
 #[test]

@@ -78,7 +78,8 @@ fn rename_with_modifications_stages_hunks_and_unstages() {
     assert_eq!(entry.hunks.len(), 1);
 
     let hunk_id = entry.hunks[0].id.clone();
-    repo.stage_hunk("g.txt", &hunk_id).expect("stage rename hunk");
+    repo.stage_hunk("g.txt", &hunk_id)
+        .expect("stage rename hunk");
     let cached = git(tmp.path(), &["diff", "--cached", "-M", "-U3"]);
     assert!(cached.contains("rename from f.txt"), "got: {cached}");
     assert!(cached.contains("rename to g.txt"), "got: {cached}");
@@ -87,9 +88,7 @@ fn rename_with_modifications_stages_hunks_and_unstages() {
     assert!(git(tmp.path(), &["ls-files", "--", "f.txt"]).is_empty());
     assert_eq!(repo.status().expect("status").staged.len(), 1);
 
-    let staged_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let staged_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
     repo.unstage_hunk("g.txt", &staged_id)
         .expect("unstage rename hunk");
     assert_eq!(index_text(tmp.path(), "f.txt"), TEN_LINES);
@@ -179,7 +178,13 @@ fn mode_and_content_change_keeps_mode_lines_in_hunk_headers() {
         layout.header
     );
     let hunk_id = layout.hunks[0].hunk.id.clone();
-    assert_eq!(layout.hunks[0].hunk.metadata.modes, vec![("old".into(), "100644".into()), ("new".into(), "100755".into())]);
+    assert_eq!(
+        layout.hunks[0].hunk.metadata.modes,
+        vec![
+            ("old".into(), "100644".into()),
+            ("new".into(), "100755".into())
+        ]
+    );
     repo.stage_lines("f.txt", &hunk_id, 2, 3)
         .expect("stage lines");
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", "f.txt"]);

@@ -25,7 +25,9 @@ fn load(path: &Path) -> Result<magit_lsp::config::Config, ConfigError> {
 
 fn status_keymap(config: &magit_lsp::config::Config, command: &str) -> Vec<String> {
     let map = Keymap::resolve("status", config.profile, config).unwrap();
-    map.command(command).map(|b| b.keys.clone()).unwrap_or_default()
+    map.command(command)
+        .map(|b| b.keys.clone())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -35,9 +37,16 @@ fn repository_services_cache_layers_and_reload_without_overwriting_base() {
     let other = dir.path().join("other");
     let main = dir.path().join("user.toml");
     write(&main, "trust_repo_config = true\n");
-    write(&root.join(".magit-lsp.toml"), "[diff]\ncontext = 11\n[keys.status]\nstage = [\"z\"]\n");
+    write(
+        &root.join(".magit-lsp.toml"),
+        "[diff]\ncontext = 11\n[keys.status]\nstage = [\"z\"]\n",
+    );
     std::fs::create_dir_all(&other).unwrap();
-    let base = ConfigService::load(LoadOptions { config_path: Some(main), ..Default::default() }).unwrap();
+    let base = ConfigService::load(LoadOptions {
+        config_path: Some(main),
+        ..Default::default()
+    })
+    .unwrap();
     let repo = base.for_repository(&root);
     assert!(std::sync::Arc::ptr_eq(&repo, &base.for_repository(&root)));
     let second = base.for_repository(&other);
@@ -57,9 +66,12 @@ fn repository_services_cache_layers_and_reload_without_overwriting_base() {
     assert!(outcome.errors[0].to_string().contains(".magit-lsp.toml"));
     assert_eq!(repo.config().diff.context, 12);
     assert_eq!(second.config().diff.context, 9);
-    assert!(base.set_initialization(Some(serde_json::json!({
-        "trust_repo_config": false, "keys": {"status": {"stage": ["Y"]}}
-    }))).errors.is_empty());
+    assert!(base
+        .set_initialization(Some(serde_json::json!({
+            "trust_repo_config": false, "keys": {"status": {"stage": ["Y"]}}
+        })))
+        .errors
+        .is_empty());
     for service in [&*repo, &*second, &base] {
         assert_eq!(service.config().diff.context, 3);
         assert_eq!(status_keymap(&service.config(), "status.stage"), vec!["Y"]);
@@ -69,8 +81,14 @@ fn repository_services_cache_layers_and_reload_without_overwriting_base() {
 #[test]
 fn includes_load_first_and_the_including_file_overrides_them() {
     let dir = TempDir::new().unwrap();
-    write(&dir.path().join("a.toml"), "[keys.status]\nstage = [\"a\"]\n");
-    write(&dir.path().join("b.toml"), "[keys.status]\nstage = [\"b\"]\n");
+    write(
+        &dir.path().join("a.toml"),
+        "[keys.status]\nstage = [\"a\"]\n",
+    );
+    write(
+        &dir.path().join("b.toml"),
+        "[keys.status]\nstage = [\"b\"]\n",
+    );
     let main = dir.path().join("main.toml");
     write(
         &main,
@@ -85,8 +103,14 @@ fn includes_load_first_and_the_including_file_overrides_them() {
 #[test]
 fn later_includes_override_earlier_ones() {
     let dir = TempDir::new().unwrap();
-    write(&dir.path().join("a.toml"), "[keys.status]\nstage = [\"a\"]\n");
-    write(&dir.path().join("b.toml"), "[keys.status]\nstage = [\"b\"]\n");
+    write(
+        &dir.path().join("a.toml"),
+        "[keys.status]\nstage = [\"a\"]\n",
+    );
+    write(
+        &dir.path().join("b.toml"),
+        "[keys.status]\nstage = [\"b\"]\n",
+    );
     let main = dir.path().join("main.toml");
     write(&main, "include = [\"a.toml\", \"b.toml\"]\n");
 
@@ -122,9 +146,15 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
             &env_dir.path().join("env.toml"),
             "[keys.status]\nunstage = [\"b\"]\n",
         );
-        write(&home.path().join("inc.toml"), "[keys.status]\nstage-all = [\"t\"]\n");
+        write(
+            &home.path().join("inc.toml"),
+            "[keys.status]\nstage-all = [\"t\"]\n",
+        );
         let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "relative_absolute_tilde_and_env_includes_resolve"])
+            .args([
+                "--exact",
+                "relative_absolute_tilde_and_env_includes_resolve",
+            ])
             .env(CHILD, "1")
             .env("HOME", home.path())
             .env("MAGIT_LSP_TEST_INCLUDE", env_dir.path().join("env.toml"))
@@ -142,7 +172,10 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
 
     let dir = TempDir::new().unwrap();
     let abs = TempDir::new().unwrap();
-    write(&abs.path().join("abs.toml"), "[keys.status]\nstage = [\"a\"]\n");
+    write(
+        &abs.path().join("abs.toml"),
+        "[keys.status]\nstage = [\"a\"]\n",
+    );
 
     let main = dir.path().join("main.toml");
     write(
@@ -152,7 +185,10 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
             abs.path().join("abs.toml").to_string_lossy(),
         ),
     );
-    write(&dir.path().join("rel.toml"), "[keys.status]\nunstage-all = [\"d\"]\n");
+    write(
+        &dir.path().join("rel.toml"),
+        "[keys.status]\nunstage-all = [\"d\"]\n",
+    );
     let env_path = std::env::var("MAGIT_LSP_TEST_INCLUDE").unwrap();
     write(Path::new(&env_path), "[keys.status]\nunstage = [\"b\"]\n");
 
@@ -160,7 +196,10 @@ fn relative_absolute_tilde_and_env_includes_resolve() {
     for include in ["$MAGIT_LSP_TEST_INCLUDE", "${MAGIT_LSP_TEST_INCLUDE}"] {
         let only_env = dir.path().join("only-env.toml");
         write(&only_env, &format!("include = [{include:?}]\n"));
-        assert_eq!(status_keymap(&load(&only_env).unwrap(), "status.unstage"), vec!["b"]);
+        assert_eq!(
+            status_keymap(&load(&only_env).unwrap(), "status.unstage"),
+            vec!["b"]
+        );
     }
 
     let config = load(&main).unwrap();
@@ -192,11 +231,14 @@ fn xdg_config_home_sets_the_default_config_path() {
         );
         return;
     }
-    let expected = Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap())
-        .join("magit-lsp/config.toml");
+    let expected =
+        Path::new(&std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("magit-lsp/config.toml");
     assert_eq!(default_config_path(), Some(expected.clone()));
     write(&expected, "[diff]\ncontext = 9\n");
-    assert_eq!(load_config(&LoadOptions::default()).unwrap().diff.context, 9);
+    assert_eq!(
+        load_config(&LoadOptions::default()).unwrap().diff.context,
+        9
+    );
 }
 
 #[test]
@@ -244,7 +286,10 @@ fn include_cycles_report_the_chain() {
 
     let error = load(&main).unwrap_err().to_string();
     assert!(error.contains("cycle"), "{error}");
-    assert!(error.contains("a.toml") && error.contains("b.toml"), "{error}");
+    assert!(
+        error.contains("a.toml") && error.contains("b.toml"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -301,14 +346,20 @@ fn config_flag_wins_over_environment() {
         resolve_config_path_from(None, Some(env), default.clone()),
         Some("/env/config.toml".into())
     );
-    assert_eq!(resolve_config_path_from(None, None, default), Some("/default/config.toml".into()));
+    assert_eq!(
+        resolve_config_path_from(None, None, default),
+        Some("/default/config.toml".into())
+    );
 }
 
 #[test]
 fn initialization_options_override_user_config() {
     let dir = TempDir::new().unwrap();
     let main = dir.path().join("config.toml");
-    write(&main, "profile = \"vim\"\ntrust_repo_config = true\n[keys.status]\nstage = [\"u\"]\n");
+    write(
+        &main,
+        "profile = \"vim\"\ntrust_repo_config = true\n[keys.status]\nstage = [\"u\"]\n",
+    );
     let config = load_config(&LoadOptions {
         config_path: Some(main),
         initialization: Some(serde_json::json!({
@@ -329,19 +380,30 @@ fn plain_section_limit_defaults_and_obeys_configuration_layers() {
     let dir = TempDir::new().unwrap();
     let repo = TempDir::new().unwrap();
     let global = dir.path().join("config.toml");
-    write(&global, "trust_repo_config = true\n[plain]\nmax_section_lines = 300\n");
-    write(&repo.path().join(".magit-lsp.toml"), "[plain]\nmax_section_lines = 100\n");
+    write(
+        &global,
+        "trust_repo_config = true\n[plain]\nmax_section_lines = 300\n",
+    );
+    write(
+        &repo.path().join(".magit-lsp.toml"),
+        "[plain]\nmax_section_lines = 100\n",
+    );
     let default = load_config(&LoadOptions::default()).unwrap();
     assert_eq!(default.plain.max_section_lines, 400);
     let config = load_config(&LoadOptions {
-        config_path: Some(global.clone()), repo_path: Some(repo.path().to_path_buf()),
-        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})), ..Default::default()
-    }).unwrap();
+        config_path: Some(global.clone()),
+        repo_path: Some(repo.path().to_path_buf()),
+        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})),
+        ..Default::default()
+    })
+    .unwrap();
     assert_eq!(config.plain.max_section_lines, 100);
     let config = load_config(&LoadOptions {
         config_path: Some(global),
-        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})), ..Default::default()
-    }).unwrap();
+        initialization: Some(serde_json::json!({"plain":{"max_section_lines":200}})),
+        ..Default::default()
+    })
+    .unwrap();
     assert_eq!(config.plain.max_section_lines, 200);
 }
 
@@ -354,11 +416,18 @@ fn invalid_plain_section_limits_are_rejected() {
         let error = load(&main).unwrap_err();
         assert!(error.message.contains("plain.max_section_lines"), "{error}");
     }
-    for value in [serde_json::json!(0), serde_json::json!(-1), serde_json::json!(1.5), serde_json::json!("4"), serde_json::json!(u64::MAX)] {
+    for value in [
+        serde_json::json!(0),
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!("4"),
+        serde_json::json!(u64::MAX),
+    ] {
         let error = load_config(&LoadOptions {
             initialization: Some(serde_json::json!({"plain":{"max_section_lines":value}})),
             ..Default::default()
-        }).unwrap_err();
+        })
+        .unwrap_err();
         assert!(error.message.contains("plain.max_section_lines"), "{error}");
     }
 }
@@ -464,10 +533,15 @@ fn actions_title_style_defaults_to_plain_and_round_trips_all_values() {
 fn invalid_actions_title_style_names_file_and_line() {
     let dir = TempDir::new().unwrap();
     let main = dir.path().join("main.toml");
-    write(&main, "[diff]\ncontext = 7\n[actions]\ntitle_style = \"fancy\"\n");
+    write(
+        &main,
+        "[diff]\ncontext = 7\n[actions]\ntitle_style = \"fancy\"\n",
+    );
     let error = load(&main).unwrap_err();
     assert!(
-        error.to_string().contains("main.toml:4: unknown title_style `fancy`"),
+        error
+            .to_string()
+            .contains("main.toml:4: unknown title_style `fancy`"),
         "{error}"
     );
 }
@@ -498,10 +572,15 @@ fn repository_actions_title_style_overrides_the_user_layer() {
 fn obsolete_menus_save_scope_is_rejected_with_its_exact_name() {
     let dir = TempDir::new().unwrap();
     let main = dir.path().join("main.toml");
-    write(&main, "[diff]\ncontext = 7\n[menus]\nsave_scope = \"repo\"\n");
+    write(
+        &main,
+        "[diff]\ncontext = 7\n[menus]\nsave_scope = \"repo\"\n",
+    );
     let error = load(&main).unwrap_err();
     assert!(
-        error.to_string().contains("main.toml:4: unknown setting `menus.save_scope`"),
+        error
+            .to_string()
+            .contains("main.toml:4: unknown setting `menus.save_scope`"),
         "{error}"
     );
 }
@@ -517,7 +596,15 @@ fn hot_reload_picks_up_changes_and_keeps_the_previous_config_on_error() {
         ..Default::default()
     })
     .unwrap();
-    assert_eq!(service.keymap("status").unwrap().command("status.stage").unwrap().keys, vec!["q"]);
+    assert_eq!(
+        service
+            .keymap("status")
+            .unwrap()
+            .command("status.stage")
+            .unwrap()
+            .keys,
+        vec!["q"]
+    );
 
     write(&main, "[keys.status]\nstage = [\"w\"]\n");
     let mut reloaded = false;
@@ -529,7 +616,15 @@ fn hot_reload_picks_up_changes_and_keeps_the_previous_config_on_error() {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
     assert!(reloaded, "reload never observed the change");
-    assert_eq!(service.keymap("status").unwrap().command("status.stage").unwrap().keys, vec!["w"]);
+    assert_eq!(
+        service
+            .keymap("status")
+            .unwrap()
+            .command("status.stage")
+            .unwrap()
+            .keys,
+        vec!["w"]
+    );
 
     write(&main, "[keys.common\nconfirm = [\"Enter\"]\n");
     let outcome = service.reload(false);
@@ -539,5 +634,13 @@ fn hot_reload_picks_up_changes_and_keeps_the_previous_config_on_error() {
         "{}",
         outcome.errors[0]
     );
-    assert_eq!(service.keymap("status").unwrap().command("status.stage").unwrap().keys, vec!["w"]);
+    assert_eq!(
+        service
+            .keymap("status")
+            .unwrap()
+            .command("status.stage")
+            .unwrap()
+            .keys,
+        vec!["w"]
+    );
 }

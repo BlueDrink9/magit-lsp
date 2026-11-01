@@ -14,19 +14,35 @@ use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection};
 fn serialized_activation_keeps_menu_prefix_error_and_close_semantics() {
     let menu = magit_lsp::menus::named("commit").unwrap();
     let wire = serde_json::to_value(&menu).unwrap();
-    let row = wire["groups"].as_array().unwrap().iter()
+    let row = wire["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
         .flat_map(|group| group["items"].as_array().unwrap())
-        .find(|item| item["key"] == "-a").unwrap();
+        .find(|item| item["key"] == "-a")
+        .unwrap();
     let steps = row["activationSteps"].as_array().unwrap();
     let keys = vec!["-a".to_string()];
     let mut pending = Vec::new();
-    assert_eq!(keyhandler::resolve_menu(&mut pending, steps[0].as_str().unwrap(), &keys), MenuResolution::Pending);
-    assert_eq!(keyhandler::resolve_menu(&mut pending, "x", &keys), MenuResolution::Unbound { chord: "-x".into() });
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, steps[0].as_str().unwrap(), &keys),
+        MenuResolution::Pending
+    );
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "x", &keys),
+        MenuResolution::Unbound { chord: "-x".into() }
+    );
     assert_eq!(pending, vec!["-"]);
-    assert_eq!(keyhandler::resolve_menu(&mut pending, steps[1].as_str().unwrap(), &keys), MenuResolution::Complete("-a".into()));
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, steps[1].as_str().unwrap(), &keys),
+        MenuResolution::Complete("-a".into())
+    );
     assert!(pending.is_empty());
     keyhandler::resolve_menu(&mut pending, steps[0].as_str().unwrap(), &keys);
-    assert_eq!(keyhandler::resolve_menu(&mut pending, "Escape", &keys), MenuResolution::Pop);
+    assert_eq!(
+        keyhandler::resolve_menu(&mut pending, "Escape", &keys),
+        MenuResolution::Pop
+    );
     assert!(pending.is_empty());
 }
 
@@ -295,7 +311,10 @@ fn non_positional_keys_and_menu_options_ignore_obsolete_render_versions() {
     assert!(refresh.effects.is_empty(), "{:?}", refresh.effects);
     assert!(refresh.render.is_some());
     let menu = test.press_at_version("c", 0);
-    assert!(menu.effects.iter().any(|effect| matches!(effect, Effect::PushView { .. })));
+    assert!(menu
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PushView { .. })));
     test.ack();
     let pending = test.press_at_version("-", u64::MAX);
     assert!(pending.effects.is_empty(), "{:?}", pending.effects);
@@ -305,9 +324,17 @@ fn non_positional_keys_and_menu_options_ignore_obsolete_render_versions() {
     assert!(switched.effects.is_empty(), "{:?}", switched.effects);
     assert!(switched.render.is_some());
     let cancelled = test.press_at_version("Escape", 0);
-    assert!(cancelled.effects.iter().any(|effect| matches!(effect, Effect::PopView { .. })));
-    let refreshed = test.invoke_at_version("common.refresh", u64::MAX,
-        Some(Cursor { line: 0, column: 0 }), None, None);
+    assert!(cancelled
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { .. })));
+    let refreshed = test.invoke_at_version(
+        "common.refresh",
+        u64::MAX,
+        Some(Cursor { line: 0, column: 0 }),
+        None,
+        None,
+    );
     assert!(refreshed.effects.is_empty());
     assert!(refreshed.render.is_some());
     assert_eq!(tmp.git(&["status", "--short"]), "");

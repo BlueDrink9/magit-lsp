@@ -3,13 +3,29 @@ use std::process::Command;
 
 fn git(path: &Path, args: &[&str]) {
     std::fs::create_dir_all(path).unwrap();
-    let status = Command::new("git").args(args).current_dir(path).status().unwrap();
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(path)
+        .status()
+        .unwrap();
     assert!(status.success(), "git {args:?}");
 }
 
 fn make_repo(path: &Path) {
     git(path, &["init", "-q"]);
-    git(path, &["-c", "user.name=test", "-c", "user.email=test@invalid", "commit", "--allow-empty", "-qm", "initial"]);
+    git(
+        path,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ],
+    );
 }
 
 fn wrapper(dir: &Path, real_git: &Path) {
@@ -29,8 +45,13 @@ fn child(path: &Path, wrapper_dir: &Path, mode: &str) {
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("GIT_DISCOVERY_MODE", mode)
         .env("GIT_DISCOVERY_PATH", path)
-        .output().unwrap();
-    assert!(output.status.success(), "child failed: {}", String::from_utf8_lossy(&output.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -41,7 +62,17 @@ fn recommended_git_queries_discover_and_open_worktrees_and_propagate_failures() 
     let nested = normal.join("nested");
     std::fs::create_dir(&nested).unwrap();
     let linked = temp.path().join("linked");
-    git(&normal, &["worktree", "add", "-q", "-b", "linked", linked.to_str().unwrap()]);
+    git(
+        &normal,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked",
+            linked.to_str().unwrap(),
+        ],
+    );
     let real_git = std::fs::canonicalize("/usr/bin/git").unwrap();
     let wrapper_dir = temp.path().join("wrapper");
     wrapper(&wrapper_dir, &real_git);
@@ -52,11 +83,20 @@ fn recommended_git_queries_discover_and_open_worktrees_and_propagate_failures() 
 
 #[test]
 fn child_checks_discovery() {
-    let Ok(raw) = std::env::var("GIT_DISCOVERY_PATH") else { return };
+    let Ok(raw) = std::env::var("GIT_DISCOVERY_PATH") else {
+        return;
+    };
     let path = PathBuf::from(raw);
     if std::env::var("GIT_DISCOVERY_MODE").unwrap() == "failure" {
-        let error = match magit_lsp::git::GitRepo::discover(&path) { Err(error) => error, Ok(_) => panic!("simulated Git failure was swallowed") };
-        assert!(error.message.contains("failed") || error.git.is_some(), "{}", error.message);
+        let error = match magit_lsp::git::GitRepo::discover(&path) {
+            Err(error) => error,
+            Ok(_) => panic!("simulated Git failure was swallowed"),
+        };
+        assert!(
+            error.message.contains("failed") || error.git.is_some(),
+            "{}",
+            error.message
+        );
         assert!(magit_lsp::git::GitRepo::open(&path).is_err());
         return;
     }
@@ -64,12 +104,17 @@ fn child_checks_discovery() {
     let git_marker = expected_root.join(".git");
     let expected_git = if git_marker.is_file() {
         let value = std::fs::read_to_string(&git_marker).unwrap();
-        std::fs::canonicalize(expected_root.join(value.trim().strip_prefix("gitdir: ").unwrap())).unwrap()
-    } else { git_marker };
+        std::fs::canonicalize(expected_root.join(value.trim().strip_prefix("gitdir: ").unwrap()))
+            .unwrap()
+    } else {
+        git_marker
+    };
     let expected_common = if expected_git.join("commondir").exists() {
         let value = std::fs::read_to_string(expected_git.join("commondir")).unwrap();
         std::fs::canonicalize(expected_git.join(value.trim())).unwrap()
-    } else { expected_git.clone() };
+    } else {
+        expected_git.clone()
+    };
     let discovered = magit_lsp::git::GitRepo::discover(&path).unwrap().unwrap();
     let opened = magit_lsp::git::GitRepo::open(&path).unwrap();
     assert_eq!(discovered.root(), expected_root);

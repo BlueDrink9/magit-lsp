@@ -4,8 +4,8 @@
 //! in UTF-16 code units. This module owns that conversion plus the delta
 //! encoding, so the rest of the server never touches either.
 
-use crate::tree::{Token, Tree};
 use crate::docstore::Encoding;
+use crate::tree::{Token, Tree};
 use lsp_types::{SemanticToken, SemanticTokens, SemanticTokensLegend};
 
 /// Token types the status view can emit, in legend order.
@@ -121,7 +121,11 @@ pub fn encode_lines(lines: &[String], tokens: &[Token]) -> Vec<SemanticToken> {
 }
 
 /// Delta-encode tokens using the negotiated position unit.
-pub fn encode_lines_with_encoding(lines: &[String], tokens: &[Token], encoding: Encoding) -> Vec<SemanticToken> {
+pub fn encode_lines_with_encoding(
+    lines: &[String],
+    tokens: &[Token],
+    encoding: Encoding,
+) -> Vec<SemanticToken> {
     let mut ordered: Vec<&Token> = tokens.iter().collect();
     ordered.sort_by_key(|token| (token.line, token.start));
 
@@ -202,7 +206,11 @@ fn utf16_len(text: &str) -> u32 {
 }
 
 fn column_len(text: &str, encoding: Encoding) -> u32 {
-    match encoding { Encoding::Utf8 => text.len() as u32, Encoding::Utf16 => utf16_len(text), Encoding::Utf32 => text.chars().count() as u32 }
+    match encoding {
+        Encoding::Utf8 => text.len() as u32,
+        Encoding::Utf16 => utf16_len(text),
+        Encoding::Utf32 => text.chars().count() as u32,
+    }
 }
 
 /// `index` moved back to the nearest UTF-8 character boundary within `text`.
@@ -284,7 +292,10 @@ mod tests {
         let groups = token_groups();
         for token_type in TOKEN_TYPES {
             assert!(
-                groups.get(*token_type).and_then(serde_json::Value::as_str).is_some(),
+                groups
+                    .get(*token_type)
+                    .and_then(serde_json::Value::as_str)
+                    .is_some(),
                 "{token_type} has no suggested group"
             );
         }

@@ -340,7 +340,9 @@ pub fn vscode(manifest: &Manifest) -> String {
         .map(|entry| Entry {
             key: entry.key,
             command: "magit.invoke",
-            args: Args { command: entry.binding },
+            args: Args {
+                command: entry.binding,
+            },
             when: entry.when,
         })
         .collect();

@@ -156,8 +156,10 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
         })
         .map(|command| command.id)
         .collect();
-    let mut pressed_commands: Vec<&str> =
-        pressed.iter().map(|(command, _key)| command.as_str()).collect();
+    let mut pressed_commands: Vec<&str> = pressed
+        .iter()
+        .map(|(command, _key)| command.as_str())
+        .collect();
     pressed_commands.sort_unstable();
     pressed_commands.dedup();
     let mut planned_menu_commands = planned_menu_commands;
@@ -189,7 +191,10 @@ fn parse_audit(text: &str) -> Result<Vec<AuditAction>, String> {
         .map(|(line_no, line)| {
             let fields: Vec<_> = line.split('\t').collect();
             if fields.len() != 4 || fields.iter().any(|field| field.is_empty()) {
-                return Err(format!("line {}: expected four nonempty TSV fields", line_no + 1));
+                return Err(format!(
+                    "line {}: expected four nonempty TSV fields",
+                    line_no + 1
+                ));
             }
             Ok(AuditAction {
                 menu: fields[0].to_string(),
@@ -205,7 +210,10 @@ fn validate_audit(expected: &[AuditAction], reference: &[AuditAction]) -> Result
     let mut expected_set = std::collections::HashSet::new();
     for action in expected {
         if !expected_set.insert(action) {
-            return Err(format!("duplicate static action: {}/{}", action.menu, action.key));
+            return Err(format!(
+                "duplicate static action: {}/{}",
+                action.menu, action.key
+            ));
         }
     }
     let mut reference_set = std::collections::HashSet::new();
@@ -216,12 +224,18 @@ fn validate_audit(expected: &[AuditAction], reference: &[AuditAction]) -> Result
     }
     for action in expected {
         if !reference_set.contains(action) {
-            return Err(format!("missing reference row: {}/{} ({})", action.menu, action.key, action.local_command));
+            return Err(format!(
+                "missing reference row: {}/{} ({})",
+                action.menu, action.key, action.local_command
+            ));
         }
     }
     for row in reference {
         if !expected_set.contains(row) {
-            return Err(format!("orphan or mismatched reference row: {}/{} ({})", row.menu, row.key, row.local_command));
+            return Err(format!(
+                "orphan or mismatched reference row: {}/{} ({})",
+                row.menu, row.key, row.local_command
+            ));
         }
     }
     Ok(())
@@ -236,9 +250,16 @@ fn definition_actions() -> Vec<AuditAction> {
             def.groups.into_iter().flat_map(move |group| {
                 let menu = menu.clone();
                 group.items.into_iter().filter_map(move |item| match item {
-                    ItemDef::Action { key, command, magit, .. } => Some(AuditAction {
-                        menu: menu.clone(), key: key.to_string(),
-                        magit_command: magit.to_string(), local_command: command.to_string(),
+                    ItemDef::Action {
+                        key,
+                        command,
+                        magit,
+                        ..
+                    } => Some(AuditAction {
+                        menu: menu.clone(),
+                        key: key.to_string(),
+                        magit_command: magit.to_string(),
+                        local_command: command.to_string(),
                     }),
                     _ => None,
                 })
@@ -249,7 +270,8 @@ fn definition_actions() -> Vec<AuditAction> {
 
 #[test]
 fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
-    let mut reference = parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
+    let mut reference =
+        parse_audit(include_str!("data/magit-keys.txt")).expect("valid key audit TSV");
     // This project action has no Magit key-audit row; it mirrors Magit's
     // selectable log operation and is independently registered here.
     reference.push(AuditAction {
@@ -261,15 +283,35 @@ fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
     let expected = definition_actions();
     validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
     let aliases = [
-        ("rebase", "s", "in-progress rebase: Skip", "magit-rebase-skip"),
-        ("rebase", "e", "in-progress rebase: Edit", "magit-rebase-edit"),
-        ("bisect", "B", "active bisect: mark Bad", "magit-bisect-mark"),
+        (
+            "rebase",
+            "s",
+            "in-progress rebase: Skip",
+            "magit-rebase-skip",
+        ),
+        (
+            "rebase",
+            "e",
+            "in-progress rebase: Edit",
+            "magit-rebase-edit",
+        ),
+        (
+            "bisect",
+            "B",
+            "active bisect: mark Bad",
+            "magit-bisect-mark",
+        ),
     ];
     for (menu, key, state, command) in aliases {
-        let action = reference.iter().find(|row| row.menu == menu && row.key == key)
+        let action = reference
+            .iter()
+            .find(|row| row.menu == menu && row.key == key)
             .unwrap_or_else(|| panic!("state alias {menu}/{key} has no static reference action"));
         assert!(!state.is_empty(), "state alias requires a reason");
-        assert!(!command.is_empty(), "state alias requires Magit command identity");
+        assert!(
+            !command.is_empty(),
+            "state alias requires Magit command identity"
+        );
         assert!(!action.magit_command.is_empty());
         assert!(!action.local_command.is_empty());
     }
@@ -277,11 +319,25 @@ fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
 
 #[test]
 fn key_audit_validator_rejects_missing_orphan_and_duplicate_rows() {
-    let action = AuditAction { menu: "remote".into(), key: "d u".into(), magit_command: "magit-update-default-branch".into(), local_command: "remote.update-default".into() };
-    assert!(validate_audit(&[action.clone()], &[]).unwrap_err().contains("missing"));
-    let orphan = AuditAction { key: "x".into(), ..action.clone() };
-    assert!(validate_audit(&[], &[orphan]).unwrap_err().contains("orphan"));
-    assert!(validate_audit(&[action.clone()], &[action.clone(), action]).unwrap_err().contains("duplicate"));
+    let action = AuditAction {
+        menu: "remote".into(),
+        key: "d u".into(),
+        magit_command: "magit-update-default-branch".into(),
+        local_command: "remote.update-default".into(),
+    };
+    assert!(validate_audit(&[action.clone()], &[])
+        .unwrap_err()
+        .contains("missing"));
+    let orphan = AuditAction {
+        key: "x".into(),
+        ..action.clone()
+    };
+    assert!(validate_audit(&[], &[orphan])
+        .unwrap_err()
+        .contains("orphan"));
+    assert!(validate_audit(&[action.clone()], &[action.clone(), action])
+        .unwrap_err()
+        .contains("duplicate"));
 }
 
 #[test]
@@ -436,15 +492,27 @@ fn log_argument_statuses_and_select_copy_action_are_exact() {
     let menu = magit_lsp::menus::named("log").expect("log menu");
     for item in menu.groups.iter().flat_map(|group| &group.items) {
         let key = item.key();
-        let implemented = matches!(key, "=n" | "=a" | "=s" | "=g" | "=S" | "=G" | "=f" | "-g" | "-d");
+        let implemented = matches!(
+            key,
+            "=n" | "=a" | "=s" | "=g" | "=S" | "=G" | "=f" | "-g" | "-d"
+        );
         if key.starts_with('=') || key.starts_with('-') {
-            assert_eq!(matches!(item.status(), MenuStatus::Implemented), implemented, "{key}");
+            assert_eq!(
+                matches!(item.status(), MenuStatus::Implemented),
+                implemented,
+                "{key}"
+            );
             if matches!(key, "-g" | "-d") {
-                assert!(matches!(item, Item::Switch { on: true, .. }), "{key} defaults on");
+                assert!(
+                    matches!(item, Item::Switch { on: true, .. }),
+                    "{key} defaults on"
+                );
             }
         }
     }
-    assert!(matches!(menu.item("c"), Some(Item::Action { command, label, status: MenuStatus::Implemented, .. }) if command == "log.select-and-copy" && label == "Select and copy commit ID"));
+    assert!(
+        matches!(menu.item("c"), Some(Item::Action { command, label, status: MenuStatus::Implemented, .. }) if command == "log.select-and-copy" && label == "Select and copy commit ID")
+    );
 }
 
 #[test]
@@ -518,7 +586,9 @@ fn the_largest_menus_reflow_and_grey_every_planned_action() {
                 .tokens
                 .iter()
                 .filter(|token| token.token_type == "magit.menu.planned")
-                .map(|token| tree.lines[token.line][token.start..token.start + token.length].to_string())
+                .map(|token| {
+                    tree.lines[token.line][token.start..token.start + token.length].to_string()
+                })
                 .collect();
             greyed.sort();
             assert_eq!(greyed, planned, "{name} at {cols}");

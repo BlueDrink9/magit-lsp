@@ -118,10 +118,7 @@ fn opaque_run_uri_and_helper_are_distinct_and_repository_bound() {
     assert_ne!(draft.run_id(), other.run_id());
     assert_ne!(draft.helper_token(), other.helper_token());
     assert_ne!(draft.run_id(), draft.helper_token());
-    assert_eq!(
-        draft.uri(),
-        format!("file://{}", first.target.display())
-    );
+    assert_eq!(draft.uri(), format!("file://{}", first.target.display()));
     assert!(draft
         .uri()
         .contains(&first.repo.root().to_string_lossy().to_string()));
@@ -382,7 +379,9 @@ fn normal_close_without_save_writes_initial_not_unsaved_text() {
 fn saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read() {
     let fixture = Fixture::new();
     let (mut draft, access) = fixture.opened();
-    draft.did_change(access.context(), 2, b"unsaved must never land").unwrap();
+    draft
+        .did_change(access.context(), 2, b"unsaved must never land")
+        .unwrap();
     let replacement = fixture.target.with_file_name("native-save");
     fs::write(&replacement, "Saved native bytes\r\n# exact comment\n").unwrap();
     fs::rename(&replacement, &fixture.target).unwrap();
@@ -393,9 +392,18 @@ fn saved_close_reads_native_safe_save_and_retains_helper_on_unsafe_read() {
     assert!(!draft.is_terminal());
     fs::remove_file(&fixture.target).unwrap();
     fs::rename(&neighbor, &fixture.target).unwrap();
-    assert_eq!(draft.finish(access.context(), 2, NormalClose).unwrap(), Reply::Ok);
-    assert_eq!(draft.saved().unwrap().text(), "Saved native bytes\r\n# exact comment\n");
-    assert_eq!(fs::read_to_string(&fixture.target).unwrap(), draft.saved().unwrap().text());
+    assert_eq!(
+        draft.finish(access.context(), 2, NormalClose).unwrap(),
+        Reply::Ok
+    );
+    assert_eq!(
+        draft.saved().unwrap().text(),
+        "Saved native bytes\r\n# exact comment\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&fixture.target).unwrap(),
+        draft.saved().unwrap().text()
+    );
     assert!(draft.finish(access.context(), 2, NormalClose).is_err());
 }
 

@@ -1,9 +1,9 @@
 use crate::errors;
 use crate::git::GitRepo;
 use crate::patch::FileLayout;
+use crate::protocol::{Cursor, Selection};
 use crate::protocol::{Effect, MessageLevel};
 use crate::Result;
-use crate::protocol::{Cursor, Selection};
 use serde_json::Value;
 
 /// A content-addressed action target tied to an existing server node identity.
@@ -138,7 +138,10 @@ pub struct DispatchRequest {
 
 /// Whether a command mutates displayed status content (not deliberate bulk).
 pub fn content_command(command: &str) -> bool {
-    matches!(command, "status.stage" | "status.unstage" | "status.discard")
+    matches!(
+        command,
+        "status.stage" | "status.unstage" | "status.discard"
+    )
 }
 
 /// Whether a hunk or line in a status section may authorize this command.
@@ -152,9 +155,14 @@ pub fn hunk_section_compatible(command: &str, section: Option<&str>) -> bool {
     }
 }
 
-fn file_identity(tree: &crate::tree::Tree, node: &crate::tree::Node) -> Option<crate::git::FileMutationIdentity> {
+fn file_identity(
+    tree: &crate::tree::Tree,
+    node: &crate::tree::Node,
+) -> Option<crate::git::FileMutationIdentity> {
     tree.nodes.iter().find_map(|file| {
-        if file.path != node.path || file.section != node.section { return None; }
+        if file.path != node.path || file.section != node.section {
+            return None;
+        }
         match &file.mutation {
             Some(crate::tree::MutationContent::File(identity)) => Some(identity.clone()),
             _ => None,
@@ -163,32 +171,56 @@ fn file_identity(tree: &crate::tree::Tree, node: &crate::tree::Node) -> Option<c
 }
 
 fn mutation_hash(
-    command: &str, mut identity: crate::git::FileMutationIdentity,
+    command: &str,
+    mut identity: crate::git::FileMutationIdentity,
     hunk: Option<(&crate::patch::Hunk, usize)>,
 ) -> String {
     use sha2::{Digest, Sha256};
     fn index_only(identity: &mut crate::git::FileMutationIdentity) {
         identity.worktree.clear();
-        if let Some((_, original)) = &mut identity.original { index_only(original); }
+        if let Some((_, original)) = &mut identity.original {
+            index_only(original);
+        }
     }
-    if command == "status.unstage" { index_only(&mut identity); }
+    if command == "status.unstage" {
+        index_only(&mut identity);
+    }
     let value = if let Some((hunk, identical)) = hunk {
         // Ordinals distinguish identical siblings only. Bind ambiguous siblings
         // to the complete file state so removing one cannot retarget another.
-        serde_json::json!([command, hunk.id, identical,
-            hunk.lines.iter().map(|line| (line.marker, &line.text, line.no_newline)).collect::<Vec<_>>(),
+        serde_json::json!([
+            command,
+            hunk.id,
+            identical,
+            hunk.lines
+                .iter()
+                .map(|line| (line.marker, &line.text, line.no_newline))
+                .collect::<Vec<_>>(),
             &hunk.metadata,
             identity.original.as_ref().map(|(path, _)| path),
-            if identical > 1 || command == "status.discard" { Some(&identity) } else { None }])
-    } else { serde_json::json!([command, identity]) };
+            if identical > 1 || command == "status.discard" {
+                Some(&identity)
+            } else {
+                None
+            }
+        ])
+    } else {
+        serde_json::json!([command, identity])
+    };
     format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
 }
 
 /// Offer a content target from typed metadata in the exact displayed tree.
 /// Diff lines intentionally target their owning hunk; sections remain bulk.
-pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> Option<ActionTarget> {
+pub fn offer_target(
+    tree: &crate::tree::Tree,
+    command: &str,
+    node_id: &str,
+) -> Option<ActionTarget> {
     use crate::tree::{MutationContent, NodeKind};
-    if !content_command(command) { return None; }
+    if !content_command(command) {
+        return None;
+    }
     let mut node = tree.node(node_id)?;
     if node.kind == NodeKind::Section {
         let section = node.section.as_deref()?;
@@ -197,88 +229,200 @@ pub fn offer_target(tree: &crate::tree::Tree, command: &str, node_id: &str) -> O
             "status.unstage" => section == "staged",
             _ => false,
         };
-        if !applicable { return None; }
+        if !applicable {
+            return None;
+        }
         use sha2::{Digest, Sha256};
-        let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&(command, section)).ok()?));
-        return Some(ActionTarget { node_id: node.id.clone(), mutation_hash: hash, selection: None });
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(command, section)).ok()?)
+        );
+        return Some(ActionTarget {
+            node_id: node.id.clone(),
+            mutation_hash: hash,
+            selection: None,
+        });
     }
     if node.kind == NodeKind::Line {
-        node = tree.nodes.iter().find(|hunk| hunk.kind == NodeKind::Hunk
-            && hunk.path == node.path && hunk.section == node.section && hunk.hunk_id == node.hunk_id)?;
+        node = tree.nodes.iter().find(|hunk| {
+            hunk.kind == NodeKind::Hunk
+                && hunk.path == node.path
+                && hunk.section == node.section
+                && hunk.hunk_id == node.hunk_id
+        })?;
     }
     if matches!(node.kind, NodeKind::Hunk | NodeKind::Line)
-        && !hunk_section_compatible(command, node.section.as_deref()) { return None; }
+        && !hunk_section_compatible(command, node.section.as_deref())
+    {
+        return None;
+    }
     let identity = file_identity(tree, node)?;
     let hunk = match node.mutation.as_ref()? {
         MutationContent::File(_) => None,
         MutationContent::Hunk { hunk, identical } => Some((hunk, *identical)),
     };
-    Some(ActionTarget { node_id: node.id.clone(), mutation_hash: mutation_hash(command, identity, hunk), selection: None })
+    Some(ActionTarget {
+        node_id: node.id.clone(),
+        mutation_hash: mutation_hash(command, identity, hunk),
+        selection: None,
+    })
 }
 
 /// Offer a content-addressed target for an exact inclusive selection in a render.
-pub fn offer_selection_target(tree: &crate::tree::Tree, command: &str, start: u32, end: u32) -> Option<ActionTarget> {
-    if !content_command(command) { return None; }
+pub fn offer_selection_target(
+    tree: &crate::tree::Tree,
+    command: &str,
+    start: u32,
+    end: u32,
+) -> Option<ActionTarget> {
+    if !content_command(command) {
+        return None;
+    }
     let (start, end) = (start.min(end), start.max(end));
-    let section = if command == "status.unstage" { "staged" } else { "unstaged" };
-    if tree.line_nodes.get(start as usize).and_then(|line| line.section.as_deref()) != Some(section) { return None; }
+    let section = if command == "status.unstage" {
+        "staged"
+    } else {
+        "unstaged"
+    };
+    if tree
+        .line_nodes
+        .get(start as usize)
+        .and_then(|line| line.section.as_deref())
+        != Some(section)
+    {
+        return None;
+    }
     let members = selection_members(tree, command, start, end, section)?;
-    if members.is_empty() { return None; }
+    if members.is_empty() {
+        return None;
+    }
     let node_id = members[0].0.clone();
-    let intent = SelectionIntent { start_line: start, end_line: end };
+    let intent = SelectionIntent {
+        start_line: start,
+        end_line: end,
+    };
     use sha2::{Digest, Sha256};
-    let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&(command, intent, &members)).ok()?));
-    Some(ActionTarget { node_id, mutation_hash: hash, selection: Some(intent) })
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(command, intent, &members)).ok()?)
+    );
+    Some(ActionTarget {
+        node_id,
+        mutation_hash: hash,
+        selection: Some(intent),
+    })
 }
 
 /// Derive the exact constituent content targets bound by a displayed selection.
-fn selection_members(tree: &crate::tree::Tree, command: &str, start: u32, end: u32, section: &str) -> Option<Vec<(String, String)>> {
+fn selection_members(
+    tree: &crate::tree::Tree,
+    command: &str,
+    start: u32,
+    end: u32,
+    section: &str,
+) -> Option<Vec<(String, String)>> {
     use crate::tree::NodeKind;
-    tree.nodes.iter().filter(|node| {
-        if node.section.as_deref() != Some(section) { return false; }
-        let included = match node.kind {
-            NodeKind::File => start as usize <= node.start_line && node.start_line <= end as usize,
-            NodeKind::Hunk => start as usize <= node.end_line && node.start_line <= end as usize,
-            _ => false,
-        };
-        included
-    }).map(|node| {
-        let mut target = offer_target(tree, command, &node.id)?;
-        target.selection = None;
-        Some((node.id.clone(), target.mutation_hash))
-    }).collect()
+    tree.nodes
+        .iter()
+        .filter(|node| {
+            if node.section.as_deref() != Some(section) {
+                return false;
+            }
+            let included = match node.kind {
+                NodeKind::File => {
+                    start as usize <= node.start_line && node.start_line <= end as usize
+                }
+                NodeKind::Hunk => {
+                    start as usize <= node.end_line && node.start_line <= end as usize
+                }
+                _ => false,
+            };
+            included
+        })
+        .map(|node| {
+            let mut target = offer_target(tree, command, &node.id)?;
+            target.selection = None;
+            Some((node.id.clone(), target.mutation_hash))
+        })
+        .collect()
 }
 
 /// Re-derive an offered target from fresh Git state without using fresh rows.
-pub fn target_is_current(repo: &GitRepo, tree: &crate::tree::Tree, command: &str, target: &ActionTarget) -> Result<bool> {
+pub fn target_is_current(
+    repo: &GitRepo,
+    tree: &crate::tree::Tree,
+    command: &str,
+    target: &ActionTarget,
+) -> Result<bool> {
     if let Some(intent) = target.selection {
-        let Some(expected) = offer_selection_target(tree, command, intent.start_line, intent.end_line) else { return Ok(false); };
-        if expected != *target { return Ok(false); }
-        let section = if command == "status.unstage" { "staged" } else { "unstaged" };
-        let Some(members) = selection_members(tree, command, intent.start_line, intent.end_line, section) else { return Ok(false); };
+        let Some(expected) =
+            offer_selection_target(tree, command, intent.start_line, intent.end_line)
+        else {
+            return Ok(false);
+        };
+        if expected != *target {
+            return Ok(false);
+        }
+        let section = if command == "status.unstage" {
+            "staged"
+        } else {
+            "unstaged"
+        };
+        let Some(members) =
+            selection_members(tree, command, intent.start_line, intent.end_line, section)
+        else {
+            return Ok(false);
+        };
         for (node_id, _) in &members {
-            let Some(member) = offer_target(tree, command, node_id) else { return Ok(false); };
-            if !target_is_current(repo, tree, command, &member)? { return Ok(false); }
+            let Some(member) = offer_target(tree, command, node_id) else {
+                return Ok(false);
+            };
+            if !target_is_current(repo, tree, command, &member)? {
+                return Ok(false);
+            }
         }
         use sha2::{Digest, Sha256};
-        let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&(command, intent, &members)).unwrap_or_default()));
+        let hash = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(command, intent, &members)).unwrap_or_default())
+        );
         return Ok(hash == target.mutation_hash);
     }
     use crate::tree::MutationContent;
-    let Some(node) = tree.node(&target.node_id) else { return Ok(false); };
-    if offer_target(tree, command, &node.id).as_ref() != Some(target) { return Ok(false); }
+    let Some(node) = tree.node(&target.node_id) else {
+        return Ok(false);
+    };
+    if offer_target(tree, command, &node.id).as_ref() != Some(target) {
+        return Ok(false);
+    }
     if node.kind == crate::tree::NodeKind::Section {
         return Ok(target.selection.is_none());
     }
-    let Some(captured) = file_identity(tree, node) else { return Ok(false); };
-    let Some(path) = node.path.as_deref() else { return Ok(false); };
-    let identity = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), command != "status.unstage")?;
+    let Some(captured) = file_identity(tree, node) else {
+        return Ok(false);
+    };
+    let Some(path) = node.path.as_deref() else {
+        return Ok(false);
+    };
+    let identity = repo.file_mutation_identity(
+        path,
+        captured.original.as_ref().map(|(path, _)| path.as_str()),
+        command != "status.unstage",
+    )?;
     let hunks;
     let hunk = match node.mutation.as_ref() {
         Some(MutationContent::Hunk { hunk, .. }) => {
             hunks = repo.file_hunks(path, node.section.as_deref() == Some("staged"))?;
-            let Some(current) = hunks.iter().find(|current| current.id == hunk.id) else { return Ok(false); };
-            Some((current, hunks.iter().filter(|other| other.same_content(current)).count()))
+            let Some(current) = hunks.iter().find(|current| current.id == hunk.id) else {
+                return Ok(false);
+            };
+            Some((
+                current,
+                hunks
+                    .iter()
+                    .filter(|other| other.same_content(current))
+                    .count(),
+            ))
         }
         Some(MutationContent::File(_)) => None,
         _ => return Ok(false),
@@ -287,27 +431,52 @@ pub fn target_is_current(repo: &GitRepo, tree: &crate::tree::Tree, command: &str
 }
 
 /// Capture cursor/selection targets from displayed structure, not rendered text.
-pub fn displayed_targets(tree: &crate::tree::Tree, command: &str, cursor: Option<Cursor>, selection: Option<Selection>) -> Vec<ActionTarget> {
+pub fn displayed_targets(
+    tree: &crate::tree::Tree,
+    command: &str,
+    cursor: Option<Cursor>,
+    selection: Option<Selection>,
+) -> Vec<ActionTarget> {
     use crate::tree::NodeKind;
     let mut targets = Vec::new();
     if let Some(selection) = selection {
         let start = selection.start_line.min(selection.end_line);
         let end = selection.start_line.max(selection.end_line);
-        let section = if command == "status.unstage" { "staged" } else { "unstaged" };
-        if tree.line_nodes.get(start).and_then(|line| line.section.as_deref()) != Some(section) { return targets; }
+        let section = if command == "status.unstage" {
+            "staged"
+        } else {
+            "unstaged"
+        };
+        if tree
+            .line_nodes
+            .get(start)
+            .and_then(|line| line.section.as_deref())
+            != Some(section)
+        {
+            return targets;
+        }
         for node in &tree.nodes {
-            if node.section.as_deref() != Some(section) { continue; }
+            if node.section.as_deref() != Some(section) {
+                continue;
+            }
             let selected = match node.kind {
                 NodeKind::File => start <= node.start_line && node.start_line <= end,
                 NodeKind::Hunk => start <= node.end_line && node.start_line <= end,
                 _ => false,
             };
             if selected {
-                if let Some(target) = offer_target(tree, command, &node.id) { targets.push(target); }
+                if let Some(target) = offer_target(tree, command, &node.id) {
+                    targets.push(target);
+                }
             }
         }
-    } else if let Some(node) = cursor.and_then(|cursor| tree.line_nodes.get(cursor.line)).and_then(|line| tree.node(&line.node)) {
-        if let Some(target) = offer_target(tree, command, &node.id) { targets.push(target); }
+    } else if let Some(node) = cursor
+        .and_then(|cursor| tree.line_nodes.get(cursor.line))
+        .and_then(|line| tree.node(&line.node))
+    {
+        if let Some(target) = offer_target(tree, command, &node.id) {
+            targets.push(target);
+        }
     }
     targets
 }

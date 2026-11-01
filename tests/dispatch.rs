@@ -15,7 +15,10 @@ fn semantic_menu_item_target_roundtrips_without_losing_item_identity() {
         item_key: "l".into(),
     };
     let encoded = serde_json::to_value(&target).unwrap();
-    assert_eq!(serde_json::from_value::<dispatch::SemanticMenuItemTarget>(encoded).unwrap(), target);
+    assert_eq!(
+        serde_json::from_value::<dispatch::SemanticMenuItemTarget>(encoded).unwrap(),
+        target
+    );
 }
 
 #[test]
@@ -261,10 +264,7 @@ fn discard_selection_resolves_to_discard_selection() {
             NodeKind::Other,
             Some(LineRange { start: 4, end: 5 })
         ),
-        Resolution::DiscardSelection {
-            start: 4,
-            end: 5
-        }
+        Resolution::DiscardSelection { start: 4, end: 5 }
     );
 }
 
@@ -364,9 +364,7 @@ fn execute_unstage_hunk_unstages_only_that_hunk() {
         .modify_two_hunks()
         .build();
     repo.stage_file("f.txt").expect("stage");
-    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
 
     dispatch::execute(
         &repo,
@@ -444,13 +442,7 @@ fn session_dispatch_returns_fresh_status_with_hunk_changed_message() {
         &lines(40).with(35, "line35 DIFFERENT").to_string(),
     );
 
-    let result = test.invoke_at_version(
-        "status.stage",
-        initial.version,
-        Some(cursor),
-        None,
-        None,
-    );
+    let result = test.invoke_at_version("status.stage", initial.version, Some(cursor), None, None);
 
     assert_eq!(
         result.effects,
@@ -460,7 +452,10 @@ fn session_dispatch_returns_fresh_status_with_hunk_changed_message() {
     let status = repo.status().expect("fresh status");
     assert!(status.staged.is_empty());
     assert_eq!(status.unstaged.len(), 1);
-    assert!(cached_diff(tmp.path()).is_empty(), "the index must stay untouched");
+    assert!(
+        cached_diff(tmp.path()).is_empty(),
+        "the index must stay untouched"
+    );
 }
 
 #[test]
@@ -600,10 +595,14 @@ fn execute_selection_git_failure_returns_readable_effect() {
 
     assert_eq!(effects.len(), 1);
     match &effects[0] {
-        Effect::Message { level, text, hint, .. } => {
+        Effect::Message {
+            level, text, hint, ..
+        } => {
             assert_eq!(*level, MessageLevel::Error);
             assert!(text.contains("Another Git process is running"), "{text}");
-            assert!(hint.as_deref().is_some_and(|hint| hint.contains("index.lock")));
+            assert!(hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("index.lock")));
         }
         other => panic!("unexpected effect: {other:?}"),
     }

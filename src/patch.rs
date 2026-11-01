@@ -61,7 +61,9 @@ impl PatchMetadata {
             } else {
                 for prefix in ["rename from ", "rename to ", "copy from ", "copy to "] {
                     if let Some(value) = line.strip_prefix(prefix) {
-                        metadata.operations.push((prefix.trim_end().into(), value.into()));
+                        metadata
+                            .operations
+                            .push((prefix.trim_end().into(), value.into()));
                     }
                 }
             }
@@ -73,8 +75,10 @@ impl PatchMetadata {
 impl Hunk {
     /// Compare mutation content without location or identical-sibling ordinal.
     pub fn same_content(&self, other: &Self) -> bool {
-        self.lines.len() == other.lines.len() && self.lines.iter().zip(&other.lines)
-            .all(|(a, b)| a.marker == b.marker && a.text == b.text && a.no_newline == b.no_newline)
+        self.lines.len() == other.lines.len()
+            && self.lines.iter().zip(&other.lines).all(|(a, b)| {
+                a.marker == b.marker && a.text == b.text && a.no_newline == b.no_newline
+            })
     }
 
     /// Compute `id` from the hunk's line markers and text.
@@ -96,7 +100,6 @@ impl Hunk {
         }
         self.id = id;
     }
-
 }
 
 /// A single file's parsed diff: the raw header before the first hunk plus hunks.
@@ -153,7 +156,6 @@ impl FileLayout {
             hunks,
         })
     }
-
 }
 
 /// One unit of work produced by normalising a document-line selection.
@@ -357,7 +359,9 @@ pub fn parse_file_diff(diff: &str) -> Option<FileDiff> {
         header.push('\n');
     }
     let metadata = PatchMetadata::from_header(&header);
-    for hunk in &mut hunks { hunk.metadata = metadata.clone(); }
+    for hunk in &mut hunks {
+        hunk.metadata = metadata.clone();
+    }
     Some(FileDiff {
         path: diff_path(diff)?,
         header,
@@ -664,24 +668,58 @@ mod tests {
 
     #[test]
     fn hunk_metadata_captures_header_semantics_but_not_blob_ids_or_coordinates() {
-        let diff = |header: &str, row| format!("diff --git a/f b/f\n{header}--- a/f\n+++ b/f\n@@ -{row},1 +{row},1 @@\n-old\n+new\n");
-        let parsed = |header: &str, row| parse_file_diff(&diff(header, row)).unwrap().hunks.remove(0);
+        let diff = |header: &str, row| {
+            format!("diff --git a/f b/f\n{header}--- a/f\n+++ b/f\n@@ -{row},1 +{row},1 @@\n-old\n+new\n")
+        };
+        let parsed =
+            |header: &str, row| parse_file_diff(&diff(header, row)).unwrap().hunks.remove(0);
         let original = parsed("index 1111111..2222222 100644\n", 1);
         let shifted = parsed("index 3333333..4444444 100644\n", 20);
         assert_eq!(original.id, shifted.id);
         assert_eq!(original.metadata, shifted.metadata);
-        assert_eq!(original.metadata.modes, vec![("unchanged".into(), "100644".into())]);
+        assert_eq!(
+            original.metadata.modes,
+            vec![("unchanged".into(), "100644".into())]
+        );
         for (header, modes, operations) in [
-            ("old mode 100644\nnew mode 100755\n", vec![("old", "100644"), ("new", "100755")], vec![]),
-            ("old mode 100644\nnew mode 120000\n", vec![("old", "100644"), ("new", "120000")], vec![]),
+            (
+                "old mode 100644\nnew mode 100755\n",
+                vec![("old", "100644"), ("new", "100755")],
+                vec![],
+            ),
+            (
+                "old mode 100644\nnew mode 120000\n",
+                vec![("old", "100644"), ("new", "120000")],
+                vec![],
+            ),
             ("new file mode 100644\n", vec![("create", "100644")], vec![]),
-            ("deleted file mode 100755\n", vec![("delete", "100755")], vec![]),
-            ("rename from old\nrename to f\n", vec![], vec![("rename from", "old"), ("rename to", "f")]),
-            ("copy from old\ncopy to f\n", vec![], vec![("copy from", "old"), ("copy to", "f")]),
+            (
+                "deleted file mode 100755\n",
+                vec![("delete", "100755")],
+                vec![],
+            ),
+            (
+                "rename from old\nrename to f\n",
+                vec![],
+                vec![("rename from", "old"), ("rename to", "f")],
+            ),
+            (
+                "copy from old\ncopy to f\n",
+                vec![],
+                vec![("copy from", "old"), ("copy to", "f")],
+            ),
         ] {
             let current = parsed(header, 1);
-            assert_eq!(current.id, original.id, "header semantics are not hunk identity");
-            let owned = |items: Vec<(&str, &str)>| items.into_iter().map(|(a, b)| (a.into(), b.into())).collect::<Vec<(String, String)>>();
+            assert_eq!(
+                current.id, original.id,
+                "header semantics are not hunk identity"
+            );
+            let owned = |items: Vec<(&str, &str)>| {
+                items
+                    .into_iter()
+                    .map(|(a, b)| (a.into(), b.into()))
+                    .collect::<Vec<(String, String)>>()
+            };
             assert_eq!(current.metadata.modes, owned(modes));
             assert_eq!(current.metadata.operations, owned(operations));
             assert_ne!(current.metadata, original.metadata);

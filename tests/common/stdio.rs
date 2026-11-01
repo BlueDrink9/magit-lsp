@@ -118,7 +118,9 @@ impl TestServer {
     /// Receive the next frame with a bounded wait.
     pub fn recv(&mut self) -> Value {
         let message = self.recv_raw();
-        if self.auto_respond_progress_create && message["method"] == "window/workDoneProgress/create" {
+        if self.auto_respond_progress_create
+            && message["method"] == "window/workDoneProgress/create"
+        {
             let response = json!({"jsonrpc":"2.0", "id":message["id"], "result":null});
             self.send(response);
         }
@@ -258,7 +260,11 @@ impl TestServer {
             .expect("stderr reader")
             .join()
             .expect("stderr thread");
-        let messages = self.responses.try_iter().map(|message| message.expect("stdout is clean LSP framing through EOF")).collect();
+        let messages = self
+            .responses
+            .try_iter()
+            .map(|message| message.expect("stdout is clean LSP framing through EOF"))
+            .collect();
         (status, messages)
     }
 }

@@ -64,9 +64,7 @@ fn unstage_hunk_works_on_unicode_path() {
     write(&tmp.path().join(path), &standard_changes());
     repo.stage_file(path).expect("stage file");
 
-    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
     repo.unstage_hunk(path, &hunk_id).expect("unstage hunk");
 
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", path]);
@@ -87,8 +85,7 @@ fn stage_lines_works_on_quote_and_backslash_path() {
     let hunk_id = repo.status().expect("status").unstaged[0].hunks[0]
         .id
         .clone();
-    repo.stage_lines(path, &hunk_id, 2, 3)
-        .expect("stage lines");
+    repo.stage_lines(path, &hunk_id, 2, 3).expect("stage lines");
 
     let cached = git(tmp.path(), &["diff", "--cached", "-U3", "--", path]);
     assert!(cached.contains("+line3 CHANGED"), "got: {cached}");
@@ -203,10 +200,7 @@ fn untracked_files_are_separate_from_unstaged() {
 
     let status = repo.status().expect("status");
     assert_eq!(status_paths(&status, false), vec!["f.txt"]);
-    assert_eq!(
-        untracked_paths(&status),
-        vec!["new.txt", "spaced name.txt"]
-    );
+    assert_eq!(untracked_paths(&status), vec!["new.txt", "spaced name.txt"]);
     for file in &status.untracked {
         assert_eq!(file.status, "?");
         assert!(file.hunks.is_empty());

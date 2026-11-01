@@ -208,9 +208,7 @@ impl Drop for GatedGit {
             if process_exists(pid) && self.is_gate_child(pid) {
                 // Last resort so the gate can never leak a waiting child; the
                 // identity check makes sure a recycled pid is never signalled.
-                let _ = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
-                    .status();
+                let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
             }
         }
     }

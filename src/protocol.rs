@@ -52,11 +52,7 @@ pub enum Effect {
     Quit,
     /// Open a worktree file at a location the server resolved from its tree.
     /// `uri` is a `file:` URI; `line` and `column` are 0-based.
-    VisitFile {
-        uri: String,
-        line: u32,
-        column: u32,
-    },
+    VisitFile { uri: String, line: u32, column: u32 },
     /// Open Git's real commit-message file, or re-present the same pending run
     /// after failed native close. New runs start at version 1; recovery carries
     /// the accepted snapshot and must not replace retained client edits/versions.
@@ -136,7 +132,11 @@ pub enum EditConfirmation {
     /// The selected content source was accepted and the helper released, not
     /// necessarily committed: Git still owns hooks and cleanup.
     #[serde(rename = "confirmed")]
-    Confirmed { run_id: String, uri: String, version: i32 },
+    Confirmed {
+        run_id: String,
+        uri: String,
+        version: i32,
+    },
 }
 
 impl Effect {
@@ -233,10 +233,7 @@ pub struct ViewOpenParams {
 impl ViewOpenParams {
     /// Repository root carried by a status view's arguments.
     pub fn repo_path(&self) -> Option<&str> {
-        self.args
-            .as_ref()?
-            .get("repo_path")
-            .and_then(Value::as_str)
+        self.args.as_ref()?.get("repo_path").and_then(Value::as_str)
     }
 }
 impl lsp_types::request::Request for ViewOpenRequest {
@@ -472,7 +469,11 @@ pub struct ViewPromptParams {
     pub secret: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub items: Option<Vec<PromptItem>>,
-    #[serde(default, rename = "allowCustom", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "allowCustom",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub allow_custom: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preselected: Option<Vec<String>>,

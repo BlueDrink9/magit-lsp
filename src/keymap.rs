@@ -187,7 +187,10 @@ impl Keymap {
                 .push(key.clone());
         }
 
-        let parsed = keys_by_command.iter().map(|(command, keys)| ((*command).to_string(), keys.clone())).collect();
+        let parsed = keys_by_command
+            .iter()
+            .map(|(command, keys)| ((*command).to_string(), keys.clone()))
+            .collect();
         let mut bindings = Vec::new();
         for command in &candidates {
             let Some(decl) = chosen.get(command.id) else {
@@ -220,7 +223,9 @@ impl Keymap {
                 continue;
             }
             for chord in self.parsed.get(&binding.command).into_iter().flatten() {
-                if self.basic_modifiers && !chord.steps().iter().all(basic_step) { continue; }
+                if self.basic_modifiers && !chord.steps().iter().all(basic_step) {
+                    continue;
+                }
                 if chord.starts_with(prefix) {
                     if chord.steps().len() > prefix.len() {
                         return Match::Prefix;
@@ -242,7 +247,11 @@ impl Keymap {
     pub fn with_basic_modifiers(mut self, basic: bool) -> Self {
         self.basic_modifiers = basic;
         for binding in &mut self.bindings {
-            binding.keys = self.parsed.get(&binding.command).into_iter().flatten()
+            binding.keys = self
+                .parsed
+                .get(&binding.command)
+                .into_iter()
+                .flatten()
                 .filter(|chord| !basic || chord.steps().iter().all(basic_step))
                 .map(KeyChord::to_canonical)
                 .collect();
@@ -258,7 +267,9 @@ impl Keymap {
 
     /// The binding for `command`, if the scope declares it.
     pub fn command(&self, command: &str) -> Option<&Binding> {
-        self.bindings.iter().find(|binding| binding.command == command)
+        self.bindings
+            .iter()
+            .find(|binding| binding.command == command)
     }
 
     /// The complete keymap for a view that only keeps `command` bound.

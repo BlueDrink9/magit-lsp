@@ -51,12 +51,13 @@ fn json_matches_snapshots_and_has_the_documented_shape() {
         let scopes = profiles[0]["scopes"].as_array().expect("scopes array");
         assert_eq!(scopes.len(), magit_lsp::config::VIEW_SCOPES.len());
         let binding = &scopes[0]["bindings"][0];
-        for field in [
-            "command", "keys", "modes", "label", "status",
-        ] {
+        for field in ["command", "keys", "modes", "label", "status"] {
             assert!(binding.get(field).is_some(), "missing `{field}`: {binding}");
         }
-        assert!(text.ends_with('\n'), "JSON manifest needs a trailing newline");
+        assert!(
+            text.ends_with('\n'),
+            "JSON manifest needs a trailing newline"
+        );
     }
 }
 
@@ -66,8 +67,12 @@ fn vscode_matches_snapshots() {
         let text = manifest::vscode(&manifest_for(profile));
         expect_file![format!("snapshots/keybindings-{}.json", profile.as_str())].assert_eq(&text);
         let entries: Vec<Value> = serde_json::from_str(&text).expect("keybindings are JSON");
-        assert!(entries.iter().all(|entry| entry["command"] == "magit.invoke"
-            && entry["args"]["command"].as_str().is_some_and(|id| magit_lsp::commands::registry().get(id).is_some())));
+        assert!(entries
+            .iter()
+            .all(|entry| entry["command"] == "magit.invoke"
+                && entry["args"]["command"]
+                    .as_str()
+                    .is_some_and(|id| magit_lsp::commands::registry().get(id).is_some())));
         for entry in &entries {
             assert!(entry["args"]["command"].is_string(), "entry: {entry}");
             assert!(
@@ -84,7 +89,9 @@ fn vscode_matches_snapshots() {
     let entries = manifest::vscode_entries(&manifest_for(Profile::Standard));
     let stage_all = entries
         .iter()
-        .find(|entry| entry.binding == "status.stage-all" && entry.key == "shift+s" && entry.scope == "status")
+        .find(|entry| {
+            entry.binding == "status.stage-all" && entry.key == "shift+s" && entry.scope == "status"
+        })
         .expect("status.stage-all binding");
     assert_eq!(stage_all.key, "shift+s");
 }
@@ -93,14 +100,21 @@ fn vscode_matches_snapshots() {
 fn contributed_vscode_payloads_are_canonical_server_commands() {
     let package: Value = serde_json::from_str(include_str!("../clients/vscode/package.json"))
         .expect("extension package is JSON");
-    let bindings = package["contributes"]["keybindings"].as_array().expect("bindings");
+    let bindings = package["contributes"]["keybindings"]
+        .as_array()
+        .expect("bindings");
     for binding in bindings {
         assert_eq!(binding["command"], "magit.invoke");
         let id = binding["args"]["command"].as_str().expect("canonical ID");
-        assert!(magit_lsp::commands::registry().get(id).is_some(), "unknown server command: {id}");
+        assert!(
+            magit_lsp::commands::registry().get(id).is_some(),
+            "unknown server command: {id}"
+        );
     }
     for (key, id) in [("f5", "common.refresh"), ("tab", "common.toggle-section")] {
-        assert!(bindings.iter().any(|binding| binding["key"] == key && binding["args"]["command"] == id));
+        assert!(bindings
+            .iter()
+            .any(|binding| binding["key"] == key && binding["args"]["command"] == id));
     }
 }
 
@@ -197,7 +211,10 @@ fn version_help_and_unknown_subcommands() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("keymap"));
 
-    let output = binary().arg("nope").output().expect("run unknown subcommand");
+    let output = binary()
+        .arg("nope")
+        .output()
+        .expect("run unknown subcommand");
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Usage:"));
@@ -234,8 +251,11 @@ fn has_file_line(stderr: &str, file: &str) -> bool {
 fn keymap_check_reports_conflicts_with_file_and_line() {
     let tmp = isolated();
     let config = tmp.path().join("conflict.toml");
-    std::fs::write(&config, "[keys.status]\nstage = [\"q\"]\nunstage = [\"q\"]\n")
-        .expect("write config");
+    std::fs::write(
+        &config,
+        "[keys.status]\nstage = [\"q\"]\nunstage = [\"q\"]\n",
+    )
+    .expect("write config");
 
     let output = binary()
         .args(["keymap", "--check", "--config"])
@@ -261,7 +281,10 @@ fn keymap_check_reports_unknown_commands_with_file_and_line() {
         .expect("run keymap --check");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown command `nope`"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("unknown command `nope`"),
+        "stderr: {stderr}"
+    );
     assert!(has_file_line(&stderr, "unknown.toml"), "stderr: {stderr}");
 }
 
@@ -285,12 +308,22 @@ fn keymap_format_json_without_profile_emits_every_profile() {
 fn check_with_format_emits_only_when_valid() {
     let tmp = isolated();
     let output = isolated_command(tmp.path())
-        .args(["keymap", "--check", "--format", "markdown", "--profile", "vim"])
+        .args([
+            "keymap",
+            "--check",
+            "--format",
+            "markdown",
+            "--profile",
+            "vim",
+        ])
         .output()
         .expect("run keymap --check --format markdown");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("# magit-lsp keymap: vim"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("# magit-lsp keymap: vim"),
+        "stdout: {stdout}"
+    );
 
     let bad = tmp.path().join("bad.toml");
     std::fs::write(&bad, "[keys.status]\nnope = [\"q\"]\n").expect("write config");

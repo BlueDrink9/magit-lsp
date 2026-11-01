@@ -81,14 +81,19 @@ impl StatusView {
         let status = &self.status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
-        build_with_limit(status, visibility, self.section_line_limit, |section, file| {
-            if section == "untracked" {
-                return Vec::new();
-            }
-            let staged = section == "staged";
-            let key = (file.path.clone(), staged);
-            hunks.get(&key).cloned().unwrap_or_default()
-        })
+        build_with_limit(
+            status,
+            visibility,
+            self.section_line_limit,
+            |section, file| {
+                if section == "untracked" {
+                    return Vec::new();
+                }
+                let staged = section == "staged";
+                let key = (file.path.clone(), staged);
+                hunks.get(&key).cloned().unwrap_or_default()
+            },
+        )
     }
 
     /// All `(section, path)` pairs in the listing, cloned so callers may mutate.
@@ -176,9 +181,12 @@ impl StatusView {
         };
         let state = state.unwrap_or_else(|| {
             let displayed_collapsed = target.children.iter().any(|child_id| {
-                tree.node(child_id).is_some_and(|child| child.kind == NodeKind::Message)
+                tree.node(child_id)
+                    .is_some_and(|child| child.kind == NodeKind::Message)
             });
-            let expanded = self.visibility.explicit_state(&target.id)
+            let expanded = self
+                .visibility
+                .explicit_state(&target.id)
                 .map(|state| state == VisibilityState::Expanded)
                 .unwrap_or(!displayed_collapsed);
             if expanded {
@@ -263,8 +271,13 @@ impl View for StatusView {
                 self.visibility.show_all();
                 // A Plain size summary is renderer-imposed, not a stored
                 // collapsed override; show-all must explicitly reveal it.
-                for section in tree.nodes.iter().filter(|node| node.kind == NodeKind::Section) {
-                    self.visibility.set(section.id.clone(), VisibilityState::Expanded);
+                for section in tree
+                    .nodes
+                    .iter()
+                    .filter(|node| node.kind == NodeKind::Section)
+                {
+                    self.visibility
+                        .set(section.id.clone(), VisibilityState::Expanded);
                 }
                 self.level = LEVEL_MAX;
                 true
@@ -318,7 +331,12 @@ where
 }
 
 /// Build with an optional rendered-line bound per section.
-pub fn build_with_limit<F>(status: &Status, visibility: &Visibility, limit: Option<usize>, mut load: F) -> Tree
+pub fn build_with_limit<F>(
+    status: &Status,
+    visibility: &Visibility,
+    limit: Option<usize>,
+    mut load: F,
+) -> Tree
 where
     F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
 {
@@ -335,8 +353,7 @@ where
                 return None;
             }
             let body_lines = section.end_line.saturating_sub(section.start_line);
-            (body_lines > limit)
-                .then(|| (section.section.clone().unwrap_or_default(), body_lines))
+            (body_lines > limit).then(|| (section.section.clone().unwrap_or_default(), body_lines))
         })
         .collect();
     if summaries.is_empty() {
@@ -358,7 +375,11 @@ impl<'a, F> Builder<'a, F>
 where
     F: FnMut(&str, &FileEntry) -> Vec<Hunk>,
 {
-    fn new(visibility: &'a Visibility, load: &'a mut F, summaries: &'a HashMap<String, usize>) -> Self {
+    fn new(
+        visibility: &'a Visibility,
+        load: &'a mut F,
+        summaries: &'a HashMap<String, usize>,
+    ) -> Self {
         Self {
             tree: Tree {
                 version: 0,
@@ -448,7 +469,9 @@ where
             let row = self.tree.lines.len();
             self.tree.lines.push(text.clone());
             self.tree.line_nodes.push(line_node(&id, NodeKind::Message));
-            self.tree.nodes.push(node(&id, NodeKind::Message, text, row));
+            self.tree
+                .nodes
+                .push(node(&id, NodeKind::Message, text, row));
             self.tree.nodes[index].children = vec![id];
         } else if self.visibility.is_expanded(&section_id) {
             let children = files
@@ -477,7 +500,10 @@ where
         file_node.section = Some(section.to_string());
         file_node.path = Some(file.path.clone());
         file_node.status = Some(file.status.clone());
-        file_node.mutation = file.mutation_identity.clone().map(crate::tree::MutationContent::File);
+        file_node.mutation = file
+            .mutation_identity
+            .clone()
+            .map(crate::tree::MutationContent::File);
         self.tree.nodes.push(file_node);
 
         let staged = section == "staged";
@@ -513,7 +539,10 @@ where
             let children = hunks
                 .iter()
                 .map(|hunk| {
-                    let identical = hunks.iter().filter(|other| other.same_content(hunk)).count();
+                    let identical = hunks
+                        .iter()
+                        .filter(|other| other.same_content(hunk))
+                        .count();
                     self.hunk(section, file, &file_id, hunk, identical)
                 })
                 .collect::<Vec<_>>();
@@ -522,7 +551,14 @@ where
         file_id
     }
 
-    fn hunk(&mut self, section: &str, file: &FileEntry, file_id: &str, hunk: &Hunk, identical: usize) -> String {
+    fn hunk(
+        &mut self,
+        section: &str,
+        file: &FileEntry,
+        file_id: &str,
+        hunk: &Hunk,
+        identical: usize,
+    ) -> String {
         let hunk_id = format!("{file_id}/hunk:{}", hunk.id);
         let line = self.tree.lines.len();
         let header = format!(
@@ -545,7 +581,10 @@ where
         hunk_node.hunk_id = Some(hunk.id.clone());
         hunk_node.new_line = Some(hunk.new_start);
         hunk_node.copy = Some(hunk_source_text(hunk));
-        hunk_node.mutation = Some(crate::tree::MutationContent::Hunk { hunk: hunk.clone(), identical });
+        hunk_node.mutation = Some(crate::tree::MutationContent::Hunk {
+            hunk: hunk.clone(),
+            identical,
+        });
         self.tree.nodes.push(hunk_node);
 
         let staged = section == "staged";

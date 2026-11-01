@@ -61,34 +61,101 @@ fn every_profile_parses_and_covers_every_command() {
 
 #[test]
 fn basic_modifier_mode_filters_delivery_and_resolution_but_full_keeps_bindings() {
-    let config = config_with(Profile::Standard, &[("status", &[("stage", &["ctrl+x", "meta+x", "shift+ctrl+x", "g ctrl+x"])])]);
+    let config = config_with(
+        Profile::Standard,
+        &[(
+            "status",
+            &[("stage", &["ctrl+x", "meta+x", "shift+ctrl+x", "g ctrl+x"])],
+        )],
+    );
     let full = Keymap::resolve("status", Profile::Standard, &config).unwrap();
-    assert_eq!(full.lookup(&KeyChord::parse("meta+x").unwrap().0[..1], EditorMode::Normal), Match::Exact("status.stage".into()));
+    assert_eq!(
+        full.lookup(
+            &KeyChord::parse("meta+x").unwrap().0[..1],
+            EditorMode::Normal
+        ),
+        Match::Exact("status.stage".into())
+    );
     let basic = full.with_basic_modifiers(true);
-    assert_eq!(basic.command("status.stage").unwrap().keys, vec!["ctrl+x", "g ctrl+x"]);
-    assert_eq!(basic.lookup(&KeyChord::parse("meta+x").unwrap().0[..1], EditorMode::Normal), Match::None);
-    assert_eq!(basic.lookup(&KeyChord::parse("ctrl+x").unwrap().0[..1], EditorMode::Normal), Match::Exact("status.stage".into()));
+    assert_eq!(
+        basic.command("status.stage").unwrap().keys,
+        vec!["ctrl+x", "g ctrl+x"]
+    );
+    assert_eq!(
+        basic.lookup(
+            &KeyChord::parse("meta+x").unwrap().0[..1],
+            EditorMode::Normal
+        ),
+        Match::None
+    );
+    assert_eq!(
+        basic.lookup(
+            &KeyChord::parse("ctrl+x").unwrap().0[..1],
+            EditorMode::Normal
+        ),
+        Match::Exact("status.stage".into())
+    );
 }
 
 #[test]
 fn basic_modifiers_check_every_step_without_removing_commands_or_printable_shift() {
-    let config = config_with(Profile::Standard, &[("status", &[
-        ("stage", &["ctrl+alt+9 meta+x", "shift+Tab", "ctrl+alt+x", "S", "!", "Enter"]),
-        ("unstage", &["meta+u"]),
-    ])]);
+    let config = config_with(
+        Profile::Standard,
+        &[(
+            "status",
+            &[
+                (
+                    "stage",
+                    &[
+                        "ctrl+alt+9 meta+x",
+                        "shift+Tab",
+                        "ctrl+alt+x",
+                        "S",
+                        "!",
+                        "Enter",
+                    ],
+                ),
+                ("unstage", &["meta+u"]),
+            ],
+        )],
+    );
     let full = Keymap::resolve("status", Profile::Standard, &config).unwrap();
     let basic = full.clone().with_basic_modifiers(true);
-    assert_eq!(basic.command("status.unstage").unwrap().keys, Vec::<String>::new());
+    assert_eq!(
+        basic.command("status.unstage").unwrap().keys,
+        Vec::<String>::new()
+    );
     for key in ["ctrl+alt+9", "ctrl+alt+9 meta+x", "shift+Tab", "meta+u"] {
-        assert_eq!(basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal), Match::None, "{key}");
+        assert_eq!(
+            basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal),
+            Match::None,
+            "{key}"
+        );
     }
     for key in ["ctrl+alt+x", "S", "!", "Enter"] {
-        assert_eq!(basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal), Match::Exact("status.stage".into()), "{key}");
-        assert!(basic.command("status.stage").unwrap().keys.contains(&key.to_owned()));
+        assert_eq!(
+            basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal),
+            Match::Exact("status.stage".into()),
+            "{key}"
+        );
+        assert!(basic
+            .command("status.stage")
+            .unwrap()
+            .keys
+            .contains(&key.to_owned()));
     }
     let restored = basic.with_basic_modifiers(false);
-    assert_eq!(restored.command("status.stage").unwrap().keys, full.command("status.stage").unwrap().keys);
-    assert_eq!(restored.lookup(KeyChord::parse("ctrl+alt+9 meta+x").unwrap().steps(), EditorMode::Normal), Match::Exact("status.stage".into()));
+    assert_eq!(
+        restored.command("status.stage").unwrap().keys,
+        full.command("status.stage").unwrap().keys
+    );
+    assert_eq!(
+        restored.lookup(
+            KeyChord::parse("ctrl+alt+9 meta+x").unwrap().steps(),
+            EditorMode::Normal
+        ),
+        Match::Exact("status.stage".into())
+    );
 }
 
 #[test]
@@ -118,8 +185,8 @@ fn profile_chords(profile: Profile) -> Vec<KeyChord> {
 
 fn vim_rule_violation(chords: &[KeyChord]) -> Option<String> {
     let reserved_motions: BTreeSet<KeyStep> = [
-        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "j", "k",
-        "G", "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
+        "v", "V", "ctrl+v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "j", "k", "G",
+        "ctrl+d", "ctrl+u", "ctrl+f", "ctrl+b", "/", "H", "L",
     ]
     .into_iter()
     .map(|key| KeyChord::parse(key).expect("reserved key parses").steps()[0].clone())
@@ -200,7 +267,10 @@ fn vim_user_can_override_structured_horizontal_motions() {
     let map = Keymap::resolve("status", Profile::Vim, &config).unwrap();
     for (key, command) in [("h", "status.stage"), ("l", "status.unstage")] {
         let step = KeyChord::parse(key).unwrap().steps().to_vec();
-        assert_eq!(map.lookup(&step, EditorMode::Normal), Match::Exact(command.into()));
+        assert_eq!(
+            map.lookup(&step, EditorMode::Normal),
+            Match::Exact(command.into())
+        );
     }
 }
 

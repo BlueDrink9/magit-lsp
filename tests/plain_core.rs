@@ -248,10 +248,18 @@ fn reduced_key_render_and_fold_modes_do_not_disable_explicit_commands() {
     let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
         panic!("expected rich")
     };
-    for command in ["status.stage", "open.commit", "common.hide-all", "menu.save-args"] {
+    for command in [
+        "status.stage",
+        "open.commit",
+        "common.hide-all",
+        "menu.save-args",
+    ] {
         assert_eq!(caps.command_requirement(command), None, "{command}");
     }
-    assert_eq!(caps.command_requirement("commit.create"), Some("editDocument"));
+    assert_eq!(
+        caps.command_requirement("commit.create"),
+        Some("editDocument")
+    );
 }
 
 #[test]

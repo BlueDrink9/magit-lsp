@@ -108,8 +108,7 @@ pub struct Command {
 impl Command {
     /// Whether this command applies to a view scope, including command-specific exceptions.
     pub fn applies_to(&self, view_scope: &str) -> bool {
-        self.scope.matches(view_scope)
-            || (self.id == "open.commit" && view_scope == "log")
+        self.scope.matches(view_scope) || (self.id == "open.commit" && view_scope == "log")
     }
 }
 
@@ -165,13 +164,27 @@ pub struct CommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptAction {
     /// Stage the captured working tree before starting commit.
-    Commit { fingerprint: RepositoryFingerprint, untracked: bool, operation: crate::git::CommitOperation },
+    Commit {
+        fingerprint: RepositoryFingerprint,
+        untracked: bool,
+        operation: crate::git::CommitOperation,
+    },
     /// Confirm rewriting a published HEAD without replaying menu arguments.
-    PublishedCommit { fingerprint: RepositoryFingerprint, operation: crate::git::CommitOperation },
+    PublishedCommit {
+        fingerprint: RepositoryFingerprint,
+        operation: crate::git::CommitOperation,
+    },
     /// Offer tracked `--all` for Extend without adding untracked files.
-    ExtendAll { fingerprint: RepositoryFingerprint, options: crate::git::CommitOptions },
+    ExtendAll {
+        fingerprint: RepositoryFingerprint,
+        options: crate::git::CommitOptions,
+    },
     /// Apply the captured resolution against the displayed patch identities.
-    Discard { fingerprint: RepositoryFingerprint, resolution: dispatch::Resolution, tree: Tree },
+    Discard {
+        fingerprint: RepositoryFingerprint,
+        resolution: dispatch::Resolution,
+        tree: Tree,
+    },
     /// Resolve a revision for the originating selection view.
     Revision,
 }
@@ -189,12 +202,19 @@ impl RepositoryFingerprint {
     pub fn capture(repo: &GitRepo) -> Result<Self> {
         let status = repo.status()?;
         let mut contents = Vec::new();
-        for entry in status.staged.iter().chain(&status.unstaged).chain(&status.untracked) {
+        for entry in status
+            .staged
+            .iter()
+            .chain(&status.unstaged)
+            .chain(&status.untracked)
+        {
             let path = repo.root().join(&entry.path);
             let content = match std::fs::symlink_metadata(&path) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     let mut bytes = vec![b'L'];
-                    bytes.extend_from_slice(std::fs::read_link(&path)?.as_os_str().as_encoded_bytes());
+                    bytes.extend_from_slice(
+                        std::fs::read_link(&path)?.as_os_str().as_encoded_bytes(),
+                    );
                     Some(bytes)
                 }
                 Ok(metadata) if metadata.is_dir() => Some(vec![b'D']),
@@ -211,25 +231,45 @@ impl RepositoryFingerprint {
         let dot_git = repo.root().join(".git");
         let git_dir = if dot_git.is_file() {
             let text = std::fs::read_to_string(&dot_git)?;
-            let path = text.trim().strip_prefix("gitdir: ").ok_or_else(|| crate::Error::new("Invalid Git directory file"))?;
+            let path = text
+                .trim()
+                .strip_prefix("gitdir: ")
+                .ok_or_else(|| crate::Error::new("Invalid Git directory file"))?;
             repo.root().join(path)
-        } else { dot_git };
+        } else {
+            dot_git
+        };
         let index = match std::fs::read(git_dir.join("index")) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(error.into()),
         };
-        Ok(Self { status, contents, index })
+        Ok(Self {
+            status,
+            contents,
+            index,
+        })
     }
 }
 
 /// Apply a prepared action without replaying command or coordinate resolution.
-pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Option<crate::protocol::PromptValue>) -> Result<CommandOutcome> {
+pub fn resume_prompt(
+    ctx: &mut CommandCtx<'_>,
+    action: PromptAction,
+    answer: Option<crate::protocol::PromptValue>,
+) -> Result<CommandOutcome> {
     use crate::protocol::PromptValue;
-    let Some(answer) = answer else { return Ok(CommandOutcome::default()); };
+    let Some(answer) = answer else {
+        return Ok(CommandOutcome::default());
+    };
     match action {
-        PromptAction::ExtendAll { fingerprint, mut options } => {
-            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+        PromptAction::ExtendAll {
+            fingerprint,
+            mut options,
+        } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
             let repo = GitRepo::open(ctx.repo_path)?;
             if RepositoryFingerprint::capture(&repo)? != fingerprint {
                 ctx.info("Repository changed while the prompt was open; try again");
@@ -238,30 +278,61 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
             options.all = true;
             prepare_head_commit(ctx, &repo, crate::git::CommitOperation::Extend(options))
         }
-        PromptAction::PublishedCommit { fingerprint, operation } => {
-            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+        PromptAction::PublishedCommit {
+            fingerprint,
+            operation,
+        } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
             let repo = GitRepo::open(ctx.repo_path)?;
             if RepositoryFingerprint::capture(&repo)? != fingerprint {
                 ctx.info("Repository changed while the prompt was open; try again");
                 return Ok(CommandOutcome::default());
             }
             ctx.info("Committing…");
-            Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
+            Ok(CommandOutcome {
+                commit: Some(operation),
+                ..Default::default()
+            })
         }
-        PromptAction::Commit { fingerprint, untracked, operation } => {
-            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+        PromptAction::Commit {
+            fingerprint,
+            untracked,
+            operation,
+        } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
             let repo = GitRepo::open(ctx.repo_path)?;
             if RepositoryFingerprint::capture(&repo)? != fingerprint {
                 ctx.info("Repository changed while the prompt was open; try again");
                 return Ok(CommandOutcome::default());
             }
-            ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUnstaged)?);
-            if untracked { ctx.extend(run_resolution(ctx.repo_path, dispatch::Resolution::StageAllUntracked)?); }
+            ctx.extend(run_resolution(
+                ctx.repo_path,
+                dispatch::Resolution::StageAllUnstaged,
+            )?);
+            if untracked {
+                ctx.extend(run_resolution(
+                    ctx.repo_path,
+                    dispatch::Resolution::StageAllUntracked,
+                )?);
+            }
             ctx.info("Committing…");
-            Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
+            Ok(CommandOutcome {
+                commit: Some(operation),
+                ..Default::default()
+            })
         }
-        PromptAction::Discard { fingerprint, resolution, tree } => {
-            if !matches!(answer, PromptValue::Bool(true)) { return Ok(CommandOutcome::default()); }
+        PromptAction::Discard {
+            fingerprint,
+            resolution,
+            tree,
+        } => {
+            if !matches!(answer, PromptValue::Bool(true)) {
+                return Ok(CommandOutcome::default());
+            }
             let repo = GitRepo::open(ctx.repo_path)?;
             if RepositoryFingerprint::capture(&repo)? != fingerprint {
                 ctx.info("Repository changed while the prompt was open; nothing discarded");
@@ -271,23 +342,41 @@ pub fn resume_prompt(ctx: &mut CommandCtx<'_>, action: PromptAction, answer: Opt
                 let section = file_worktree_section(&tree, path);
                 if !displayed_file_is_current(&repo, &tree, path, section)? {
                     ctx.info(errors::HUNK_CHANGED);
-                    return Ok(CommandOutcome { refresh: true, ..Default::default() });
+                    return Ok(CommandOutcome {
+                        refresh: true,
+                        ..Default::default()
+                    });
                 }
             }
             let effects = match resolution {
-                dispatch::Resolution::DiscardSelection { start, end } => execute_displayed_selection(&repo, &tree, start, end, false, true)?,
+                dispatch::Resolution::DiscardSelection { start, end } => {
+                    execute_displayed_selection(&repo, &tree, start, end, false, true)?
+                }
                 _ => dispatch::execute(&repo, &resolution, &[])?,
             };
             ctx.extend(effects);
-            Ok(CommandOutcome { refresh: true, ..Default::default() })
+            Ok(CommandOutcome {
+                refresh: true,
+                ..Default::default()
+            })
         }
         PromptAction::Revision => {
-            let PromptValue::Text(revision) = answer else { return Err(crate::Error::new("Expected a revision")); };
-            let oid = match GitRepo::open(ctx.repo_path).and_then(|repo| repo.resolve_commit(revision.trim())) {
-                Ok(oid) if !revision.trim().is_empty() => oid,
-                _ => { ctx.info(format!("Invalid commit revision: {}", revision.trim())); return Ok(CommandOutcome::default()); }
+            let PromptValue::Text(revision) = answer else {
+                return Err(crate::Error::new("Expected a revision"));
             };
-            Ok(CommandOutcome { selected_commits: Some(vec![oid]), ..Default::default() })
+            let oid = match GitRepo::open(ctx.repo_path)
+                .and_then(|repo| repo.resolve_commit(revision.trim()))
+            {
+                Ok(oid) if !revision.trim().is_empty() => oid,
+                _ => {
+                    ctx.info(format!("Invalid commit revision: {}", revision.trim()));
+                    return Ok(CommandOutcome::default());
+                }
+            };
+            Ok(CommandOutcome {
+                selected_commits: Some(vec![oid]),
+                ..Default::default()
+            })
         }
     }
 }
@@ -404,13 +493,19 @@ impl Registry {
 
 #[cfg(test)]
 mod availability_tests {
-    use super::{Availability, registry};
+    use super::{registry, Availability};
 
     #[test]
     fn availability_and_scope_are_pure_registry_metadata() {
         let commands = registry();
-        assert!(matches!(commands.availability("status.reverse"), Some(Availability::Planned(_))));
-        assert_eq!(commands.availability("common.confirm"), Some(Availability::Implemented));
+        assert!(matches!(
+            commands.availability("status.reverse"),
+            Some(Availability::Planned(_))
+        ));
+        assert_eq!(
+            commands.availability("common.confirm"),
+            Some(Availability::Implemented)
+        );
         assert!(commands.is_runnable_in("common.confirm", "commit"));
         assert!(commands.is_runnable_in("common.confirm", "status"));
         assert!(!commands.is_runnable_in("status.apply", "commit"));
@@ -620,24 +715,32 @@ fn build() -> Registry {
             run: quit,
         },
         Command {
-            id: "common.cycle-visibility", scope: Scope::Common,
+            id: "common.cycle-visibility",
+            scope: Scope::Common,
             doc: "Cycle the visibility of every section",
-            status: CommandStatus::Implemented, run: cycle_visibility,
+            status: CommandStatus::Implemented,
+            run: cycle_visibility,
         },
         Command {
-            id: "common.next-sibling", scope: Scope::Common,
+            id: "common.next-sibling",
+            scope: Scope::Common,
             doc: "Move to the next sibling",
-            status: CommandStatus::Implemented, run: next_sibling,
+            status: CommandStatus::Implemented,
+            run: next_sibling,
         },
         Command {
-            id: "common.prev-sibling", scope: Scope::Common,
+            id: "common.prev-sibling",
+            scope: Scope::Common,
             doc: "Move to the previous sibling",
-            status: CommandStatus::Implemented, run: prev_sibling,
+            status: CommandStatus::Implemented,
+            run: prev_sibling,
         },
         Command {
-            id: "common.parent-section", scope: Scope::Common,
+            id: "common.parent-section",
+            scope: Scope::Common,
             doc: "Move to the parent section",
-            status: CommandStatus::Implemented, run: parent_section,
+            status: CommandStatus::Implemented,
+            run: parent_section,
         },
         Command {
             id: "common.toggle-text-mode",
@@ -700,9 +803,27 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: commit_create,
         },
-        Command { id: "commit.amend", scope: Scope::MenuAction, doc: "Amend HEAD", status: CommandStatus::Implemented, run: commit_amend },
-        Command { id: "commit.extend", scope: Scope::MenuAction, doc: "Extend HEAD without editing its message", status: CommandStatus::Implemented, run: commit_extend },
-        Command { id: "commit.reword", scope: Scope::MenuAction, doc: "Reword HEAD", status: CommandStatus::Implemented, run: commit_reword },
+        Command {
+            id: "commit.amend",
+            scope: Scope::MenuAction,
+            doc: "Amend HEAD",
+            status: CommandStatus::Implemented,
+            run: commit_amend,
+        },
+        Command {
+            id: "commit.extend",
+            scope: Scope::MenuAction,
+            doc: "Extend HEAD without editing its message",
+            status: CommandStatus::Implemented,
+            run: commit_extend,
+        },
+        Command {
+            id: "commit.reword",
+            scope: Scope::MenuAction,
+            doc: "Reword HEAD",
+            status: CommandStatus::Implemented,
+            run: commit_reword,
+        },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
         Command {
@@ -806,10 +927,18 @@ fn build() -> Registry {
             status: CommandStatus::Implemented,
             run: reset_menu_args,
         },
-        planned("commit-message.history-prev", Scope::CommitMessage,
-            "Recall the previous commit message", "R-EDIT-HISTORY"),
-        planned("commit-message.history-next", Scope::CommitMessage,
-            "Recall the next commit message", "R-EDIT-HISTORY"),
+        planned(
+            "commit-message.history-prev",
+            Scope::CommitMessage,
+            "Recall the previous commit message",
+            "R-EDIT-HISTORY",
+        ),
+        planned(
+            "commit-message.history-next",
+            Scope::CommitMessage,
+            "Recall the next commit message",
+            "R-EDIT-HISTORY",
+        ),
         planned(
             "commit-message.add-signoff",
             Scope::CommitMessage,
@@ -888,11 +1017,20 @@ fn commit_create(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     commit_operation(ctx, crate::git::CommitKind::Create)
 }
 
-fn commit_amend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Amend) }
-fn commit_extend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Extend) }
-fn commit_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { commit_operation(ctx, crate::git::CommitKind::Reword) }
+fn commit_amend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_operation(ctx, crate::git::CommitKind::Amend)
+}
+fn commit_extend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_operation(ctx, crate::git::CommitKind::Extend)
+}
+fn commit_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_operation(ctx, crate::git::CommitKind::Reword)
+}
 
-fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> Result<CommandOutcome> {
+fn commit_operation(
+    ctx: &mut CommandCtx<'_>,
+    kind: crate::git::CommitKind,
+) -> Result<CommandOutcome> {
     let repo = GitRepo::open(ctx.repo_path)?;
     let options = match commit_options(ctx.args, &repo, kind) {
         Ok(options) => options,
@@ -906,7 +1044,9 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
         ctx.info("Cannot edit HEAD: this repository has no commit yet");
         return Ok(CommandOutcome::default());
     }
-    if kind != crate::git::CommitKind::Create && (options.reuse_message.is_some() || options.reedit_message.is_some()) {
+    if kind != crate::git::CommitKind::Create
+        && (options.reuse_message.is_some() || options.reedit_message.is_some())
+    {
         ctx.info("Message reuse and reedit options conflict with HEAD edit actions");
         return Ok(CommandOutcome::default());
     }
@@ -914,17 +1054,32 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
         ctx.info("Reword uses --only and cannot be combined with --all");
         return Ok(CommandOutcome::default());
     }
-    if kind == crate::git::CommitKind::Extend && status.staged.is_empty()
+    if kind == crate::git::CommitKind::Extend
+        && status.staged.is_empty()
         && !(options.all && !status.unstaged.is_empty())
-        && !(options.allow_empty || options.reset_author || options.signoff || options.author.is_some() || options.date.is_some())
+        && !(options.allow_empty
+            || options.reset_author
+            || options.signoff
+            || options.author.is_some()
+            || options.date.is_some())
     {
         if status.unstaged.is_empty() {
             ctx.info("Nothing staged (or unstaged) to extend");
             return Ok(CommandOutcome::default());
         }
-        return Ok(CommandOutcome { prompt: Some((head_commit_prompt(
-            "Nothing staged. Commit all tracked changes and extend HEAD?", None,
-        ), PromptAction::ExtendAll { fingerprint: RepositoryFingerprint::capture(&repo)?, options })), ..Default::default() });
+        return Ok(CommandOutcome {
+            prompt: Some((
+                head_commit_prompt(
+                    "Nothing staged. Commit all tracked changes and extend HEAD?",
+                    None,
+                ),
+                PromptAction::ExtendAll {
+                    fingerprint: RepositoryFingerprint::capture(&repo)?,
+                    options,
+                },
+            )),
+            ..Default::default()
+        });
     }
     let ready = options.allow_empty || (options.all && !status.unstaged.is_empty());
     let operation = match kind {
@@ -964,11 +1119,17 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
             min: None,
             max: None,
         };
-        return Ok(CommandOutcome { prompt: Some((prompt, PromptAction::Commit {
-            fingerprint: RepositoryFingerprint::capture(&repo)?,
-            untracked: !status.untracked.is_empty(),
-            operation,
-        })), ..Default::default() });
+        return Ok(CommandOutcome {
+            prompt: Some((
+                prompt,
+                PromptAction::Commit {
+                    fingerprint: RepositoryFingerprint::capture(&repo)?,
+                    untracked: !status.untracked.is_empty(),
+                    operation,
+                },
+            )),
+            ..Default::default()
+        });
     }
     ctx.info("Committing…");
     Ok(CommandOutcome {
@@ -979,37 +1140,71 @@ fn commit_operation(ctx: &mut CommandCtx<'_>, kind: crate::git::CommitKind) -> R
 
 fn head_commit_prompt(title: &str, detail: Option<&str>) -> ViewPromptParams {
     ViewPromptParams {
-        prompt_id: String::new(), kind: PromptKind::Confirm, title: title.into(),
-        detail: detail.map(str::to_string), yes_label: None, no_label: None,
-        destructive: Some(true), default: None, placeholder: None, secret: None,
-        items: None, allow_custom: None, preselected: None, min: None, max: None,
+        prompt_id: String::new(),
+        kind: PromptKind::Confirm,
+        title: title.into(),
+        detail: detail.map(str::to_string),
+        yes_label: None,
+        no_label: None,
+        destructive: Some(true),
+        default: None,
+        placeholder: None,
+        secret: None,
+        items: None,
+        allow_custom: None,
+        preselected: None,
+        min: None,
+        max: None,
     }
 }
 
-fn prepare_head_commit(ctx: &mut CommandCtx<'_>, repo: &GitRepo, operation: crate::git::CommitOperation) -> Result<CommandOutcome> {
+fn prepare_head_commit(
+    ctx: &mut CommandCtx<'_>,
+    repo: &GitRepo,
+    operation: crate::git::CommitOperation,
+) -> Result<CommandOutcome> {
     if repo.head_is_published()? {
         let prompt = head_commit_prompt("Rewrite published HEAD?", Some(
             "HEAD is reachable from a remote-tracking branch. Rewriting it may require a force push.",
         ));
-        return Ok(CommandOutcome { prompt: Some((prompt, PromptAction::PublishedCommit {
-            fingerprint: RepositoryFingerprint::capture(repo)?, operation,
-        })), ..Default::default() });
+        return Ok(CommandOutcome {
+            prompt: Some((
+                prompt,
+                PromptAction::PublishedCommit {
+                    fingerprint: RepositoryFingerprint::capture(repo)?,
+                    operation,
+                },
+            )),
+            ..Default::default()
+        });
     }
     ctx.info("Committing…");
-    Ok(CommandOutcome { commit: Some(operation), ..Default::default() })
+    Ok(CommandOutcome {
+        commit: Some(operation),
+        ..Default::default()
+    })
 }
 
 /// Validate structured commit-menu input once, before staging or launching Git.
-fn commit_options(args: Option<&Value>, repo: &GitRepo, kind: crate::git::CommitKind) -> Result<crate::git::CommitOptions> {
+fn commit_options(
+    args: Option<&Value>,
+    repo: &GitRepo,
+    kind: crate::git::CommitKind,
+) -> Result<crate::git::CommitOptions> {
     let args: crate::menu::Args = match args.filter(|value| !value.is_null()) {
-        Some(value) => serde_json::from_value(value.clone())
-            .map_err(|error| crate::Error::new(format!("Expected commit switches and option values: {error}")))?,
+        Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+            crate::Error::new(format!(
+                "Expected commit switches and option values: {error}"
+            ))
+        })?,
         None => crate::menu::Args::default(),
     };
     let mut options = crate::git::CommitOptions::default();
     let mut seen = std::collections::HashSet::new();
     for key in args.switches {
-        if !seen.insert(key.clone()) { return Err(crate::Error::new(format!("Duplicate commit switch {key}"))); }
+        if !seen.insert(key.clone()) {
+            return Err(crate::Error::new(format!("Duplicate commit switch {key}")));
+        }
         match key.as_str() {
             "-a" => options.all = true,
             "-e" => options.allow_empty = true,
@@ -1017,17 +1212,24 @@ fn commit_options(args: Option<&Value>, repo: &GitRepo, kind: crate::git::Commit
             "-n" => options.no_verify = true,
             "-R" => options.reset_author = true,
             "-s" => options.signoff = true,
-            _ => return Err(crate::Error::new(format!("Unsupported commit switch {key}"))),
+            _ => {
+                return Err(crate::Error::new(format!(
+                    "Unsupported commit switch {key}"
+                )))
+            }
         }
     }
     for (key, value) in args.options {
         if value.contains('\0') || (value.trim().is_empty() && key != "=S") {
-            return Err(crate::Error::new(format!("Missing or invalid value for {key}")));
+            return Err(crate::Error::new(format!(
+                "Missing or invalid value for {key}"
+            )));
         }
         match key.as_str() {
             "=A" => {
-                let valid = value.rsplit_once('<').is_some_and(|(name, email)|
-                    !name.trim().is_empty() && email.ends_with('>') && email.len() > 2);
+                let valid = value.rsplit_once('<').is_some_and(|(name, email)| {
+                    !name.trim().is_empty() && email.ends_with('>') && email.len() > 2
+                });
                 if !valid || value.contains(['\n', '\r']) {
                     return Err(crate::Error::new("Author must be Name <email>"));
                 }
@@ -1037,23 +1239,41 @@ fn commit_options(args: Option<&Value>, repo: &GitRepo, kind: crate::git::Commit
             "=S" => options.signing_key = Some(value),
             "=C" => options.reuse_message = Some(value),
             "=c" => options.reedit_message = Some(value),
-            _ => return Err(crate::Error::new(format!("Unsupported commit option {key}"))),
+            _ => {
+                return Err(crate::Error::new(format!(
+                    "Unsupported commit option {key}"
+                )))
+            }
         }
     }
     if options.reuse_message.is_some() && options.reedit_message.is_some() {
-        return Err(crate::Error::new("Reuse and reedit message options conflict"));
+        return Err(crate::Error::new(
+            "Reuse and reedit message options conflict",
+        ));
     }
     if options.reset_author && options.author.is_some() {
-        return Err(crate::Error::new("Reset author cannot be combined with author"));
+        return Err(crate::Error::new(
+            "Reset author cannot be combined with author",
+        ));
     }
-    if options.reset_author && kind == crate::git::CommitKind::Create
-        && options.reuse_message.is_none() && options.reedit_message.is_none() {
-        return Err(crate::Error::new("Reset author requires reuse/reedit when creating a commit"));
+    if options.reset_author
+        && kind == crate::git::CommitKind::Create
+        && options.reuse_message.is_none()
+        && options.reedit_message.is_none()
+    {
+        return Err(crate::Error::new(
+            "Reset author requires reuse/reedit when creating a commit",
+        ));
     }
-    for revision in [&mut options.reuse_message, &mut options.reedit_message].into_iter().flatten() {
+    for revision in [&mut options.reuse_message, &mut options.reedit_message]
+        .into_iter()
+        .flatten()
+    {
         *revision = repo.resolve_commit(revision)?;
     }
-    if let Some(date) = &options.date { repo.validate_author_date(date)?; }
+    if let Some(date) = &options.date {
+        repo.validate_author_date(date)?;
+    }
     Ok(options)
 }
 
@@ -1085,10 +1305,15 @@ fn open_current_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 fn select_and_copy(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     let args = ctx.args.and_then(Value::as_object);
     let string_arg = |name: &str, default: &str| {
-        args.and_then(|args| args.get(name)).and_then(Value::as_str).unwrap_or(default).to_string()
+        args.and_then(|args| args.get(name))
+            .and_then(Value::as_str)
+            .unwrap_or(default)
+            .to_string()
     };
     let bool_arg = |name: &str, default: bool| {
-        args.and_then(|args| args.get(name)).and_then(Value::as_bool).unwrap_or(default)
+        args.and_then(|args| args.get(name))
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
     };
     Ok(CommandOutcome {
         open_selection: Some(SelectionRequest {
@@ -1112,11 +1337,20 @@ fn toggle_commit_mark(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         return Ok(CommandOutcome::default());
     };
     let oid = ctx.cursor.and_then(|cursor| {
-        tree.line_nodes.get(cursor.line).and_then(|line| tree.node(&line.node))
-            .filter(|node| node.kind == NodeKind::Commit).and_then(|node| node.commit.clone())
+        tree.line_nodes
+            .get(cursor.line)
+            .and_then(|line| tree.node(&line.node))
+            .filter(|node| node.kind == NodeKind::Commit)
+            .and_then(|node| node.commit.clone())
     });
-    if oid.as_deref().is_some_and(|oid| ctx.view.toggle_commit_mark(oid)) {
-        return Ok(CommandOutcome { refresh: false, ..Default::default() });
+    if oid
+        .as_deref()
+        .is_some_and(|oid| ctx.view.toggle_commit_mark(oid))
+    {
+        return Ok(CommandOutcome {
+            refresh: false,
+            ..Default::default()
+        });
     }
     ctx.info("Place the cursor on a selectable commit to mark it");
     Ok(CommandOutcome::default())
@@ -1124,7 +1358,11 @@ fn toggle_commit_mark(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 /// Prompt for a revision and return its validated full commit object ID.
 fn enter_revision(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    if !ctx.view.commit_selection().is_some_and(|selection| selection.allow_free_text) {
+    if !ctx
+        .view
+        .commit_selection()
+        .is_some_and(|selection| selection.allow_free_text)
+    {
         ctx.info("Free-text revisions are not available for this selection");
         return Ok(CommandOutcome::default());
     }
@@ -1145,7 +1383,10 @@ fn enter_revision(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         min: None,
         max: None,
     };
-    Ok(CommandOutcome { prompt: Some((prompt, PromptAction::Revision)), ..Default::default() })
+    Ok(CommandOutcome {
+        prompt: Some((prompt, PromptAction::Revision)),
+        ..Default::default()
+    })
 }
 
 /// Drop every record from the process log and re-render the view.
@@ -1279,15 +1520,22 @@ fn confirm(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             ctx.info("Wait for the log view to render before selecting a commit");
             return Ok(CommandOutcome::default());
         };
-        let cursor_oid = ctx.cursor.and_then(|cursor| tree.line_nodes.get(cursor.line)
-            .and_then(|line| tree.node(&line.node)).filter(|node| node.kind == NodeKind::Commit)
-            .and_then(|node| node.commit.as_deref()));
+        let cursor_oid = ctx.cursor.and_then(|cursor| {
+            tree.line_nodes
+                .get(cursor.line)
+                .and_then(|line| tree.node(&line.node))
+                .filter(|node| node.kind == NodeKind::Commit)
+                .and_then(|node| node.commit.as_deref())
+        });
         let selected = ctx.view.selected_commits(cursor_oid);
         if selected.is_empty() {
             ctx.info("Place the cursor on a commit to confirm the selection");
             return Ok(CommandOutcome::default());
         }
-        return Ok(CommandOutcome { selected_commits: Some(selected), ..Default::default() });
+        return Ok(CommandOutcome {
+            selected_commits: Some(selected),
+            ..Default::default()
+        });
     }
     if ctx.draft_run_id().is_none() {
         ctx.info("Nothing to confirm");
@@ -1312,7 +1560,10 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         });
     }
     if ctx.view.commit_selection().is_some() {
-        return Ok(CommandOutcome { pop: true, ..Default::default() });
+        return Ok(CommandOutcome {
+            pop: true,
+            ..Default::default()
+        });
     }
     if ctx.selection.is_some() {
         let key = ctx.key.clone().unwrap_or_else(|| "Escape".to_string());
@@ -1402,14 +1653,21 @@ fn cycle_visibility(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 fn hierarchy_cursor(ctx: &mut CommandCtx<'_>, direction: Option<bool>) -> Result<CommandOutcome> {
-    let tree = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
-    let target = ctx.cursor.and_then(|cursor| tree.navigation_node(cursor.line)).and_then(|node| {
-        match direction {
+    let tree = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
+    let target = ctx
+        .cursor
+        .and_then(|cursor| tree.navigation_node(cursor.line))
+        .and_then(|node| match direction {
             Some(forward) => tree.sibling(&node.id, forward).or(Some(node)),
             None => tree.parent(&node.id).or(Some(node)),
-        }
-    });
-    Ok(CommandOutcome { cursor_nodes: target.map(|node| node.id.clone()).into_iter().collect(), ..Default::default() })
+        });
+    Ok(CommandOutcome {
+        cursor_nodes: target.map(|node| node.id.clone()).into_iter().collect(),
+        ..Default::default()
+    })
 }
 
 fn next_sibling(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -1434,8 +1692,12 @@ fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 /// Move to a visible structured header of the requested kind.
 fn jump(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     let args = ctx.args.and_then(Value::as_object);
-    let kind = args.and_then(|args| args.get("kind")).and_then(Value::as_str);
-    let dir = args.and_then(|args| args.get("dir")).and_then(Value::as_i64);
+    let kind = args
+        .and_then(|args| args.get("kind"))
+        .and_then(Value::as_str);
+    let dir = args
+        .and_then(|args| args.get("dir"))
+        .and_then(Value::as_i64);
     let Some(kind) = kind.filter(|kind| matches!(*kind, "section" | "file" | "hunk")) else {
         ctx.info("Jump kind must be section, file or hunk");
         return Ok(CommandOutcome::default());
@@ -1444,15 +1706,39 @@ fn jump(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         ctx.info("Jump direction must be 1 or -1");
         return Ok(CommandOutcome::default());
     };
-    let wanted = match kind { "section" => NodeKind::Section, "file" => NodeKind::File, _ => NodeKind::Hunk };
-    let Some(cursor) = ctx.cursor else { return Ok(CommandOutcome::default()); };
-    let source = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
-    let lines: Vec<usize> = source.line_nodes.iter().enumerate().filter_map(|(line, owner)| {
-        (owner.kind == wanted && source.node(&owner.node).is_some_and(|node| node.start_line == line)).then_some(line)
-    }).collect();
-    let target = if dir > 0 { lines.into_iter().find(|line| *line > cursor.line) }
-        else { lines.into_iter().rev().find(|line| *line < cursor.line) };
-    Ok(CommandOutcome { cursor: target.map(|line| Cursor { line, column: 0 }), ..Default::default() })
+    let wanted = match kind {
+        "section" => NodeKind::Section,
+        "file" => NodeKind::File,
+        _ => NodeKind::Hunk,
+    };
+    let Some(cursor) = ctx.cursor else {
+        return Ok(CommandOutcome::default());
+    };
+    let source = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
+    let lines: Vec<usize> = source
+        .line_nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(line, owner)| {
+            (owner.kind == wanted
+                && source
+                    .node(&owner.node)
+                    .is_some_and(|node| node.start_line == line))
+            .then_some(line)
+        })
+        .collect();
+    let target = if dir > 0 {
+        lines.into_iter().find(|line| *line > cursor.line)
+    } else {
+        lines.into_iter().rev().find(|line| *line < cursor.line)
+    };
+    Ok(CommandOutcome {
+        cursor: target.map(|line| Cursor { line, column: 0 }),
+        ..Default::default()
+    })
 }
 
 fn stage(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -1475,43 +1761,59 @@ fn stage_or_unstage(
         start: selection.start_line as u32,
         end: selection.end_line as u32,
     });
-    let source = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    let source = ctx
+        .view
+        .command_source_tree()
+        .unwrap_or_else(|| ctx.view.tree());
     // A stage request originating in the displayed staged section is never
     // retargeted to an unstaged hunk after a refresh. Visual selections retain
     // precedence and are resolved by their original section below.
-    if command == dispatch::Command::Stage && selection.is_none()
-        && ctx.cursor.and_then(|cursor| source.navigation_node(cursor.line))
-            .is_some_and(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("staged"))
+    if command == dispatch::Command::Stage
+        && selection.is_none()
+        && ctx
+            .cursor
+            .and_then(|cursor| source.navigation_node(cursor.line))
+            .is_some_and(|node| {
+                node.kind == NodeKind::Hunk && node.section.as_deref() == Some("staged")
+            })
     {
         return Ok(CommandOutcome::default());
     }
     let destinations = if command == dispatch::Command::Stage && ctx.selection.is_none() {
-        ctx.cursor.and_then(|cursor| source.navigation_node(cursor.line))
-            .filter(|node| node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged"))
+        ctx.cursor
+            .and_then(|cursor| source.navigation_node(cursor.line))
+            .filter(|node| {
+                node.kind == NodeKind::Hunk && node.section.as_deref() == Some("unstaged")
+            })
             .map(|node| {
                 // Capture the successor and source ancestors before Git mutates the view.
                 // Never follow the staged hunk's relocation when no sibling survives.
                 let file = source.parent(&node.id);
-                source.sibling(&node.id, true).into_iter()
+                source
+                    .sibling(&node.id, true)
+                    .into_iter()
                     .chain(file)
                     .chain(file.and_then(|file| source.parent(&file.id)))
-                    .map(|node| node.id.clone()).collect()
-            }).unwrap_or_default()
-    } else { Vec::new() };
-    let (effects, prompt) = stage_or_unstage_at(
-        ctx.view,
-        ctx.repo_path,
-        command,
-        ctx.cursor,
-        selection,
-    )?;
+                    .map(|node| node.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let (effects, prompt) =
+        stage_or_unstage_at(ctx.view, ctx.repo_path, command, ctx.cursor, selection)?;
     let succeeded = effects.is_empty();
     let move_cursor = succeeded && prompt.is_none();
     ctx.extend(effects);
     Ok(CommandOutcome {
         prompt,
         refresh: true,
-        cursor_nodes: if move_cursor { destinations } else { Vec::new() },
+        cursor_nodes: if move_cursor {
+            destinations
+        } else {
+            Vec::new()
+        },
         ..Default::default()
     })
 }
@@ -1580,20 +1882,26 @@ fn stage_or_unstage_at(
         dispatch::resolve(command, dispatch::NodeKind::Other, Some(range))
     } else {
         let Some(cursor) = cursor else {
-            return Ok((vec![Effect::message(
-                MessageLevel::Info,
-                "Place the cursor on a change to stage or unstage.",
-            )], None));
+            return Ok((
+                vec![Effect::message(
+                    MessageLevel::Info,
+                    "Place the cursor on a change to stage or unstage.",
+                )],
+                None,
+            ));
         };
         let Some(node) = source
             .line_nodes
             .get(cursor.line)
             .and_then(|line| source.node(&line.node))
         else {
-            return Ok((vec![Effect::message(
-                MessageLevel::Info,
-                "No change under the cursor.",
-            )], None));
+            return Ok((
+                vec![Effect::message(
+                    MessageLevel::Info,
+                    "No change under the cursor.",
+                )],
+                None,
+            ));
         };
 
         let current = view.tree();
@@ -1605,20 +1913,23 @@ fn stage_or_unstage_at(
             match re_resolve(current, node) {
                 Some(node) => node,
                 None => {
-                    return Ok((vec![Effect::message(
-                        MessageLevel::Warn,
-                        errors::HUNK_CHANGED,
-                    )], None))
+                    return Ok((
+                        vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)],
+                        None,
+                    ))
                 }
             }
         };
 
         // An untracked file has no index entry to remove.
         if command == dispatch::Command::Unstage && node.section.as_deref() == Some("untracked") {
-            return Ok((vec![Effect::message(
-                MessageLevel::Info,
-                dispatch::NOTHING_TO_UNSTAGE,
-            )], None));
+            return Ok((
+                vec![Effect::message(
+                    MessageLevel::Info,
+                    dispatch::NOTHING_TO_UNSTAGE,
+                )],
+                None,
+            ));
         }
 
         dispatch::resolve(command, dispatch_target(node), None)
@@ -1626,7 +1937,9 @@ fn stage_or_unstage_at(
 
     let repo = GitRepo::open(repo_path)?;
     if let Some(path) = match &resolution {
-        dispatch::Resolution::StageFile { path } | dispatch::Resolution::UnstageFile { path } => Some(path.as_str()),
+        dispatch::Resolution::StageFile { path } | dispatch::Resolution::UnstageFile { path } => {
+            Some(path.as_str())
+        }
         _ => None,
     } {
         let section = if matches!(resolution, dispatch::Resolution::UnstageFile { .. }) {
@@ -1635,7 +1948,10 @@ fn stage_or_unstage_at(
             file_worktree_section(source, path)
         };
         if !displayed_file_is_current(&repo, source, path, section)? {
-            return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
+            return Ok((
+                vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)],
+                None,
+            ));
         }
     }
     if matches!(
@@ -1649,7 +1965,10 @@ fn stage_or_unstage_at(
         if let dispatch::Resolution::DiscardFile { path } = &resolution {
             let section = file_worktree_section(source, path);
             if !displayed_file_is_current(&repo, source, path, section)? {
-                return Ok((vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)], None));
+                return Ok((
+                    vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)],
+                    None,
+                ));
             }
         }
         let what = match &resolution {
@@ -1680,14 +1999,24 @@ fn stage_or_unstage_at(
             min: None,
             max: None,
         };
-        return Ok((Vec::new(), Some((prompt, PromptAction::Discard {
-            fingerprint: RepositoryFingerprint::capture(&repo)?, resolution, tree: source.clone(),
-        }))));
+        return Ok((
+            Vec::new(),
+            Some((
+                prompt,
+                PromptAction::Discard {
+                    fingerprint: RepositoryFingerprint::capture(&repo)?,
+                    resolution,
+                    tree: source.clone(),
+                },
+            )),
+        ));
     }
     let effects = match &resolution {
-        dispatch::Resolution::Selection { start, end, reverse } => {
-            execute_displayed_selection(&repo, source, *start, *end, *reverse, false)
-        }
+        dispatch::Resolution::Selection {
+            start,
+            end,
+            reverse,
+        } => execute_displayed_selection(&repo, source, *start, *end, *reverse, false),
         dispatch::Resolution::DiscardSelection { start, end } => {
             execute_displayed_selection(&repo, source, *start, *end, false, true)
         }
@@ -1697,17 +2026,34 @@ fn stage_or_unstage_at(
 }
 
 /// Check the complete file state captured by the originating render.
-fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &str) -> Result<bool> {
-    let Some(file) = tree.nodes.iter().find(|node| node.kind == NodeKind::File
-        && node.path.as_deref() == Some(path) && node.section.as_deref() == Some(section)) else {
+fn displayed_file_is_current(
+    repo: &GitRepo,
+    tree: &Tree,
+    path: &str,
+    section: &str,
+) -> Result<bool> {
+    let Some(file) = tree.nodes.iter().find(|node| {
+        node.kind == NodeKind::File
+            && node.path.as_deref() == Some(path)
+            && node.section.as_deref() == Some(section)
+    }) else {
         return Ok(false);
     };
     let Some(crate::tree::MutationContent::File(captured)) = file.mutation.as_ref() else {
         return Ok(false);
     };
-    let current = repo.file_mutation_identity(path, captured.original.as_ref().map(|(path, _)| path.as_str()), section != "staged")?;
-    fn matches(captured: &crate::git::FileMutationIdentity, current: &crate::git::FileMutationIdentity, staged: bool) -> bool {
-        captured.head == current.head && captured.index == current.index
+    let current = repo.file_mutation_identity(
+        path,
+        captured.original.as_ref().map(|(path, _)| path.as_str()),
+        section != "staged",
+    )?;
+    fn matches(
+        captured: &crate::git::FileMutationIdentity,
+        current: &crate::git::FileMutationIdentity,
+        staged: bool,
+    ) -> bool {
+        captured.head == current.head
+            && captured.index == current.index
             && (staged || captured.worktree == current.worktree)
             && match (&captured.original, &current.original) {
                 (None, None) => true,
@@ -1719,10 +2065,15 @@ fn displayed_file_is_current(repo: &GitRepo, tree: &Tree, path: &str, section: &
 }
 
 fn file_worktree_section<'a>(tree: &'a Tree, path: &str) -> &'a str {
-    tree.nodes.iter().find(|node| node.kind == NodeKind::File
-        && node.path.as_deref() == Some(path)
-        && matches!(node.section.as_deref(), Some("unstaged" | "untracked")))
-        .and_then(|node| node.section.as_deref()).unwrap_or("unstaged")
+    tree.nodes
+        .iter()
+        .find(|node| {
+            node.kind == NodeKind::File
+                && node.path.as_deref() == Some(path)
+                && matches!(node.section.as_deref(), Some("unstaged" | "untracked"))
+        })
+        .and_then(|node| node.section.as_deref())
+        .unwrap_or("unstaged")
 }
 
 /// Run a whole-section operation against `repo_path`.
@@ -1734,84 +2085,154 @@ fn run_resolution(repo_path: &str, resolution: dispatch::Resolution) -> Result<V
 /// Resolve displayed coordinates before reading Git; fresh diffs only supply
 /// current patch coordinates for the selected content identities.
 fn execute_displayed_selection(
-    repo: &GitRepo, tree: &Tree, start: u32, end: u32, staged: bool, discard: bool,
+    repo: &GitRepo,
+    tree: &Tree,
+    start: u32,
+    end: u32,
+    staged: bool,
+    discard: bool,
 ) -> Result<Vec<Effect>> {
     let (start, end) = (start.min(end) as usize, start.max(end) as usize);
     let section = if staged { "staged" } else { "unstaged" };
     // Preserve the selection's originating-section rule.
-    if tree.line_nodes.get(start).or_else(|| tree.line_nodes.get(end))
-        .and_then(|line| line.section.as_deref()) != Some(section) {
-        return Ok(vec![Effect::message(MessageLevel::Info, crate::patch::NO_CHANGED_LINES)]);
+    if tree
+        .line_nodes
+        .get(start)
+        .or_else(|| tree.line_nodes.get(end))
+        .and_then(|line| line.section.as_deref())
+        != Some(section)
+    {
+        return Ok(vec![Effect::message(
+            MessageLevel::Info,
+            crate::patch::NO_CHANGED_LINES,
+        )]);
     }
     let selected = |node: &Node| start <= node.start_line && node.start_line <= end;
     let mut ops = Vec::new();
     let mut layouts = Vec::new();
-    for file in tree.nodes.iter().filter(|node| node.kind == NodeKind::File
-        && node.section.as_deref() == Some(section)) {
-        if end < file.start_line || start > file.end_line { continue; }
-        let Some(path) = file.path.as_deref() else { continue; };
-        let hunks: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Hunk
-            && node.section.as_deref() == Some(section) && node.path.as_deref() == Some(path)).collect();
+    for file in tree
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::File && node.section.as_deref() == Some(section))
+    {
+        if end < file.start_line || start > file.end_line {
+            continue;
+        }
+        let Some(path) = file.path.as_deref() else {
+            continue;
+        };
+        let hunks: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.kind == NodeKind::Hunk
+                    && node.section.as_deref() == Some(section)
+                    && node.path.as_deref() == Some(path)
+            })
+            .collect();
         let first_op = ops.len();
         if selected(file) {
             ops.push(SelectionOp::WholeFile { path: path.into() });
         } else {
             for hunk in &hunks {
-                let Some(id) = hunk.hunk_id.as_deref() else { continue; };
+                let Some(id) = hunk.hunk_id.as_deref() else {
+                    continue;
+                };
                 if selected(hunk) {
-                    ops.push(SelectionOp::WholeHunk { path: path.into(), hunk_id: id.into() });
+                    ops.push(SelectionOp::WholeHunk {
+                        path: path.into(),
+                        hunk_id: id.into(),
+                    });
                 } else {
-                    let lines: Vec<_> = tree.nodes.iter().filter(|node| node.kind == NodeKind::Line
-                        && node.section.as_deref() == Some(section) && node.path.as_deref() == Some(path)
-                        && node.hunk_id.as_deref() == Some(id) && selected(node)
-                        && matches!(node.marker, Some('+') | Some('-')))
-                        .filter_map(|node| node.line_index).collect();
+                    let lines: Vec<_> = tree
+                        .nodes
+                        .iter()
+                        .filter(|node| {
+                            node.kind == NodeKind::Line
+                                && node.section.as_deref() == Some(section)
+                                && node.path.as_deref() == Some(path)
+                                && node.hunk_id.as_deref() == Some(id)
+                                && selected(node)
+                                && matches!(node.marker, Some('+') | Some('-'))
+                        })
+                        .filter_map(|node| node.line_index)
+                        .collect();
                     if !lines.is_empty() {
-                        ops.push(SelectionOp::Lines { path: path.into(), hunk_id: id.into(), lines });
+                        ops.push(SelectionOp::Lines {
+                            path: path.into(),
+                            hunk_id: id.into(),
+                            lines,
+                        });
                     }
                 }
             }
         }
-        if ops.len() == first_op { continue; }
-        let whole_file = ops[first_op..].iter().any(|op| matches!(op, SelectionOp::WholeFile { .. }));
-        if whole_file && !displayed_file_is_current(repo, tree, path, section)? {
-            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+        if ops.len() == first_op {
+            continue;
         }
-        let diff = if staged { repo.diff_staged(path)? } else { repo.diff_unstaged(path)? };
+        let whole_file = ops[first_op..]
+            .iter()
+            .any(|op| matches!(op, SelectionOp::WholeFile { .. }));
+        if whole_file && !displayed_file_is_current(repo, tree, path, section)? {
+            return Ok(vec![Effect::message(
+                MessageLevel::Warn,
+                errors::HUNK_CHANGED,
+            )]);
+        }
+        let diff = if staged {
+            repo.diff_staged(path)?
+        } else {
+            repo.diff_unstaged(path)?
+        };
         // Layout rows are deliberately unused: operations already contain the
         // request tree's identities and line_index offsets, not fresh rows.
         let layout = if whole_file {
             FileLayout::from_diff(&diff, 0).unwrap_or_else(|| FileLayout {
-                path: path.to_string(), header: String::new(), header_line: 0, hunks: Vec::new(),
+                path: path.to_string(),
+                header: String::new(),
+                header_line: 0,
+                hunks: Vec::new(),
             })
         } else if let Some(layout) = FileLayout::from_diff(&diff, 0) {
             layout
         } else {
-            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+            return Ok(vec![Effect::message(
+                MessageLevel::Warn,
+                errors::HUNK_CHANGED,
+            )]);
         };
         let unchanged = ops[first_op..].iter().all(|op| match op {
             SelectionOp::WholeFile { .. } => whole_file,
             SelectionOp::WholeHunk { hunk_id, .. } | SelectionOp::Lines { hunk_id, .. } => {
                 // Selection execution also consumes the fresh file header.
                 // Compare its semantics, not just content IDs or fresh rows.
-                let captured = hunks.iter().find(|node| node.hunk_id.as_ref() == Some(hunk_id))
+                let captured = hunks
+                    .iter()
+                    .find(|node| node.hunk_id.as_ref() == Some(hunk_id))
                     .and_then(|node| node.mutation.as_ref());
                 match captured {
-                    Some(crate::tree::MutationContent::Hunk { hunk, .. }) =>
-                        layout.hunks.iter().any(|h| &h.hunk.id == hunk_id
-                            && h.hunk.metadata == hunk.metadata),
+                    Some(crate::tree::MutationContent::Hunk { hunk, .. }) => layout
+                        .hunks
+                        .iter()
+                        .any(|h| &h.hunk.id == hunk_id && h.hunk.metadata == hunk.metadata),
                     _ => false,
                 }
             }
         });
         if !unchanged {
-            return Ok(vec![Effect::message(MessageLevel::Warn, errors::HUNK_CHANGED)]);
+            return Ok(vec![Effect::message(
+                MessageLevel::Warn,
+                errors::HUNK_CHANGED,
+            )]);
         }
         layouts.push(layout);
     }
     // Validate every selected identity before mutating any file.
-    let result = if discard { repo.discard_selection_ops(&layouts, &ops) }
-        else { repo.apply_selection_ops(&layouts, &ops, staged) };
+    let result = if discard {
+        repo.discard_selection_ops(&layouts, &ops)
+    } else {
+        repo.apply_selection_ops(&layouts, &ops, staged)
+    };
     errors::effects_for_result(result)
 }
 

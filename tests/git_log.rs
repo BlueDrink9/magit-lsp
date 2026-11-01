@@ -116,7 +116,11 @@ fn forced_git_colors_do_not_affect_structured_graph_log() {
     common::git(fixture.path(), &["checkout", "-"]);
     common::git(fixture.path(), &["merge", "--no-ff", "side", "-m", "merge"]);
     let repo = magit_lsp::git::GitRepo::open(fixture.path()).unwrap();
-    let options = GitLogOptions { graph: true, page_size: 20, ..Default::default() };
+    let options = GitLogOptions {
+        graph: true,
+        page_size: 20,
+        ..Default::default()
+    };
     let ordinary = repo.log(&options).unwrap();
     common::git(fixture.path(), &["config", "color.ui", "always"]);
     common::git(fixture.path(), &["config", "color.log", "always"]);
@@ -165,14 +169,16 @@ fn typed_options_support_page_size_graph_decoration_grep_and_literal_paths() {
         .commit("needle subject", vec![("dir/[x].txt", "one\n")])
         .commit("other subject", vec![("dir/x.txt", "two\n")])
         .build();
-    let page = repo.log(&GitLogOptions {
-        page_size: 1,
-        graph: false,
-        decorate: false,
-        grep: Some("needle".into()),
-        paths: vec!["dir/[x].txt".into()],
-        ..Default::default()
-    }).unwrap();
+    let page = repo
+        .log(&GitLogOptions {
+            page_size: 1,
+            graph: false,
+            decorate: false,
+            grep: Some("needle".into()),
+            paths: vec!["dir/[x].txt".into()],
+            ..Default::default()
+        })
+        .unwrap();
     assert_eq!(page.commits.len(), 1);
     assert_eq!(page.commits[0].subject, "needle subject");
     assert!(page.commits[0].graph_prefix.is_empty());
@@ -189,7 +195,15 @@ fn loading_a_larger_page_keeps_all_earlier_commit_oids() {
     let first = repo.log(&GitLogOptions::default()).unwrap();
     assert_eq!(first.commits.len(), 100);
     assert!(first.has_more);
-    let larger = repo.log(&GitLogOptions { page_size: 200, ..Default::default() }).unwrap();
+    let larger = repo
+        .log(&GitLogOptions {
+            page_size: 200,
+            ..Default::default()
+        })
+        .unwrap();
     assert_eq!(larger.commits.len(), 105);
-    assert!(first.commits.iter().all(|old| larger.commits.iter().any(|new| new.oid == old.oid)));
+    assert!(first
+        .commits
+        .iter()
+        .all(|old| larger.commits.iter().any(|new| new.oid == old.oid)));
 }

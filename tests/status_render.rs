@@ -81,23 +81,42 @@ fn old_parser_status() -> Status {
 
 #[test]
 fn file_identity_is_retained_in_the_server_tree_but_never_sent_or_copied() {
-    let (tmp, repo) = RepoFixture::new().commit("init", [("f.txt", "base\0bytes")]).build();
+    let (tmp, repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "base\0bytes")])
+        .build();
     write(&tmp.path().join("f.txt"), "shown\0bytes");
     let status = repo.status_listing().unwrap();
     let tree = status_view::build(&status);
-    let file = tree.nodes.iter().find(|node| node.kind == NodeKind::File).unwrap();
+    let file = tree
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::File)
+        .unwrap();
     let captured = file.mutation.clone().expect("server-owned identity");
-    assert!(matches!(captured, magit_lsp::tree::MutationContent::File(_)));
+    assert!(matches!(
+        captured,
+        magit_lsp::tree::MutationContent::File(_)
+    ));
     assert!(file.copy.is_none());
-    assert_eq!(tree.copy_value(Some(file.start_line), None).as_deref(), Some("f.txt"));
+    assert_eq!(
+        tree.copy_value(Some(file.start_line), None).as_deref(),
+        Some("f.txt")
+    );
     let wire = serde_json::to_string(&tree).unwrap();
     assert!(!wire.contains("file-identity:"));
     assert!(!wire.contains("worktree"));
     write(&tmp.path().join("f.txt"), "later\0bytes");
     let fresh = status_view::build(&repo.status_listing().unwrap());
-    let new_file = fresh.nodes.iter().find(|node| node.kind == NodeKind::File).unwrap();
+    let new_file = fresh
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::File)
+        .unwrap();
     assert_ne!(new_file.mutation.as_ref(), Some(&captured));
-    assert_eq!(tree.clone().node(&file.id).unwrap().mutation.as_ref(), Some(&captured));
+    assert_eq!(
+        tree.clone().node(&file.id).unwrap().mutation.as_ref(),
+        Some(&captured)
+    );
 }
 
 fn line_of(tree: &Tree, text: &str) -> usize {
@@ -326,7 +345,6 @@ fn line_map_resolves_every_rendered_line() {
     assert_eq!(entry.marker, Some('-'));
     assert_eq!(entry.text.as_deref(), Some("b"));
     assert_eq!(entry.hunk_id.as_deref(), Some("old"));
-
 }
 
 #[test]
@@ -383,19 +401,36 @@ fn document_symbols_nest_sections_files_and_hunks() {
 fn limited_sections_emit_a_structured_exact_overflow_row_at_the_boundary() {
     let status = old_parser_status();
     let full = status_view::build(&status);
-    let section = full.nodes.iter().find(|node| node.id == "section:unstaged").unwrap();
+    let section = full
+        .nodes
+        .iter()
+        .find(|node| node.id == "section:unstaged")
+        .unwrap();
     let body_lines = section.end_line - section.start_line;
-    let render = |limit| status_view::build_with_limit(&status, &Visibility::new(), Some(limit), |_, file| file.hunks.clone());
+    let render = |limit| {
+        status_view::build_with_limit(&status, &Visibility::new(), Some(limit), |_, file| {
+            file.hunks.clone()
+        })
+    };
 
     let below = render(body_lines - 1);
     let collapsed = below.node("section:unstaged").unwrap();
     let overflow_id = "section:unstaged:overflow";
-    assert_eq!(below.lines[collapsed.start_line + 1], format!("{body_lines} more lines: expand"));
+    assert_eq!(
+        below.lines[collapsed.start_line + 1],
+        format!("{body_lines} more lines: expand")
+    );
     assert_eq!(collapsed.children, vec![overflow_id.to_string()]);
     assert_eq!(below.node(overflow_id).unwrap().kind, NodeKind::Message);
     assert_eq!(below.line_nodes.len(), below.lines.len());
-    assert!(below.line_nodes.iter().all(|entry| below.node(&entry.node).is_some()));
-    assert!(below.tokens.iter().all(|token| token.line < below.lines.len()));
+    assert!(below
+        .line_nodes
+        .iter()
+        .all(|entry| below.node(&entry.node).is_some()));
+    assert!(below
+        .tokens
+        .iter()
+        .all(|token| token.line < below.lines.len()));
     assert!(below.links.iter().all(|link| link.line < below.lines.len()));
 
     let at = render(body_lines);
@@ -406,11 +441,17 @@ fn limited_sections_emit_a_structured_exact_overflow_row_at_the_boundary() {
 
     let mut explicitly_expanded = Visibility::new();
     explicitly_expanded.set("section:unstaged", VisibilityState::Expanded);
-    let expanded = status_view::build_with_limit(&status, &explicitly_expanded, Some(1), |_, file| file.hunks.clone());
+    let expanded =
+        status_view::build_with_limit(&status, &explicitly_expanded, Some(1), |_, file| {
+            file.hunks.clone()
+        });
     assert!(expanded.node("unstaged/f.txt").is_some());
     let mut explicitly_collapsed = Visibility::new();
     explicitly_collapsed.set("section:unstaged", VisibilityState::Collapsed);
-    let collapsed = status_view::build_with_limit(&status, &explicitly_collapsed, Some(1), |_, file| file.hunks.clone());
+    let collapsed =
+        status_view::build_with_limit(&status, &explicitly_collapsed, Some(1), |_, file| {
+            file.hunks.clone()
+        });
     assert!(collapsed.node("section:unstaged:overflow").is_none());
     assert!(collapsed.node("unstaged/f.txt").is_none());
 
@@ -428,14 +469,25 @@ fn one_oversized_file_is_summarized_without_partial_hunk_structure() {
         let section = full.node("section:unstaged").unwrap();
         section.end_line - section.start_line
     };
-    let tree = status_view::build_with_limit(&status, &Visibility::new(), Some(100), |_, file| file.hunks.clone());
+    let tree = status_view::build_with_limit(&status, &Visibility::new(), Some(100), |_, file| {
+        file.hunks.clone()
+    });
     let row = tree.node("section:unstaged:overflow").unwrap();
-    assert_eq!(tree.lines[row.start_line], format!("{expected_hidden} more lines: expand"));
+    assert_eq!(
+        tree.lines[row.start_line],
+        format!("{expected_hidden} more lines: expand")
+    );
     assert!(tree.node("unstaged/f.txt").is_none());
     assert!(tree.nodes.iter().all(|node| node.kind != NodeKind::Hunk));
     assert_eq!(tree.line_nodes.len(), tree.lines.len());
-    assert!(tree.symbols.iter().any(|symbol| symbol.node == "section:unstaged" && symbol.children.is_empty()));
-    assert!(tree.tokens.iter().all(|token| token.line < tree.lines.len()));
+    assert!(tree
+        .symbols
+        .iter()
+        .any(|symbol| symbol.node == "section:unstaged" && symbol.children.is_empty()));
+    assert!(tree
+        .tokens
+        .iter()
+        .all(|token| token.line < tree.lines.len()));
     assert!(tree.links.iter().all(|link| link.line < tree.lines.len()));
 }
 

@@ -33,7 +33,9 @@ fn worktree_identity(path: &Path) -> Result<String> {
             let mut buffer = [0; 65536];
             loop {
                 let count = file.read(&mut buffer)?;
-                if count == 0 { break; }
+                if count == 0 {
+                    break;
+                }
                 hash.update(&buffer[..count]);
             }
         } else if metadata.is_dir() {
@@ -48,7 +50,10 @@ fn worktree_identity(path: &Path) -> Result<String> {
                 hash.update(worktree_identity(&child.path())?);
             }
         } else {
-            return Err(Error::new(format!("Cannot snapshot special file {}", path.display())));
+            return Err(Error::new(format!(
+                "Cannot snapshot special file {}",
+                path.display()
+            )));
         }
     }
     Ok(format!("{:x}", hash.finalize()))
@@ -213,7 +218,10 @@ impl CommitOperation {
             Self::Create(options) => (vec![], options),
             Self::Amend(options) => (vec!["--amend".into()], options),
             Self::Extend(options) => (vec!["--amend".into(), "--no-edit".into()], options),
-            Self::Reword(options) => (vec!["--amend".into(), "--only".into(), "--allow-empty".into()], options),
+            Self::Reword(options) => (
+                vec!["--amend".into(), "--only".into(), "--allow-empty".into()],
+                options,
+            ),
         };
         args.extend(options.argv());
         args
@@ -251,11 +259,28 @@ impl CommitOptions {
     /// Render trusted values to argv without shell parsing.
     pub fn argv(&self) -> Vec<String> {
         let mut args = Vec::new();
-        for (enabled, flag) in [(self.all, "--all"), (self.allow_empty, "--allow-empty"), (self.verbose, "--verbose"), (self.no_verify, "--no-verify"), (self.reset_author, "--reset-author"), (self.signoff, "--signoff")] {
-            if enabled { args.push(flag.to_string()); }
+        for (enabled, flag) in [
+            (self.all, "--all"),
+            (self.allow_empty, "--allow-empty"),
+            (self.verbose, "--verbose"),
+            (self.no_verify, "--no-verify"),
+            (self.reset_author, "--reset-author"),
+            (self.signoff, "--signoff"),
+        ] {
+            if enabled {
+                args.push(flag.to_string());
+            }
         }
-        for (flag, value) in [("--author", self.author.as_deref()), ("--date", self.date.as_deref()), ("--gpg-sign", self.signing_key.as_deref()), ("--reuse-message", self.reuse_message.as_deref()), ("--reedit-message", self.reedit_message.as_deref())] {
-            if let Some(value) = value { args.push(format!("{flag}={value}")); }
+        for (flag, value) in [
+            ("--author", self.author.as_deref()),
+            ("--date", self.date.as_deref()),
+            ("--gpg-sign", self.signing_key.as_deref()),
+            ("--reuse-message", self.reuse_message.as_deref()),
+            ("--reedit-message", self.reedit_message.as_deref()),
+        ] {
+            if let Some(value) = value {
+                args.push(format!("{flag}={value}"));
+            }
         }
         args
     }
@@ -354,17 +379,22 @@ pub struct GitRepo {
 impl GitRepo {
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
-        Self::command_in_with_env(&self.root, &["var", "GIT_AUTHOR_IDENT"], &[
-            ("GIT_AUTHOR_NAME", "Date validation"),
-            ("GIT_AUTHOR_EMAIL", "date@example.invalid"),
-            ("GIT_AUTHOR_DATE", date),
-        ])?;
+        Self::command_in_with_env(
+            &self.root,
+            &["var", "GIT_AUTHOR_IDENT"],
+            &[
+                ("GIT_AUTHOR_NAME", "Date validation"),
+                ("GIT_AUTHOR_EMAIL", "date@example.invalid"),
+                ("GIT_AUTHOR_DATE", date),
+            ],
+        )?;
         Ok(())
     }
 
     /// Open the repository containing `path`, resolving its working-tree root.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Self::discover(path)?.ok_or_else(|| Error::new("This folder is not inside a Git repository."))
+        Self::discover(path)?
+            .ok_or_else(|| Error::new("This folder is not inside a Git repository."))
     }
 
     /// Discover a repository and its canonical worktree/Git identities.
@@ -377,17 +407,32 @@ impl GitRepo {
         };
         let out = match Self::command_in(&cwd, &["rev-parse", "--show-toplevel"]) {
             Ok(out) => out,
-            Err(error) if error.git.as_ref().is_some_and(|failure| failure.stderr.to_lowercase().contains("not a git repository")) => return Ok(None),
+            Err(error)
+                if error.git.as_ref().is_some_and(|failure| {
+                    failure
+                        .stderr
+                        .to_lowercase()
+                        .contains("not a git repository")
+                }) =>
+            {
+                return Ok(None)
+            }
             Err(error) => return Err(error),
         };
         let root = out.trim();
-        if root.is_empty() { return Ok(None); }
+        if root.is_empty() {
+            return Ok(None);
+        }
         let root = std::fs::canonicalize(root)?;
         let git_dir = Self::command_in(&root, &["rev-parse", "--git-dir"])?;
         let common_dir = Self::command_in(&root, &["rev-parse", "--git-common-dir"])?;
         let resolve_dir = |value: &str| {
             let path = Path::new(value.trim());
-            std::fs::canonicalize(if path.is_absolute() { path.to_path_buf() } else { root.join(path) })
+            std::fs::canonicalize(if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root.join(path)
+            })
         };
         let git_dir = resolve_dir(&git_dir)?;
         let common_dir = resolve_dir(&common_dir)?;
@@ -404,10 +449,14 @@ impl GitRepo {
     }
 
     /// The per-worktree Git directory.
-    pub fn git_dir(&self) -> &Path { &self.git_dir }
+    pub fn git_dir(&self) -> &Path {
+        &self.git_dir
+    }
 
     /// The shared Git directory, identical across linked worktrees.
-    pub fn common_dir(&self) -> &Path { &self.common_dir }
+    pub fn common_dir(&self) -> &Path {
+        &self.common_dir
+    }
 
     /// Resolve COMMIT_EDITMSG in this worktree's actual, canonical Git directory.
     /// Linked worktrees must not use the common repository's message file.
@@ -416,12 +465,23 @@ impl GitRepo {
         let mut command = git_command(&self.root, &args, Stdio::null(), &[]);
         let out = runner::run_owned(&mut command, None)
             .map_err(|error| Error::new(format!("Cannot resolve editor directory: {error}")))?;
-        let status = out.status.ok_or_else(|| Error::new("Editor directory lookup was cancelled"))?;
+        let status = out
+            .status
+            .ok_or_else(|| Error::new("Editor directory lookup was cancelled"))?;
         if !status.success() {
-            return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr)));
+            return Err(Error::git(GitFailure::from_output(
+                &args,
+                status,
+                &out.stderr,
+            )));
         }
-        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
-            return Err(Error::new("Editor directory lookup returned incomplete output"));
+        if out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete
+        {
+            return Err(Error::new(
+                "Editor directory lookup returned incomplete output",
+            ));
         }
         let output = std::str::from_utf8(&out.stdout)
             .map_err(|_| Error::new("Git editor directory is not UTF-8"))?;
@@ -440,13 +500,23 @@ impl GitRepo {
     pub fn head_committer_date(&self) -> Result<String> {
         let date = self.run(&["show", "-s", "--format=%cI", "HEAD"])?;
         let date = date.trim();
-        if date.is_empty() { return Err(Error::new("Cannot read HEAD committer date")); }
+        if date.is_empty() {
+            return Err(Error::new("Cannot read HEAD committer date"));
+        }
         Ok(date.to_string())
     }
 
     /// Whether any fetched remote-tracking branch contains the current HEAD.
     pub fn head_is_published(&self) -> Result<bool> {
-        Ok(!self.run(&["for-each-ref", "--format=%(refname)", "--contains=HEAD", "refs/remotes/"])?.trim().is_empty())
+        Ok(!self
+            .run(&[
+                "for-each-ref",
+                "--format=%(refname)",
+                "--contains=HEAD",
+                "refs/remotes/",
+            ])?
+            .trim()
+            .is_empty())
     }
 
     /// Return a coherent page of log records; filtering values are individual
@@ -605,7 +675,10 @@ impl GitRepo {
 
     /// Compute the status without reading any file's diff.
     pub fn status_listing(&self) -> Result<Status> {
-        let options = crate::config::LoadOptions { repo_path: Some(self.root.clone()), ..Default::default() };
+        let options = crate::config::LoadOptions {
+            repo_path: Some(self.root.clone()),
+            ..Default::default()
+        };
         let policy = crate::config::load_config(&options)
             .map(|config| config.presentation_files)
             .unwrap_or_else(|_| vec![".magit".to_owned()]);
@@ -625,29 +698,65 @@ impl GitRepo {
             "--branch",
         ])?;
         let mut status = self.parse_status(&raw, repo_path, presentation_files)?;
-        for file in status.staged.iter_mut().chain(&mut status.unstaged).chain(&mut status.untracked) {
-            file.mutation_identity = Some(self.file_mutation_identity(&file.path, file.orig_path.as_deref(), true)?);
+        for file in status
+            .staged
+            .iter_mut()
+            .chain(&mut status.unstaged)
+            .chain(&mut status.untracked)
+        {
+            file.mutation_identity =
+                Some(self.file_mutation_identity(&file.path, file.orig_path.as_deref(), true)?);
         }
         Ok(status)
     }
 
     /// Capture blobs/modes for both endpoints, optionally including non-following
     /// worktree content. Unstage authorization does not inspect the worktree.
-    pub fn file_mutation_identity(&self, path: &str, original: Option<&str>, worktree: bool) -> Result<FileMutationIdentity> {
+    pub fn file_mutation_identity(
+        &self,
+        path: &str,
+        original: Option<&str>,
+        worktree: bool,
+    ) -> Result<FileMutationIdentity> {
         let head = match self.run(&["rev-parse", "--verify", "--quiet", "HEAD"]) {
             Ok(_) => self.run(&["ls-tree", "-r", "-z", "HEAD", "--", path])?,
-            Err(error) if error.git.as_ref().is_some_and(|failure| failure.exit_code == 1 && failure.stderr.is_empty()) => String::new(),
+            Err(error)
+                if error
+                    .git
+                    .as_ref()
+                    .is_some_and(|failure| failure.exit_code == 1 && failure.stderr.is_empty()) =>
+            {
+                String::new()
+            }
             Err(error) => return Err(error),
         };
         let literal = format!(":(literal){path}");
         let index = self.run(&["ls-files", "--stage", "-z", "--", &literal])?;
-        let original = original.map(|origin| self.file_mutation_identity(origin, None, worktree)
-            .map(|identity| (origin.to_string(), Box::new(identity)))).transpose()?;
-        let worktree = if worktree { worktree_identity(&self.root.join(path))? } else { String::new() };
-        Ok(FileMutationIdentity { head, index, worktree, original })
+        let original = original
+            .map(|origin| {
+                self.file_mutation_identity(origin, None, worktree)
+                    .map(|identity| (origin.to_string(), Box::new(identity)))
+            })
+            .transpose()?;
+        let worktree = if worktree {
+            worktree_identity(&self.root.join(path))?
+        } else {
+            String::new()
+        };
+        Ok(FileMutationIdentity {
+            head,
+            index,
+            worktree,
+            original,
+        })
     }
 
-    fn parse_status(&self, raw: &str, repo_path: String, presentation_files: &[String]) -> Result<Status> {
+    fn parse_status(
+        &self,
+        raw: &str,
+        repo_path: String,
+        presentation_files: &[String],
+    ) -> Result<Status> {
         let mut status = Status::empty(repo_path);
 
         let mut tokens = raw.split('\0');
@@ -687,7 +796,8 @@ impl GitRepo {
                 b'?' => {
                     if let Some(path) = token.strip_prefix("? ") {
                         // Plain presentation documents are editor state, not repository content.
-                        if crate::config::is_presentation_file(Path::new(path), presentation_files) {
+                        if crate::config::is_presentation_file(Path::new(path), presentation_files)
+                        {
                             continue;
                         }
                         status.untracked.push(FileEntry {
@@ -1177,16 +1287,30 @@ impl GitRepo {
         let out = runner::run_owned(&mut command, Some(patch_text.as_bytes()))
             .map_err(|e| Error::new(format!("failed to run git apply: {e}")))?;
         let Some(status) = out.status else {
-            return Err(Error::new("git apply was cancelled; process reap is incomplete"));
+            return Err(Error::new(
+                "git apply was cancelled; process reap is incomplete",
+            ));
         };
-        log_finished(&self.root, &args, status, started.elapsed(), &out.stdout, &out.stderr);
+        log_finished(
+            &self.root,
+            &args,
+            status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
         if !status.success() {
             let mut failure = GitFailure::from_output(&args, status, &out.stderr);
             failure.warning = warn_if_git_is_below_recommendation(&self.root, &[], &status);
             return Err(Error::git(failure));
         }
-        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
-            return Err(Error::new("git apply completed with incomplete process output"));
+        if out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete
+        {
+            return Err(Error::new(
+                "git apply completed with incomplete process output",
+            ));
         }
         if out.outcome.stdin_error {
             return Err(Error::new("failed to write patch to git apply stdin"));
@@ -1210,19 +1334,36 @@ impl GitRepo {
         // not turn an already recorded commit into a reported failure.
         let before = commit_head(&self.root);
         let mut command = git_command(&self.root, &refs, Stdio::null(), env);
-        let out = runner::run_owned(&mut command, None).map_err(|e| Error::new(format!("failed to run git: {e}")))?;
-        let Some(status) = out.status else { return Err(Error::new("git commit cancellation is incomplete; process ownership remains with the reaper. Git lock files may remain; no locks were removed.")); };
-        log_finished(&self.root, &refs, status, started.elapsed(), &out.stdout, &out.stderr);
-        let recorded = out.outcome.cancelled && before.as_ref().is_some_and(|before| {
-            commit_head(&self.root).is_some_and(|after| !after.is_empty() && &after != before)
-        });
-        let cancellation_warning = out.outcome.cancelled.then(|| cancellation_lock_warning(&self.root));
+        let out = runner::run_owned(&mut command, None)
+            .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
+        let Some(status) = out.status else {
+            return Err(Error::new("git commit cancellation is incomplete; process ownership remains with the reaper. Git lock files may remain; no locks were removed."));
+        };
+        log_finished(
+            &self.root,
+            &refs,
+            status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
+        let recorded = out.outcome.cancelled
+            && before.as_ref().is_some_and(|before| {
+                commit_head(&self.root).is_some_and(|after| !after.is_empty() && &after != before)
+            });
+        let cancellation_warning = out
+            .outcome
+            .cancelled
+            .then(|| cancellation_lock_warning(&self.root));
         if !status.success() && !recorded {
             let mut failure = GitFailure::from_output(&refs, status, &out.stderr);
-            failure.warning = cancellation_warning.or_else(|| warn_if_git_is_below_recommendation(&self.root, env, &status));
+            failure.warning = cancellation_warning
+                .or_else(|| warn_if_git_is_below_recommendation(&self.root, env, &status));
             return Err(Error::git(failure));
         }
-        let mut warning = (out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete)
+        let mut warning = (out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete)
             .then(|| "git commit completed, but process output was incomplete".to_string());
         if let Some(locks) = cancellation_warning {
             warning = Some(format!("Git recorded a commit before cancellation; a hook may have been interrupted. {locks}"));
@@ -1230,7 +1371,13 @@ impl GitRepo {
         let read = runner::with_cancel(None, || self.run(&["log", "-1", "--format=%B"]));
         let message = match read {
             Ok(message) => Some(message.trim_end().to_string()),
-            Err(error) => { warning = Some(format!("{}; commit message could not be read: {error}", warning.unwrap_or_else(|| "commit succeeded".into()))); None }
+            Err(error) => {
+                warning = Some(format!(
+                    "{}; commit message could not be read: {error}",
+                    warning.unwrap_or_else(|| "commit succeeded".into())
+                ));
+                None
+            }
         };
         Ok(CommitOutcome { message, warning })
     }
@@ -1250,15 +1397,27 @@ impl GitRepo {
         let out = runner::run_owned(&mut command, None)
             .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
         let Some(status) = out.status else {
-            return Err(Error::new("git command was cancelled; process reap is incomplete"));
+            return Err(Error::new(
+                "git command was cancelled; process reap is incomplete",
+            ));
         };
-        log_finished(cwd, args, status, started.elapsed(), &out.stdout, &out.stderr);
+        log_finished(
+            cwd,
+            args,
+            status,
+            started.elapsed(),
+            &out.stdout,
+            &out.stderr,
+        );
         if !status.success() {
             let mut failure = GitFailure::from_output(args, status, &out.stderr);
             failure.warning = warn_if_git_is_below_recommendation(cwd, env, &status);
             return Err(Error::git(failure));
         }
-        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+        if out.outcome.stdout_truncated
+            || out.outcome.stderr_truncated
+            || out.outcome.drain_incomplete
+        {
             return Err(Error::new("git command completed with incomplete output"));
         }
         if out.outcome.stdin_error {
@@ -1276,20 +1435,30 @@ fn readonly_probe(root: &Path, args: &[&str]) -> Option<runner::OwnedOutput> {
     let timer_cancel = cancel.clone();
     let (done, waiting) = std::sync::mpsc::channel();
     let timer = std::thread::spawn(move || {
-        if waiting.recv_timeout(std::time::Duration::from_millis(500)).is_err() {
+        if waiting
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .is_err()
+        {
             timer_cancel.cancel();
         }
     });
     let mut args_with_flags = vec!["--no-optional-locks"];
     args_with_flags.extend_from_slice(args);
     let result = runner::with_cancel(Some(cancel), || {
-        runner::run_owned(&mut git_command(root, &args_with_flags, Stdio::null(), &[]), None)
+        runner::run_owned(
+            &mut git_command(root, &args_with_flags, Stdio::null(), &[]),
+            None,
+        )
     });
     let _ = done.send(());
     let _ = timer.join();
     let out = result.ok()?;
-    (out.status.is_some() && !out.outcome.cancelled && !out.outcome.stdout_truncated
-        && !out.outcome.stderr_truncated && !out.outcome.drain_incomplete).then_some(out)
+    (out.status.is_some()
+        && !out.outcome.cancelled
+        && !out.outcome.stdout_truncated
+        && !out.outcome.stderr_truncated
+        && !out.outcome.drain_incomplete)
+        .then_some(out)
 }
 
 // An empty, successfully observed state denotes unborn HEAD; None is unknown.
@@ -1298,43 +1467,68 @@ fn commit_head(root: &Path) -> Option<String> {
     if out.status?.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty() {
         return Some(String::new());
     }
-    if !out.status?.success() { return None; }
+    if !out.status?.success() {
+        return None;
+    }
     let oid = std::str::from_utf8(&out.stdout).ok()?.trim();
-    (matches!(oid.len(), 40 | 64) && oid.bytes().all(|b| b.is_ascii_hexdigit())).then(|| oid.to_string())
+    (matches!(oid.len(), 40 | 64) && oid.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| oid.to_string())
 }
 
 fn cancellation_lock_warning(root: &Path) -> String {
     let mut locks = Vec::new();
-    if let Some(out) = readonly_probe(root, &["rev-parse", "--absolute-git-dir", "--git-common-dir"]) {
+    if let Some(out) = readonly_probe(
+        root,
+        &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+    ) {
         if out.status.is_some_and(|s| s.success()) {
             if let Ok(paths) = std::str::from_utf8(&out.stdout) {
                 // Exactly two paths are expected. Newlines in Git paths or
                 // malformed diagnostic output must not expand the scan budget.
                 let paths: Vec<_> = paths.lines().take(3).collect();
                 if paths.len() == 2 && paths.iter().all(|p| !p.is_empty() && !p.contains('\0')) {
-                let deadline = Instant::now() + std::time::Duration::from_millis(25);
-                let mut remaining = 128usize;
-                let mut dirs: Vec<_> = paths.into_iter().map(|p| root.join(p)).collect();
-                dirs.sort();
-                dirs.dedup();
-                for dir in dirs {
-                    for name in ["index.lock", "HEAD.lock", "packed-refs.lock", "config.lock", "shallow.lock"] {
-                        let path = dir.join(name);
-                        if path.symlink_metadata().is_ok() { locks.push(path); }
-                    }
-                    let mut pending = vec![dir.join("refs")];
-                    while let Some(dir) = pending.pop() {
-                        if remaining == 0 || Instant::now() >= deadline { break; }
-                        let Ok(entries) = std::fs::read_dir(dir) else { continue; };
-                        for entry in entries {
-                            if remaining == 0 || Instant::now() >= deadline { break; }
-                            remaining -= 1;
-                            let Ok(entry) = entry else { continue; };
-                            if entry.file_type().is_ok_and(|t| t.is_dir()) { pending.push(entry.path()); }
-                            else if entry.path().extension().is_some_and(|e| e == "lock") { locks.push(entry.path()); }
+                    let deadline = Instant::now() + std::time::Duration::from_millis(25);
+                    let mut remaining = 128usize;
+                    let mut dirs: Vec<_> = paths.into_iter().map(|p| root.join(p)).collect();
+                    dirs.sort();
+                    dirs.dedup();
+                    for dir in dirs {
+                        for name in [
+                            "index.lock",
+                            "HEAD.lock",
+                            "packed-refs.lock",
+                            "config.lock",
+                            "shallow.lock",
+                        ] {
+                            let path = dir.join(name);
+                            if path.symlink_metadata().is_ok() {
+                                locks.push(path);
+                            }
+                        }
+                        let mut pending = vec![dir.join("refs")];
+                        while let Some(dir) = pending.pop() {
+                            if remaining == 0 || Instant::now() >= deadline {
+                                break;
+                            }
+                            let Ok(entries) = std::fs::read_dir(dir) else {
+                                continue;
+                            };
+                            for entry in entries {
+                                if remaining == 0 || Instant::now() >= deadline {
+                                    break;
+                                }
+                                remaining -= 1;
+                                let Ok(entry) = entry else {
+                                    continue;
+                                };
+                                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                                    pending.push(entry.path());
+                                } else if entry.path().extension().is_some_and(|e| e == "lock") {
+                                    locks.push(entry.path());
+                                }
+                            }
                         }
                     }
-                }
                 }
             }
         }
@@ -1342,7 +1536,13 @@ fn cancellation_lock_warning(root: &Path) -> String {
     let mut warning = "Cancellation may leave Git lock files; no locks were removed. Check that no Git process is still using them before manual recovery.".to_string();
     if !locks.is_empty() {
         warning.push_str(" Observed: ");
-        warning.push_str(&locks.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "));
+        warning.push_str(
+            &locks
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
     }
     warning
 }

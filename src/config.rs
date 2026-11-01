@@ -236,7 +236,9 @@ pub struct Config {
 
 /// Whether a path is one of the configured Plain presentation documents.
 pub fn is_presentation_file(path: &Path, names: &[String]) -> bool {
-    path.file_name().and_then(|name| name.to_str()).is_some_and(|name| names.iter().any(|candidate| candidate == name))
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| names.iter().any(|candidate| candidate == name))
 }
 
 impl Default for Config {
@@ -261,7 +263,9 @@ impl Default for Config {
                 margin: None,
             },
             actions: ActionsSettings::default(),
-            plain: PlainSettings { max_section_lines: 400 },
+            plain: PlainSettings {
+                max_section_lines: 400,
+            },
             presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
@@ -602,9 +606,10 @@ fn apply_document(
                 let value = item.as_str().ok_or_else(|| {
                     ConfigError::new("`profile` must be a string").at_file_line(file, line)
                 })?;
-                layered.profile = Some(Profile::parse(value).map_err(|message| {
-                    ConfigError::new(message).at_file_line(file, line)
-                })?);
+                layered.profile = Some(
+                    Profile::parse(value)
+                        .map_err(|message| ConfigError::new(message).at_file_line(file, line))?,
+                );
             }
             "trust_repo_config" => {
                 let value = item.as_bool().ok_or_else(|| {
@@ -701,11 +706,10 @@ fn apply_document(
                     match name {
                         "title_style" => {
                             let text = string(value, "actions.title_style", file, line)?;
-                            layered.actions_title_style = Some(
-                                TitleStyle::parse(&text).map_err(|message| {
+                            layered.actions_title_style =
+                                Some(TitleStyle::parse(&text).map_err(|message| {
                                     ConfigError::new(message).at_file_line(file, line)
-                                })?,
-                            );
+                                })?);
                         }
                         other => return Err(unknown_key(file, line, "actions", other)),
                     }
@@ -718,8 +722,16 @@ fn apply_document(
                     match name {
                         "files" => {
                             let names = string_array(value, "presentation.files", file, source)?;
-                            if names.iter().any(|name| name.is_empty() || name.contains(['/', '\\', '\0']) || name == "." || name == "..") {
-                                return Err(ConfigError::new("`presentation.files` entries must be non-empty file basenames").at_file_line(file, line));
+                            if names.iter().any(|name| {
+                                name.is_empty()
+                                    || name.contains(['/', '\\', '\0'])
+                                    || name == "."
+                                    || name == ".."
+                            }) {
+                                return Err(ConfigError::new(
+                                    "`presentation.files` entries must be non-empty file basenames",
+                                )
+                                .at_file_line(file, line));
                             }
                             layered.presentation_files = Some(names);
                         }
@@ -735,7 +747,10 @@ fn apply_document(
                         "max_section_lines" => {
                             let max = integer(value, "plain.max_section_lines", file, line)?;
                             if max == 0 {
-                                return Err(ConfigError::new("`plain.max_section_lines` must be a positive integer").at_file_line(file, line));
+                                return Err(ConfigError::new(
+                                    "`plain.max_section_lines` must be a positive integer",
+                                )
+                                .at_file_line(file, line));
                             }
                             layered.plain_max_section_lines = Some(max);
                         }
@@ -744,8 +759,9 @@ fn apply_document(
                 }
             }
             other => {
-                return Err(ConfigError::new(format!("unknown setting `{other}`"))
-                    .at_file_line(file, line))
+                return Err(
+                    ConfigError::new(format!("unknown setting `{other}`")).at_file_line(file, line)
+                )
             }
         }
     }
@@ -777,16 +793,12 @@ fn apply_keys(
                 })?;
                 for element in array.iter() {
                     let text = element.as_str().ok_or_else(|| {
-                        ConfigError::new("`unbind` entries must be strings").at_file_line(
-                            file,
-                            span_line(source, element.span()),
-                        )
+                        ConfigError::new("`unbind` entries must be strings")
+                            .at_file_line(file, span_line(source, element.span()))
                     })?;
-                    entry.unbind.push(parse_chord(
-                        text,
-                        file,
-                        span_line(source, element.span()),
-                    )?);
+                    entry
+                        .unbind
+                        .push(parse_chord(text, file, span_line(source, element.span()))?);
                 }
                 continue;
             }
@@ -860,7 +872,11 @@ fn parse_binding_table_from_table(
     Ok(spec)
 }
 
-fn parse_modes(item: &TomlValue, file: &Path, source: &str) -> Result<Vec<EditorMode>, ConfigError> {
+fn parse_modes(
+    item: &TomlValue,
+    file: &Path,
+    source: &str,
+) -> Result<Vec<EditorMode>, ConfigError> {
     let array = item.as_array().ok_or_else(|| {
         ConfigError::new("`modes` must be an array")
             .at_file_line(file, span_line(source, item.span()))
@@ -889,11 +905,7 @@ fn parse_chord_array(
             ConfigError::new("key entries must be strings")
                 .at_file_line(file, span_line(source, element.span()))
         })?;
-        keys.push(parse_chord(
-            text,
-            file,
-            span_line(source, element.span()),
-        )?);
+        keys.push(parse_chord(text, file, span_line(source, element.span()))?);
     }
     Ok(keys)
 }
@@ -916,17 +928,19 @@ fn settings_table<'a>(
 }
 
 fn string(item: &Item, what: &str, file: &Path, line: usize) -> Result<String, ConfigError> {
-    item.as_str()
-        .map(str::to_string)
-        .ok_or_else(|| ConfigError::new(format!("`{what}` must be a string")).at_file_line(file, line))
+    item.as_str().map(str::to_string).ok_or_else(|| {
+        ConfigError::new(format!("`{what}` must be a string")).at_file_line(file, line)
+    })
 }
 
 fn integer(item: &Item, what: &str, file: &Path, line: usize) -> Result<u32, ConfigError> {
     let value = item.as_integer().ok_or_else(|| {
         ConfigError::new(format!("`{what}` must be an integer")).at_file_line(file, line)
     })?;
-    u32::try_from(value)
-        .map_err(|_| ConfigError::new(format!("`{what}` must be a non-negative integer")).at_file_line(file, line))
+    u32::try_from(value).map_err(|_| {
+        ConfigError::new(format!("`{what}` must be a non-negative integer"))
+            .at_file_line(file, line)
+    })
 }
 
 fn string_array(
@@ -954,10 +968,7 @@ fn unknown_key(file: &Path, line: usize, table: &str, key: &str) -> ConfigError 
     ConfigError::new(format!("unknown setting `{table}.{key}`")).at_file_line(file, line)
 }
 
-fn apply_initialization(
-    config: &mut Config,
-    value: &serde_json::Value,
-) -> Result<(), ConfigError> {
+fn apply_initialization(config: &mut Config, value: &serde_json::Value) -> Result<(), ConfigError> {
     let label = PathBuf::from("<initializationOptions>");
     if let Some(profile) = value.get("profile").and_then(serde_json::Value::as_str) {
         config.profile =
@@ -978,11 +989,24 @@ fn apply_initialization(
         };
         for (name, value) in plain {
             if name != "max_section_lines" {
-                return Err(ConfigError::new(format!("unknown setting `plain.{name}`")).at_file(&label));
+                return Err(
+                    ConfigError::new(format!("unknown setting `plain.{name}`")).at_file(&label)
+                );
             }
-            let max = value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| ConfigError::new("`plain.max_section_lines` must be a positive representable integer").at_file(&label))?;
+            let max = value
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| {
+                    ConfigError::new(
+                        "`plain.max_section_lines` must be a positive representable integer",
+                    )
+                    .at_file(&label)
+                })?;
             if max == 0 {
-                return Err(ConfigError::new("`plain.max_section_lines` must be a positive integer").at_file(&label));
+                return Err(ConfigError::new(
+                    "`plain.max_section_lines` must be a positive integer",
+                )
+                .at_file(&label));
             }
             config.plain.max_section_lines = max;
         }
@@ -990,30 +1014,31 @@ fn apply_initialization(
     Ok(())
 }
 
-fn keys_from_json(
-    value: &serde_json::Value,
-    file: &Path,
-) -> Result<KeysConfig, ConfigError> {
+fn keys_from_json(value: &serde_json::Value, file: &Path) -> Result<KeysConfig, ConfigError> {
     let mut keys = KeysConfig::default();
     let Some(scopes) = value.as_object() else {
         return Err(ConfigError::new("`keys` must be an object").at_file(file));
     };
     for (scope, entries) in scopes {
         let Some(entries) = entries.as_object() else {
-            return Err(ConfigError::new(format!("`keys.{scope}` must be an object")).at_file(file));
+            return Err(
+                ConfigError::new(format!("`keys.{scope}` must be an object")).at_file(file),
+            );
         };
         let entry = keys.scopes.entry(scope.clone()).or_default();
         for (name, spec) in entries {
             if name == "unbind" {
                 let Some(array) = spec.as_array() else {
-                    return Err(
-                        ConfigError::new(format!("`keys.{scope}.unbind` must be an array"))
-                            .at_file(file),
-                    );
+                    return Err(ConfigError::new(format!(
+                        "`keys.{scope}.unbind` must be an array"
+                    ))
+                    .at_file(file));
                 };
                 for key in array {
                     let Some(text) = key.as_str() else {
-                        return Err(ConfigError::new("`unbind` entries must be strings").at_file(file));
+                        return Err(
+                            ConfigError::new("`unbind` entries must be strings").at_file(file)
+                        );
                     };
                     entry.unbind.push(parse_chord(text, file, 0)?);
                 }
@@ -1024,22 +1049,27 @@ fn keys_from_json(
                     let mut chords = Vec::new();
                     for key in items {
                         let Some(text) = key.as_str() else {
-                            return Err(ConfigError::new("key entries must be strings").at_file(file));
+                            return Err(
+                                ConfigError::new("key entries must be strings").at_file(file)
+                            );
                         };
                         chords.push(parse_chord(text, file, 0)?);
                     }
                     BindingSpec::new(chords)
                 }
                 serde_json::Value::Object(table) => {
-                    let Some(items) = table.get("keys").and_then(serde_json::Value::as_array) else {
+                    let Some(items) = table.get("keys").and_then(serde_json::Value::as_array)
+                    else {
                         return Err(
-                            ConfigError::new("binding object needs a `keys` array").at_file(file),
+                            ConfigError::new("binding object needs a `keys` array").at_file(file)
                         );
                     };
                     let mut chords = Vec::new();
                     for key in items {
                         let Some(text) = key.as_str() else {
-                            return Err(ConfigError::new("key entries must be strings").at_file(file));
+                            return Err(
+                                ConfigError::new("key entries must be strings").at_file(file)
+                            );
                         };
                         chords.push(parse_chord(text, file, 0)?);
                     }
@@ -1048,14 +1078,12 @@ fn keys_from_json(
                         spec.modes.clear();
                         for mode in modes {
                             let Some(text) = mode.as_str() else {
-                                return Err(
-                                    ConfigError::new("`modes` entries must be strings").at_file(file)
-                                );
+                                return Err(ConfigError::new("`modes` entries must be strings")
+                                    .at_file(file));
                             };
                             spec.modes.push(
-                                EditorMode::parse(text).map_err(|message| {
-                                    ConfigError::new(message).at_file(file)
-                                })?,
+                                EditorMode::parse(text)
+                                    .map_err(|message| ConfigError::new(message).at_file(file))?,
                             );
                         }
                     }
@@ -1235,34 +1263,42 @@ impl ConfigService {
     /// Return the cached configuration for an already resolved working-tree root.
     pub fn for_repository(&self, root: &Path) -> Arc<ConfigService> {
         let mut repositories = self.repositories.lock().unwrap_or_else(|p| p.into_inner());
-        repositories.entry(root.to_path_buf()).or_insert_with(|| {
-            let state = self.lock();
-            let mut options = state.options.clone();
-            options.repo_path = Some(root.to_path_buf());
-            let service = Self::load(options.clone()).unwrap_or_else(|error| {
-                let mut config = (*state.config).clone();
-                config.files.push(root.join(".magit-lsp.toml"));
-                let observed = hash_files(&config.files);
-                Self {
-                    repositories: Mutex::new(BTreeMap::new()),
-                    inner: Mutex::new(ServiceState {
-                        options,
-                        config: Arc::new(config),
-                        keymaps: state.keymaps.clone(),
-                        error: Some(error),
-                        observed,
-                    }),
-                }
-            });
-            Arc::new(service)
-        }).clone()
+        repositories
+            .entry(root.to_path_buf())
+            .or_insert_with(|| {
+                let state = self.lock();
+                let mut options = state.options.clone();
+                options.repo_path = Some(root.to_path_buf());
+                let service = Self::load(options.clone()).unwrap_or_else(|error| {
+                    let mut config = (*state.config).clone();
+                    config.files.push(root.join(".magit-lsp.toml"));
+                    let observed = hash_files(&config.files);
+                    Self {
+                        repositories: Mutex::new(BTreeMap::new()),
+                        inner: Mutex::new(ServiceState {
+                            options,
+                            config: Arc::new(config),
+                            keymaps: state.keymaps.clone(),
+                            error: Some(error),
+                            observed,
+                        }),
+                    }
+                });
+                Arc::new(service)
+            })
+            .clone()
     }
 
     /// Reload if a watched file changed (or unconditionally when `force`).
     pub fn reload(&self, force: bool) -> ReloadOutcome {
         let mut outcome = self.reload_local(force);
         let force_repositories = force || outcome.changed;
-        for service in self.repositories.lock().unwrap_or_else(|p| p.into_inner()).values() {
+        for service in self
+            .repositories
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
             let repo = service.reload_local(force_repositories);
             outcome.changed |= repo.changed;
             outcome.errors.extend(repo.errors);

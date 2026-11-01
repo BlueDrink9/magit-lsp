@@ -215,7 +215,9 @@ fn discard_hunk_preserves_unrelated_worktree_content() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let id = repo.status().expect("status").unstaged[0].hunks[0].id.clone();
+    let id = repo.status().expect("status").unstaged[0].hunks[0]
+        .id
+        .clone();
     repo.discard_hunk("f.txt", &id).expect("discard hunk");
     assert!(repo.status().expect("status").unstaged.is_empty());
     assert_eq!(
@@ -230,7 +232,8 @@ fn discard_untracked_file_removes_it() {
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
     write(&tmp.path().join("untracked.bin"), "binary\0contents");
-    repo.discard_file("untracked.bin").expect("discard untracked");
+    repo.discard_file("untracked.bin")
+        .expect("discard untracked");
     assert!(!tmp.path().join("untracked.bin").exists());
     assert!(repo.status().expect("status").untracked.is_empty());
 }
@@ -241,10 +244,12 @@ fn discard_selection_removes_selected_line_only() {
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
         .build();
-    let layout = FileLayout::from_diff(&repo.diff_unstaged("f.txt").expect("diff"), 0)
-        .expect("layout");
+    let layout =
+        FileLayout::from_diff(&repo.diff_unstaged("f.txt").expect("diff"), 0).expect("layout");
     let first = layout.hunks[0].first_line;
-    assert!(repo.discard_selection(&[layout], first + 3, first + 3).expect("discard selection"));
+    assert!(repo
+        .discard_selection(&[layout], first + 3, first + 3)
+        .expect("discard selection"));
     let content = std::fs::read_to_string(tmp.path().join("f.txt")).expect("read");
     assert!(!content.contains("line3 CHANGED"));
     assert!(content.contains("NEW line"));
@@ -263,7 +268,10 @@ fn stage_hunk_by_id_survives_line_shifts() {
     // Insert lines above the hunk: its line numbers move, its content does not.
     write(
         &tmp.path().join("f.txt"),
-        &format!("inserted1\ninserted2\n{}", lines(40).with(35, "line35 CHANGED")),
+        &format!(
+            "inserted1\ninserted2\n{}",
+            lines(40).with(35, "line35 CHANGED")
+        ),
     );
 
     repo.stage_hunk("f.txt", &hunk_id)
@@ -400,9 +408,7 @@ fn unstage_hunk_reverts_staged_hunk() {
     repo.stage_hunk("f.txt", &hunk_id).expect("stage");
     assert!(!cached_diff(tmp.path()).is_empty());
 
-    let staged_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let staged_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
     repo.unstage_hunk("f.txt", &staged_id).expect("unstage");
 
     let cached = cached_diff(tmp.path());
@@ -560,9 +566,7 @@ fn unstage_hunk_works_without_commits() {
     let (tmp, repo) = init_unborn_repo();
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
-    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
     repo.unstage_hunk("f.txt", &hunk_id)
         .expect("unstage hunk without HEAD");
 
@@ -576,9 +580,7 @@ fn unstage_lines_works_without_commits() {
     write(&tmp.path().join("f.txt"), "a\nB\nc\n");
 
     // Hunk lines are +a, +b, +c; unstage only +b.
-    let hunk_id = repo.status().expect("status").staged[0].hunks[0]
-        .id
-        .clone();
+    let hunk_id = repo.status().expect("status").staged[0].hunks[0].id.clone();
     repo.unstage_lines("f.txt", &hunk_id, 1, 1)
         .expect("unstage lines without HEAD");
 
@@ -957,7 +959,11 @@ fn model_selection(
     end: u32,
     reverse: bool,
 ) -> String {
-    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
     let mut source: Vec<String> = current.lines().map(str::to_owned).collect();
     let mut result = Vec::new();
     let mut cursor = 0usize;
@@ -976,10 +982,19 @@ fn model_selection(
 
         for (index, line) in hunk.hunk.lines.iter().enumerate() {
             let document_line = hunk.first_line + index as u32;
-            let selected = whole_file || whole_hunk || (document_line >= start && document_line <= end);
+            let selected =
+                whole_file || whole_hunk || (document_line >= start && document_line <= end);
             let source_line = if reverse { line.new_no } else { line.old_no };
-            let is_source = if reverse { line.marker == '+' } else { line.marker == '-' };
-            let is_target = if reverse { line.marker == '-' } else { line.marker == '+' };
+            let is_source = if reverse {
+                line.marker == '+'
+            } else {
+                line.marker == '-'
+            };
+            let is_target = if reverse {
+                line.marker == '-'
+            } else {
+                line.marker == '+'
+            };
 
             if line.marker == ' ' {
                 if let Some(number) = source_line {

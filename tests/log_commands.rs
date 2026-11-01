@@ -40,7 +40,14 @@ fn log_menu_opens_log_and_q_returns_to_status_in_each_profile() {
         test.ack();
         test.press(opener);
         let menu_id = test.view_id().to_string();
-        assert!(test.session().views().get(&menu_id).unwrap().descriptor().capture);
+        assert!(
+            test.session()
+                .views()
+                .get(&menu_id)
+                .unwrap()
+                .descriptor()
+                .capture
+        );
         test.press("l");
         let log_id = test.view_id().to_string();
         let descriptor = test.session().views().get(&log_id).unwrap().descriptor();
@@ -84,7 +91,9 @@ fn log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scop
     use magit_lsp::protocol::Effect;
 
     for profile in [Profile::Standard, Profile::Vim] {
-        let (tmp, _repo) = RepoFixture::new().commit("log entry", [("f.txt", TEN_LINES)]).build();
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("log entry", [("f.txt", TEN_LINES)])
+            .build();
         let (mut test, _) = TestSession::open_status_at(&tmp, profile, WIDE_VIEWPORT);
         test.ack();
         test.press(if profile == Profile::Vim { "g l" } else { "l" });
@@ -95,12 +104,35 @@ fn log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scop
             let log = keymap.get("log").expect("log keymap");
             let select = keymap.get("log.select").expect("log.select keymap");
             for command in ["select.toggle-mark", "select.enter-rev"] {
-                assert!(select.bindings.iter().any(|binding| binding.command == command), "{command} missing from log.select");
+                assert!(
+                    select
+                        .bindings
+                        .iter()
+                        .any(|binding| binding.command == command),
+                    "{command} missing from log.select"
+                );
             }
-            assert!(!log.bindings.iter().any(|binding| binding.keys.iter().any(|keys| keys == key)), "{key} bound in log");
-            assert!(!select.bindings.iter().any(|binding| binding.keys.iter().any(|keys| keys == key)), "{key} bound in log.select");
+            assert!(
+                !log.bindings
+                    .iter()
+                    .any(|binding| binding.keys.iter().any(|keys| keys == key)),
+                "{key} bound in log"
+            );
+            assert!(
+                !select
+                    .bindings
+                    .iter()
+                    .any(|binding| binding.keys.iter().any(|keys| keys == key)),
+                "{key} bound in log.select"
+            );
             let result = test.press(key);
-            assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PassThrough { key: passed } if passed == key)), "{key}: {:?}", result.effects);
+            assert!(
+                result.effects.iter().any(
+                    |effect| matches!(effect, Effect::PassThrough { key: passed } if passed == key)
+                ),
+                "{key}: {:?}",
+                result.effects
+            );
         }
     }
 }
@@ -108,7 +140,9 @@ fn log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scop
 #[test]
 fn invalid_log_arguments_return_effects_and_keep_the_menu_stack_consistent() {
     use magit_lsp::protocol::Effect;
-    let (tmp, _repo) = RepoFixture::new().commit("entry", [("f.txt", "text\n")]).build();
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("entry", [("f.txt", "text\n")])
+        .build();
     let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
     test.press("l");
     let menu = test.view_id().to_string();
@@ -117,11 +151,21 @@ fn invalid_log_arguments_return_effects_and_keep_the_menu_stack_consistent() {
     test.press_ui("n");
     let result = test.press("l");
     assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: magit_lsp::protocol::MessageLevel::Error, text, .. } if text.contains("positive integer"))), "{:?}", result.effects);
-    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu)));
-    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")));
     assert!(test.session().views().get(&menu).is_none());
     assert_eq!(test.view_id(), "v1");
-    assert!(!test.session().views().iter().any(|view| view.descriptor().kind == ViewKind::Log));
+    assert!(!test
+        .session()
+        .views()
+        .iter()
+        .any(|view| view.descriptor().kind == ViewKind::Log));
 
     test.press("l");
     let grep_menu = test.view_id().to_string();
@@ -129,13 +173,37 @@ fn invalid_log_arguments_return_effects_and_keep_the_menu_stack_consistent() {
     test.press_ui("=");
     test.press_ui("g");
     let result = test.press("l");
-    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: magit_lsp::protocol::MessageLevel::Error, .. })), "{:?}", result.effects);
-    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &grep_menu)));
-    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")));
+    assert!(
+        result.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::Message {
+                level: magit_lsp::protocol::MessageLevel::Error,
+                ..
+            }
+        )),
+        "{:?}",
+        result.effects
+    );
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &grep_menu)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == "v1")));
     assert_eq!(test.view_id(), "v1");
-    assert!(!test.session().views().iter().any(|view| view.descriptor().kind == ViewKind::Log));
+    assert!(!test
+        .session()
+        .views()
+        .iter()
+        .any(|view| view.descriptor().kind == ViewKind::Log));
 
     test.press("l");
     let retry = test.press("l");
-    assert!(retry.opened.iter().any(|(render, _)| test.session().views().get(&render.view_id).is_some_and(|view| view.descriptor().kind == ViewKind::Log)));
+    assert!(retry.opened.iter().any(|(render, _)| test
+        .session()
+        .views()
+        .get(&render.view_id)
+        .is_some_and(|view| view.descriptor().kind == ViewKind::Log)));
 }
