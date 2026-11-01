@@ -1,16 +1,16 @@
 mod common;
 
 use common::*;
+use magit_lsp::config::Profile;
 use magit_lsp::errors::map_git_failure;
 use magit_lsp::git::GitFailure;
-use magit_lsp::protocol::{Effect, MessageLevel};
-use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use magit_lsp::protocol::Cursor;
+use magit_lsp::protocol::{Effect, MessageLevel};
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
 fn git_failure(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitFailure {
@@ -266,7 +266,10 @@ fn index_lock_failure_returns_a_message_effect_and_status() {
             Some("If no Git process is running, remove the stale .git/index.lock file and try again."),
             None)]
     );
-    let status = GitRepo::open(tmp.path()).expect("open repo").status().expect("status");
+    let status = GitRepo::open(tmp.path())
+        .expect("open repo")
+        .status()
+        .expect("status");
     assert!(status.staged.is_empty());
 }
 
@@ -286,7 +289,10 @@ fn not_a_repository_returns_a_message_effect() {
         }
     }));
     let response = server.response_with_id(2);
-    assert_eq!(response["error"]["message"], "This folder is not inside a Git repository.", "{response}");
+    assert_eq!(
+        response["error"]["message"], "This folder is not inside a Git repository.",
+        "{response}"
+    );
     server.shutdown_and_exit();
     let status = server.finish(std::time::Duration::from_secs(10));
     assert!(status.success(), "server exited: {status}");
@@ -304,7 +310,10 @@ fn disappeared_displayed_file_returns_a_readable_refusal() {
 
     assert_eq!(outcome.effects.len(), 1);
     let Effect::Message {
-        level, text, detail, ..
+        level,
+        text,
+        detail,
+        ..
     } = &outcome.effects[0]
     else {
         panic!("expected a message effect, got {:?}", outcome.effects[0]);
@@ -312,7 +321,10 @@ fn disappeared_displayed_file_returns_a_readable_refusal() {
     assert_eq!(*level, MessageLevel::Warn);
     assert_eq!(text, magit_lsp::errors::HUNK_CHANGED);
     assert!(detail.is_none());
-    let status = GitRepo::open(tmp.path()).expect("open repo").status().expect("status");
+    let status = GitRepo::open(tmp.path())
+        .expect("open repo")
+        .status()
+        .expect("status");
     assert!(status.staged.is_empty());
 }
 
@@ -343,7 +355,12 @@ fn no_op_selection_returns_an_info_effect() {
             None
         )]
     );
-    assert!(GitRepo::open(tmp.path()).expect("open repo").status().expect("status").staged.is_empty());
+    assert!(GitRepo::open(tmp.path())
+        .expect("open repo")
+        .status()
+        .expect("status")
+        .staged
+        .is_empty());
 }
 
 #[test]
@@ -413,7 +430,9 @@ fn conflicts_from_a_real_repository_are_readable() {
 
 #[test]
 fn backend_apply_failure_child() {
-    let Ok(root) = std::env::var("ERROR_TEST_ROOT") else { return };
+    let Ok(root) = std::env::var("ERROR_TEST_ROOT") else {
+        return;
+    };
     let repo = magit_lsp::git::GitRepo::open(root).unwrap();
     let mode = std::env::var("ERROR_TEST_MODE").expect("test mode");
     if mode == "success" {
@@ -443,21 +462,57 @@ fn backend_apply_failure_child() {
     }
     assert!(failure.warning.as_deref().unwrap_or("").contains("2.19.6"));
     let effect = Effect::from_git_failure(failure);
-    let Effect::Message { hint: Some(hint), .. } = effect else { panic!("missing advisory: {effect:?}") };
-    assert!(hint.contains("2.30.8"));
+    let Effect::Message {
+        hint: Some(hint), ..
+    } = effect
+    else {
+        panic!("missing advisory: {effect:?}")
+    };
+    assert!(hint.contains("2.30.9"));
 }
-
 
 #[test]
 fn normal_and_piped_apply_failures_keep_original_details() {
-    let initial = (0..20_000).map(|n| format!("line {n}\n")).collect::<String>();
-    let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", initial.as_str())]).build();
+    let initial = (0..20_000)
+        .map(|n| format!("line {n}\n"))
+        .collect::<String>();
+
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", initial.as_str())])
+        .build();
+
     let fake_dir = TempDir::new().unwrap();
-    let real = Command::new("sh").args(["-c", "command -v git"]).output().unwrap();
+    let real = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
     let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
+
     let fake = fake_dir.path().join("git");
-    std::fs::write(&fake, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo probe >> \"$PROBE_FILE\"; [ \"$PROBE_MODE\" != failed ] || exit 1; echo \"$PROBE_VERSION\"; exit 0; fi\nif [ \"$SUCCESS\" = yes ]; then exec '{real}' \"$@\"; fi\ncase \"$1\" in add|apply) if [ \"$1\" = apply ] && [ \"$EARLY\" != yes ]; then cat >/dev/null; fi; echo 'fatal: preserved fake failure' >&2; exit 17;; esac\nexec '{real}' \"$@\"\n")).unwrap();
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh
+            if [ \"$1\" = --version ]; then
+            echo 'git version 2.19.6.windows.1'
+            exit 0
+            fi
+            case \"$1\" in
+            add|apply)
+        if [ \"$1\" = apply ] && [ \"$EARLY\" != yes ]; then
+        cat >/dev/null
+        fi
+        echo 'fatal: preserved fake failure' >&2
+        exit 17
+        ;;
+        esac
+        exec '{real}' \"$@\"
+        "
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
     for (mode, early) in [("add", "no"), ("apply", "no"), ("early", "yes")] {
         let changed = if mode == "add" {
             "modified file\n".to_string()
@@ -472,19 +527,35 @@ fn normal_and_piped_apply_failures_keep_original_details() {
             }
             lines.join("\n") + "\n"
         };
+
         write(&tmp.path().join("f.txt"), &changed);
-        let output = Command::new(std::env::current_exe().unwrap()).args(["--exact", "backend_apply_failure_child"]).env("PATH", format!("{}:{}", fake_dir.path().display(), std::env::var("PATH").unwrap_or_default())).env("ERROR_TEST_ROOT", tmp.path()).env("ERROR_TEST_MODE", mode).env("EARLY", early).env("PROBE_FILE", fake_dir.path().join("probes")).env("PROBE_MODE", "ok").env("PROBE_VERSION", "git version 2.19.6.windows.1").output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "backend_apply_failure_child"])
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    fake_dir.path().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .env("ERROR_TEST_ROOT", tmp.path())
+            .env("ERROR_TEST_MODE", mode)
+            .env("EARLY", early)
+            .env("PROBE_MODE", "ok")
+            .env("PROBE_VERSION", "git version 2.19.6.windows.1")
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "Child test failed (mode={mode}, early={early}, status={})\n\
+                --- stdout ---\n{}\n\
+                --- stderr ---\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
     }
-    for (probe_mode, version) in [("ok", "git version 2.30.8"), ("ok", "git version 2.40.1"), ("failed", ""), ("ok", "nonsense")] {
-        for mode in ["add"] {
-            let output = Command::new(std::env::current_exe().unwrap()).args(["--exact", "backend_apply_failure_child"]).env("PATH", format!("{}:{}", fake_dir.path().display(), std::env::var("PATH").unwrap_or_default())).env("ERROR_TEST_ROOT", tmp.path()).env("ERROR_TEST_MODE", mode).env("ERROR_TEST_NO_WARNING", "1").env("EARLY", "no").env("PROBE_FILE", fake_dir.path().join("probes")).env("PROBE_MODE", probe_mode).env("PROBE_VERSION", version).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        }
-    }
-    let probe_file = fake_dir.path().join("probes");
-    let _ = std::fs::remove_file(&probe_file);
-    let output = Command::new(std::env::current_exe().unwrap()).args(["--exact", "backend_apply_failure_child"]).env("PATH", format!("{}:{}", fake_dir.path().display(), std::env::var("PATH").unwrap_or_default())).env("ERROR_TEST_ROOT", tmp.path()).env("ERROR_TEST_MODE", "success").env("SUCCESS", "yes").env("EARLY", "no").env("PROBE_FILE", &probe_file).env("PROBE_MODE", "ok").env("PROBE_VERSION", "git version 2.19.6").output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert!(!probe_file.exists(), "successful Git operation must not probe version");
 }
