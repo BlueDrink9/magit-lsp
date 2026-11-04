@@ -14,10 +14,7 @@ detection.
 
 ## Knip
 
-- Unused files (4): `clients/vscode/test/e2e/real-file-lifecycle.js`,
-  `clients/vscode/test/e2e/real-file-lifecycle.mjs`,
-  `clients/vscode/test/e2e/real-file-spike.js`,
-  `clients/vscode/test/e2e/real-file-spike.mjs`.
+- Unused files (0): none.
 - Unlisted dependencies (1): `vscode-jsonrpc/node` at
   `clients/vscode/test/e2e/real-file-native.js:391:14`.
 - Unused exports (69):
@@ -45,11 +42,15 @@ detection.
 
 Knip entry graph: package metadata discovers `extension.js`; package scripts
 discover `scripts/gen-keybindings.mjs`, `test/test.js`, `test/integration.js`,
-and `test/e2e/run.mjs`. `test/e2e/suite.js` is the sole explicit exceptional
-entry because VSCode loads it by the generated `--extensionTestsPath` argument,
-which static import analysis cannot follow. Knip 5.88.1 reported an isolated
-unreachable helper probe as an unused file; the probe was removed. Static graph
-check only; no native VSCode execution is claimed.
+and `test/e2e/run.mjs`. Documented direct Node launchers
+`test/e2e/real-file-spike.mjs` and `test/e2e/real-file-lifecycle.mjs` are roots.
+`test/e2e/suite.js` is host-loaded through generated `--extensionTestsPath`;
+`test/e2e/real-file-spike.js` and `test/e2e/real-file-lifecycle.js` are likewise
+copied/required as generated-host extension modules, so static import analysis
+cannot reach them. Knip 5.88.1 reports zero unused files, one unlisted dependency
+and 69 unused exports. An isolated unreachable helper probe was previously
+reported and removed. Static graph check only; no native VSCode execution is
+claimed.
 
 ## Luacheck
 

@@ -1,7 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "test/e2e/suite.js"
+    "test/e2e/suite.js",
+    "test/e2e/real-file-spike.mjs",
+    "test/e2e/real-file-lifecycle.mjs",
+    "test/e2e/real-file-spike.js",
+    "test/e2e/real-file-lifecycle.js"
   ],
   "project": [
     "**/*.js",
