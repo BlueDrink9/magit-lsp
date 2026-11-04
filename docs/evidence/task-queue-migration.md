@@ -8,18 +8,48 @@ source documents; proposal text alone is not closure evidence.
 
 | Finding | Status / replacement |
 | --- | --- |
-| A01–A10 | Complete per `REVIEW_REPORT.md` reconciliation; retained historical, no new ticket. |
-| A11 | Complete Linux cutover, acceptance owner R-EDIT-6; historical managed-design adversarial acceptance. R-EDIT-REAL residual lifecycle cases T104; platform gates T100/T101. |
-| A12 | Open, retained gap: no numbered replacement ticket found. Preserve sole issue record; needs owner assignment before implementation. |
-| A13–A21 | Complete per checked records/reconciliation; no new ticket. |
-| A22–A23 | Withdrawn, no ticket. |
-| A24–A34 | Complete per checked records/reconciliation; no new ticket. |
+| Finding | Status / replacement / evidence |
+| --- | --- |
+| A01 | Complete; `REVIEW_REPORT.md` finding A01, acceptance evidence 2026-10-27; security bridge tests and full gate. |
+| A02 | Complete; `REVIEW_REPORT.md` finding A02 and its acceptance evidence; positional-version implementation/test record. |
+| A03 | Complete; `REVIEW_REPORT.md` finding A03 and its acceptance evidence; displayed-identity selection record. |
+| A04 | Complete; `REVIEW_REPORT.md` finding A04 and its acceptance evidence; close-notification integration record. |
+| A05 | Complete; `REVIEW_REPORT.md` finding A05 and its acceptance evidence; prompt/session-lock regression record. |
+| A06 | Complete; `REVIEW_REPORT.md` finding A06 and its acceptance evidence; VSCode quit-effect record. |
+| A07 | Complete; `REVIEW_REPORT.md` finding A07 and its acceptance evidence; edit-key/focus removal record. |
+| A08 | Complete; `REVIEW_REPORT.md` finding A08 and its acceptance evidence; originating-client prompt record. |
+| A09 | Complete; `REVIEW_REPORT.md` finding A09 and its acceptance evidence; process-log token record. |
+| A10 | Complete; `REVIEW_REPORT.md` finding A10 and its acceptance evidence; repository configuration record. |
+| A11 | Managed-draft cutover complete; owner R-EDIT-6; residual R-EDIT-REAL lifecycle cases T104, platform gates T100/T101. See `REVIEW_REPORT.md` A11 and TASKS R-EDIT-6 evidence; not acceptance of these residuals. |
+| A12 | Open retained gap: finding is real-dispatch Git-failure handling and removal of `server::mutation` (`REVIEW_REPORT.md` A12). No numbered replacement owner evidenced; do not map to unrelated T103 reader-lock work. |
+| A13 | Complete; `REVIEW_REPORT.md` finding A13 and acceptance evidence. |
+| A14 | Complete; `REVIEW_REPORT.md` finding A14 and acceptance evidence. |
+| A15 | Complete; `REVIEW_REPORT.md` finding A15 and acceptance evidence. |
+| A16 | Complete; `REVIEW_REPORT.md` finding A16 and acceptance evidence. |
+| A17 | Complete; `REVIEW_REPORT.md` finding A17 and acceptance evidence. |
+| A18 | Complete; `REVIEW_REPORT.md` finding A18 and acceptance evidence. |
+| A19 | Complete; `REVIEW_REPORT.md` finding A19 and acceptance evidence. |
+| A20 | Complete; `REVIEW_REPORT.md` finding A20 and acceptance evidence. |
+| A21 | Complete; `REVIEW_REPORT.md` finding A21 and acceptance evidence. |
+| A22 | Withdrawn after deeper inspection; disposition recorded in `REVIEW_REPORT.md` reconciliation; no replacement ticket. |
+| A23 | Withdrawn after deeper inspection; disposition recorded in `REVIEW_REPORT.md` reconciliation; no replacement ticket. |
+| A24 | Complete; `REVIEW_REPORT.md` finding A24 and acceptance evidence. |
+| A25 | Complete; `REVIEW_REPORT.md` finding A25 and acceptance evidence. |
+| A26 | Complete; `REVIEW_REPORT.md` finding A26 and acceptance evidence. |
+| A27 | Complete; `REVIEW_REPORT.md` finding A27 and acceptance evidence. |
+| A28 | Complete; `REVIEW_REPORT.md` finding A28 and acceptance evidence; retained scaffolding has documented consumers. |
+| A29 | Complete; `REVIEW_REPORT.md` finding A29 and acceptance evidence. |
+| A30 | Complete; `REVIEW_REPORT.md` finding A30 and acceptance evidence. |
+| A31 | Complete; `REVIEW_REPORT.md` finding A31 and acceptance evidence. |
+| A32 | Complete; `REVIEW_REPORT.md` finding A32 and acceptance evidence. |
+| A33 | Complete; `REVIEW_REPORT.md` finding A33 and acceptance evidence. |
+| A34 | Complete; `REVIEW_REPORT.md` finding A34 and acceptance evidence. |
 
 BUG-READ-1: minimal intake/unblocked-request slice is complete under R-PLAIN-PREREQ;
 evidence is the checked record and probe noted in the Plain task file. The larger
-same-session read redesign is explicitly deferred to T103. It is not closure of
-the larger design. A11 is not assigned to BUG-READ-1: its acceptance owner is
-R-EDIT-6, and residual lifecycle acceptance is T104.
+same-session read redesign remains deferred to T103. It is not closure of the
+larger design. A11 is owned by R-EDIT-6, not BUG-READ-1; residual lifecycle
+acceptance is T104.
 
 ## Open old §7 records
 
@@ -63,8 +93,8 @@ this statement as evidence of implementation.
 
 ## Retained gaps and evidence limits
 
-- A12 has no numbered replacement or assigned implementation owner in the
-  supplied queue; retained gap.
+- A12 retains its exact real-dispatch Git-failure scope; no numbered owner is
+  evidenced. T103 is the separate deferred reader-lock redesign.
 - R-EDIT-REAL parent acceptance is not green. T104 covers only listed residual
   lifecycle cases; preserve the broader gates and historical failures.
 - BUG-READ-1's larger redesign is intentionally deferred to T103.

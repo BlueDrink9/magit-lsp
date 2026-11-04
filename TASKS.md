@@ -8,6 +8,10 @@
   Audit every unchecked old §7 item, both Plain task files and REVIEW_REPORT A01–A34 against numbered tickets; write a compact migration ledger in `docs/evidence/task-queue-migration.md`. Resolve A11/BUG-READ-1 ownership first, preserve unmapped issues explicitly, and add T001 slice tracking to the replacement queue; do not remove source records yet.
 - [x] **T001.2 — Consolidate working rules and ticket verification policy.**
   Update `AGENTS.md`, the existing `TASKS.md` ticket template, and replacement-list shared rules. Keep no-vision policy authoritative only in AGENTS; align tests, golden/generated artifacts, fakes, capabilities and completed-ticket rules with the new queue without changing implementation or claiming unrun verification.
+- [x] **T001.3a — Audit each technical-debt review finding and retain unresolved ownership.**
+  Expand the migration ledger to individual A01–A34 rows using explicit evidence; preserve A12 and any unresolved decisions as one-line TASKS entries with numbered-queue owners or retained gaps. Only then replace `REVIEW_REPORT.md` with its header and empty Open findings template; put the audited IDs and evidence narrative in the commit message.
+- [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
+- [ ] **Retained review decision — common navigation/cycle operations.** Decide whether the four still-Planned bindings need an implementation ticket or corrected historical milestone; preserve §5.1 bindings meanwhile. Source: `docs/evidence/task-queue-migration.md` old-ledger decision record.
 - [x] **Remove the superseded protocol plan and its ad hoc work item.**
   Delete `protocol review and plan.md` and its obsolete unchecked queue entry. Preserve unrelated work; identify the first ticket in `TASKS_PART_SEVEN.md` without starting it.
 - [x] **Gather the A–E harness and client-abstraction evidence report.**
