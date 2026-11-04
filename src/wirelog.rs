@@ -34,18 +34,29 @@ impl WireLog {
             let mut file = {
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
-                    .write(true)
+                    .append(true)
                     .create(true)
-                    .truncate(true)
                     .mode(0o600)
                     .open(path)?
             };
             #[cfg(not(unix))]
-            let mut file = std::fs::File::create(path)?;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)?;
             for (direction, time, raw) in rx {
-                let row = serde_json::json!({"direction":direction,"time":time,"raw":raw});
-                serde_json::to_writer(&mut file, &row)?;
-                file.write_all(b"\n")?;
+                let row = serde_json::json!({"direction":direction,"time":time,"pid":std::process::id(),"raw":raw});
+                let mut line = serde_json::to_vec(&row)?;
+                line.push(b'\n');
+                #[cfg(unix)]
+                {
+                    use std::os::fd::AsRawFd;
+                    let lock = FileLock::lock(file.as_raw_fd())?;
+                    file.write_all(&line)?;
+                    drop(lock);
+                }
+                #[cfg(not(unix))]
+                file.write_all(&line)?;
             }
             file.flush()
         });
@@ -128,6 +139,32 @@ impl WireLog {
             }
             None => Ok(None),
         }
+    }
+}
+
+#[cfg(unix)]
+struct FileLock(i32);
+
+#[cfg(unix)]
+impl FileLock {
+    fn lock(fd: i32) -> io::Result<Self> {
+        unsafe extern "C" {
+            fn flock(fd: i32, operation: i32) -> i32;
+        }
+        if unsafe { flock(fd, 2) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(fd))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        unsafe extern "C" {
+            fn flock(fd: i32, operation: i32) -> i32;
+        }
+        let _ = unsafe { flock(self.0, 8) };
     }
 }
 

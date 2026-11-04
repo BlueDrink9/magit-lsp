@@ -35,6 +35,56 @@ fn actual_server_without_wirelog_keeps_stdout_clean_and_creates_no_log() {
 }
 
 #[test]
+fn concurrent_servers_append_complete_rows_without_truncating() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("shared.jsonl");
+    let path_text = path.to_string_lossy().into_owned();
+    let mut first = stdio::TestServer::spawn(&[("MAGIT_LSP_WIRELOG", &path_text)]);
+    let mut second = stdio::TestServer::spawn(&[("MAGIT_LSP_WIRELOG", &path_text)]);
+    first.initialize(json!({"general":{"positionEncodings":["utf-16"]}}));
+    second.initialize(json!({"general":{"positionEncodings":["utf-16"]}}));
+    first.shutdown_and_exit();
+    second.shutdown_and_exit();
+    assert!(first
+        .finish_with_messages(std::time::Duration::from_secs(10))
+        .0
+        .success());
+    assert!(second
+        .finish_with_messages(std::time::Duration::from_secs(10))
+        .0
+        .success());
+    let text = std::fs::read_to_string(path).unwrap();
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(rows.iter().any(|row| row["raw"]["method"] == "initialize"));
+    assert!(rows.iter().any(|row| row["raw"]["method"] == "shutdown"));
+    assert!(rows.iter().all(|row| row["pid"].is_number()));
+}
+
+#[test]
+fn recorder_restart_preserves_existing_rows() {
+    let path = std::env::temp_dir().join(format!("wirelog-restart-{}.jsonl", std::process::id()));
+    for method in ["first", "second"] {
+        let log = WireLog::new(&path, "").unwrap();
+        let message: Message =
+            serde_json::from_value(json!({"jsonrpc":"2.0","method":method})).unwrap();
+        log.record("in", &message).unwrap();
+        log.finish().unwrap();
+    }
+    let text = std::fs::read_to_string(&path).unwrap();
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["raw"]["method"], "first");
+    assert_eq!(rows[1]["raw"]["method"], "second");
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn unavailable_output_warns_but_server_still_speaks_valid_lsp() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("missing").join("wire.jsonl");

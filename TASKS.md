@@ -16,6 +16,8 @@ Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
   Done: captured bundled Neovim initialize and authentic native didChange. Evidence, exact commands, observed draft/edit state, source hash and cleanup: `tests/fixtures/lsp_traces/README.md`.
 - [x] **T002.2c1 — Forward recorder configuration through the native VSCode launcher.**
   Add only the opt-in wirelog variable to the isolated launcher's environment allowlist; preserve existing isolation and native text-only behavior. The following capture slice supplies actual-host evidence.
+- [x] **T002.2c2 — Prevent multi-session wirelog corruption.**
+  Native VSCode capture exposed concurrent recorder truncation: `/tmp/opencode/t002-vscode/raw.jsonl` contains 121972 NUL bytes amid valid records. Preserve complete JSONL across recorder instances/processes sharing a path, serialize complete lines off the LSP hot path, and test overlap/restarts without losing prior records.
 - [ ] **T002.2c — Capture bundled VSCode declarations and native edits.**
   Use the shipped extension in an isolated native host, not a fake editor; retain actual host/extension versions, initialize and didChange, text/structured evidence and cleanup.
 - [ ] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**
