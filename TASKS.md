@@ -10,6 +10,8 @@
   Update `AGENTS.md`, the existing `TASKS.md` ticket template, and replacement-list shared rules. Keep no-vision policy authoritative only in AGENTS; align tests, golden/generated artifacts, fakes, capabilities and completed-ticket rules with the new queue without changing implementation or claiming unrun verification.
 - [x] **T001.3a — Audit each technical-debt review finding and retain unresolved ownership.**
   Expand the migration ledger to individual A01–A34 rows using explicit evidence; preserve A12 and any unresolved decisions as one-line TASKS entries with numbered-queue owners or retained gaps. Only then replace `REVIEW_REPORT.md` with its header and empty Open findings template; put the audited IDs and evidence narrative in the commit message.
+- [x] **T001.4a — Migrate versioned VSCode host facts and retire NOTES.**
+  Move F5, find-widget, QuickPick and fold observations into `docs/evidence/vscode-host-behaviours.md`, preserving Codium versions and uncertainty. Put unresolved F5 diagnosis in T105 and delete `clients/vscode/NOTES.md`; keep evidence text-only.
 - [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
 - [x] **Retained review decision — common navigation/cycle operations.** R-NAV verified all four tree-owned commands; 74 Rust tests and `common-navigation.scn` passed 2026-10-28. Immutable record: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.**

@@ -432,7 +432,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 
 - **Depends on:** T001. This ticket moved here from phase 14.
 - **Target Files:** `docs/evidence/vscode-host-behaviours.md`, `clients/vscode/lib/*.js`.
-- **Context:** In VS Code, the F5 key did not reach the magit view in a test. The cause is not proven.
+- **Context:** Historical text evidence in `docs/evidence/vscode-host-behaviours.md` records F5 reaching the renderer as Alt+F5 on Codium 1.140.06880 with extension 0.1.0. Cause remains unproven; this is not a current-behavior claim or native F5 fix.
 - **Acceptance:** Find the cause. Write it in the evidence file with the Codium version. Fix it, or document the limit and remove F5 from the generated bindings.
 - **Verify:** Run the test that presses F5 in the status view. It must show the refresh, or the binding must not exist.
 
