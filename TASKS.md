@@ -14,6 +14,8 @@ Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
   Done: captured initialize params and three genuine didChange messages from plugin-free Neovim 0.12.6; validated JSON and source equality. Evidence: `tests/fixtures/lsp_traces/`. Partial coverage only: full replacement, insertion and deletion observed; remaining T034 shapes, exact launch/cleanup commands and complete conformance not captured.
 - [x] **T002.2b — Capture bundled Neovim declarations and native edits.**
   Done: captured bundled Neovim initialize and authentic native didChange. Evidence, exact commands, observed draft/edit state, source hash and cleanup: `tests/fixtures/lsp_traces/README.md`.
+- [x] **T002.2c1 — Forward recorder configuration through the native VSCode launcher.**
+  Add only the opt-in wirelog variable to the isolated launcher's environment allowlist; preserve existing isolation and native text-only behavior. The following capture slice supplies actual-host evidence.
 - [ ] **T002.2c — Capture bundled VSCode declarations and native edits.**
   Use the shipped extension in an isolated native host, not a fake editor; retain actual host/extension versions, initialize and didChange, text/structured evidence and cleanup.
 - [ ] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**

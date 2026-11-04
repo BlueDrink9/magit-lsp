@@ -88,6 +88,7 @@ writeFileSync(`${repo}/.vscode/settings.json`, JSON.stringify({
 const env = Object.fromEntries(['HOME', 'PATH', 'DISPLAY', 'XAUTHORITY',
   'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'LANG', 'USER', 'SHELL']
   .filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
+if (process.env.MAGIT_LSP_WIRELOG) env.MAGIT_LSP_WIRELOG = process.env.MAGIT_LSP_WIRELOG;
 if (process.env.MAGIT_VSCODE_A06_ONLY === '1') env.MAGIT_VSCODE_A06_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A29_ONLY === '1') env.MAGIT_VSCODE_A29_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A33_ONLY === '1') env.MAGIT_VSCODE_A33_ONLY = '1';
