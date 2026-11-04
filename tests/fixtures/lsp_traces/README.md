@@ -389,6 +389,117 @@ Neovim action capture source is `/tmp/opencode/t002-neovim-actions/raw-parent/ra
 
 The original driver and report are retained at `/tmp/opencode/t002-neovim-actions/driver.py` and `/tmp/opencode/t002-neovim-actions/report.json`. The capture was run with `python3 /tmp/opencode/t002-neovim-actions/driver.py`; the recorded driver lines 71–79 still enabled the incidental undo. Do not treat this command as a three-action-only run or rerun it to recreate this evidence.
 
+Reproduce the three native actions on Linux from any checkout subdirectory with
+Neovim 0.12.6, tmux, Python 3 and Git. This standalone recipe builds the debug
+server if needed, creates isolated HOME/repository/socket/tmux state, records
+structured native before/after states, waits for each real server repair before
+the next action, and retains all evidence under its printed temporary path.
+Fresh extraction is compared to that run's source, not historical PID, URI or
+timestamps; it validates this method and action causality, not the historical
+source. The historical MULTI action began before its prior repair settled; this
+fresh recipe makes no claim about old MULTI's repair boundary.
+
+```sh
+set -euo pipefail
+ROOT=$(git rev-parse --show-toplevel)
+python3 - "$ROOT" <<'PY'
+import hashlib, json, os, pathlib, shutil, signal, subprocess, sys, time
+root=pathlib.Path(sys.argv[1]).resolve(); tag=f'{os.getpid()}-{time.time_ns()}'
+d=pathlib.Path('/tmp/opencode')/f't002-neovim-actions-{tag}'; repo=d/'repo'; raw=d/'raw-parent/raw.jsonl'
+sock=pathlib.Path('/tmp')/f't002-neovim-actions-{tag}.sock'; label=f't002-actions-{tag}'; session='cap'; pid=None
+def run(a,**kw): return subprocess.run(a,text=True,capture_output=True,check=True,**kw)
+def rows():
+ if not raw.exists(): return []
+ out=[]
+ for line in raw.read_text().splitlines():
+  try: out.append(json.loads(line))
+  except json.JSONDecodeError: continue
+ return out
+def rpc(expr): return run(['nvim','--server',str(sock),'--remote-expr',expr],timeout=3).stdout.strip()
+def state():
+ lua="(function() local b=vim.api.nvim_get_current_buf(); return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'),version=vim.lsp.util.buf_versions[b],name=vim.api.nvim_buf_get_name(b)}) end)()"
+ return json.loads(rpc('luaeval('+json.dumps(lua)+')'))
+def wait(label,pred,seconds=20):
+ end=time.monotonic()+seconds; last=None
+ while time.monotonic()<end:
+  try:
+   x=state(); last=x
+   if pred(x): return x
+  except (subprocess.CalledProcessError, json.JSONDecodeError): pass
+  time.sleep(.05)
+ raise RuntimeError(f'timeout {label}; last state={last!r}')
+def changes_after(offset,version):
+ return [i for i,r in enumerate(rows()[offset:],offset) if r.get('direction')=='in' and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('version')==version]
+report={'actions':[]}
+d.mkdir(parents=True); (d/'home').mkdir(); repo.mkdir(); raw.parent.mkdir()
+try:
+ run(['git','init','-q'],cwd=repo); run(['git','config','user.name','Capture'],cwd=repo); run(['git','config','user.email','capture@example.invalid'],cwd=repo)
+ (repo/'tracked.txt').write_text('base\n'); run(['git','add','tracked.txt'],cwd=repo); run(['git','commit','-qm','baseline'],cwd=repo); (repo/'.magit').write_text('sentinel\n')
+ server=root/'target/debug/magit-lsp'
+ if not server.exists(): run(['cargo','build','--manifest-path',str(root/'Cargo.toml')],cwd=root,timeout=170)
+ env=os.environ.copy(); env.update(HOME=str(d/'home'),XDG_CONFIG_HOME=str(d/'home/config'),XDG_DATA_HOME=str(d/'home/data'),XDG_STATE_HOME=str(d/'home/state'),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0',MAGIT_LSP_WIRELOG=str(raw),PLAIN_REPO=str(repo),PLAIN_SERVER=str(server))
+ run(['tmux','-L',label,'new-session','-d','-x','120','-y','50','-s',session,'nvim','--listen',str(sock),'-u',str(root/'tests/ui/plain_init.lua'),str(repo/'.magit')],cwd=repo,env=env)
+ base=wait('initialized rendered status',lambda x:x['version'] is not None and 'Head:' in x['text'])
+ init=next(r for r in rows() if r.get('raw',{}).get('method')=='initialize'); pid=init['pid']
+ def act(name,keys,pred,repair=True):
+  before=state(); offset=len(rows()); run(['nvim','--server',str(sock),'--remote-send',keys],timeout=8); after=wait(name,pred)
+  deadline=time.monotonic()+15
+  while time.monotonic()<deadline and not changes_after(offset,after['version']): time.sleep(.05)
+  if not changes_after(offset,after['version']): raise RuntimeError(f'{name}: didChange boundary missing')
+  rec={'action':name,'keys':keys,'before':before,'after':after,'didChange_row':changes_after(offset,after['version'])[0]+1}
+  if repair:
+   fixed=wait(name+' authoritative repair',lambda x:x['version']>after['version'] and x['text']==base['text'])
+   rec['repair'] = fixed
+  report['actions'].append(rec); return after
+ lines=base['text'].splitlines(); line=next(i for i,x in enumerate(lines) if 'Head:' in x)+1
+ act('selection replacement',f'{line}G0vllrX<Esc>',lambda x:x['version']>base['version'] and x['text']!=base['text'])
+ # Q and MULTI are assigned through native Ex input; setup does not edit the buffer.
+ run(['nvim','--server',str(sock),'--remote-send','<Cmd>let @a="Q"<CR>'],timeout=8)
+ s=state(); act('one-character register paste','gg0"ap',lambda x:x['version']>s['version'] and x['text']!=s['text'])
+ run(['nvim','--server',str(sock),'--remote-send','<Cmd>let @a="MULTI"<CR>'],timeout=8)
+ s=state(); act('multi-character register paste','gg0"ap',lambda x:x['version']>s['version'] and x['text']!=s['text'])
+ # Drain only after graceful editor close and recorded server exit.
+ run(['nvim','--server',str(sock),'--remote-send','<Cmd>qa!<CR>'],timeout=8)
+ deadline=time.monotonic()+20
+ while time.monotonic()<deadline:
+  rs=rows(); exits=[r for r in rs if r.get('pid')==pid and r.get('raw',{}).get('method') in ('shutdown','exit')]
+  try: os.kill(pid,0); alive=True
+  except ProcessLookupError: alive=False
+  if any(r.get('raw',{}).get('method')=='exit' for r in exits) and not alive: break
+  time.sleep(.05)
+ else: raise RuntimeError('owned LSP server did not drain after graceful editor exit')
+ report['server_pid']=pid; report['server_exit_observed']=True
+ # Extraction selects initialize and didChange rows for this run's recorder only.
+ selected=[r for r in rows() if r.get('direction')=='in' and r.get('pid')==pid and r.get('raw',{}).get('method') in ('initialize','textDocument/didChange')]
+ (d/'generated.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in selected))
+ # Verify parsed extraction against parsed source rows and final drained source hash.
+ parsed=[json.loads(x) for x in (d/'generated.jsonl').read_text().splitlines()]
+ assert parsed==selected and len([r for r in selected if r.get('raw',{}).get('method')=='textDocument/didChange'])>=3
+ report.update(source=str(raw),source_sha256=hashlib.sha256(raw.read_bytes()).hexdigest(),source_rows=len(rows()),selected_rows=len(selected),extraction_matches_source=True,actions_count=3)
+ (d/'report.json').write_text(json.dumps(report,indent=2)+'\n'); print((d/'report.json').read_text())
+finally:
+ # Preserve failed run evidence. Always release only this run's tmux/socket/server.
+ subprocess.run(['tmux','-L',label,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ deadline=time.monotonic()+5
+ while sock.exists() and time.monotonic()<deadline: time.sleep(.05)
+ if pid:
+  deadline=time.monotonic()+5
+  while time.monotonic()<deadline:
+   try: os.kill(pid,0)
+   except ProcessLookupError: break
+   time.sleep(.05)
+ if sock.exists(): sock.unlink()
+ if 'error' in report: print(f'FAILED evidence retained: {d}',file=sys.stderr)
+if sock.exists(): raise RuntimeError('owned Neovim socket remains')
+if subprocess.run(['tmux','-L',label,'has-session','-t',session],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: raise RuntimeError('owned tmux session remains')
+if pid:
+ try: os.kill(pid,0)
+ except ProcessLookupError: pass
+ else: raise RuntimeError(f'owned server PID remains: {pid}')
+print(f'cleanup verified; evidence={d}')
+PY
+```
+
 The separate rapid/undo capture is retained in `plain-neovim-0.12.6-rapid-repair.jsonl` and its metadata sidecar. Final drained raw source SHA256 is `05295fce72b5d9da6f2c57d62648b77d9fd95aa84a6e3b9a28800882d07c6397` (21 rows, including shutdown, response and exit); source rows 9, 10, 13 and 14 are copied byte-for-byte. Row 9 proves rapid native input; row 10 is the new server `workspace/applyEdit` deleting `RAPID`; row 13 is its correlated editor reply. The reply is not accepted alone: native buffer text and version were inspected and matched the exact baseline before sending `u`. Row 14 coalesces the server repair echo (delete `RAPID`) with the native undo (insert `RAPID`); there is no separate echo before undo. The observed undo restored `RAPID`, then the server issued a further repair. The sidecar records baseline/after hashes, versions, native keys, row offsets and request ID without prescribing the undo outcome.
 
 Reproduce on Linux from any checkout subdirectory with Neovim 0.12.6, tmux, Python 3 and Git. This complete recipe creates a real temporary Git repository, uses a unique recorder/socket/tmux namespace, retries startup remote-expr errors with a deadline, polls wire/state conditions, sends undo only after matching correlated reply and baseline restoration, gracefully closes Neovim, waits for the server's exit and process termination, then prints final source hash/count. It preserves the raw capture directory for audit.
