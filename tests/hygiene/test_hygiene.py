@@ -20,6 +20,7 @@ class HygieneTests(unittest.TestCase):
     """Exercise runner reporting against real temporary Git repositories."""
 
     def setUp(self):
+        os.environ["HYGIENE_SOFT_LIMIT"] = "20"
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         subprocess.run([REAL_GIT, "init", "-q"], cwd=self.root, check=True)
@@ -77,22 +78,18 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
 
     def test_sizes_and_markers_are_deterministic(self):
-        with patch.dict(os.environ, {"HYGIENE_SOFT_LIMIT": "20"}):
-            spec = importlib.util.spec_from_file_location("hygiene_limited", SCRIPT)
-            limited = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(limited)
         first, _ = self.execute()
         second, _ = self.execute()
         self.assertEqual(first, second)
-        self.assertIn("Largest tracked text files (top 20; soft limit 100000 bytes):", first)
+        self.assertIn("Largest tracked text files (top 20; soft limit 20 bytes):", first)
+        self.assertIn("[over soft limit]", first)
         self.assertIn("big.txt:1:keep-for: reason", first)
         self.assertIn("big.txt:2:allow(dead_code)", first)
 
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            limited.report(self.root)
-        self.assertIn("soft limit 20 bytes", output.getvalue())
-        self.assertIn("[over soft limit]", output.getvalue())
+        self.assertNotIn("generated space.lua", first)
+        self.assertNotIn("generated-true.txt", first)
+        self.assertNotIn("generated-marker", first)
+        self.assertNotIn("generated true", first)
 
     def test_generated_and_untracked_lua_excluded_but_tracked_lua_passed(self):
         generated = self.root / "generated space.lua"
