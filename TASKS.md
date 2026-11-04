@@ -112,12 +112,16 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `464d5e4b06df8d22cacf273f0c
   - **Done when:** Standard-library symbols available in the supported Neovim LuaJIT runtime are accepted, undefined project globals remain reported, and the baseline exactly matches fresh luacheck 1.2.0 output.
   - **Constraints:** Do not add project globals to silence source bugs, blanket-disable warning classes, narrow checked source paths, or claim runtime execution.
 
-- [ ] **[P1] Give every retained hygiene finding an owner or reason** (`hygiene-allowlist.md:15-123`, `Knip`, `Luacheck`, and `Size and marker report`; `TASKS.md:12-21`, `T003.3` and `T003.4`)
+- [x] **[P1] Complete marker ownership and baseline reconciliation.**
+  Split remainder after two partial checkpoints: keep the existing per-export/Lua/size follow-up draft, explicitly disposition every marker, correct the guarded-unpack evidence, and reconcile the report snapshot. Verified `nix shell nixpkgs#cargo-machete nixpkgs#luajitPackages.luacheck --command npm exec --yes --package=knip@5.88.1 -- make hygiene && git diff --check`: exit 0; expected Knip and luacheck findings remain report-only.
+- [x] **[P1] Give every retained hygiene finding an owner or reason** (`hygiene-allowlist.md`, `Knip`, `Luacheck`, and `Size and marker report`; `TASKS.md`, `T003.3` and `T003.4`)
   - **Problem:** The baseline itemizes findings but leaves the unlisted dependency, all unused exports, all luacheck warnings, and six over-limit files under generic “validate later,” “follow-up policy,” or “may need treatment” language. T003 acceptance requires each finding to be deleted, retained for a concrete reason, or assigned to a ticket; a pending investigation note is not a disposition or owner.
   - **Why it matters:** This violates correctness and cleanliness of the baseline and makes checked T003.3 overstate completion. Future runs cannot tell accepted debt from unowned work.
   - **Change:** After the Knip-entry and Lua-runtime tasks, rerun the pinned tools and reconcile exact counts. For each remaining finding, record either a concrete evidence-based retention reason or the exact unique unchecked task title that owns its resolution; grouping is allowed only when one reason/action genuinely applies to every named member. Add small unchecked tasks outside `## Review` when no existing ticket owns the work. Resolve or explicitly ticket the direct `vscode-jsonrpc/node` import instead of describing its transitive availability as a future investigation. Give each over-limit file its own rationale or owner.
   - **Done when:** Every finding in the fresh cargo-machete/Knip/luacheck/size/marker report maps to deletion, a specific retention reason, or an exact unchecked task title; raw and summarized counts agree; no entry relies on “legacy,” “review later,” “policy work,” or T003.4 alone as its rationale.
   - **Constraints:** Do after: `Model the real VSCode entry graph in Knip` and `Check Lua against Neovim's actual LuaJIT standard`. Do not suppress findings merely to make the report clean, declare dynamic/public consumers without evidence, change the user's dirty `Cargo.toml`/`README.md`, touch untracked release files, or mark parent T003/T003.4 complete.
+
+### Remaining checkpoint review task
 
 - [ ] **[P2] Make hygiene tests portable and prove checker working directories** (`tests/hygiene/test_hygiene.py:28-41`, `execute` and `stub`; `tests/hygiene/test_hygiene.py:100-111`, `test_invocation_failure_is_reported_and_knip_uses_client_cwd`)
   - **Problem:** The harness assumes Git exists at `/usr/bin/git` or `/bin/git` and creates a symlink, which fails on valid non-FHS Linux environments and is not portable to existing macOS/Windows CI. The cwd test creates `clients/vscode` but never observes `$PWD`, so its name and T003.2a's checked claim are unsupported.
@@ -222,11 +226,27 @@ P3 deferred: none substantiated in this review.
   - **Constraints:** Documentation only; retain immutable source references and unfinished T001 work.
   - **Verify:** `grep -n -E 'A01–A10|A12|real-dispatch' TASKS_PART_SEVEN.md TASKS.md docs/evidence/task-queue-migration.md`
 
-## 0. Decisions already made
+## Deferred hygiene follow-ups
+
+- [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
+- [ ] **Audit unused VSCode exports: commands and context** — `clients/vscode/lib/commands.js` (`openStatus`, `viewport`, `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`); `context.js` (`deriveContext`, `inactiveContext`, `staticScope`). Verify focused VSCode tests and Knip.
+- [ ] **Audit unused VSCode exports: draft and edit lifecycle** — `clients/vscode/lib/drafts.js` (`cancel`, `close`, `confirm`, `disconnect`, `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`, `setup`); `edit.js` (`KIND`, `SCHEME`, `draftAction`, `isEditEffect`, `languageForKind`); `edits.js` (`onDocumentClosed`, `onActiveEditorChanged`, `confirmEditCommand`, `cancelEditCommand`, `currentEdit`). Verify edit lifecycle tests and Knip.
+- [ ] **Audit unused VSCode exports: effects, fold keys and menus** — `clients/vscode/lib/effects.js` (`showMessage`, `replay`); `foldkeys.js` (`parseJsonc`, `mapFoldCommand`, `mapFoldKeys`); `menu.js` (`quickPickItems`, `quickPickItem`, `describeItem`, `routeTyped`, `charToKey`); `menus.js` (`showMenu`, `menuItems`, `hideMenu`, `queueSteps`). Verify menu/fold/effect tests and Knip.
+- [ ] **Audit unused VSCode exports: prompt, render and requests** — `clients/vscode/lib/prompt.js` (`CUSTOM_ID`, `promptItems`, `answerFor`, `customChoice`); `render.js` (`applyRender`, `applyEdit`); `requests.js` (`press`, `invoke`, `applyRender`, `handlePrompt`, `resync`). Verify prompt/render/request tests and Knip.
+- [ ] **Audit unused VSCode exports: semantic, session and views** — `clients/vscode/lib/semantic.js` (`register`); `session.js` (`activate`, `deactivate`, `createClient`); `views.js` (`stateForUri`, `activeState`, `isMenuKind`, `ensureView`, `showView`, `showDocument`, `applyCursor`, `activateView`, `closeView`, `closeRoot`, `focusView`). Verify VSCode integration tests and Knip.
+- [ ] **Resolve Lua warning findings** — `lua/magit-lsp/debug.lua:91`, `edit.lua:98`, `highlights.lua:19`, `hooks.lua:42,49,56,63,70,78,103`, `init.lua:122,167,373`, `keymap.lua:83`, `keys.lua:256`, `requests.lua:179`, `view.lua:626,728`, `scripts/color_spike.lua:57`, `tests/spikes/real_file_nvim.lua:14,27,40,47`, `tests/test_magit_lsp.lua:45,514,894,1143,1526,1550,1553,1555,1556,1557,1743`. Verify pinned luacheck; guarded `table.unpack` fallback is tested at line 1743, but LuaJIT runtime reports `table.unpack == nil`.
+- [ ] **Reduce evidence archive size** — `docs/evidence/harness-reassessment-inputs.md`; preserve immutable evidence while reducing tracked file below 100000 bytes. Verify `make hygiene` size report.
+- [ ] **Split server implementation below hygiene limit** — `src/server.rs`; preserve behavior and reduce below 100000 bytes. Verify focused Rust tests and `make hygiene`.
+- [ ] **Split async server tests below hygiene limit** — `tests/server_async.rs`; preserve coverage and reduce below 100000 bytes. Verify `cargo test --test server_async` and `make hygiene`.
+- [ ] **Split Neovim integration tests below hygiene limit** — `tests/test_magit_lsp.lua`; preserve coverage and reduce below 100000 bytes. Verify focused Neovim tests and `make hygiene`.
+- [ ] **Split canonical task roadmap below hygiene limit** — `TASKS.md`; retain canonical design while reducing below 100000 bytes. Verify documentation links and `make hygiene`.
+- [ ] **Split editor bridge tests below hygiene limit** — `tests/editor_bridge.rs`; preserve coverage and reduce below 100000 bytes. Verify `cargo test --test editor_bridge` and `make hygiene`.
 
 These decisions are canonical unless superseded by an explicit later decision
 here. General agent working conventions and verification guidance live in
 `AGENTS.md`.
+
+## 0. Decisions already made
 
 | Topic | Decision |
 | --- | --- |

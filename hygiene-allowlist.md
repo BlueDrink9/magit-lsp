@@ -7,7 +7,7 @@ Baseline captured 2026-11-05 with `cargo-machete 0.9.2`, `knip 5.88.1` and
 nix shell nixpkgs#cargo-machete nixpkgs#luajitPackages.luacheck --command npm exec --yes --package=knip@5.88.1 -- make hygiene
 ```
 
-Full raw report: `/tmp/opencode/t003-hygiene/baseline.log`. cargo-machete
+Full raw report: `/tmp/opencode/p1-hygiene.log`. cargo-machete
 reported clean. Knip and luacheck findings below are recorded, not suppressed.
 No dependency is allowlisted; isolated probe below confirms unused dependency
 detection.
@@ -75,18 +75,27 @@ code issues, not allowlisted source suppressions; fix or disposition individuall
 - `tests/spikes/real_file_nvim.lua:27:10`, `:40:10`, `:47:10`: writes
   undeclared globals `SpikeState`, `SpikeShow`, `SpikeRefresh`; declare local or
   test globals explicitly after confirming test contract.
-- `tests/test_magit_lsp.lua:1743:16`: undefined `table.unpack` field under
-  LuaJIT standard; Neovim's runtime supplies it.
+- `tests/test_magit_lsp.lua:1743:16`: guarded compatibility probe
+  `local unpack = table.unpack or unpack`; clean Neovim output is
+  `LuaJIT 2.1.1785763465 nil`, so this runtime does not supply the field.
+  Retain as a compatibility probe, not as a runtime guarantee.
+
+Every Knip finding and Luacheck diagnostic has an exact unchecked owner title
+in `TASKS.md` under **Deferred hygiene follow-ups**. The dependency owns
+`Resolve the vscode-jsonrpc/node direct dependency`. The 69 exports map by
+module/member list to the five VSCode export audit tasks; all 34 warnings map
+to `Resolve Lua warning findings`. Counts match the fresh raw report at
+`/tmp/opencode/p1-hygiene.log`.
 
 ## Size and marker report
 
 The runner soft limit is 100000 bytes. Over-limit tracked text files:
 `docs/evidence/harness-reassessment-inputs.md` (508906 bytes / 9530 lines),
 `src/server.rs` (162205 / 4242), `tests/server_async.rs` (107846 / 2717),
-`tests/test_magit_lsp.lua` (107501 / 2730), `TASKS.md` (103993 / 1321), and
-`tests/editor_bridge.rs` (103096 / 2442). These are concrete size findings;
-the evidence archive and canonical roadmap may need separate policy treatment,
-but are not blanket exemptions.
+`tests/test_magit_lsp.lua` (107501 / 2730), `TASKS.md` (117703 / 1378), and
+`tests/editor_bridge.rs` (103096 / 2442). Each has a separate owner task in
+`TASKS.md` under **Deferred hygiene follow-ups**, naming that exact path and
+focused verification.
 
 Tracked marker matches:
 - `TASKS.md:15` and `TASKS_PART_SEVEN.md:98` mention runner requirements; these
@@ -94,10 +103,11 @@ Tracked marker matches:
 - `docs/evidence/harness-reassessment-inputs.md:6019:27`, `:6107:29`,
   `:6115:37`, `:7598:27`, `:8158:44`, `:8162:48`, `:8230:19`, and
   `:8889:19` are historical evidence text; not live source annotations.
-- `scripts/hygiene.py:72`, `:77` and `tests/hygiene/test_hygiene.py:21`, `:72`,
-  `:73`, `:77`, `:79` are the scanner and its fixtures/assertions.
-- `src/commands.rs:643`, `:658`: retained bindings for planned navigation,
-  TASKS §5.1.
+- `scripts/hygiene.py:72`, `:77` are literal scanner needles. The matching
+  `tests/hygiene/test_hygiene.py:21`, `:72`, `:73`, `:77`, `:79` are literal
+  fixture inputs and assertions enforcing those needles and report formats.
+- `src/commands.rs:643`, `:658`: retained bindings are covered by completed
+  R-NAV tree-owned command decision (TASKS §5.1); they are not planned work.
 - `src/config.rs:136`, `:143`, `:145`, `:152`, `:159`, `:161`: inactive or
   partially applied configuration schema, with roadmap references in source;
   review against TASKS §3.18 / R-5.5 / R-3.6 / R-5.1.
@@ -116,7 +126,8 @@ Tracked marker matches:
 - `src/view.rs:158`: descriptor viewport retained per TASKS §3.2 for clients.
   `src/view.rs:263`: view contract retained for LogView page extension,
   TASKS §7/R-5.1.
-- `tests/common/mod.rs:6`: test-only `allow(dead_code)` for shared helpers.
+- `tests/common/mod.rs:6`: test-only `allow(dead_code)` keeps shared test helpers
+  available to integration-test crates that use different subsets.
 
 ## Unused-dependency probe
 
