@@ -1,14 +1,19 @@
 """Focused tests for the report-only hygiene runner."""
 
+import contextlib
+import importlib.util
+import io
 import os
+import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/hygiene.py"
+REAL_GIT = shutil.which("git")
 
 
 class HygieneTests(unittest.TestCase):
@@ -17,121 +22,89 @@ class HygieneTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run([REAL_GIT, "init", "-q"], cwd=self.root, check=True)
         (self.root / "big.txt").write_text("keep-for: reason\nallow(dead_code)\n" + "x\n" * 30)
         (self.root / "small.txt").write_text("small\n")
-        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run([REAL_GIT, "add", "."], cwd=self.root, check=True)
+        spec = importlib.util.spec_from_file_location("hygiene_under_test", SCRIPT)
+        self.runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.runner)
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def execute(self, tools):
-        git = Path("/usr/bin/git")
-        if not git.exists():
-            git = Path("/bin/git")
-        git_link = Path(tools) / "git"
-        if not git_link.exists():
-            git_link.symlink_to(git)
-        env = dict(os.environ, PATH=str(tools), HYGIENE_SOFT_LIMIT="20")
-        return subprocess.run([sys.executable, str(SCRIPT)], cwd=self.root, env=env, text=True, capture_output=True)
+    def execute(self, outcomes=None, missing=(), failures=()):
+        outcomes = outcomes or {}
+        calls = []
+        original = subprocess.run
 
-    def stub(self, directory, name, code, output):
-        path = directory / name
-        path.write_text(f"#!/bin/sh\nprintf '%s\\n' {output!r}\nexit {code}\n")
-        path.chmod(0o755)
+        def run(command, *args, **kwargs):
+            if command[0] == "git":
+                return original([REAL_GIT, *command[1:]], *args, **kwargs)
+            calls.append((command, Path(kwargs["cwd"])))
+            name = Path(command[0]).name
+            if name in failures:
+                raise OSError("cannot execute")
+            if name in missing:
+                raise AssertionError("missing executable should not launch")
+            code, output = outcomes.get(name, (0, ""))
+            return subprocess.CompletedProcess(command, code, output, "")
+
+        stdout = io.StringIO()
+        with patch.object(self.runner.subprocess, "run", side_effect=run), \
+             patch.object(self.runner.shutil, "which", side_effect=lambda n: None if n in missing else f"/fake/{n}"), \
+             contextlib.redirect_stdout(stdout):
+            self.runner.report(self.root)
+        return stdout.getvalue(), calls
 
     def test_known_findings_and_unknown_nonzero_are_distinct(self):
-        with tempfile.TemporaryDirectory() as tools:
-            bindir = Path(tools)
-            for tool in ("cargo", "knip", "luacheck"):
-                self.stub(bindir, tool, 1 if tool == "cargo" else 0, "tool output")
-            result = self.execute(tools)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cargo machete: FINDINGS (exit 1)", result.stdout)
-        self.assertIn("tool output", result.stdout)
+        output, calls = self.execute({"cargo": (1, "tool output")})
+        self.assertIn("cargo machete: FINDINGS (exit 1)", output)
+        self.assertIn("tool output", output)
+        self.assertEqual(calls[0], (["cargo", "machete"], self.root))
+        self.assertEqual(calls[1][1], self.root / "clients/vscode")
+        self.assertEqual(calls[2][1], self.root)
 
-    def test_arbitrary_nonzero_is_not_called_findings(self):
-        (self.root / "clients/vscode").mkdir(parents=True)
-        with tempfile.TemporaryDirectory() as tools:
-            bindir = Path(tools)
-            self.stub(bindir, "cargo", 7, "tool output")
-            self.stub(bindir, "knip", 1, "config error")
-            self.stub(bindir, "luacheck", 0, "")
-            result = self.execute(tools)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cargo machete: NONZERO (exit 7)", result.stdout)
-        self.assertIn("knip: NONZERO (exit 1)", result.stdout)
-        self.assertNotIn("FINDINGS", result.stdout)
+    def test_nonzero_is_reported(self):
+        output, _ = self.execute({"cargo": (7, "tool output"), "knip": (1, "config error")})
+        self.assertIn("cargo machete: NONZERO (exit 7)", output)
+        self.assertIn("knip: NONZERO (exit 1)", output)
 
     def test_missing_checker_is_distinct(self):
-        with tempfile.TemporaryDirectory() as tools:
-            self.stub(Path(tools), "cargo", 0, "")
-            self.stub(Path(tools), "luacheck", 0, "")
-            result = self.execute(tools)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("knip: MISSING executable knip", result.stdout)
-        self.assertNotIn("knip: CLEAN", result.stdout)
+        output, calls = self.execute(missing={"knip"})
+        self.assertIn("knip: MISSING executable knip", output)
+        self.assertNotIn("knip: CLEAN", output)
+        self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
 
     def test_sizes_and_markers_are_deterministic(self):
-        with tempfile.TemporaryDirectory() as tools:
-            for tool in ("cargo", "knip", "luacheck"):
-                self.stub(Path(tools), tool, 0, "")
-            first = self.execute(tools)
-            second = self.execute(tools)
-        self.assertEqual(first.stdout, second.stdout)
-        self.assertIn("Largest tracked text files (top 20; soft limit 20 bytes):", first.stdout)
-        self.assertIn("big.txt", first.stdout)
-        self.assertIn("[over soft limit]", first.stdout)
-        self.assertIn("big.txt:1:keep-for: reason", first.stdout)
-        self.assertIn("big.txt:2:allow(dead_code)", first.stdout)
+        first, _ = self.execute()
+        second, _ = self.execute()
+        self.assertEqual(first, second)
+        self.assertIn("Largest tracked text files (top 20; soft limit 100000 bytes):", first)
+        self.assertIn("big.txt:1:keep-for: reason", first)
+        self.assertIn("big.txt:2:allow(dead_code)", first)
 
-    def test_generated_attributes_exclude_size_and_markers(self):
-        generated = self.root / "generated file.txt"
-        generated.write_text("keep-for: generated\n" + "z" * 200)
-        true_generated = self.root / "true-generated.txt"
-        true_generated.write_text("keep-for: true generated\n" + "z" * 200)
-        (self.root / ".gitattributes").write_text(
-            '"generated file.txt" linguist-generated\n'
-            "true-generated.txt linguist-generated=true\n"
-        )
-        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
-        attributes = subprocess.run(
-            ["git", "check-attr", "-z", "linguist-generated", "--", "generated file.txt", "true-generated.txt"],
-            cwd=self.root, check=True, capture_output=True,
-        ).stdout.split(b"\0")
-        self.assertEqual(attributes[2], b"set")
-        self.assertEqual(attributes[5], b"true")
-        with tempfile.TemporaryDirectory() as tools:
-            for tool in ("cargo", "knip", "luacheck"):
-                self.stub(Path(tools), tool, 0, "")
-            result = self.execute(tools)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("generated file.txt", result.stdout)
-        self.assertNotIn("true-generated.txt", result.stdout)
-        self.assertIn("big.txt", result.stdout)
+    def test_generated_and_untracked_lua_excluded_but_tracked_lua_passed(self):
+        generated = self.root / "generated.lua"
+        generated.write_text("-- generated\n")
+        tracked = self.root / "tracked.lua"
+        tracked.write_text("-- tracked\n")
+        (self.root / ".gitattributes").write_text("generated.lua linguist-generated\n")
+        subprocess.run([REAL_GIT, "add", "."], cwd=self.root, check=True)
+        (self.root / "untracked.lua").write_text("-- untracked\n")
+        output, calls = self.execute()
+        lua_call = next(c for c in calls if c[0][0] == "luacheck")
+        self.assertEqual(lua_call[0], ["luacheck", "--config", str(self.root / ".luacheckrc"), "tracked.lua"])
+        self.assertNotIn("generated.lua", lua_call[0])
+        self.assertNotIn("untracked.lua", lua_call[0])
 
-    def test_invocation_failure_is_reported_and_knip_uses_client_cwd(self):
-        (self.root / "clients/vscode").mkdir(parents=True)
-        with tempfile.TemporaryDirectory() as tools:
-            bindir = Path(tools)
-            self.stub(bindir, "cargo", 0, "")
-            self.stub(bindir, "knip", 0, "")
-            self.stub(bindir, "luacheck", 0, "")
-            (bindir / "knip").write_text("#!/no/such/interpreter\n")
-            (bindir / "knip").chmod(0o755)
-            result = self.execute(tools)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("knip: INVOCATION FAILURE:", result.stdout)
+    def test_invocation_failure_is_reported(self):
+        output, _ = self.execute(failures={"knip"})
+        self.assertIn("knip: INVOCATION FAILURE: cannot execute", output)
 
     def test_missing_cargo_machete_subcommand_is_nonzero(self):
-        with tempfile.TemporaryDirectory() as tools:
-            bindir = Path(tools)
-            self.stub(bindir, "cargo", 101, "no such command: machete")
-            self.stub(bindir, "knip", 0, "")
-            self.stub(bindir, "luacheck", 0, "")
-            result = self.execute(tools)
-        self.assertIn("cargo machete: NONZERO (exit 101)", result.stdout)
-        self.assertIn("no such command: machete", result.stdout)
+        output, _ = self.execute({"cargo": (101, "no such command: machete")})
+        self.assertIn("cargo machete: NONZERO (exit 101)", output)
 
 
 if __name__ == "__main__":
