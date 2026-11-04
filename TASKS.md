@@ -43,6 +43,18 @@
 - [x] **Checkpoint — Resolve Rust formatting-gate drift.**
   `cargo fmt --all -- --check` reports existing workspace-wide formatting differences; log `/tmp/opencode/queue-checkpoint/fmt.log`. Apply rustfmt only to the reported Rust files, preserve unrelated user edits, and verify the full formatting check.
 
+## Review
+
+Checkpoint review blocker (2026-11-05 00:20 NZDT): the configured reviewer could not start (`Model unavailable: openai/gpt-5.5-sol`). No human input requested. Available workers will perform bounded read-only review slices; retain the previous Last review baseline until coverage is recorded. Full `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs are under `/tmp/opencode/queue-checkpoint/`.
+
+- [x] **Checkpoint review — Git mutation identities and structured successors.**
+  Review committed changes since `dd92f90cdb11d827606a689a88a280f480d7508d` in Git/patch/dispatch/tree/status/commands and their focused tests. Add only substantiated P0–P2 worker-ready findings here; record exact coverage and P3 deferrals without source edits.
+  Coverage: reviewed the requested diff through `d90d5da`; inspected `src/git.rs`, `src/patch.rs`, `src/dispatch.rs`, `src/tree.rs`, `src/status_view.rs`, `src/commands.rs`, and `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/views.rs`, `tests/navigation.rs`. No substantiated P0–P2 findings. P3: none deferred; no speculative findings. Coverage is limited to these paths and this diff; no runtime reruns or broader repository audit.
+- [ ] **Checkpoint review — Plain protocol versions and process ownership.**
+  Review committed server/session/protocol/runner changes since the same baseline, focusing on boundary validation, displayed version/coordinate handling, capability negotiation and secure helper ownership. Add actionable findings and honest coverage limits; do not edit source.
+- [ ] **Checkpoint review — Roadmap migration preserves open requirements.**
+  Audit committed documentation migration and immutable issue provenance since the same baseline; distinguish deliberately unfinished T001 work from lost requirements or false completion claims. Add actionable findings and coverage limits; do not edit source.
+
 Last review: dd92f90cdb11d827606a689a88a280f480d7508d
 
 Checkpoint: accumulated Plain visibility/provider changes reviewed; no
