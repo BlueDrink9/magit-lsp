@@ -79,6 +79,8 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 
 ## Review
 
+Checkpoint closure (2026-11-05): all three findings below are resolved (`f123a20`, `7b578b0`, `e08837c`). The final Helix shell recipe passed a fresh Linux execution from a checkout subdirectory; committed fixtures remain unchanged. Linux full tests, rustfmt and text-native tour passed (`/tmp/opencode/helix-checkpoint/`); the subsequent test-only fixture contract passed `cargo test --test wirelog` and rustfmt. Four owned servers left by unsuccessful recipe attempts were identified by isolated capture cwd/environment and closed; no `magit-lsp` remained. No P0 requires re-review; no P3 deferred. T002 remains open for five missing action classes per editor; independent T003 hygiene is next.
+
 Checkpoint review: GPT-5.6 Sol reviewed `8ecba12dc44f321daaa43dec773f374616bb6b67..464d5e4b06df8d22cacf273f0c458b55ba4bc151`. Inspected only `AGENTS.md`, `TASKS.md`, `TASKS_PART_SEVEN.md`, `src/wirelog.rs`, `tests/wirelog.rs`, and `tests/fixtures/lsp_traces/{README.md,bundled-neovim-0.12.6.jsonl,helix-25.07.1.jsonl,initialize-helix-25.07.1.json}` plus fixture-test references under `tests/`. Three findings: one P1 and two P2; no P0. Accepted the checked T002.2 four-client baseline while leaving queue parent T002 open for the five missing T034 native-action classes per editor. Did not rerun tests or claim non-Linux execution; relied on the supplied Linux gate results. Logger changes were reviewed only as prior P1 resolutions, with no speculative expansion. P3 deferred: none substantiated.
 
 - [x] **[P1] Finish native Helix smoke shutdown and recipe verification.**
