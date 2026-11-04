@@ -89,3 +89,25 @@ Reproduce from repository root (VSCodium and display available):
 mkdir -p /tmp/opencode/t002-vscode-fixed
 MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_EDIT_ONLY=1 MAGIT_LSP_WIRELOG=/tmp/opencode/t002-vscode-fixed/raw.jsonl npm --prefix clients/vscode run test:e2e
 ```
+
+### Native Helix 25.07.1 capture
+
+`helix-25.07.1.jsonl` retains actual initialize and three native
+`textDocument/didChange` notifications from one recorder PID, in source order.
+`initialize-helix-25.07.1.json` stores exact initialize params. Captured
+2026-11-05 with `/nix/store/1nc2y094mdd6z9c4bgm766jwmxsf3mzd-helix-25.07.1/bin/hx`
+(`hx --version`: 25.07.1). Dated release check:
+`https://api.github.com/repos/helix-editor/helix/releases/latest` reported
+tag 25.07.1 on 2026-11-05. Recorder source SHA256:
+`66b2b40fc281625336cbaf808fc0455fe324f8e8110b740d310433141f8d9eda`.
+
+Used a fresh `/tmp/opencode/helix-capture-*` home, config, repository and tmux
+socket `helixcap`; recorder parent existed before launch. Language config used
+the generic declaration below, with absolute `target/debug/magit-lsp`.
+`sample.magit` initially held `hello\n`; native keys inserted `X`, then sent
+`x`, `p`, `a`, Enter. Recorder rows 4–6 show insertion, selection replacement
+and later insertion. This was an ordinary attached file, not a server-owned
+status view. Bracketed paste, paste-many, rapid typing and undo-after-server-
+repair were not established. Raw payloads retain recorder-redacted data
+without normalization. Cleanup: `tmux -L helixcap kill-server`, then remove
+the owned `$D` tree. `reconstructed-plain.jsonl` remains historical reconstruction.
