@@ -640,7 +640,6 @@ fn build() -> Registry {
             run: detail_level_4,
         },
         Command {
-            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
             id: "common.next-section",
             scope: Scope::Common,
             doc: "Move to the next section",
@@ -655,7 +654,6 @@ fn build() -> Registry {
             run: prev_section,
         },
         Command {
-            // keep-for: TASKS §5.1 retained binding; planned navigation implementation requires roadmap disposition.
             id: "common.jump",
             scope: Scope::Common,
             doc: "Move to the next or previous visible section, file or hunk",

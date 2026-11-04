@@ -98,7 +98,7 @@ The runner soft limit is 100000 bytes. Over-limit tracked text files:
 focused verification.
 
 Tracked marker matches:
-- `TASKS.md:15` and `TASKS_PART_SEVEN.md:98` mention runner requirements; these
+- `TASKS.md:17` and `TASKS_PART_SEVEN.md:98` mention runner requirements; these
   are documentation, not code-retention claims.
 - `docs/evidence/harness-reassessment-inputs.md:6019:27`, `:6107:29`,
   `:6115:37`, `:7598:27`, `:8158:44`, `:8162:48`, `:8230:19`, and
@@ -106,8 +106,6 @@ Tracked marker matches:
 - `scripts/hygiene.py:72`, `:77` are literal scanner needles. The matching
   `tests/hygiene/test_hygiene.py:21`, `:72`, `:73`, `:77`, `:79` are literal
   fixture inputs and assertions enforcing those needles and report formats.
-- `src/commands.rs:643`, `:658`: retained bindings are covered by completed
-  R-NAV tree-owned command decision (TASKS §5.1); they are not planned work.
 - `src/config.rs:136`, `:143`, `:145`, `:152`, `:159`, `:161`: inactive or
   partially applied configuration schema, with roadmap references in source;
   review against TASKS §3.18 / R-5.5 / R-3.6 / R-5.1.

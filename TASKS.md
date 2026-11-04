@@ -257,7 +257,7 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `a70df920a165885e73cd315c29
   - **Constraints:** Documentation only. Do not weaken CI follow-ups or imply Windows/macOS were executed.
   - **Verify:** `grep -n -E 'Linux-only|Linux only|Windows|macOS|cross-platform' AGENTS.md`
 
-- [ ] **[P2] Remove stale planned-navigation marker claims** (`src/commands.rs:643-658`, command entries `common.next-section` and `common.jump`; `hygiene-allowlist.md:100-110`, `Tracked marker matches`)
+- [x] **[P2] Remove stale planned-navigation marker claims** (`src/commands.rs:643-658`, command entries `common.next-section` and `common.jump`; `hygiene-allowlist.md:100-110`, `Tracked marker matches`)
   - **Problem:** The changed baseline correctly says R-NAV completed these implemented commands and that they are not planned work, but both scanned source comments still say “planned navigation implementation requires roadmap disposition.” The report therefore emits stale retention claims that contradict its own disposition.
   - **Why it matters:** This violates cleanliness and correctness of the hygiene baseline. Marker output should explain live retention, not preserve a resolved plan as active debt.
   - **Change:** Delete the two obsolete `keep-for:` comments from the implemented command entries. Update the baseline marker list and line references to match the fresh report rather than replacing them with another retention marker.
