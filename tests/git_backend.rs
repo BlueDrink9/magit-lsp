@@ -690,7 +690,9 @@ fn stage_replacement(repo: &GitRepo, path: &str, old: &str, new: &str) {
 /// printed for `f.txt`.
 fn assert_staged_hunks_match_git(repo: &GitRepo, tmp: &Path) {
     let cached = cached_diff(tmp);
-    let expected = patch::parse_unified_diff(&cached);
+    let expected = patch::parse_file_diff(&cached)
+        .expect("cached diff contains one file")
+        .hunks;
     let status = repo.status().expect("status");
     let staged = status
         .staged
