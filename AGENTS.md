@@ -98,6 +98,12 @@ Start in these components:
 
 ## Verification
 
+- Local execution and verification target Linux only. Do not block Linux work
+  because Windows or macOS hosts are unavailable; record platform-specific
+  risks and retain explicit Windows/macOS CI checks as follow-ups. Keep code,
+  tests and behavior portable across supported platforms, and claim cross-platform
+  verification only after the corresponding CI evidence exists.
+
 - Plain-mode evidence requires the fake-editor harness plus focused native
   Neovim runs using a plain LSP setup without the magit-lsp plugin. Helix is a
   manual smoke checklist, not a harness or first-party support promise.

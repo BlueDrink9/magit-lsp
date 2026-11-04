@@ -4,6 +4,8 @@ Last review: 8ecba12dc44f321daaa43dec773f374616bb6b67
 
 ## Ad hoc
 
+- [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
+  Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Follow the numbered queue in dependency order; preserve unrelated local changes.
