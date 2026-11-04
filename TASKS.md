@@ -2,7 +2,8 @@
 
 ## Ad hoc
 
-- [ ] work through ./protocol review and plan.md
+- [x] **Remove the superseded protocol plan and its ad hoc work item.**
+  Delete `protocol review and plan.md` and its obsolete unchecked queue entry. Preserve unrelated work; identify the first ticket in `TASKS_PART_SEVEN.md` without starting it.
 - [x] **Gather the A–E harness and client-abstraction evidence report.**
   Create only `docs/evidence/harness-reassessment-inputs.md` for report content, following the user's complete A–E evidence requirements; define the current protocol and distinguish implementation from plans/unknowns. Read-only investigation, text only, actual commands/verbatim path:line excerpts, explicit missing evidence, home/user redaction; no implementation work or unrelated edits. Stop after the report.
 
