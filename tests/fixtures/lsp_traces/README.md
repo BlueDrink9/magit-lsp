@@ -102,17 +102,22 @@ MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_EDIT_ONLY=1 MAGIT_LSP_WIRELOG
 tag 25.07.1 on 2026-11-05. Recorder source SHA256:
 `66b2b40fc281625336cbaf808fc0455fe324f8e8110b740d310433141f8d9eda`.
 
-Reproduce from any checkout on Linux with Helix 25.07.1, tmux and `jq`.
-Commands derive server path from repository root, isolate home/config/repository,
-and use a fresh recorder source. Fresh runs have different PID, timestamp and
-temporary URI; compare generated extracts to their own raw source, not the old
-volatile source byte-for-byte. The recorded source hash below identifies only
-the original capture, not a promise that a fresh run reproduces it.
+Reproduce from any checkout subdirectory on Linux with Helix 25.07.1, tmux and
+`jq`. This uses the exact captured Helix binary. Fresh runs have different PID,
+timestamp and temporary URI; compare each extraction structurally to its own
+source. The original source path and hash above identify the old capture only.
 
+```sh
+set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
 cargo build --manifest-path "$ROOT/Cargo.toml"
-D=$(mktemp -d /tmp/opencode/helix-capture-)
+D=$(mktemp -d /tmp/opencode/helix-capture-XXXXXXXX)
+SOCKET="helixcap-$$"
+SESSION="cap-$$"
 mkdir -p "$D/home" "$D/config/helix" "$D/repo" "$D/raw-parent"
+cleanup() { tmux -L "$SOCKET" kill-server 2>/dev/null || true; rm -rf "$D"; }
+trap 'status=$?; if test "$status" -ne 0; then echo "Helix capture retained at: $D" >&2; tmux -L "$SOCKET" capture-pane -p -t "$SESSION":0.0 2>/dev/null >&2 || true; fi' EXIT
 git -C "$D/repo" init -q
 SERVER=$(realpath "$ROOT/target/debug/magit-lsp")
 cat > "$D/config/helix/languages.toml" <<EOF
@@ -125,44 +130,124 @@ scope = "source.magit"
 file-types = [{ glob = "*.magit" }]
 roots = [".git"]
 language-servers = ["magit-lsp"]
+EOF
 
 HX=/nix/store/1nc2y094mdd6z9c4bgm766jwmxsf3mzd-helix-25.07.1/bin/hx
+test "$("$HX" --version | head -1)" = 'helix 25.07.1'
 printf 'hello\n' > "$D/repo/sample.magit"
-tmux -L helixcap new-session -d -s cap "cd '$D/repo' && HOME='$D/home' XDG_CONFIG_HOME='$D/config' MAGIT_LSP_WIRELOG='$D/raw-parent/raw.jsonl' '$HX' sample.magit"
-for i in $(seq 1 100); do
-  if test -s "$D/raw-parent/raw.jsonl" && jq -e 'select(.raw.method == "initialize")' "$D/raw-parent/raw.jsonl" >/dev/null 2>&1; then break; fi
-  sleep 0.1
-done
+tmux -L "$SOCKET" new-session -d -s "$SESSION" "cd '$D/repo' && HOME='$D/home' XDG_CONFIG_HOME='$D/config' MAGIT_LSP_WIRELOG='$D/raw-parent/raw.jsonl' '$HX' sample.magit"
+HX_PID=$(tmux -L "$SOCKET" display-message -p -t "$SESSION" '#{pane_pid}')
+export SOURCE="$D/raw-parent/raw.jsonl"
+python3 - <<'PY'
+import json, os, time
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    try:
+        with open(os.environ['SOURCE']) as f:
+            if any(json.loads(line).get('raw', {}).get('method') == 'initialize' for line in f):
+                break
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+else:
+    raise SystemExit('timed out waiting for initialize')
+PY
 jq -e 'select(.raw.method == "initialize")' "$D/raw-parent/raw.jsonl" >/dev/null
-tmux -L helixcap send-keys -t cap:0.0 i X Escape
-tmux -L helixcap send-keys -t cap:0.0 x p a Enter
-tmux -L helixcap send-keys -t cap:0.0 ':q' Enter
-for i in $(seq 1 100); do tmux -L helixcap has-session -t cap 2>/dev/null || break; sleep 0.1; done
-tmux -L helixcap kill-server 2>/dev/null || true
-for i in $(seq 1 100); do pgrep -af "$HX sample.magit" | grep -F "$D/repo" >/dev/null || break; sleep 0.1; done
-! pgrep -af "$HX sample.magit" | grep -F "$D/repo"
+export SOCKET SESSION
+python3 - <<'PY'
+import json, os, subprocess, time
+source = os.environ['SOURCE']
+socket, session = os.environ['SOCKET'], os.environ['SESSION']
+def read_rows():
+    with open(source) as f:
+        rows = []
+        for line in f:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return rows
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    rows = read_rows()
+    if any(row.get('raw', {}).get('method') == 'textDocument/didOpen' for row in rows):
+        break
+else:
+    raise SystemExit('timed out waiting for Helix didOpen')
+def changes():
+    rows = read_rows()
+    pid = next(row['pid'] for row in rows if row.get('raw', {}).get('method') == 'initialize')
+    return sum(row.get('pid') == pid and row.get('raw', {}).get('method') == 'textDocument/didChange' for row in rows)
+def wait_changes(expected):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if changes() >= expected:
+            return
+    raise SystemExit(f'timed out waiting for {expected} Helix didChange rows; saw {changes()}')
+actions = [(['i', 'X', 'Escape'], 1), (['o', 'Escape'], 2), (['o', 'Escape'], 3)]
+for keys, expected in actions:
+    subprocess.run(['tmux', '-L', socket, 'send-keys', '-t', f'{session}:0.0', *keys], check=True)
+    wait_changes(expected)
+subprocess.run(['tmux', '-L', socket, 'send-keys', '-t', f'{session}:0.0', 'Escape'], check=True)
+screen = subprocess.check_output(['tmux', '-L', socket, 'capture-pane', '-p', '-t', f'{session}:0.0'], text=True)
+print(screen)
+if 'INSERT' in screen.upper():
+    raise SystemExit('Helix still reports insert mode; refusing quit command')
+subprocess.run(['tmux', '-L', socket, 'send-keys', '-t', f'{session}:0.0', ':quit-all!', 'Enter'], check=True)
+PY
+export SOCKET SESSION
+python3 - <<'PY'
+import json, os, subprocess, time
+socket, session = os.environ['SOCKET'], os.environ['SESSION']
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    if subprocess.run(['tmux', '-L', socket, 'has-session', '-t', session],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
+        break
+else:
+    raise SystemExit('timed out waiting for graceful Helix shutdown')
+source = os.environ['SOURCE']
+deadline = time.monotonic() + 15
+while time.monotonic() < deadline:
+    with open(source) as f:
+        rows = []
+        for line in f:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    init = next(row for row in rows if row.get('raw', {}).get('method') == 'initialize')
+    pid = init['pid']
+    if any(row.get('pid') == pid and row.get('raw', {}).get('method') in ('shutdown', 'exit') for row in rows) and not __import__('os').path.exists(f'/proc/{pid}'):
+        break
+else:
+    raise SystemExit('timed out waiting for recorder shutdown/exit rows and server PID drain')
+PY
 test -s "$D/raw-parent/raw.jsonl"
 sha256sum "$D/raw-parent/raw.jsonl"
 PID=$(jq -r 'select(.raw.method == "initialize") | .pid' "$D/raw-parent/raw.jsonl" | head -1)
 jq -c "select(.direction == \"in\" and .pid == $PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$D/raw-parent/raw.jsonl" > "$D/generated.jsonl"
 jq -c "select(.direction == \"in\" and .pid == $PID and .raw.method == \"initialize\") | .raw.params" "$D/raw-parent/raw.jsonl" > "$D/initialize.json"
 test "$(wc -l < "$D/generated.jsonl")" -eq 4
-cmp -s "$D/generated.jsonl" <(jq -c "select(.pid == $PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$D/raw-parent/raw.jsonl")
-cmp -s "$D/initialize.json" <(jq -c "select(.pid == $PID and .raw.method == \"initialize\") | .raw.params" "$D/raw-parent/raw.jsonl")
+cmp -s "$D/generated.jsonl" <(jq -c "select(.direction == \"in\" and .pid == $PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$D/raw-parent/raw.jsonl")
+cmp -s "$D/initialize.json" <(jq -c "select(.direction == \"in\" and .pid == $PID and .raw.method == \"initialize\") | .raw.params" "$D/raw-parent/raw.jsonl")
 
 # Validate original committed evidence against its source when source is retained.
 ORIGINAL=/tmp/opencode/helix-capture-1793822958/raw-parent/raw.jsonl
-sha256sum "$ORIGINAL"
-OLD_PID=$(jq -r 'select(.raw.method == "initialize") | .pid' "$ORIGINAL" | head -1)
-jq -c "select(.direction == \"in\" and .pid == $OLD_PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$ORIGINAL" | cmp - tests/fixtures/lsp_traces/helix-25.07.1.jsonl
-jq -S "select(.direction == \"in\" and .pid == $OLD_PID and .raw.method == \"initialize\") | .raw.params" "$ORIGINAL" | jq -S . | cmp - <(jq -S . tests/fixtures/lsp_traces/initialize-helix-25.07.1.json)
+if test -f "$ORIGINAL"; then
+  sha256sum "$ORIGINAL"
+  OLD_PID=$(jq -r 'select(.raw.method == "initialize") | .pid' "$ORIGINAL" | head -1)
+  jq -S -c "select(.direction == \"in\" and .pid == $OLD_PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$ORIGINAL" | cmp - <(jq -S -c . "$ROOT/tests/fixtures/lsp_traces/helix-25.07.1.jsonl")
+  jq -S "select(.direction == \"in\" and .pid == $OLD_PID and .raw.method == \"initialize\") | .raw.params" "$ORIGINAL" | cmp - <(jq -S . "$ROOT/tests/fixtures/lsp_traces/initialize-helix-25.07.1.json")
+else
+  echo "Original source unavailable; cannot compare committed fixtures: $ORIGINAL" >&2
+fi
+cleanup
 ```
 
-Fresh-run verification above checks source-derived outputs; committed fixtures
-remain evidence from the original run. The original source was present when
-this recipe was updated and matched the stated SHA256. Cleanup only after
-reviewing/hash-checking both outputs: `rm -rf "$D"`.
-```
+Fresh-run outputs are checked against their own source. If the retained original
+source is available, the recipe also compares its structurally extracted rows
+and initialize params against committed fixtures. Cleanup runs only after all
+checks pass; otherwise inspect the retained directory printed by `mktemp`.
 
 The capture's retained rows 2–4 show `X` inserted at 0:0, then newline
 insertions at 1:0. None replaces a nonempty range. This ordinary attached file
