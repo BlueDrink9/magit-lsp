@@ -1,6 +1,7 @@
 use lsp_server::Message;
 use magit_lsp::{transport, wirelog::WireLog};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 #[path = "common/stdio.rs"]
@@ -93,6 +94,165 @@ fn committed_trace_fixtures_parse_and_match_initialize_presets() {
         preset_count, 4,
         "expected all four current-client initialize presets"
     );
+}
+
+#[test]
+fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp_traces");
+    let load = |name: &str| -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(directory.join(name)).unwrap()).unwrap()
+    };
+    let read_rows = |name: &str| -> Vec<serde_json::Value> {
+        std::fs::read_to_string(directory.join(name))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    fn method(row: &serde_json::Value) -> &str {
+        row["raw"]["method"].as_str().unwrap_or("")
+    }
+    fn changes(row: &serde_json::Value) -> &serde_json::Value {
+        &row["raw"]["params"]["contentChanges"]
+    }
+    let selected = load("plain-neovim-0.12.6-actions.json");
+    let selected_rows = read_rows("plain-neovim-0.12.6-actions.jsonl");
+    let selected_indices = selected["fixture_source_rows"].as_array().unwrap();
+    assert_eq!(selected_indices.len(), selected_rows.len());
+    for (position, (index, row)) in selected_indices.iter().zip(&selected_rows).enumerate() {
+        assert_eq!(index.as_u64().unwrap() as usize, [9, 14][position]);
+        assert_eq!(method(row), "textDocument/didChange");
+    }
+    let visual = &selected_rows[0]["raw"]["params"];
+    assert_eq!(visual["textDocument"]["version"], 5);
+    assert_eq!(changes(&selected_rows[0])[1]["text"], "XXX");
+    assert_eq!(selected["wire_versions"]["visual replacement"], 5);
+    assert_eq!(selected["wire_versions"]["one-character register paste"], 7);
+    assert_eq!(
+        selected["wire_versions"]["multi-character register paste"],
+        8
+    );
+    assert_eq!(selected["wire_versions"]["combined didChange"], 9);
+    let action_metadata = selected["actions"].as_array().unwrap();
+    assert_eq!(action_metadata[0]["after"]["version"], 5);
+    assert_eq!(action_metadata[1]["after"]["version"], 7);
+    assert_eq!(action_metadata[2]["after"]["version"], 8);
+    let combined = changes(&selected_rows[1]);
+    assert_eq!(
+        selected_rows[1]["raw"]["params"]["textDocument"]["version"],
+        9
+    );
+    assert!(combined
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edit| edit["text"] == "Q"));
+    assert!(combined
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edit| edit["text"] == "MULTI"));
+    assert_eq!(combined[1]["range"]["start"]["character"], 1);
+    assert_eq!(combined[2]["range"]["start"]["character"], 1);
+    assert_eq!(combined[3]["range"]["start"]["character"], 1);
+
+    let helix = load("helix-25.07.1-actions.json");
+    let helix_rows = read_rows("helix-25.07.1-actions.jsonl");
+    let expected = [
+        ("selection_replace", 10, "XXX", 2),
+        ("named_register_paste_one", 16, "H", 4),
+        ("named_register_paste_multi", 22, "Hea", 6),
+    ];
+    for (position, (action, (name, row_number, text, version))) in helix["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected)
+        .enumerate()
+    {
+        assert_eq!(action["name"], name);
+        assert_eq!(action["wire_rows"][0], row_number);
+        let row = &helix_rows[position];
+        assert_eq!(method(row), "textDocument/didChange");
+        assert_eq!(row["raw"]["params"]["textDocument"]["version"], version);
+        assert_eq!(changes(row)[0]["text"], text);
+        assert_eq!(changes(row)[0]["range"]["start"]["line"], 0);
+        assert_eq!(
+            changes(row)[0]["range"]["start"]["character"],
+            if name == "selection_replace" { 0 } else { 1 }
+        );
+        assert_eq!(action["before"], action["after"]);
+    }
+
+    let rapid = load("plain-neovim-0.12.6-rapid-repair.json");
+    let rapid_rows = read_rows("plain-neovim-0.12.6-rapid-repair.jsonl");
+    let rapid_action = &rapid["actions"]["rapid_input"];
+    let hash = |text: &str| format!("{:x}", Sha256::digest(text.as_bytes()));
+    assert_eq!(
+        hash(rapid_action["before"]["text"].as_str().unwrap()),
+        rapid_action["before_sha256"]
+    );
+    assert_eq!(
+        hash(rapid_action["after"]["text"].as_str().unwrap()),
+        rapid_action["after_sha256"]
+    );
+    assert_eq!(
+        hash(
+            rapid["actions"]["repair"]["restored"]["text"]
+                .as_str()
+                .unwrap()
+        ),
+        rapid["actions"]["repair"]["restored_sha256"]
+    );
+    let source_rows = rapid["fixture_source_rows"].as_array().unwrap();
+    let retained_index = |row: &serde_json::Value| {
+        source_rows
+            .iter()
+            .position(|source_row| source_row == row)
+            .unwrap()
+    };
+    let did = retained_index(&rapid_action["didChange_source_row"]);
+    let repair = &rapid["actions"]["repair"];
+    let request = retained_index(&repair["request_source_row"]);
+    let reply = retained_index(&repair["reply_source_row"]);
+    let undo = retained_index(&repair["editor_echo_source_row"]);
+    assert!(did < request && request < reply && reply < undo);
+    assert_eq!(method(&rapid_rows[did]), "textDocument/didChange");
+    assert_eq!(changes(&rapid_rows[did])[1]["text"], "RAPID");
+    let request_row = &rapid_rows[request];
+    assert_eq!(request_row["direction"], "out");
+    assert_eq!(method(request_row), "workspace/applyEdit");
+    assert_eq!(request_row["raw"]["id"], repair["request_id"]);
+    let uri = request_row["raw"]["params"]["edit"]["changes"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap();
+    let repair_edit = &request_row["raw"]["params"]["edit"]["changes"][uri][0];
+    assert_eq!(repair_edit["newText"], "");
+    assert_eq!(repair_edit["range"]["start"]["line"], 0);
+    assert_eq!(repair_edit["range"]["start"]["character"], 0);
+    assert_eq!(repair_edit["range"]["end"]["line"], 0);
+    assert_eq!(repair_edit["range"]["end"]["character"], 5);
+    assert_eq!(
+        rapid_rows[did]["raw"]["params"]["textDocument"]["uri"],
+        uri.as_str()
+    );
+    let reply_row = &rapid_rows[reply];
+    assert_eq!(reply_row["direction"], "in");
+    assert_eq!(reply_row["raw"]["id"], repair["request_id"]);
+    assert_eq!(reply_row["raw"]["result"]["applied"], true);
+    assert_eq!(
+        rapid_rows[undo]["raw"]["params"]["textDocument"]["uri"],
+        uri.as_str()
+    );
+    assert_eq!(
+        rapid_rows[undo]["raw"]["params"]["textDocument"]["version"],
+        rapid["actions"]["undo"]["after"]["version"]
+    );
+    assert_eq!(changes(&rapid_rows[undo]).as_array().unwrap().len(), 2);
 }
 
 #[test]

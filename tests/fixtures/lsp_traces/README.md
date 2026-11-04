@@ -368,6 +368,13 @@ temporary directory after printing this drained provenance.
 which user action caused it. Actions count as captured only with native action
 provenance; unavailable actions remain explicit.
 
+`cargo test --test wirelog` parses the three action sidecars and checks their
+selected retained rows, action edit/version shapes, repair request/reply
+correlation and ordering, and rapid-repair state hashes. These are structural
+checks of committed evidence, not proof of native causality inferred from a
+payload. Full-source SHA256 and byte-for-byte equality against the original raw
+capture remain manual provenance checks: full raw files are not committed.
+
 | Native action | Helix 25.07.1 | Neovim traces |
 |---|---|---|
 | Single insert | Observed payload shape (Helix row 2); native single-key cause documented. | Native A insertion in plain trace row 3; retained. |
