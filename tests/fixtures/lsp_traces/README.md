@@ -1,8 +1,9 @@
 # LSP traces
 
 `reconstructed-plain.jsonl` is reconstructed from the documented Plain-client
-handoff examples. The user's raw Helix JSONL was unavailable; this is not an
-actual Helix capture.
+handoff examples. The original raw Helix source survives at
+`/tmp/opencode/helix-capture-1793822958/raw-parent/raw.jsonl` with SHA256
+`66b2b40fc281625336cbaf808fc0455fe324f8e8110b740d310433141f8d9eda`.
 
 `plain-neovim-0.12.6.jsonl` contains four inbound wire messages extracted in
 source order: the actual initialize request followed by the first three actual
@@ -101,14 +102,22 @@ MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_EDIT_ONLY=1 MAGIT_LSP_WIRELOG
 tag 25.07.1 on 2026-11-05. Recorder source SHA256:
 `66b2b40fc281625336cbaf808fc0455fe324f8e8110b740d310433141f8d9eda`.
 
-Reproduce from repository root after `cargo build`; set `D` to a new
-`/tmp/opencode/helix-capture-*`. Create `$D/home`, `$D/config/helix`,
-`$D/repo/.git` and `$D/raw-parent` (recorder parent must exist). Put this in
-`$D/config/helix/languages.toml`:
+Reproduce from any checkout on Linux with Helix 25.07.1, tmux and `jq`.
+Commands derive server path from repository root, isolate home/config/repository,
+and use a fresh recorder source. Fresh runs have different PID, timestamp and
+temporary URI; compare generated extracts to their own raw source, not the old
+volatile source byte-for-byte. The recorded source hash below identifies only
+the original capture, not a promise that a fresh run reproduces it.
 
-```toml
+ROOT=$(git rev-parse --show-toplevel)
+cargo build --manifest-path "$ROOT/Cargo.toml"
+D=$(mktemp -d /tmp/opencode/helix-capture-)
+mkdir -p "$D/home" "$D/config/helix" "$D/repo" "$D/raw-parent"
+git -C "$D/repo" init -q
+SERVER=$(realpath "$ROOT/target/debug/magit-lsp")
+cat > "$D/config/helix/languages.toml" <<EOF
 [language-server.magit-lsp]
-command = "/home/william/src/magit-lsp/target/debug/magit-lsp"
+command = "$SERVER"
 
 [[language]]
 name = "magit"
@@ -116,19 +125,43 @@ scope = "source.magit"
 file-types = [{ glob = "*.magit" }]
 roots = [".git"]
 language-servers = ["magit-lsp"]
+
+HX=/nix/store/1nc2y094mdd6z9c4bgm766jwmxsf3mzd-helix-25.07.1/bin/hx
+printf 'hello\n' > "$D/repo/sample.magit"
+tmux -L helixcap new-session -d -s cap "cd '$D/repo' && HOME='$D/home' XDG_CONFIG_HOME='$D/config' MAGIT_LSP_WIRELOG='$D/raw-parent/raw.jsonl' '$HX' sample.magit"
+for i in $(seq 1 100); do
+  if test -s "$D/raw-parent/raw.jsonl" && jq -e 'select(.raw.method == "initialize")' "$D/raw-parent/raw.jsonl" >/dev/null 2>&1; then break; fi
+  sleep 0.1
+done
+jq -e 'select(.raw.method == "initialize")' "$D/raw-parent/raw.jsonl" >/dev/null
+tmux -L helixcap send-keys -t cap:0.0 i X Escape
+tmux -L helixcap send-keys -t cap:0.0 x p a Enter
+tmux -L helixcap send-keys -t cap:0.0 ':q' Enter
+for i in $(seq 1 100); do tmux -L helixcap has-session -t cap 2>/dev/null || break; sleep 0.1; done
+tmux -L helixcap kill-server 2>/dev/null || true
+for i in $(seq 1 100); do pgrep -af "$HX sample.magit" | grep -F "$D/repo" >/dev/null || break; sleep 0.1; done
+! pgrep -af "$HX sample.magit" | grep -F "$D/repo"
+test -s "$D/raw-parent/raw.jsonl"
+sha256sum "$D/raw-parent/raw.jsonl"
+PID=$(jq -r 'select(.raw.method == "initialize") | .pid' "$D/raw-parent/raw.jsonl" | head -1)
+jq -c "select(.direction == \"in\" and .pid == $PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$D/raw-parent/raw.jsonl" > "$D/generated.jsonl"
+jq -c "select(.direction == \"in\" and .pid == $PID and .raw.method == \"initialize\") | .raw.params" "$D/raw-parent/raw.jsonl" > "$D/initialize.json"
+test "$(wc -l < "$D/generated.jsonl")" -eq 4
+cmp -s "$D/generated.jsonl" <(jq -c "select(.pid == $PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$D/raw-parent/raw.jsonl")
+cmp -s "$D/initialize.json" <(jq -c "select(.pid == $PID and .raw.method == \"initialize\") | .raw.params" "$D/raw-parent/raw.jsonl")
+
+# Validate original committed evidence against its source when source is retained.
+ORIGINAL=/tmp/opencode/helix-capture-1793822958/raw-parent/raw.jsonl
+sha256sum "$ORIGINAL"
+OLD_PID=$(jq -r 'select(.raw.method == "initialize") | .pid' "$ORIGINAL" | head -1)
+jq -c "select(.direction == \"in\" and .pid == $OLD_PID and (.raw.method == \"initialize\" or .raw.method == \"textDocument/didChange\"))" "$ORIGINAL" | cmp - tests/fixtures/lsp_traces/helix-25.07.1.jsonl
+jq -S "select(.direction == \"in\" and .pid == $OLD_PID and .raw.method == \"initialize\") | .raw.params" "$ORIGINAL" | jq -S . | cmp - <(jq -S . tests/fixtures/lsp_traces/initialize-helix-25.07.1.json)
 ```
 
-Then run:
-
-```sh
-printf 'hello\n' > "$D/repo/sample.magit"
-HX=/nix/store/1nc2y094mdd6z9c4bgm766jwmxsf3mzd-helix-25.07.1/bin/hx
-tmux -L helixcap new-session -d -s cap2 "cd '$D/repo' && HOME='$D/home' XDG_CONFIG_HOME='$D/config' MAGIT_LSP_WIRELOG='$D/raw-parent/raw.jsonl' '$HX' sample.magit"
-tmux -L helixcap send-keys -t cap2:0.0 i X Escape
-tmux -L helixcap send-keys -t cap2:0.0 x p a Enter
-tmux -L helixcap capture-pane -p -t cap2:0.0
-tmux -L helixcap kill-server
-rm -rf "$D"
+Fresh-run verification above checks source-derived outputs; committed fixtures
+remain evidence from the original run. The original source was present when
+this recipe was updated and matched the stated SHA256. Cleanup only after
+reviewing/hash-checking both outputs: `rm -rf "$D"`.
 ```
 
 The capture's retained rows 2–4 show `X` inserted at 0:0, then newline

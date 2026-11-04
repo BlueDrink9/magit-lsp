@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: 8ecba12dc44f321daaa43dec773f374616bb6b67
+Last review: 464d5e4b06df8d22cacf273f0c458b55ba4bc151
 
 ## Ad hoc
 
@@ -78,6 +78,29 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
   `cargo fmt --all -- --check` reports existing workspace-wide formatting differences; log `/tmp/opencode/queue-checkpoint/fmt.log`. Apply rustfmt only to the reported Rust files, preserve unrelated user edits, and verify the full formatting check.
 
 ## Review
+
+Checkpoint review: GPT-5.6 Sol reviewed `8ecba12dc44f321daaa43dec773f374616bb6b67..464d5e4b06df8d22cacf273f0c458b55ba4bc151`. Inspected only `AGENTS.md`, `TASKS.md`, `TASKS_PART_SEVEN.md`, `src/wirelog.rs`, `tests/wirelog.rs`, and `tests/fixtures/lsp_traces/{README.md,bundled-neovim-0.12.6.jsonl,helix-25.07.1.jsonl,initialize-helix-25.07.1.json}` plus fixture-test references under `tests/`. Three findings: one P1 and two P2; no P0. Accepted the checked T002.2 four-client baseline while leaving queue parent T002 open for the five missing T034 native-action classes per editor. Did not rerun tests or claim non-Linux execution; relied on the supplied Linux gate results. Logger changes were reviewed only as prior P1 resolutions, with no speculative expansion. P3 deferred: none substantiated.
+
+- [x] **[P1] Make the Helix capture recipe preserve verifiable evidence** (`tests/fixtures/lsp_traces/README.md:93-137`, `Native Helix 25.07.1 capture`)
+  - **Problem:** The reproduction commands hard-code one checkout path, send input before any bounded readiness check, kill tmux instead of closing Helix cleanly, and delete `$D` before hashing or extracting the raw log. The README gives a source hash but no retained source path or extraction commands, so following the documented recipe cannot reproduce or audit the committed fixture and initialize preset.
+  - **Why it matters:** This violates correctness and readability of capture provenance. The existing capture may be authentic, but its documented procedure neither reliably drains the recorder nor shows how the committed evidence was derived.
+  - **Change:** Rewrite only the Helix recipe to derive the server path from the repository root, create the fixture repository explicitly, wait with a bounded condition until the initialize row exists before sending native keys, exit Helix gracefully, and wait for the process to close. Add exact commands that hash the raw recorder file, extract the retained same-PID initialize and three `didChange` rows in source order, derive `initialize-helix-25.07.1.json` from the retained initialize params, and compare both generated files with the committed fixtures before optional cleanup. Name the raw source location used for the stated SHA256, or state honestly that only its hash survives.
+  - **Done when:** A fresh Linux run can follow the text from an arbitrary checkout, produces a drained raw JSONL, verifies the documented source hash, regenerates byte-equivalent or explicitly normalized committed Helix files, and performs cleanup only after those checks.
+  - **Constraints:** Do not recapture with another Helix binary, alter captured payloads, claim Windows/macOS execution, add image evidence, or expand T034 action coverage. Preserve the confirmed Helix 25.07.1 provenance and all explicitly unavailable actions.
+
+- [ ] **[P2] Enforce trace and initialize-preset consistency** (`tests/wirelog.rs:1-332`; `tests/plain_harness.rs:242-250`, `reconstructed_trace_is_valid_jsonl`; `TASKS.md:25-30`, `T002.2d`, `T002.2`)
+  - **Problem:** `cargo test --test wirelog` never reads `tests/fixtures/lsp_traces/`, while the completed task text cites that test and trace parsing as enforcement. Only `reconstructed-plain.jsonl` has a parsing test, so malformed current-client JSONL or a preset drifting from its retained initialize request passes the named gate.
+  - **Why it matters:** This violates correctness and cohesion: versioned evidence is part of T002 acceptance, but its claimed regression gate covers recorder behavior rather than committed evidence.
+  - **Change:** Add one focused fixture test, preferably in `tests/wirelog.rs`, that parses every nonempty line of every committed `*.jsonl`, parses every `initialize-*.json`, and asserts each current-client preset exactly equals the `params` of the matching retained initialize request. Keep the reconstructed trace parse-only because it has no real-capture preset. Update the T002 enforcement wording only if the final test command differs.
+  - **Done when:** `cargo test --test wirelog` fails for malformed fixture JSON, a missing initialize row, or any mismatch between a current-client initialize preset and its matching trace; all committed fixtures pass.
+  - **Constraints:** Do not compare volatile data across different clients, normalize captured declarations, fabricate missing presets, or turn incomplete T034 action evidence into a conformance claim. Do after: Make the Helix capture recipe preserve verifiable evidence.
+
+- [ ] **[P2] State that five T034 action classes remain missing** (`tests/fixtures/lsp_traces/README.md:139-160`, `T034 action evidence matrix`)
+  - **Problem:** The matrix records native single-insert evidence for both Helix and Neovim, then concludes that all six actions remain incomplete for at least one family. The five other rows are missing for both families; the conclusion contradicts the table and the retained T002 scope.
+  - **Why it matters:** This is a correctness and readability defect in the canonical evidence summary and can make workers reopen already captured single-insert evidence.
+  - **Change:** Replace the final conclusion with the exact bounded status: single insert is captured for both requested editor families; selection replacement, one-character paste, multi-character paste, rapid typing, and undo immediately after a server repair edit remain uncaptured for each family. Keep parent T002 open and keep the checked T002.2 four-client baseline unchanged.
+  - **Done when:** The prose, matrix, `TASKS.md` status, and `TASKS_PART_SEVEN.md` acceptance consistently distinguish the completed four-client baseline from the five missing native-action classes per editor.
+  - **Constraints:** Documentation only. Do not mark full T002/T034 conformance complete, recapture clients, or infer native actions from payload shape.
 
 Checkpoint review: Sol 5.6 reviewed `3059565..8ecba12`; three P1 findings below, no P0/P2/P3. Full test, formatting and text-native tour gates passed before fixes; logs `/tmp/opencode/wirelog-captures-checkpoint/`. Tour headings and only `menu-commit` excerpt inspected. The user's earlier review skip does not apply to this newly reached eight-task checkpoint. No full-UI-suite or cross-platform execution claim.
 
