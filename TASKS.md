@@ -77,6 +77,8 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 
 Checkpoint review: Sol 5.6 reviewed `3059565..8ecba12`; three P1 findings below, no P0/P2/P3. Full test, formatting and text-native tour gates passed before fixes; logs `/tmp/opencode/wirelog-captures-checkpoint/`. Tour headings and only `menu-commit` excerpt inspected. The user's earlier review skip does not apply to this newly reached eight-task checkpoint. No full-UI-suite or cross-platform execution claim.
 
+Checkpoint closed: all three reviewed P1 findings and the Windows append-handle follow-up are committed (`e34ce5a`, `f7d4bea`, `6dd4f7e`, `15a8f63`). Full `make test FILTER=--no-fail-fast`, rustfmt and diff checks passed again after fixes; log `test-after-fixes.log` in the same directory. No owned server remained. No P0 required re-review and no P3 was deferred. T002 remains unfinished; next slice is current Helix capture/availability, followed by remaining edit-shape evidence.
+
 - [x] **[P1] Serialize shared wirelogs on every tested platform** (`src/wirelog.rs:32-61`, `WireLog::new`; `tests/wirelog.rs:37-64`, `concurrent_servers_append_complete_rows_without_truncating`)
   - **Problem:** Complete-line locking exists only under `cfg(unix)`; Windows uses uncoordinated append even though Windows runs the Rust suite. The concurrency test can also pass after losing one whole session because it checks only that any initialize and shutdown row exist, not exact per-process counts or order.
   - **Why it matters:** This violates correctness and cohesion with the cross-platform CI contract. Concurrent or restarted Windows servers can interleave or lose recorder rows, recreating the corruption that this change claims to fix.
