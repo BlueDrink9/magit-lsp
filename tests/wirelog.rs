@@ -1,9 +1,99 @@
 use lsp_server::Message;
 use magit_lsp::{transport, wirelog::WireLog};
 use serde_json::json;
+use std::collections::HashMap;
 
 #[path = "common/stdio.rs"]
 mod stdio;
+
+#[test]
+fn committed_trace_fixtures_parse_and_match_initialize_presets() {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp_traces");
+    let mut traces = HashMap::new();
+    let mut presets = Vec::new();
+    for entry in std::fs::read_dir(&directory).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")
+        {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let mut rows = Vec::new();
+            for (line_number, line) in text
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| !line.trim().is_empty())
+            {
+                rows.push(
+                    serde_json::from_str::<serde_json::Value>(line).unwrap_or_else(|error| {
+                        panic!(
+                            "{}:{}: invalid JSON: {error}",
+                            path.display(),
+                            line_number + 1
+                        )
+                    }),
+                );
+            }
+            traces.insert(name, rows);
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && name.starts_with("initialize-")
+        {
+            let preset: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+            )
+            .unwrap_or_else(|error| panic!("{}: invalid JSON: {error}", path.display()));
+            presets.push((
+                path,
+                name.trim_start_matches("initialize-")
+                    .trim_end_matches(".json")
+                    .to_owned(),
+                preset,
+            ));
+        }
+    }
+    assert!(
+        !traces.is_empty(),
+        "no JSONL traces in {}",
+        directory.display()
+    );
+    let preset_count = presets.len();
+    for (preset_path, trace_name, preset) in presets {
+        let trace_name = format!("{trace_name}.jsonl");
+        let rows = traces.get(&trace_name).unwrap_or_else(|| {
+            panic!(
+                "{}: matching trace {} is missing",
+                preset_path.display(),
+                directory.join(&trace_name).display()
+            )
+        });
+        let params: Vec<_> = rows
+            .iter()
+            .filter(|row| row.get("raw").unwrap_or(row).get("method") == Some(&json!("initialize")))
+            .map(|row| &row.get("raw").unwrap_or(row)["params"])
+            .collect();
+        assert_eq!(
+            params.len(),
+            1,
+            "{}: expected one retained initialize request",
+            preset_path.display()
+        );
+        assert_eq!(
+            params[0],
+            &preset,
+            "{}: initialize params differ from {}",
+            preset_path.display(),
+            trace_name
+        );
+    }
+    assert_eq!(
+        preset_count, 4,
+        "expected all four current-client initialize presets"
+    );
+}
 
 #[test]
 fn records_actual_server_transport_and_drains_at_shutdown() {
