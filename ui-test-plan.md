@@ -80,7 +80,7 @@ inspect → act → inspect and always stopping owned UI:
   state. R-EDIT-8 history-prev/next recalls and restores the current unsent draft.
 - VSCode native e2e (R-EDIT-5, `clients/vscode/test/e2e/suite.js`): same barriers,
   close-intent distinctions, recovery, history, status read-only and no implicit
-  commit on save; scripted widget integration is not native evidence.
+  commit on save; scripted widget integration is not native evidence. Historical screenshot references are not current agent evidence requirements; follow the [no-vision policy](AGENTS.md#working-conventions).
   The writable `magit-commit` provider sends one explicit full-sync stream,
   independent of VSCode's native document-version counter. Use native Ctrl+S to
   checkpoint; use **Magit: Confirm Commit Draft**, **Magit: Abort Commit Draft**,
@@ -93,7 +93,7 @@ inspect → act → inspect and always stopping owned UI:
   editing keys are not captured by the status-view keymap. History temporarily
   gates native mutation, checks document identity/version and reconciles any API
   edit race without overwriting local text. The native suite retains save,
-  history, version-error, dirty-close, abort and disconnect screenshots plus
+  history, version-error, dirty-close, abort and disconnect evidence artifacts (historical screenshots are not agent requirements) plus
   `r-edit-5-evidence.json` / `r-edit-5-disconnect.json`; inspect fresh artifacts,
   not historical real-file A07 evidence. Process/progress-end ordering remains
   server-owned; tests wait independently for actual Git state and progress end.

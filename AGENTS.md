@@ -48,11 +48,10 @@ Start in these components:
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap, glossary, design and
   protocol (§§1–4), keymaps (§5), views (§6), the dependency-ordered
   implementation/review queue (§7), testing (§8), and open questions (§9).
-  §§10–12 are compact historical summaries/evidence pointers, not a separate
-  active review queue.
-  Read only the sections relevant to the task; §10 is historical context, not
-  proof of current behaviour. Do not duplicate its detailed design or progress
-  history here.
+  The sole numbered implementation and review queue is `TASKS_PART_SEVEN.md`;
+  `TASKS.md` holds canonical design, contracts and open questions. Read only
+  relevant sections; immutable historical sources are provenance, not proof of
+  current behaviour. Do not duplicate detailed design or progress history here.
 - [`README.md`](./README.md) is user-facing: overview, supported features,
   requirements and test instructions.
 - [`ui-test-plan.md`](./ui-test-plan.md) defines real-UI test rules and scenario

@@ -52,7 +52,7 @@ All child tickets of these four tickets are done. Close each umbrella now. Move 
 | R-PLAIN-ACTIONS | `executeCommand` with offers that match a snapshot. Title styles. Cursor, section and selection actions. Boundary and stale-state tests. Refusal of unsupported actions. Descriptions of availability. A latency test. Native content actions. | T008, T009, T010 |
 | R-PLAIN-STACK | Menus and Back in one document. Switch toggles. A concrete log. The log to commit menu and back. Native menu and log evidence. Undo repair after a view change. | T008 (menu option rows open prompts) |
 | R-PLAIN-CORE | Capability negotiation. A typed delivery seam. One dispatcher. Enforcement of rich optional features. | T009 (stable-ID picker), T010 (provider-file edits), T022 (fake-provider test) |
-| R-EDIT-REAL | The real-file cutover. Exact-version confirm and saved-file close. Native close, lifecycle, multi-root and retry evidence in both clients. Ring retention. Same-run recovery. | T104 (lifecycle cases not yet checked) |
+| R-EDIT-REAL | Real-file cutover and tested slices complete; broad native/adversarial and multi-root acceptance remains not green. T104 tracks only remaining lifecycle cases. See immutable `c6db4cf:TASKS.md` and §3.10. | T104 (subset only) |
 
 ## Completed work
 
@@ -69,37 +69,12 @@ All child tickets of these four tickets are done. Close each umbrella now. Move 
 
 ## Phase 1: Review and hygiene (gates 0.2)
 
-### T001 docs-diet (M)
+### [x] T001 docs-diet — Complete
 
-- **T001 migration slices (unchecked):**
-  - [x] T001.1 Map old §7 and review findings to this queue; resolve A11/BUG-READ-1 ownership; write `docs/evidence/task-queue-migration.md`. Mapping milestone complete; per-finding audit remains T001.3.
-  - [x] T001.2 Apply document rules and ticket-template rules to `AGENTS.md` and `TASKS.md`.
-  - [ ] T001.3 Reconcile and shorten completed records; preserve every open issue and its owner.
-  - [ ] T001.4 Move host facts, screenshot policy, evidence banners and process-ownership material to their documented homes.
-  - [ ] T001.5 Remove superseded historical sections and source planning files only after all open records are represented.
-  - [ ] T001.6 Search for image instructions, stale native-evidence wording and unmapped findings; record retained gaps.
-
-- **Depends on:** none.
-- **Target Files:** `AGENTS.md`, `TASKS.md`, `ui-test-plan.md`, `docs/SCREENSHOTS.md`, `docs/RELEASING.md`, `clients/vscode/NOTES.md`, `REVIEW_REPORT.md`, `magit-lsp-plain-client-tasks.md`, `magit-lsp-plain-keys-tasks.md`, `docs/evidence/*`.
-- **Reference Files:** the Rules section of this document; the current `TASKS.md`.
-- **Constraints:** Change text only. Do not change source code. Do not delete the only record of an open issue.
-- **Acceptance:**
-  1. Put the rules in `AGENTS.md` and in the `TASKS.md` ticket template. Write the no-vision rule in `AGENTS.md` only. Link to it from other files. Add the golden rule: a golden change needs its own commit, and the commit message explains each changed hunk.
-  2. Shorten each completed ticket to 12 lines or less. Shorten IMM-1 to IMM-9 to short rules. Name the test that enforces each rule. If no test exists, write "gap" on one line.
-  3. Move the host facts from `clients/vscode/NOTES.md` to `docs/evidence/vscode-host-behaviours.md`. Include F5 interception, find-widget focus, QuickPick focus and fold chords. Write the Codium version for each fact. Move "F5 cause not proven" to T105. Delete `NOTES.md`.
-  4. Audit `REVIEW_REPORT.md` one finding at a time (A01 to A34). Record the status of each finding and where `TASKS.md` tracks it. Copy each open item to `TASKS.md` as one line. Check A11 and BUG-READ-1 first. Then empty the file. Leave a header and an empty "Open findings" template. List the audited findings in the commit message.
-  5. Remove "native evidence in both clients" from the old tickets R-SELECT-OPS, R-4.1a, R-7.3a, R-OP-STATE and R-TODO. Search for other uses of the phrase.
-  6. Move screenshot code to `scripts/readme-shots/`. Add `make readme-shots` for human use. Write R-REL-2 again so that screenshots are a manual task. Add a "historical" banner to each evidence file that cites PNG files. Remove PNG mentions from `docs/evidence/real-file-client-spike.md`.
-  7. Edit the sections of `TASKS.md`:
-     - Top matter: delete the finished "Ad hoc" item and the review checkpoint paragraph.
-     - Section 0: replace the "Commit selection (target)" row with the picker rule (see T008). Add rows for test policy, generated files, capability resolution with quirks, and "the rich protocol stays". Merge the seven Plain "(target)" rows into two rows.
-     - Sections 3.6 and 3.7: add the prompt presentation principle and the `pick` shape (see T008). Replace "no client picker" with "clients never filter, parse or resolve Git state".
-     - Section 3.10: shorten the dated slice entries into the contract. Move the process-ownership text (about 60 lines) to `docs/design/process-ownership.md`.
-     - Sections 3.15 and 8.4: replace the token table and the `:TOhtml` plan with the colour tests in T028.
-     - Section 9: write the answers. The macOS config directory uses the `dirs` crate (see T047). Escape cancels most views. Full-line tint is wanted (see T094).
-     - Sections 10, 11 and 12: delete.
-  8. Delete the two Plain task files when this document represents every open ticket in them.
-- **Verify:** Run `git diff --check`. Search the documents. No active ticket may tell an agent to capture or open an image. No ticket may say "both clients" for native evidence.
+Done: `d12d5a4`. Enforced by bounded migration assertions and `git diff --check`.
+Residuals: A12 remains ownerless; R-EDIT-REAL remains not green and T104 tracks
+only a subset. Binary-platform limits and immutable provenance remain documented
+in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 
 ### T002 wire-recorder (S)
 

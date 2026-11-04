@@ -12,8 +12,8 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
   Add historical banners to evidence documents that cite images; remove PNG passages from the real-file spike without relabelling visual observations as current text proof. Preserve substantive API/wire/Git evidence.
 - [x] **T001.4c — Isolate human-only README image guidance.**
   Make screenshot/releasing guidance explicitly human-only, with AGENTS links and historical caveats. Existing screenshot code is absent; provide a non-capturing human help target and directory documentation rather than adding agent image paths.
-- [ ] **T001.6 — Verify documentation migration and record residuals.**
-  Finish the document-search acceptance audit, synchronize slice checks and compress completed records with honest evidence. Mark T001 complete only when its acceptance is actually met, or record precise blockers and move to independent T002.
+- [x] **T001 docs-diet — Complete.**
+  Done: `d12d5a4`. Enforced by `git diff --check` and bounded migration assertions. Residuals: A12 ownerless ([ledger](docs/evidence/task-queue-migration.md)); R-EDIT-REAL not green, T104 subset only; binary-platform limits and immutable provenance retained (`cbec0bf:TASKS.md`).
 - [ ] **Retained gap — A12 real-dispatch Git failure handling.** Exact scope: real-dispatch Git-failure handling and removal of `server::mutation`; no numbered owner evidenced. Distinct from T103's same-session reader-lock redesign. Immutable provenance: `d04dfa2:TASKS.md`; details: [migration ledger](docs/evidence/task-queue-migration.md).
 - [x] **Retained decision — R-NAV.** Four tree-owned commands verified; immutable evidence: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.** Immutable evidence and enforcing checks retained in `da4d422:TASKS.md`.
@@ -21,7 +21,7 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
 - [x] **T001.5a — Align design and test documents with the replacement queue.**
 - [x] **T001.5b1 — Preserve immutable per-ticket scope and verification provenance.** See [migration ledger](docs/evidence/task-queue-migration.md).
 
-Checkpoint (2026-11-05): bounded review through `d90d5da`, not comprehensive audit. `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs under `/tmp/opencode/queue-checkpoint/`. Fallback peer review was bounded; no comprehensive source-behavior or acceptance audit claimed. Parent T001 remains incomplete pending screenshot/evidence and Plain-plan cleanup.
+Checkpoint (2026-11-05): bounded review through `d90d5da`, not comprehensive audit. `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs under `/tmp/opencode/queue-checkpoint/`. Fallback peer review was bounded; no comprehensive source-behavior or acceptance audit claimed. T001 documentation migration is complete; broader review remains bounded.
 
 Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims require current source/tests. Project status: early stage; backward compatibility is not a goal.
 

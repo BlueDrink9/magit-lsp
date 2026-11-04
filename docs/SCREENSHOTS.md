@@ -1,8 +1,7 @@
 # Human-only README image guidance
 
 This document is manual guidance for human maintainers publishing README images.
-Agents must not capture, open, inspect or render images. Follow the no-vision
-policy in [AGENTS.md](../AGENTS.md): automated native evidence is text and
+Follow the no-vision policy in [AGENTS.md](../AGENTS.md#working-conventions): automated native evidence is text and
 structured state (`.screen`, accessibility/DOM text, JSON, wire/API and Git
 state), never PNG or CDP image capture. `make readme-shots` prints this path;
 it does not capture anything.
