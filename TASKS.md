@@ -11,7 +11,7 @@ Last review: 464d5e4b06df8d22cacf273f0c458b55ba4bc151
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
-- [ ] **T003.2 — Add the report-only hygiene runner and focused tests.**
+- [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
   Add `make hygiene` running cargo-machete, knip and luacheck, reporting missing tools distinctly. Include the twenty largest nongenerated tracked files, a soft growth threshold, and `allow(dead_code)`/`keep-for:` searches; test report-only behavior and failure reporting.
 - [ ] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
   Run actual tools in an isolated tool environment, retain each baseline finding with a reason, and prove an intentional unused dependency is reported before removing it. Preserve the user's dirty Cargo.toml exactly outside any explicitly scoped metadata change.

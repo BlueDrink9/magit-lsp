@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test readme-shots
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test readme-shots hygiene
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -12,6 +12,9 @@ endef
 
 build:
 	$(call run,build,cargo build -q)
+
+hygiene:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
 
 # `make test` covers the Rust, Neovim and VSCode suites. The real-UI Python
 # suites are separate: `make ui-unit` (harness) and `make ui-test`/`make ui-tour`
