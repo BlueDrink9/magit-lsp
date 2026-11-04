@@ -2,6 +2,10 @@
 
 ## Ad hoc
 
+- [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.**
+  Follow the replacement queue in dependency order, splitting large tickets into scoped work items. Record blockers without requesting human input before the deadline; preserve unrelated local changes.
+- [x] **T001.1 — Map open roadmap and review issues to the replacement queue.**
+  Audit every unchecked old §7 item, both Plain task files and REVIEW_REPORT A01–A34 against numbered tickets; write a compact migration ledger in `docs/evidence/task-queue-migration.md`. Resolve A11/BUG-READ-1 ownership first, preserve unmapped issues explicitly, and add T001 slice tracking to the replacement queue; do not remove source records yet.
 - [x] **Remove the superseded protocol plan and its ad hoc work item.**
   Delete `protocol review and plan.md` and its obsolete unchecked queue entry. Preserve unrelated work; identify the first ticket in `TASKS_PART_SEVEN.md` without starting it.
 - [x] **Gather the A–E harness and client-abstraction evidence report.**
