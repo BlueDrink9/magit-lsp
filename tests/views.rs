@@ -51,7 +51,7 @@ fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
 }
 
 #[test]
-fn staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk() {
+fn staging_a_hunk_line_sends_edits_and_keeps_the_cursor_in_the_source_section() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
         .modify_standard()
@@ -79,10 +79,19 @@ fn staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk() {
 
     let moved = render.cursor.expect("successor cursor");
     test.set_cursor(moved);
-    let moved_node = test.focused_node();
-    assert_eq!(moved_node.path.as_deref(), Some("f.txt"));
-    assert_eq!(moved_node.hunk_id.as_deref(), Some(hunk_id.as_str()));
-    assert_eq!(moved_node.section.as_deref(), Some("staged"));
+    assert_eq!(test.focused_node().id, "section:unstaged");
+    let staged_hunk = test
+        .tree()
+        .line_nodes
+        .iter()
+        .find(|node| {
+            node.path.as_deref() == Some("f.txt")
+                && node.hunk_id.as_deref() == Some(hunk_id.as_str())
+                && node.section.as_deref() == Some("staged")
+        })
+        .expect("original hunk remains in staged tree");
+    assert_eq!(staged_hunk.path.as_deref(), Some("f.txt"));
+    assert_eq!(hunk_count(&cached_diff(tmp.path())), 1);
     assert_eq!(hunk_count(&cached_diff(tmp.path())), 1);
 }
 
