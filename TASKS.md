@@ -4,6 +4,8 @@ Last review: a70df920a165885e73cd315c29bf3c27caf78564
 
 ## Ad hoc
 
+- [ ] **Immediate — Locate the orchestration prompt source and update its review trigger.**
+  Find the configuration supplying the developer-level orchestration prompt and replace its fixed eight-task trigger with the approved judgment-based wording in AGENTS.md. Repository instructions alone do not override the current prompt; do not claim activation until updated orchestration instructions are actually loaded.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
   Proposed orchestration configuration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. Until then, the active higher-priority eight-task review rule remains. Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
