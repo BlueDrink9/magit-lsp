@@ -5,7 +5,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 ## How to read this document
 
 - Named roadmap phases (the `Phase N` groups below) are phase boundaries; individual tickets, implementation slices and review-fix batches are not. Run the phase gate when the last unchecked item in a named phase completes. The active higher-priority review remains required after eight completed tasks since `Last review:`. The proposed judgment-based orchestration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. At each applicable phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
-- A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, Verify.
+- A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, Verify, and an explicit Phase gate (name the applicable gate or `none`; gates apply only at actual named phase ends).
 - Sizes are S, M or L. They are relative sizes. They are not time estimates.
 - Check each path that has the mark (confirm) before you edit it. If the path is wrong, correct the ticket.
 - Old ticket numbers (for example R-PLAIN-PROMPT) stay in the history. The last section maps old numbers to new numbers.
@@ -89,17 +89,11 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
   4. Commit preset files named `initialize-<client>-<version>.json`.
 - **Verify:** Run `cargo test --test wirelog`. Make sure that each fixture parses as JSON. Record one capture run for each client as text.
 
-### T003 hygiene-tooling (S)
+### [x] T003 hygiene-tooling — Complete
 
-- **Depends on:** T001.
-- **Target Files:** `Makefile`, `AGENTS.md`, `Cargo.toml`, `.luacheckrc` (new), a `knip` configuration in `clients/vscode/` (new), allowlist files (new).
-- **Purpose:** Find dead code and file growth at the end of a phase and at review time. Do not run the tools for each ticket.
-- **Acceptance:**
-  1. `make hygiene` runs these checks. It reports findings only, at first. `cargo machete` (list false positives in `[package.metadata.cargo-machete]`). `knip` for `clients/vscode` (entry points: `extension.js`, tests and scripts). `luacheck` with a `.luacheckrc` that declares the `vim` global. A size report of the 20 largest files that are not generated, with a soft limit. Searches for `allow(dead_code)` and `keep-for:`.
-  2. Put each existing finding in an allowlist file. Write a reason for each entry.
-  3. `AGENTS.md` has a "Phase end and review" section that names `make hygiene`. The ticket template has a phase gate line. The checklist of T033 has a hygiene entry. Each finding must be deleted, allowlisted with a reason, or put in a ticket.
-  4. Optional: run the command each week in CI. Report only.
-- **Verify:** `make hygiene` exits with code 0 with the baseline. Add an unused dependency on purpose. Make sure that the tool reports it. Then remove it.
+Done: `a345a98` (runner/tests), `95c40e5` (tool configs), `741ffa2` (finding dispositions). Enforced by `make hygiene` and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`.
+Linux report-only baseline: cargo-machete 0.9.2 clean; Knip 5.88.1 reports one unlisted dependency and 69 unused exports; luacheck 1.2.0 reports 34 warnings and 0 errors. Findings have reasons or exact owners; report-only exit 0 does not mean debt-free.
+Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T002 remains open, so Phase 1 is not complete.
 
 ## Phase 2: Capability model (gates 0.2)
 
@@ -347,7 +341,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
   1. Run the T015 and T019 scenarios through the fake-editor harness. Assert the exact repository state.
   2. Add a minimal fake provider. It must prove that the dispatcher and the view interaction work without Git. Do not build a jj backend.
   3. Generate `docs/plain-support.md` again. No command may be `Unavailable` without a reason.
-  4. Record the results of `make test`, `make ui-test` and `make hygiene`.
+  4. Record the results of `make test`, `make ui-test` and `make hygiene`. Disposition every hygiene finding by fixing/deleting it, allowlisting with a concrete reason, or assigning an exact owner task; report missing tools and launch failures, and do not call report-only exit 0 debt-free.
 - **Verify:** Run `make test`, `make ui-test` and `make test-rust FILTER="--test plain_e2e"`.
 
 ## Phase 6A: Rich protocol v1 and client prototypes
