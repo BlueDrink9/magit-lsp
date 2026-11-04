@@ -48,15 +48,11 @@ impl WireLog {
                 let row = serde_json::json!({"direction":direction,"time":time,"pid":std::process::id(),"raw":raw});
                 let mut line = serde_json::to_vec(&row)?;
                 line.push(b'\n');
-                #[cfg(unix)]
                 {
-                    use std::os::fd::AsRawFd;
-                    let lock = FileLock::lock(file.as_raw_fd())?;
+                    file.lock()?;
                     file.write_all(&line)?;
-                    drop(lock);
+                    file.unlock()?;
                 }
-                #[cfg(not(unix))]
-                file.write_all(&line)?;
             }
             file.flush()
         });
@@ -139,32 +135,6 @@ impl WireLog {
             }
             None => Ok(None),
         }
-    }
-}
-
-#[cfg(unix)]
-struct FileLock(i32);
-
-#[cfg(unix)]
-impl FileLock {
-    fn lock(fd: i32) -> io::Result<Self> {
-        unsafe extern "C" {
-            fn flock(fd: i32, operation: i32) -> i32;
-        }
-        if unsafe { flock(fd, 2) } == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self(fd))
-    }
-}
-
-#[cfg(unix)]
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        unsafe extern "C" {
-            fn flock(fd: i32, operation: i32) -> i32;
-        }
-        let _ = unsafe { flock(self.0, 8) };
     }
 }
 

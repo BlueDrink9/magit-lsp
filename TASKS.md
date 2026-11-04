@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
+Last review: 8ecba12dc44f321daaa43dec773f374616bb6b67
 
 ## Ad hoc
 
@@ -74,6 +74,34 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
   `cargo fmt --all -- --check` reports existing workspace-wide formatting differences; log `/tmp/opencode/queue-checkpoint/fmt.log`. Apply rustfmt only to the reported Rust files, preserve unrelated user edits, and verify the full formatting check.
 
 ## Review
+
+Checkpoint review: Sol 5.6 reviewed `3059565..8ecba12`; three P1 findings below, no P0/P2/P3. Full test, formatting and text-native tour gates passed before fixes; logs `/tmp/opencode/wirelog-captures-checkpoint/`. Tour headings and only `menu-commit` excerpt inspected. The user's earlier review skip does not apply to this newly reached eight-task checkpoint. No full-UI-suite or cross-platform execution claim.
+
+- [x] **[P1] Serialize shared wirelogs on every tested platform** (`src/wirelog.rs:32-61`, `WireLog::new`; `tests/wirelog.rs:37-64`, `concurrent_servers_append_complete_rows_without_truncating`)
+  - **Problem:** Complete-line locking exists only under `cfg(unix)`; Windows uses uncoordinated append even though Windows runs the Rust suite. The concurrency test can also pass after losing one whole session because it checks only that any initialize and shutdown row exist, not exact per-process counts or order.
+  - **Why it matters:** This violates correctness and cohesion with the cross-platform CI contract. Concurrent or restarted Windows servers can interleave or lose recorder rows, recreating the corruption that this change claims to fix.
+  - **Change:** Give the append writer one cross-process locking abstraction on Unix and Windows. Keep serialization before the lock, then lock only around one complete pre-serialized JSONL line. Strengthen `concurrent_servers_append_complete_rows_without_truncating` with each child PID captured from `TestServer::pid()`, bounded unique message bursts through both live servers, and exact row counts plus expected per-PID message order; prove both sessions are complete rather than checking `any`. Retain the restart test for prior-file preservation.
+  - **Done when:** Shared-path tests prove two distinct PIDs each retain every unique row in source order, every line parses, no NUL/interleaved bytes exist, restart rows remain ordered, and the same assertions run on Linux, macOS, and Windows CI.
+  - **Constraints:** Do not truncate, disable the Windows test, serialize producers on the LSP thread, or weaken append/restart behavior. Preserve unrelated `Cargo.toml` work if a locking dependency is needed.
+  - **Verify:** `cargo test --test wirelog`; cross-platform proof is the existing `native-test` CI matrix.
+
+- [ ] **[P1] Make identity replacement byte-index safe** (`src/wirelog.rs:288-300`, `replace_case_insensitive`; `tests/wirelog.rs:169-194`, `redacts_percent_encoded_home_and_username_forms`)
+  - **Problem:** `replace_case_insensitive` finds a byte offset in a Unicode-lowercased copy, then applies that offset and the original needle length to the original string. Unicode lowercase can change byte length, so unrelated text such as `İ` before an identity can produce wrong slicing or panic the recorder worker and drop queued rows.
+  - **Why it matters:** This is a correctness and privacy failure in the redaction boundary: valid LSP text can stop recording before sensitive values are drained.
+  - **Change:** Replace the lowercase-copy search with offset-preserving matching. The simplest acceptable structure is ASCII case-insensitive byte matching for ASCII/percent-encoded forms and exact matching for non-ASCII identity bytes; never derive original-string offsets from a transformed string. Add cases with length-changing Unicode before and inside surrounding text, lowercase percent escapes, and an exact non-ASCII identity.
+  - **Done when:** The regression inputs neither panic nor leak configured plain/encoded identities, unrelated Unicode remains intact, and all queued rows reach disk in order.
+  - **Constraints:** Do not apply lossy Unicode normalization, redact unrelated path components, or move redaction onto the background writer. Preserve mixed-case percent-escape matching.
+  - **Verify:** `cargo test --test wirelog`
+
+- [ ] **[P1] Retain the claimed bundled-Neovim native edit** (`tests/fixtures/lsp_traces/bundled-neovim-0.12.6.jsonl:2`; `tests/fixtures/lsp_traces/README.md:22-30,60-63`; `TASKS.md:13-15`, `T002.2b`)
+  - **Problem:** The completed task and README claim an authentic native `COMMIT_EDITMSG` insertion, but the committed JSONL retains only a `magit://status/...` full replacement and omits `Bundled native capture`. Future consumers therefore cannot verify the claimed native-edit evidence from the committed fixture.
+  - **Why it matters:** This violates correctness and cleanliness of conformance provenance. A server-render echo must not stand in for retained evidence of a user edit.
+  - **Change:** Re-extract the actual commit-draft `textDocument/didChange` from the named recorder source, preserving its exact raw payload and source order with initialize, then update the README to identify exactly which retained row proves the native edit. If the source cannot be verified, leave the status row honestly described and reopen/qualify `T002.2b` instead of claiming retained native-edit evidence.
+  - **Done when:** The committed fixture contains a source-equal `COMMIT_EDITMSG` change with the documented native text, or `T002.2b` is explicitly incomplete; JSONL, README, and task status make the same bounded claim.
+  - **Constraints:** Do not fabricate or normalize declarations, URIs, versions, or edit payloads. Keep T002 and T034 parent work explicitly unfinished and leave Helix scope unchanged.
+  - **Verify:** Parse every `tests/fixtures/lsp_traces/*.jsonl` line as JSON and compare the retained bundled-Neovim rows byte-for-byte or structurally against the recorder source named in the README.
+
+P3 deferred: none substantiated in this review.
 
 - [x] **Checkpoint review — Opt-in wire recorder and completed documentation cutover.**
   Coverage: reviewed `a78349e..77bc34d`, directly inspecting `src/wirelog.rs`, `src/server.rs`, `tests/wirelog.rs`, the T002 ticket, `TASKS_PART_SEVEN.md`, `docs/evidence/task-queue-migration.md`, `docs/evidence/real-file-client-spike.md`, `AGENTS.md` and `Makefile`. Verified queue cutover retains immutable source references; A12 remains ownerless and distinct from T103; R-EDIT-REAL remains not green and T104 is a subset. T002.2 capture/preset acceptance remains pending by design. Found one P2 correlated-response error leak below; no P3 separately substantiated. Coverage does not establish source acceptance or audit every changed path. Configured reviewer unavailable (`openai/gpt-5.5-sol`); fallback peer review only, not independent comprehensive audit. Full tests, rustfmt and text-native UI tour had passed; logs: `/tmp/opencode/wirelog-checkpoint/`.

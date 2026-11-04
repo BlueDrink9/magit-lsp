@@ -43,8 +43,23 @@ fn concurrent_servers_append_complete_rows_without_truncating() {
     let mut second = stdio::TestServer::spawn(&[("MAGIT_LSP_WIRELOG", &path_text)]);
     first.initialize(json!({"general":{"positionEncodings":["utf-16"]}}));
     second.initialize(json!({"general":{"positionEncodings":["utf-16"]}}));
+    let first_pid = first.pid();
+    let second_pid = second.pid();
+    assert_ne!(first_pid, second_pid);
+    let first_messages: Vec<_> = (0..12)
+        .map(|i| format!("first-{i:02}-{}", "x".repeat(4096)))
+        .collect();
+    let second_messages: Vec<_> = (0..12)
+        .map(|i| format!("second-{i:02}-{}", "y".repeat(4096)))
+        .collect();
+    for (first_message, second_message) in first_messages.iter().zip(&second_messages) {
+        first.send(json!({"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":first_message}}));
+        second.send(json!({"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":second_message}}));
+    }
     first.shutdown_and_exit();
     second.shutdown_and_exit();
+    let first_sent = first.sent.clone();
+    let second_sent = second.sent.clone();
     assert!(first
         .finish_with_messages(std::time::Duration::from_secs(10))
         .0
@@ -54,13 +69,39 @@ fn concurrent_servers_append_complete_rows_without_truncating() {
         .0
         .success());
     let text = std::fs::read_to_string(path).unwrap();
+    assert!(!text.as_bytes().contains(&0));
     let rows: Vec<serde_json::Value> = text
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert!(rows.iter().any(|row| row["raw"]["method"] == "initialize"));
-    assert!(rows.iter().any(|row| row["raw"]["method"] == "shutdown"));
-    assert!(rows.iter().all(|row| row["pid"].is_number()));
+    for (pid, sent, expected) in [
+        (first_pid, first_sent, first_messages),
+        (second_pid, second_sent, second_messages),
+    ] {
+        let actual: Vec<_> = rows.iter().filter(|row| row["pid"] == pid).collect();
+        let expected_in: Vec<_> = sent.iter().filter(|m| m.get("method").is_some()).collect();
+        let actual_in: Vec<_> = actual
+            .iter()
+            .filter(|row| row["direction"] == "in")
+            .map(|row| &row["raw"])
+            .collect();
+        assert_eq!(actual_in.len(), expected_in.len());
+        for (actual, sent) in actual_in.iter().zip(expected_in) {
+            if sent["method"] == "window/logMessage" {
+                assert_eq!(actual["params"]["message"], sent["params"]["message"]);
+            } else {
+                assert_eq!(actual["method"], sent["method"]);
+            }
+        }
+        let recorded: Vec<_> = actual_in
+            .iter()
+            .filter_map(|message| message["params"]["message"].as_str())
+            .collect();
+        assert_eq!(
+            recorded,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
