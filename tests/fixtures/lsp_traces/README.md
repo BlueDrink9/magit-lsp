@@ -263,11 +263,15 @@ provenance; unavailable actions remain explicit.
 | Native action | Helix 25.07.1 | Neovim traces |
 |---|---|---|
 | Single insert | Observed payload shape (Helix row 2); native single-key cause documented. | Native A insertion in plain trace row 3; retained. |
-| Selection replace | NOT CAPTURED; no nonempty replacement range in Helix rows 2–4. | NOT CAPTURED; no native selection-replacement action evidence. |
-| Paste one character | NOT CAPTURED. | NOT CAPTURED. |
-| Paste many characters | NOT CAPTURED. | NOT CAPTURED. |
+| Selection replace | NOT CAPTURED; no nonempty replacement range in Helix rows 2–4. | Captured: native `1G0vllrX<Esc>` produced `XXXd`; action trace metadata and source rows 9, 14 retained in `plain-neovim-0.12.6-actions.*`. |
+| Paste one character | NOT CAPTURED. | Captured: native register `Q` and `gg0"ap` produced `HQead`; action trace metadata and source rows retained in `plain-neovim-0.12.6-actions.*`. |
+| Paste many characters | NOT CAPTURED. | Captured: native register `MULTI` and `gg0"ap` produced `HMULTIQead`; it began before prior repair settled. See retained action metadata and limits. |
 | Rapid typing | NOT CAPTURED; separate rapid input not tested. | NOT CAPTURED. |
 | Undo immediately after server repair edit | NOT CAPTURED. | NOT CAPTURED. |
+
+Neovim action capture source is `/tmp/opencode/t002-neovim-actions/raw-parent/raw.jsonl`, SHA256 `856b70d34cb40b2d221177f89d43b75399adaf8bfa9d543253ace4e5e20360de` (21 rows). `plain-neovim-0.12.6-actions.jsonl` preserves source rows 9 and 14 verbatim; its JSON sidecar records exact native keys, structured before/after text and versions, and source row mapping. Source row 9 is didChange version 5 (`XXX` replacement); row 14 is didChange version 9 and contains Q and MULTI edits together with intervening server edits. Native state versions were 7 and 8 for the two pastes. MULTI began before prior repair settled, so this is action evidence, not a clean-repair claim. The run also executed incidental undo: its `repair_before_undo` still contains `HMULTIQead`, so undo-after-repair is not established and is excluded from the action fixture.
+
+The original driver and report are retained at `/tmp/opencode/t002-neovim-actions/driver.py` and `/tmp/opencode/t002-neovim-actions/report.json`. The capture was run with `python3 /tmp/opencode/t002-neovim-actions/driver.py`; the recorded driver lines 71–79 still enabled the incidental undo. Do not treat this command as a three-action-only run or rerun it to recreate this evidence.
 
 Plain Neovim row 2 is a server-rendered insertion, row 3 native `A`
 insertion, and row 4 `A` deletion/repair; only row 3 establishes single insert.
@@ -275,7 +279,8 @@ Bundled Neovim's commit-draft change is a native full-buffer replacement, not
 proof of any particular requested input action. Bundled VSCode's retained
 change is also a full-buffer replacement; no native action among the six is
 established there. Single insert is captured for both requested editor families.
-The five remaining action classes—selection replacement, one-character paste,
-multi-character paste, rapid typing, and undo immediately after a server repair
-edit—remain uncaptured for each family. The checked T002.2 four-client baseline
-is complete; parent T002 and full T034 conformance remain open.
+For Neovim, selection replacement and both register pastes are now captured;
+rapid typing and undo immediately after a confirmed server repair remain
+uncaptured. For Helix, all five action classes remain uncaptured. The checked
+T002.2 four-client baseline is complete; parent T002 and full T034 conformance
+remain open.

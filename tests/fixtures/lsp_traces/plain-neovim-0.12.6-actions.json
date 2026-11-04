@@ -1,0 +1,77 @@
+{
+  "source": "/tmp/opencode/t002-neovim-actions/raw-parent/raw.jsonl",
+  "source_sha256": "856b70d34cb40b2d221177f89d43b75399adaf8bfa9d543253ace4e5e20360de",
+  "source_rows": 21,
+  "fixture_source_rows": [
+    9,
+    14
+  ],
+  "actions": [
+    {
+      "action": "visual replacement",
+      "keys": "1G0vllrX<Esc>",
+      "before": {
+        "version": 4,
+        "text": "Head: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "after": {
+        "version": 5,
+        "text": "XXXd: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "apply_edit_count_before": 1,
+      "apply_edit_count_after": 1
+    },
+    {
+      "action": "one-character register paste",
+      "keys": "gg0\"ap",
+      "before": {
+        "version": 6,
+        "text": "Head: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "after": {
+        "version": 7,
+        "text": "HQead: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "apply_edit_count_before": 2,
+      "apply_edit_count_after": 2
+    },
+    {
+      "action": "multi-character register paste",
+      "keys": "gg0\"ap",
+      "before": {
+        "version": 7,
+        "text": "HQead: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "after": {
+        "version": 8,
+        "text": "HMULTIQead: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean",
+        "name": "/tmp/opencode/t002-neovim-actions/repo/.magit",
+        "modified": true
+      },
+      "apply_edit_count_before": 2,
+      "apply_edit_count_after": 2
+    }
+  ],
+  "wire_versions": {
+    "visual replacement": 5,
+    "one-character register paste": 7,
+    "multi-character register paste": 8,
+    "combined didChange": 9
+  },
+  "limitations": [
+    "The multi-character paste began before the prior server repair settled.",
+    "Wire notifications coalesced paste edits with intervening server edits; version 9 is the authentic combined didChange.",
+    "The incidental undo is excluded: report repair_before_undo still contains HMULTIQead and does not establish repair-before-undo."
+  ],
+  "excluded_incidental_undo": true
+}

@@ -11,6 +11,14 @@ Last review: 14023109f73f235d35b7631b47c93a005cda4ade
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
+- [ ] **T002.3a — Capture the five remaining native Neovim input actions.**
+  In isolated plugin-free Neovim, record native selection replacement, one-character register paste, multi-character register paste, rapid typing and undo immediately after an actual server repair. Retain source-equal wire records, action commands and structured before/after state; update only Neovim matrix cells proved by the run and preserve any genuine limits.
+- [x] **T002.3a1 — Capture native Neovim selection and register pastes.**
+  Retain source-equal wire rows and native metadata for visual replacement and one-/multi-character register pastes. Multi-paste began before prior repair settled; incidental undo does not prove repair-before-undo. Done: committed evidence; enforced by source-equality and wirelog checks.
+- [ ] **T002.3a2 — Capture Neovim rapid input and undo after repair.**
+  Extend the proven native capture with rapid typing and undo ordered after a confirmed server repair, then reconcile the Neovim action evidence and parent slice. Preserve input provenance and actual wire ordering.
+- [ ] **T002.3b — Capture the five remaining native Helix input actions.**
+  Use the current-release isolated native Helix setup to record the same five actions, with actual paste/input provenance and repair-before-undo ordering. Retain source-equal wire records and reproducible text-only commands; do not infer actions from payload shape or mark T002 complete without an honest final acceptance audit.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
