@@ -4,7 +4,9 @@ Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
 
 ## Ad hoc
 
-- [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.** Follow the numbered queue in dependency order; preserve unrelated local changes.
+- [x] **Update execution limits and future reviewer selection.**
+  Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
+- [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Follow the numbered queue in dependency order; preserve unrelated local changes.
 - [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**
   Implement a reusable recorder with ordered background file writes and recursive identity/credential redaction. Test direction/order, JSON validity, real framing replay and credential absence before server integration.
 - [x] **T002.1b — Wire opt-in recording into the actual server transport.** Actual-binary opt-in, disabled/error paths, drain and collision-safe redaction; `cargo test --test wirelog`.
