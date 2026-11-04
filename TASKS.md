@@ -31,6 +31,8 @@
 
 ## Bugfix
 
+- [x] **Checkpoint — Restore log-menu key routing and native passthrough.**
+  Both profiles bind status `open.log` to `l`; update stale Vim test input from `g l` to `l`. Captured menu, log opening, `q` return and native-key passthrough remain covered. Done: current change; enforced by `cargo test --test log_commands`.
 - [x] **Checkpoint — Restore full Git-backend hunk comparisons.**
   Expected staged hunks now use `parse_file_diff`, preserving file metadata in full equality checks. All 41 real-Git backend tests pass; verified `cargo test --test git_backend && git diff --check`.
 - [x] **Checkpoint — Resolve Rust formatting-gate drift.**

@@ -15,7 +15,7 @@ fn current_log_opens_and_quit_returns_to_status() {
     let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
     test.ack();
 
-    test.press("g l");
+    test.press("l");
     test.press("l");
     let log_id = test.view_id().to_string();
     let descriptor = test.session().views().get(&log_id).unwrap().descriptor();
@@ -32,7 +32,7 @@ fn current_log_opens_and_quit_returns_to_status() {
 
 #[test]
 fn log_menu_opens_log_and_q_returns_to_status_in_each_profile() {
-    for (profile, opener) in [(Profile::Standard, "l"), (Profile::Vim, "g l")] {
+    for (profile, opener) in [(Profile::Standard, "l"), (Profile::Vim, "l")] {
         let (tmp, _repo) = RepoFixture::new()
             .commit("first log subject", [("f.txt", TEN_LINES)])
             .build();
@@ -96,7 +96,7 @@ fn log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scop
             .build();
         let (mut test, _) = TestSession::open_status_at(&tmp, profile, WIDE_VIEWPORT);
         test.ack();
-        test.press(if profile == Profile::Vim { "g l" } else { "l" });
+        test.press("l");
         test.press("l");
 
         for key in ["/", "?", "n", "p"] {
