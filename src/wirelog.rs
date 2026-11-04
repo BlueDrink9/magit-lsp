@@ -19,7 +19,7 @@ pub struct WireLog {
 
 struct RedactionState {
     identities: Vec<String>,
-    secret_requests: HashSet<String>,
+    secret_requests: HashSet<(String, String)>,
 }
 
 impl WireLog {
@@ -36,6 +36,17 @@ impl WireLog {
         identities.retain(|s| !s.is_empty());
         let (tx, rx) = mpsc::channel::<(String, u128, Value)>();
         let worker = thread::spawn(move || {
+            #[cfg(unix)]
+            let mut file = {
+                use std::os::unix::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(path)?
+            };
+            #[cfg(not(unix))]
             let mut file = std::fs::File::create(path)?;
             for (direction, time, raw) in rx {
                 let row = serde_json::json!({"direction":direction,"time":time,"raw":raw});
@@ -60,17 +71,24 @@ impl WireLog {
         let mut state = self.state.lock().unwrap();
         let method = raw.get("method").and_then(Value::as_str).unwrap_or("");
         let id = raw.get("id").map(Value::to_string);
-        let correlated = method.ends_with("/prompt")
-            && raw.pointer("/params/secret").and_then(Value::as_bool) == Some(true)
-            || id
-                .as_ref()
-                .is_some_and(|id| state.secret_requests.remove(id));
-        if method.ends_with("/prompt") && correlated {
+        let prompt_secret = method.ends_with("/prompt")
+            && raw.pointer("/params/secret").and_then(Value::as_bool) == Some(true);
+        let correlated =
+            if method.is_empty() && (raw.get("result").is_some() || raw.get("error").is_some()) {
+                id.as_ref().is_some_and(|id| {
+                    state
+                        .secret_requests
+                        .remove(&(id.clone(), opposite(direction).to_owned()))
+                })
+            } else {
+                false
+            };
+        if prompt_secret {
             if let Some(id) = id {
-                state.secret_requests.insert(id);
+                state.secret_requests.insert((id, direction.to_owned()));
             }
         }
-        if correlated {
+        if correlated || prompt_secret {
             redact_secret_values(&mut raw);
         }
         redact(&mut raw, &state.identities, false, false);
@@ -139,9 +157,17 @@ fn redact(value: &mut Value, identities: &[String], secret_prompt: bool, prompt_
                 let lower = key.to_ascii_lowercase();
                 if (secret && (key == "default" || key == "value"))
                     || (prompt_answer && key == "value")
-                    || ["password", "credential", "askpass", "token"]
-                        .iter()
-                        .any(|s| lower.contains(s))
+                    || [
+                        "password",
+                        "credential",
+                        "askpass",
+                        "token",
+                        "access_token",
+                        "refresh_token",
+                        "auth_token",
+                    ]
+                    .iter()
+                    .any(|s| lower == *s)
                 {
                     *child = Value::String("[REDACTED]".into());
                 } else {
@@ -156,7 +182,7 @@ fn redact(value: &mut Value, identities: &[String], secret_prompt: bool, prompt_
         }
         Value::String(text) => {
             for identity in identities {
-                *text = text.replace(identity, "[REDACTED]");
+                *text = replace_case_insensitive(text, identity);
             }
         }
         _ => {}
@@ -176,4 +202,27 @@ fn redact_secret_values(value: &mut Value) {
     if let Some(result) = value.get_mut("result") {
         *result = Value::String("[REDACTED]".into());
     }
+}
+
+fn opposite(direction: &str) -> &'static str {
+    if direction == "in" {
+        "out"
+    } else {
+        "in"
+    }
+}
+
+fn replace_case_insensitive(text: &str, needle: &str) -> String {
+    if needle.is_empty() {
+        return text.to_owned();
+    }
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(index) = rest.to_ascii_lowercase().find(&needle.to_ascii_lowercase()) {
+        out.push_str(&rest[..index]);
+        out.push_str("[REDACTED]");
+        rest = &rest[index + needle.len()..];
+    }
+    out.push_str(rest);
+    out
 }

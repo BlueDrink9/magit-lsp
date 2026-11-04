@@ -7,8 +7,7 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
 - [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.** Follow the numbered queue in dependency order; preserve unrelated local changes.
 - [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**
   Implement a reusable recorder with ordered background file writes and recursive identity/credential redaction. Test direction/order, JSON validity, real framing replay and credential absence before server integration.
-- [ ] **T002.1b — Wire opt-in recording into the actual server transport.**
-  Integrate the recorder at inbound/outbound boundaries under `MAGIT_LSP_WIRELOG`; test actual-binary logging, disabled behavior, clean stdout and shutdown drain. Prior combined attempt inspected interfaces but made no source changes; split for bounded implementation.
+- [x] **T002.1b — Wire opt-in recording into the actual server transport.** Actual-binary opt-in, disabled/error paths, drain and collision-safe redaction; `cargo test --test wirelog`.
 - [ ] **T002.2 — Capture real client initialize and change evidence.**
   Use the recorder in available bundled and plain client harnesses; commit versioned initialize presets and real captures, distinguish reconstruction, and list missing client/typing-shape evidence without inventing conformance.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.

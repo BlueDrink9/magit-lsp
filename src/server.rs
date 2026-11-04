@@ -1361,7 +1361,14 @@ pub fn run_with(options: ServerOptions) -> Result<()> {
 async fn serve(options: ServerOptions) -> Result<i32> {
     let mut reader = BufReader::new(tokio::io::stdin());
     let (sender, receiver) = mpsc::unbounded_channel();
-    let writer = tokio::spawn(writer_loop(tokio::io::stdout(), receiver));
+    let wirelog = match crate::wirelog::WireLog::from_env() {
+        Ok(log) => log.map(Arc::new),
+        Err(error) => {
+            eprintln!("wirelog unavailable: {error}");
+            None
+        }
+    };
+    let writer = tokio::spawn(writer_loop(tokio::io::stdout(), receiver, wirelog.clone()));
 
     // The config is loaded before the client connects, so a broken file in the
     // default location cannot prevent startup. Its error is shown on initialize.
@@ -1508,7 +1515,13 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     tracing::debug!("magit-lsp listening on stdio");
 
     let exit_code = loop {
-        match transport::read_message(&mut reader).await {
+        let read = transport::read_message(&mut reader).await;
+        if let (Some(log), Ok(Some(message))) = (&wirelog, &read) {
+            if let Err(error) = log.record("in", message) {
+                eprintln!("wirelog record failed: {error}");
+            }
+        }
+        match read {
             Ok(Some(Message::Request(request))) => {
                 if request.method == "shutdown" {
                     shutdown_requested = true;
@@ -1728,6 +1741,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         Ok(Err(error)) => return Err(Error::from(error)),
         Err(error) => return Err(Error::new(error.to_string())),
     }
+    if let Some(log) = wirelog {
+        if let Err(error) = log.finish() {
+            eprintln!("wirelog finish failed: {error}");
+        }
+    }
     if let Some(error) = read_error {
         return Err(error);
     }
@@ -1770,11 +1788,17 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
 async fn writer_loop<W>(
     mut writer: W,
     mut receiver: mpsc::UnboundedReceiver<Message>,
+    wirelog: Option<Arc<crate::wirelog::WireLog>>,
 ) -> std::io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
     while let Some(message) = receiver.recv().await {
+        if let Some(log) = &wirelog {
+            if let Err(error) = log.record("out", &message) {
+                eprintln!("wirelog record failed: {error}");
+            }
+        }
         transport::write_message(&mut writer, &message).await?;
     }
     Ok(())
