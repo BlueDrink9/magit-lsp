@@ -6,6 +6,14 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
 
 - [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.** Follow the numbered queue in dependency order; preserve unrelated local changes.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
+- [x] **T001.5c — Remove duplicate top matter and retired Plain plans.**
+  Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).
+- [ ] **T001.4b — Qualify historical visual evidence.**
+  Add historical banners to evidence documents that cite images; remove PNG passages from the real-file spike without relabelling visual observations as current text proof. Preserve substantive API/wire/Git evidence.
+- [ ] **T001.4c — Isolate human-only README image guidance.**
+  Make screenshot/releasing guidance explicitly human-only, with AGENTS links and historical caveats. Existing screenshot code is absent; provide a non-capturing human help target and directory documentation rather than adding agent image paths.
+- [ ] **T001.6 — Verify documentation migration and record residuals.**
+  Finish the document-search acceptance audit, synchronize slice checks and compress completed records with honest evidence. Mark T001 complete only when its acceptance is actually met, or record precise blockers and move to independent T002.
 - [ ] **Retained gap — A12 real-dispatch Git failure handling.** Exact scope: real-dispatch Git-failure handling and removal of `server::mutation`; no numbered owner evidenced. Distinct from T103's same-session reader-lock redesign. Immutable provenance: `d04dfa2:TASKS.md`; details: [migration ledger](docs/evidence/task-queue-migration.md).
 - [x] **Retained decision — R-NAV.** Four tree-owned commands verified; immutable evidence: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.** Immutable evidence and enforcing checks retained in `da4d422:TASKS.md`.
@@ -65,46 +73,6 @@ Checkpoint review limitation (2026-11-05): the configured reviewer could not sta
   - **Done when:** Queue index, retained gap, and migration ledger consistently state A12 is unresolved, with no fabricated numbered owner.
   - **Constraints:** Documentation only; retain immutable source references and unfinished T001 work.
   - **Verify:** `grep -n -E 'A01–A10|A12|real-dispatch' TASKS_PART_SEVEN.md TASKS.md docs/evidence/task-queue-migration.md`
-
-Checkpoint: accumulated Plain visibility/provider changes reviewed; no
-substantiated P0–P2 findings. Exact synchronized snapshots, negotiated position
-encodings, bounded sections and typed visibility controls have focused tests;
-native summary/expand/hide/show and all five providers passed for both EOF
-variants with unchanged Git/presentation state and verified owned cleanup.
-`make ui-tour` and `git diff --check` passed; focused menu-commit tour text was
-inspected; no `magit-lsp` processes remained. `make test` stopped at the user-deferred
-`errors::normal_and_piped_apply_failures_keep_original_details`; later suites
-were not reached. No lint target was found. This is not full-gate acceptance.
-
-Canonical roadmap, design, protocol and backlog. Terms are in §1, protocol
-shapes in §§3–4, and live tasks state their acceptance gates. Read selectively
-from [AGENTS.md](./AGENTS.md); `README.md` owns user-facing documentation.
-Do not duplicate detailed design/history in `AGENTS.md`.
-
-**Status note:** design sections describe intended behaviour. Verify current
-behaviour in source/tests rather than treating historical notes as current facts.
-
-**Project status:** early stage. **Backward compatibility is not a goal.**
-Rename, delete, and reshape protocol methods, config keys and Lua APIs freely.
-Delete the old thing; do not leave shims.
-
-## Contents
-
-0. Decisions already made
-1. Glossary
-2. Completed correctness contracts
-3. Design decisions (expanded)
-4. Protocol reference
-5. Default keymaps (profiles)
-6. View catalog
-7. Dependency-ordered implementation queue
-8. Testing strategy
-9. Open questions
-10. Implementation status and deviations
-11. Client reviews (completed history archived)
-12. Review backlog (compact summary)
-
----
 
 ## 0. Decisions already made
 
