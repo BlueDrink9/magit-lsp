@@ -261,13 +261,28 @@ fn replace_case_insensitive(text: &str, needle: &str) -> String {
     if needle.is_empty() {
         return text.to_owned();
     }
+    let haystack = text.as_bytes();
+    let pattern = needle.as_bytes();
     let mut out = String::new();
-    let mut rest = text;
-    while let Some(index) = rest.to_ascii_lowercase().find(&needle.to_ascii_lowercase()) {
-        out.push_str(&rest[..index]);
+    let mut cursor = 0;
+    while cursor + pattern.len() <= haystack.len() {
+        let found = text[cursor..].char_indices().find_map(|(relative, _)| {
+            let index = cursor + relative;
+            let candidate = haystack.get(index..index + pattern.len())?;
+            let matches = candidate.iter().zip(pattern).all(|(left, right)| {
+                if left.is_ascii() && right.is_ascii() {
+                    left.eq_ignore_ascii_case(right)
+                } else {
+                    left == right
+                }
+            });
+            matches.then_some(index)
+        });
+        let Some(index) = found else { break };
+        out.push_str(&text[cursor..index]);
         out.push_str("[REDACTED]");
-        rest = &rest[index + needle.len()..];
+        cursor = index + pattern.len();
     }
-    out.push_str(rest);
+    out.push_str(&text[cursor..]);
     out
 }

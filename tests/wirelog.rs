@@ -235,6 +235,38 @@ async fn redacts_percent_encoded_home_and_username_forms() {
 }
 
 #[tokio::test]
+async fn redaction_preserves_unicode_offsets_and_queued_rows() {
+    let path = std::env::temp_dir().join(format!("wirelog-unicode-{}.jsonl", std::process::id()));
+    let identity = "/home/alice/İdentity-álîce";
+    let log = WireLog::new(&path, identity).unwrap();
+    for (id, message) in [
+        (1, format!("İ before {identity} İ after")),
+        (2, format!("before İ {identity} after İ")),
+        (3, format!("İ {identity} İ")),
+    ] {
+        let message: Message = serde_json::from_value(json!({"jsonrpc":"2.0","id":id,"method":"window/logMessage","params":{"message":message}})).unwrap();
+        log.record("in", &message).unwrap();
+    }
+    log.finish().unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for forbidden in [identity, "%C3%8Ddentity-%C3%A1l%C3%AEce", "álîce"] {
+        assert!(!text.contains(forbidden), "leaked {forbidden}");
+    }
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(rows.len(), 3);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row["raw"]["id"], index + 1);
+        let message = row["raw"]["params"]["message"].as_str().unwrap();
+        assert_eq!(message.matches("[REDACTED]").count(), 1);
+        assert_eq!(message.matches('İ').count(), 2);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn unrelated_request_id_does_not_consume_secret_response_correlation() {
     let path = std::env::temp_dir().join(format!("wirelog-collision-{}.jsonl", std::process::id()));
     let log = WireLog::new(&path, "").unwrap();

@@ -91,7 +91,7 @@ Checkpoint review: Sol 5.6 reviewed `3059565..8ecba12`; three P1 findings below,
   - **Done when:** The production open options satisfy the documented cross-platform locking precondition and existing recorder tests pass; no claim of locally executed Windows tests.
   - **Verify:** `cargo test --test wirelog && cargo fmt --all -- --check && git diff --check`
 
-- [ ] **[P1] Make identity replacement byte-index safe** (`src/wirelog.rs:288-300`, `replace_case_insensitive`; `tests/wirelog.rs:169-194`, `redacts_percent_encoded_home_and_username_forms`)
+- [x] **[P1] Make identity replacement byte-index safe** (`src/wirelog.rs:288-300`, `replace_case_insensitive`; `tests/wirelog.rs:169-194`, `redacts_percent_encoded_home_and_username_forms`)
   - **Problem:** `replace_case_insensitive` finds a byte offset in a Unicode-lowercased copy, then applies that offset and the original needle length to the original string. Unicode lowercase can change byte length, so unrelated text such as `İ` before an identity can produce wrong slicing or panic the recorder worker and drop queued rows.
   - **Why it matters:** This is a correctness and privacy failure in the redaction boundary: valid LSP text can stop recording before sensitive values are drained.
   - **Change:** Replace the lowercase-copy search with offset-preserving matching. The simplest acceptable structure is ASCII case-insensitive byte matching for ASCII/percent-encoded forms and exact matching for non-ASCII identity bytes; never derive original-string offsets from a transformed string. Add cases with length-changing Unicode before and inside surrounding text, lowercase percent escapes, and an exact non-ASCII identity.
