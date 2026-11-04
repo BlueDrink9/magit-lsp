@@ -1,5 +1,7 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
+> Historical evidence only. Visual observations below are prior reports, not current text-based acceptance. Current evidence policy: [AGENTS.md no-vision policy](../../AGENTS.md#working-conventions).
+
 ## Current verdict: scoped lifecycle observations PASS; parent acceptance incomplete
 
 Decision recorded: assume ordinary LSP `didClose` confirms saved-file content by
@@ -43,8 +45,7 @@ draft didOpen; workspace-change appends initialize with the new root and no
 draft didOpen. EOF/deactivation never confirms. No lifecycle false-confirmation
 blocker was observed in this bounded configuration.
 
-Inspected all three `pre-action.png` images: native Explorer, permanent draft
-tab, visible `spike message`, no dirty marker/dialog. Inspected each
+Inspected each
 `command.json`, `api.jsonl`, `wire.jsonl`, `result.json`, `supervisor.jsonl`:
 commands, timestamps, roots, exits and cleanup. `command.json` retains exact
 expanded arguments/ports/version: binary above, `--wait --no-sandbox
@@ -90,7 +91,7 @@ MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/
 Retained verified extension-test host: `/tmp/opencode/real-file-vscode-XSt31I/`.
 Retained verified normal development host: `/tmp/opencode/real-file-vscode-jLMkbH/`.
 Each has `command.json` (exact binary/expanded arguments/version), `result.json`,
-`api.jsonl`, `wire.jsonl`, `output.txt` and PNGs. Both use owned disposable real
+`api.jsonl`, `wire.jsonl` and `output.txt`. Both use owned disposable real
 Git repositories and isolated profiles/extensions. Codium is `1.140.06880`,
 commit `807ba2d6075c29587f884698cd7370c81ab0724c`, x64; languageclient `9.0.1`.
 Neovim was **not rerun** in this follow-up; its evidence below is historical.
@@ -127,12 +128,8 @@ Extension-test mode suppresses the native dialog and makes no such claim.
 These are tab-observer observations, not production freshness or commit-barrier
 tests.
 
-Inspected both verified hosts' API/wire traces and the normal host screenshots:
-`03c-dirty-save-dialog.png` (Save focused; two dirty native text lines),
-`03e-dirty-discard-dialog.png` (actual Save/Don't Save/Cancel prompt over
-`discarded text`), `03b-dirty-cancel.png` (dirty tab retained),
-`03d-dirty-save-closed.png` and `03f-dirty-discard-closed.png` (no draft tab),
-and `04-refresh-language.png` (reopened, refreshed dirty plaintext editor).
+Inspected both verified hosts' API/wire traces. The visual observations from that
+run are historical and are not current text-based acceptance.
 Both results have `gate:"pass"`. Owned profiles
 are killed and bounded-poll checked absent even on failure; process inspection
 also found no surviving owned profiles or Python observer. SIGTERM alone can
@@ -196,8 +193,7 @@ The init opens the target after startup, attaches on BufReadPost, and retains a
 separate status window so `:q` tests buffer closure rather than editor shutdown.
 No `--clean` override, arbitrary settling sleeps, fake Git directories, synthetic
 didOpen/didClose notifications or production extension load are used. Readiness
-and evidence waits poll real conditions with bounded deadlines. Screenshots use
-the isolated renderer CDP target; tmux captures are plain text. Only owned unique
+and evidence waits poll real conditions with bounded deadlines. Only owned unique
 profiles/tmux servers are terminated; no user editor is reused or closed.
 
 ## Retained and inspected evidence
@@ -208,18 +204,18 @@ Neovim: `/tmp/opencode/real-file-nvim-6ic9e_t0/`.
 
 Both Codium directories retain `wire.jsonl` (actual observer stdin messages),
 `api.jsonl` (separate editor API observations), `result.json`, `command.json`,
-`output.txt` and renderer PNGs. The Neovim directory retains `wire.jsonl`,
+`output.txt`. The Neovim directory retains `wire.jsonl`,
 `result.json` (including exact command/version), and `.screen` captures.
 These are retained local artifacts, not portable repository attachments.
 
-Inspected the normal host's `01-open.png`, `02-native-close.png`,
-`03-dirty-dialog.png` and `04-refresh-language.png`: real file/text visible;
-then no tab; native Save/Don't Save/Cancel dialog; refreshed dirty plaintext
-document. Inspected Neovim's `01-open.screen`, `02-dirty-refused.screen`,
+Inspected Neovim's `01-open.screen`, `02-dirty-refused.screen`,
 `03-refresh-language.screen`, `03b-external-change-warning.screen`,
 `04-native-close.screen`: target visible; E37 and retained dirty text; replacement
 text; external-change write warning; then only the status buffer. Actual wire
 open/save/close records and standard request responses were inspected separately.
+
+Removed visual observations are preserved immutably at
+`8c053a5:docs/evidence/real-file-client-spike.md`.
 
 ## Findings
 

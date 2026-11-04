@@ -1,5 +1,7 @@
 # Magit HEAD-edit operations: source evidence
 
+> Historical evidence only. Prior visual reports below are not current acceptance. Current evidence policy: [AGENTS.md no-vision policy](../../AGENTS.md#working-conventions).
+
 Source checked 2026-10-29 against Magit
 [`4031049049b23785268497ff49eed0690f1ce85f`](https://github.com/magit/magit/commit/4031049049b23785268497ff49eed0690f1ce85f),
 `lisp/magit-commit.el`. Definitions `magit-commit-extend` (222–240),
