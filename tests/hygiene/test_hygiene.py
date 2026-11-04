@@ -62,8 +62,8 @@ class HygieneTests(unittest.TestCase):
         self.assertIn("cargo machete: FINDINGS (exit 1)", output)
         self.assertIn("tool output", output)
         self.assertEqual(calls[0], (["cargo", "machete"], self.root))
-        self.assertEqual(calls[1][1], self.root / "clients/vscode")
-        self.assertEqual(calls[2][1], self.root)
+        self.assertEqual(calls[1], (["knip"], self.root / "clients/vscode"))
+        self.assertEqual(calls[2], (["luacheck", "--config", str(self.root / ".luacheckrc")], self.root))
 
     def test_nonzero_is_reported(self):
         output, _ = self.execute({"cargo": (7, "tool output"), "knip": (1, "config error")})
@@ -77,6 +77,10 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
 
     def test_sizes_and_markers_are_deterministic(self):
+        with patch.dict(os.environ, {"HYGIENE_SOFT_LIMIT": "20"}):
+            spec = importlib.util.spec_from_file_location("hygiene_limited", SCRIPT)
+            limited = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(limited)
         first, _ = self.execute()
         second, _ = self.execute()
         self.assertEqual(first, second)
@@ -84,15 +88,26 @@ class HygieneTests(unittest.TestCase):
         self.assertIn("big.txt:1:keep-for: reason", first)
         self.assertIn("big.txt:2:allow(dead_code)", first)
 
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            limited.report(self.root)
+        self.assertIn("soft limit 20 bytes", output.getvalue())
+        self.assertIn("[over soft limit]", output.getvalue())
+
     def test_generated_and_untracked_lua_excluded_but_tracked_lua_passed(self):
-        generated = self.root / "generated.lua"
-        generated.write_text("-- generated\n")
+        generated = self.root / "generated space.lua"
+        generated.write_text("-- keep-for: generated-marker\n" + "x\n" * 30)
+        generated_true = self.root / "generated-true.txt"
+        generated_true.write_text("allow(dead_code) generated true\n" + "x\n" * 30)
         tracked = self.root / "tracked.lua"
         tracked.write_text("-- tracked\n")
-        (self.root / ".gitattributes").write_text("generated.lua linguist-generated\n")
+        (self.root / ".gitattributes").write_text('"generated space.lua" linguist-generated=set\ngenerated-true.txt linguist-generated=true\n')
         subprocess.run([REAL_GIT, "add", "."], cwd=self.root, check=True)
         (self.root / "untracked.lua").write_text("-- untracked\n")
         output, calls = self.execute()
+        self.assertNotIn("generated-marker", output)
+        self.assertNotIn("generated-true", output)
+        self.assertIn("small.txt", output)
         lua_call = next(c for c in calls if c[0][0] == "luacheck")
         self.assertEqual(lua_call[0], ["luacheck", "--config", str(self.root / ".luacheckrc"), "tracked.lua"])
         self.assertNotIn("generated.lua", lua_call[0])

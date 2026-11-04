@@ -123,7 +123,9 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `464d5e4b06df8d22cacf273f0c
 
 ### Remaining checkpoint review task
 
-- [x] **[P2] Make hygiene tests portable and prove checker working directories** (`tests/hygiene/test_hygiene.py:28-41`, `execute` and `stub`; `tests/hygiene/test_hygiene.py:100-111`, `test_invocation_failure_is_reported_and_knip_uses_client_cwd`)
+- [x] **[P2] Make hygiene tests portable and prove checker working directories** (`tests/hygiene/test_hygiene.py`)
+  Restored generated-file marker/size exclusions and deterministic soft-limit checks; exact cargo, Knip and Lua argv/cwd assertions pass. Verification: focused unittest suite, `make hygiene`, `git diff --check`.
+  Portable helpers and actual cwd assertions landed in `caf5588`; completion still needs the dropped generated-size/marker and soft-limit regression coverage restored, plus full checker argv assertions. Do not regress portable real-Git setup.
   - **Problem:** The harness assumes Git exists at `/usr/bin/git` or `/bin/git` and creates a symlink, which fails on valid non-FHS Linux environments and is not portable to existing macOS/Windows CI. The cwd test creates `clients/vscode` but never observes `$PWD`, so its name and T003.2a's checked claim are unsupported.
   - **Why it matters:** This violates correctness and readability of the focused tests. A green test neither proves Knip runs from the client root nor reliably runs wherever Git is installed.
   - **Change:** Resolve Git from the original environment before replacing `PATH`, then expose only that executable through a portable wrapper or controlled path without assuming FHS locations or symlink support. Make executable stubs record their argv and cwd; separately test the invalid-executable `OSError` path. Assert cargo-machete and luacheck run at repository root, Knip runs at `clients/vscode`, and luacheck receives only expected tracked nongenerated Lua paths.
