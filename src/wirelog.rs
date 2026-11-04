@@ -202,6 +202,14 @@ fn redact_secret_values(value: &mut Value) {
     if let Some(result) = value.get_mut("result") {
         *result = Value::String("[REDACTED]".into());
     }
+    if let Some(error) = value.get_mut("error").and_then(Value::as_object_mut) {
+        if let Some(message) = error.get_mut("message") {
+            *message = Value::String("[REDACTED]".into());
+        }
+        if let Some(data) = error.get_mut("data") {
+            *data = Value::String("[REDACTED]".into());
+        }
+    }
 }
 
 fn opposite(direction: &str) -> &'static str {

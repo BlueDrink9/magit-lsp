@@ -131,7 +131,15 @@ async fn unrelated_request_id_does_not_consume_secret_response_correlation() {
         ),
         (
             "in",
-            json!({"jsonrpc":"2.0","id":7,"result":"secret-answer"}),
+            json!({"jsonrpc":"2.0","id":7,"method":"client/other","params":{"value":"unrelated"}}),
+        ),
+        (
+            "in",
+            json!({"jsonrpc":"2.0","id":99,"error":{"code":-32001,"message":"unrelated error","data":{"detail":"untouched"}}}),
+        ),
+        (
+            "in",
+            json!({"jsonrpc":"2.0","id":7,"error":{"code":-32002,"message":"failed with secret-answer","data":{"nested":{"secret":"secret-answer"},"reason":"denied"}}}),
         ),
     ] {
         let message: Message = serde_json::from_value(raw).unwrap();
@@ -146,6 +154,12 @@ async fn unrelated_request_id_does_not_consume_secret_response_correlation() {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     assert_eq!(rows[1]["raw"]["params"]["value"], "unrelated");
-    assert_eq!(rows[2]["raw"]["result"], "[REDACTED]");
+    assert_eq!(rows[2]["raw"]["params"]["value"], "unrelated");
+    assert_eq!(rows[3]["raw"]["error"]["message"], "unrelated error");
+    assert_eq!(rows[3]["raw"]["error"]["data"]["detail"], "untouched");
+    assert_eq!(rows[4]["raw"]["id"], 7);
+    assert_eq!(rows[4]["raw"]["error"]["code"], -32002);
+    assert_eq!(rows[4]["raw"]["error"]["message"], "[REDACTED]");
+    assert_eq!(rows[4]["raw"]["error"]["data"], "[REDACTED]");
     std::fs::remove_file(path).unwrap();
 }

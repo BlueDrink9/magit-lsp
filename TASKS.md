@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
+Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
 
 ## Ad hoc
 
@@ -64,11 +64,18 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 - [x] **Checkpoint review — Opt-in wire recorder and completed documentation cutover.**
   Coverage: reviewed `a78349e..77bc34d`, directly inspecting `src/wirelog.rs`, `src/server.rs`, `tests/wirelog.rs`, the T002 ticket, `TASKS_PART_SEVEN.md`, `docs/evidence/task-queue-migration.md`, `docs/evidence/real-file-client-spike.md`, `AGENTS.md` and `Makefile`. Verified queue cutover retains immutable source references; A12 remains ownerless and distinct from T103; R-EDIT-REAL remains not green and T104 is a subset. T002.2 capture/preset acceptance remains pending by design. Found one P2 correlated-response error leak below; no P3 separately substantiated. Coverage does not establish source acceptance or audit every changed path. Configured reviewer unavailable (`openai/gpt-5.5-sol`); fallback peer review only, not independent comprehensive audit. Full tests, rustfmt and text-native UI tour had passed; logs: `/tmp/opencode/wirelog-checkpoint/`.
 
-- [ ] **[P2] Correlated secret-prompt errors are recorded without redaction.** (`src/wirelog.rs`)
+- [x] **[P2] Correlated secret-prompt errors are recorded without redaction.** (`src/wirelog.rs`)
   - **Problem:** A correlated response error enters `redact_secret_values`, which redacts only `result`; `error.message` and `error.data` remain unchanged. A client error that echoes the submitted secret can therefore persist in the opt-in wire log.
   - **Change:** Redact correlated response error payloads as well as results, without discarding unrelated capability or protocol fields.
   - **Done when:** A test records a secret prompt and matching response error containing the secret in nested error fields, then asserts the secret is absent and non-sensitive fields remain.
   - **Constraints:** Source behavior only; preserve direction/order, correlation identity and legitimate fields.
+  - **Verify:** `cargo test --test wirelog`
+
+- [ ] **[P2] Percent-encoded identity characters can bypass wirelog redaction.**
+  - **Problem:** `WireLog::new` encodes only `%` and `/`; a home such as `/home/alice smith` is not matched in `file:///home/alice%20smith`. Non-ASCII usernames have the same problem, leaking encoded user/home identity.
+  - **Change:** Match proper UTF-8 percent-encoded forms of configured home/username identities, including mixed-case escape digits and usual slash-preserving file URIs; preserve unrelated text.
+  - **Done when:** Tests cover space and non-ASCII home/user names, plain and encoded URI forms, and assert sensitive representations absent while other paths and capability objects remain intact.
+  - **Constraints:** No new dependencies, no global environment mutation, no unrelated server changes.
   - **Verify:** `cargo test --test wirelog`
 
 - [x] **Checkpoint review — Git mutation identities and structured successors.**
