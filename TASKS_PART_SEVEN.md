@@ -85,7 +85,7 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 - **Acceptance:**
   1. The recorder writes both directions in wire order, for requests, responses and notifications. A test replays a recording through the JSON-RPC framing.
   2. Capture one `initialize` and one `didChange` for each of these clients: bundled Neovim, bundled VS Code, plain Neovim and Helix. Record Helix again on its current release. The old 25.07.1 trace did not declare `window.showDocument`. Mark a trace "reconstructed" if you did not capture it. A reconstructed trace does not count as conformance evidence.
-  3. For T034, capture these `didChange` shapes from Helix and Neovim: a single insert, a selection replace, a paste of one character, a paste of several characters, rapid typing, and an undo right after a server repair edit. List each shape that you could not capture.
+  3. For T034, capture these native actions from Helix and Neovim: a single insert, a selection replace, a paste of one character, a paste of several characters, rapid typing, and an undo right after a server repair edit. List each action that you could not capture. Do not infer input action from payload shape alone; the four-client baseline does not complete this acceptance.
   4. Commit preset files named `initialize-<client>-<version>.json`.
 - **Verify:** Run `cargo test --test wirelog`. Make sure that each fixture parses as JSON. Record one capture run for each client as text.
 

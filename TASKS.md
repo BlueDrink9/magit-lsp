@@ -24,8 +24,10 @@ Last review: 8ecba12dc44f321daaa43dec773f374616bb6b67
   Retain same-PID initialize and first native change with observed omission of `experimental.magit`; native provenance, versions, invocation and cleanup are documented in the trace README. Mismatch remains for T004 audit. Enforced by `cargo test --test wirelog` and JSON/source-equality checks.
 - [x] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**
   Done: captured Helix 25.07.1 initialize and native edits; documented bounded coverage, provenance and limits in `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog` and trace JSON parsing.
-- [ ] **T002.2 — Capture real client initialize and change evidence.**
-  Use the recorder in available bundled and plain client harnesses; commit versioned initialize presets and real captures, distinguish reconstruction, and list missing client/typing-shape evidence without inventing conformance.
+- [x] **T002.2e — Audit capture provenance and enumerate missing edit shapes.**
+  Done: trace README documents Helix reproduction, audited rows and explicit action matrix; no input action inferred from payload shape.
+- [x] **T002.2 — Capture real client initialize and change evidence.**
+  Done: four client captures and versioned initialize presets retained; recorder implementation `e34ce5a`, client captures `15a8f63`, `1563bbb`. Reconstructed trace remains distinct. Enforced by `cargo test --test wirelog`, JSON parsing and source audit in trace README. T034 six-action Helix/Neovim coverage remains incomplete as enumerated there; no full conformance claim.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
 - [x] **T001.5c — Remove duplicate top matter and retired Plain plans.**
   Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).

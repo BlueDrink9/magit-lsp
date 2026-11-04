@@ -101,13 +101,60 @@ MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_EDIT_ONLY=1 MAGIT_LSP_WIRELOG
 tag 25.07.1 on 2026-11-05. Recorder source SHA256:
 `66b2b40fc281625336cbaf808fc0455fe324f8e8110b740d310433141f8d9eda`.
 
-Used a fresh `/tmp/opencode/helix-capture-*` home, config, repository and tmux
-socket `helixcap`; recorder parent existed before launch. Language config used
-the generic declaration below, with absolute `target/debug/magit-lsp`.
-`sample.magit` initially held `hello\n`; native keys inserted `X`, then sent
-`x`, `p`, `a`, Enter. Recorder rows 4–6 show insertion, selection replacement
-and later insertion. This was an ordinary attached file, not a server-owned
-status view. Bracketed paste, paste-many, rapid typing and undo-after-server-
-repair were not established. Raw payloads retain recorder-redacted data
-without normalization. Cleanup: `tmux -L helixcap kill-server`, then remove
-the owned `$D` tree. `reconstructed-plain.jsonl` remains historical reconstruction.
+Reproduce from repository root after `cargo build`; set `D` to a new
+`/tmp/opencode/helix-capture-*`. Create `$D/home`, `$D/config/helix`,
+`$D/repo/.git` and `$D/raw-parent` (recorder parent must exist). Put this in
+`$D/config/helix/languages.toml`:
+
+```toml
+[language-server.magit-lsp]
+command = "/home/william/src/magit-lsp/target/debug/magit-lsp"
+
+[[language]]
+name = "magit"
+scope = "source.magit"
+file-types = [{ glob = "*.magit" }]
+roots = [".git"]
+language-servers = ["magit-lsp"]
+```
+
+Then run:
+
+```sh
+printf 'hello\n' > "$D/repo/sample.magit"
+HX=/nix/store/1nc2y094mdd6z9c4bgm766jwmxsf3mzd-helix-25.07.1/bin/hx
+tmux -L helixcap new-session -d -s cap2 "cd '$D/repo' && HOME='$D/home' XDG_CONFIG_HOME='$D/config' MAGIT_LSP_WIRELOG='$D/raw-parent/raw.jsonl' '$HX' sample.magit"
+tmux -L helixcap send-keys -t cap2:0.0 i X Escape
+tmux -L helixcap send-keys -t cap2:0.0 x p a Enter
+tmux -L helixcap capture-pane -p -t cap2:0.0
+tmux -L helixcap kill-server
+rm -rf "$D"
+```
+
+The capture's retained rows 2–4 show `X` inserted at 0:0, then newline
+insertions at 1:0. None replaces a nonempty range. This ordinary attached file
+is not a server-owned status view. Do not infer input action from edit text.
+`reconstructed-plain.jsonl` remains historical reconstruction.
+
+### T034 action evidence matrix
+
+“Observed” means retained payload proves that change shape; it does not prove
+which user action caused it. Actions count as captured only with native action
+provenance; unavailable actions remain explicit.
+
+| Native action | Helix 25.07.1 | Neovim traces |
+|---|---|---|
+| Single insert | Observed payload shape (Helix row 2); native single-key cause documented. | Native A insertion in plain trace row 3; retained. |
+| Selection replace | NOT CAPTURED; no nonempty replacement range in Helix rows 2–4. | NOT CAPTURED; no native selection-replacement action evidence. |
+| Paste one character | NOT CAPTURED. | NOT CAPTURED. |
+| Paste many characters | NOT CAPTURED. | NOT CAPTURED. |
+| Rapid typing | NOT CAPTURED; separate rapid input not tested. | NOT CAPTURED. |
+| Undo immediately after server repair edit | NOT CAPTURED. | NOT CAPTURED. |
+
+Plain Neovim row 2 is a server-rendered insertion, row 3 native `A`
+insertion, and row 4 `A` deletion/repair; these do not establish the missing
+actions. Bundled Neovim's commit-draft change is a native full-buffer
+replacement, not proof of any particular requested input action. Bundled
+VSCode's retained change is also a full-buffer replacement; no native action
+among the six is established. Thus all six actions remain incomplete for at
+least one or both requested editor families.
