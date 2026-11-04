@@ -12,6 +12,8 @@
   Expand the migration ledger to individual A01–A34 rows using explicit evidence; preserve A12 and any unresolved decisions as one-line TASKS entries with numbered-queue owners or retained gaps. Only then replace `REVIEW_REPORT.md` with its header and empty Open findings template; put the audited IDs and evidence narrative in the commit message.
 - [x] **T001.4a — Migrate versioned VSCode host facts and retire NOTES.**
   Move F5, find-widget, QuickPick and fold observations into `docs/evidence/vscode-host-behaviours.md`, preserving Codium versions and uncertainty. Put unresolved F5 diagnosis in T105 and delete `clients/vscode/NOTES.md`; keep evidence text-only.
+- [x] **T001.3c — Replace dated editor-slice narrative with the current contract.**
+  Rewrite §3.10 as a short real-file editor contract with a compact completed-slice ledger and explicit T099–T104 residuals. Preserve historical evidence through immutable Git references; do not claim parent or broad-gate completion.
 - [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
 - [x] **Retained review decision — common navigation/cycle operations.** R-NAV verified all four tree-owned commands; 74 Rust tests and `common-navigation.scn` passed 2026-10-28. Immutable record: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.**
@@ -468,286 +470,58 @@ keys keep them). Implementation per client:
 
 ### 3.10 Editor bridge (open Git's editor inside the user's editor)
 
-**Production real-file implementation slice (2026-10-29).** The server and both
-bundled adapters now open the canonical actual-gitdir `COMMIT_EDITMSG` file
-(`editDocument.mode: "realFile"`, `file:` URI, separate opaque `runId`). The old
-virtual provider and wire `draft/save`/`draft/finish` methods are removed. Native
-save writes disk and keeps editing. Full-sync versions remain bounded to 1 MiB.
-Explicit confirmation is `workspace/executeCommand` with command `magit.command`
-and one argument `{command:"common.confirm",runId,uri,version,
-source:"synchronized"}`: exact latest version validation and safe writeback precede
-helper release. `source:"saved-file"` instead reads bounded saved disk bytes and
-never writes unsaved synchronized text. Default `didClose` uses saved-file
-confirmation; VSCode is the known exception (identified by clientInfo), ignoring
-didClose as confirmation and sending run-aware saved-file intent only on an actual
-last matching `tabGroups` closed event across all groups. Explicit abort remains
-`view/invoke common.cancel` with `{runId}`. All terminal decisions use the registry
-lock. Safe-save inode replacement is accepted only in the pinned Git directory,
-with regular-file, no-symlink/no-hardlink and owner checks. History remains
-in the bounded server ring; rich recall routes are removed and both history
-commands are planned under R-EDIT-HISTORY. Confirmation returns
-`{type:"confirmed",runId,uri,version}` after helper release, not Git success.
-Rejected sync is reported as a readable `Message` through `view/effects` without
-replacing local edits. Failed ordinary native close also re-presents the same
-pending `EditDocument` run/snapshot; Neovim restores its wiped native buffer,
-full-sync observer and keymaps with retained local text/version. No custom draft
-error notification remains. Git owns
-templates, cleanup, effective-empty behavior and hooks.
+**Current real-file contract.** Git editor helper opens canonical actual-gitdir
+`COMMIT_EDITMSG` as `mode: "realFile"` with a `file:` URI and opaque `runId`.
+Validate helper token, owner, kind, URI/path and run before exposing it. No managed
+virtual document or draft/history wire protocol remains. Only commit messages are
+implemented; history recall is deferred to R-EDIT-HISTORY (T099).
 
-This is an implementation/integration slice with focused native evidence,
-**not parent R-EDIT-REAL broad native or adversarial acceptance**; that parent stays
-unchecked. Pre-cutover managed-wire acceptance is historical, not this contract.
+Explicit `common.confirm` accepts only the exact owner/run/URI/current version;
+synchronized text is safely written inside the pinned Git directory before helper
+release. Saved-file confirmation reads bounded disk bytes and never substitutes
+unsaved synchronized text. Replacements must remain regular, owned, and without
+symlink/hardlink, inside pinned gitdir. Native Save writes disk but does not finish
+editing. Unsaved close honors Save / Don't Save / Cancel: Save confirms saved
+bytes; Don't Save confirms last saved bytes (initially Git's template); Cancel
+keeps buffer and run open. Empty/comment-only content is Git-owned empty-message
+behavior, not explicit abort. Git owns templates, cleanup, hooks and commit result.
 
-- [x] **R-EDIT-REAL Git empty-message semantics and native saved-file scenario.**
-  Real-Git stdio covers initial comments/status/configured template, empty/comments/
-  whitespace and untouched-template aborts with unchanged HEAD/index/worktree,
-  and edited-template cleanup/exact HEAD message. Native evidence inspected in
-  `build/ui/commit-real-file/{standard,vim}-{100x30,80x24}/`: save-alone shows
-  `0L, 0B written` and staged changes; empty/untouched-template close shows
-  `Commit aborted: empty message`; final saved close shows
-  `Committed: Real saved-file message` and `Working tree clean`.
-  Verified: `cargo test --test editor_bridge --test editor_drafts --test server_async`
-  (65 tests), `cargo build --release`, focused native scenario (all four
-  combinations), and `git diff --check`. Parent R-EDIT-REAL remains unchecked.
+Normal close completes helper successfully; explicit abort, progress cancellation,
+disconnect/EOF and shutdown cancel at any phase. VSCode confirms only on the
+run-aware last owned tab closing across all groups; `didClose` is not confirmation
+there. Elsewhere `didClose` saved-file confirmation is an accepted assumption,
+not a run-aware guarantee. Registry lock arbitrates terminal outcomes. Progress,
+cancellation and disconnect remain owned through completion; one terminal outcome
+releases helper/config/progress exactly once. Failures retain the pending run and
+recover/reopen editable text; reject late responses. Buffer recovery is best-effort;
+drafts do not survive server crash. Token is private and unlogged; inherited-env
+same-user/nested-hook spoofing remains a limit. See [process ownership contract](docs/design/process-ownership.md).
 
-- [x] **R-EDIT-REAL registered-confirmation payload test follow-up (2026-10-29).**
-  Test the actual `workspace/executeCommand` confirmation endpoint for extra text,
-  assert rejected confirmation leaves Git and the message file unchanged, and use
-  that endpoint for terminal behavior. The obsolete draft route is not used as
-  barrier evidence. Parent R-EDIT-REAL remains unchecked.
-  - **Verification:** `cargo test --test editor_bridge && git diff --check`.
+**Completed slices** (immutable historical narrative:
+[`c6db4cf:TASKS.md`](https://github.com/example/magit-lsp/blob/c6db4cf/TASKS.md)):
 
-- [x] **R-EDIT-REAL existing-effects recovery slice (2026-10-29).** Remove the
-  last obsolete draft error notification and both client handlers. Rejected
-  open/change reports a readable message without overwriting native edits;
-  failed saved-file native close re-presents only the same pending run through
-  existing effects. Recovery preserves local text/version, native full-sync and
-  keymaps, with retry/explicit abort and stale-run resurrection guards. Parent
-  R-EDIT-REAL remains unchecked.
-  - **Verification:** exact ticket command passed: `cargo test --test editor_bridge
-    --test editor_drafts --test server_async` (64 tests), `make test-lua`,
-    `make vscode-test` (unit/integration and generated bindings),
-    `scripts/ui run tests/ui/scenarios/commit-draft-close.scn` (1 PASS),
-    `MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_EDIT_ONLY=1
-    npm --prefix clients/vscode run test:e2e`, and `git diff --check`.
-    Stdio tests cover unreadable-file failed close retaining the same run/version,
-    then retry committing restored disk rather than unsaved synchronized text.
-    Lua covers recovered-buffer explicit abort; both client suites cover retained
-    edits/version and terminal-run re-presentation rejection.
-  - **Inspected native evidence:** `build/ui/commit-draft-close/{failed-close-retained,
-    recovery-text,recovered-close-committed}.screen` shows readable failure,
-    retained text and successful same-run retry; scenario assertions also check
-    restored keymaps/version. `/tmp/opencode/vscode-review-umgCTE/real-file-native-{evidence,
-    trace}.json` and `real-file-native-3-discard-dialog.png` retain production
-    Codium native Save/Don't Save/Cancel and all-group last-owned-tab evidence:
-    exactly one saved-file confirmation per run and exact saved subject/body,
-    never unsaved text. Additional inspected screenshots in the passing
-    `/tmp/opencode/vscode-review-vAMNxo/` run cover two groups and native Cancel.
-    No owned live UI/server remained after cleanup. No test deadline increased.
-  - Full regression is **not clean**: the inherited release baseline at fc47bcf
-    already failed `tests/errors.rs::normal_and_piped_apply_failures_keep_original_details`
-    at line 477 (`build/test-logs/rust.EwFXOb`). This slice does not modify that
-    unrelated failure or claim `make test` passed.
+| Slice | Completion reference | Enforcing test / evidence |
+| --- | --- | --- |
+| Git empty-message and saved-file behavior | R-EDIT-REAL, `c6db4cf` | `tests/editor_bridge.rs`; focused real-Git/native scenario |
+| Registered confirmation payload validation | R-EDIT-REAL, `c6db4cf` | `tests/editor_bridge.rs` |
+| Existing-effects recovery and same-run retry | R-EDIT-REAL, `c6db4cf` | `tests/editor_bridge.rs`, `tests/editor_drafts.rs`; focused UI scenario |
+| VSCode lifecycle supervisor slice | R-EDIT-REAL, `c6db4cf` | lifecycle e2e; Linux/Codium single-root evidence only |
+| Real-file cutover/integration | R-EDIT-REAL, `c6db4cf` | `tests/editor_bridge.rs`, `tests/editor_drafts.rs`; broad native gap |
+| Rich-history route removal | R-EDIT-REAL, `79384c2` | `tests/editor_bridge.rs`; recall deferred |
 
-- [x] **R-EDIT-REAL production VSCode lifecycle supervisor slice.** Run the
-  production extension/server/Git helper in isolated normal hosts across native
-  close-window, reload-window and same-window single-root folder replacement.
-  Persist wire/API/progress/process observations outside the host; require actual
-  exit/reactivation, saved-file preservation, unchanged HEAD/index/worktree,
-  no lifecycle confirmation and eventual old server/helper exit before cleanup.
-  Reload must open fresh Git text with a new run ID at the reused URI and reject
-  late old-run confirmation. Parent R-EDIT-REAL remains unchecked; evidence is
-  limited to the current Linux/Codium build and clean single-root fixtures.
-  - **Verification:** `MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium
-    node clients/vscode/test/e2e/real-file-lifecycle.mjs && git diff --check`
-    passed. Inspected all six native pre/post PNGs plus results, progress/wire
-    observations and PID/start-time process identities under
-    `/tmp/opencode/real-file-lifecycle-NVD44m/{close-window,reload-window,workspace-change}/`.
-    All three original hosts deactivated without a matching `event.closed` or
-    `common.confirm`; HEAD, index tree and staged/unstaged bytes were unchanged.
-    Old server, Git commit and editor-helper processes exited before forced
-    cleanup. Every `cleanup.json` reports zero remaining owned processes.
-    Reload retained the saved file, then opened fresh Git text with a distinct
-    run ID at the same URI; the deliberate late old-run request returned
-    `Commit draft run is not pending`, without affecting the new draft or HEAD.
-  - **Harness diagnosis:** the inherited loop expected a dead extension host to
-    supervise itself and had no writer for `lifecycle-result.json`. The external
-    supervisor now owns each phase and persists failures, process census and
-    cleanup even on failure. Native reload can reject the outstanding command
-    RPC with `Canceled`; this is recorded, never accepted as completion without
-    actual host reactivation. Small tiled windows hide editor text behind side
-    bars, so the harness closes those bars and waits for painted saved text.
-    Close-window's desktop post-shot includes unrelated pre-existing windows;
-    only the isolated profile's process identities establish its complete exit.
-    No production lifecycle implementation changed; no broader platform,
-    multi-root, full-regression or parent acceptance claim is made.
-
-- [x] **R-EDIT-REAL implementation/integration slice.** Real file server/client
-  cutover and focused integration verification; parent native/adversarial
-  acceptance and Magit message-ring parity remain pending.
-  - Focused production Neovim evidence: `commit-draft-history.scn` and
-    `commit-draft-close.scn` passed with the debug server; saved/recalled/restored,
-    discarded-to-saved and recovered-close screens inspected in `build/ui/`.
-    Native VSCode production suite was updated but **not run** in this slice;
-    native dirty choices/multi-group/lifecycle adversarial acceptance remains
-    for the orchestrator. Spike results are not reused as production evidence.
-  - Verification: exact ticket gate passed (68 Rust tests, Lua, VSCode unit and
-    generated bindings, Node integration including 240 real-Git selection cases,
-    `git diff --check`). Full native VSCode acceptance and full regression gate
-    remain unrun; parent R-EDIT-REAL stays unchecked.
-
-- [x] **R-EDIT-REAL rich-history removal slice (2026-10-29).** Remove the obsolete
-  history route/types, per-draft navigation and rich-client recall commands;
-  retain the bounded server ring and saved finish/abort retention from 79384c2.
-  History commands are planned under R-EDIT-HISTORY. Semantic executeCommand
-  confirmation returns `type:"confirmed"`; no new custom method or compatibility
-  shim. Exact-version/full-sync/writeback, saved-file close, terminal arbitration
-  and e141e89's all-group owned-last-tab behavior are unchanged. `draft/error`
-  recovery is intentionally untouched for the next existing-effects slice.
-  - **Verification:** exact ticket gate passed: regenerated manifest/menu/parity
-    snapshots (keybindings and README parity unchanged), five private editor/ring
-    tests, Lua, VSCode unit/generated bindings, native `commit-confirm.scn` and
-    production Codium edit-only e2e. Supplemental unfiltered `editor_drafts`,
-    `editor_bridge`, `server_async`, `commands` suites passed all 73 cases;
-    Node integration passed, including 240 exact repository-state selection cases.
-  - **Inspected evidence:** `build/ui/commit-confirm/{standard,vim}-{100x30,80x24}/{editor,staged}.screen`
-    proves prompt decline/accept, native Git editor opening and explicit abort
-    retaining staged changes. `/tmp/opencode/vscode-review-DfgHFR/real-file-native-evidence.json`
-    and `real-file-native-trace.json`, plus `real-file-native-2-cancel-dialog.png`
-    and `real-file-native-3-committed.png`, verify actual native Save/Don't Save/
-    Cancel and all-group last-owned-tab semantics: exactly one saved-file
-    confirmation per run, exact saved subject/body, no unsaved-text submission.
-    Owned UI/server processes were absent after cleanup. No test deadline changed.
-  - **Limits:** parent R-EDIT-REAL remains unchecked; no broader lifecycle,
-    platform or deferred R-EDIT-HISTORY acceptance is claimed.
-
-**Current versus target:** the real-file cutover above is implemented. Plain
-presentation remains a separate target reusing this workflow; standard didClose
-reliability/late-event limits are an accepted assumption, not a run-aware protocol
-guarantee. See [Plain-client tasks](./magit-lsp-plain-client-tasks.md).
-
-Git opens an editor for: commit messages (incl. `--amend`, reword), merge
-messages, annotated tag messages, interactive rebase todo lists, `git commit
---fixup=reword:`, etc.
-
-**Mechanism**
-1. When the server spawns Git it sets: `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR` (and
-   `EDITOR`, `VISUAL` if unset) to `"<path to magit-lsp binary> --editor-helper"`,
-   plus `MAGIT_LSP_SOCKET=<unix socket or named pipe path>` and
-   `MAGIT_LSP_EDIT_ID=<opaque run>` and private one-shot
-   `MAGIT_LSP_HELPER_TOKEN=<credential>` (never sent to the client or logged).
-2. Git runs the helper with the file path as argument. The helper connects to
-   the socket, sends `{editId, token, path, kind}` and **blocks** waiting for a
-   reply (`ok` → exit 0, `abort` → exit 1; Git aborts the operation on 1).
-3. The authenticated helper/run maps to the spawning session; validate the token,
-   owner, kind and canonical actual-gitdir `COMMIT_EDITMSG` path before announcing
-   `{type:"editDocument",runId,uri,text,version:1,kind:"commit-message",
-   title:"Commit message",mode:"realFile",scope:"commit-message"}`.
-4. Open that exact file URI natively: Neovim in the current window with explicit
-   LSP attachment and `bufhidden=wipe`; VSCode permanently (`preview:false`).
-   Full sync retains bounded live text/version; save only writes the real file.
-5. Explicit `magit.command` confirmation validates the synchronized exact version
-   and writes it safely; saved-file confirmation instead reads disk. Default
-   didClose uses the latter; VSCode uses the owned last-tab run-aware fallback.
-   Native Discard submits prior saved text, not unsaved sync. Abort is separate.
-6. `view/invoke common.cancel {runId}`, progress cancel and disconnect/shutdown
-   cancel; a registry lock arbitrates terminal outcomes. Failures retain the helper
-   and recover editable text on the same run. Git owns hooks/cleanup/empty semantics.
-7. Only commit-message editing is implemented; other edit kinds remain roadmap.
-   R-EDIT-2 process ownership/cleanup is unchanged. No managed provider or draft
-   wire methods remain; history recall is deferred to R-EDIT-HISTORY.
-
-**Superseded design:** R-EDIT-3/4/5's virtual managed document, save/finish/history
-barriers and custom close picker were removed by R-EDIT-REAL. Their 2026-10-28
-acceptance was for the old design, not today's native workflow. Historical server
-evidence: `/tmp/opencode/r-edit-8-verification.log`; native evidence is summarized
-in the completed historical tickets. See the current contract above instead.
-
-**Ring:** default 50 entries / 1 MiB aggregate UTF-8 per canonical repository,
-in memory for server lifetime, exact consecutive dedup and oldest eviction.
-Eligible saved finish text and best-effort saved abort text feed retention;
-didSave/live unsaved text does not. Unreadable abort files are skipped. Keep
-eligibility exclusions and visible overflow warnings; never truncate. Pinned
-Magit differences in effective-message normalization, global dedup, scope and caps
-are documented retained policy, not migration requirements. Rich recall is removed
-and planned under R-EDIT-HISTORY, not a current wire protocol.
-
-Process ownership proposal is preserved in [docs/design/process-ownership.md](docs/design/process-ownership.md).
-
-Portability gate: `setsid` and `waitid(...WNOWAIT)` are Unix interfaces with
-platform-specific availability/semantics; Linux implementation and real-Git
-tests are required before Linux R-EDIT-2 acceptance and R-EDIT-6 client cutover.
-macOS group/WNOWAIT/reap behavior remains unverified and belongs to the separate,
-later R-EDIT-9 CI/platform acceptance ticket, not a Linux acceptance dependency.
-Retain the full-grace fallback on macOS; it is not validation. Investigate kqueue
-exit observation only if required, not as an implemented alternative. Rust
-`Child::try_wait` reaps on observed exit, so cannot precede a possible group
-signal; use non-reaping waitid observation plus sole final reap or gate platform.
-Windows lacks this Unix group/waitid scheme; named-pipe ACL and suspended
-creation/atomic Job assignment require independent R-EDIT-7 feasibility and
-validation. Numeric limits are proposed defaults, not current behavior.
-Minimum adversarial acceptance for R-EDIT-2/A11: leader exits on TERM while a
-TERM-resistant descendant remains, and the group still receives KILL after the
-full grace; stopped member receives CONT then terminates; exit-before-cancel
-produces no signal; normal-exit daemon survives pipe-drain timeout; trace proves
-initial WNOWAIT observation → cancel linearization → TERM/CONT → full grace
-(or the conservative Linux hint after observed leader exit) → KILL → final reap,
-with no signal after reap. Cooperative real-hook cancellation must finish
-comfortably below two seconds with readiness established before timing; prompt
-intent acknowledgement is tested independently using a resistant hook. These are required tests, not
-claims of platform execution.
-
-Explicit abort, progress cancel, client disconnect/EOF/shutdown always cancel
-the run at any phase; they are not normal buffer close. Normal user close of the
-commit buffer completes the helper as a successful native COMMIT_EDITMSG editor
-exit. Explicit `common.confirm` synchronizes the exact version and writes it back;
-save/autosave alone only writes disk. For unsaved native close, honor Save /
-Discard / Cancel: Save closes/confirms the saved file;
-Discard closes/confirms the last saved file (initially Git's template),
-not latest unsaved didChange; Cancel keeps buffer/run open. Empty/comment-only
-saved text is Git-owned failure, not explicit abort. Terminal server cleanup is
-guarded against recursive confirm/cancel; focus change, language reattach,
-editor shutdown is not user-close intent. Default didClose confirms saved bytes
-by accepted assumption; VSCode instead requires its run-aware last-tab event. If
-confirmation/version/writeback fails, retain the
-pending helper and recover/reopen the draft if its native buffer closed.
-Terminal edit-close invalidates UI idempotently. Reject late responses; state draft
-durability/crash limits: in-memory drafts do not survive server crash, and native
-recovery copies are best-effort, not guaranteed durable recovery. Opaque run ID/one-shot helper token scoped to
-owner/repository; no secret logging. A token alone cannot prevent inherited-env
-hook spoofing (same-user/nested hook limitation). Preserve askpass protection,
-A29 readonly VSCode status and Neovim text-mode semantics; do not implement other
-edit kinds incidentally. Phase 3E R-EDIT-8 owns the bounded server-side message
-ring; R-4.2 remains staged diff/trailers/lint owner and depends on this phase.
-Ring limits/retention are defined above; native history recall has moved to
-R-EDIT-HISTORY. Do not populate from Git log in this ticket.
-
-Run lifecycle is hooks → editor waiting → finalizing → terminal; exactly one
-completion/progress end/edit/config release. Cancellation differs from Git
-failure and empty-message. Handler nonblocking-sends intent to sole Child owner;
-graceful helper abort first when connected, then bounded TERM/KILL escalation;
-late helper aborts immediately. One owner
-arbitrates cancel/reap, never signals after reap/identity release; exit status is
-separate from pipe EOF. Avoid try_wait/reap then group-kill races. Unix owned
-group/session, documented controlling-tty choice, bounded TERM then KILL (INT
-optional only), bounded bytes/output truncation error and finite drains on
-normal exit/cancel, with pipe deadlines and no indefinitely blocked reader threads.
-Do not kill normal-exit daemons to drain; escaped setsid
-children are not contained, bound escaped-pipe cleanup; unreapable child goes to
-owned reaper honestly. Never delete locks or broad-kill process names. Bounded
-readonly lock observation uses the actual linked-worktree gitdir and common-dir
-where applicable and is advisory only; warn forced cancellation may leave
-locks. Exclude probes from mutation cancellation/optional writes. BUG-READ-1
-global Git locking stays deferred. Current bridge is Unix-only: Linux real
-validation is required for Linux acceptance; macOS group/reaping validation is
-deferred to R-EDIT-9 without blocking Linux cutover or claiming macOS support
-validated. Windows named pipe,
-restrictive ACL and atomic suspended Job assignment is a separate feasibility
-gate, not a claimed guarantee.
-
-**Askpass:** `GIT_ASKPASS` and `SSH_ASKPASS` point at the same helper (with
-`--askpass`). The server turns the request into a `text` prompt with
-`secret: true` (or `confirm` for host-key questions). Never log the answer.
+**Residual gates and limits.** R-EDIT-REAL parent acceptance remains unchecked;
+wide native/adversarial, multi-root and broad regression gates are not green.
+Spike is evidence only, not production acceptance: see
+[real-file client spike](docs/evidence/real-file-client-spike.md). T099 history
+is deferred; T100 Windows pipe/ACL/Job feasibility is unverified; T101 macOS
+process-group/reaping validation is unverified. T104 lifecycle residual acceptance
+is pending: last-window exit, dirty shutdown, other builds, and broader
+reload/workspace changes. Process ownership remains subject to its Linux real-Git
+and adversarial gate; macOS and Windows guarantees are not claimed. Broad
+regression has an inherited failure in
+`tests/errors.rs::normal_and_piped_apply_failures_keep_original_details`; no green
+gate claim. Plain presentation is separate; see
+[Plain-client tasks](./magit-lsp-plain-client-tasks.md).
 
 ### 3.11 Menus (transients) and how they appear in each editor
 
