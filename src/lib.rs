@@ -34,6 +34,7 @@ pub mod tree;
 pub mod ui;
 pub mod view;
 pub mod watcher;
+pub mod wirelog;
 
 use std::fmt;
 

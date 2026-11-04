@@ -5,6 +5,12 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
 ## Ad hoc
 
 - [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.** Follow the numbered queue in dependency order; preserve unrelated local changes.
+- [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**
+  Implement a reusable recorder with ordered background file writes and recursive identity/credential redaction. Test direction/order, JSON validity, real framing replay and credential absence before server integration.
+- [ ] **T002.1b — Wire opt-in recording into the actual server transport.**
+  Integrate the recorder at inbound/outbound boundaries under `MAGIT_LSP_WIRELOG`; test actual-binary logging, disabled behavior, clean stdout and shutdown drain. Prior combined attempt inspected interfaces but made no source changes; split for bounded implementation.
+- [ ] **T002.2 — Capture real client initialize and change evidence.**
+  Use the recorder in available bundled and plain client harnesses; commit versioned initialize presets and real captures, distinguish reconstruction, and list missing client/typing-shape evidence without inventing conformance.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
 - [x] **T001.5c — Remove duplicate top matter and retired Plain plans.**
   Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).
