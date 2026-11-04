@@ -1,5 +1,7 @@
 # magit-lsp — Roadmap
 
+Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
+
 ## Ad hoc
 
 - [ ] **Work through `TASKS_PART_SEVEN.md` until November 5, 2026 at 08:00 NZDT.**
@@ -45,25 +47,23 @@
 
 ## Review
 
-Checkpoint review blocker (2026-11-05 00:20 NZDT): the configured reviewer could not start (`Model unavailable: openai/gpt-5.5-sol`). No human input requested. Available workers will perform bounded read-only review slices; retain the previous Last review baseline until coverage is recorded. Full `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs are under `/tmp/opencode/queue-checkpoint/`.
+Checkpoint review limitation (2026-11-05): the configured reviewer could not start (`Model unavailable: openai/gpt-5.5-sol`). Three available-worker peer reviews covered the core mutation, Plain/process and documentation risks listed below, against baseline `dd92f90cdb11d827606a689a88a280f480d7508d`. This is bounded coverage, not a comprehensive audit of every changed file. No human input requested. Full `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs are under `/tmp/opencode/queue-checkpoint/`.
 
 - [x] **Checkpoint review — Git mutation identities and structured successors.**
   Review committed changes since `dd92f90cdb11d827606a689a88a280f480d7508d` in Git/patch/dispatch/tree/status/commands and their focused tests. Add only substantiated P0–P2 worker-ready findings here; record exact coverage and P3 deferrals without source edits.
   Coverage: reviewed the requested diff through `d90d5da`; inspected `src/git.rs`, `src/patch.rs`, `src/dispatch.rs`, `src/tree.rs`, `src/status_view.rs`, `src/commands.rs`, and `tests/git_backend.rs`, `tests/dispatch.rs`, `tests/views.rs`, `tests/navigation.rs`. No substantiated P0–P2 findings. P3: none deferred; no speculative findings. Coverage is limited to these paths and this diff; no runtime reruns or broader repository audit.
 - [x] **Checkpoint review — Plain protocol versions and process ownership.**
   Review committed server/session/protocol/runner changes since the same baseline, focusing on boundary validation, displayed version/coordinate handling, capability negotiation and secure helper ownership. Add actionable findings and honest coverage limits; do not edit source.
-  Coverage: reviewed the requested diff through `d90d5da`; inspected `src/server.rs`, `src/session.rs`, `src/protocol.rs`, `src/runner/owned.rs`, `src/presentation/plain.rs`, `src/presentation/resolve.rs`, and the `tests/plain_render.rs` diff. The requested `tests/plain_providers.rs`, `tests/position_encoding.rs`, and `tests/editor.rs` do not exist. A single glob found related test files `tests/plain_core.rs`, `tests/plain_vis.rs`, `tests/plain_actions.rs`, and `tests/editor_bridge.rs`; these were not inspected. No substantiated P0–P2 findings. Coverage limited to requested diff and listed inspected paths; no runtime reruns or broader audit. P3 deferred.
+  Coverage: reviewed the requested diff through `d90d5da`; inspected `src/server.rs`, `src/session.rs`, `src/protocol.rs`, `src/runner/owned.rs`, `src/presentation/plain.rs`, `src/presentation/resolve.rs`, and the `tests/plain_render.rs` diff. The requested `tests/plain_providers.rs`, `tests/position_encoding.rs`, and `tests/editor.rs` do not exist. A single glob found related test files `tests/plain_core.rs`, `tests/plain_vis.rs`, `tests/plain_actions.rs`, and `tests/editor_bridge.rs`; these were not inspected. No substantiated P0–P2 findings. Coverage limited to requested diff and listed inspected paths; no runtime reruns or broader audit. No specific P3 finding recorded.
 - [x] **Checkpoint review — Roadmap migration preserves open requirements.**
   Audit committed documentation migration and immutable issue provenance since the same baseline; distinguish deliberately unfinished T001 work from lost requirements or false completion claims. Add actionable findings and coverage limits; do not edit source.
 - Coverage: reviewed the requested documentation diff through `d90d5da`; inspected the migration ledger, replacement queue index/T001 records, retained A12 and R-NAV records, `REVIEW_REPORT.md` reduction, process-ownership design, VSCode host evidence, and UI test-plan edits. Immutable checks used `d04dfa2:TASKS.md` and `da4d422:TASKS.md`. T001.5b2 and older §7/history/Plain plans and screenshot cleanup remain explicitly unchecked; not treated as regressions. R-NAV is recorded complete; R-EDIT-REAL parent remains explicitly not green and T104 is only a subset. No specific P3 finding recorded. Limit: bounded documentation/provenance review, not independent audit of every source behavior or each A-finding acceptance test.
-- [ ] **[P2] A12 is marked complete in the queue index while its sole retained issue remains open.** (`TASKS_PART_SEVEN.md:1079`)
+- [x] **[P2] A12 is marked complete in the queue index while its sole retained issue remains open.** (`TASKS.md`, old §7 index and §12 summary)
   - **Problem:** The index says “A01–A10, A12, and actionable A13–A21/A24–A34 are complete,” but migration ledger and `TASKS.md` retain A12 as an open, ownerless real-dispatch Git-failure/removal-of-`server::mutation` gap. This falsely implies closure and conflicts with immutable source `d04dfa2:TASKS.md`.
   - **Change:** Remove A12 from the completed list or qualify it as open and ownerless; preserve distinction from T103 reader-lock work.
   - **Done when:** Queue index, retained gap, and migration ledger consistently state A12 is unresolved, with no fabricated numbered owner.
   - **Constraints:** Documentation only; retain immutable source references and unfinished T001 work.
   - **Verify:** `grep -n -E 'A01–A10|A12|real-dispatch' TASKS_PART_SEVEN.md TASKS.md docs/evidence/task-queue-migration.md`
-
-Last review: dd92f90cdb11d827606a689a88a280f480d7508d
 
 Checkpoint: accumulated Plain visibility/provider changes reviewed; no
 substantiated P0–P2 findings. Exact synchronized snapshots, negotiated position
@@ -1114,8 +1114,9 @@ Follow the authoritative [no-vision policy in AGENTS.md](./AGENTS.md#working-con
   - Response-first divergence repairs in the actual-binary profile matrix. Native Neovim launched in an owned tmux server with `--listen` and a standalone `vim.lsp.start` init; stale `.magit` disk text was replaced in-buffer, watcher-only `watcher-only.txt` appeared, native typing produced a newer LSP buffer version and was undone, and the final text exactly matched the authoritative watcher render. Disk sentinel bytes were unchanged, rich `view/render` count was zero, no project Lua modules/runtimepath were loaded, and owned tmux/Neovim/server cleanup was verified. Text/JSON evidence: `build/ui/plain-render/native.{screen,json}`. Verification passed: `cargo build --release && python3 scripts/test_plain_neovim.py && cargo test --test plain_render && git diff --check` (10 plain-render tests).
 
 Task specifications and open checkboxes remain below; this index summarizes
-review status without duplicating the report ledger. A01–A10, A12, and actionable
-A13–A21/A24–A34 are complete; A22/A23 were withdrawn. A11 is owned by
+review status without duplicating the report ledger. A01–A10 and actionable
+A13–A21/A24–A34 are complete; A12 remains an unresolved, ownerless real-dispatch
+Git-failure/removal-of-`server::mutation` gap; A22/A23 were withdrawn. A11 is owned by
 R-EDIT-6. [`REVIEW_REPORT.md`](./REVIEW_REPORT.md) is evidence, not scheduling
 authority. Completed history is in the
 [completed-roadmap archive](./docs/archive/completed-roadmap-2026-10-28.md).
@@ -2475,7 +2476,8 @@ layout customization remain genuinely open.
 
 Completed Neovim, VSCode and UI harness review history is retained in the
 [completed-roadmap archive](./docs/archive/completed-roadmap-2026-10-28.md).
-Current review status: A01–A10/A12 and actionable A13–A21/A24–A34 complete;
+Current review status: A01–A10 and actionable A13–A21/A24–A34 complete;
+A12 remains an unresolved, ownerless real-dispatch Git-failure/removal-of-`server::mutation` gap;
 A22/A23 withdrawn; A11 owned by R-EDIT-6. See `REVIEW_REPORT.md` for evidence,
 not scheduling authority. Preserve BUG-READ-1's larger-design deferral (§7).
 
