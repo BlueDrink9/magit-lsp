@@ -12,6 +12,12 @@ Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
 - [x] **T002.1b — Wire opt-in recording into the actual server transport.** Actual-binary opt-in, disabled/error paths, drain and collision-safe redaction; `cargo test --test wirelog`.
 - [x] **T002.2a — Capture plain Neovim declarations and edit shapes.**
   Done: captured initialize params and three genuine didChange messages from plugin-free Neovim 0.12.6; validated JSON and source equality. Evidence: `tests/fixtures/lsp_traces/`. Partial coverage only: full replacement, insertion and deletion observed; remaining T034 shapes, exact launch/cleanup commands and complete conformance not captured.
+- [x] **T002.2b — Capture bundled Neovim declarations and native edits.**
+  Done: captured bundled Neovim initialize and authentic native didChange. Evidence, exact commands, observed draft/edit state, source hash and cleanup: `tests/fixtures/lsp_traces/README.md`.
+- [ ] **T002.2c — Capture bundled VSCode declarations and native edits.**
+  Use the shipped extension in an isolated native host, not a fake editor; retain actual host/extension versions, initialize and didChange, text/structured evidence and cleanup.
+- [ ] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**
+  Check an actual current Helix binary in an isolated terminal session; keep historical reconstructed traces distinct, document unobservable shapes or unavailable external prerequisites, and do not fabricate conformance.
 - [ ] **T002.2 — Capture real client initialize and change evidence.**
   Use the recorder in available bundled and plain client harnesses; commit versioned initialize presets and real captures, distinguish reconstruction, and list missing client/typing-shape evidence without inventing conformance.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
