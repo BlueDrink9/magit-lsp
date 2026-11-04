@@ -117,6 +117,33 @@ async fn records_redacted_order_and_roundtrips_real_frames() {
 }
 
 #[tokio::test]
+async fn redacts_percent_encoded_home_and_username_forms() {
+    let path = std::env::temp_dir().join(format!("wirelog-identity-{}.jsonl", std::process::id()));
+    let log = WireLog::new(&path, "/home/alice smith/álîce").unwrap();
+    let raw = json!({
+        "jsonrpc":"2.0", "method":"window/logMessage", "params":{"message":
+            "/home/alice smith/álîce file:///home/alice%20smith/%C3%A1l%C3%AEce file:///home/alice%20smith/%c3%a1l%c3%aece /tmp/alice%20smith semanticTokens"
+        }
+    });
+    log.record("in", &serde_json::from_value(raw).unwrap())
+        .unwrap();
+    log.finish().unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for forbidden in [
+        "/home/alice smith/álîce",
+        "alice smith",
+        "álîce",
+        "%C3%A1l%C3%AEce",
+    ] {
+        assert!(!text.contains(forbidden), "leaked {forbidden}");
+    }
+    let row: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+    let message = row["raw"]["params"]["message"].as_str().unwrap();
+    assert!(message.contains("/tmp/alice%20smith"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn unrelated_request_id_does_not_consume_secret_response_correlation() {
     let path = std::env::temp_dir().join(format!("wirelog-collision-{}.jsonl", std::process::id()));
     let log = WireLog::new(&path, "").unwrap();

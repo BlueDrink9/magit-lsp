@@ -27,13 +27,7 @@ impl WireLog {
     pub fn new(path: impl AsRef<Path>, identity: impl Into<String>) -> io::Result<Self> {
         let path: PathBuf = path.as_ref().into();
         let identity = identity.into();
-        let mut identities = vec![identity.clone()];
-        if let Some(name) = Path::new(&identity).file_name().and_then(|s| s.to_str()) {
-            identities.push(name.to_owned());
-        }
-        let encoded = identity.replace('%', "%25").replace('/', "%2F");
-        identities.push(encoded);
-        identities.retain(|s| !s.is_empty());
+        let identities = expand_identity(&identity);
         let (tx, rx) = mpsc::channel::<(String, u128, Value)>();
         let worker = thread::spawn(move || {
             #[cfg(unix)]
@@ -125,14 +119,48 @@ impl WireLog {
                     .or_else(|_| std::env::var("USERNAME"))
                     .unwrap_or_default();
                 let log = Self::new(path, home)?;
-                if !user.is_empty() {
-                    log.state.lock().unwrap().identities.push(user);
-                }
+                log.state
+                    .lock()
+                    .unwrap()
+                    .identities
+                    .extend(expand_identity(&user));
                 Ok(Some(log))
             }
             None => Ok(None),
         }
     }
+}
+
+fn expand_identity(identity: &str) -> Vec<String> {
+    let mut identities = Vec::new();
+    let mut add_forms = |value: &str| {
+        if value.is_empty() {
+            return;
+        }
+        identities.push(value.to_owned());
+        identities.push(percent_encode(value, true));
+        identities.push(percent_encode(value, false));
+    };
+    add_forms(identity);
+    if let Some(name) = Path::new(identity).file_name().and_then(|s| s.to_str()) {
+        add_forms(name);
+    }
+    identities.sort();
+    identities.dedup();
+    identities
+}
+
+fn percent_encode(value: &str, preserve_slash: bool) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) || preserve_slash && byte == b'/'
+        {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 impl Drop for WireLog {

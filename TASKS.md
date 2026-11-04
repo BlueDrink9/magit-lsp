@@ -71,7 +71,7 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
   - **Constraints:** Source behavior only; preserve direction/order, correlation identity and legitimate fields.
   - **Verify:** `cargo test --test wirelog`
 
-- [ ] **[P2] Percent-encoded identity characters can bypass wirelog redaction.**
+ - [x] **[P2] Percent-encoded identity characters can bypass wirelog redaction.**
   - **Problem:** `WireLog::new` encodes only `%` and `/`; a home such as `/home/alice smith` is not matched in `file:///home/alice%20smith`. Non-ASCII usernames have the same problem, leaking encoded user/home identity.
   - **Change:** Match proper UTF-8 percent-encoded forms of configured home/username identities, including mixed-case escape digits and usual slash-preserving file URIs; preserve unrelated text.
   - **Done when:** Tests cover space and non-ASCII home/user names, plain and encoded URI forms, and assert sensitive representations absent while other paths and capability objects remain intact.
