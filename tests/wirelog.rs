@@ -74,11 +74,17 @@ fn concurrent_servers_append_complete_rows_without_truncating() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    assert_eq!(rows.len(), first_sent.len() + second_sent.len() + 4);
+    assert!(rows.iter().all(|row| {
+        [json!(first_pid), json!(second_pid)].contains(&row["pid"])
+            && ["in", "out"].contains(&row["direction"].as_str().unwrap())
+    }));
     for (pid, sent, expected) in [
         (first_pid, first_sent, first_messages),
         (second_pid, second_sent, second_messages),
     ] {
         let actual: Vec<_> = rows.iter().filter(|row| row["pid"] == pid).collect();
+        assert_eq!(actual.len(), sent.len() + 2);
         let expected_in: Vec<_> = sent.iter().filter(|m| m.get("method").is_some()).collect();
         let actual_in: Vec<_> = actual
             .iter()
@@ -101,6 +107,17 @@ fn concurrent_servers_append_complete_rows_without_truncating() {
             recorded,
             expected.iter().map(String::as_str).collect::<Vec<_>>()
         );
+        let actual_out: Vec<_> = actual
+            .iter()
+            .filter(|row| row["direction"] == "out")
+            .map(|row| &row["raw"])
+            .collect();
+        assert_eq!(actual_out.len(), 2);
+        assert_eq!(actual_out[0]["id"], 1);
+        assert_eq!(actual_out[1]["id"], 99);
+        assert!(actual_out
+            .iter()
+            .all(|message| message.get("result").is_some()));
     }
 }
 
