@@ -1,11 +1,9 @@
 # magit-lsp — Roadmap
 
-Last review: a70df920a165885e73cd315c29bf3c27caf78564
+Last review: 14023109f73f235d35b7631b47c93a005cda4ade
 
 ## Ad hoc
 
-- [ ] **Immediate — Locate the orchestration prompt source and update its review trigger.**
-  Find the configuration supplying the developer-level orchestration prompt and replace its fixed eight-task trigger with the approved judgment-based wording in AGENTS.md. Repository instructions alone do not override the current prompt; do not claim activation until updated orchestration instructions are actually loaded.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
   Proposed orchestration configuration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. Until then, the active higher-priority eight-task review rule remains. Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
@@ -232,6 +230,40 @@ P3 deferred: none substantiated in this review.
   - **Done when:** Queue index, retained gap, and migration ledger consistently state A12 is unresolved, with no fabricated numbered owner.
   - **Constraints:** Documentation only; retain immutable source references and unfinished T001 work.
   - **Verify:** `grep -n -E 'A01–A10|A12|real-dispatch' TASKS_PART_SEVEN.md TASKS.md docs/evidence/task-queue-migration.md`
+
+Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `a70df920a165885e73cd315c29bf3c27caf78564..14023109f73f235d35b7631b47c93a005cda4ade`. Coverage was limited to the eight requested changed paths plus `Makefile`, `clients/vscode/package.json`, the actual VSCode E2E roots/imports, live marker sites, and the current review/deferred queues. The supplied Linux full-test, rustfmt, seven hygiene-test, pinned hygiene, and text-tour results remain lead evidence; this review ran no test suite and claims no Windows/macOS execution. T002 native-action gaps and unrelated roadmap debt were not reopened. Found one P1 and three P2 tasks; no P0. P3 deferred: remove the four vacuous generated-file absence assertions in `test_sizes_and_markers_are_deterministic` (`tests/hygiene/test_hygiene.py:89-92`), because the following real-Git test already proves those exclusions.
+
+- [x] **[P1] Make the phase-gate schema match the actual queue** (`TASKS_PART_SEVEN.md:5-9`, `How to read this document`; `TASKS.md:1246-1250`, `Task ticket template and UI rule`)
+  - **Problem:** The new queue instructions say every ticket has an explicit `Phase gate` field, but no ticket has that field. The same change correctly defines gates through named phase groups, so the field claim makes the completed T003 contract and canonical worker instructions internally false.
+  - **Why it matters:** This violates correctness and cohesion. Workers cannot follow a declared ticket schema that the canonical queue does not use, and may mistake tickets or slices for independent gates.
+  - **Change:** State in both locations that a ticket inherits its applicable gate from its enclosing named phase and the phase map. Remove the claim that each ticket contains an explicit `Phase gate` field; do not add repetitive fields to every ticket. Preserve the active eight-completed-task checkpoint and the proposed, inactive judgment-based replacement verbatim in substance.
+  - **Done when:** The queue describes its existing phase-map/enclosing-section structure truthfully, and nothing says individual tickets, slices, or review-fix batches are phase boundaries.
+  - **Constraints:** Documentation only. Do not activate the proposed orchestration policy, mark Phase 1 complete, alter T002/T003 status, or retrofit the entire roadmap.
+  - **Verify:** `git diff --check && grep -n -E 'Phase gate|phase gate|eight completed|not active|not.*phase boundar' TASKS.md TASKS_PART_SEVEN.md AGENTS.md`
+
+- [ ] **[P2] Restore hygiene-test environment isolation** (`tests/hygiene/test_hygiene.py:19-35`, `HygieneTests.setUp` and `tearDown`; `test_sizes_and_markers_are_deterministic`)
+  - **Problem:** `setUp` assigns `HYGIENE_SOFT_LIMIT=20` in the process environment and `tearDown` never restores the caller's value. The committed completion note claims inherited-value isolation, but the test overwrites any inherited value and leaks `20` to later tests.
+  - **Why it matters:** This violates correctness and cleanliness of the test host. Test order can change later modules' behavior, while the claimed host-isolation regression is not exercised.
+  - **Change:** Save and restore the prior environment state with `patch.dict` or explicit setup/cleanup, and import the runner under the scoped value because `LIMIT` is read at module load. Add an assertion that a pre-existing value such as `37` is unchanged after the test while the imported runner still uses the intended test limit.
+  - **Done when:** The seven focused tests pass, both absent and pre-existing `HYGIENE_SOFT_LIMIT` states are restored exactly, and the size test still proves the 20-byte threshold without changing global state after completion.
+  - **Constraints:** Do not change production threshold semantics, invoke host hygiene tools, require network access, or claim Windows/macOS execution.
+  - **Verify:** `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`
+
+- [ ] **[P2] Remove duplicate Linux verification policy** (`AGENTS.md:65-77`, `Phase end and review`)
+  - **Problem:** The new “Local execution is Linux-only” bullet immediately repeats the existing “Local execution and verification target Linux only” bullet, including the same CI and claim limits.
+  - **Why it matters:** This violates DRY and readability in the canonical agent instructions. Parallel policy wording can drift and create two apparent sources of truth.
+  - **Change:** Keep one consolidated bullet containing Linux-only local execution, explicit Windows/macOS CI follow-ups, portability expectations, and the ban on unsupported cross-platform claims. Delete only the redundant wording.
+  - **Done when:** `AGENTS.md` states the complete platform policy once under verification, with no loss of constraints.
+  - **Constraints:** Documentation only. Do not weaken CI follow-ups or imply Windows/macOS were executed.
+  - **Verify:** `grep -n -E 'Linux-only|Linux only|Windows|macOS|cross-platform' AGENTS.md`
+
+- [ ] **[P2] Remove stale planned-navigation marker claims** (`src/commands.rs:643-658`, command entries `common.next-section` and `common.jump`; `hygiene-allowlist.md:100-110`, `Tracked marker matches`)
+  - **Problem:** The changed baseline correctly says R-NAV completed these implemented commands and that they are not planned work, but both scanned source comments still say “planned navigation implementation requires roadmap disposition.” The report therefore emits stale retention claims that contradict its own disposition.
+  - **Why it matters:** This violates cleanliness and correctness of the hygiene baseline. Marker output should explain live retention, not preserve a resolved plan as active debt.
+  - **Change:** Delete the two obsolete `keep-for:` comments from the implemented command entries. Update the baseline marker list and line references to match the fresh report rather than replacing them with another retention marker.
+  - **Done when:** `make hygiene` no longer reports navigation markers at `src/commands.rs`, the commands remain implemented and unchanged, and `hygiene-allowlist.md` matches the fresh marker report.
+  - **Constraints:** Do not change command behavior, bindings, R-NAV status, unrelated markers, or deferred hygiene owners.
+  - **Verify:** `make hygiene && grep -n 'keep-for:' src/commands.rs hygiene-allowlist.md`
 
 ## Deferred hygiene follow-ups
 
@@ -1247,7 +1279,7 @@ The sole active numbered backlog is [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.m
 
 ### Task ticket template and UI rule
 
-Every ticket states **Target Files** (exclusive write boundary), **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, and exact **Verification Command**; also state dependencies, size and applicable named phase gate. The phase gate applies when the last unchecked item in a named phase group completes, not when an individual ticket, slice or review-fix batch completes. The active higher-priority review checkpoint remains every eight completed tasks since `Last review:`; see the proposed orchestration configuration in [AGENTS.md](./AGENTS.md#working-conventions). Apply shared rules in [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
+Every ticket states **Target Files** (exclusive write boundary), **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, and exact **Verification Command**; also state dependencies and size. Each ticket inherits its applicable phase gate from its enclosing named phase and the phase map. The phase gate applies when the last unchecked item in a named phase group completes, not when an individual ticket, slice or review-fix batch completes. The active higher-priority review checkpoint remains every eight completed tasks since `Last review:`; see the proposed orchestration configuration in [AGENTS.md](./AGENTS.md#working-conventions). Apply shared rules in [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
 
 ---
 
