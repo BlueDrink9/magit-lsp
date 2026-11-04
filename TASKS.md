@@ -99,7 +99,7 @@ Checkpoint review: Sol 5.6 reviewed `3059565..8ecba12`; three P1 findings below,
   - **Constraints:** Do not apply lossy Unicode normalization, redact unrelated path components, or move redaction onto the background writer. Preserve mixed-case percent-escape matching.
   - **Verify:** `cargo test --test wirelog`
 
-- [ ] **[P1] Retain the claimed bundled-Neovim native edit** (`tests/fixtures/lsp_traces/bundled-neovim-0.12.6.jsonl:2`; `tests/fixtures/lsp_traces/README.md:22-30,60-63`; `TASKS.md:13-15`, `T002.2b`)
+- [x] **[P1] Retain the claimed bundled-Neovim native edit** (`tests/fixtures/lsp_traces/bundled-neovim-0.12.6.jsonl:2`; `tests/fixtures/lsp_traces/README.md:22-30,60-63`; `TASKS.md:13-15`, `T002.2b`)
   - **Problem:** The completed task and README claim an authentic native `COMMIT_EDITMSG` insertion, but the committed JSONL retains only a `magit://status/...` full replacement and omits `Bundled native capture`. Future consumers therefore cannot verify the claimed native-edit evidence from the committed fixture.
   - **Why it matters:** This violates correctness and cleanliness of conformance provenance. A server-render echo must not stand in for retained evidence of a user edit.
   - **Change:** Re-extract the actual commit-draft `textDocument/didChange` from the named recorder source, preserving its exact raw payload and source order with initialize, then update the README to identify exactly which retained row proves the native edit. If the source cannot be verified, leave the status row honestly described and reopen/qualify `T002.2b` instead of claiming retained native-edit evidence.

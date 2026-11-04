@@ -19,9 +19,10 @@ Coverage is partial: these notifications show full-document replacement,
 insertion and deletion, but do not establish all six T034 edit shapes or
 complete conformance. Other source messages are intentionally omitted.
 
-`bundled-neovim-0.12.6.jsonl` contains the actual initialize request followed
-by the first native `textDocument/didChange`; the initialize params are also
-stored in `initialize-bundled-neovim-0.12.6.json`. Source:
+`bundled-neovim-0.12.6.jsonl` contains the actual initialize request and the
+native commit-draft `textDocument/didChange` (source row 66), in source order.
+It omits the earlier status-view echo (source row 12). The initialize params
+are also stored in `initialize-bundled-neovim-0.12.6.json`. Source:
 `/tmp/opencode/t002-bundled/raw.jsonl`, SHA256
 `f0a8cae59cd5e6a0605e63330c97baa14a12176c4b5807dc96d12f0dca63b612`.
 The source recorded bundled Neovim client version 0.12.6. Observed draft:
@@ -57,8 +58,8 @@ finally:
 PY
 ```
 
-The capture is opt-in and recorder-redacted. Only initialize and the first
-automatic didChange are retained; remaining raw messages are omitted. The
+The capture is opt-in and recorder-redacted. Only initialize and the native
+commit-draft didChange are retained; remaining raw messages are omitted. The
 temporary source log is owned by this run and may be removed with
 `rm -f /tmp/opencode/t002-bundled/raw.jsonl`.
 
