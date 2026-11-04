@@ -76,7 +76,7 @@ code issues, not allowlisted source suppressions; fix or disposition individuall
   undeclared globals `SpikeState`, `SpikeShow`, `SpikeRefresh`; declare local or
   test globals explicitly after confirming test contract.
 - `tests/test_magit_lsp.lua:1743:16`: undefined `table.unpack` field under
-  configured Lua version; reconcile runtime compatibility and checker config.
+  LuaJIT standard; Neovim's runtime supplies it.
 
 ## Size and marker report
 

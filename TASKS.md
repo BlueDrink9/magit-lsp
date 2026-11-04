@@ -105,7 +105,7 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `464d5e4b06df8d22cacf273f0c
   - **Done when:** Removing an otherwise unreachable VSCode helper from all real roots makes Knip report it; all actual package scripts and generated-host extension roots remain represented; configuration hints no longer report redundant patterns; the baseline states the new exact unlisted-dependency and unused-export counts.
   - **Constraints:** Do not blanket-ignore test/E2E directories, suppress unused exports, remove runtime code based only on Knip, or claim native VSCode execution from this static check.
 
-- [ ] **[P1] Check Lua against Neovim's actual LuaJIT standard** (`.luacheckrc:1-6`, `std`; `hygiene-allowlist.md:59-83`, `Luacheck`)
+- [x] **[P1] Check Lua against Neovim's actual LuaJIT standard** (`.luacheckrc:1-6`, `std`; `hygiene-allowlist.md:59-83`, `Luacheck`)
   - **Problem:** The comment says the config models Neovim's runtime, but `std = 'lua51'` omits LuaJIT library additions and produces the baseline's `table.unpack` warning. This mixes a real supported-runtime check with a checker-induced compatibility finding.
   - **Why it matters:** This violates cohesion and readability of the Lua baseline. False runtime diagnostics obscure actionable warnings.
   - **Change:** Use luacheck 1.2.0's LuaJIT/Neovim-appropriate standard while retaining the explicit editor-provided `vim` global and current source scope. Rerun the pinned luacheck, remove only diagnostics eliminated by the corrected runtime model, and update the exact warning/error count in `hygiene-allowlist.md`.
