@@ -256,6 +256,114 @@ is not a server-owned status view. Do not infer input action from edit text.
 
 ### T034 action evidence matrix
 
+#### Helix selection and register-paste evidence
+
+`helix-25.07.1-actions.jsonl` contains the original source rows 10, 16 and 22
+verbatim (not reconstructed from the fresh run). Its sidecar records exact
+native key sequences, source row numbers, source SHA256
+`ed10a9d46467228bf8250cd44064aa94466c5fea6b03e0ed25d7dbb9e788c078`, the
+repair/echo/reply rows, and the original cleanup limitation. The three actual
+edits were `Hea`→`XXX` over range 0:0–0:3, insertion of `H` at 0:1, and
+insertion of `Hea` at 0:1. Each action was followed by server repair, didChange
+echo and successful applyEdit reply. Saved native text before and after each
+action is identical: server repair restored the baseline, as intended. This
+does not negate the action; the source didChange rows establish it. Yanks used
+to fill registers `a` and `b` were setup, not edits.
+
+The original capture later acquired unrelated cleanup keypress edits in rows
+27–39 and ended without graceful shutdown. Those tail rows are excluded from
+the selected action evidence; the three selected rows remain verbatim and the
+full original source hash is stable. The corrected driver now checks the
+Helix pane is out of insert/select mode and sends `:quit-all!` directly, without
+a preceding Escape. Fresh validation was run from the repository root with:
+
+```sh
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+cargo build --manifest-path "$ROOT/Cargo.toml"
+nix shell nixpkgs#helix --command python3 - <<'PY'
+import hashlib, json, os, pathlib, shutil, subprocess, tempfile, time
+
+ROOT=pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()).resolve()
+HX=shutil.which('hx')
+if not HX: raise SystemExit('hx missing inside nix shell nixpkgs#helix')
+TAG=f'{os.getpid()}-{time.time_ns()}'; D=pathlib.Path(tempfile.mkdtemp(prefix=f't002-helix-{TAG}-',dir='/tmp/opencode'))
+REPO,HOME,CONFIG=D/'repo',D/'home',D/'config'; RAW=D/'raw-parent/raw.jsonl'
+SOCKET=SESSION=f't002hx-{TAG}'; TMUX=['tmux','-L',SOCKET]; SERVER=(ROOT/'target/debug/magit-lsp').resolve()
+def cmd(args,**kw): return subprocess.run(args,check=True,text=True,**kw)
+def rows(): return [json.loads(x) for x in RAW.read_text().splitlines() if x.strip()] if RAW.exists() else []
+def wait(pred,label,timeout=20):
+ end=time.monotonic()+timeout
+ while time.monotonic()<end:
+  if (value:=pred()): return value
+  time.sleep(.05)
+ raise RuntimeError('timeout waiting for '+label)
+def screen(): return subprocess.check_output(TMUX+['capture-pane','-p','-t',f'{SESSION}:0.0'],text=True)
+def keys(*ks): cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',*ks])
+def changes():
+ rr=rows(); init=next((r for r in rr if r.get('raw',{}).get('method')=='initialize'),None)
+ return [r for r in rr if init and r.get('pid')==init.get('pid') and r.get('raw',{}).get('method')=='textDocument/didChange']
+def text():
+ path=REPO/'.magit'
+ try: stamp=(path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)
+ except FileNotFoundError: stamp=None
+ keys(':write','Enter')
+ wait(lambda:path.exists() and (path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)!=stamp,'native save')
+ return path.read_text()
+report=None; REPO.mkdir(); HOME.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
+try:
+ if subprocess.check_output([HX,'--version'],text=True).strip()!='helix 25.07.1': raise RuntimeError('wrong Helix version')
+ cmd(['git','init','-q',str(REPO)]); cmd(['git','config','user.name','Capture'],cwd=REPO); cmd(['git','config','user.email','capture@example.invalid'],cwd=REPO)
+ (REPO/'tracked').write_text('base\n'); cmd(['git','add','tracked'],cwd=REPO); cmd(['git','commit','-qm','base'],cwd=REPO); (REPO/'.magit').write_text('Loading…\n')
+ if not SERVER.exists(): cmd(['cargo','build','--manifest-path',str(ROOT/'Cargo.toml')],cwd=ROOT)
+ (CONFIG/'helix/languages.toml').write_text(f'''[language-server.magit-lsp]\ncommand = "{SERVER}"\n\n[[language]]\nname = "magit"\nscope = "source.magit"\nfile-types = [{{ glob = ".magit" }}]\nroots = [".git"]\nlanguage-servers = ["magit-lsp"]\n''')
+ env=os.environ.copy(); env.update(HOME=str(HOME),XDG_CONFIG_HOME=str(CONFIG),XDG_DATA_HOME=str(D/'data'),XDG_STATE_HOME=str(D/'state'),MAGIT_LSP_WIRELOG=str(RAW),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
+ cmd(['tmux','-L',SOCKET,'new-session','-d','-s',SESSION,'-x','120','-y','40',f"cd '{REPO}' && HOME='{HOME}' XDG_CONFIG_HOME='{CONFIG}' MAGIT_LSP_WIRELOG='{RAW}' '{HX}' .magit"],env=env)
+ wait(lambda:any(r.get('raw',{}).get('method')=='textDocument/didOpen' for r in rows()),'didOpen'); wait(lambda:'Head:' in screen() and 'Loading' not in screen(),'render')
+ req=next((r for r in rows() if r.get('direction')=='out' and r.get('raw',{}).get('method')=='workspace/applyEdit'),None)
+ if not req: raise RuntimeError('missing initial applyEdit')
+ wait(lambda:any(r.get('direction')=='in' and r.get('raw',{}).get('id')==req['raw'].get('id') for r in rows()),'render reply')
+ report={'directory':str(D),'helix_version':subprocess.check_output([HX,'--version'],text=True).strip(),'source':str(RAW),'actions':[]}
+ actions=[('selection_replace',['Escape','g','g','g','h','v','l','l','r','X']),('named_register_paste_one',['Escape','g','g','g','h','"','a','y','Escape','g','g','g','h','"','a','p']),('named_register_paste_multi',['Escape','g','g','g','h','v','l','l','"','b','y','Escape','g','g','g','h','"','b','p'])]
+ for name,sequence in actions:
+  before=text(); count=len(changes()); keys(*sequence); wait(lambda:changes() if len(changes())>count else None,name+' didChange'); after=text()
+  report['actions'].append({'name':name,'keys':sequence,'before':before,'after':after})
+finally:
+ if subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
+  pane=screen()
+  if 'INSERT' in pane.upper() or 'SELECT' in pane.upper(): raise RuntimeError('not in normal mode; refusing quit')
+  cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',':quit-all!','Enter'])
+  wait(lambda:subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0,'graceful shutdown',8)
+ subprocess.run(['tmux','-L',SOCKET,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+if report is None: raise RuntimeError(f'capture failed; retained at {D}')
+deadline=time.monotonic()+15
+while time.monotonic()<deadline:
+ rr=rows(); init=next((r for r in rr if r.get('raw',{}).get('method')=='initialize'),None); pid=init.get('pid') if init else None
+ if pid and any(r.get('pid')==pid and r.get('raw',{}).get('method')=='exit' for r in rr):
+  try: os.kill(pid,0)
+  except ProcessLookupError: break
+ time.sleep(.05)
+else: raise RuntimeError(f'recorder did not drain; retained at {D}')
+report['source_sha256']=hashlib.sha256(RAW.read_bytes()).hexdigest(); report['source_rows']=len(rows())
+print(json.dumps(report,indent=2)); print(f"drained source {RAW}; SHA256 {report['source_sha256']}; rows {report['source_rows']}; PID {pid} exited")
+shutil.rmtree(D)
+PY
+```
+
+This embedded recipe resolves the checkout via Git, obtains Helix through Nix,
+uses owned temporary resources, waits for the actual render, performs native
+save-based before/after inspection and drains shutdown/exit before printing
+source hash and row count. Fresh runs validate the procedure, not historical
+PID/time/hash. Original capture cleanup limitation remains: its tail rows 27–39
+are excluded and it has no graceful shutdown; its three action rows remain
+source-equal.
+
+Executed from `tests/fixtures` on 2026-11-05: exit 0; fresh source
+`/tmp/opencode/t002-helix-3209274-1793834905552565670-hrwjzczo/raw-parent/raw.jsonl`,
+SHA256 `b9aef5d32b5c8e16b253ffb71254746f264496424bff31b2e03f42a8db3927db`,
+28 rows; server PID 3209312 recorded graceful exit. The recipe removed its owned
+temporary directory after printing this drained provenance.
+
 “Observed” means retained payload proves that change shape; it does not prove
 which user action caused it. Actions count as captured only with native action
 provenance; unavailable actions remain explicit.
@@ -263,9 +371,9 @@ provenance; unavailable actions remain explicit.
 | Native action | Helix 25.07.1 | Neovim traces |
 |---|---|---|
 | Single insert | Observed payload shape (Helix row 2); native single-key cause documented. | Native A insertion in plain trace row 3; retained. |
-| Selection replace | NOT CAPTURED; no nonempty replacement range in Helix rows 2–4. | Captured: native `1G0vllrX<Esc>` produced `XXXd`; action trace metadata and source rows 9, 14 retained in `plain-neovim-0.12.6-actions.*`. |
-| Paste one character | NOT CAPTURED. | Captured: native register `Q` and `gg0"ap` produced `HQead`; action trace metadata and source rows retained in `plain-neovim-0.12.6-actions.*`. |
-| Paste many characters | NOT CAPTURED. | Captured: native register `MULTI` and `gg0"ap` produced `HMULTIQead`; it began before prior repair settled. See retained action metadata and limits. |
+| Selection replace | Captured: native `ggghvllrX` replaced `Hea` with `XXX` (source row 10); server repair and echo restored baseline. | Captured: native `1G0vllrX<Esc>` produced `XXXd`; action trace metadata and source rows 9, 14 retained in `plain-neovim-0.12.6-actions.*`. |
+| Paste one character | Captured: native `"ay` yank then `"ap` paste inserted `H` at 0:1 (source row 16); server repair and echo restored baseline. | Captured: native register `Q` and `gg0"ap` produced `HQead`; action trace metadata and source rows retained in `plain-neovim-0.12.6-actions.*`. |
+| Paste many characters | Captured: native `vll"by` yank then `"bp` paste inserted `Hea` at 0:1 (source row 22); server repair and echo restored baseline. | Captured: native register `MULTI` and `gg0"ap` produced `HMULTIQead`; it began before prior repair settled. See retained action metadata and limits. |
 | Rapid typing | NOT CAPTURED; separate rapid input not tested. | Captured: native `gg0iRAPID<Esc>`; raw change and metadata retained in `plain-neovim-0.12.6-rapid-repair.*`. |
 | Undo immediately after server repair edit | NOT CAPTURED. | Captured: native `u` sent only after correlated repair reply and baseline buffer restoration; actual undo and follow-on server repair retained in `plain-neovim-0.12.6-rapid-repair.*`. |
 
@@ -355,6 +463,8 @@ proof of any particular requested input action. Bundled VSCode's retained
 change is also a full-buffer replacement; no native action among the six is
 established there. Single insert is captured for both requested editor families.
 For Neovim, selection replacement, both register pastes, rapid typing, and undo
-after confirmed repair are captured. For Helix, all five action classes remain uncaptured. The checked
+after confirmed repair are captured. For Helix, selection replacement and both
+register pastes are captured; rapid typing and undo after confirmed repair remain
+uncaptured. The checked
 T002.2 four-client baseline is complete; parent T002 and full T034 conformance
 remain open.

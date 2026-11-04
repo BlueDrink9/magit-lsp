@@ -19,6 +19,10 @@ Last review: 14023109f73f235d35b7631b47c93a005cda4ade
   Done: native `gg0iRAPID<Esc>`, correlated repair request/reply, baseline-restored buffer, and immediately following native `u` with actual resulting text and didChange retained source-equal. Reproduction and limits: `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog`, JSON parsing and source audit in the trace README. Parent T002 remains open for Helix.
 - [ ] **T002.3b — Capture the five remaining native Helix input actions.**
   Use the current-release isolated native Helix setup to record the same five actions, with actual paste/input provenance and repair-before-undo ordering. Retain source-equal wire records and reproducible text-only commands; do not infer actions from payload shape or mark T002 complete without an honest final acceptance audit.
+- [x] **T002.3b1 — Capture native Helix selection and register pastes.**
+  Wait for the actual server-rendered presentation, then capture selection replacement and one-/multi-character register pastes. Treat yanks as nonmutating setup, not edits requiring didChange; preserve exact native keys, source rows and final drained provenance.
+- [ ] **T002.3b2 — Capture Helix rapid input and undo after repair.**
+  Extend the proven native Helix setup with rapid input and undo only after actual repair restoration. Verify source equality and all action evidence before closing the parent slice or T002.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
