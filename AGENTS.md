@@ -96,6 +96,8 @@ Start in these components:
 - Choose verification proportionate to the change: run the narrowest relevant checks for each task, and ensure no orphan `magit-lsp` processes. For user-visible behavior, retain real native-UI evidence in the affected client using focused scenarios and text/structured state only; Neovim-only evidence is not a substitute for VSCode changes, and unrelated client suites are not required. Never capture or inspect images.
 - Validate protocol input, user configuration and Git output at their boundaries. Once internal values are validated, trust their invariants: do not reparse canonical keys, invent fallback command statuses, reconstruct displayed selections from fresh diffs, or maintain alternate production paths solely for tests. Keep recovery where failure is genuinely external: lost render acknowledgements, editor buffer lifetime, Git failures and client disconnects.
 
+- **Proposed orchestration configuration replacement (not active enforcement):** Run a review at each named roadmap phase boundary, or earlier when a substantial body of work has accumulated. Use architectural judgment rather than a fixed task count. Consider scope, changed-code volume, shared interfaces, risk and verification results. Small tickets, implementation slices and review fixes do not independently justify a checkpoint. Record why an intermediate review is warranted. Activating this proposal requires an orchestration-instruction update. Until then, the active higher-priority rule still requires review after eight completed tasks since `Last review:`. Named roadmap phase groups, not named Txxx tickets, slices or review-fix batches, are actual phase boundaries.
+
 ## Verification
 
 - Local execution and verification target Linux only. Do not block Linux work
@@ -114,7 +116,11 @@ Start in these components:
   `make test-file FILE=tests/<file>.lua`. Rerun only failed cases while
   diagnosing; use `V=1` only when the default compact output is insufficient.
   Run the full `make test` regression gate about every three completed
-  implementation tasks and at phase/handoff boundaries. Also run full `make
+  implementation tasks and at phase/handoff boundaries. Run the phase gate when
+  the last unchecked item in a named roadmap phase completes; completing an
+  individual ticket, implementation slice or review-fix batch is not itself a
+  phase boundary. Independently, stop for the required review after eight
+  completed tasks since `Last review:`. Also run full `make
   test` when changes are broad or shared, or a regression is suspected.
 - `make ui-unit` tests the real-UI harness; `make ui-test` runs scripted real-UI
   scenarios; `make ui-tour` writes `build/ui/tour.md`.

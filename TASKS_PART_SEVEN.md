@@ -4,7 +4,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 
 ## How to read this document
 
-- A phase is a group of tickets. A phase ends with a phase gate. At the phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
+- Named roadmap phases (the `Phase N` groups below) are phase boundaries; individual tickets, implementation slices and review-fix batches are not. Run the phase gate when the last unchecked item in a named phase completes. The active higher-priority review remains required after eight completed tasks since `Last review:`. The proposed judgment-based orchestration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. At each applicable phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
 - A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, Verify.
 - Sizes are S, M or L. They are relative sizes. They are not time estimates.
 - Check each path that has the mark (confirm) before you edit it. If the path is wrong, correct the ticket.

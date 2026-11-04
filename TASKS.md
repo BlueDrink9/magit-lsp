@@ -4,6 +4,8 @@ Last review: a70df920a165885e73cd315c29bf3c27caf78564
 
 ## Ad hoc
 
+- [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
+  Proposed orchestration configuration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. Until then, the active higher-priority eight-task review rule remains. Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
   Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
 - [x] **Update execution limits and future reviewer selection.**
@@ -1243,7 +1245,7 @@ The sole active numbered backlog is [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.m
 
 ### Task ticket template and UI rule
 
-Every ticket states **Target Files** (exclusive write boundary), **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, and exact **Verification Command**; also state dependencies, size and applicable phase gate. Apply shared rules in [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
+Every ticket states **Target Files** (exclusive write boundary), **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, and exact **Verification Command**; also state dependencies, size and applicable named phase gate. The phase gate applies when the last unchecked item in a named phase group completes, not when an individual ticket, slice or review-fix batch completes. The active higher-priority review checkpoint remains every eight completed tasks since `Last review:`; see the proposed orchestration configuration in [AGENTS.md](./AGENTS.md#working-conventions). Apply shared rules in [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
 
 ---
 
