@@ -10,7 +10,7 @@ Last review: a78349eba1e1c134afbe424af2f3d77b3eb4eb92
   Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).
 - [x] **T001.4b — Qualify historical visual evidence.**
   Add historical banners to evidence documents that cite images; remove PNG passages from the real-file spike without relabelling visual observations as current text proof. Preserve substantive API/wire/Git evidence.
-- [ ] **T001.4c — Isolate human-only README image guidance.**
+- [x] **T001.4c — Isolate human-only README image guidance.**
   Make screenshot/releasing guidance explicitly human-only, with AGENTS links and historical caveats. Existing screenshot code is absent; provide a non-capturing human help target and directory documentation rather than adding agent image paths.
 - [ ] **T001.6 — Verify documentation migration and record residuals.**
   Finish the document-search acceptance audit, synchronize slice checks and compress completed records with honest evidence. Mark T001 complete only when its acceptance is actually met, or record precise blockers and move to independent T002.

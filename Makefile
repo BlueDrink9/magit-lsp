@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test readme-shots
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -43,3 +43,6 @@ ui-tour:
 
 color-spike: build
 	$(call run,color-spike,nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua)
+
+readme-shots:
+	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
