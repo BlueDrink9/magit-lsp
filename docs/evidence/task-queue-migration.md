@@ -8,42 +8,41 @@ source documents; proposal text alone is not closure evidence.
 
 | Finding | Status / replacement |
 | --- | --- |
-| Finding | Status / replacement / evidence |
 | --- | --- |
-| A01 | Complete; `REVIEW_REPORT.md` finding A01, acceptance evidence 2026-10-27; security bridge tests and full gate. |
-| A02 | Complete; `REVIEW_REPORT.md` finding A02 and its acceptance evidence; positional-version implementation/test record. |
-| A03 | Complete; `REVIEW_REPORT.md` finding A03 and its acceptance evidence; displayed-identity selection record. |
-| A04 | Complete; `REVIEW_REPORT.md` finding A04 and its acceptance evidence; close-notification integration record. |
-| A05 | Complete; `REVIEW_REPORT.md` finding A05 and its acceptance evidence; prompt/session-lock regression record. |
-| A06 | Complete; `REVIEW_REPORT.md` finding A06 and its acceptance evidence; VSCode quit-effect record. |
-| A07 | Complete; `REVIEW_REPORT.md` finding A07 and its acceptance evidence; edit-key/focus removal record. |
-| A08 | Complete; `REVIEW_REPORT.md` finding A08 and its acceptance evidence; originating-client prompt record. |
-| A09 | Complete; `REVIEW_REPORT.md` finding A09 and its acceptance evidence; process-log token record. |
-| A10 | Complete; `REVIEW_REPORT.md` finding A10 and its acceptance evidence; repository configuration record. |
-| A11 | Managed-draft cutover complete; owner R-EDIT-6; residual R-EDIT-REAL lifecycle cases T104, platform gates T100/T101. See `REVIEW_REPORT.md` A11 and TASKS R-EDIT-6 evidence; not acceptance of these residuals. |
-| A12 | Open retained gap: finding is real-dispatch Git-failure handling and removal of `server::mutation` (`REVIEW_REPORT.md` A12). No numbered replacement owner evidenced; do not map to unrelated T103 reader-lock work. |
-| A13 | Complete; `REVIEW_REPORT.md` finding A13 and acceptance evidence. |
-| A14 | Complete; `REVIEW_REPORT.md` finding A14 and acceptance evidence. |
-| A15 | Complete; `REVIEW_REPORT.md` finding A15 and acceptance evidence. |
-| A16 | Complete; `REVIEW_REPORT.md` finding A16 and acceptance evidence. |
-| A17 | Complete; `REVIEW_REPORT.md` finding A17 and acceptance evidence. |
-| A18 | Complete; `REVIEW_REPORT.md` finding A18 and acceptance evidence. |
-| A19 | Complete; `REVIEW_REPORT.md` finding A19 and acceptance evidence. |
-| A20 | Complete; `REVIEW_REPORT.md` finding A20 and acceptance evidence. |
-| A21 | Complete; `REVIEW_REPORT.md` finding A21 and acceptance evidence. |
-| A22 | Withdrawn after deeper inspection; disposition recorded in `REVIEW_REPORT.md` reconciliation; no replacement ticket. |
-| A23 | Withdrawn after deeper inspection; disposition recorded in `REVIEW_REPORT.md` reconciliation; no replacement ticket. |
-| A24 | Complete; `REVIEW_REPORT.md` finding A24 and acceptance evidence. |
-| A25 | Complete; `REVIEW_REPORT.md` finding A25 and acceptance evidence. |
-| A26 | Complete; `REVIEW_REPORT.md` finding A26 and acceptance evidence. |
-| A27 | Complete; `REVIEW_REPORT.md` finding A27 and acceptance evidence. |
-| A28 | Complete; `REVIEW_REPORT.md` finding A28 and acceptance evidence; retained scaffolding has documented consumers. |
-| A29 | Complete; `REVIEW_REPORT.md` finding A29 and acceptance evidence. |
-| A30 | Complete; `REVIEW_REPORT.md` finding A30 and acceptance evidence. |
-| A31 | Complete; `REVIEW_REPORT.md` finding A31 and acceptance evidence. |
-| A32 | Complete; `REVIEW_REPORT.md` finding A32 and acceptance evidence. |
-| A33 | Complete; `REVIEW_REPORT.md` finding A33 and acceptance evidence. |
-| A34 | Complete; `REVIEW_REPORT.md` finding A34 and acceptance evidence. |
+| A01 | Complete; `da4d422^:REVIEW_REPORT.md` finding A01, acceptance evidence 2026-10-27; security bridge tests and full gate. |
+| A02 | Complete; `da4d422^:REVIEW_REPORT.md` finding A02 and its acceptance evidence; positional-version implementation/test record. |
+| A03 | Complete; `da4d422^:REVIEW_REPORT.md` finding A03 and its acceptance evidence; displayed-identity selection record. |
+| A04 | Complete; `da4d422^:REVIEW_REPORT.md` finding A04 and its acceptance evidence; close-notification integration record. |
+| A05 | Complete; `da4d422^:REVIEW_REPORT.md` finding A05 and its acceptance evidence; prompt/session-lock regression record. |
+| A06 | Complete; `da4d422^:REVIEW_REPORT.md` finding A06 and its acceptance evidence; VSCode quit-effect record. |
+| A07 | Complete; `da4d422^:REVIEW_REPORT.md` finding A07 and its acceptance evidence; edit-key/focus removal record. |
+| A08 | Complete; `da4d422^:REVIEW_REPORT.md` finding A08 and its acceptance evidence; originating-client prompt record. |
+| A09 | Complete; `da4d422^:REVIEW_REPORT.md` finding A09 and its acceptance evidence; process-log token record. |
+| A10 | Complete; `da4d422^:REVIEW_REPORT.md` finding A10 and its acceptance evidence; repository configuration record. |
+| A11 | Managed-draft cutover complete; owner R-EDIT-6; residual R-EDIT-REAL lifecycle cases T104, platform gates T100/T101. See `da4d422^:REVIEW_REPORT.md` A11 and TASKS R-EDIT-6 evidence; not acceptance of these residuals. |
+| A12 | Open retained gap: finding is real-dispatch Git-failure handling and removal of `server::mutation` (`da4d422^:REVIEW_REPORT.md` A12). No numbered replacement owner evidenced; do not map to unrelated T103 reader-lock work. |
+| A13 | Complete; `da4d422^:REVIEW_REPORT.md` finding A13 and acceptance evidence. |
+| A14 | Complete; `da4d422^:REVIEW_REPORT.md` finding A14 and acceptance evidence. |
+| A15 | Complete; `da4d422^:REVIEW_REPORT.md` finding A15 and acceptance evidence. |
+| A16 | Complete; `da4d422^:REVIEW_REPORT.md` finding A16 and acceptance evidence. |
+| A17 | Complete; `da4d422^:REVIEW_REPORT.md` finding A17 and acceptance evidence. |
+| A18 | Complete; `da4d422^:REVIEW_REPORT.md` finding A18 and acceptance evidence. |
+| A19 | Complete; `da4d422^:REVIEW_REPORT.md` finding A19 and acceptance evidence. |
+| A20 | Complete; `da4d422^:REVIEW_REPORT.md` finding A20 and acceptance evidence. |
+| A21 | Complete; `da4d422^:REVIEW_REPORT.md` finding A21 and acceptance evidence. |
+| A22 | Withdrawn after deeper inspection; disposition recorded in `da4d422^:REVIEW_REPORT.md` reconciliation; no replacement ticket. |
+| A23 | Withdrawn after deeper inspection; disposition recorded in `da4d422^:REVIEW_REPORT.md` reconciliation; no replacement ticket. |
+| A24 | Complete; `da4d422^:REVIEW_REPORT.md` finding A24 and acceptance evidence. |
+| A25 | Complete; `da4d422^:REVIEW_REPORT.md` finding A25 and acceptance evidence. |
+| A26 | Complete; `da4d422^:REVIEW_REPORT.md` finding A26 and acceptance evidence. |
+| A27 | Complete; `da4d422^:REVIEW_REPORT.md` finding A27 and acceptance evidence. |
+| A28 | Complete; `da4d422^:REVIEW_REPORT.md` finding A28 and acceptance evidence; retained scaffolding has documented consumers. |
+| A29 | Complete; `da4d422^:REVIEW_REPORT.md` finding A29 and acceptance evidence. |
+| A30 | Complete; `da4d422^:REVIEW_REPORT.md` finding A30 and acceptance evidence. |
+| A31 | Complete; `da4d422^:REVIEW_REPORT.md` finding A31 and acceptance evidence. |
+| A32 | Complete; `da4d422^:REVIEW_REPORT.md` finding A32 and acceptance evidence. |
+| A33 | Complete; `da4d422^:REVIEW_REPORT.md` finding A33 and acceptance evidence. |
+| A34 | Complete; `da4d422^:REVIEW_REPORT.md` finding A34 and acceptance evidence. |
 
 BUG-READ-1: minimal intake/unblocked-request slice is complete under R-PLAIN-PREREQ;
 evidence is the checked record and probe noted in the Plain task file. The larger
@@ -101,3 +100,7 @@ this statement as evidence of implementation.
 - The replacement index does not provide per-finding test evidence for each
   A01–A10/A13–A21/A24–A34. Their completed status is based on explicit
   reconciliation, not independently re-audited here.
+
+## Reconciled decisions
+
+- R-NAV: verified complete 2026-10-28; 74 Rust tests and `common-navigation.scn` passed. The retained navigation decision is reconciled; immutable evidence: `da4d422:TASKS.md`.

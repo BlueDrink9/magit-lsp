@@ -11,7 +11,9 @@
 - [x] **T001.3a — Audit each technical-debt review finding and retain unresolved ownership.**
   Expand the migration ledger to individual A01–A34 rows using explicit evidence; preserve A12 and any unresolved decisions as one-line TASKS entries with numbered-queue owners or retained gaps. Only then replace `REVIEW_REPORT.md` with its header and empty Open findings template; put the audited IDs and evidence narrative in the commit message.
 - [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
-- [ ] **Retained review decision — common navigation/cycle operations.** Decide whether the four still-Planned bindings need an implementation ticket or corrected historical milestone; preserve §5.1 bindings meanwhile. Source: `docs/evidence/task-queue-migration.md` old-ledger decision record.
+- [x] **Retained review decision — common navigation/cycle operations.** R-NAV verified all four tree-owned commands; 74 Rust tests and `common-navigation.scn` passed 2026-10-28. Immutable record: `da4d422:TASKS.md`.
+- [x] **T001.3b — Compress completed correctness and editor contracts.**
+  Shorten IMM-1–IMM-9 and completed §3.10 records to requirements, enforcing tests or explicit gaps, and commit references. Move process ownership to `docs/design/process-ownership.md`; preserve all remaining real-file acceptance and reconcile the already-verified R-NAV decision. Keep evidence recoverable through immutable Git references.
 - [x] **Remove the superseded protocol plan and its ad hoc work item.**
   Delete `protocol review and plan.md` and its obsolete unchecked queue entry. Preserve unrelated work; identify the first ticket in `TASKS_PART_SEVEN.md` without starting it.
 - [x] **Gather the A–E harness and client-abstraction evidence report.**
@@ -137,104 +139,17 @@ Completed hands-on fixes, retained here for their behavioural contracts.
 These contracts remain canonical; open evidence gaps and follow-ups are tracked
 in §7. Historical completion marks are not proof that every original test exists.
 
-### IMM-1 — Unstaging a file header fails in a repo with no commits
+### Completed correctness contracts (immutable completion record: `da4d422:TASKS.md`)
 
-- [x] Unstage paths with `git reset -q -- <paths>`, falling back to
-  `git rm --cached -q -f --ignore-unmatch -- <paths>`; include both rename paths.
-  This is safe in unborn repositories and when index differs from worktree.
-  Preserve unborn-repo file/hunk/line/all mutation coverage; oldest-Git validation
-  and fallback coverage remain a P2 task, not an established version guarantee.
-
-### IMM-2 — Visual stage/unstage with non-change lines corrupts the patch
-
-- [x] Pure selection normalisation in `patch.rs`: use tree nodes and inclusive
-  `[start,end]`; covering a file header selects the file, otherwise a hunk
-  header selects its hunk, otherwise collect only selected `+`/`-` lines.
-  Drop empty operations; an empty selection emits info "No changed lines in
-  the selection". Cross-file/hunk operations apply in order (one apply per
-  file); unstage/discard use reverse apply.
-  Preserve original file headers and selected changes, convert unselected `-`
-  to context, drop unselected `+`, and let `--recount` fix counts (§3.13).
-  Tests cover context-only, mixed/header selections, two hunks/files and staged
-  selections; random patches must pass `git apply --cached --check`, apply to
-  the expected index and reverse to identity (§8.3).
-
-### IMM-3 — Error messages must be readable
-
-- [x] Git failures produce successful responses with `Effect::Message{level:"error"}`;
-  JSON-RPC errors are only for protocol faults (bad params, unknown method,
-  internal panic). `errors.rs` maps exit code + stderr to
-  `UserError {summary, hint?, detail?, command?, processLogId?}`: a plain-language
-  sentence, optional next step, raw stderr, command and log reference.
-  Canonical mappings:
-
-  | stderr contains | summary |
-  | --- | --- |
-  | `could not resolve HEAD` / `unborn` | "This repository has no commits yet." |
-  | `corrupt patch` | "Git could not apply that selection. Try selecting whole lines that are changes." |
-  | `index.lock` | "Another Git process is running in this repository." + hint to remove stale `.git/index.lock` only if no Git process is running |
-  | `not a git repository` | "This folder is not inside a Git repository." |
-  | `would be overwritten` | "Your local changes would be overwritten. Commit, stash or discard them first." |
-  | `non-fast-forward` / `rejected` | "The remote has commits you do not have. Fetch or pull first." |
-  | `Authentication failed` / `Permission denied` | "Git could not authenticate with the remote." |
-  | `CONFLICT` | "The operation stopped because of conflicts." + hint to resolve then continue |
-  | anything else | "`git <subcommand>` failed." with `detail` = stderr |
-  Clients notify summary/hint at the right level and offer detail/process log;
-  never show raw tables/JSON. Test each mapped failure and Neovim notification.
-
-### IMM-4 — Neovim status buffer must be read-only
-
-- [x] `nofile`, `bufhidden=hide`, no swap/undo, `modifiable=false`,
-  `modified=false`; text mode toggles editing (§3.14). The sole render writer
-  temporarily enables modification, applies full/range edits, clears modified
-  and locks again. Block `:w`/`:write` (`BufWriteCmd` plus the E382
-  `CmdlineLeave` guard); unbound edits fail natively with E21.
-  R-UI-3 removed `readonly=true` to avoid W10; the one-time hint occurs on
-  attempted write rather than E21. Text remains intact and refreshes after edits.
-
-### IMM-5 — Two separate line stagings appear as one staged hunk; audit the diff/patch layer
-
-- [x] No hunk-merging bug: Git merges gaps ≤ `2 × context` (six lines at U3).
-  Git merges gaps ≤ twice context (six lines at U3). Fixtures verify lines 5/35
-  in a 40-line file produce two hunks and four-line gaps produce one. Status
-  matches `git diff --cached -U3`; `patch.rs` builds region patches for `git apply`
-  with `--unidiff-zero --recount` (§3.13), not diff computation in `git.rs`.
-
-### IMM-6 — Node-kind dispatch for stage/unstage/discard
-
-Rule: **stage, unstage, discard, reverse and apply act on the smallest node under
-the cursor, or on the selection if one exists.** Implement as one function that
-maps `(command, node kind, selection)` to an operation:
-
-| Cursor on | `status.stage` | `status.unstage` | `status.discard` |
-| --- | --- | --- | --- |
-| Section header "Unstaged changes" | stage all unstaged | n/a (message) | discard all unstaged (confirm) |
-| Section header "Staged changes" | n/a | unstage all staged | n/a |
-| Untracked section header | stage all untracked | n/a | delete all untracked (confirm) |
-| File header | stage whole file | **unstage whole file** | discard file (confirm) |
-| Hunk header | stage hunk | unstage hunk | discard hunk (confirm) |
-| `+`/`-` line, no selection | stage the **hunk** | unstage the hunk | discard the hunk (confirm) |
-| Selection (visual) | per IMM-2 | per IMM-2 | per IMM-2 (confirm) |
-| Context line, no selection | stage the hunk | unstage the hunk | discard the hunk (confirm) |
-| Anything else | `Message` "Nothing to stage here" | likewise | likewise |
-
-- [x] Stage/unstage resolver and executor in `src/dispatch.rs`; every row
-  requires an in-process test. Discard execution/wiring remains R-3.6.
-
-### IMM-7 — Extract the test harness
-
-- [x] Shared helpers, `RepoFixture` and `TestSession` live in
-  `tests/common/session.rs` with deterministic setup (§8.2); see completed archive.
-
-### IMM-8 — Spike: colour verification with `:TOhtml`
-
-- [x] `scripts/color_spike.lua` / `make color-spike`; findings and colour-test
-  rules are recorded in §8.4.
-
-### IMM-9 — Update `AGENTS.md`
-
-- [x] `AGENTS.md` links to this roadmap; decisions live in §0 and working
-  conventions in `AGENTS.md`.
+- **IMM-1:** Unstage works in unborn repositories and rename paths. Tests: `tests/dispatch.rs`; oldest-Git/fallback evidence gap remains.
+- **IMM-2:** Normalize tree-based inclusive selections; retain only changes and safely reverse-apply. Tests: patch/dispatch suites; randomized property evidence per §8.3.
+- **IMM-3:** Git failures become readable message effects; protocol faults remain RPC errors. Tests: `tests/errors.rs`; mapped failures enforced, broader UI evidence retained in archive.
+- **IMM-4:** Neovim status buffer is render-only except text mode; writes blocked. Tests: `tests/editor_bridge.rs`; native rules and evidence remain in immutable record.
+- **IMM-5:** Git diff context determines hunk merge; patch builder does not compute diffs. Tests: patch fixtures and cached diff parity.
+- **IMM-6:** Dispatch uses smallest tree node or explicit selection. Tests: `tests/dispatch.rs`; discard execution/wiring remains R-3.6.
+- **IMM-7:** Shared deterministic test harness in `tests/common/session.rs`. Tests: harness consumers; completion record retained.
+- **IMM-8:** Historical `:TOhtml` spike only; superseded by T028. No rerun; do not treat spike as production evidence.
+- **IMM-9:** `AGENTS.md` links roadmap; decisions and working rules have canonical homes. Tests: documentation contract; no runtime test.
 
 ---
 
@@ -755,47 +670,7 @@ Magit differences in effective-message normalization, global dedup, scope and ca
 are documented retained policy, not migration requirements. Rich recall is removed
 and planned under R-EDIT-HISTORY, not a current wire protocol.
 
-**Process feasibility gate (proposed R-EDIT-2 mechanism).** One async owner task
-owns `Child`, cancel receiver, exit observation, final wait/reap, and reader
-completion channels; handlers only enqueue idempotent cancellation. A valid
-progress-cancel request promptly receives one LSP `report` (`Cancelling…`, no
-longer cancellable) and readable feedback. This acknowledges intent, not Git
-termination or absence of a commit. Serialize report/end against token removal;
-duplicate/unknown/ended tokens do not report, and cleanup retains the repository
-reservation until the owner finishes. Exit-before-cancel still wins and completed
-commits still report success. Start Git in
-a new session/process group before exec (child-side spawn setup, not racy
-post-spawn `setpgid`). No controlling tty: piped stdout/stderr, null stdin unless
-the invocation requires otherwise. Concurrent readers retain at most 4 MiB per
-stream, continue draining/discarding after cap, and flag truncation. Reader drain
-deadline is 2 seconds after leader exit/terminal cancellation. When the owner
-dequeues cancel, it first observes leader status with
-`waitid(P_PID, pid, WEXITED|WNOHANG|WNOWAIT)`. If already exited, exit wins and
-no signal is sent. Otherwise cancellation linearizes: abort a connected helper,
-send TERM to the group, and send CONT to the group so stopped members can
-process termination. Retain the unreaped leader for at most the 2-second TERM
-grace, then send exactly one group KILL even if the leader exited during that
-grace. Linux may finish grace early **only after WNOWAIT observes leader exit**:
-inspect `/proc` for live nonleader members of its pinned process group, validating
-stat identity/state/pgrp outside the potentially arbitrary `comm` field. No live
-members observed is merely a latency hint: still send the final group KILL before
-reap. A fork/scan race can miss a member and end its grace early; inspection is
-neither a graceful-exit guarantee nor whole-descendant containment. Never signal
-individual scan PIDs. Unavailable, malformed, slow or uncertain inspection keeps
-full grace, as do observed live/stopped/TERM-resistant members. Other Unix targets
-retain the existing full-grace fallback, without platform validation claims.
-Reap only after KILL, using bounded observation; if KILL is not reaped within a further 2 seconds,
-transfer the still-owned Child handle to a process-lifetime reaper task that only
-waits/reaps; report cancellation incomplete and retain ownership until reap.
-The retained unreaped leader pins PID/PGID identity: no other waiter, `try_wait`,
-`waitpid(-1)`, or SIGCHLD auto-reap disposition is permitted. Never signal after
-final reap. Exit observation is distinct from pipe EOF. On normal leader exit,
-never signal to force inherited-pipe EOF; allow the 2-second drain deadline,
-report incomplete drain, finalize.
-Readers must support cancellation/parent-pipe close, bounded data and deadline,
-not detached indefinitely-blocked threads. Crash cannot run this reaper or
-guarantee child cleanup. Nested hooks share group; `setsid` escapees cannot be
-contained. Never broad-kill, delete locks, or kill normal-exit daemons.
+Process ownership proposal is preserved in [docs/design/process-ownership.md](docs/design/process-ownership.md).
 
 Portability gate: `setsid` and `waitid(...WNOWAIT)` are Unix interfaces with
 platform-specific availability/semantics; Linux implementation and real-Git
