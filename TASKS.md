@@ -13,7 +13,7 @@ Last review: 464d5e4b06df8d22cacf273f0c458b55ba4bc151
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
   Add `make hygiene` running cargo-machete, knip and luacheck, reporting missing tools distinctly. Include the twenty largest nongenerated tracked files, a soft growth threshold, and `allow(dead_code)`/`keep-for:` searches; test report-only behavior and failure reporting.
-- [ ] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
+- [x] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
   Run actual tools in an isolated tool environment, retain each baseline finding with a reason, and prove an intentional unused dependency is reported before removing it. Preserve the user's dirty Cargo.toml exactly outside any explicitly scoped metadata change.
 - [x] **T003.2a — Enforce generated-file filtering and hermetic reporter tests.**
   Correct the runner's Git attribute parsing: current text splitting retains `: linguist-generated` in keys and therefore never excludes generated paths. Add actual Git-attribute coverage and make missing-tool tests independent of installed host tools; exercise invocation failures and real test cwd layout explicitly.
