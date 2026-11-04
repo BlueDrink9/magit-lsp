@@ -20,7 +20,11 @@ class HygieneTests(unittest.TestCase):
     """Exercise runner reporting against real temporary Git repositories."""
 
     def setUp(self):
-        os.environ["HYGIENE_SOFT_LIMIT"] = "20"
+        original_limit = os.environ.get("HYGIENE_SOFT_LIMIT")
+        self.addCleanup(self.assert_environment_restored, original_limit)
+        environment = patch.dict(os.environ, {"HYGIENE_SOFT_LIMIT": "20"})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         subprocess.run([REAL_GIT, "init", "-q"], cwd=self.root, check=True)
@@ -33,6 +37,9 @@ class HygieneTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def assert_environment_restored(self, original_limit):
+        self.assertEqual(os.environ.get("HYGIENE_SOFT_LIMIT"), original_limit)
 
     def execute(self, outcomes=None, missing=(), failures=()):
         outcomes = outcomes or {}
@@ -78,6 +85,7 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
 
     def test_sizes_and_markers_are_deterministic(self):
+        self.assertEqual(self.runner.LIMIT, 20)
         first, _ = self.execute()
         second, _ = self.execute()
         self.assertEqual(first, second)

@@ -241,7 +241,7 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `a70df920a165885e73cd315c29
   - **Constraints:** Documentation only. Do not activate the proposed orchestration policy, mark Phase 1 complete, alter T002/T003 status, or retrofit the entire roadmap.
   - **Verify:** `git diff --check && grep -n -E 'Phase gate|phase gate|eight completed|not active|not.*phase boundar' TASKS.md TASKS_PART_SEVEN.md AGENTS.md`
 
-- [ ] **[P2] Restore hygiene-test environment isolation** (`tests/hygiene/test_hygiene.py:19-35`, `HygieneTests.setUp` and `tearDown`; `test_sizes_and_markers_are_deterministic`)
+- [x] **[P2] Restore hygiene-test environment isolation** (`tests/hygiene/test_hygiene.py:19-35`, `HygieneTests.setUp` and `tearDown`; `test_sizes_and_markers_are_deterministic`)
   - **Problem:** `setUp` assigns `HYGIENE_SOFT_LIMIT=20` in the process environment and `tearDown` never restores the caller's value. The committed completion note claims inherited-value isolation, but the test overwrites any inherited value and leaks `20` to later tests.
   - **Why it matters:** This violates correctness and cleanliness of the test host. Test order can change later modules' behavior, while the claimed host-isolation regression is not exercised.
   - **Change:** Save and restore the prior environment state with `patch.dict` or explicit setup/cleanup, and import the runner under the scoped value because `LIMIT` is read at module load. Add an assertion that a pre-existing value such as `37` is unchanged after the test while the imported runner still uses the intended test limit.
