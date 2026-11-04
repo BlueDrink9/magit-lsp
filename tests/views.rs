@@ -13,19 +13,38 @@ use magit_lsp::protocol::{Cursor, Effect, MessageLevel, Selection};
 fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
     use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
     use magit_lsp::session::Execution;
-    let (tmp, _) = RepoFixture::new().commit("init", [("f.txt", lines(40).to_string())]).modify_two_hunks().build();
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", lines(40).to_string())])
+        .modify_two_hunks()
+        .build();
     let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
     let line = test.goto_marker("f.txt", '+');
     let view = test.view_id().to_string();
-    let Execution::Prompt(prompt) = test.session.start_invoke(&ViewInvokeParams {
-        view_id: view.clone(), command: "status.discard".to_string(), version: Some(initial.version),
-        cursor: Some(Cursor { line, column: 0 }), selection: None, args: None,
-    }).unwrap() else { panic!("discard prompt"); };
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: view.clone(),
+            command: "status.discard".to_string(),
+            version: Some(initial.version),
+            cursor: Some(Cursor { line, column: 0 }),
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("discard prompt");
+    };
     test.session.resize(&view, WIDE_VIEWPORT).unwrap();
     let render = test.session.refresh(&view).unwrap().unwrap();
     test.session.ack(&view, render.version).unwrap();
-    let Execution::Done(result) = test.session.resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true))).unwrap() else { panic!("discard complete"); };
+    let Execution::Done(result) = test
+        .session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true)))
+        .unwrap()
+    else {
+        panic!("discard complete");
+    };
     assert!(result.effects.is_empty(), "{:?}", result.effects);
     assert_eq!(hunk_count(&tmp.git(&["diff", "--", "f.txt"])), 1);
     assert!(cached_diff(tmp.path()).is_empty());
@@ -250,7 +269,10 @@ fn positional_requests_after_a_newer_ack_never_stage_the_replacement_row() {
         test.refresh().expect("v2");
         test.ack();
         assert_eq!(test.tree().line_nodes[row].path.as_deref(), Some("b.txt"));
-        let cursor = Cursor { line: row, column: 0 };
+        let cursor = Cursor {
+            line: row,
+            column: 0,
+        };
         test.set_cursor(cursor);
         let outcome = if invoke {
             test.invoke_at_version("status.stage", initial.version, Some(cursor), None, None)
@@ -260,10 +282,18 @@ fn positional_requests_after_a_newer_ack_never_stage_the_replacement_row() {
         assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
         assert!(outcome.render.is_none());
         assert_eq!(cached_diff(tmp.path()), "");
-        assert_eq!(tmp.git(&["ls-files", "--stage"]),
-            format!("100644 {} 0\tbase.txt\n", tmp.git(&["rev-parse", "HEAD:base.txt"]).trim()));
+        assert_eq!(
+            tmp.git(&["ls-files", "--stage"]),
+            format!(
+                "100644 {} 0\tbase.txt\n",
+                tmp.git(&["rev-parse", "HEAD:base.txt"]).trim()
+            )
+        );
         assert_eq!(tmp.git(&["status", "--short"]), "?? b.txt\n");
-        assert_eq!(std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(), "replacement\n");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("b.txt")).unwrap(),
+            "replacement\n"
+        );
     }
 }
 
@@ -281,8 +311,15 @@ fn newer_unacked_renders_use_the_requested_tree_not_the_newest_ack() {
             write(&tmp.path().join("a.txt"), "inserted\n");
             test.refresh().expect("new unacked render");
             assert_eq!(test.tree().line_nodes[row].path.as_deref(), Some("a.txt"));
-            let version = if use_acked { initial.version } else { test.version() };
-            let cursor = Cursor { line: row, column: 0 };
+            let version = if use_acked {
+                initial.version
+            } else {
+                test.version()
+            };
+            let cursor = Cursor {
+                line: row,
+                column: 0,
+            };
             test.set_cursor(cursor);
             let outcome = if invoke {
                 test.invoke_at_version("status.stage", version, Some(cursor), None, None)
@@ -295,9 +332,15 @@ fn newer_unacked_renders_use_the_requested_tree_not_the_newest_ack() {
             } else {
                 ("a.txt", "b.txt", "inserted\n")
             };
-            assert_eq!(tmp.git(&["diff", "--cached", "--name-only"]), format!("{staged}\n"));
+            assert_eq!(
+                tmp.git(&["diff", "--cached", "--name-only"]),
+                format!("{staged}\n")
+            );
             assert_eq!(tmp.git(&["show", &format!(":{staged}")]), contents);
-            assert_eq!(tmp.git(&["status", "--short"]), format!("A  {staged}\n?? {untracked}\n"));
+            assert_eq!(
+                tmp.git(&["status", "--short"]),
+                format!("A  {staged}\n?? {untracked}\n")
+            );
         }
     }
 }
@@ -312,12 +355,22 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
     let line = test.goto_file("untracked", "a.txt");
     let cursor = Cursor { line, column: 0 };
     for ack in [false, true] {
-        if ack { test.ack(); }
+        if ack {
+            test.ack();
+        }
         for version in [0, test.version() + 1, u64::MAX] {
             for invoke in [false, true] {
                 let outcome = if invoke {
-                    test.invoke_at_version("status.stage", version, Some(cursor),
-                        Some(Selection { start_line: line, end_line: line }), None)
+                    test.invoke_at_version(
+                        "status.stage",
+                        version,
+                        Some(cursor),
+                        Some(Selection {
+                            start_line: line,
+                            end_line: line,
+                        }),
+                        None,
+                    )
                 } else {
                     test.press_at_version("s", version)
                 };
@@ -326,10 +379,17 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
             }
         }
         let view_id = test.view_id().to_string();
-        let outcome = test.session_mut().invoke(&magit_lsp::protocol::ViewInvokeParams {
-            view_id, command: "status.stage".into(), version: None, args: None,
-            cursor: Some(cursor), selection: None,
-        }).expect("missing version refusal");
+        let outcome = test
+            .session_mut()
+            .invoke(&magit_lsp::protocol::ViewInvokeParams {
+                view_id,
+                command: "status.stage".into(),
+                version: None,
+                args: None,
+                cursor: Some(cursor),
+                selection: None,
+            })
+            .expect("missing version refusal");
         assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
         assert_eq!(cached_diff(tmp.path()), "");
         assert_eq!(tmp.git(&["status", "--short"]), "?? a.txt\n");
@@ -366,47 +426,81 @@ fn a_visual_selection_stages_only_the_lines_it_covers() {
 #[test]
 fn visual_selections_keep_displayed_identities_across_external_edits_and_collapsed_hunks() {
     let base: String = (1..=40).map(|n| format!("line{n}\n")).collect();
-    let displayed = base.replace("line3\n", "line3\nEARLY\n")
+    let displayed = base
+        .replace("line3\n", "line3\nEARLY\n")
         .replace("line33\n", "line33\nSELECTED\nNEIGHBOR\n");
     for reverse in [false, true] {
         for collapsed in [false, true] {
             for changed in [false, true] {
                 let (tmp, _repo) = RepoFixture::new()
                     .commit("init", [("f.txt", base.as_str())])
-                    .modify("f.txt", &displayed).build();
-                if reverse { tmp.git(&["add", "f.txt"]); }
+                    .modify("f.txt", &displayed)
+                    .build();
+                if reverse {
+                    tmp.git(&["add", "f.txt"]);
+                }
                 let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
                 test.ack();
                 if collapsed {
-                    let hunk = test.tree().nodes.iter().find(|node|
-                        node.kind == magit_lsp::tree::NodeKind::Hunk).unwrap().start_line;
-                    test.invoke_at("common.toggle-section", Cursor { line: hunk, column: 0 });
+                    let hunk = test
+                        .tree()
+                        .nodes
+                        .iter()
+                        .find(|node| node.kind == magit_lsp::tree::NodeKind::Hunk)
+                        .unwrap()
+                        .start_line;
+                    test.invoke_at(
+                        "common.toggle-section",
+                        Cursor {
+                            line: hunk,
+                            column: 0,
+                        },
+                    );
                     test.ack();
                 }
                 let line = test.goto_text("f.txt", "SELECTED");
                 let version = test.version();
-                let external = displayed.replace("EARLY\n", "EARLY\nEXTERNAL\n")
-                    .replace("SELECTED\n", if changed { "ALTERED\n" } else { "SELECTED\n" });
+                let external = displayed.replace("EARLY\n", "EARLY\nEXTERNAL\n").replace(
+                    "SELECTED\n",
+                    if changed { "ALTERED\n" } else { "SELECTED\n" },
+                );
                 write(&tmp.path().join("f.txt"), &external);
-                if reverse { tmp.git(&["add", "f.txt"]); }
+                if reverse {
+                    tmp.git(&["add", "f.txt"]);
+                }
                 let index_before = tmp.git(&["show", ":f.txt"]);
                 // Retain the acknowledged source while a newer render is outstanding.
                 test.refresh();
                 let outcome = test.invoke_at_version(
-                    if reverse { "status.unstage" } else { "status.stage" },
-                    version, Some(Cursor { line, column: 0 }),
-                    Some(Selection { start_line: line, end_line: line }), None,
+                    if reverse {
+                        "status.unstage"
+                    } else {
+                        "status.stage"
+                    },
+                    version,
+                    Some(Cursor { line, column: 0 }),
+                    Some(Selection {
+                        start_line: line,
+                        end_line: line,
+                    }),
+                    None,
                 );
                 if changed {
                     assert_eq!(message_texts(&outcome.effects), vec![errors::HUNK_CHANGED]);
                     assert_eq!(tmp.git(&["show", ":f.txt"]), index_before);
                 } else {
                     assert!(outcome.effects.is_empty(), "{:?}", outcome.effects);
-                    let expected = if reverse { external.replace("SELECTED\n", "") }
-                        else { base.replace("line33\n", "line33\nSELECTED\n") };
+                    let expected = if reverse {
+                        external.replace("SELECTED\n", "")
+                    } else {
+                        base.replace("line33\n", "line33\nSELECTED\n")
+                    };
                     assert_eq!(tmp.git(&["show", ":f.txt"]), expected);
                 }
-                assert_eq!(std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(), external);
+                assert_eq!(
+                    std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+                    external
+                );
             }
         }
     }

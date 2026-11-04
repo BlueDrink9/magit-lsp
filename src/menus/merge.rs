@@ -55,13 +55,7 @@ pub fn definition() -> MenuDef {
                         "magit-merge-nocommit",
                         "R-7.1",
                     ),
-                    action(
-                        "a",
-                        "merge.absorb",
-                        "Absorb",
-                        "magit-merge-absorb",
-                        "R-7.1",
-                    ),
+                    action("a", "merge.absorb", "Absorb", "magit-merge-absorb", "R-7.1"),
                     action(
                         "p",
                         "merge.preview",

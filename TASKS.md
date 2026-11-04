@@ -33,7 +33,7 @@
 
 - [x] **Checkpoint — Restore full Git-backend hunk comparisons.**
   Expected staged hunks now use `parse_file_diff`, preserving file metadata in full equality checks. All 41 real-Git backend tests pass; verified `cargo test --test git_backend && git diff --check`.
-- [ ] **Checkpoint — Resolve Rust formatting-gate drift.**
+- [x] **Checkpoint — Resolve Rust formatting-gate drift.**
   `cargo fmt --all -- --check` reports existing workspace-wide formatting differences; log `/tmp/opencode/queue-checkpoint/fmt.log`. Apply rustfmt only to the reported Rust files, preserve unrelated user edits, and verify the full formatting check.
 
 Last review: dd92f90cdb11d827606a689a88a280f480d7508d

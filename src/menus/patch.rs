@@ -15,7 +15,12 @@ pub fn apply_definition() -> MenuDef {
                 vec![
                     switch("-3", "--3way", "Fall back on 3way merge"),
                     switch("-R", "--reject", "Reject only failed hunks"),
-                    option("=p", "-p", "Remove leading slashes from paths", Reader::Number),
+                    option(
+                        "=p",
+                        "-p",
+                        "Remove leading slashes from paths",
+                        Reader::Number,
+                    ),
                     switch("-c", "--scissors", "Remove text before scissors line"),
                     switch("-k", "--keep", "Inhibit removal of email cruft"),
                     switch("-b", "--keep-non-patch", "Limit removal of email cruft"),

@@ -5,10 +5,10 @@
 
 mod common;
 
+use common::{init_repo, write};
 use magit_lsp::watcher::{Refresh, RepoWatcher, WatcherConfig};
 use std::sync::mpsc;
 use std::time::Duration;
-use common::{init_repo, write};
 
 /// Test timing: a burst is debounced after 20 ms, and a lock is retried three
 /// times 10 ms apart, so the whole test stays well inside a bounded wait.
@@ -32,10 +32,7 @@ fn wait_for(
     let deadline = std::time::Instant::now() + WAIT;
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for {description}"
-        );
+        assert!(!remaining.is_zero(), "timed out waiting for {description}");
         match rx.recv_timeout(remaining.min(Duration::from_millis(50))) {
             Ok(refresh) if predicate(&refresh) => return refresh,
             Ok(Refresh::IndexLocked) => continue, // not the event under test
@@ -122,7 +119,10 @@ fn git_internals_do_not_trigger_a_refresh() {
     // Noise: `.git` internals that never change what a view renders.
     std::fs::create_dir_all(repo.join(".git/objects/ab")).expect("create objects dir");
     write(&repo.join(".git/objects/ab/cd"), "blob");
-    write(&repo.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n");
+    write(
+        &repo.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n",
+    );
     write(&repo.join(".git/refs/heads/main.lock"), "");
 
     match rx.recv_timeout(Duration::from_millis(150)) {

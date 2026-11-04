@@ -38,14 +38,19 @@ impl DocumentFormat {
     /// Infer the document's newline convention without changing its accepted text.
     pub fn from_text(text: &str) -> Self {
         let crlf = text.contains("\r\n");
-        Self { crlf, final_terminator: text.ends_with('\n') }
+        Self {
+            crlf,
+            final_terminator: text.ends_with('\n'),
+        }
     }
 
     /// Serialize structured Tree rows using this document's immutable newline convention.
     pub fn serialize(self, tree: &crate::tree::Tree) -> String {
         let separator = if self.crlf { "\r\n" } else { "\n" };
         let mut text = tree.lines.join(separator);
-        if self.final_terminator { text.push_str(separator); }
+        if self.final_terminator {
+            text.push_str(separator);
+        }
         text
     }
 }
@@ -102,21 +107,42 @@ pub struct PlainDocument {
 
 impl PlainDocument {
     /// Create a detached controller for one document URI.
-    pub fn new(uri: impl Into<String>, encoding: Encoding, document_changes: bool, format: DocumentFormat) -> Self {
+    pub fn new(
+        uri: impl Into<String>,
+        encoding: Encoding,
+        document_changes: bool,
+        format: DocumentFormat,
+    ) -> Self {
         Self {
-            uri: uri.into(), encoding, document_changes, format,
-            state: DocumentState::Detached, authoritative: None, client: None,
-            snapshots: VecDeque::new(), snapshot_limit: 6, in_flight: None, rejected: None, next_id: 0,
-            action_snapshots: VecDeque::new(), format_suspended: false, warning_pending: false,
+            uri: uri.into(),
+            encoding,
+            document_changes,
+            format,
+            state: DocumentState::Detached,
+            authoritative: None,
+            client: None,
+            snapshots: VecDeque::new(),
+            snapshot_limit: 6,
+            in_flight: None,
+            rejected: None,
+            next_id: 0,
+            action_snapshots: VecDeque::new(),
+            format_suspended: false,
+            warning_pending: false,
         }
     }
 
     /// Return the current lifecycle state.
-    pub fn state(&self) -> DocumentState { self.state }
+    pub fn state(&self) -> DocumentState {
+        self.state
+    }
 
     /// Return a snapshot text when its exact-text hash is retained.
     pub fn snapshot(&self, hash: &[u8; 32]) -> Option<(&str, i32)> {
-        self.snapshots.iter().find(|s| &s.hash == hash).map(|s| (s.text.as_str(), s.version))
+        self.snapshots
+            .iter()
+            .find(|s| &s.hash == hash)
+            .map(|s| (s.text.as_str(), s.version))
     }
 
     /// Record an authoritative render and start an edit if the client is ready.
@@ -127,21 +153,59 @@ impl PlainDocument {
     }
 
     /// Retain the exact structured snapshot associated with an authoritative render.
-    pub fn render_actions(&mut self, tree: crate::tree::Tree, view_id: String, generation: u64, scope: String, menu: Option<crate::menu::Menu>) -> Option<ApplyEdit> {
+    pub fn render_actions(
+        &mut self,
+        tree: crate::tree::Tree,
+        view_id: String,
+        generation: u64,
+        scope: String,
+        menu: Option<crate::menu::Menu>,
+    ) -> Option<ApplyEdit> {
         let text = self.format.serialize(&tree);
         let hash = hash_text(&text);
-        self.action_snapshots.retain(|snapshot| snapshot.hash != hash);
-        self.action_snapshots.push_back(ActionSnapshot { hash, view_id, generation, scope, tree, menu });
-        while self.action_snapshots.len() > self.snapshot_limit { self.action_snapshots.pop_front(); }
+        self.action_snapshots
+            .retain(|snapshot| snapshot.hash != hash);
+        self.action_snapshots.push_back(ActionSnapshot {
+            hash,
+            view_id,
+            generation,
+            scope,
+            tree,
+            menu,
+        });
+        while self.action_snapshots.len() > self.snapshot_limit {
+            self.action_snapshots.pop_front();
+        }
         self.render(text)
     }
 
     /// Find a retained action snapshot only when its exact document text matches.
-    pub fn action_snapshot(&self, text: &str) -> Option<(&crate::tree::Tree, &str, u64, &str, Option<&crate::menu::Menu>)> {
-        if self.format_suspended { return None; }
+    pub fn action_snapshot(
+        &self,
+        text: &str,
+    ) -> Option<(
+        &crate::tree::Tree,
+        &str,
+        u64,
+        &str,
+        Option<&crate::menu::Menu>,
+    )> {
+        if self.format_suspended {
+            return None;
+        }
         let hash = hash_text(text);
-        self.action_snapshots.iter().find(|snapshot| snapshot.hash == hash)
-            .map(|snapshot| (&snapshot.tree, snapshot.view_id.as_str(), snapshot.generation, snapshot.scope.as_str(), snapshot.menu.as_ref()))
+        self.action_snapshots
+            .iter()
+            .find(|snapshot| snapshot.hash == hash)
+            .map(|snapshot| {
+                (
+                    &snapshot.tree,
+                    snapshot.view_id.as_str(),
+                    snapshot.generation,
+                    snapshot.scope.as_str(),
+                    snapshot.menu.as_ref(),
+                )
+            })
     }
 
     /// Consume the one user-facing warning caused by persistent format drift.
@@ -162,17 +226,23 @@ impl PlainDocument {
 
     /// Observe a didChange notification, reconciling an exact applyEdit echo.
     pub fn change(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
-        if self.state == DocumentState::Detached { return None; }
+        if self.state == DocumentState::Detached {
+            return None;
+        }
         let text = text.into();
         let observed = self.snapshot_for(text, version);
         self.client = Some(observed.clone());
         self.rejected = None;
         if let Some(flight) = self.in_flight.as_mut() {
             flight.echoed = flight.target.hash == observed.hash;
-            flight.format_drift = !flight.echoed && format_equivalent(&flight.target.text, &observed.text);
+            flight.format_drift =
+                !flight.echoed && format_equivalent(&flight.target.text, &observed.text);
             flight.diverged |= !flight.echoed;
             if flight.response == Some(true) {
-                if flight.format_drift { self.suspend_for_format_drift(); return None; }
+                if flight.format_drift {
+                    self.suspend_for_format_drift();
+                    return None;
+                }
                 self.in_flight = None;
                 self.state = DocumentState::Ready;
             }
@@ -184,18 +254,28 @@ impl PlainDocument {
 
     /// Resolve an applyEdit result; late responses after close/reopen are ignored.
     pub fn response(&mut self, id: u64, applied: bool) -> Option<ApplyEdit> {
-        let Some(flight) = self.in_flight.as_mut() else { return None; };
-        if flight.request.id != id { return None; }
+        let Some(flight) = self.in_flight.as_mut() else {
+            return None;
+        };
+        if flight.request.id != id {
+            return None;
+        }
         flight.response = Some(applied);
         if !applied {
             if !flight.diverged {
-                self.rejected = Some((flight.target.hash, self.client.as_ref().map_or([0; 32], |client| client.hash)));
+                self.rejected = Some((
+                    flight.target.hash,
+                    self.client.as_ref().map_or([0; 32], |client| client.hash),
+                ));
             }
             self.in_flight = None;
             self.state = DocumentState::Ready;
             return self.prepare();
         }
-        if flight.format_drift { self.suspend_for_format_drift(); return None; }
+        if flight.format_drift {
+            self.suspend_for_format_drift();
+            return None;
+        }
         if flight.echoed || flight.diverged {
             self.in_flight = None;
             self.state = DocumentState::Ready;
@@ -216,16 +296,29 @@ impl PlainDocument {
 
     fn snapshot_for(&mut self, text: String, version: i32) -> Snapshot {
         let hash = hash_text(&text);
-        let snapshot = Snapshot { hash, text, version };
+        let snapshot = Snapshot {
+            hash,
+            text,
+            version,
+        };
         self.snapshots.retain(|s| s.hash != hash);
         self.snapshots.push_back(snapshot.clone());
-        while self.snapshots.len() > self.snapshot_limit { self.snapshots.pop_front(); }
+        while self.snapshots.len() > self.snapshot_limit {
+            self.snapshots.pop_front();
+        }
         snapshot
     }
 
     fn prepare(&mut self) -> Option<ApplyEdit> {
-        if self.state == DocumentState::Detached || self.in_flight.is_some() || self.format_suspended { return None; }
-        let (Some(authoritative), Some(client)) = (&self.authoritative, &self.client) else { return None; };
+        if self.state == DocumentState::Detached
+            || self.in_flight.is_some()
+            || self.format_suspended
+        {
+            return None;
+        }
+        let (Some(authoritative), Some(client)) = (&self.authoritative, &self.client) else {
+            return None;
+        };
         if authoritative.hash == client.hash {
             self.state = DocumentState::Ready;
             return None;
@@ -241,9 +334,19 @@ impl PlainDocument {
         } else {
             json!({"changes":{self.uri.clone():edits}})
         };
-        let request = ApplyEdit { id: self.next_id, edit };
+        let request = ApplyEdit {
+            id: self.next_id,
+            edit,
+        };
         let target = authoritative.clone();
-        self.in_flight = Some(InFlight { request: request.clone(), target, echoed: false, diverged: false, response: None, format_drift: false });
+        self.in_flight = Some(InFlight {
+            request: request.clone(),
+            target,
+            echoed: false,
+            diverged: false,
+            response: None,
+            format_drift: false,
+        });
         self.state = DocumentState::Applying;
         Some(request)
     }
@@ -259,7 +362,10 @@ impl PlainDocument {
 fn format_equivalent(expected: &str, observed: &str) -> bool {
     fn logical(text: &str) -> String {
         let normalized = text.replace("\r\n", "\n");
-        normalized.strip_suffix('\n').unwrap_or(&normalized).to_owned()
+        normalized
+            .strip_suffix('\n')
+            .unwrap_or(&normalized)
+            .to_owned()
     }
     expected != observed && logical(expected) == logical(observed)
 }
@@ -270,14 +376,33 @@ mod tests {
     use crate::tree::Tree;
 
     fn tree(text: &str) -> Tree {
-        Tree { version: 0, lines: vec![text.to_owned()], nodes: vec![], line_nodes: vec![], tokens: vec![], symbols: vec![], links: vec![] }
+        Tree {
+            version: 0,
+            lines: vec![text.to_owned()],
+            nodes: vec![],
+            line_nodes: vec![],
+            tokens: vec![],
+            symbols: vec![],
+            links: vec![],
+        }
     }
 
     #[test]
     fn action_snapshot_retention_is_bounded_and_keeps_generation() {
-        let mut document = PlainDocument::new("file:///test", Encoding::Utf16, false, DocumentFormat::from_text(""));
+        let mut document = PlainDocument::new(
+            "file:///test",
+            Encoding::Utf16,
+            false,
+            DocumentFormat::from_text(""),
+        );
         for generation in 0..7 {
-            document.render_actions(tree(&format!("render-{generation}")), "view".into(), generation, "scope".into(), None);
+            document.render_actions(
+                tree(&format!("render-{generation}")),
+                "view".into(),
+                generation,
+                "scope".into(),
+                None,
+            );
         }
         assert!(document.action_snapshot("render-0").is_none());
         let (_, _, generation, _, _) = document.action_snapshot("render-6").unwrap();
@@ -286,19 +411,42 @@ mod tests {
 }
 
 /// Hash exact UTF-8 text for collision-resistant snapshot matching.
-pub fn hash_text(text: &str) -> [u8; 32] { Sha256::digest(text.as_bytes()).into() }
+pub fn hash_text(text: &str) -> [u8; 32] {
+    Sha256::digest(text.as_bytes()).into()
+}
 
 /// Produce a single minimal valid edit using negotiated LSP position units.
 pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
-    if old == new { return Vec::new(); }
-    let mut prefix = old.bytes().zip(new.bytes()).take_while(|(a,b)| a == b).count();
-    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) { prefix -= 1; }
-    while splits_crlf(old, prefix) || splits_crlf(new, prefix) { prefix -= 1; }
+    if old == new {
+        return Vec::new();
+    }
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    while splits_crlf(old, prefix) || splits_crlf(new, prefix) {
+        prefix -= 1;
+    }
     let mut suffix = 0;
-    let max_suffix = old.len().saturating_sub(prefix).min(new.len().saturating_sub(prefix));
-    while suffix < max_suffix && old.as_bytes()[old.len()-1-suffix] == new.as_bytes()[new.len()-1-suffix] { suffix += 1; }
-    while !old.is_char_boundary(old.len()-suffix) || !new.is_char_boundary(new.len()-suffix) { suffix -= 1; }
-    while splits_crlf(old, old.len()-suffix) || splits_crlf(new, new.len()-suffix) { suffix -= 1; }
+    let max_suffix = old
+        .len()
+        .saturating_sub(prefix)
+        .min(new.len().saturating_sub(prefix));
+    while suffix < max_suffix
+        && old.as_bytes()[old.len() - 1 - suffix] == new.as_bytes()[new.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    while splits_crlf(old, old.len() - suffix) || splits_crlf(new, new.len() - suffix) {
+        suffix -= 1;
+    }
     let old_end = old.len() - suffix;
     let new_end = new.len() - suffix;
     let start = position(old, prefix, encoding);
@@ -307,7 +455,8 @@ pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
 }
 
 fn splits_crlf(text: &str, offset: usize) -> bool {
-    offset > 0 && offset < text.len()
+    offset > 0
+        && offset < text.len()
         && text.as_bytes()[offset - 1] == b'\r'
         && text.as_bytes()[offset] == b'\n'
 }

@@ -96,8 +96,12 @@ mod editor_history_tests {
 
     fn repository() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        assert!(std::process::Command::new("git").args(["init", "-q"])
-            .arg(dir.path()).status().unwrap().success());
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(dir.path())
+            .status()
+            .unwrap()
+            .success());
         std::fs::write(dir.path().join(".git/COMMIT_EDITMSG"), "initial\n").unwrap();
         dir
     }
@@ -105,18 +109,29 @@ mod editor_history_tests {
     fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
         let run = registry.create(repo.to_str().unwrap(), "owner").unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
-        registry.apply("owner", &run, &uri, |draft, context| {
-            let token = draft.helper_token().to_string();
-            draft.accept_helper(context, &token, COMMIT_MESSAGE_KIND,
-                &repo.join(".git/COMMIT_EDITMSG"))?;
-            draft.did_open(context, 1, b"initial\n")
-        }).unwrap();
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                let token = draft.helper_token().to_string();
+                draft.accept_helper(
+                    context,
+                    &token,
+                    COMMIT_MESSAGE_KIND,
+                    &repo.join(".git/COMMIT_EDITMSG"),
+                )?;
+                draft.did_open(context, 1, b"initial\n")
+            })
+            .unwrap();
         (run, uri)
     }
 
     fn retained(registry: &EditRegistry, repo: &Path) -> Vec<String> {
-        registry.history.lock().unwrap().get(&std::fs::canonicalize(repo).unwrap())
-            .map(|history| history.entries().iter().cloned().collect()).unwrap_or_default()
+        registry
+            .history
+            .lock()
+            .unwrap()
+            .get(&std::fs::canonicalize(repo).unwrap())
+            .map(|history| history.entries().iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -125,44 +140,85 @@ mod editor_history_tests {
         let first = repository();
         let second = repository();
         let (run, uri) = opened(&registry, first.path());
-        registry.apply("owner", &run, &uri, |draft, context| {
-            draft.did_change(context, 2, b"saved abort\r\n# exact")?;
-            draft.save(context, 2)?;
-            draft.did_change(context, 3, b"unsaved never retained")
-        }).unwrap();
-        assert!(retained(&registry, first.path()).is_empty(), "save alone never retains");
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_change(context, 2, b"saved abort\r\n# exact")?;
+                draft.save(context, 2)?;
+                draft.did_change(context, 3, b"unsaved never retained")
+            })
+            .unwrap();
+        assert!(
+            retained(&registry, first.path()).is_empty(),
+            "save alone never retains"
+        );
         assert!(registry.resolve(&run, Reply::Abort));
-        assert!(!registry.resolve(&run, Reply::Abort), "terminal arbitration is once-only");
-        assert_eq!(retained(&registry, first.path()), ["saved abort\r\n# exact"]);
+        assert!(
+            !registry.resolve(&run, Reply::Abort),
+            "terminal arbitration is once-only"
+        );
+        assert_eq!(
+            retained(&registry, first.path()),
+            ["saved abort\r\n# exact"]
+        );
 
         let (run, uri) = opened(&registry, first.path());
-        registry.apply("owner", &run, &uri, |draft, context| {
-            draft.did_change(context, 2, b"confirmed even if Git later fails")
-        }).unwrap();
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_change(context, 2, b"confirmed even if Git later fails")
+            })
+            .unwrap();
         // Acknowledge helper completion without adding a production browsing API.
         registry.lock()[&run].completion.send(true).unwrap();
-        registry.finish("owner", &DraftFinishParams {
-            run_id: run, uri, version: 2, reason: DraftFinishReason::Confirm,
-        }).unwrap();
-        assert_eq!(retained(&registry, first.path()),
-            ["saved abort\r\n# exact", "confirmed even if Git later fails"]);
-        assert_eq!(std::fs::read_to_string(first.path().join(".git/COMMIT_EDITMSG")).unwrap(),
-            "confirmed even if Git later fails");
+        registry
+            .finish(
+                "owner",
+                &DraftFinishParams {
+                    run_id: run,
+                    uri,
+                    version: 2,
+                    reason: DraftFinishReason::Confirm,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            retained(&registry, first.path()),
+            [
+                "saved abort\r\n# exact",
+                "confirmed even if Git later fails"
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(first.path().join(".git/COMMIT_EDITMSG")).unwrap(),
+            "confirmed even if Git later fails"
+        );
 
         let (run, uri) = opened(&registry, second.path());
-        registry.apply("owner", &run, &uri, |draft, context| {
-            draft.did_change(context, 2, b"second repository")?;
-            draft.save(context, 2).map(|_| ())
-        }).unwrap();
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_change(context, 2, b"second repository")?;
+                draft.save(context, 2).map(|_| ())
+            })
+            .unwrap();
         assert!(registry.resolve(&run, Reply::Abort));
         assert_eq!(retained(&registry, second.path()), ["second repository"]);
-        assert_eq!(retained(&registry, first.path()),
-            ["saved abort\r\n# exact", "confirmed even if Git later fails"]);
+        assert_eq!(
+            retained(&registry, first.path()),
+            [
+                "saved abort\r\n# exact",
+                "confirmed even if Git later fails"
+            ]
+        );
         let (run, _) = opened(&registry, second.path());
         assert!(registry.resolve(&run, Reply::Abort));
-        assert_eq!(retained(&registry, second.path()), ["second repository"],
-            "unchanged template excluded");
-        assert!(retained(&EditRegistry::new(), first.path()).is_empty(), "server lifetime isolation");
+        assert_eq!(
+            retained(&registry, second.path()),
+            ["second repository"],
+            "unchanged template excluded"
+        );
+        assert!(
+            retained(&EditRegistry::new(), first.path()).is_empty(),
+            "server lifetime isolation"
+        );
     }
 
     #[test]
@@ -170,14 +226,24 @@ mod editor_history_tests {
         let registry = EditRegistry::new();
         let repo = repository();
         let (run, uri) = opened(&registry, repo.path());
-        registry.apply("owner", &run, &uri, |draft, context| {
-            draft.did_change(context, 2, b"unsaved")
-        }).unwrap();
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_change(context, 2, b"unsaved")
+            })
+            .unwrap();
         std::fs::write(repo.path().join(".git/COMMIT_EDITMSG"), "native saved\n").unwrap();
         registry.lock()[&run].completion.send(true).unwrap();
-        registry.finish("owner", &DraftFinishParams {
-            run_id: run, uri, version: 2, reason: DraftFinishReason::NormalClose,
-        }).unwrap();
+        registry
+            .finish(
+                "owner",
+                &DraftFinishParams {
+                    run_id: run,
+                    uri,
+                    version: 2,
+                    reason: DraftFinishReason::NormalClose,
+                },
+            )
+            .unwrap();
         assert_eq!(retained(&registry, repo.path()), ["native saved\n"]);
     }
 }
@@ -212,7 +278,8 @@ impl EditRegistry {
                 waiting: Some(waiting),
                 draft,
                 owner: owner.to_string(),
-                completed, completion,
+                completed,
+                completion,
             },
         );
         Ok(edit_id)
@@ -228,18 +295,38 @@ impl EditRegistry {
     /// and owner come from trusted server state, never client parameters.
     #[cfg(unix)]
     pub(crate) fn apply<T>(
-        &self, owner: &str, run_id: &str, uri: &str,
+        &self,
+        owner: &str,
+        run_id: &str,
+        uri: &str,
         action: impl FnOnce(&mut draft::Draft, draft::DraftContext<'_>) -> Result<T>,
     ) -> Result<T> {
         let mut entries = self.lock();
-        let entry = entries.get_mut(run_id).ok_or_else(|| Error::new("Commit draft run is not pending"))?;
+        let entry = entries
+            .get_mut(run_id)
+            .ok_or_else(|| Error::new("Commit draft run is not pending"))?;
         let repository = entry.draft.repository().to_path_buf();
-        let result = action(&mut entry.draft, draft::DraftContext { owner, run_id, uri, repository: &repository })?;
+        let result = action(
+            &mut entry.draft,
+            draft::DraftContext {
+                owner,
+                run_id,
+                uri,
+                repository: &repository,
+            },
+        )?;
         if entry.draft.is_terminal() {
             let entry = entries.remove(run_id).unwrap();
-            entry.replies.send(Reply::Ok).map_err(|_| Error::new("Commit draft helper disconnected"))?;
+            entry
+                .replies
+                .send(Reply::Ok)
+                .map_err(|_| Error::new("Commit draft helper disconnected"))?;
             drop(entries);
-            if entry.completed.recv_timeout(std::time::Duration::from_secs(2)) != Ok(true) {
+            if entry
+                .completed
+                .recv_timeout(std::time::Duration::from_secs(2))
+                != Ok(true)
+            {
                 return Err(Error::new("Commit draft helper did not accept completion"));
             }
         }
@@ -249,8 +336,11 @@ impl EditRegistry {
     /// Resolve the exact issued URI on this connection for standard LSP sync.
     #[cfg(unix)]
     pub fn run_for_uri(&self, owner: &str, uri: &str) -> Result<String> {
-        self.lock().iter().find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
-            .map(|(id, _)| id.clone()).ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
+        self.lock()
+            .iter()
+            .find(|(_, entry)| entry.owner == owner && entry.draft.uri() == uri)
+            .map(|(id, _)| id.clone())
+            .ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
     }
 
     /// No editor-helper file synchronization is available outside Unix yet.
@@ -262,24 +352,41 @@ impl EditRegistry {
     /// Report rejected synchronization through existing effects, re-presenting
     /// only the same still-pending run after a failed native close.
     pub(crate) fn notification_failure(
-        &self, owner: &str, run_id: &str, uri: &str, message: String,
-        reopen: bool, emit: impl FnOnce(Vec<Effect>),
+        &self,
+        owner: &str,
+        run_id: &str,
+        uri: &str,
+        message: String,
+        reopen: bool,
+        emit: impl FnOnce(Vec<Effect>),
     ) {
         #[cfg(unix)]
         {
             let entries = self.lock();
-            let Some(entry) = entries.get(run_id) else { return; };
-            if entry.owner != owner || entry.draft.uri() != uri || entry.draft.is_terminal() { return; }
-            let mut effects = vec![Effect::message(crate::protocol::MessageLevel::Error,
-                format!("commit draft: {message}. Your text is retained; retry or abort explicitly."))];
+            let Some(entry) = entries.get(run_id) else {
+                return;
+            };
+            if entry.owner != owner || entry.draft.uri() != uri || entry.draft.is_terminal() {
+                return;
+            }
+            let mut effects = vec![Effect::message(
+                crate::protocol::MessageLevel::Error,
+                format!(
+                    "commit draft: {message}. Your text is retained; retry or abort explicitly."
+                ),
+            )];
             if reopen {
                 if let Some(snapshot) = entry.draft.live() {
                     let metadata = edit_document_metadata(COMMIT_MESSAGE_KIND);
                     effects.push(Effect::EditDocument {
-                        run_id: run_id.to_string(), uri: uri.to_string(),
-                        text: snapshot.text().to_string(), version: snapshot.version(),
-                        kind: COMMIT_MESSAGE_KIND.to_string(), title: metadata.title.to_string(),
-                        mode: EditDocumentMode::RealFile, scope: metadata.scope.to_string(),
+                        run_id: run_id.to_string(),
+                        uri: uri.to_string(),
+                        text: snapshot.text().to_string(),
+                        version: snapshot.version(),
+                        kind: COMMIT_MESSAGE_KIND.to_string(),
+                        title: metadata.title.to_string(),
+                        mode: EditDocumentMode::RealFile,
+                        scope: metadata.scope.to_string(),
                     });
                 }
             }
@@ -294,13 +401,20 @@ impl EditRegistry {
     /// Retain only a validated submitted checkpoint, before Git's eventual result.
     /// A retention warning never converts a successful submission into an abort.
     #[cfg(unix)]
-    pub(crate) fn finish(&self, owner: &str, p: &crate::protocol::DraftFinishParams) -> Result<Option<String>> {
+    pub(crate) fn finish(
+        &self,
+        owner: &str,
+        p: &crate::protocol::DraftFinishParams,
+    ) -> Result<Option<String>> {
         self.apply(owner, &p.run_id, &p.uri, |draft, context| {
             draft.finish(context, p.version, p.reason)?;
             let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
-            Ok(histories.entry(context.repository.to_path_buf()).or_default()
+            Ok(histories
+                .entry(context.repository.to_path_buf())
+                .or_default()
                 .retain(draft.saved().unwrap().text(), draft.initial().unwrap())
-                .err().map(|error| error.to_string()))
+                .err()
+                .map(|error| error.to_string()))
         })
     }
 
@@ -316,7 +430,9 @@ impl EditRegistry {
     /// Abort and drop a pending run. Unvalidated `Ok` release is always rejected.
     pub fn resolve(&self, edit_id: &str, reply: Reply) -> bool {
         // Successful release is possible only through validated draft.finish.
-        if reply == Reply::Ok { return false; }
+        if reply == Reply::Ok {
+            return false;
+        }
         let entry = self.lock().remove(edit_id);
         match entry {
             Some(entry) => {
@@ -334,7 +450,9 @@ impl EditRegistry {
     fn retain_saved(&self, draft: &draft::Draft) {
         if let (Some(saved), Some(initial)) = (draft.saved(), draft.initial()) {
             let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
-            let _ = histories.entry(draft.repository().to_path_buf()).or_default()
+            let _ = histories
+                .entry(draft.repository().to_path_buf())
+                .or_default()
                 .retain(saved.text(), initial);
         }
     }
@@ -398,13 +516,20 @@ pub fn socket_path() -> Option<&'static Path> {
 /// Run `git commit` with the helper as its editor and return the committed
 /// message, read back from `git log -1 --format=%B`. Repository discovery is
 /// not a cancellation target; only the commit inherits the caller's handle.
-pub fn commit(repo_path: &str, edit_id: &str, socket: &Path, operation: &crate::git::CommitOperation) -> Result<crate::git::CommitOutcome> {
+pub fn commit(
+    repo_path: &str,
+    edit_id: &str,
+    socket: &Path,
+    operation: &crate::git::CommitOperation,
+) -> Result<crate::git::CommitOutcome> {
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
     let token = registry().helper_token(edit_id)?;
     let committer_date = match operation {
-        crate::git::CommitOperation::Extend(_) | crate::git::CommitOperation::Reword(_) => Some(repo.head_committer_date()?),
+        crate::git::CommitOperation::Extend(_) | crate::git::CommitOperation::Reword(_) => {
+            Some(repo.head_committer_date()?)
+        }
         _ => None,
     };
     let mut env = vec![
@@ -415,7 +540,9 @@ pub fn commit(repo_path: &str, edit_id: &str, socket: &Path, operation: &crate::
         (EDIT_ID_ENV, edit_id),
         (HELPER_TOKEN_ENV, token.as_str()),
     ];
-    if let Some(date) = &committer_date { env.push(("GIT_COMMITTER_DATE", date.as_str())); }
+    if let Some(date) = &committer_date {
+        env.push(("GIT_COMMITTER_DATE", date.as_str()));
+    }
     let args = operation.argv();
     repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
 }
@@ -509,7 +636,8 @@ fn unix_helper(file: &str) -> Result<bool> {
         .map_err(|error| Error::new(format!("cannot connect to the editor bridge: {error}")))?;
     let hello = EditHello {
         edit_id,
-        token: std::env::var(HELPER_TOKEN_ENV).map_err(|_| Error::new("editor helper credential is not set"))?,
+        token: std::env::var(HELPER_TOKEN_ENV)
+            .map_err(|_| Error::new("editor helper credential is not set"))?,
         path: path.to_string_lossy().into_owned(),
         kind: COMMIT_MESSAGE_KIND.to_string(),
     };
@@ -689,9 +817,16 @@ fn handle_edit(
         let uri = entry.draft.uri().to_string();
         let repository = entry.draft.repository().to_path_buf();
         let context = draft::DraftContext {
-            owner: &entry.owner, run_id: &hello.edit_id, uri: &uri, repository: &repository,
+            owner: &entry.owner,
+            run_id: &hello.edit_id,
+            uri: &uri,
+            repository: &repository,
         };
-        if entry.draft.accept_helper(context, &hello.token, &hello.kind, Path::new(&hello.path)).is_err() {
+        if entry
+            .draft
+            .accept_helper(context, &hello.token, &hello.kind, Path::new(&hello.path))
+            .is_err()
+        {
             return write_reply(stream, false, None);
         }
         let Some(replies) = entry.waiting.take() else {
@@ -700,10 +835,14 @@ fn handle_edit(
         tracing::debug!(edit_id = %hello.edit_id, repo = %entry.repo_path, "editor bridge: edit");
         let metadata = edit_document_metadata(&hello.kind);
         emitter(vec![Effect::EditDocument {
-            run_id: hello.edit_id.clone(), uri,
-            text: entry.draft.initial().unwrap().to_string(), version: 1,
-            kind: hello.kind, title: metadata.title.to_string(),
-            mode: EditDocumentMode::RealFile, scope: metadata.scope.to_string(),
+            run_id: hello.edit_id.clone(),
+            uri,
+            text: entry.draft.initial().unwrap().to_string(),
+            version: 1,
+            kind: hello.kind,
+            title: metadata.title.to_string(),
+            mode: EditDocumentMode::RealFile,
+            scope: metadata.scope.to_string(),
         }]);
         (replies, entry.completion.clone())
     };
@@ -715,8 +854,21 @@ fn handle_edit(
                 use std::os::fd::AsRawFd;
                 let mut byte = 0u8;
                 // SAFETY: the live socket and one-byte writable buffer are valid.
-                let received = unsafe { libc::recv(stream.as_raw_fd(), (&mut byte as *mut u8).cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
-                if received == 0 || (received < 0 && !matches!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted)) {
+                let received = unsafe {
+                    libc::recv(
+                        stream.as_raw_fd(),
+                        (&mut byte as *mut u8).cast(),
+                        1,
+                        libc::MSG_PEEK | libc::MSG_DONTWAIT,
+                    )
+                };
+                if received == 0
+                    || (received < 0
+                        && !matches!(
+                            std::io::Error::last_os_error().kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        ))
+                {
                     registry().resolve(&hello.edit_id, Reply::Abort);
                     break Reply::Abort;
                 }

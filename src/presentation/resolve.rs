@@ -1,7 +1,7 @@
 //! Repository candidates discovered for Plain document initialization.
 
-use std::path::{Path, PathBuf};
 use crate::git::GitRepo;
+use std::path::{Path, PathBuf};
 
 /// Canonical identity and worktree paths reported by Git.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,11 +26,23 @@ pub enum Resolution {
 }
 
 /// Resolve a document using explicit path, workspace roots, then document ancestry.
-pub fn resolve(explicit: Option<&Path>, workspaces: &[PathBuf], document: Option<&Path>) -> Resolution {
+pub fn resolve(
+    explicit: Option<&Path>,
+    workspaces: &[PathBuf],
+    document: Option<&Path>,
+) -> Resolution {
     if let Some(path) = explicit {
-        return GitRepo::discover(path).ok().flatten().map(repository).map_or(Resolution::None, Resolution::Resolved);
+        return GitRepo::discover(path)
+            .ok()
+            .flatten()
+            .map(repository)
+            .map_or(Resolution::None, Resolution::Resolved);
     }
-    let workspace_candidates = unique(workspaces.iter().filter_map(|p| GitRepo::discover(p).ok().flatten().map(repository)));
+    let workspace_candidates = unique(
+        workspaces
+            .iter()
+            .filter_map(|p| GitRepo::discover(p).ok().flatten().map(repository)),
+    );
     if workspace_candidates.len() == 1 {
         return Resolution::Resolved(workspace_candidates[0].clone());
     }
@@ -46,13 +58,20 @@ pub fn resolve(explicit: Option<&Path>, workspaces: &[PathBuf], document: Option
 }
 
 fn repository(repo: GitRepo) -> Repository {
-    Repository { root: repo.root().to_owned(), git_dir: repo.git_dir().to_owned(), common_dir: repo.common_dir().to_owned() }
+    Repository {
+        root: repo.root().to_owned(),
+        git_dir: repo.git_dir().to_owned(),
+        common_dir: repo.common_dir().to_owned(),
+    }
 }
 
 fn unique(repositories: impl Iterator<Item = Repository>) -> Vec<Repository> {
     let mut result = Vec::new();
     for repo in repositories {
-        if !result.iter().any(|existing: &Repository| existing.root == repo.root) {
+        if !result
+            .iter()
+            .any(|existing: &Repository| existing.root == repo.root)
+        {
             result.push(repo);
         }
     }

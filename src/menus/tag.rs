@@ -24,13 +24,7 @@ pub fn definition() -> MenuDef {
                 "Create",
                 vec![
                     action("t", "tag.create", "tag", "magit-tag-create", "R-6.3"),
-                    action(
-                        "r",
-                        "tag.release",
-                        "release",
-                        "magit-tag-release",
-                        "R-6.3",
-                    ),
+                    action("r", "tag.release", "release", "magit-tag-release", "R-6.3"),
                 ],
             ),
             group(

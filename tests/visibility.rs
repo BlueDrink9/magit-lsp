@@ -7,9 +7,9 @@ use magit_lsp::config::Profile;
 use magit_lsp::diff_text;
 use magit_lsp::git::diff_invocation_count;
 use magit_lsp::protocol::Cursor;
-use magit_lsp::tree::{NodeKind, Tree};
-use magit_lsp::view::{Ctx, View, VisibilityCommand, Viewport};
 use magit_lsp::status_view::StatusView;
+use magit_lsp::tree::{NodeKind, Tree};
+use magit_lsp::view::{Ctx, View, Viewport, VisibilityCommand};
 use serde_json::json;
 
 fn count_kind(tree: &Tree, kind: NodeKind) -> usize {
@@ -24,29 +24,57 @@ fn rich_status_toggle_and_show_all_reveal_automatic_summary() {
         .build();
     let mut view = StatusView::open(tmp.path().to_str().unwrap()).unwrap();
     assert!(view.set_section_line_limit(Some(1)));
-    let ctx = Ctx { viewport: Viewport::default(), pending: &[] };
+    let ctx = Ctx {
+        viewport: Viewport::default(),
+        pending: &[],
+    };
     let mut tree = view.render(&ctx);
-    let summary = tree.node("section:unstaged:overflow").expect("automatic summary");
-    assert!(view.set_visibility(&tree, Some(summary.start_line), VisibilityCommand::Toggle { recursive: false }));
+    let summary = tree
+        .node("section:unstaged:overflow")
+        .expect("automatic summary");
+    assert!(view.set_visibility(
+        &tree,
+        Some(summary.start_line),
+        VisibilityCommand::Toggle { recursive: false }
+    ));
     tree = view.render(&ctx);
-    assert!(tree.node("section:unstaged:overflow").is_none(), "toggle expands displayed summary");
+    assert!(
+        tree.node("section:unstaged:overflow").is_none(),
+        "toggle expands displayed summary"
+    );
     assert!(tree.node("unstaged/f.txt").is_some());
 
     view.on_refresh().unwrap();
     tree = view.render(&ctx);
-    assert!(tree.node("unstaged/f.txt").is_some(), "explicit expansion survives refresh");
-    assert!(view.set_visibility(&tree, Some(tree.node("section:unstaged").unwrap().start_line), VisibilityCommand::HideAll));
+    assert!(
+        tree.node("unstaged/f.txt").is_some(),
+        "explicit expansion survives refresh"
+    );
+    assert!(view.set_visibility(
+        &tree,
+        Some(tree.node("section:unstaged").unwrap().start_line),
+        VisibilityCommand::HideAll
+    ));
     tree = view.render(&ctx);
-    assert!(view.set_visibility(&tree, Some(tree.node("section:unstaged").unwrap().start_line), VisibilityCommand::ShowAll));
+    assert!(view.set_visibility(
+        &tree,
+        Some(tree.node("section:unstaged").unwrap().start_line),
+        VisibilityCommand::ShowAll
+    ));
     tree = view.render(&ctx);
-    assert!(tree.node("unstaged/f.txt").is_some(), "show-all overrides renderer-imposed summary");
+    assert!(
+        tree.node("unstaged/f.txt").is_some(),
+        "show-all overrides renderer-imposed summary"
+    );
 }
 
 #[test]
 fn cycle_visibility_wraps_all_four_levels_and_survives_empty_refreshes() {
     for profile in [Profile::Vim, Profile::Standard] {
-        let (tmp, _repo) = RepoFixture::new().commit("init", [("f.txt", TEN_LINES)])
-            .modify_standard().build();
+        let (tmp, _repo) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
         let (mut test, _) = TestSession::open_status(&tmp, profile);
         test.ack();
         test.goto_marker("f.txt", '+');
@@ -57,7 +85,9 @@ fn cycle_visibility_wraps_all_four_levels_and_survives_empty_refreshes() {
             assert_eq!(count_kind(test.tree(), NodeKind::File) > 0, level >= 2);
             assert_eq!(count_kind(test.tree(), NodeKind::Hunk) > 0, level >= 3);
             assert_eq!(count_kind(test.tree(), NodeKind::Line) > 0, level >= 4);
-            if level == 1 { assert_eq!(test.focused_node().kind, NodeKind::Section); }
+            if level == 1 {
+                assert_eq!(test.focused_node().kind, NodeKind::Section);
+            }
             test.refresh();
             test.ack();
         }
@@ -80,20 +110,40 @@ fn cycle_visibility_wraps_all_four_levels_and_survives_empty_refreshes() {
 
 #[test]
 fn cycle_visibility_preserves_the_retained_cursor_identity_and_refuses_stale_input() {
-    let (tmp, _repo) = RepoFixture::new().commit("init", [("base.txt", "base\n")]).build();
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("base.txt", "base\n")])
+        .build();
     write(&tmp.path().join("b.txt"), "b\n");
     let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
-    let cursor = Cursor { line: test.goto_file("untracked", "b.txt"), column: 0 };
+    let cursor = Cursor {
+        line: test.goto_file("untracked", "b.txt"),
+        column: 0,
+    };
     write(&tmp.path().join("a.txt"), "a\n");
     test.refresh();
-    let result = test.invoke_at_version("common.cycle-visibility", initial.version, Some(cursor), None, None);
+    let result = test.invoke_at_version(
+        "common.cycle-visibility",
+        initial.version,
+        Some(cursor),
+        None,
+        None,
+    );
     test.set_cursor(result.render.unwrap().cursor.unwrap());
     assert_eq!(test.focused_node().id, "section:untracked");
     test.ack();
-    let result = test.invoke_at_version("common.cycle-visibility", initial.version, Some(cursor), None, None);
+    let result = test.invoke_at_version(
+        "common.cycle-visibility",
+        initial.version,
+        Some(cursor),
+        None,
+        None,
+    );
     assert!(result.render.is_none());
-    assert_eq!(message_texts(&result.effects), vec![magit_lsp::errors::STALE_VIEW]);
+    assert_eq!(
+        message_texts(&result.effects),
+        vec![magit_lsp::errors::STALE_VIEW]
+    );
     assert_eq!(count_kind(test.tree(), NodeKind::File), 0);
 }
 
@@ -124,7 +174,10 @@ fn collapsing_a_file_hides_its_hunks_and_moves_the_cursor_to_the_header() {
     test.ack();
 
     let header = test.goto_file("unstaged", "f.txt");
-    let cursor = Cursor { line: header, column: 0 };
+    let cursor = Cursor {
+        line: header,
+        column: 0,
+    };
 
     let outcome = toggle(&mut test, "common.toggle-section", Some(cursor), None);
     let render = outcome.render.expect("render notification");
@@ -196,19 +249,44 @@ fn folding_a_hunk_body_and_title_only_hides_that_stable_hunk() {
 
     let body = test.goto_marker("f.txt", '+');
     let body_id = test.tree().line_nodes[body].node.clone();
-    let target_id = test.tree().collapsible_ancestor(&body_id).expect("body's hunk").id.clone();
-    let sibling_id = test.tree().nodes.iter().find(|node|
-        node.kind == NodeKind::Hunk && node.id != target_id
-    ).expect("distinct sibling hunk").id.clone();
+    let target_id = test
+        .tree()
+        .collapsible_ancestor(&body_id)
+        .expect("body's hunk")
+        .id
+        .clone();
+    let sibling_id = test
+        .tree()
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Hunk && node.id != target_id)
+        .expect("distinct sibling hunk")
+        .id
+        .clone();
     let target_body = test.tree().node(&target_id).unwrap().children.clone();
     let sibling_body = test.tree().node(&sibling_id).unwrap().children.clone();
     assert!(!target_body.is_empty());
     assert!(!sibling_body.is_empty());
     let file_id = test.tree().parent(&target_id).unwrap().id.clone();
-    let outcome = toggle(&mut test, "common.toggle-section", Some(Cursor { line: body, column: 0 }), None);
-    let cursor = outcome.render.expect("body fold renders").cursor.expect("hunk title cursor");
+    let outcome = toggle(
+        &mut test,
+        "common.toggle-section",
+        Some(Cursor {
+            line: body,
+            column: 0,
+        }),
+        None,
+    );
+    let cursor = outcome
+        .render
+        .expect("body fold renders")
+        .cursor
+        .expect("hunk title cursor");
     test.ack();
-    assert_eq!(cursor.line, test.tree().node(&target_id).unwrap().start_line);
+    assert_eq!(
+        cursor.line,
+        test.tree().node(&target_id).unwrap().start_line
+    );
 
     // Collapsing retains both titles and the file, not the target's body.
     // A repository refresh must preserve the same content-owned identities.
@@ -218,22 +296,46 @@ fn folding_a_hunk_body_and_title_only_hides_that_stable_hunk() {
             test.ack();
         }
         assert_eq!(count_kind(test.tree(), NodeKind::Hunk), 2);
-        assert_eq!(test.tree().node(&file_id).unwrap().children, vec![target_id.clone(), sibling_id.clone()]);
+        assert_eq!(
+            test.tree().node(&file_id).unwrap().children,
+            vec![target_id.clone(), sibling_id.clone()]
+        );
         assert!(test.tree().node(&target_id).unwrap().children.is_empty());
         assert!(target_body.iter().all(|id| test.tree().node(id).is_none()));
-        assert_eq!(test.tree().node(&sibling_id).unwrap().children, sibling_body);
+        assert_eq!(
+            test.tree().node(&sibling_id).unwrap().children,
+            sibling_body
+        );
         assert!(sibling_body.iter().all(|id| test.tree().node(id).is_some()));
     }
 
     // Unfold, fold, and unfold from the containing title, leaving its sibling alone.
     for expanded in [true, false, true] {
         let title = test.tree().node(&target_id).unwrap().start_line;
-        let result = toggle(&mut test, "common.toggle-section", Some(Cursor { line: title, column: 0 }), None);
+        let result = toggle(
+            &mut test,
+            "common.toggle-section",
+            Some(Cursor {
+                line: title,
+                column: 0,
+            }),
+            None,
+        );
         assert!(result.render.is_some());
         test.ack();
         let target = test.tree().node(&target_id).expect("stable hunk title");
-        assert_eq!(target.children, if expanded { target_body.clone() } else { vec![] });
-        assert_eq!(test.tree().node(&sibling_id).unwrap().children, sibling_body);
+        assert_eq!(
+            target.children,
+            if expanded {
+                target_body.clone()
+            } else {
+                vec![]
+            }
+        );
+        assert_eq!(
+            test.tree().node(&sibling_id).unwrap().children,
+            sibling_body
+        );
         assert_eq!(test.tree().node(&file_id).unwrap().children.len(), 2);
     }
 }
@@ -530,7 +632,10 @@ fn collapsed_section_does_not_diff_expanded_child_files_until_reopened() {
     let collapsed = toggle(
         &mut test,
         "common.toggle-section",
-        Some(Cursor { line: section, column: 0 }),
+        Some(Cursor {
+            line: section,
+            column: 0,
+        }),
         None,
     );
     assert!(collapsed.render.is_some());
@@ -549,7 +654,10 @@ fn collapsed_section_does_not_diff_expanded_child_files_until_reopened() {
     let opened = toggle(
         &mut test,
         "common.show-section",
-        Some(Cursor { line: section, column: 0 }),
+        Some(Cursor {
+            line: section,
+            column: 0,
+        }),
         Some(false),
     );
     assert!(opened.render.is_some());

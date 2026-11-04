@@ -17,7 +17,11 @@ pub fn definition() -> MenuDef {
                     switch("-e", "--allow-empty", "Allow empty commit"),
                     switch("-v", "--verbose", "Show diff of changes to be committed"),
                     switch("-n", "--no-verify", "Disable hooks"),
-                    switch("-R", "--reset-author", "Claim authorship and reset author date"),
+                    switch(
+                        "-R",
+                        "--reset-author",
+                        "Claim authorship and reset author date",
+                    ),
                     switch("-s", "--signoff", "Add Signed-off-by trailer"),
                     option("=A", "--author=", "Override the author", Reader::Text),
                     option("=D", "--date=", "Override the author date", Reader::Date),
@@ -38,7 +42,13 @@ pub fn definition() -> MenuDef {
             ),
             group(
                 "Create",
-                vec![action("c", "commit.create", "Commit", "magit-commit-create", "")],
+                vec![action(
+                    "c",
+                    "commit.create",
+                    "Commit",
+                    "magit-commit-create",
+                    "",
+                )],
             ),
             group(
                 "Edit HEAD",
@@ -59,7 +69,13 @@ pub fn definition() -> MenuDef {
                 "Edit",
                 vec![
                     action("f", "commit.fixup", "Fixup", "magit-commit-fixup", "R-4.1"),
-                    action("s", "commit.squash", "Squash", "magit-commit-squash", "R-4.1"),
+                    action(
+                        "s",
+                        "commit.squash",
+                        "Squash",
+                        "magit-commit-squash",
+                        "R-4.1",
+                    ),
                     action("A", "commit.alter", "Alter", "magit-commit-alter", "R-4.1"),
                     action(
                         "n",
@@ -68,7 +84,13 @@ pub fn definition() -> MenuDef {
                         "magit-commit-augment",
                         "R-4.1",
                     ),
-                    action("W", "commit.revise", "Revise", "magit-commit-revise", "R-4.1"),
+                    action(
+                        "W",
+                        "commit.revise",
+                        "Revise",
+                        "magit-commit-revise",
+                        "R-4.1",
+                    ),
                 ],
             ),
             group(

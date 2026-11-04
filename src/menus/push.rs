@@ -20,12 +20,7 @@ pub fn definition() -> MenuDef {
                     switch("-u", "--set-upstream", "Set upstream"),
                     switch("-T", "--tags", "Include all tags"),
                     switch("-t", "--follow-tags", "Include related annotated tags"),
-                    option(
-                        "=o",
-                        "--push-option=",
-                        "Set push-options",
-                        Reader::Text,
-                    ),
+                    option("=o", "--push-option=", "Set push-options", Reader::Text),
                 ],
             ),
             group(

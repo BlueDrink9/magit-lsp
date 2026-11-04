@@ -89,13 +89,7 @@ pub fn definition() -> MenuDef {
             group(
                 "Transform",
                 vec![
-                    action(
-                        "b",
-                        "stash.branch",
-                        "Branch",
-                        "magit-stash-branch",
-                        "R-6.5",
-                    ),
+                    action("b", "stash.branch", "Branch", "magit-stash-branch", "R-6.5"),
                     action(
                         "B",
                         "stash.branch-here",

@@ -156,8 +156,11 @@ impl Draft {
     pub fn did_open(&mut self, context: DraftContext<'_>, version: i32, text: &[u8]) -> Result<()> {
         let contents = self.pending(context)?;
         let text = checked_text(text)?;
-        if contents.attached || version < 0 || text != contents.live.text
-            || (contents.opened && version != contents.live.version) {
+        if contents.attached
+            || version < 0
+            || text != contents.live.text
+            || (contents.opened && version != contents.live.version)
+        {
             return Err(Error::new(
                 "Open the commit draft with its current version and exact text",
             ));
@@ -312,7 +315,9 @@ fn file_uri(path: &Path) -> String {
     let mut uri = String::from("file://");
     for byte in path.as_os_str().as_bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'.' | b'_' | b'~' => uri.push(*byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'.' | b'_' | b'~' => {
+                uri.push(*byte as char)
+            }
             _ => uri.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -369,7 +374,9 @@ impl Target {
 
     fn read(&self) -> Result<String> {
         let mut bytes = Vec::new();
-        self.current(false)?.take(MAX_DRAFT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+        self.current(false)?
+            .take(MAX_DRAFT_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
         Ok(checked_text(&bytes)?.to_string())
     }
 
@@ -410,7 +417,8 @@ fn open_message(directory: &File, write: bool) -> Result<File> {
 fn regular_unlinked(file: &File) -> Result<()> {
     let metadata = file.metadata()?;
     // SAFETY: geteuid has no arguments or memory access requirements.
-    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != unsafe { libc::geteuid() } {
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != unsafe { libc::geteuid() }
+    {
         return Err(Error::new(
             "Commit draft target must be a regular file without hardlinks",
         ));

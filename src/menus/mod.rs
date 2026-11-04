@@ -72,11 +72,7 @@ pub enum ItemDef {
 }
 
 /// A boolean argument.
-pub(crate) fn switch(
-    key: &'static str,
-    flag: &'static str,
-    label: &'static str,
-) -> ItemDef {
+pub(crate) fn switch(key: &'static str, flag: &'static str, label: &'static str) -> ItemDef {
     ItemDef::Switch { key, flag, label }
 }
 
@@ -152,15 +148,29 @@ pub fn build(def: &MenuDef) -> Menu {
         for group in &mut menu.groups {
             for item in &mut group.items {
                 match item {
-                    Item::Switch { key, on, status, .. } if key == "-g" || key == "-d" => {
+                    Item::Switch {
+                        key, on, status, ..
+                    } if key == "-g" || key == "-d" => {
                         *on = true;
                         *status = MenuStatus::Implemented;
                     }
-                    Item::Option { key, status, .. } if key != "=n" && key != "=a" && key != "=s" && key != "=g" && key != "=S" && key != "=G" && key != "=f" => {
-                        *status = MenuStatus::Planned { roadmap_id: "R-5.3".to_string() };
+                    Item::Option { key, status, .. }
+                        if key != "=n"
+                            && key != "=a"
+                            && key != "=s"
+                            && key != "=g"
+                            && key != "=S"
+                            && key != "=G"
+                            && key != "=f" =>
+                    {
+                        *status = MenuStatus::Planned {
+                            roadmap_id: "R-5.3".to_string(),
+                        };
                     }
                     Item::Switch { key, status, .. } if key != "-g" && key != "-d" => {
-                        *status = MenuStatus::Planned { roadmap_id: "R-5.3".to_string() };
+                        *status = MenuStatus::Planned {
+                            roadmap_id: "R-5.3".to_string(),
+                        };
                     }
                     _ => {}
                 }

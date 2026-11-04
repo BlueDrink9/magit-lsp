@@ -2,8 +2,8 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
-use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
 use crate::presentation::plain::{ApplyEdit, DocumentFormat, PlainDocument};
+use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -409,8 +409,12 @@ impl Shared {
                         }
                     };
                     for render in renders {
-                        let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
-                            .get(&repo_for_handler).and_then(|views| views.current_snapshot(&render.view_id));
+                        let snapshot = shared
+                            .published
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .get(&repo_for_handler)
+                            .and_then(|views| views.current_snapshot(&render.view_id));
                         if !route_plain_render(&shared, &render.view_id, snapshot) {
                             let _ = shared.sender.send(custom_ui(&shared.client).render(render));
                         }
@@ -576,7 +580,10 @@ impl Shared {
 
     /// Stop new work and cancel every operation that can wait on the client.
     fn terminal_cleanup(&self) {
-        let _plain = self.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        let _plain = self
+            .plain_lifecycle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let runs = {
             let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
             // Serialize the terminal boundary with publication of begin.
@@ -584,9 +591,17 @@ impl Shared {
             progress.values().cloned().collect::<Vec<_>>()
         };
         self.cancel_outbound();
-        self.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).clear();
-        let mut documents = self.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-        for entry in documents.values_mut() { entry.controller.close(); }
+        self.plain_incarnations
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+        let mut documents = self
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        for entry in documents.values_mut() {
+            entry.controller.close();
+        }
         documents.clear();
         drop(documents);
         for run in runs {
@@ -742,24 +757,49 @@ impl Shared {
 
 /// Feed an authoritative logical-view render into its Plain document, if any.
 fn deliver_render(shared: &Shared, render: ViewRender) -> Option<Message> {
-    let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
-        .values().find_map(|views| views.current_snapshot(&render.view_id));
-    if route_plain_render(shared, &render.view_id, snapshot) { None }
-    else { Some(custom_ui(&shared.client).render(render)) }
+    let snapshot = shared
+        .published
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .find_map(|views| views.current_snapshot(&render.view_id));
+    if route_plain_render(shared, &render.view_id, snapshot) {
+        None
+    } else {
+        Some(custom_ui(&shared.client).render(render))
+    }
 }
 
 /// Feed an authoritative logical-view render into its Plain document, if any.
-fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>) -> bool {
-    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-    if shared.closing.load(Ordering::SeqCst) { return true; }
+fn route_plain_render(
+    shared: &Shared,
+    view_id: &str,
+    snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>,
+) -> bool {
+    let _plain = shared
+        .plain_lifecycle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if shared.closing.load(Ordering::SeqCst) {
+        return true;
+    }
     let request = {
-        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some((uri, entry)) = documents.iter_mut().find(|(_, entry)| entry.view_id == view_id) else {
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some((uri, entry)) = documents
+            .iter_mut()
+            .find(|(_, entry)| entry.view_id == view_id)
+        else {
             return false;
         };
-        snapshot.and_then(|(tree, generation, scope, menu)| entry.controller.render_actions(tree, view_id.to_owned(), generation, scope, menu).map(|request| {
-            (entry.incarnation, uri.clone(), request)
-        }))
+        snapshot.and_then(|(tree, generation, scope, menu)| {
+            entry
+                .controller
+                .render_actions(tree, view_id.to_owned(), generation, scope, menu)
+                .map(|request| (entry.incarnation, uri.clone(), request))
+        })
     };
     if let Some((incarnation, uri, request)) = request {
         send_plain_edit(shared, uri, incarnation, request);
@@ -769,7 +809,11 @@ fn route_plain_render(shared: &Shared, view_id: &str, snapshot: Option<(crate::t
 
 /// Send one controller edit and reconcile its correlated standard-LSP reply.
 fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEdit) {
-    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) { return; }
+    if shared.closing.load(Ordering::SeqCst)
+        || !plain_incarnation_is_current(shared, &uri, incarnation)
+    {
+        return;
+    }
     let Ok((pending, receiver)) = shared.register_outbound(
         "workspace/applyEdit",
         serde_json::json!({ "edit": edit.edit }),
@@ -777,7 +821,10 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
         return;
     };
     let shared = shared.clone();
-    let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+    let runtime = shared
+        .runtime
+        .clone()
+        .expect("Plain transport owns a Tokio runtime");
     runtime.spawn(async move {
         let applied = shared.await_outbound(pending, receiver).await.ok()
             .and_then(|response| response.response_result.ok())
@@ -803,28 +850,61 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
 fn schedule_plain_open(shared: &Shared, uri: String) {
     let format = {
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(document) = documents.get(&uri) else { return; };
+        let Some(document) = documents.get(&uri) else {
+            return;
+        };
         DocumentFormat::from_text(&document.text)
     };
-    let Some(path) = file_uri_path(&uri) else { return; };
-    if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) { return; }
+    let Some(path) = file_uri_path(&uri) else {
+        return;
+    };
+    if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) {
+        return;
+    }
     close_plain(shared, &uri);
-    let incarnation = shared.next_plain_incarnation.fetch_add(1, Ordering::Relaxed) + 1;
-    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).insert(uri.clone(), incarnation);
+    let incarnation = shared
+        .next_plain_incarnation
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
+    shared
+        .plain_incarnations
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(uri.clone(), incarnation);
     let shared = shared.clone();
-    tokio::spawn(async move { bootstrap_plain(&shared, uri, incarnation, format).await; });
+    tokio::spawn(async move {
+        bootstrap_plain(&shared, uri, incarnation, format).await;
+    });
 }
 
 async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format: DocumentFormat) {
-    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) { return; }
+    if shared.closing.load(Ordering::SeqCst)
+        || !plain_incarnation_is_current(shared, &uri, incarnation)
+    {
+        return;
+    }
     let (caps, workspaces, encoding) = {
         let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
-        (client.plain.clone(), client.workspace_repositories.iter().map(|r| r.root.clone()).collect::<Vec<_>>(), client.encoding)
+        (
+            client.plain.clone(),
+            client
+                .workspace_repositories
+                .iter()
+                .map(|r| r.root.clone())
+                .collect::<Vec<_>>(),
+            client.encoding,
+        )
     };
     let config = shared.config.config();
-    let Some(path) = file_uri_path(&uri) else { return; };
-    if !crate::config::is_presentation_file(&path, &config.presentation_files) { return; }
-    let Some(caps) = caps else { return; };
+    let Some(path) = file_uri_path(&uri) else {
+        return;
+    };
+    if !crate::config::is_presentation_file(&path, &config.presentation_files) {
+        return;
+    }
+    let Some(caps) = caps else {
+        return;
+    };
     if !caps.apply_edit {
         let _ = shared.sender.send(show_message(2, format!("magit-lsp: cannot render {} because the client does not support workspace/applyEdit", path.display())));
         return;
@@ -833,7 +913,11 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
     let repository = match resolution {
         crate::presentation::resolve::Resolution::Resolved(repository) => repository,
         crate::presentation::resolve::Resolution::Choose(candidates) => {
-            let choices = candidates.iter().map(|item| item.root.display().to_string()).collect::<Vec<_>>().join(", ");
+            let choices = candidates
+                .iter()
+                .map(|item| item.root.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             let _ = shared.sender.send(show_message(2, format!("magit-lsp: cannot choose a repository for {}; workspace roots are ambiguous: {choices}", path.display())));
             return;
         }
@@ -846,83 +930,188 @@ async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format:
     let opened = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         session.set_keymaps(config.keymaps());
-        session.open_with_section_line_limit(view_id.clone(), ViewKind::Status, crate::view::Placement::default(), Viewport::default(), config.config().plain.max_section_lines as usize)
+        session.open_with_section_line_limit(
+            view_id.clone(),
+            ViewKind::Status,
+            crate::view::Placement::default(),
+            Viewport::default(),
+            config.config().plain.max_section_lines as usize,
+        )
     };
     // `open` uses (id, kind, placement, viewport); preserve the root session's
     // authoritative Tree while keeping this logical view private to Plain.
     let (descriptor, _) = match opened {
         Ok(opened) => opened,
-        Err(error) => { let _ = shared.sender.send(show_message(1, format!("magit-lsp: cannot render status: {error}"))); return; }
+        Err(error) => {
+            let _ = shared.sender.send(show_message(
+                1,
+                format!("magit-lsp: cannot render status: {error}"),
+            ));
+            return;
+        }
     };
     let published = handle.lock().unwrap_or_else(|p| p.into_inner()).published();
-    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(shared, &uri, incarnation) {
-        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+    let _plain = shared
+        .plain_lifecycle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if shared.closing.load(Ordering::SeqCst)
+        || !plain_incarnation_is_current(shared, &uri, incarnation)
+    {
+        let _ = handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&descriptor.id);
         return;
     }
-    let current = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(&uri).cloned();
+    let current = shared
+        .documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&uri)
+        .cloned();
     let Some(current) = current else {
-        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        let _ = handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&descriptor.id);
         return;
     };
     let mut controller = PlainDocument::new(uri.clone(), encoding, caps.document_changes, format);
     if let Some((tree, generation, scope, menu)) = published.current_snapshot(&descriptor.id) {
         controller.render_actions(tree, descriptor.id.clone(), generation, scope, menu);
     } else {
-        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        let _ = handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&descriptor.id);
         return;
     }
     let first = controller.open(current.version, current.text);
     if !plain_incarnation_is_current(shared, &uri, incarnation) {
-        let _ = handle.lock().unwrap_or_else(|p| p.into_inner()).close(&descriptor.id);
+        let _ = handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&descriptor.id);
         return;
     }
     {
-        shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).insert(uri.clone(), PlainEntry { incarnation, repo: repo.clone(), view_id: descriptor.id.clone(), controller });
-        shared.view_repos.lock().unwrap_or_else(|p| p.into_inner()).insert(descriptor.id, repo.clone());
-        shared.published.lock().unwrap_or_else(|p| p.into_inner()).entry(repo.clone()).or_insert(published);
+        shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                uri.clone(),
+                PlainEntry {
+                    incarnation,
+                    repo: repo.clone(),
+                    view_id: descriptor.id.clone(),
+                    controller,
+                },
+            );
+        shared
+            .view_repos
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(descriptor.id, repo.clone());
+        shared
+            .published
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(repo.clone())
+            .or_insert(published);
     }
     shared.ensure_watcher(&repo);
-    if let Some(edit) = first { send_plain_edit(shared, uri, incarnation, edit); }
+    if let Some(edit) = first {
+        send_plain_edit(shared, uri, incarnation, edit);
+    }
 }
 
 fn plain_incarnation_is_current(shared: &Shared, uri: &str, incarnation: u64) -> bool {
-    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).get(uri) == Some(&incarnation)
+    shared
+        .plain_incarnations
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(uri)
+        == Some(&incarnation)
 }
 
 fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
-    if let Some(handle) = shared.session(repo) { return handle; }
+    if let Some(handle) = shared.session(repo) {
+        return handle;
+    }
     let candidate = Arc::new(Mutex::new(Session::new(repo)));
     let mut sessions = shared.sessions.lock().unwrap_or_else(|p| p.into_inner());
     sessions.entry(repo.to_owned()).or_insert(candidate).clone()
 }
 
 fn plain_change(shared: &Shared, uri: &str) {
-    let snapshot = shared.documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).cloned();
-    let Some(snapshot) = snapshot else { return; };
-    let (request, warning) = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get_mut(uri)
+    let snapshot = shared
+        .documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(uri)
+        .cloned();
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    let (request, warning) = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(uri)
         .map(|entry| {
             let request = entry.controller.change(snapshot.version, snapshot.text);
             (request, entry.controller.take_format_warning())
-        }).unwrap_or((None, false));
-    if warning { let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into())); }
+        })
+        .unwrap_or((None, false));
+    if warning {
+        let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into()));
+    }
     if let Some(edit) = request {
-        let incarnation = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).get(uri).map(|entry| entry.incarnation);
-        if let Some(incarnation) = incarnation { send_plain_edit(shared, uri.to_owned(), incarnation, edit); }
+        let incarnation = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(uri)
+            .map(|entry| entry.incarnation);
+        if let Some(incarnation) = incarnation {
+            send_plain_edit(shared, uri.to_owned(), incarnation, edit);
+        }
     }
 }
 
 fn close_plain(shared: &Shared, uri: &str) {
-    shared.plain_incarnations.lock().unwrap_or_else(|p| p.into_inner()).remove(uri);
-    let entry = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner()).remove(uri);
-    let Some(mut entry) = entry else { return; };
+    shared
+        .plain_incarnations
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(uri);
+    let entry = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(uri);
+    let Some(mut entry) = entry else {
+        return;
+    };
     entry.controller.close();
     if let Some(session) = shared.session(&entry.repo) {
-        let _ = session.lock().unwrap_or_else(|p| p.into_inner()).close(&entry.view_id);
+        let _ = session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close(&entry.view_id);
     }
-    shared.view_repos.lock().unwrap_or_else(|p| p.into_inner()).remove(&entry.view_id);
+    shared
+        .view_repos
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&entry.view_id);
     let shared = shared.clone();
-    let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+    let runtime = shared
+        .runtime
+        .clone()
+        .expect("Plain transport owns a Tokio runtime");
     runtime.spawn_blocking(move || shared.stop_watcher_if_idle(&entry.repo));
 }
 
@@ -938,7 +1127,12 @@ fn dynamic_delivery(client: &Arc<Mutex<ClientCaps>>) -> bool {
 fn custom_ui(client: &Arc<Mutex<ClientCaps>>) -> CustomRender {
     let client = client.clone();
     CustomRender::negotiated(move || {
-        match client.lock().unwrap_or_else(|p| p.into_inner()).presentation.as_ref() {
+        match client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation
+            .as_ref()
+        {
             Some(Presentation::Rich(rich)) => Some(rich.clone()),
             _ => None,
         }
@@ -980,9 +1174,12 @@ impl PromptBridge {
         let ui = custom_ui(&self.client);
         if !ui.allows_prompt(request) {
             if let Some(sender) = self.sender.upgrade() {
-                let _ = sender.send(ui.effects(ViewEffectsParams { effects: vec![
-                    Effect::message(MessageLevel::Warn, "Client does not support this prompt"),
-                ] }));
+                let _ = sender.send(ui.effects(ViewEffectsParams {
+                    effects: vec![Effect::message(
+                        MessageLevel::Warn,
+                        "Client does not support this prompt",
+                    )],
+                }));
             }
             return None;
         }
@@ -1337,16 +1534,25 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 if request.method == "workspace/executeCommand" {
                     if let Some(reason) = plain_unsupported_execute_reason(&request) {
                         let (response, notifications) = match plain_unsupported_message(reason) {
-                            Ok(dispatched) => (Response::new_ok(request.id, dispatched.result), dispatched.notifications),
+                            Ok(dispatched) => (
+                                Response::new_ok(request.id, dispatched.result),
+                                dispatched.notifications,
+                            ),
                             Err(error) => (error_response(request.id, error), Vec::new()),
                         };
-                        for message in notifications { let _ = sender.send(message); }
+                        for message in notifications {
+                            let _ = sender.send(message);
+                        }
                         let _ = sender.send(Message::Response(response));
                         continue;
                     }
                     if let Some(params) = plain_execute_params(&request) {
-                        let (response, notifications) = match execute_plain_action(&shared, params) {
-                            Ok(dispatched) => (Response::new_ok(request.id, dispatched.result), dispatched.notifications),
+                        let (response, notifications) = match execute_plain_action(&shared, params)
+                        {
+                            Ok(dispatched) => (
+                                Response::new_ok(request.id, dispatched.result),
+                                dispatched.notifications,
+                            ),
                             Err(error) => (error_response(request.id, error), Vec::new()),
                         };
                         for message in notifications {
@@ -1437,7 +1643,10 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     let draft_run = editor::registry()
                         .run_for_uri(&shared.draft_owner, uri)
                         .ok();
-                    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+                    let _plain = shared
+                        .plain_lifecycle
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
                     if let Err(error) = draft_notification(&shared, &notification) {
                         if notification.method == "textDocument/didChange" {
                             shared
@@ -1462,7 +1671,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 notification.method == "textDocument/didClose",
                                 |effects| {
                                     let _ = sender.send(
-                                        custom_ui(&shared.client).effects(ViewEffectsParams { effects }),
+                                        custom_ui(&shared.client)
+                                            .effects(ViewEffectsParams { effects }),
                                     );
                                 },
                             );
@@ -1538,12 +1748,19 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
     }
     let command = argument.get("command")?.as_str()?;
     match crate::commands::registry().availability(command)? {
-        crate::commands::Availability::Planned(_) => Some("This command is planned and cannot run in Plain mode"),
+        crate::commands::Availability::Planned(_) => {
+            Some("This command is planned and cannot run in Plain mode")
+        }
         crate::commands::Availability::Implemented
             if !crate::dispatch::content_command(command)
                 && crate::dispatch::visibility_command(command).is_none()
-                && !matches!(command, "open.commit" | "open.log" | "menu.run-action" | "common.cancel") =>
-            Some("This command requires a Plain client adapter that is not available"),
+                && !matches!(
+                    command,
+                    "open.commit" | "open.log" | "menu.run-action" | "common.cancel"
+                ) =>
+        {
+            Some("This command requires a Plain client adapter that is not available")
+        }
         crate::commands::Availability::Implemented => None,
     }
 }
@@ -1733,16 +1950,23 @@ fn plain_execute_params(request: &Request) -> Option<crate::dispatch::PlainActio
 
 /// Stale Plain action feedback without running the command or touching Git.
 fn plain_stale_message() -> Result<Dispatched> {
-    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse {
-        effects: vec![Effect::message(MessageLevel::Warn, crate::errors::STALE_VIEW)],
-    })?))
+    Ok(Dispatched::value(serde_json::to_value(
+        ViewInvokeResponse {
+            effects: vec![Effect::message(
+                MessageLevel::Warn,
+                crate::errors::STALE_VIEW,
+            )],
+        },
+    )?))
 }
 
 /// Refuse an unsupported Plain action without entering dispatch or registering prompts.
 fn plain_unsupported_message(reason: &'static str) -> Result<Dispatched> {
-    Ok(Dispatched::value(serde_json::to_value(ViewInvokeResponse {
-        effects: vec![Effect::message(MessageLevel::Warn, reason)],
-    })?))
+    Ok(Dispatched::value(serde_json::to_value(
+        ViewInvokeResponse {
+            effects: vec![Effect::message(MessageLevel::Warn, reason)],
+        },
+    )?))
 }
 
 /// Execute a Plain action only while its retained offer still matches live state.
@@ -1750,15 +1974,21 @@ fn execute_plain_action(
     shared: &Shared,
     params: crate::dispatch::PlainActionParams,
 ) -> Result<Dispatched> {
-    let caps = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
+    let caps = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .clone();
     if let Some(caps) = caps.as_ref() {
         if crate::dispatch::content_command(&params.command) {
-        match caps.content_action(&params.command) {
-            Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)
-                | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason)) =>
-                    return plain_unsupported_message(reason),
-            _ => {}
-        }
+            match caps.content_action(&params.command) {
+                Some(
+                    crate::presentation::PlainContentAction::MissingCapabilities(reason)
+                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason),
+                ) => return plain_unsupported_message(reason),
+                _ => {}
+            }
         }
     } else {
         return plain_unsupported_message("Plain action capabilities are unavailable");
@@ -1776,8 +2006,11 @@ fn execute_plain_action(
             .plain_documents
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let Some(entry) = documents.get(uri) else { return plain_stale_message(); };
-        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text)
+        let Some(entry) = documents.get(uri) else {
+            return plain_stale_message();
+        };
+        let Some((tree, view_id, generation, scope, menu)) =
+            entry.controller.action_snapshot(&text)
         else {
             return plain_stale_message();
         };
@@ -1786,7 +2019,9 @@ fn execute_plain_action(
         }
         let line = match &params.target {
             crate::dispatch::PlainActionTarget::Content(target) => {
-                let Some(node) = tree.node(&target.node_id) else { return plain_stale_message(); };
+                let Some(node) = tree.node(&target.node_id) else {
+                    return plain_stale_message();
+                };
                 let git = crate::git::GitRepo::open(&entry.repo)?;
                 if !crate::dispatch::target_is_current(&git, tree, &params.command, target)? {
                     return plain_stale_message();
@@ -1794,39 +2029,76 @@ fn execute_plain_action(
                 node.start_line
             }
             crate::dispatch::PlainActionTarget::View(target) => {
-                let supported = matches!(params.command.as_str(), "open.commit" | "open.log" | "common.cancel");
-                let applies = crate::commands::registry().get(&params.command).is_some_and(|command| command.applies_to(&scope));
-                if !supported || target.view_id != view_id || !(applies || (params.command == "common.cancel" && scope != "status")) {
+                let supported = matches!(
+                    params.command.as_str(),
+                    "open.commit" | "open.log" | "common.cancel"
+                );
+                let applies = crate::commands::registry()
+                    .get(&params.command)
+                    .is_some_and(|command| command.applies_to(&scope));
+                if !supported
+                    || target.view_id != view_id
+                    || !(applies || (params.command == "common.cancel" && scope != "status"))
+                {
                     return plain_stale_message();
                 }
                 0
             }
             crate::dispatch::PlainActionTarget::Node(target) => {
                 if !crate::dispatch::visibility_command(&params.command).is_some()
-                    || target.view_id != view_id || scope != "status" {
+                    || target.view_id != view_id
+                    || scope != "status"
+                {
                     return plain_stale_message();
                 }
-                let Some(node) = tree.node(&target.node_id) else { return plain_stale_message(); };
-                if matches!(params.command.as_str(), "common.toggle-section" | "common.show-section" | "common.hide-section")
-                    && tree.collapsible_ancestor(&node.id).is_none() {
+                let Some(node) = tree.node(&target.node_id) else {
+                    return plain_stale_message();
+                };
+                if matches!(
+                    params.command.as_str(),
+                    "common.toggle-section" | "common.show-section" | "common.hide-section"
+                ) && tree.collapsible_ancestor(&node.id).is_none()
+                {
                     return plain_stale_message();
                 }
                 node.start_line
             }
             crate::dispatch::PlainActionTarget::MenuItem(target) => {
-                let valid = target.view_id == view_id && menu.as_ref().is_some_and(|menu| {
-                    if menu.id != target.menu_id { return false; }
-                    match (params.command.as_str(), menu.item(&target.item_key)) {
-                        ("menu.toggle-switch", Some(crate::menu::Item::Switch { status: crate::menu::MenuStatus::Implemented, .. })) => true,
-                        ("menu.run-action", Some(crate::menu::Item::Action { command, status: crate::menu::MenuStatus::Implemented, .. })) => command == "log.current",
-                        _ => false,
-                    }
-                });
-                if !valid { return plain_stale_message(); }
+                let valid = target.view_id == view_id
+                    && menu.as_ref().is_some_and(|menu| {
+                        if menu.id != target.menu_id {
+                            return false;
+                        }
+                        match (params.command.as_str(), menu.item(&target.item_key)) {
+                            (
+                                "menu.toggle-switch",
+                                Some(crate::menu::Item::Switch {
+                                    status: crate::menu::MenuStatus::Implemented,
+                                    ..
+                                }),
+                            ) => true,
+                            (
+                                "menu.run-action",
+                                Some(crate::menu::Item::Action {
+                                    command,
+                                    status: crate::menu::MenuStatus::Implemented,
+                                    ..
+                                }),
+                            ) => command == "log.current",
+                            _ => false,
+                        }
+                    });
+                if !valid {
+                    return plain_stale_message();
+                }
                 0
             }
         };
-        if matches!(params.target, crate::dispatch::PlainActionTarget::Content(_)) && !crate::dispatch::content_command(&params.command) {
+        if matches!(
+            params.target,
+            crate::dispatch::PlainActionTarget::Content(_)
+        ) && !crate::dispatch::content_command(&params.command)
+        {
             return plain_stale_message();
         }
         let repo = entry.repo.clone();
@@ -1839,37 +2111,72 @@ fn execute_plain_action(
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new("Plain action session closed"))?;
-    if params.command == "common.cancel" && scope == "log" && matches!(params.target, crate::dispatch::PlainActionTarget::View(_)) {
-        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
+    if params.command == "common.cancel"
+        && scope == "log"
+        && matches!(params.target, crate::dispatch::PlainActionTarget::View(_))
+    {
+        let result = handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
             .back_from_plain_log(&view_id, params.view_generation)?;
         return dispatched_outcome(shared, &repo, result);
     }
     if let crate::dispatch::PlainActionTarget::MenuItem(target) = &params.target {
-      if params.command == "menu.toggle-switch" {
-        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
-            .toggle_menu_switch(&view_id, params.view_generation, &target.menu_id, &target.item_key)?;
-        return dispatched_outcome(shared, &repo, result);
-      }
-      if params.command == "menu.run-action" {
-        let ui = ServerUi::new(shared);
-        let result = handle.lock().unwrap_or_else(|p| p.into_inner())
-            .run_plain_menu_action(&view_id, params.view_generation, &target.menu_id, &target.item_key, &ui)?;
-        return dispatched_outcome(shared, &repo, result);
-      }
+        if params.command == "menu.toggle-switch" {
+            let result = handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .toggle_menu_switch(
+                    &view_id,
+                    params.view_generation,
+                    &target.menu_id,
+                    &target.item_key,
+                )?;
+            return dispatched_outcome(shared, &repo, result);
+        }
+        if params.command == "menu.run-action" {
+            let ui = ServerUi::new(shared);
+            let result = handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .run_plain_menu_action(
+                    &view_id,
+                    params.view_generation,
+                    &target.menu_id,
+                    &target.item_key,
+                    &ui,
+                )?;
+            return dispatched_outcome(shared, &repo, result);
+        }
     }
     let request = crate::dispatch::DispatchRequest {
         command: params.command,
         target: crate::dispatch::DispatchTarget {
             view_id: view_id.clone(),
             version: Some(params.view_generation),
-            cursor: matches!(params.target, crate::dispatch::PlainActionTarget::Content(_) | crate::dispatch::PlainActionTarget::Node(_)).then_some(Cursor { line, column: 0 }),
-            selection: match &params.target { crate::dispatch::PlainActionTarget::Content(target) => target.selection.map(|selection| crate::protocol::Selection {
-                start_line: selection.start_line as usize,
-                end_line: selection.end_line as usize,
-            }), _ => None },
+            cursor: matches!(
+                params.target,
+                crate::dispatch::PlainActionTarget::Content(_)
+                    | crate::dispatch::PlainActionTarget::Node(_)
+            )
+            .then_some(Cursor { line, column: 0 }),
+            selection: match &params.target {
+                crate::dispatch::PlainActionTarget::Content(target) => {
+                    target
+                        .selection
+                        .map(|selection| crate::protocol::Selection {
+                            start_line: selection.start_line as usize,
+                            end_line: selection.end_line as usize,
+                        })
+                }
+                _ => None,
+            },
             key: None,
         },
-        action_target: match params.target { crate::dispatch::PlainActionTarget::Content(target) => Some(target), _ => None },
+        action_target: match params.target {
+            crate::dispatch::PlainActionTarget::Content(target) => Some(target),
+            _ => None,
+        },
         args: None,
     };
     let step = handle
@@ -2253,9 +2560,20 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let result = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.document_symbols_with_encoding(encoding)) }
-                else { tree_for_positional_request(shared, uri).map(|tree| tree.document_symbols()) };
-            let Some(result) = result else { return Ok(Dispatched::value(Value::Null)); };
+            let result = if is_plain_provider_uri(shared, uri) {
+                let encoding = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .encoding;
+                plain_provider_snapshot(shared, uri)
+                    .map(|(tree, _, _)| tree.document_symbols_with_encoding(encoding))
+            } else {
+                tree_for_positional_request(shared, uri).map(|tree| tree.document_symbols())
+            };
+            let Some(result) = result else {
+                return Ok(Dispatched::value(Value::Null));
+            };
             let result = serde_json::to_value(result)?;
             Ok(Dispatched::value(result))
         }
@@ -2270,13 +2588,24 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let location = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).and_then(|(tree, repo, text)| {
-                if !plain_position_valid(&text, position.position, encoding) { return None; }
-                tree.definition_with_encoding(&repo, position.position, encoding)
-            }) } else { tree_for_positional_request(shared, uri).and_then(|tree| {
-                let repo = shared.repo_for_uri(uri)?;
-                tree.definition(&repo, position.position)
-            }) };
+            let location = if is_plain_provider_uri(shared, uri) {
+                let encoding = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .encoding;
+                plain_provider_snapshot(shared, uri).and_then(|(tree, repo, text)| {
+                    if !plain_position_valid(&text, position.position, encoding) {
+                        return None;
+                    }
+                    tree.definition_with_encoding(&repo, position.position, encoding)
+                })
+            } else {
+                tree_for_positional_request(shared, uri).and_then(|tree| {
+                    let repo = shared.repo_for_uri(uri)?;
+                    tree.definition(&repo, position.position)
+                })
+            };
             Ok(Dispatched::value(serde_json::to_value(location)?))
         }
         "textDocument/documentLink" => {
@@ -2285,8 +2614,21 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let links = if is_plain_provider_uri(shared, uri) { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, repo, _)| tree.document_links_with_encoding(&repo, encoding)) } else { tree_for_positional_request(shared, uri).and_then(|tree| Some(tree.document_links(&shared.repo_for_uri(uri)?))) };
-            let Some(links) = links else { return Ok(Dispatched::value(Value::Null)); };
+            let links = if is_plain_provider_uri(shared, uri) {
+                let encoding = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .encoding;
+                plain_provider_snapshot(shared, uri)
+                    .map(|(tree, repo, _)| tree.document_links_with_encoding(&repo, encoding))
+            } else {
+                tree_for_positional_request(shared, uri)
+                    .and_then(|tree| Some(tree.document_links(&shared.repo_for_uri(uri)?)))
+            };
+            let Some(links) = links else {
+                return Ok(Dispatched::value(Value::Null));
+            };
             Ok(Dispatched::value(serde_json::to_value(links)?))
         }
         "textDocument/foldingRange" => {
@@ -2295,7 +2637,11 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             if shared.is_text_uri(uri) {
                 return Ok(Dispatched::value(Value::Null));
             }
-            let ranges = if is_plain_provider_uri(shared, uri) { plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.folding_ranges()) } else { tree_for_positional_request(shared, uri).map(|tree| tree.folding_ranges()) };
+            let ranges = if is_plain_provider_uri(shared, uri) {
+                plain_provider_snapshot(shared, uri).map(|(tree, _, _)| tree.folding_ranges())
+            } else {
+                tree_for_positional_request(shared, uri).map(|tree| tree.folding_ranges())
+            };
             Ok(Dispatched::value(serde_json::to_value(ranges)?))
         }
         "textDocument/semanticTokens/full" => {
@@ -2305,9 +2651,24 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                 return Ok(Dispatched::value(Value::Null));
             }
             let plain = is_plain_provider_uri(shared, uri);
-            let tokens = if plain { let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding; plain_provider_snapshot(shared, uri).map(|(tree, _, _)| semantic_tokens::encode_with_encoding(&tree, encoding)) }
-                else { Some(tree_for_positional_request(shared, uri).map(|tree| semantic_tokens::encode(&tree)).unwrap_or_default()) };
-            let Some(tokens) = tokens else { return Ok(Dispatched::value(Value::Null)); };
+            let tokens = if plain {
+                let encoding = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .encoding;
+                plain_provider_snapshot(shared, uri)
+                    .map(|(tree, _, _)| semantic_tokens::encode_with_encoding(&tree, encoding))
+            } else {
+                Some(
+                    tree_for_positional_request(shared, uri)
+                        .map(|tree| semantic_tokens::encode(&tree))
+                        .unwrap_or_default(),
+                )
+            };
+            let Some(tokens) = tokens else {
+                return Ok(Dispatched::value(Value::Null));
+            };
             let result = serde_json::to_value(SemanticTokensResult::Tokens(tokens))?;
             Ok(Dispatched::value(result))
         }
@@ -2318,42 +2679,99 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
     let uri = params.text_document.uri.as_str();
     let (text, tree, view_id, generation, scope, repo, menu) = {
-        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+        let _lifecycle = shared
+            .plain_lifecycle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else { return Value::Array(Vec::new()); };
+        let Some(document) = documents.get(uri).filter(|doc| !doc.repair) else {
+            return Value::Array(Vec::new());
+        };
         let text = document.text.clone();
-        let documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(entry) = documents.get(uri) else { return Value::Array(Vec::new()); };
-        let Some((tree, view_id, generation, scope, menu)) = entry.controller.action_snapshot(&text) else { return Value::Array(Vec::new()); };
-        if view_id != entry.view_id { return Value::Array(Vec::new()); }
-        (text, tree.clone(), view_id.to_owned(), generation, scope.to_owned(), entry.repo.clone(), menu.cloned())
+        let documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(entry) = documents.get(uri) else {
+            return Value::Array(Vec::new());
+        };
+        let Some((tree, view_id, generation, scope, menu)) =
+            entry.controller.action_snapshot(&text)
+        else {
+            return Value::Array(Vec::new());
+        };
+        if view_id != entry.view_id {
+            return Value::Array(Vec::new());
+        }
+        (
+            text,
+            tree.clone(),
+            view_id.to_owned(),
+            generation,
+            scope.to_owned(),
+            entry.repo.clone(),
+            menu.cloned(),
+        )
     };
     let config = shared.config.for_repository(std::path::Path::new(&repo));
-    let capabilities = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.clone();
+    let capabilities = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .clone();
     let style = config.config().actions.title_style;
     let keymap = config.keymap(&scope);
     let start = params.range.start;
     let end = params.range.end;
-    let encoding = shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding;
+    let encoding = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .encoding;
     if !plain_position_valid(&text, start, encoding)
         || !plain_position_valid(&text, end, encoding)
-        || (start.line, start.character) > (end.line, end.character) {
+        || (start.line, start.character) > (end.line, end.character)
+    {
         return Value::Array(Vec::new());
     }
     let selection = if start != end {
-        let end_line = if end.character == 0 && end.line > start.line { end.line - 1 } else { end.line };
-        if start.line > end_line { return Value::Array(Vec::new()); }
+        let end_line = if end.character == 0 && end.line > start.line {
+            end.line - 1
+        } else {
+            end.line
+        };
+        if start.line > end_line {
+            return Value::Array(Vec::new());
+        }
         Some((start.line, end_line))
-    } else { None };
-    let Some(line_node) = tree.line_nodes.get(start.line as usize).and_then(|line| tree.node(&line.node)) else {
+    } else {
+        None
+    };
+    let Some(line_node) = tree
+        .line_nodes
+        .get(start.line as usize)
+        .and_then(|line| tree.node(&line.node))
+    else {
         return Value::Array(Vec::new());
     };
     let mut actions = Vec::new();
     if let Some(menu) = menu {
         for item in menu.groups.iter().flat_map(|group| &group.items) {
-            let crate::menu::Item::Switch { key, label, status, .. } = item else { continue; };
+            let crate::menu::Item::Switch {
+                key, label, status, ..
+            } = item
+            else {
+                continue;
+            };
             let implemented = matches!(status, crate::menu::MenuStatus::Implemented);
-            if !implemented && !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) { continue; }
+            if !implemented
+                && !capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.disabled_actions)
+            {
+                continue;
+            }
             let args = serde_json::json!({
                 "command": "menu.toggle-switch",
                 "documentUri": uri,
@@ -2361,50 +2779,119 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 "viewGeneration": generation,
             });
             let title = format!("Toggle {label}");
-            actions.push(serde_json::to_value(lsp_types::CodeAction {
-                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                disabled: (!implemented).then(|| lsp_types::CodeActionDisabled { reason: "Unavailable: menu switch is not implemented".into() }),
-                edit: None,
-                command: implemented.then(|| lsp_types::Command { title, command: "magit.command".into(), arguments: Some(vec![args.clone()]) }),
-                data: (!implemented).then_some(args),
-            }).unwrap_or(Value::Null));
+            actions.push(
+                serde_json::to_value(lsp_types::CodeAction {
+                    title: title.clone(),
+                    kind: None,
+                    diagnostics: None,
+                    is_preferred: None,
+                    disabled: (!implemented).then(|| lsp_types::CodeActionDisabled {
+                        reason: "Unavailable: menu switch is not implemented".into(),
+                    }),
+                    edit: None,
+                    command: implemented.then(|| lsp_types::Command {
+                        title,
+                        command: "magit.command".into(),
+                        arguments: Some(vec![args.clone()]),
+                    }),
+                    data: (!implemented).then_some(args),
+                })
+                .unwrap_or(Value::Null),
+            );
         }
         for item in menu.groups.iter().flat_map(|group| &group.items) {
-            let crate::menu::Item::Action { key, command, label, status: crate::menu::MenuStatus::Implemented, .. } = item else { continue; };
-            if command != "log.current" { continue; }
+            let crate::menu::Item::Action {
+                key,
+                command,
+                label,
+                status: crate::menu::MenuStatus::Implemented,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            if command != "log.current" {
+                continue;
+            }
             let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
-            actions.push(serde_json::to_value(lsp_types::CodeAction { title: format!("Open {label}"), kind:None, diagnostics:None, is_preferred:None, disabled:None, edit:None, command:Some(lsp_types::Command { title:format!("Open {label}"), command:"magit.command".into(), arguments:Some(vec![args]) }), data:None }).unwrap_or(Value::Null));
+            actions.push(
+                serde_json::to_value(lsp_types::CodeAction {
+                    title: format!("Open {label}"),
+                    kind: None,
+                    diagnostics: None,
+                    is_preferred: None,
+                    disabled: None,
+                    edit: None,
+                    command: Some(lsp_types::Command {
+                        title: format!("Open {label}"),
+                        command: "magit.command".into(),
+                        arguments: Some(vec![args]),
+                    }),
+                    data: None,
+                })
+                .unwrap_or(Value::Null),
+            );
         }
     }
     for command in crate::commands::registry().iter() {
-        if !command.applies_to(&scope) { continue; }
+        if !command.applies_to(&scope) {
+            continue;
+        }
         let registry_availability = crate::commands::registry().availability(command.id);
         if crate::dispatch::visibility_command(command.id).is_some() {
-            if scope != "status" { continue; }
-            let local = matches!(command.id, "common.toggle-section" | "common.show-section" | "common.hide-section");
+            if scope != "status" {
+                continue;
+            }
+            let local = matches!(
+                command.id,
+                "common.toggle-section" | "common.show-section" | "common.hide-section"
+            );
             // Offer global controls from section headers; their typed target is
             // still any retained status node when a client invokes them.
-            if !local && line_node.kind != crate::tree::NodeKind::Section { continue; }
-            if local && tree.collapsible_ancestor(&line_node.id).is_none() { continue; }
+            if !local && line_node.kind != crate::tree::NodeKind::Section {
+                continue;
+            }
+            if local && tree.collapsible_ancestor(&line_node.id).is_none() {
+                continue;
+            }
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
                 "target": { "viewId": view_id, "nodeId": line_node.id },
                 "viewGeneration": generation,
             });
-            let title = plain_action_title(style, command.doc,
-                keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str),
-                line_node.path.as_deref());
-            actions.push(serde_json::to_value(lsp_types::CodeAction {
-                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                disabled: None, edit: None,
-                command: Some(lsp_types::Command { title, command: "magit.command".into(), arguments: Some(vec![args]) }),
-                data: None,
-            }).unwrap_or(Value::Null));
+            let title = plain_action_title(
+                style,
+                command.doc,
+                keymap
+                    .as_ref()
+                    .and_then(|map| map.command(command.id))
+                    .and_then(|binding| binding.keys.first())
+                    .map(String::as_str),
+                line_node.path.as_deref(),
+            );
+            actions.push(
+                serde_json::to_value(lsp_types::CodeAction {
+                    title: title.clone(),
+                    kind: None,
+                    diagnostics: None,
+                    is_preferred: None,
+                    disabled: None,
+                    edit: None,
+                    command: Some(lsp_types::Command {
+                        title,
+                        command: "magit.command".into(),
+                        arguments: Some(vec![args]),
+                    }),
+                    data: None,
+                })
+                .unwrap_or(Value::Null),
+            );
             continue;
         }
         if !crate::dispatch::content_command(command.id) {
-            let semantic = (matches!(command.id, "open.commit" | "open.log") && command.applies_to(&scope))
+            let semantic = (matches!(command.id, "open.commit" | "open.log")
+                && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
                 let args = serde_json::json!({
@@ -2413,27 +2900,70 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                     "target": { "viewId": view_id },
                     "viewGeneration": generation,
                 });
-                let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
-                actions.push(serde_json::to_value(lsp_types::CodeAction {
-                    title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                    disabled: None, edit: None,
-                    command: Some(lsp_types::Command { title, command: "magit.command".to_string(), arguments: Some(vec![args]) }),
-                    data: None,
-                }).unwrap_or(Value::Null));
+                let title = plain_action_title(
+                    style,
+                    command.doc,
+                    keymap
+                        .as_ref()
+                        .and_then(|map| map.command(command.id))
+                        .and_then(|binding| binding.keys.first())
+                        .map(String::as_str),
+                    line_node.path.as_deref(),
+                );
+                actions.push(
+                    serde_json::to_value(lsp_types::CodeAction {
+                        title: title.clone(),
+                        kind: None,
+                        diagnostics: None,
+                        is_preferred: None,
+                        disabled: None,
+                        edit: None,
+                        command: Some(lsp_types::Command {
+                            title,
+                            command: "magit.command".to_string(),
+                            arguments: Some(vec![args]),
+                        }),
+                        data: None,
+                    })
+                    .unwrap_or(Value::Null),
+                );
                 continue;
             }
             let reason = match registry_availability {
-                Some(crate::commands::Availability::Planned(roadmap)) => Some(format!("Planned: roadmap {roadmap}")),
-                Some(crate::commands::Availability::Implemented) => Some("Unavailable: Plain client adapter is not implemented".to_owned()),
+                Some(crate::commands::Availability::Planned(roadmap)) => {
+                    Some(format!("Planned: roadmap {roadmap}"))
+                }
+                Some(crate::commands::Availability::Implemented) => {
+                    Some("Unavailable: Plain client adapter is not implemented".to_owned())
+                }
                 None => continue,
             };
-            if !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) { continue; }
+            if !capabilities
+                .as_ref()
+                .is_some_and(|caps| caps.disabled_actions)
+            {
+                continue;
+            }
             let args = serde_json::json!({"command": command.id, "documentUri": uri, "viewGeneration": generation});
-            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
+            let title = plain_action_title(
+                style,
+                command.doc,
+                keymap
+                    .as_ref()
+                    .and_then(|map| map.command(command.id))
+                    .and_then(|binding| binding.keys.first())
+                    .map(String::as_str),
+                line_node.path.as_deref(),
+            );
             let action = lsp_types::CodeAction {
-                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                disabled: reason.map(|reason| lsp_types::CodeActionDisabled { reason }), edit: None,
-                command: None, data: Some(args),
+                title: title.clone(),
+                kind: None,
+                diagnostics: None,
+                is_preferred: None,
+                disabled: reason.map(|reason| lsp_types::CodeActionDisabled { reason }),
+                edit: None,
+                command: None,
+                data: Some(args),
             };
             actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
             continue;
@@ -2444,14 +2974,22 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             crate::dispatch::offer_target(&tree, command.id, &line_node.id)
         };
         if let Some(target) = target {
-            let availability = capabilities.as_ref().and_then(|caps| caps.content_action(command.id));
+            let availability = capabilities
+                .as_ref()
+                .and_then(|caps| caps.content_action(command.id));
             let unavailable = match availability {
-                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)
-                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason)) => Some(reason),
+                Some(
+                    crate::presentation::PlainContentAction::MissingCapabilities(reason)
+                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason),
+                ) => Some(reason),
                 Some(crate::presentation::PlainContentAction::Supported) => None,
                 None => continue,
             };
-            if unavailable.is_some() && !capabilities.as_ref().is_some_and(|caps| caps.disabled_actions) {
+            if unavailable.is_some()
+                && !capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.disabled_actions)
+            {
                 continue;
             }
             let args = serde_json::json!({
@@ -2460,13 +2998,31 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 "target": target.clone(),
                 "viewGeneration": generation,
             });
-            let title = plain_action_title(style, command.doc, keymap.as_ref().and_then(|map| map.command(command.id)).and_then(|binding| binding.keys.first()).map(String::as_str), line_node.path.as_deref());
+            let title = plain_action_title(
+                style,
+                command.doc,
+                keymap
+                    .as_ref()
+                    .and_then(|map| map.command(command.id))
+                    .and_then(|binding| binding.keys.first())
+                    .map(String::as_str),
+                line_node.path.as_deref(),
+            );
             let action = lsp_types::CodeAction {
-                title: title.clone(), kind: None, diagnostics: None, is_preferred: None,
-                disabled: unavailable.map(|reason| lsp_types::CodeActionDisabled { reason: reason.to_owned() }), edit: None,
+                title: title.clone(),
+                kind: None,
+                diagnostics: None,
+                is_preferred: None,
+                disabled: unavailable.map(|reason| lsp_types::CodeActionDisabled {
+                    reason: reason.to_owned(),
+                }),
+                edit: None,
                 command: unavailable.is_none().then(|| lsp_types::Command {
-                    title, command: "magit.command".to_string(), arguments: Some(vec![args.clone()]),
-                }), data: unavailable.map(|_| args),
+                    title,
+                    command: "magit.command".to_string(),
+                    arguments: Some(vec![args.clone()]),
+                }),
+                data: unavailable.map(|_| args),
             };
             actions.push(serde_json::to_value(action).unwrap_or(Value::Null));
         }
@@ -2474,9 +3030,24 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     Value::Array(actions)
 }
 
-fn plain_action_title(style: crate::config::TitleStyle, doc: &str, chord: Option<&str>, path: Option<&str>) -> String {
-    let mnemonic = matches!(style, crate::config::TitleStyle::Mnemonic | crate::config::TitleStyle::MnemonicPath).then_some(chord).flatten();
-    let path = matches!(style, crate::config::TitleStyle::Path | crate::config::TitleStyle::MnemonicPath).then_some(path).flatten();
+fn plain_action_title(
+    style: crate::config::TitleStyle,
+    doc: &str,
+    chord: Option<&str>,
+    path: Option<&str>,
+) -> String {
+    let mnemonic = matches!(
+        style,
+        crate::config::TitleStyle::Mnemonic | crate::config::TitleStyle::MnemonicPath
+    )
+    .then_some(chord)
+    .flatten();
+    let path = matches!(
+        style,
+        crate::config::TitleStyle::Path | crate::config::TitleStyle::MnemonicPath
+    )
+    .then_some(path)
+    .flatten();
     match (mnemonic, path) {
         (Some(chord), Some(path)) => format!("{chord} {path}: {doc}"),
         (Some(chord), None) => format!("{chord} {doc}"),
@@ -2492,27 +3063,50 @@ mod plain_action_title_tests {
 
     #[test]
     fn title_styles_omit_missing_components() {
-        assert_eq!(plain_action_title(TitleStyle::Plain, "Stage", None, None), "Stage");
-        assert_eq!(plain_action_title(TitleStyle::Mnemonic, "Stage", None, None), "Stage");
-        assert_eq!(plain_action_title(TitleStyle::Path, "Stage", None, Some("src/a")), "src/a: Stage");
-        assert_eq!(plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), None), "s Stage");
-        assert_eq!(plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), Some("src/a")), "s src/a: Stage");
+        assert_eq!(
+            plain_action_title(TitleStyle::Plain, "Stage", None, None),
+            "Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::Mnemonic, "Stage", None, None),
+            "Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::Path, "Stage", None, Some("src/a")),
+            "src/a: Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), None),
+            "s Stage"
+        );
+        assert_eq!(
+            plain_action_title(TitleStyle::MnemonicPath, "Stage", Some("s"), Some("src/a")),
+            "s src/a: Stage"
+        );
     }
 }
 
 fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Encoding) -> bool {
-    let Some(line) = text.split('\n').nth(position.line as usize) else { return false; };
+    let Some(line) = text.split('\n').nth(position.line as usize) else {
+        return false;
+    };
     let line = line.strip_suffix('\r').unwrap_or(line);
     let mut units = 0u32;
-    if position.character == 0 { return true; }
+    if position.character == 0 {
+        return true;
+    }
     for ch in line.chars() {
         units = match encoding {
             Encoding::Utf8 => units.saturating_add(ch.len_utf8() as u32),
             Encoding::Utf16 => units.saturating_add(ch.len_utf16() as u32),
             Encoding::Utf32 => units.saturating_add(1),
         };
-        if units == position.character { return true; }
-        if units > position.character { return false; }
+        if units == position.character {
+            return true;
+        }
+        if units > position.character {
+            return false;
+        }
     }
     units == position.character
 }
@@ -2520,18 +3114,39 @@ fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Enc
 fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolve::Repository> {
     use crate::git::GitRepo;
     let mut paths = Vec::new();
-    if let Some(folders) = params.pointer("/workspaceFolders").and_then(Value::as_array) {
-        paths.extend(folders.iter().filter_map(|folder| folder.get("uri").and_then(Value::as_str).and_then(file_uri_path)));
+    if let Some(folders) = params
+        .pointer("/workspaceFolders")
+        .and_then(Value::as_array)
+    {
+        paths.extend(folders.iter().filter_map(|folder| {
+            folder
+                .get("uri")
+                .and_then(Value::as_str)
+                .and_then(file_uri_path)
+        }));
     }
     if paths.is_empty() {
-        if let Some(path) = params.get("rootUri").and_then(Value::as_str).and_then(file_uri_path) {
+        if let Some(path) = params
+            .get("rootUri")
+            .and_then(Value::as_str)
+            .and_then(file_uri_path)
+        {
             paths.push(path);
         }
     }
     let mut repositories = Vec::new();
     for path in paths {
-        if let Some(repository) = GitRepo::discover(&path).ok().flatten().map(|repo| crate::presentation::resolve::Repository { root: repo.root().to_owned(), git_dir: repo.git_dir().to_owned(), common_dir: repo.common_dir().to_owned() }) {
-            if !repositories.iter().any(|item: &crate::presentation::resolve::Repository| item.root == repository.root) {
+        if let Some(repository) = GitRepo::discover(&path).ok().flatten().map(|repo| {
+            crate::presentation::resolve::Repository {
+                root: repo.root().to_owned(),
+                git_dir: repo.git_dir().to_owned(),
+                common_dir: repo.common_dir().to_owned(),
+            }
+        }) {
+            if !repositories
+                .iter()
+                .any(|item: &crate::presentation::resolve::Repository| item.root == repository.root)
+            {
                 repositories.push(repository);
             }
         }
@@ -2541,8 +3156,13 @@ fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolv
 
 fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
     let rest = uri.strip_prefix("file://")?;
-    let path = if let Some(local) = rest.strip_prefix("localhost/") { format!("/{local}") }
-        else if rest.starts_with('/') { rest.to_owned() } else { return None };
+    let path = if let Some(local) = rest.strip_prefix("localhost/") {
+        format!("/{local}")
+    } else if rest.starts_with('/') {
+        rest.to_owned()
+    } else {
+        return None;
+    };
     let bytes = path.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -2561,7 +3181,12 @@ fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
 }
 
 fn hex(byte: u8) -> Option<u8> {
-    match byte { b'0'..=b'9' => Some(byte - b'0'), b'a'..=b'f' => Some(byte - b'a' + 10), b'A'..=b'F' => Some(byte - b'A' + 10), _ => None }
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -2570,9 +3195,21 @@ mod repository_uri_tests {
 
     #[test]
     fn file_uri_decoding_is_complete_and_rejects_nonlocal_or_malformed_uris() {
-        assert_eq!(file_uri_path("file:///tmp/a%20%C3%A9%23%25").unwrap(), std::path::PathBuf::from("/tmp/a é#%"));
-        assert_eq!(file_uri_path("file://localhost/tmp/a%20b").unwrap(), std::path::PathBuf::from("/tmp/a b"));
-        for invalid in ["https://example.test/a", "file://remote/tmp/a", "file:///tmp/%Q0", "file:///tmp/%FF", "file:///tmp/%2"] {
+        assert_eq!(
+            file_uri_path("file:///tmp/a%20%C3%A9%23%25").unwrap(),
+            std::path::PathBuf::from("/tmp/a é#%")
+        );
+        assert_eq!(
+            file_uri_path("file://localhost/tmp/a%20b").unwrap(),
+            std::path::PathBuf::from("/tmp/a b")
+        );
+        for invalid in [
+            "https://example.test/a",
+            "file://remote/tmp/a",
+            "file:///tmp/%Q0",
+            "file:///tmp/%FF",
+            "file:///tmp/%2",
+        ] {
             assert!(file_uri_path(invalid).is_none(), "accepted {invalid}");
         }
     }
@@ -2584,22 +3221,36 @@ fn tree_for_positional_request(shared: &Shared, uri: &str) -> Option<Tree> {
 }
 
 fn plain_provider_snapshot(shared: &Shared, uri: &str) -> Option<(Tree, String, String)> {
-    let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+    let _lifecycle = shared
+        .plain_lifecycle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
     let document = documents.get(uri).filter(|doc| !doc.repair)?;
     let text = document.text.clone();
-    let entries = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+    let entries = shared
+        .plain_documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let entry = entries.get(uri)?;
     let (tree, view_id, _, _, _) = entry.controller.action_snapshot(&text)?;
-    if view_id != entry.view_id { return None; }
+    if view_id != entry.view_id {
+        return None;
+    }
     Some((tree.clone(), entry.repo.clone(), text))
 }
 
 fn is_plain_provider_uri(shared: &Shared, uri: &str) -> bool {
-    let negotiated = shared.client.lock().unwrap_or_else(|p| p.into_inner()).plain.is_some();
-    negotiated && file_uri_path(uri).is_some_and(|path| {
-        crate::config::is_presentation_file(&path, &shared.config.config().presentation_files)
-    })
+    let negotiated = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .is_some();
+    negotiated
+        && file_uri_path(uri).is_some_and(|path| {
+            crate::config::is_presentation_file(&path, &shared.config.config().presentation_files)
+        })
 }
 
 fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
@@ -2632,7 +3283,13 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     };
     let (descriptor, render, keymap) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-        let rich = match shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation.as_ref() {
+        let rich = match shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation
+            .as_ref()
+        {
             Some(Presentation::Rich(caps)) => Some(caps.clone()),
             _ => None,
         };
@@ -2645,13 +3302,8 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
             .or_insert_with(|| session.published());
         session.set_keymaps(keymaps);
         let placement = p.placement.unwrap_or_default();
-        let (descriptor, render) = session.open_with_args(
-            id.clone(),
-            p.kind,
-            placement,
-            p.viewport,
-            p.args.as_ref(),
-        )?;
+        let (descriptor, render) =
+            session.open_with_args(id.clone(), p.kind, placement, p.viewport, p.args.as_ref())?;
         let keymap = session.keymap_notice(&id);
         (descriptor, render, keymap)
     };
@@ -2811,8 +3463,16 @@ fn set_mode_view(shared: &Shared, params: Value) -> Result<Dispatched> {
 }
 
 /// Turn a command outcome into its response plus render/keymap notifications.
-fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) -> Result<Dispatched> {
-    outcome.effects = custom_ui(&shared.client).prepare_effects(ViewEffectsParams { effects: outcome.effects }).effects;
+fn dispatched_outcome(
+    shared: &Shared,
+    repo: &str,
+    mut outcome: InvokeResult,
+) -> Result<Dispatched> {
+    outcome.effects = custom_ui(&shared.client)
+        .prepare_effects(ViewEffectsParams {
+            effects: outcome.effects,
+        })
+        .effects;
     let mut notifications = Vec::new();
     if let Some(operation) = outcome
         .commit
@@ -2852,8 +3512,14 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
     // that routing identity before any render from this outcome is delivered.
     let mut plain_focus = Vec::new();
     {
-        let _lifecycle = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
-        let mut documents = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner());
+        let _lifecycle = shared
+            .plain_lifecycle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let mut documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         for effect in &outcome.effects {
             match effect {
                 Effect::PushView { descriptor } | Effect::OpenView { descriptor } => {
@@ -2872,8 +3538,12 @@ fn dispatched_outcome(shared: &Shared, repo: &str, mut outcome: InvokeResult) ->
         }
     }
     for view_id in plain_focus {
-        let snapshot = shared.published.lock().unwrap_or_else(|p| p.into_inner())
-            .values().find_map(|views| views.current_snapshot(&view_id));
+        let snapshot = shared
+            .published
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .find_map(|views| views.current_snapshot(&view_id));
         route_plain_render(shared, &view_id, snapshot);
     }
     if let Some(render) = outcome.render {
@@ -2978,14 +3648,26 @@ impl Drop for CommitEdit {
 /// lock is held while Git blocks on the helper. Only the final refresh takes
 /// the session lock again, briefly.
 fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOperation) {
-    let unsupported = shared.client.lock().unwrap_or_else(|p| p.into_inner())
-        .presentation.as_ref().is_some_and(|presentation| matches!(
-            presentation, Presentation::Rich(caps) if !caps.supports_effect("editDocument")
-        ));
+    let unsupported = shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .presentation
+        .as_ref()
+        .is_some_and(|presentation| {
+            matches!(
+                presentation, Presentation::Rich(caps) if !caps.supports_effect("editDocument")
+            )
+        });
     if unsupported {
-        let _ = shared.sender.send(custom_ui(&shared.client).effects(ViewEffectsParams {
-            effects: vec![Effect::message(MessageLevel::Warn, "Client does not support editDocument")],
-        }));
+        let _ = shared
+            .sender
+            .send(custom_ui(&shared.client).effects(ViewEffectsParams {
+                effects: vec![Effect::message(
+                    MessageLevel::Warn,
+                    "Client does not support editDocument",
+                )],
+            }));
         return;
     }
     let sender = shared.sender.clone();

@@ -42,13 +42,7 @@ pub fn definition() -> MenuDef {
                         "magit-fetch-other",
                         "R-6.2",
                     ),
-                    action(
-                        "a",
-                        "fetch.all",
-                        "all remotes",
-                        "magit-fetch-all",
-                        "R-6.2",
-                    ),
+                    action("a", "fetch.all", "all remotes", "magit-fetch-all", "R-6.2"),
                 ],
             ),
             group(

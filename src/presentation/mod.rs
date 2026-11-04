@@ -241,7 +241,10 @@ pub enum PlainContentAction {
 impl PlainCapabilities {
     /// Decide whether a Plain stage/unstage/discard action can run.
     pub fn content_action(&self, command: &str) -> Option<PlainContentAction> {
-        if !matches!(command, "status.stage" | "status.unstage" | "status.discard") {
+        if !matches!(
+            command,
+            "status.stage" | "status.unstage" | "status.discard"
+        ) {
             return None;
         }
         if !self.apply_edit || !self.code_actions || !self.execute_command {

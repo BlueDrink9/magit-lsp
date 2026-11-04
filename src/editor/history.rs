@@ -54,7 +54,14 @@ mod tests {
     #[test]
     fn eligibility_and_exact_consecutive_dedup() {
         let mut history = History::default();
-        for text in ["", "initial", "# comment\r\n", "# comment\r\n", " ", "# comment\r\n"] {
+        for text in [
+            "",
+            "initial",
+            "# comment\r\n",
+            "# comment\r\n",
+            " ",
+            "# comment\r\n",
+        ] {
             history.retain(text, "initial").unwrap();
         }
         assert_eq!(history.entries, ["# comment\r\n", " ", "# comment\r\n"]);
@@ -70,7 +77,10 @@ mod tests {
         assert_eq!(history.entries.len(), MAX_HISTORY_ENTRIES);
         assert_eq!(history.entries.front().unwrap(), "message 2");
         assert_eq!(history.entries.back().unwrap(), "message 51");
-        assert_eq!(history.bytes, history.entries.iter().map(String::len).sum::<usize>());
+        assert_eq!(
+            history.bytes,
+            history.entries.iter().map(String::len).sum::<usize>()
+        );
     }
 
     #[test]
@@ -81,7 +91,9 @@ mod tests {
         history.retain(&first, "").unwrap();
         history.retain(&second, "").unwrap();
         assert_eq!(history.bytes, MAX_HISTORY_BYTES);
-        assert!(history.retain(&"🦀".repeat(MAX_HISTORY_BYTES / 4 + 1), "").is_err());
+        assert!(history
+            .retain(&"🦀".repeat(MAX_HISTORY_BYTES / 4 + 1), "")
+            .is_err());
         assert_eq!(history.entries, [first, second.clone()]);
         assert_eq!(history.bytes, MAX_HISTORY_BYTES);
         history.retain("x", "").unwrap();

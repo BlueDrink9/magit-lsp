@@ -20,7 +20,11 @@ pub fn definition() -> MenuDef {
             ),
             group(
                 "Context arguments",
-                vec![switch("-W", "--function-context", "Show surrounding functions")],
+                vec![switch(
+                    "-W",
+                    "--function-context",
+                    "Show surrounding functions",
+                )],
             ),
             group(
                 "Tune arguments",
@@ -29,9 +33,18 @@ pub fn definition() -> MenuDef {
                     option("=m", "--diff-merges=", "Diff merges", Reader::Choice),
                     switch("-M", "--find-renames", "Detect renames"),
                     switch("-C", "--find-copies", "Detect copies"),
-                    switch("-H", "--find-copies-harder", "Detect copies if source unmodified"),
+                    switch(
+                        "-H",
+                        "--find-copies-harder",
+                        "Detect copies if source unmodified",
+                    ),
                     switch("-R", "--relative", "Relative paths"),
-                    option("=c", "--color-moved=", "Highlight moved lines", Reader::Choice),
+                    option(
+                        "=c",
+                        "--color-moved=",
+                        "Highlight moved lines",
+                        Reader::Choice,
+                    ),
                     switch("-S", "--show-signature", "Show signatures"),
                     switch("-s", "--stat", "Show diffstat"),
                 ],

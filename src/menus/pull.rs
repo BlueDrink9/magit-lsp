@@ -36,13 +36,7 @@ pub fn definition() -> MenuDef {
                         "magit-pull-from-upstream",
                         "R-6.2",
                     ),
-                    action(
-                        "e",
-                        "pull.other",
-                        "elsewhere",
-                        "magit-pull-branch",
-                        "R-6.2",
-                    ),
+                    action("e", "pull.other", "elsewhere", "magit-pull-branch", "R-6.2"),
                 ],
             ),
             group(

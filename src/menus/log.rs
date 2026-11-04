@@ -49,7 +49,13 @@ pub fn definition() -> MenuDef {
                     action("o", "log.other", "other", "magit-log-other", "R-5.1"),
                     action("h", "log.head", "HEAD", "magit-log-head", "R-5.1"),
                     action("u", "log.related", "related", "magit-log-related", "R-5.1"),
-                    action("c", "log.select-and-copy", "Select and copy commit ID", "magit-log-select", ""),
+                    action(
+                        "c",
+                        "log.select-and-copy",
+                        "Select and copy commit ID",
+                        "magit-log-select",
+                        "",
+                    ),
                 ],
             ),
             group(
