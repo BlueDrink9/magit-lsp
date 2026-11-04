@@ -4,7 +4,7 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
 
 **Why this exists.** Tasks have been accepted against server state and unit-level Neovim cases, so bugs that only show on screen (wrong keys, stacked menus, missing actions, "frozen" messages, lag) went unnoticed. From now on, **a task that changes what the user sees is not done until a scripted test has driven the real UI and its screen output has been checked.**
 
-**No-vision policy:** Never use vision, inspect/render images, invoke image or screenshot tools, or capture screenshots. This applies to every agent and delegated worker. Native UI interaction remains required where specified, but checkpoints and acceptance use text/structured evidence only: tmux `.screen`, accessibility/DOM text, JSON, wire/API and Git state. Text snapshots remain allowed. Do not add image-snapshot tests or screenshot capture paths, and do not require future image inspection. Historical evidence descriptions remain historical; they are not claims that evidence was text-based.
+Follow the authoritative [no-vision policy in AGENTS.md](./AGENTS.md#working-conventions).
 
 **Status of the causes below.** The "suspected cause" lines are hypotheses written without reading the current code. Confirm each with a failing test before changing anything.
 
@@ -101,13 +101,15 @@ inspect → act → inspect and always stopping owned UI:
   UI-only claim: cancel in pre-hook/editor/commit-msg/finalizing, finish-v-cancel,
   inherited pipes after normal exit, bounded drain and TERM-resistant child,
   subsequent commit without lock cleanup, and no foreign process kill. Linux is
-  required for R-EDIT-2 and R-EDIT-6 acceptance/cutover, including both clients'
-  native evidence; unavailable macOS execution does not block Linux acceptance.
+  required for R-EDIT-2 and R-EDIT-6 acceptance/cutover; unavailable macOS
+  execution does not block Linux acceptance. Focus native Neovim evidence on new
+  visible behavior; require VSCode evidence only for changed declared
+  capabilities or files under `clients/vscode/`.
   macOS remains unverified, with its full-grace fallback retained. Separate later
   macOS CI/platform acceptance (R-EDIT-9) requires identified runner/OS/toolchain,
   real-Git group/session, non-reaping WNOWAIT and sole-reap traces (full grace,
   final group KILL before reap, no signals after reap), adversarial process cases
-  and both clients' native cutover evidence. Linux `/proc` latency evidence is not
+  and focused client evidence where the queue requires it. Linux `/proc` latency evidence is not
   macOS validation. Windows remains separate feasibility work (R-EDIT-7).
 
 R-EDIT-2 cooperative-hook refinement uses `commit-owned-cancel.scn` (current

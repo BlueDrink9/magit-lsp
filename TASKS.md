@@ -14,6 +14,8 @@
   Move F5, find-widget, QuickPick and fold observations into `docs/evidence/vscode-host-behaviours.md`, preserving Codium versions and uncertainty. Put unresolved F5 diagnosis in T105 and delete `clients/vscode/NOTES.md`; keep evidence text-only.
 - [x] **T001.3c — Replace dated editor-slice narrative with the current contract.**
   Rewrite §3.10 as a short real-file editor contract with a compact completed-slice ledger and explicit T099–T104 residuals. Preserve historical evidence through immutable Git references; do not claim parent or broad-gate completion.
+- [x] **T001.5a — Align design and test documents with the replacement queue.**
+  Apply T001's §0, §3.6/3.7, §3.15, §8.4 and §9 decisions; distinguish planned behavior from current implementation. Remove duplicated no-vision rules and obsolete both-clients gates from `ui-test-plan.md`, retaining text-native verification and real open platform/lifecycle gaps.
 - [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
 - [x] **Retained review decision — common navigation/cycle operations.** R-NAV verified all four tree-owned commands; 74 Rust tests and `common-navigation.scn` passed 2026-10-28. Immutable record: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.**
@@ -89,14 +91,13 @@ here. General agent working conventions and verification guidance live in
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
-| Commit selection (target) | Intended selection uses server-rendered log select mode with structured stable identities and caller restoration; no client picker or choice prompt (§3.7). Current implementation must be checked against source; Plain's parameterized single/multi flow is pending. |
-| Plain presentation (target) | Standard-LSP presentation is VCS-neutral; concrete backend/workflow providers supply repository identity and mutation semantics. Reusable interactions target concrete views/data: serving/stacking; parameterized stable-ID single/multi pickers with caller restoration; provider-file message edits with finish/cancel callbacks; one semantic dispatcher; and a fake-provider independence test without jj implementation. Intended architecture, not current behavior. |
-| Plain client naming and selection (target) | “Plain” means spec-only generic LSP clients, not an editor-specific adapter; one semantic dispatcher selects `customRender` only when explicitly requested, otherwise Plain. |
-| Plain document sync (target) | Incremental sync uses one URI-keyed store; apply each notification's changes sequentially, accepting ranged and rangeless changes and negotiated encodings. |
-| Plain repository resolution (target) | Resolve an unambiguous repository from explicit/workspace/document context; never guess for mutations, use no launcher (the editor helper is required), and exclude presentation files from Untracked. |
-| Plain action/rendering (target) | Content-addressed targets are revalidated at execution; stale targets refresh without mutation. Render expanded by default, auto-cap large sections with expand actions, and retain folding support. |
-| Plain prompts/capabilities (target) | Selector is capabilities.experimental.magit; standard capabilities govern Plain support, while declared optional effects/prompts/placements are bounded by the block. |
-| Plain deferred/out-of-scope (target) | History is deferred to R-EDIT-HISTORY; character input, launcher, diagnostics, discard recovery refs, direct executeCommand bindings, custom URIs and LSP 3.18 virtual content are out of scope. |
+| Picker (T008) | Server supplies typed labels and stable IDs for single/multi selection; clients return IDs. Clients never filter, parse or resolve Git state. A native widget may filter server-supplied labels. |
+| Tests | Feature Rust state tests and conformance scenarios; native Neovim only for new visible behavior, VSCode only for changed declared capabilities or client files. |
+| Generated files | Ship only files clients need; mark generated and enforce drift checks. |
+| Capability resolution with quirks | Resolve declarations, then client quirks, then user configuration (T005). |
+| Rich protocol | The rich protocol stays; v1 preview permits additive changes only. |
+| Plain presentation (target) | Standard-LSP presentation is VCS-neutral. T008 serving/stacking and parameterized stable-ID picking; T009 provider-file edits; T010 semantic dispatcher and fake-provider independence test. Intended architecture, not current behavior. |
+| Plain support (target) | Generic LSP client selection, sequential URI-keyed sync, safe repository resolution, validated targets and bounded capabilities; deferred/out-of-scope work remains in the numbered queue. |
 
 ---
 
@@ -259,14 +260,14 @@ question, shown prominently, e.g. `"Delete branch feature/x?"`), `detail?`
 completion list, and the server must not log it. Used for Git credential and
 SSH passphrase requests arriving through the askpass helper (§3.10).
 
-**Fuzzy matching** is a client concern, not part of the protocol. Clients may
-filter generic `choice` prompt `items` however their picker does. Commit
-selection is not a generic choice prompt and does not use client fuzzy matching.
+Prompt presentation should fit the question and user choice. Native widgets may
+filter server-supplied labels, but clients never parse, resolve or filter Git
+state. Generic `choice` prompts may use the editor's normal picker behavior.
 
-**Commit picking is not a prompt kind.** The server implements
-`ctx.pick_commit` by sending an `openView`/`pushView` for a log view in *select
-mode* (§3.7). The client sees an ordinary view. When the user confirms, the
-server resolves the waiting command.
+**Intended T008 pick (not implemented):** A `pick` request carries purpose,
+prompt, `multi`, and server-supplied `{id,label,description?,detail?}` items.
+The response returns selected IDs or cancellation. Commit picking is not a
+generic choice prompt; the server owns Git resolution and stable identity.
 
 **Mapping to editors** (default implementations; clients may use richer UI):
 
@@ -283,23 +284,23 @@ These map onto the user's own picker plugins automatically in Neovim because
 
 ### 3.7 Select mode (picking commits and other things)
 
-Used when a command needs the user to pick a commit (rebase onto, cherry-pick,
+Intended T008 behavior for commands that need the user to pick a commit (rebase onto, cherry-pick,
 fixup target, reset to, …). This server-owned log select mode is the normal
 commit-selection flow; it is not a client fuzzy picker, QuickPick, or `choice`
 prompt. The client displays server-rendered text verbatim and forwards input.
 
-- Server pushes and focuses a log view with
-  `select: {purpose: "rebase onto", multi: false, prompt: "Rebase onto which commit?", allowFreeText: true}`;
-  the visible purpose/prompt is rendered by the server. Native editor navigation
-  and search remain available (search keys must not be swallowed by key capture).
-- Extra bindings active (scope `log.select`): `common.confirm` returns the
+- The server supplies purpose, prompt, multiplicity and stable `{id,label}`
+  choices. Clients return IDs; they do not filter, parse or resolve Git state.
+  Native widgets may filter server-supplied labels. This is intended behavior,
+  not a claim that T008 has shipped.
+- Intended extra bindings (scope `log.select`): `common.confirm` returns the
   commit under the cursor (or all marked commits if `multi`),
   `common.cancel` returns without mutation, and `select.toggle-mark` is
   multi-only. Selection identity comes from structured commit nodes, never
   rendered-text parsing or row indices. Confirm returns the selected identity
   to the waiting operation and restores the caller view; cancel restores the
   caller without mutation.
-- `allowFreeText` is an optional escape hatch, not the default flow: a key
+- A free-text option is an optional escape hatch, not the default flow: a key
   (`select.enter-rev`) opens a `text` prompt so the user can type `HEAD~3`, a
   branch, or a tag; the server validates it with `git rev-parse --verify`.
   No client Git, filtering, or commit-selection implementation is required.
@@ -680,8 +681,8 @@ Diff context size is a setting (`diff.context`, default 3) passed as `-U<n>` to
 
 ### 3.15 Highlighting and theme integration
 
-Goal: elements are visually distinct, readable, and **follow the user's colour
-scheme** — so we use *links to standard groups*, not hard-coded colours.
+Goal: elements are visually distinct, readable, and follow the user's colour
+scheme. T028 specifies role-based resolved-style tests; this design is intended.
 
 - The server labels text with **semantic tokens**: a custom token *type* plus
   *modifiers*. Clients map each type to the standard theme group(s).
@@ -697,8 +698,9 @@ scheme** — so we use *links to standard groups*, not hard-coded colours.
   tinting for added/removed lines is an optional later extra (client option),
   because semantic tokens cannot colour whole lines.
 
-Initial mapping (finalise during IMM-8 and Phase 1; "verify" = check the group
-exists in `:highlight` for the built-in schemes):
+T028 tests semantic roles and resolved styles against supported built-in
+schemes. Test that roles resolve to readable styles and user overrides work;
+do not lock acceptance to a token-to-group table or rendered HTML/image.
 
 | Token type | Meaning | Neovim link | VSCode scope |
 | --- | --- | --- | --- |
@@ -2312,60 +2314,14 @@ only temp paths and timings.
   socket helper; client disconnect aborts Git.
 - **Error mapping:** one test per row of the IMM-3 table.
 
-### 8.4 Colour and presentation tests with `:TOhtml` (Neovim)
+### 8.4 Colour and presentation tests (T028)
 
-**IMM-8 findings (Neovim 0.12.5, `make color-spike`):** ordinary extmarks
-appear as resolved-group HTML classes (e.g. MagitHeader → Title), but `tohtml`
-skips namespaces containing `nvim.lsp.semantic_tokens` (including per-client
-namespaces) and warns that LSP tokens are unsupported. Thus HTML is a visual
-reference, not semantic-class evidence; use `get_at_pos()` plus `nvim_get_hl`.
-`hl_eol` is ignored outside the explicit range.
-
-API: `:packadd nvim.tohtml` in 0.12.5 (built in on 0.10/0.11), then
-`require('tohtml').tohtml(winid?, opt?) -> string[]`, with options
-`title/number_lines/font/width/range`; `:TOhtml [file]` writes/splits the HTML.
-Set `termguicolors` first, disable folds (or `zR`), reapply highlight links
-after `:colorscheme` clears defaults. Query `nvim_get_hl` with `link=true` for
-targets and `false` for attributes (numeric colours formatted `#%06x`).
-Warm terminal-colour caches/drain scheduled warnings before asserting them;
-headless uses Normal's GUI background. Width affects fillers, not wrapping.
-
-The fixed added/removed mapping uses `@diff.plus` → Added and `@diff.minus`
-→ Removed, not nonexistent built-in `diffAdded/diffRemoved`. Inspect all
-attributes: Title in habamax/lunaperche is bold-only, not necessarily broken.
-Spike outputs are `build/test-output/status-<scheme>-<background>.html` and
-`build/test-output/semantic-tokens.md` (token → link → resolved fg), for
-default dark/light, vim, habamax, delek and lunaperche.
-
-Plan:
-1. Helper `render_status_html(scheme, background)`: start headless Neovim with
-   `scripts/minimal_init.lua`, `:set background=…`, `:colorscheme …`, open the
-   status view on a fixture repo, **wait for semantic tokens** (poll
-   `vim.lsp.semantic_tokens.get_at_pos()`; extmarks only exist after a draw),
-   run `:TOhtml`, write `build/test-output/colors/<scheme>-<background>.html`.
-2. HTML → cells: parse the `<style>` block (class → fg/bg/bold) and the spans
-   into `{text, fg, bg, bold}` runs. Keep this parser small and tested.
-3. Assertions per scheme (use built-in schemes only, no plugins: `default`
-   dark and light, `vim`, plus a few shipped ones such as `habamax`, `delek`,
-   `lunaperche`; list with `:colorscheme <Tab>`):
-   - every semantic token type in the fixture appears in the output;
-   - **distinct elements have distinct colours**: added ≠ removed ≠ context;
-     section title ≠ file path ≠ hunk header ≠ hash; menu key ≠ menu label;
-   - `menu.planned` is visibly dimmer than `menu.label` (lower contrast but
-     still above a minimum contrast ratio against the background);
-   - no foreground equals the background; contrast ratio ≥ 3:1 for all tokens
-     except `planned`/`disabled`;
-   - **theme integration:** each `@lsp.type.magit.*` group is a *link*
-     (`nvim_get_hl(0, {name = g, link = true})` returns `link`), the link target
-     is in the allowed list of §3.15, and the resolved colour **changes** when
-     the colourscheme changes (i.e. nothing is hard-coded). The client
-     re-applies the links from a `ColorScheme` autocmd.
-4. Emit a legend `build/test-output/semantic-tokens.md`: token → link target →
-   resolved fg per scheme, so a human can review at a glance. Optionally render
-   the HTML to PNG with a headless browser if available (not required).
-5. `:TOhtml` does not include semantic-token extmarks (finding 2), so the
-   spike's token table comes from `vim.lsp.semantic_tokens.get_at_pos()` and
-   `nvim_get_hl`; the HTML is only a visual reference.
+Test token names and role coverage. Add a Rust token-response test for a fixture,
+client data tests that map each legend type to a Neovim link or VS Code scope,
+and one ANSI smoke test per client using one colour scheme. The smoke test checks
+that added and removed cells have different foreground colours. Do not test
+contrast, multiple schemes, theme changes, or HTML rendering. `:TOhtml` cannot
+see semantic-token namespaces; the historical IMM-8 spike is not acceptance.
 
 ### 8.5 Protocol-level tests
 
@@ -2427,17 +2383,15 @@ the command line and real colours.
 1. **macOS config dir:** `~/.config` via `etcetera` (proposed) or
    `~/Library/Application Support` via `dirs`.
     -- Use dirs. We should have a root command for editing the config file in the client though.
-2. **Editable-scope cancel key** in `standard` (`ctrl+shift+x` proposed).
-   Closing the buffer already cancels, so this is a convenience.
-   -- Escape should probably cancel most things. For closing the commit message or rebase buffers... unsure. Probably leave it to the client to exit without saving/with code fail?
+2. **Escape behavior:** Escape cancels most views. Commit-message and rebase
+   buffers may need client-specific exit behavior; retain this caveat.
 3. **VSCode menu default:** QuickPick (proposed) vs. text document in a lower
    editor group. Revisit after the Phase 2 spike.
 4. **Per-repo config trust:** is `.magit-lsp.toml` worth the risk surface?
    Currently limited to keys and display, behind `trust_repo_config`.
 5. **Minimum supported Git version** (decide by running IMM-1 tests on old
    versions).
-6. **Full-line background tinting** for diff lines (optional client feature).
-  -- yes, good idea. Magit does this, looks great.
+6. **Full-line background tinting:** wanted; T094 owns the feature.
 7. **LSP 3.18 `workspace/textDocumentContent`** adoption when clients support it.
 8. **Fold keys in VSCode** for users with customised `editor.toggleFold`:
    the "mirror my shortcuts" command (proposed) vs. any better mechanism found
