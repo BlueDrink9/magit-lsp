@@ -16,6 +16,10 @@
   Rewrite §3.10 as a short real-file editor contract with a compact completed-slice ledger and explicit T099–T104 residuals. Preserve historical evidence through immutable Git references; do not claim parent or broad-gate completion.
 - [x] **T001.5a — Align design and test documents with the replacement queue.**
   Apply T001's §0, §3.6/3.7, §3.15, §8.4 and §9 decisions; distinguish planned behavior from current implementation. Remove duplicated no-vision rules and obsolete both-clients gates from `ui-test-plan.md`, retaining text-native verification and real open platform/lifecycle gaps.
+- [x] **T001.5b1 — Preserve immutable per-ticket scope and verification provenance.**
+  Add exact old-record references to every numbered ticket replacing old §7, including terse T040–T111 rows. Repair the migration ledger and enumerate unverified lifecycle/platform/broad-gate limitations; do not delete old sections yet.
+- [ ] **T001.5b2 — Replace superseded task and history sections.**
+  After provenance is retained, replace old §7 with the numbered-queue link and explicit retained gaps, remove §§10–12 and obsolete checkpoint/completed top matter, and retain the ticket template and honest test limits.
 - [ ] **Retained review gap — A12 real-dispatch Git failure handling.** `docs/evidence/task-queue-migration.md` records exact scope; no numbered owner is evidenced. Do not conflate with T103's deferred same-session reader-lock redesign.
 - [x] **Retained review decision — common navigation/cycle operations.** R-NAV verified all four tree-owned commands; 74 Rust tests and `common-navigation.scn` passed 2026-10-28. Immutable record: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.**

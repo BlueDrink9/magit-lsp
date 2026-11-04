@@ -8,7 +8,6 @@ source documents; proposal text alone is not closure evidence.
 
 | Finding | Status / replacement |
 | --- | --- |
-| --- | --- |
 | A01 | Complete; `da4d422^:REVIEW_REPORT.md` finding A01, acceptance evidence 2026-10-27; security bridge tests and full gate. |
 | A02 | Complete; `da4d422^:REVIEW_REPORT.md` finding A02 and its acceptance evidence; positional-version implementation/test record. |
 | A03 | Complete; `da4d422^:REVIEW_REPORT.md` finding A03 and its acceptance evidence; displayed-identity selection record. |
@@ -104,3 +103,57 @@ this statement as evidence of implementation.
 ## Reconciled decisions
 
 - R-NAV: verified complete 2026-10-28; 74 Rust tests and `common-navigation.scn` passed. The retained navigation decision is reconciled; immutable evidence: `da4d422:TASKS.md`.
+
+## Numbered-ticket immutable provenance
+
+For every numbered ticket below, the exact old scope and its `Verify` text
+remain recoverable in immutable `d04dfa2:TASKS.md`; use the old unique ID to
+locate the complete record. This is scope provenance, not evidence of completion.
+
+| Numbered replacement | Exact old unique ID | Immutable source |
+| --- | --- | --- |
+| T040–T046 | R-4.1-signing; R-5.3a; R-6.3a; R-6.1a; R-8.2a; R-9.1a; R-9.5a, respectively | `d04dfa2:TASKS.md` |
+| T047 | Section 9 config-edit request; no old ticket ID | `d04dfa2:TASKS.md` |
+| T048–T057 | R-VIEW-DATA; R-5.2a; R-5.2b; R-5.2c; R-5.3b; R-5.3c; R-5.3d; R-5.3e; R-5.4; R-5.6, respectively | `d04dfa2:TASKS.md` |
+| T058–T073 | R-5.5; R-BASELINE; R-4.3; R-6.4; R-4.2a; R-4.2b; R-4.2c; R-4.1c; R-4.1d; R-6.1b; R-NETWORK; R-6.2; R-6.3b; R-6.3c; R-6.5a; R-6.5b, respectively | `d04dfa2:TASKS.md` |
+| T074 | R-7.1a | `d04dfa2:TASKS.md` |
+| T075 | R-7.1b | `d04dfa2:TASKS.md` |
+| T076 | R-7.2a | `d04dfa2:TASKS.md` |
+| T077 | R-7.2b | `d04dfa2:TASKS.md` |
+| T078 | R-7.3-options | `d04dfa2:TASKS.md` |
+| T079 | R-7.3b | `d04dfa2:TASKS.md` |
+| T080 | R-7.3c | `d04dfa2:TASKS.md` |
+| T081 | R-7.4 | `d04dfa2:TASKS.md` |
+| T082 | R-8.1a | `d04dfa2:TASKS.md` |
+| T083 | R-8.1b | `d04dfa2:TASKS.md` |
+| T084 | R-8.2b | `d04dfa2:TASKS.md` |
+| T085 | R-8.2c | `d04dfa2:TASKS.md` |
+| T086 | R-8.2d | `d04dfa2:TASKS.md` |
+| T087 | R-8.2e | `d04dfa2:TASKS.md` |
+| T088 | R-9.3a | `d04dfa2:TASKS.md` |
+| T089 | R-8.2f | `d04dfa2:TASKS.md` |
+| T090 | R-8.2g | `d04dfa2:TASKS.md` |
+| T091 | R-8.3a | `d04dfa2:TASKS.md` |
+| T092 | R-8.3b | `d04dfa2:TASKS.md` |
+| T093 | R-9.1b | `d04dfa2:TASKS.md` |
+| T094 | R-9.1c | `d04dfa2:TASKS.md` |
+| T095 | R-9.2a | `d04dfa2:TASKS.md` |
+| T096 | R-9.2b | `d04dfa2:TASKS.md` |
+| T097 | R-9.4 | `d04dfa2:TASKS.md` |
+| T098 | R-9.5b | `d04dfa2:TASKS.md` |
+| T099 | R-EDIT-HISTORY | `d04dfa2:TASKS.md` |
+| T100–T103 | R-EDIT-7; R-EDIT-9; R-SELECT-AUDIT; larger BUG-READ-1, respectively | `d04dfa2:TASKS.md` |
+| T104 | R-EDIT-REAL residual lifecycle cases | `d04dfa2:TASKS.md` |
+| T105 | VS Code F5 open question | `d04dfa2:TASKS.md` |
+| T106–T109 | No old record; new tickets | No old record |
+| T110 | R-STRAT-RICH | `d04dfa2:TASKS.md` |
+| T111 | Section 9 open design questions; no old ticket ID | `d04dfa2:TASKS.md` |
+
+R-EDIT-REAL residuals remain not-green: last-window exit, dirty shutdown,
+cross-build, wider reload/workspace changes, platform coverage and broad
+failed gates. T104 names only its lifecycle subset. A12 remains real-dispatch
+Git-failure handling and removal of `server::mutation`; it has no numbered
+owner and is not T103's reader-lock redesign. Future section layout maps to
+T093 only if that server-policy scope is correct; whole-file-only binary
+updates remain an explicit residual with no owner. Keep §9 dirs/T047 and the
+Escape caveat; this note does not rewrite either requirement.

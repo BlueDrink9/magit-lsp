@@ -769,6 +769,9 @@ Do not start these tickets until the owner asks.
 
 ## Old numbers to new numbers
 
+For mapped old records, immutable `d04dfa2:TASKS.md` is the full-scope and
+`Verify` authority; see [migration provenance](docs/evidence/task-queue-migration.md#numbered-ticket-immutable-provenance).
+
 Use this list to find a ticket from the history. Each open ticket in the old `TASKS.md` and in the two planning documents has a new number, or a reason why it has none.
 
 - **Phase 1 and 2:** H-01 is T001. H-02 is T002. H-18 is T003. H-03 is T004. H-04 is T005. H-05 is T006. H-14 is T007.
