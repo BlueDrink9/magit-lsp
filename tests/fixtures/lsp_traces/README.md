@@ -310,7 +310,8 @@ def text():
  keys(':write','Enter')
  wait(lambda:path.exists() and (path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)!=stamp,'native save')
  return path.read_text()
-report=None; REPO.mkdir(); HOME.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
+report=None; primary=None; cleanup=[]; server_pid=None; launched=False
+REPO.mkdir(); HOME.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
 try:
  if subprocess.check_output([HX,'--version'],text=True).strip()!='helix 25.07.1': raise RuntimeError('wrong Helix version')
  cmd(['git','init','-q',str(REPO)]); cmd(['git','config','user.name','Capture'],cwd=REPO); cmd(['git','config','user.email','capture@example.invalid'],cwd=REPO)
@@ -319,22 +320,54 @@ try:
  (CONFIG/'helix/languages.toml').write_text(f'''[language-server.magit-lsp]\ncommand = "{SERVER}"\n\n[[language]]\nname = "magit"\nscope = "source.magit"\nfile-types = [{{ glob = ".magit" }}]\nroots = [".git"]\nlanguage-servers = ["magit-lsp"]\n''')
  env=os.environ.copy(); env.update(HOME=str(HOME),XDG_CONFIG_HOME=str(CONFIG),XDG_DATA_HOME=str(D/'data'),XDG_STATE_HOME=str(D/'state'),MAGIT_LSP_WIRELOG=str(RAW),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
  cmd(['tmux','-L',SOCKET,'new-session','-d','-s',SESSION,'-x','120','-y','40',f"cd '{REPO}' && HOME='{HOME}' XDG_CONFIG_HOME='{CONFIG}' MAGIT_LSP_WIRELOG='{RAW}' '{HX}' .magit"],env=env)
+ launched=True
  wait(lambda:any(r.get('raw',{}).get('method')=='textDocument/didOpen' for r in rows()),'didOpen'); wait(lambda:'Head:' in screen() and 'Loading' not in screen(),'render')
  req=next((r for r in rows() if r.get('direction')=='out' and r.get('raw',{}).get('method')=='workspace/applyEdit'),None)
  if not req: raise RuntimeError('missing initial applyEdit')
  wait(lambda:any(r.get('direction')=='in' and r.get('raw',{}).get('id')==req['raw'].get('id') for r in rows()),'render reply')
+ init=next((r for r in rows() if r.get('raw',{}).get('method')=='initialize'),None)
+ server_pid=init.get('pid') if init else None
  report={'directory':str(D),'helix_version':subprocess.check_output([HX,'--version'],text=True).strip(),'source':str(RAW),'actions':[]}
  actions=[('selection_replace',['Escape','g','g','g','h','v','l','l','r','X']),('named_register_paste_one',['Escape','g','g','g','h','"','a','y','Escape','g','g','g','h','"','a','p']),('named_register_paste_multi',['Escape','g','g','g','h','v','l','l','"','b','y','Escape','g','g','g','h','"','b','p'])]
  for name,sequence in actions:
   before=text(); count=len(changes()); keys(*sequence); wait(lambda:changes() if len(changes())>count else None,name+' didChange'); after=text()
   report['actions'].append({'name':name,'keys':sequence,'before':before,'after':after})
+except BaseException as exc:
+ primary=exc
 finally:
- if subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
+ def cleanup_step(label,fn):
+  try: fn()
+  except BaseException as exc: cleanup.append(f'{label}: {exc!r}')
+ def stop_editor():
+  alive=subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+  if not alive: return
   pane=screen()
-  if 'INSERT' in pane.upper() or 'SELECT' in pane.upper(): raise RuntimeError('not in normal mode; refusing quit')
+  if 'INSERT' in pane.upper() or 'SELECT' in pane.upper():
+   cleanup.append('graceful Helix quit skipped: editor remains in insert/select mode')
+   return
   cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',':quit-all!','Enter'])
   wait(lambda:subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0,'graceful shutdown',8)
- subprocess.run(['tmux','-L',SOCKET,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ if launched: cleanup_step('Helix shutdown',stop_editor)
+ cleanup_step('owned tmux server shutdown',lambda:subprocess.run(TMUX+['kill-server'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL) if subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0 else None)
+ if server_pid:
+  def stop_server():
+   proc=pathlib.Path(f'/proc/{server_pid}')
+   if not proc.exists(): return
+   if pathlib.Path(f'/proc/{server_pid}/exe').resolve()!=SERVER: raise RuntimeError(f'PID {server_pid} executable does not match owned server')
+   envp=(proc/'environ').read_bytes().split(b'\0')
+   if b'MAGIT_LSP_WIRELOG='+os.fsencode(RAW) not in envp: raise RuntimeError(f'PID {server_pid} wirelog does not match owned run')
+   os.kill(server_pid,15)
+   deadline=time.monotonic()+5
+   while time.monotonic()<deadline and proc.exists(): time.sleep(.05)
+   if proc.exists(): os.kill(server_pid,9)
+  cleanup_step('owned server shutdown',stop_server)
+ socket_path=pathlib.Path(f'/tmp/tmux-{os.getuid()}')/SOCKET
+ cleanup_step('owned tmux socket removal',lambda:socket_path.unlink(missing_ok=True))
+if primary is not None or cleanup:
+ details=[]
+ if primary is not None: details.append(f'primary failure: {primary!r}')
+ details.extend('cleanup failure: '+x for x in cleanup)
+ raise RuntimeError('; '.join(details)+f'; evidence retained at {D}')
 if report is None: raise RuntimeError(f'capture failed; retained at {D}')
 deadline=time.monotonic()+15
 while time.monotonic()<deadline:
@@ -353,16 +386,23 @@ PY
 This embedded recipe resolves the checkout via Git, obtains Helix through Nix,
 uses owned temporary resources, waits for the actual render, performs native
 save-based before/after inspection and drains shutdown/exit before printing
-source hash and row count. Fresh runs validate the procedure, not historical
-PID/time/hash. Original capture cleanup limitation remains: its tail rows 27–39
-are excluded and it has no graceful shutdown; its three action rows remain
-source-equal.
+source hash and row count. Failures retain their evidence directory and report
+the primary error plus cleanup diagnostics. Cleanup only addresses the unique
+tmux namespace, its socket, and a server PID whose executable and wirelog match
+this run. Fresh runs validate the procedure, not historical PID/time/hash.
+Original capture cleanup limitation remains: its tail rows 27–39 are excluded
+and it has no graceful shutdown; its three action rows remain source-equal.
 
-Executed from `tests/fixtures` on 2026-11-05: exit 0; fresh source
-`/tmp/opencode/t002-helix-3209274-1793834905552565670-hrwjzczo/raw-parent/raw.jsonl`,
-SHA256 `b9aef5d32b5c8e16b253ffb71254746f264496424bff31b2e03f42a8db3927db`,
-28 rows; server PID 3209312 recorded graceful exit. The recipe removed its owned
-temporary directory after printing this drained provenance.
+Executed from `tests/fixtures` on 2026-11-05: normal run exited 0; fresh source
+`/tmp/opencode/t002-helix-3447614-1793836672917409985-4qompd88/raw-parent/raw.jsonl`,
+SHA256 `810df29d9086697b251cfe66d50ca0985c8733742053c0bc85dfc94d9fa51bf3`,
+28 rows; server PID 3447652 recorded graceful exit. The recipe removed its owned
+temporary directory after printing this drained provenance. Fault probe before
+launch retained `/tmp/opencode/t002-helix-3451328-1793836685861463797-l35rxazq`
+and reported `INJECT_BEFORE_LAUNCH`. Select-mode probe retained
+`/tmp/opencode/t002-helix-3451348-1793836686238085546-4nq1xhvy` and reported
+`INJECT_SELECT_MODE`; both exited 1 with primary failure visible. No owned Helix,
+server, tmux namespace or socket remained after either probe.
 
 “Observed” means retained payload proves that change shape; it does not prove
 which user action caused it. Actions count as captured only with native action
