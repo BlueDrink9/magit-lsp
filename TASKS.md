@@ -8,7 +8,15 @@ Last review: 464d5e4b06df8d22cacf273f0c458b55ba4bc151
   Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
-- [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Follow the numbered queue in dependency order; preserve unrelated local changes.
+- [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
+- [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
+  Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
+- [ ] **T003.2 — Add the report-only hygiene runner and focused tests.**
+  Add `make hygiene` running cargo-machete, knip and luacheck, reporting missing tools distinctly. Include the twenty largest nongenerated tracked files, a soft growth threshold, and `allow(dead_code)`/`keep-for:` searches; test report-only behavior and failure reporting.
+- [ ] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
+  Run actual tools in an isolated tool environment, retain each baseline finding with a reason, and prove an intentional unused dependency is reported before removing it. Preserve the user's dirty Cargo.toml exactly outside any explicitly scoped metadata change.
+- [ ] **T003.4 — Document phase hygiene and complete the tooling contract.**
+  Add AGENTS phase-end/review guidance, ticket-template and T033 hygiene gates. Verify the completed report-only baseline and narrow tests; record Linux evidence and non-Linux CI follow-ups before marking T003 complete.
 - [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**
   Implement a reusable recorder with ordered background file writes and recursive identity/credential redaction. Test direction/order, JSON validity, real framing replay and credential absence before server integration.
 - [x] **T002.1b — Wire opt-in recording into the actual server transport.** Actual-binary opt-in, disabled/error paths, drain and collision-safe redaction; `cargo test --test wirelog`.

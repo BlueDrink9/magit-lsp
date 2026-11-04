@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "extension.js",
+    "test/**/*.js",
+    "test/**/*.mjs",
+    "scripts/**/*.mjs"
+  ],
+  "project": [
+    "**/*.js",
+    "**/*.mjs"
+  ],
+  "ignore": [
+    "node_modules/**",
+    "out/**"
+  ],
+  "ignoreDependencies": [
+    "vscode"
+  ]
+}
