@@ -119,6 +119,10 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     let selected = load("plain-neovim-0.12.6-actions.json");
     let selected_rows = read_rows("plain-neovim-0.12.6-actions.jsonl");
     let selected_indices = selected["fixture_source_rows"].as_array().unwrap();
+    let action_metadata = selected["actions"].as_array().unwrap();
+    assert_eq!(selected_indices.len(), 2);
+    assert_eq!(selected_rows.len(), 2);
+    assert_eq!(action_metadata.len(), 3);
     assert_eq!(selected_indices.len(), selected_rows.len());
     for (position, (index, row)) in selected_indices.iter().zip(&selected_rows).enumerate() {
         assert_eq!(index.as_u64().unwrap() as usize, [9, 14][position]);
@@ -127,6 +131,10 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     let visual = &selected_rows[0]["raw"]["params"];
     assert_eq!(visual["textDocument"]["version"], 5);
     assert_eq!(changes(&selected_rows[0])[1]["text"], "XXX");
+    assert_eq!(
+        changes(&selected_rows[0])[1],
+        json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"rangeLength":3,"text":"XXX"})
+    );
     assert_eq!(selected["wire_versions"]["visual replacement"], 5);
     assert_eq!(selected["wire_versions"]["one-character register paste"], 7);
     assert_eq!(
@@ -134,7 +142,6 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         8
     );
     assert_eq!(selected["wire_versions"]["combined didChange"], 9);
-    let action_metadata = selected["actions"].as_array().unwrap();
     assert_eq!(action_metadata[0]["after"]["version"], 5);
     assert_eq!(action_metadata[1]["after"]["version"], 7);
     assert_eq!(action_metadata[2]["after"]["version"], 8);
@@ -156,6 +163,15 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     assert_eq!(combined[1]["range"]["start"]["character"], 1);
     assert_eq!(combined[2]["range"]["start"]["character"], 1);
     assert_eq!(combined[3]["range"]["start"]["character"], 1);
+    assert_eq!(
+        combined,
+        &json!([
+            {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"rangeLength":3,"text":"Hea"},
+            {"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":1}},"rangeLength":0,"text":"Q"},
+            {"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":1}},"rangeLength":0,"text":"MULTI"},
+            {"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":6}},"rangeLength":5,"text":""}
+        ])
+    );
 
     let helix = load("helix-25.07.1-actions.json");
     let helix_rows = read_rows("helix-25.07.1-actions.jsonl");
@@ -164,6 +180,9 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         ("named_register_paste_one", 16, "H", 4),
         ("named_register_paste_multi", 22, "Hea", 6),
     ];
+    assert_eq!(helix["actions"].as_array().unwrap().len(), 3);
+    assert_eq!(helix_rows.len(), 3);
+    assert_eq!(helix["source_rows"].as_array().unwrap().len(), 3);
     for (position, (action, (name, row_number, text, version))) in helix["actions"]
         .as_array()
         .unwrap()
@@ -178,15 +197,24 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         assert_eq!(row["raw"]["params"]["textDocument"]["version"], version);
         assert_eq!(changes(row)[0]["text"], text);
         assert_eq!(changes(row)[0]["range"]["start"]["line"], 0);
+        assert_eq!(changes(row)[0]["range"]["end"]["line"], 0);
+        assert_eq!(
+            changes(row)[0]["range"]["end"]["character"],
+            if name == "selection_replace" { 3 } else { 1 }
+        );
         assert_eq!(
             changes(row)[0]["range"]["start"]["character"],
             if name == "selection_replace" { 0 } else { 1 }
         );
+        assert_eq!(action["wire_rows"].as_array().unwrap().len(), 2);
+        assert_eq!(action["wire_rows"][1], expected[position].1 + 2);
         assert_eq!(action["before"], action["after"]);
     }
 
     let rapid = load("plain-neovim-0.12.6-rapid-repair.json");
     let rapid_rows = read_rows("plain-neovim-0.12.6-rapid-repair.jsonl");
+    assert_eq!(rapid["fixture_source_rows"].as_array().unwrap().len(), 4);
+    assert_eq!(rapid_rows.len(), 4);
     let rapid_action = &rapid["actions"]["rapid_input"];
     let hash = |text: &str| format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
@@ -205,6 +233,21 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         ),
         rapid["actions"]["repair"]["restored_sha256"]
     );
+    let before = rapid_action["before"]["text"].as_str().unwrap();
+    let after = rapid_action["after"]["text"].as_str().unwrap();
+    let restored = rapid["actions"]["repair"]["restored"]["text"]
+        .as_str()
+        .unwrap();
+    let undo_before = rapid["actions"]["undo"]["before"]["text"].as_str().unwrap();
+    let undo_after = rapid["actions"]["undo"]["after"]["text"].as_str().unwrap();
+    assert_eq!(after, format!("RAPID{before}"));
+    assert_eq!(restored, before);
+    assert_eq!(undo_before, restored);
+    assert_eq!(undo_after, after);
+    assert_eq!(rapid_action["after"]["version"], 5);
+    assert_eq!(rapid["actions"]["repair"]["restored"]["version"], 6);
+    assert_eq!(rapid["actions"]["undo"]["before"]["version"], 6);
+    assert_eq!(rapid["actions"]["undo"]["after"]["version"], 7);
     let source_rows = rapid["fixture_source_rows"].as_array().unwrap();
     let retained_index = |row: &serde_json::Value| {
         source_rows
@@ -220,6 +263,11 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     assert!(did < request && request < reply && reply < undo);
     assert_eq!(method(&rapid_rows[did]), "textDocument/didChange");
     assert_eq!(changes(&rapid_rows[did])[1]["text"], "RAPID");
+    assert_eq!(changes(&rapid_rows[did]).as_array().unwrap().len(), 2);
+    assert_eq!(
+        changes(&rapid_rows[did])[1],
+        json!({"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"rangeLength":0,"text":"RAPID"})
+    );
     let request_row = &rapid_rows[request];
     assert_eq!(request_row["direction"], "out");
     assert_eq!(method(request_row), "workspace/applyEdit");
@@ -231,6 +279,10 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         .next()
         .unwrap();
     let repair_edit = &request_row["raw"]["params"]["edit"]["changes"][uri][0];
+    assert_eq!(
+        repair_edit,
+        &json!({"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}})
+    );
     assert_eq!(repair_edit["newText"], "");
     assert_eq!(repair_edit["range"]["start"]["line"], 0);
     assert_eq!(repair_edit["range"]["start"]["character"], 0);
@@ -252,7 +304,13 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         rapid_rows[undo]["raw"]["params"]["textDocument"]["version"],
         rapid["actions"]["undo"]["after"]["version"]
     );
-    assert_eq!(changes(&rapid_rows[undo]).as_array().unwrap().len(), 2);
+    assert_eq!(
+        changes(&rapid_rows[undo]),
+        &json!([
+            {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}},"rangeLength":5,"text":""},
+            {"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"rangeLength":0,"text":"RAPID"}
+        ])
+    );
 }
 
 #[test]
