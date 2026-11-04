@@ -61,7 +61,15 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 
 ## Review
 
-Checkpoint review limitation (2026-11-05): the configured reviewer could not start (`Model unavailable: openai/gpt-5.5-sol`). Three available-worker peer reviews covered the core mutation, Plain/process and documentation risks listed below, against baseline `dd92f90cdb11d827606a689a88a280f480d7508d`. This is bounded coverage, not a comprehensive audit of every changed file. No human input requested. Full `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs are under `/tmp/opencode/queue-checkpoint/`.
+- [x] **Checkpoint review — Opt-in wire recorder and completed documentation cutover.**
+  Coverage: reviewed `a78349e..77bc34d`, directly inspecting `src/wirelog.rs`, `src/server.rs`, `tests/wirelog.rs`, the T002 ticket, `TASKS_PART_SEVEN.md`, `docs/evidence/task-queue-migration.md`, `docs/evidence/real-file-client-spike.md`, `AGENTS.md` and `Makefile`. Verified queue cutover retains immutable source references; A12 remains ownerless and distinct from T103; R-EDIT-REAL remains not green and T104 is a subset. T002.2 capture/preset acceptance remains pending by design. Found one P2 correlated-response error leak below; no P3 separately substantiated. Coverage does not establish source acceptance or audit every changed path. Configured reviewer unavailable (`openai/gpt-5.5-sol`); fallback peer review only, not independent comprehensive audit. Full tests, rustfmt and text-native UI tour had passed; logs: `/tmp/opencode/wirelog-checkpoint/`.
+
+- [ ] **[P2] Correlated secret-prompt errors are recorded without redaction.** (`src/wirelog.rs`)
+  - **Problem:** A correlated response error enters `redact_secret_values`, which redacts only `result`; `error.message` and `error.data` remain unchanged. A client error that echoes the submitted secret can therefore persist in the opt-in wire log.
+  - **Change:** Redact correlated response error payloads as well as results, without discarding unrelated capability or protocol fields.
+  - **Done when:** A test records a secret prompt and matching response error containing the secret in nested error fields, then asserts the secret is absent and non-sensitive fields remain.
+  - **Constraints:** Source behavior only; preserve direction/order, correlation identity and legitimate fields.
+  - **Verify:** `cargo test --test wirelog`
 
 - [x] **Checkpoint review — Git mutation identities and structured successors.**
   Review committed changes since `dd92f90cdb11d827606a689a88a280f480d7508d` in Git/patch/dispatch/tree/status/commands and their focused tests. Add only substantiated P0–P2 worker-ready findings here; record exact coverage and P3 deferrals without source edits.
