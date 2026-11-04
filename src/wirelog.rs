@@ -34,6 +34,7 @@ impl WireLog {
             let mut file = {
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
+                    .read(true)
                     .append(true)
                     .create(true)
                     .mode(0o600)
@@ -41,6 +42,7 @@ impl WireLog {
             };
             #[cfg(not(unix))]
             let mut file = std::fs::OpenOptions::new()
+                .read(true)
                 .append(true)
                 .create(true)
                 .open(path)?;
