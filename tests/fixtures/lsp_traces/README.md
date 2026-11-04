@@ -270,9 +270,12 @@ provenance; unavailable actions remain explicit.
 | Undo immediately after server repair edit | NOT CAPTURED. | NOT CAPTURED. |
 
 Plain Neovim row 2 is a server-rendered insertion, row 3 native `A`
-insertion, and row 4 `A` deletion/repair; these do not establish the missing
-actions. Bundled Neovim's commit-draft change is a native full-buffer
-replacement, not proof of any particular requested input action. Bundled
-VSCode's retained change is also a full-buffer replacement; no native action
-among the six is established. Thus all six actions remain incomplete for at
-least one or both requested editor families.
+insertion, and row 4 `A` deletion/repair; only row 3 establishes single insert.
+Bundled Neovim's commit-draft change is a native full-buffer replacement, not
+proof of any particular requested input action. Bundled VSCode's retained
+change is also a full-buffer replacement; no native action among the six is
+established there. Single insert is captured for both requested editor families.
+The five remaining action classes—selection replacement, one-character paste,
+multi-character paste, rapid typing, and undo immediately after a server repair
+edit—remain uncaptured for each family. The checked T002.2 four-client baseline
+is complete; parent T002 and full T034 conformance remain open.

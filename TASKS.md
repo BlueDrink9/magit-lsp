@@ -97,7 +97,7 @@ Checkpoint review: GPT-5.6 Sol reviewed `8ecba12dc44f321daaa43dec773f374616bb6b6
   - **Done when:** `cargo test --test wirelog` fails for malformed fixture JSON, a missing initialize row, or any mismatch between a current-client initialize preset and its matching trace; all committed fixtures pass.
   - **Constraints:** Do not compare volatile data across different clients, normalize captured declarations, fabricate missing presets, or turn incomplete T034 action evidence into a conformance claim. Do after: Make the Helix capture recipe preserve verifiable evidence.
 
-- [ ] **[P2] State that five T034 action classes remain missing** (`tests/fixtures/lsp_traces/README.md:139-160`, `T034 action evidence matrix`)
+- [x] **[P2] State that five T034 action classes remain missing** (`tests/fixtures/lsp_traces/README.md:139-160`, `T034 action evidence matrix`)
   - **Problem:** The matrix records native single-insert evidence for both Helix and Neovim, then concludes that all six actions remain incomplete for at least one family. The five other rows are missing for both families; the conclusion contradicts the table and the retained T002 scope.
   - **Why it matters:** This is a correctness and readability defect in the canonical evidence summary and can make workers reopen already captured single-insert evidence.
   - **Change:** Replace the final conclusion with the exact bounded status: single insert is captured for both requested editor families; selection replacement, one-character paste, multi-character paste, rapid typing, and undo immediately after a server repair edit remain uncaptured for each family. Keep parent T002 open and keep the checked T002.2 four-client baseline unchanged.
