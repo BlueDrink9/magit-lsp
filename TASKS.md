@@ -15,6 +15,8 @@ Last review: 464d5e4b06df8d22cacf273f0c458b55ba4bc151
   Add `make hygiene` running cargo-machete, knip and luacheck, reporting missing tools distinctly. Include the twenty largest nongenerated tracked files, a soft growth threshold, and `allow(dead_code)`/`keep-for:` searches; test report-only behavior and failure reporting.
 - [ ] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
   Run actual tools in an isolated tool environment, retain each baseline finding with a reason, and prove an intentional unused dependency is reported before removing it. Preserve the user's dirty Cargo.toml exactly outside any explicitly scoped metadata change.
+- [x] **T003.2a — Enforce generated-file filtering and hermetic reporter tests.**
+  Correct the runner's Git attribute parsing: current text splitting retains `: linguist-generated` in keys and therefore never excludes generated paths. Add actual Git-attribute coverage and make missing-tool tests independent of installed host tools; exercise invocation failures and real test cwd layout explicitly.
 - [ ] **T003.4 — Document phase hygiene and complete the tooling contract.**
   Add AGENTS phase-end/review guidance, ticket-template and T033 hygiene gates. Verify the completed report-only baseline and narrow tests; record Linux evidence and non-Linux CI follow-ups before marking T003 complete.
 - [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**

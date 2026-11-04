@@ -16,12 +16,15 @@ def tracked(root):
     result = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
     paths = sorted(p.decode() for p in result.stdout.split(b"\0") if p)
     attrs = subprocess.run(
-        ["git", "check-attr", "linguist-generated", "--", *paths],
-        cwd=root, capture_output=True, text=True, check=True,
+        ["git", "check-attr", "-z", "linguist-generated", "--", *paths],
+        cwd=root, capture_output=True, check=True,
     )
+    fields = attrs.stdout.split(b"\0")
     generated = {
-        line.rsplit(": ", 1)[0].split(": linguist-generated: ", 1)[0]
-        for line in attrs.stdout.splitlines() if line.endswith(": set")
+        fields[index].decode()
+        for index in range(0, len(fields) - 2, 3)
+        if fields[index + 1] == b"linguist-generated"
+        and fields[index + 2] in (b"set", b"true")
     }
     return [p for p in paths if p not in generated]
 
