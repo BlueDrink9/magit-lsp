@@ -18,8 +18,8 @@ Last review: 30595656ecb5cb6f5d6f8c5f6fcc849481732e3b
   Add only the opt-in wirelog variable to the isolated launcher's environment allowlist; preserve existing isolation and native text-only behavior. The following capture slice supplies actual-host evidence.
 - [x] **T002.2c2 — Prevent multi-session wirelog corruption.**
   Native VSCode capture exposed concurrent recorder truncation: `/tmp/opencode/t002-vscode/raw.jsonl` contains 121972 NUL bytes amid valid records. Preserve complete JSONL across recorder instances/processes sharing a path, serialize complete lines off the LSP hot path, and test overlap/restarts without losing prior records.
-- [ ] **T002.2c — Capture bundled VSCode declarations and native edits.**
-  Use the shipped extension in an isolated native host, not a fake editor; retain actual host/extension versions, initialize and didChange, text/structured evidence and cleanup.
+- [x] **T002.2c — Capture bundled VSCode declarations and native edits.**
+  Retain same-PID initialize and first native change with observed omission of `experimental.magit`; native provenance, versions, invocation and cleanup are documented in the trace README. Mismatch remains for T004 audit. Enforced by `cargo test --test wirelog` and JSON/source-equality checks.
 - [ ] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**
   Check an actual current Helix binary in an isolated terminal session; keep historical reconstructed traces distinct, document unobservable shapes or unavailable external prerequisites, and do not fabricate conformance.
 - [ ] **T002.2 — Capture real client initialize and change evidence.**

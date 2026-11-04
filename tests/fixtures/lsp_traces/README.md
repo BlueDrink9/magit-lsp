@@ -61,3 +61,30 @@ The capture is opt-in and recorder-redacted. Only initialize and the first
 automatic didChange are retained; remaining raw messages are omitted. The
 temporary source log is owned by this run and may be removed with
 `rm -f /tmp/opencode/t002-bundled/raw.jsonl`.
+
+`bundled-vscode-1.140.06880.jsonl` contains PID 1417132's actual initialize
+request and first native `textDocument/didChange`, in source order;
+`initialize-bundled-vscode-1.140.06880.json` stores the exact initialize
+`params`. Source: `/tmp/opencode/t002-vscode-fixed/raw.jsonl`, SHA256
+`556f8246c5c5cc1b4e40dfd9499cbc26ed0183b283f42cdd0e13c80525841b42`.
+Observed clientInfo is VSCodium 1.140.0; the CLI host build is 1.140.06880
+and the shipped extension is 0.1.0. The actual wire initialize omits
+`experimental.magit`, despite the extension source intending that declaration.
+Treat this observed mismatch as evidence for T004's capability audit; no
+declaration is fabricated. The isolated normal-host launcher loads the
+production extension; initialize options report profile `standard`.
+
+The native evidence at
+`/tmp/opencode/vscode-review-8AR4IX/real-file-native-evidence.json` reports
+`status: pass` for production real-file native close. The source contains 298
+valid rows; this extraction keeps initialize and the first change from the
+same PID. Other messages and the synthetic semantic-owner probe from PID
+1418535 are excluded. The recorded run exited 0 and its launcher terminates
+only its owned editor processes.
+
+Reproduce from repository root (VSCodium and display available):
+
+```sh
+mkdir -p /tmp/opencode/t002-vscode-fixed
+MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_EDIT_ONLY=1 MAGIT_LSP_WIRELOG=/tmp/opencode/t002-vscode-fixed/raw.jsonl npm --prefix clients/vscode run test:e2e
+```
