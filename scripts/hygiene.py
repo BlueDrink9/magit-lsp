@@ -40,8 +40,12 @@ def run_check(label, command, cwd, paths=()):
     except OSError as error:
         print(f"{label}: INVOCATION FAILURE: {error}")
         return
-    failed_to_start = "no such command" in result.stderr.lower() or "not found" in result.stderr.lower()
-    kind = "INVOCATION FAILURE" if result.returncode and failed_to_start else ("FINDINGS" if result.returncode else "CLEAN")
+    if result.returncode == 0:
+        kind = "CLEAN"
+    elif (label == "cargo machete" or label == "luacheck") and result.returncode == 1:
+        kind = "FINDINGS"
+    else:
+        kind = "NONZERO"
     print(f"{label}: {kind} (exit {result.returncode})")
     output = (result.stdout + result.stderr).strip()
     if output:

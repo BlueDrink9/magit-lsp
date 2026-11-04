@@ -40,15 +40,28 @@ class HygieneTests(unittest.TestCase):
         path.write_text(f"#!/bin/sh\nprintf '%s\\n' {output!r}\nexit {code}\n")
         path.chmod(0o755)
 
-    def test_nonzero_checker_is_reported_but_runner_succeeds(self):
+    def test_known_findings_and_unknown_nonzero_are_distinct(self):
         with tempfile.TemporaryDirectory() as tools:
             bindir = Path(tools)
             for tool in ("cargo", "knip", "luacheck"):
-                self.stub(bindir, tool, 7 if tool == "cargo" else 0, "tool output")
+                self.stub(bindir, tool, 1 if tool == "cargo" else 0, "tool output")
             result = self.execute(tools)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cargo machete: FINDINGS (exit 7)", result.stdout)
+        self.assertIn("cargo machete: FINDINGS (exit 1)", result.stdout)
         self.assertIn("tool output", result.stdout)
+
+    def test_arbitrary_nonzero_is_not_called_findings(self):
+        (self.root / "clients/vscode").mkdir(parents=True)
+        with tempfile.TemporaryDirectory() as tools:
+            bindir = Path(tools)
+            self.stub(bindir, "cargo", 7, "tool output")
+            self.stub(bindir, "knip", 1, "config error")
+            self.stub(bindir, "luacheck", 0, "")
+            result = self.execute(tools)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cargo machete: NONZERO (exit 7)", result.stdout)
+        self.assertIn("knip: NONZERO (exit 1)", result.stdout)
+        self.assertNotIn("FINDINGS", result.stdout)
 
     def test_missing_checker_is_distinct(self):
         with tempfile.TemporaryDirectory() as tools:
@@ -109,6 +122,16 @@ class HygieneTests(unittest.TestCase):
             result = self.execute(tools)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("knip: INVOCATION FAILURE:", result.stdout)
+
+    def test_missing_cargo_machete_subcommand_is_nonzero(self):
+        with tempfile.TemporaryDirectory() as tools:
+            bindir = Path(tools)
+            self.stub(bindir, "cargo", 101, "no such command: machete")
+            self.stub(bindir, "knip", 0, "")
+            self.stub(bindir, "luacheck", 0, "")
+            result = self.execute(tools)
+        self.assertIn("cargo machete: NONZERO (exit 101)", result.stdout)
+        self.assertIn("no such command: machete", result.stdout)
 
 
 if __name__ == "__main__":
