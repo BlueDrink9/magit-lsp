@@ -6,6 +6,8 @@
   Follow the replacement queue in dependency order, splitting large tickets into scoped work items. Record blockers without requesting human input before the deadline; preserve unrelated local changes.
 - [x] **T001.1 — Map open roadmap and review issues to the replacement queue.**
   Audit every unchecked old §7 item, both Plain task files and REVIEW_REPORT A01–A34 against numbered tickets; write a compact migration ledger in `docs/evidence/task-queue-migration.md`. Resolve A11/BUG-READ-1 ownership first, preserve unmapped issues explicitly, and add T001 slice tracking to the replacement queue; do not remove source records yet.
+- [x] **T001.2 — Consolidate working rules and ticket verification policy.**
+  Update `AGENTS.md`, the existing `TASKS.md` ticket template, and replacement-list shared rules. Keep no-vision policy authoritative only in AGENTS; align tests, golden/generated artifacts, fakes, capabilities and completed-ticket rules with the new queue without changing implementation or claiming unrun verification.
 - [x] **Remove the superseded protocol plan and its ad hoc work item.**
   Delete `protocol review and plan.md` and its obsolete unchecked queue entry. Preserve unrelated work; identify the first ticket in `TASKS_PART_SEVEN.md` without starting it.
 - [x] **Gather the A–E harness and client-abstraction evidence report.**
@@ -1405,13 +1407,7 @@ truthfully. Historical task Verify command lists and recorded evidence describe
 what was required or run at that time; do not rewrite them to imply current
 policy or erase that evidence.
 
-**No-vision policy (mandatory for all agents and delegated workers):** under no
-circumstances use vision, inspect/render images, invoke image/screenshot tools,
-or capture screenshots. Native UI verification remains real, but uses text and
-structured state only (`.screen`, accessibility/DOM text, JSON, wire/API and Git
-state). Text snapshots are allowed. Do not add image-snapshot tests/capture paths
-or require image-based acceptance/inspection. Historical evidence descriptions
-remain historical and must not be rewritten as text-based evidence.
+Follow the authoritative [no-vision policy in AGENTS.md](./AGENTS.md#working-conventions).
 
 ### Review
 
@@ -1684,19 +1680,25 @@ boundary), **Reference Files** (read first), **Architectural Constraints**
 (invariants), **Acceptance Criteria** (observable outcomes), and **Verification
 Command** (exact command that must exit 0).
 
+Every ticket must also state **Depends on**, **Size**, and a phase-gate check
+when applicable. Apply shared test, golden/generated-file, fake, capability,
+and completed-ticket rules from [AGENTS.md](./AGENTS.md#working-conventions).
+
 For any task that changes what the user sees (`ui-test-plan.md` U2.1):
 
 - **Acceptance Criteria** must contain a visible outcome: "after pressing X
   the screen shows …".
-- **Verification Command** must include focused real native-UI evidence for
-  the affected client, using relevant scenario(s), not automatically the full
-  `make ui-test` suite. Feature tickets require native evidence in the reference client (Neovim) plus Rust state tests. VSCode native evidence is required only when the ticket adds or changes an adapter capability: a new effect type, prompt kind, render form, key-delivery mechanism, view placement or lifetime pattern, or menu item kind. Full VSCode conformance runs at release candidate (R-REL-4), not per ticket. Use the full UI suite only
+- Feature tickets require Rust state tests and conformance scenarios. Require
+  focused native Neovim evidence only for new visible behavior. Require VSCode
+  evidence only when a declared capability changes or `clients/vscode/` files
+  change. Set `MAGIT_NATIVE=1` for the optional local native tier; CI runs all
+  tests. Use the full UI suite only
   for broad UI/shared lifecycle changes, phase completion, or suspected
   regressions.
 - The report lists the scenario files, their results and saved evidence paths,
   and explicitly identifies checks skipped or deferred.
-- A task is not done until a `.scn` scenario has driven the real UI
-  (`scripts/ui`, §8.8).
+- Require a `.scn` real-UI scenario only when the ticket's visible behavior is
+  new (`scripts/ui`, §8.8).
 
 Every task that opens a new view (log, revision, refs, commit message) also
 adds a scenario for it.

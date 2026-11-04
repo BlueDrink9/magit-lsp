@@ -12,15 +12,15 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 
 ## Rules for all tickets
 
-1. **Text evidence only.** Do not make, open or mention an image. Use only text as evidence. Text evidence includes: document text, `.screen` and `.ansi` files, JSON state dumps, wire logs, DOM text dumps, tab dumps, repository state and process lists. A human makes README screenshots with `scripts/readme-shots/`. An agent must not run that script.
-2. **Test policy.** CI runs all tests. A full local run is optional. Set `MAGIT_NATIVE=1` to run the native tier on your machine. A feature ticket needs Rust state tests and the conformance scenarios. Use Neovim native evidence only when the visible behavior is new. Use VS Code evidence only when a declared capability changes or a file in `clients/vscode/` changes.
-3. **Snapshots and goldens.** Use `UPDATE_EXPECT` only when necessary. A change to a golden needs its own commit. The commit message must explain each changed hunk. A golden must be small and normalized. Add assertions that regeneration cannot change. Do not mark goldens as `linguist-generated`.
-4. **Generated files.** Commit a generated file only if a client needs it as shipped. Examples are the keybindings in `package.json`, `.d.ts` files, spec tables and example files. Mark each committed generated file as generated. Use a header, or a `"//generated"` key. Add the file to `.gitattributes` as `linguist-generated`. Add a CI check for drift. Do not commit other generated files.
-5. **Delete, do not deprecate.** Keep an option, declaration or variant only if a real consumer uses it. A `keep-for:` comment or `allow(dead_code)` does not give permission to keep dead code.
-6. **Fakes.** A fake is trustworthy only if the same assertions also run against the real thing. The expected values must come from a recorded real run. Never fake Git. Each fake capability module must have an `// anchor:` comment. The comment names the real client or trace. Or it says `anchor: none yet`.
-7. **Client claims.** Absence of a capability means "not supported" only when the declaration is the feature. These are `window.showDocument`, `workspace.applyEdit`, `semanticTokens` and `workspaceEdit.documentChanges`. For capabilities that only describe sub-features, absence is not a signal. Examples are `definition`, `references` and `executeCommand`.
-8. **`applied: true` is not proof.** Neovim returns `applied: true` when it skipped a stale edit. Compare the resulting text hash. Send one document in each `applyEdit`.
-9. **Completed tickets.** Shorten a completed ticket to 12 lines or less. Write the requirement, `Done: <commit>` and the test that enforces it. Put the evidence narrative in the commit message.
+1. Follow the authoritative [no-vision rule](./AGENTS.md#working-conventions); use text and structured evidence only.
+2. Apply shared working and verification rules in [AGENTS.md](./AGENTS.md#working-conventions). CI runs all tests; full local runs are optional. Set `MAGIT_NATIVE=1` for the local native tier.
+3. Feature Rust state tests and conformance scenarios are required. Native Neovim evidence is for new visible behavior only; VSCode evidence is for changed declared capabilities or files under `clients/vscode/`.
+4. Golden changes require a dedicated commit. Explain every changed hunk in its commit message. Keep goldens small and normalized; add immutable semantic assertions. Never mark goldens generated.
+5. Ship generated files only when clients need them; mark them generated and add CI drift checks. Do not commit other generated files.
+6. Delete unused options, declarations and variants; do not deprecate. Fake capability modules need `// anchor:` naming a real client/trace or `anchor: none yet`. Assertions must also run against real behavior; expected values come from recorded runs. Never fake Git.
+7. Capability absence means unsupported only when the declaration itself is the feature (`window.showDocument`, `workspace.applyEdit`, `semanticTokens`, `workspaceEdit.documentChanges`); absence of sub-features such as `definition`, `references` or `executeCommand` is not a signal.
+8. `applied: true` does not prove applyEdit succeeded. Compare resulting text hash; send one document per `applyEdit`.
+9. Compress completed tickets to 12 lines or less: requirement, `Done: <commit>`, and enforcing test. Put evidence narrative in commit message.
 
 ## Phase map
 
@@ -72,8 +72,8 @@ All child tickets of these four tickets are done. Close each umbrella now. Move 
 ### T001 docs-diet (M)
 
 - **T001 migration slices (unchecked):**
-  - [ ] T001.1 Map old §7 and review findings to this queue; resolve A11/BUG-READ-1 ownership; write `docs/evidence/task-queue-migration.md`.
-  - [ ] T001.2 Apply document rules and ticket-template rules to `AGENTS.md` and `TASKS.md`.
+  - [x] T001.1 Map old §7 and review findings to this queue; resolve A11/BUG-READ-1 ownership; write `docs/evidence/task-queue-migration.md`. Mapping milestone complete; per-finding audit remains T001.3.
+  - [x] T001.2 Apply document rules and ticket-template rules to `AGENTS.md` and `TASKS.md`.
   - [ ] T001.3 Reconcile and shorten completed records; preserve every open issue and its owner.
   - [ ] T001.4 Move host facts, screenshot policy, evidence banners and process-ownership material to their documented homes.
   - [ ] T001.5 Remove superseded historical sections and source planning files only after all open records are represented.

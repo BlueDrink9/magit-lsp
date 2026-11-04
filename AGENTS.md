@@ -64,6 +64,22 @@ Start in these components:
 
 - **No-vision policy (mandatory for every agent, including delegated workers and subagents):** never use vision, inspect or render images, or invoke image/screenshot tools, under any circumstances. Do not capture screenshots or add image-snapshot tests/capture paths. Native UI verification remains real and interactive, but evidence and acceptance must be text/structured state only (for example `.screen`, accessibility/DOM text, JSON, wire/API and Git state). Text snapshots are allowed. Do not impose image-based acceptance or future screenshot inspection requirements.
 
+- Shared ticket rules: feature Rust state tests and conformance scenarios;
+  focused Neovim native evidence only for new visible behavior, and VSCode
+  evidence only for changed declared capabilities or `clients/vscode/` files.
+  CI runs all tests; full local runs are optional (`MAGIT_NATIVE=1` enables the
+  native tier). Golden changes require a dedicated commit whose message explains
+  every changed hunk; keep goldens small/normalized with immutable assertions.
+  Ship generated files only when clients need them, mark them generated and add
+  CI drift checks. Fake capability modules need `// anchor:` to a real client or
+  trace (or `anchor: none yet`), and assertions must also run against real
+  behavior. Capability absence means unsupported only when the declaration is
+  the feature; sub-feature absence is not a signal. For applyEdit, verify result
+  text hash, not `applied: true`, and send one document per request. Delete unused
+  declarations rather than deprecating them. Compress completed tickets to 12
+  lines: requirement, `Done: <commit>`, and enforcing test; put evidence narrative
+  in commit message.
+
 - Keep changes scoped to the requested task. Do not take on unrelated unchecked
   roadmap or review backlog items.
 - Every external/public function and type needs a concise docstring (`///` in
