@@ -104,8 +104,6 @@ Start in these components:
 
 - Run `make hygiene` at actual named phase ends and required review checkpoints, not for each ticket. The phase gate applies only when the last unchecked item in that named phase completes; the independent review checkpoint remains after eight completed tasks since `Last review:`.
 - For each finding, fix it, delete dead code, allowlist it with a concrete reason, or assign an exact owner task. A report-only exit code of 0 is not clean-debt acceptance. Report missing tools and launch failures honestly; do not treat them as a clean report.
-- Local execution is Linux-only. Keep Windows/macOS CI checks as follow-ups and do not claim those hosts ran without CI evidence.
-
 - Local execution and verification target Linux only. Do not block Linux work
   because Windows or macOS hosts are unavailable; record platform-specific
   risks and retain explicit Windows/macOS CI checks as follow-ups. Keep code,

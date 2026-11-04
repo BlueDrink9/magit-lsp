@@ -249,7 +249,7 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `a70df920a165885e73cd315c29
   - **Constraints:** Do not change production threshold semantics, invoke host hygiene tools, require network access, or claim Windows/macOS execution.
   - **Verify:** `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`
 
-- [ ] **[P2] Remove duplicate Linux verification policy** (`AGENTS.md:65-77`, `Phase end and review`)
+- [x] **[P2] Remove duplicate Linux verification policy** (`AGENTS.md:65-77`, `Phase end and review`)
   - **Problem:** The new “Local execution is Linux-only” bullet immediately repeats the existing “Local execution and verification target Linux only” bullet, including the same CI and claim limits.
   - **Why it matters:** This violates DRY and readability in the canonical agent instructions. Parallel policy wording can drift and create two apparent sources of truth.
   - **Change:** Keep one consolidated bullet containing Linux-only local execution, explicit Windows/macOS CI follow-ups, portability expectations, and the ban on unsupported cross-platform claims. Delete only the redundant wording.
