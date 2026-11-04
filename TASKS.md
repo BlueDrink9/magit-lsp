@@ -31,6 +31,11 @@
 
 ## Bugfix
 
+- [x] **Checkpoint — Establish the staged-successor failure cause.**
+  Capture exact pre/post structured node identities, hunk IDs and rendered cursor for the single failing views case. Distinguish user folding, bounded overflow, metadata identity or cursor re-resolution using concrete output; retain a concise diagnosis and source paths before changing production behavior.
+  Diagnosis: old selected line is `unstaged/f.txt/hunk:c3b060d5f55c6348/line:3` (path `f.txt`, hunk `c3b060d5f55c6348`, marker `+`, line index 3). Post-stage tree contains the same hunk ID under staged `f.txt`, but no matching line; staged lines represent the changed hunk. `re_resolve` returns that staged hunk, but `successor_cursor` then falls through to `nearest_ancestor`, which selects `section:unstaged`; rendered cursor is line 18 and focused node has no path. Cause: the staged hunk has matching path/hunk identity but no matching line marker/index, so `re_resolve` returns hunk, while subsequent fallback replaces it with old section ancestor. See `src/session.rs:2665–2684,2699–2717`; unknown nodes expand per `src/tree.rs:28–45`, so folding is not cause. Evidence: focused `--nocapture` structured-node output.
+- [ ] **Checkpoint — Preserve staged-hunk successor cursor.**
+  Exhaustive Rust gate has one remaining failure: `tests/views.rs::staging_a_hunk_line_sends_edits_and_moves_the_cursor_to_the_staged_hunk`, where successor resolves to a node with no path. Preserve content-based hunk identity, staged structural context and ack-based edits; diagnose rather than weaken cursor assertions. Verify `cargo test --test views` and focused native text evidence for production changes.
 - [x] **Checkpoint — Restore log-menu key routing and native passthrough.**
   Both profiles bind status `open.log` to `l`; update stale Vim test input from `g l` to `l`. Captured menu, log opening, `q` return and native-key passthrough remain covered. Done: current change; enforced by `cargo test --test log_commands`.
 - [x] **Checkpoint — Restore full Git-backend hunk comparisons.**
