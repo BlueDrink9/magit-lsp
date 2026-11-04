@@ -266,12 +266,87 @@ provenance; unavailable actions remain explicit.
 | Selection replace | NOT CAPTURED; no nonempty replacement range in Helix rows 2–4. | Captured: native `1G0vllrX<Esc>` produced `XXXd`; action trace metadata and source rows 9, 14 retained in `plain-neovim-0.12.6-actions.*`. |
 | Paste one character | NOT CAPTURED. | Captured: native register `Q` and `gg0"ap` produced `HQead`; action trace metadata and source rows retained in `plain-neovim-0.12.6-actions.*`. |
 | Paste many characters | NOT CAPTURED. | Captured: native register `MULTI` and `gg0"ap` produced `HMULTIQead`; it began before prior repair settled. See retained action metadata and limits. |
-| Rapid typing | NOT CAPTURED; separate rapid input not tested. | NOT CAPTURED. |
-| Undo immediately after server repair edit | NOT CAPTURED. | NOT CAPTURED. |
+| Rapid typing | NOT CAPTURED; separate rapid input not tested. | Captured: native `gg0iRAPID<Esc>`; raw change and metadata retained in `plain-neovim-0.12.6-rapid-repair.*`. |
+| Undo immediately after server repair edit | NOT CAPTURED. | Captured: native `u` sent only after correlated repair reply and baseline buffer restoration; actual undo and follow-on server repair retained in `plain-neovim-0.12.6-rapid-repair.*`. |
 
 Neovim action capture source is `/tmp/opencode/t002-neovim-actions/raw-parent/raw.jsonl`, SHA256 `856b70d34cb40b2d221177f89d43b75399adaf8bfa9d543253ace4e5e20360de` (21 rows). `plain-neovim-0.12.6-actions.jsonl` preserves source rows 9 and 14 verbatim; its JSON sidecar records exact native keys, structured before/after text and versions, and source row mapping. Source row 9 is didChange version 5 (`XXX` replacement); row 14 is didChange version 9 and contains Q and MULTI edits together with intervening server edits. Native state versions were 7 and 8 for the two pastes. MULTI began before prior repair settled, so this is action evidence, not a clean-repair claim. The run also executed incidental undo: its `repair_before_undo` still contains `HMULTIQead`, so undo-after-repair is not established and is excluded from the action fixture.
 
 The original driver and report are retained at `/tmp/opencode/t002-neovim-actions/driver.py` and `/tmp/opencode/t002-neovim-actions/report.json`. The capture was run with `python3 /tmp/opencode/t002-neovim-actions/driver.py`; the recorded driver lines 71–79 still enabled the incidental undo. Do not treat this command as a three-action-only run or rerun it to recreate this evidence.
+
+The separate rapid/undo capture is retained in `plain-neovim-0.12.6-rapid-repair.jsonl` and its metadata sidecar. Final drained raw source SHA256 is `05295fce72b5d9da6f2c57d62648b77d9fd95aa84a6e3b9a28800882d07c6397` (21 rows, including shutdown, response and exit); source rows 9, 10, 13 and 14 are copied byte-for-byte. Row 9 proves rapid native input; row 10 is the new server `workspace/applyEdit` deleting `RAPID`; row 13 is its correlated editor reply. The reply is not accepted alone: native buffer text and version were inspected and matched the exact baseline before sending `u`. Row 14 coalesces the server repair echo (delete `RAPID`) with the native undo (insert `RAPID`); there is no separate echo before undo. The observed undo restored `RAPID`, then the server issued a further repair. The sidecar records baseline/after hashes, versions, native keys, row offsets and request ID without prescribing the undo outcome.
+
+Reproduce on Linux from any checkout subdirectory with Neovim 0.12.6, tmux, Python 3 and Git. This complete recipe creates a real temporary Git repository, uses a unique recorder/socket/tmux namespace, retries startup remote-expr errors with a deadline, polls wire/state conditions, sends undo only after matching correlated reply and baseline restoration, gracefully closes Neovim, waits for the server's exit and process termination, then prints final source hash/count. It preserves the raw capture directory for audit.
+
+```sh
+ROOT=$(git rev-parse --show-toplevel)
+python3 - "$ROOT" <<'PY'
+import hashlib, json, os, pathlib, subprocess, sys, time
+root=pathlib.Path(sys.argv[1]).resolve(); tag=f'{os.getpid()}-{time.time_ns()}'; d=pathlib.Path('/tmp/opencode')/f't002-neovim-rapid-repair-{tag}'
+repo=d/'repo'; raw=d/'raw-parent/raw.jsonl'; sock=f'/tmp/t002-neovim-rapid-repair-{tag}.sock'; label=f't002-rapid-{tag}'
+def run(a,**kw): return subprocess.run(a,text=True,capture_output=True,check=True,**kw)
+def rows(): return [json.loads(x) for x in raw.read_text().splitlines() if x.strip()] if raw.exists() else []
+def state():
+ lua="(function() local b=vim.api.nvim_get_current_buf(); return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'),version=vim.lsp.util.buf_versions[b],name=vim.api.nvim_buf_get_name(b)}) end)()"
+ end=time.monotonic()+8
+ while time.monotonic()<end:
+  try: return json.loads(run(['nvim','--server',sock,'--remote-expr','luaeval('+json.dumps(lua)+')'],timeout=2).stdout)
+  except subprocess.CalledProcessError: time.sleep(.05)
+ raise RuntimeError('Neovim remote-expr readiness timeout')
+def wait(pred,label,seconds=20):
+ end=time.monotonic()+seconds
+ while time.monotonic()<end:
+  try:
+   x=state()
+   if pred(x): return x
+  except subprocess.CalledProcessError: pass
+  time.sleep(.05)
+ raise RuntimeError('timeout: '+label)
+d.mkdir(parents=True); repo.mkdir(); (d/'home').mkdir(); raw.parent.mkdir()
+try:
+ run(['git','init','-q'],cwd=repo); run(['git','config','user.name','Capture'],cwd=repo); run(['git','config','user.email','capture@example.invalid'],cwd=repo)
+ (repo/'tracked').write_text('base\n'); run(['git','add','tracked'],cwd=repo); run(['git','commit','-qm','base'],cwd=repo); (repo/'.magit').write_text('sentinel\n')
+ env=os.environ.copy(); env.update(HOME=str(d/'home'),XDG_CONFIG_HOME=str(d/'home/config'),XDG_DATA_HOME=str(d/'home/data'),XDG_STATE_HOME=str(d/'home/state'),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0',MAGIT_LSP_WIRELOG=str(raw),PLAIN_REPO=str(repo),PLAIN_SERVER=str(root/'target/debug/magit-lsp'))
+ if not pathlib.Path(env['PLAIN_SERVER']).exists(): run(['cargo','build','--manifest-path',str(root/'Cargo.toml')],cwd=root,timeout=180)
+ subprocess.run(['tmux','-L',label,'new-session','-d','-x','120','-y','50','-s','cap','nvim','--listen',sock,'-u',str(root/'tests/ui/plain_init.lua'),str(repo/'.magit')],cwd=repo,env=env,check=True)
+ base=wait(lambda x:x['version'] is not None and 'Head:' in x['text'],'initial render'); offset=len(rows()); run(['nvim','--server',sock,'--remote-send','gg0iRAPID<Esc>']); changed=wait(lambda x:x['text']!=base['text'],'rapid input')
+ end=time.monotonic()+20; req=None
+ while time.monotonic()<end:
+  wire=rows(); req=next(((i,r) for i,r in enumerate(wire[offset:],offset) if r.get('direction')=='out' and r.get('raw',{}).get('method')=='workspace/applyEdit' and any(u.endswith('/.magit') and any(c.get('newText')=='' for c in cs) for u,cs in r.get('raw',{}).get('params',{}).get('edit',{}).get('changes',{}).items())),None)
+  if req: break
+  time.sleep(.05)
+ if not req: raise RuntimeError('no new repair applyEdit')
+ rid=req[1]['raw']['id']; end=time.monotonic()+20; reply=None
+ while time.monotonic()<end:
+  wire=rows(); reply=next(((i,r) for i,r in enumerate(wire[req[0]+1:],req[0]+1) if r.get('direction')=='in' and r.get('raw',{}).get('id')==rid),None)
+  if reply: break
+  time.sleep(.05)
+ if not reply: raise RuntimeError('no correlated applyEdit reply')
+ restored=wait(lambda x:x['text']==base['text'] and x['version']>changed['version'],'native repair restoration'); before=state(); run(['nvim','--server',sock,'--remote-send','u']); undone=wait(lambda x:x['version']>before['version'],'native undo')
+ end=time.monotonic()+10
+ while time.monotonic()<end:
+  wire=rows(); echo=next(((i,r) for i,r in enumerate(wire) if r.get('direction')=='in' and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('version')==undone['version']),None)
+  if echo: break
+  time.sleep(.05)
+ if not echo: raise RuntimeError('undo didChange not recorded')
+finally:
+ subprocess.run(['nvim','--server',sock,'--remote-send','<Cmd>qa!<CR>'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ end=time.monotonic()+15
+ while time.monotonic()<end:
+  wire=rows(); init=next((r for r in wire if r.get('raw',{}).get('method')=='initialize'),None); pid=init.get('pid') if init else None
+  exited=pid and any(r.get('pid')==pid and r.get('raw',{}).get('method')=='exit' for r in wire)
+  try: os.kill(pid,0); alive=True
+  except (ProcessLookupError,TypeError): alive=False
+  if exited and not alive: break
+  time.sleep(.05)
+ else: raise RuntimeError('owned LSP server did not gracefully exit')
+ subprocess.run(['tmux','-L',label,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ if pathlib.Path(sock).exists(): raise RuntimeError('owned Neovim socket remains')
+ wire=rows(); (d/'report.json').write_text(json.dumps({'source':str(raw),'source_sha256':hashlib.sha256(raw.read_bytes()).hexdigest(),'source_rows':len(wire),'rapid':changed,'repair_request_id':rid,'repair_request_row':req[0]+1,'reply_row':reply[0]+1,'restored':restored,'undo':undone,'undo_echo_row':echo[0]+1,'server_pid':pid,'server_exit_observed':bool(exited),'socket_remains':False},indent=2)+'\n')
+ print((d/'report.json').read_text())
+PY
+```
+
+The equivalent capture driver is retained at `/tmp/opencode/t002-neovim-rapid-repair/driver.py`; neither it nor that path is needed by the README recipe. To regenerate fixture rows and metadata, select rapid didChange, following `workspace/applyEdit`, matching response ID, and undo didChange in source order. Compare retained JSONL lines byte-for-byte with source lines, then record source hash and structured before/after state. Checked extraction indices were `[8, 9, 12, 13]` (zero-based); the final source has 21 rows after graceful drain.
 
 Plain Neovim row 2 is a server-rendered insertion, row 3 native `A`
 insertion, and row 4 `A` deletion/repair; only row 3 establishes single insert.
@@ -279,8 +354,7 @@ Bundled Neovim's commit-draft change is a native full-buffer replacement, not
 proof of any particular requested input action. Bundled VSCode's retained
 change is also a full-buffer replacement; no native action among the six is
 established there. Single insert is captured for both requested editor families.
-For Neovim, selection replacement and both register pastes are now captured;
-rapid typing and undo immediately after a confirmed server repair remain
-uncaptured. For Helix, all five action classes remain uncaptured. The checked
+For Neovim, selection replacement, both register pastes, rapid typing, and undo
+after confirmed repair are captured. For Helix, all five action classes remain uncaptured. The checked
 T002.2 four-client baseline is complete; parent T002 and full T034 conformance
 remain open.
