@@ -1,18 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
-    "extension.js",
-    "test/**/*.js",
-    "test/**/*.mjs",
-    "scripts/**/*.mjs"
+    "test/e2e/suite.js"
   ],
   "project": [
     "**/*.js",
     "**/*.mjs"
-  ],
-  "ignore": [
-    "node_modules/**",
-    "out/**"
   ],
   "ignoreDependencies": [
     "vscode"

@@ -14,47 +14,42 @@ detection.
 
 ## Knip
 
-- Unlisted dependency: `vscode-jsonrpc/node` at
-  `clients/vscode/test/e2e/real-file-native.js:391:14`. Test imports the
-  package but its package declaration is absent; determine the owning package
-  declaration and add it (or remove the import) in follow-up T003 policy work.
-- Unused exports: these module exports are not imported by Knip's configured
-  entry graph. This is evidence of graph reachability, not proof they are safe
-  to delete; validate public/test runtime consumers before disposition.
-  - `clients/vscode/lib/commands.js`: `openStatus`, `viewport`,
-    `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`.
-  - `clients/vscode/lib/context.js`: `deriveContext`, `inactiveContext`,
-    `staticScope`.
-  - `clients/vscode/lib/drafts.js`: `cancel`, `close`, `confirm`,
-    `disconnect`, `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`,
-    `setup`.
-  - `clients/vscode/lib/edit.js`: `KIND`, `SCHEME`, `draftAction`,
-    `isEditEffect`, `languageForKind`.
-  - `clients/vscode/lib/edits.js`: `onDocumentClosed`,
-    `onActiveEditorChanged`, `confirmEditCommand`, `cancelEditCommand`,
-    `currentEdit`.
+- Unused files (4): `clients/vscode/test/e2e/real-file-lifecycle.js`,
+  `clients/vscode/test/e2e/real-file-lifecycle.mjs`,
+  `clients/vscode/test/e2e/real-file-spike.js`,
+  `clients/vscode/test/e2e/real-file-spike.mjs`.
+- Unlisted dependencies (1): `vscode-jsonrpc/node` at
+  `clients/vscode/test/e2e/real-file-native.js:391:14`.
+- Unused exports (69):
+  - `clients/vscode/lib/commands.js`: `openStatus`, `viewport`, `pressCommand`,
+    `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`.
+  - `clients/vscode/lib/context.js`: `deriveContext`, `inactiveContext`, `staticScope`.
+  - `clients/vscode/lib/drafts.js`: `cancel`, `close`, `confirm`, `disconnect`,
+    `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`, `setup`.
+  - `clients/vscode/lib/edit.js`: `KIND`, `SCHEME`, `draftAction`, `isEditEffect`, `languageForKind`.
+  - `clients/vscode/lib/edits.js`: `onDocumentClosed`, `onActiveEditorChanged`,
+    `confirmEditCommand`, `cancelEditCommand`, `currentEdit`.
   - `clients/vscode/lib/effects.js`: `showMessage`, `replay`.
-  - `clients/vscode/lib/foldkeys.js`: `parseJsonc`, `mapFoldCommand`,
-    `mapFoldKeys`.
-  - `clients/vscode/lib/menu.js`: `quickPickItems`, `quickPickItem`,
-    `describeItem`, `routeTyped`, `charToKey`.
-  - `clients/vscode/lib/menus.js`: `showMenu`, `menuItems`, `hideMenu`,
-    `queueSteps`.
-  - `clients/vscode/lib/prompt.js`: `CUSTOM_ID`, `promptItems`,
-    `answerFor`, `customChoice`.
+  - `clients/vscode/lib/foldkeys.js`: `parseJsonc`, `mapFoldCommand`, `mapFoldKeys`.
+  - `clients/vscode/lib/menu.js`: `quickPickItems`, `quickPickItem`, `describeItem`,
+    `routeTyped`, `charToKey`.
+  - `clients/vscode/lib/menus.js`: `showMenu`, `menuItems`, `hideMenu`, `queueSteps`.
+  - `clients/vscode/lib/prompt.js`: `CUSTOM_ID`, `promptItems`, `answerFor`, `customChoice`.
   - `clients/vscode/lib/render.js`: `applyRender`, `applyEdit`.
-  - `clients/vscode/lib/requests.js`: `press`, `invoke`, `applyRender`,
-    `handlePrompt`, `resync`.
+  - `clients/vscode/lib/requests.js`: `press`, `invoke`, `applyRender`, `handlePrompt`, `resync`.
   - `clients/vscode/lib/semantic.js`: `register`.
-  - `clients/vscode/lib/session.js`: `activate`, `deactivate`,
-    `createClient`.
-  - `clients/vscode/lib/views.js`: `stateForUri`, `activeState`,
-    `isMenuKind`, `ensureView`, `showView`, `showDocument`, `applyCursor`,
-    `activateView`, `closeView`, `closeRoot`, `focusView`.
-- Configuration hints: `clients/vscode/knip.json` entries `node_modules/**` and
-  `out/**` are redundant ignores; `extension.js` is a redundant entry pattern.
-  Remove/review these entries in follow-up rather than treating them as
-  intentional exclusions.
+  - `clients/vscode/lib/session.js`: `activate`, `deactivate`, `createClient`.
+  - `clients/vscode/lib/views.js`: `stateForUri`, `activeState`, `isMenuKind`, `ensureView`,
+    `showView`, `showDocument`, `applyCursor`, `activateView`, `closeView`, `closeRoot`, `focusView`.
+- Configuration hints: none.
+
+Knip entry graph: package metadata discovers `extension.js`; package scripts
+discover `scripts/gen-keybindings.mjs`, `test/test.js`, `test/integration.js`,
+and `test/e2e/run.mjs`. `test/e2e/suite.js` is the sole explicit exceptional
+entry because VSCode loads it by the generated `--extensionTestsPath` argument,
+which static import analysis cannot follow. Knip 5.88.1 reported an isolated
+unreachable helper probe as an unused file; the probe was removed. Static graph
+check only; no native VSCode execution is claimed.
 
 ## Luacheck
 
