@@ -11,6 +11,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [x] **T005.1 — Define the evidence-backed quirk registry and resolver.**
+  Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `cargo test --test quirks` against captured initialize declarations, version/name boundaries, capability matching and override validation.
+- [ ] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
+  Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
+- [ ] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
+  Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
   Proposed orchestration configuration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. Until then, the active higher-priority eight-task review rule remains. Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
