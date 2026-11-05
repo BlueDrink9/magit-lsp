@@ -149,12 +149,7 @@ pub struct RichCapabilities {
 impl RichCapabilities {
     /// Required optional effect for a command, before any command-side work.
     pub fn command_requirement(&self, command: &str) -> Option<&'static str> {
-        let required = match command {
-            "common.visit" => "visitFile",
-            "common.copy-value" | "log.select-and-copy" => "clipboard",
-            "commit.create" | "commit.amend" | "commit.extend" | "commit.reword" => "editDocument",
-            _ => return None,
-        };
+        let required = crate::commands::required_effect(command)?;
         (!self.supports_effect(required)).then_some(required)
     }
 

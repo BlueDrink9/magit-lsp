@@ -214,6 +214,33 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
 }
 
 #[test]
+fn rich_command_requirements_come_from_registry_metadata() {
+    let mut block = rich_block();
+    block["effects"] = json!([]);
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
+        panic!("expected rich")
+    };
+    let required = [
+        ("common.visit", "visitFile"),
+        ("common.copy-value", "clipboard"),
+        ("log.select-and-copy", "clipboard"),
+        ("commit.create", "editDocument"),
+        ("commit.amend", "editDocument"),
+        ("commit.extend", "editDocument"),
+        ("commit.reword", "editDocument"),
+    ];
+    for (command, effect) in required {
+        assert_eq!(caps.command_requirement(command), Some(effect));
+    }
+    assert_eq!(caps.command_requirement("common.confirm"), None);
+    assert_eq!(caps.command_requirement("missing.command"), None);
+    let Presentation::Rich(declared) = negotiate(&initialize(Some(rich_block()))).unwrap() else {
+        panic!("expected rich")
+    };
+    assert_eq!(declared.command_requirement("common.visit"), None);
+}
+
+#[test]
 fn rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema() {
     assert!(negotiate(&initialize(Some(rich_block()))).is_ok());
 

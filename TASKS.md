@@ -18,6 +18,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
+- [ ] **T004.6 — Derive capability requirements from command metadata.**
+  Replace the presentation-layer command-name match with canonical command-owned optional-effect requirements. Cover actual direct and deferred effect-producing paths before closing this parent; retain preflight rejection before Git or editor work.
+- [x] **T004.6a — Derive the optional-effect requirement table from the registry.**
+  Put requirements alongside registered command metadata and consume that single source in RichCapabilities. Preserve all seven existing initiating-command requirements, including deferred commit editing and selection copying; do not make generic confirmation require clipboard access.
+- [ ] **T004.6b — Cover actual optional-effect producers against command requirements.**
+  Exercise direct visit/copy, selection-copy completion and commit editor initiation with real repository/session paths. Attribute deferred effects to their initiating commands, verify registry requirements and preserve unsupported-capability preflight protections; do not claim exhaustive coverage from a duplicated list alone.
 - [x] **T004.1 — Use camelCase content-action targets on the wire.**
   Change `ActionTarget` serialization/deserialization to `nodeId` and `mutationHash`, update live Plain test payloads and assert old snake_case payloads are rejected. Preserve content-addressed identity, selection and stale-target protections; do not alter historical native trace fixtures.
 - [x] **T004.2 — Remove unconsumed rich rendering and key-delivery modes.**
