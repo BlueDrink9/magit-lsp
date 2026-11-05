@@ -854,20 +854,19 @@ fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
 
 #[test]
 fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
-    let (repo, _) = fixtures::RepoFixture::new()
-        .commit("initial", [("f.txt", "before\n")])
-        .modify_standard()
-        .build();
+    for (case, declared, profile, succeeds) in [
+        ("absent support", false, Profile::Standard, None),
+        ("declared success", true, Profile::Standard, Some(true)),
+        ("declared rejection", true, Profile::NoShowDocument, Some(false)),
+    ] {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "before\n")]).modify_standard().build();
     let head = repo.git(&["rev-parse", "HEAD"]);
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut capabilities = caps();
     capabilities["workspace"] = json!({"applyEdit":true,"workspaceEdit":{"documentChanges":true}});
     capabilities["textDocument"] = json!({"codeAction":{}});
-    let mut client = ClientPump::new(
-        stdio::TestServer::spawn(&[]),
-        Profile::Standard,
-        capabilities,
-    );
+    if declared { capabilities["window"]["showDocument"] = json!({"support":true}); }
+    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), profile, capabilities);
     let open = client.editor.open(&uri, "stale\n");
     client.send(open);
     client.until(|c| c.editor.text(&uri).contains("f.txt"));
@@ -904,16 +903,31 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     });
 
     let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
-    let manual = client.server.notifications.iter().find(|m| m["method"] == "window/showMessage")
-        .expect("Plain editor instructions use standard window/showMessage");
-    assert!(manual["params"]["message"].as_str().unwrap().contains(&expected_path));
-    assert!(manual["params"]["message"].as_str().unwrap().contains("Open"));
-    assert!(client.editor.outbound.iter().all(|m| m["method"] != "window/showDocument"));
+    let requests: Vec<_> = client.editor.outbound.iter().filter(|m| m["method"] == "window/showDocument").collect();
+    assert_eq!(requests.len(), usize::from(declared), "{case}");
+    if let Some(success) = succeeds {
+        let request = requests[0];
+        assert_eq!(request["params"]["uri"], format!("file://{expected_path}"), "{case}");
+        assert_eq!(request["params"]["external"], false, "{case}");
+        assert_eq!(request["params"]["takeFocus"], true, "{case}");
+        let reply = client.server.sent.iter().find(|m| m["id"] == request["id"] && m["method"].is_null()).expect("correlated showDocument response");
+        assert_eq!(reply["result"]["success"], success, "{case}");
+    }
+    let manual = client.server.notifications.iter().find(|m| m["method"] == "window/showMessage"
+        && m["params"]["message"].as_str().is_some_and(|message| message.contains("COMMIT_EDITMSG")));
+    if succeeds == Some(true) { assert!(manual.is_none(), "success must not use manual fallback: {case}"); }
+    else {
+        let manual = manual.expect("Plain editor instructions use standard window/showMessage");
+        assert!(manual["params"]["message"].as_str().unwrap().contains(&expected_path), "{case}");
+        assert!(manual["params"]["message"].as_str().unwrap().contains("Open"), "{case}");
+        if succeeds == Some(false) { assert!(client.server.sent.iter().any(|m| m["method"] == "window/workDoneProgress/cancel"), "cancel after fallback: {case}"); }
+    }
     assert!(
         client.server.notifications.iter().all(|m| m["method"] != "view/effects"),
         "unexpected custom notifications: {:?}",
         client.server.notifications.iter().filter(|m| m["method"] == "view/effects").collect::<Vec<_>>()
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{case}");
     client.finish();
+    }
 }

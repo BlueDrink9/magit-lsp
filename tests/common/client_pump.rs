@@ -109,9 +109,11 @@ impl ClientPump {
             return;
         }
         if message["method"].is_string() && !message["id"].is_null() {
-            self.dispatch_validated(&message);
+            let responses = self.editor.dispatch(&message);
+            for response in responses.iter().cloned() { self.server.send(response); }
             if message["method"] == "window/showDocument"
                 && message["params"]["uri"].as_str().is_some_and(|uri| uri.ends_with("/.git/COMMIT_EDITMSG"))
+                && responses.iter().any(|response| response["result"]["success"] == true)
             {
                 self.cancel_pending_edit();
             }
