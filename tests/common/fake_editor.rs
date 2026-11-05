@@ -2,6 +2,14 @@
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
+
+static NEXT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
+
+/// Allocate a process-unique client request ID shared by editors and pumps.
+pub fn allocate_request_id() -> i64 {
+    NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Model { UndeclaredDocumentChanges, SilentStaleApply, DecomposedChanges }
@@ -117,11 +125,11 @@ impl FakeEditor {
     }
     /// Send a code-action request for a range.
     pub fn code_action(&self, uri: &str, range: Value) -> Value {
-        json!({"jsonrpc":"2.0","id":71,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}})
+        json!({"jsonrpc":"2.0","id":allocate_request_id(),"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}})
     }
     /// Send an execute-command request.
     pub fn execute_command(&self, command: &str, arguments: Value) -> Value {
-        json!({"jsonrpc":"2.0","id":72,"method":"workspace/executeCommand","params":{"command":command,"arguments":arguments}})
+        json!({"jsonrpc":"2.0","id":allocate_request_id(),"method":"workspace/executeCommand","params":{"command":command,"arguments":arguments}})
     }
     /// Apply an entire workspace edit atomically, rejecting stale versions and invalid ranges.
     pub fn apply_edit(&mut self, edit: &Value) -> Value {

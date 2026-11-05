@@ -936,8 +936,14 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
         &uri,
         json!({"start":{"line":file_row,"character":0},"end":{"line":file_row,"character":0}}),
     );
+    let request_id = request["id"].as_i64().expect("code action request ID");
     server.send(request);
-    let response = server.response_with_id(71);
+    let response = server.response_with_id(request_id);
+    let execute = editor.execute_command("magit.command", json!([]));
+    let execute_id = execute["id"].as_i64().expect("execute request ID");
+    assert_ne!(request_id, execute_id, "client request IDs must be distinct");
+    server.send(execute);
+    assert!(server.response_with_id(execute_id)["error"].is_object());
     let actions = response["result"].as_array().expect("action array");
     assert!(
         !actions.is_empty(),

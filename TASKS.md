@@ -16,6 +16,14 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Complete and verify the extracted configurable pump and dynamic request correlation, including the standalone action consumer. No real-server didOpen conformance claim in this slice.
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_actions"` @ `0b8c39e` → `ok: rust`
+- [ ] **T006.1b — Prove Plain didOpen applyEdit through the client pump.** Add the actual stdio server didOpen/applyEdit regression; pump responses/echoes must reach authoritative text without modifying the presentation file or receiving rich renders.
+- [ ] **T006.1 — Extract the configurable client pump and dynamic request IDs.** Extract `ClientPump` to `tests/common/client_pump.rs`, let callers set initialize capabilities, eliminate fixed fake-editor request IDs, preserve existing tests, and add a real-server Plain didOpen/applyEdit pump regression. Original scope: [T006 clauses 1 and 7](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l). Split after two checkpoints; close after T006.1a and T006.1b.
+- [ ] **T006.2 — Compose declared editor models and strict feature checks.** Add `plain-min`/`rich-min` bases, anchored declaration/behavior modules and strict undeclared-use checks; reuse registry-derived behavior models and retain legacy profiles. Original scope: T006 clauses 2–4.
+- [ ] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5.
+- [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit.
+
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
   Done: `6d08d85`. Verified: authority-pointer sweep finds no live instruction to execute Part Seven as a queue; its detailed scopes remain mandatory references. No feature acceptance was closed.

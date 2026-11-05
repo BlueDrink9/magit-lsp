@@ -5,111 +5,19 @@ mod fake_editor;
 mod fixtures;
 #[path = "common/stdio.rs"]
 mod stdio;
+#[path = "common/client_pump.rs"]
+mod client_pump;
+use client_pump::ClientPump;
 use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
 use std::fs;
 use std::time::Duration;
 
-struct ClientPump {
-    server: stdio::TestServer,
-    editor: FakeEditor,
-    next_id: i64,
-    replies: std::collections::HashMap<i64, Value>,
-    cancel_on_edit: bool,
-}
-impl ClientPump {
-    fn new(mut server: stdio::TestServer, profile: Profile) -> Self {
-        let init=server.initialize(json!({"window":{"workDoneProgress":true},"general":{"positionEncodings":["utf-8","utf-16","utf-32"]}}));
-        assert!(init["result"]["capabilities"].is_object());
-        let mut editor = FakeEditor::new(profile);
-        editor.encoding = match init["result"]["capabilities"]["positionEncoding"]
-            .as_str()
-            .unwrap_or("utf-16")
-        {
-            "utf-8" => "utf-8",
-            "utf-16" => "utf-16",
-            "utf-32" => "utf-32",
-            other => panic!("invalid negotiated encoding: {other}"),
-        };
-        Self {
-            server,
-            editor,
-            next_id: 2,
-            replies: Default::default(),
-            cancel_on_edit: false,
-        }
-    }
-    fn send(&mut self, mut message: Value) -> i64 {
-        let id = self.next_id;
-        if message.get("id").is_some() {
-            self.next_id += 1;
-            message["id"] = json!(id);
-        }
-        self.server.send(message);
-        id
-    }
-    fn dispatch(&mut self, request: &Value) {
-        for frame in self.editor.dispatch(request) {
-            self.server.send(frame);
-        }
-    }
-    fn step(&mut self) {
-        let message = self.server.recv();
-        if message["method"].is_string() && !message["id"].is_null() {
-            self.dispatch(&message);
-            return;
-        }
-        if let Some(id) = message["id"].as_i64() {
-            assert!(
-                self.replies.insert(id, message).is_none(),
-                "duplicate response"
-            );
-            return;
-        }
-        if self.cancel_on_edit
-            && message["method"] == "view/effects"
-            && message["params"]["effects"]
-                .as_array()
-                .is_some_and(|e| e.iter().any(|e| e["type"] == "editDocument"))
-        {
-            let token = self
-                .server
-                .notifications
-                .iter()
-                .rev()
-                .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
-                .expect("commit began")["params"]["token"]
-                .clone();
-            self.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
-            self.cancel_on_edit = false;
-        }
-        self.server.notifications.push(message);
-    }
-    fn until(&mut self, condition: impl Fn(&Self) -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
-        while !condition(self) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "pump condition timed out"
-            );
-            self.step();
-        }
-    }
-    fn until_response(&mut self, id: i64) -> Value {
-        self.until(|c| c.replies.contains_key(&id));
-        self.replies.remove(&id).unwrap()
-    }
-    fn finish(mut self) {
-        let id = self.send(json!({"jsonrpc":"2.0","id":0,"method":"shutdown","params":null}));
-        assert_eq!(self.until_response(id)["result"], Value::Null);
-        self.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
-        assert!(self.server.finish(Duration::from_secs(10)).success());
-    }
-}
+fn caps() -> Value { json!({"window":{"workDoneProgress":true},"general":{"positionEncodings":["utf-8","utf-16","utf-32"]}}) }
 
 #[test]
 fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
-    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard);
+    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, caps());
     let uri = "file:///tmp/plain-harness.txt";
     let frame = client.editor.open(uri, "hello\n");
     client.send(frame);
@@ -395,7 +303,7 @@ fn many_decomposed_ranges_replay_sequentially_in_one_notification() {
 
 #[test]
 fn debounce_releases_no_echo_until_flush_on_actual_transport() {
-    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::DebouncedDidChange);
+    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::DebouncedDidChange, caps());
     let uri = "file:///debounce";
     let open = client.editor.open(uri, "a");
     client.send(open);
@@ -427,7 +335,7 @@ fn shared_dispatch_captures_real_send_order_for_echo_profiles() {
         (Profile::Standard, ["textDocument/didChange", "response"]),
         (Profile::ReorderEcho, ["response", "textDocument/didChange"]),
     ] {
-        let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), profile);
+        let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), profile, caps());
         let open = client.editor.open("file:///order", "a");
         client.send(open);
         // Scripted server request, but actual dispatcher and pipe writes, not production Plain acceptance.
@@ -462,7 +370,7 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
         .modify_standard()
         .build();
     let head = repo.git(&["rev-parse", "HEAD"]);
-    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard);
+    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, caps());
     let id=client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/open","params":{"kind":"status","args":{"repo_path":repo.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
     let opened = client.until_response(id);
     let view = opened["result"]["id"]
