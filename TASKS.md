@@ -13,15 +13,18 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
-- [ ] **Roadmap reconciliation — Restore one authoritative queue.**
+- [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
-- [ ] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
+  Done: `6d08d85`. Verified: authority-pointer sweep finds no live instruction to execute Part Seven as a queue; its detailed scopes remain mandatory references. No feature acceptance was closed.
+- [x] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
   Give each unfinished heading/table ticket its own checkbox and valid specification link. Retain phase order and owner-request gates; keep T105 only in Phase 6A and T005 child status in Ad hoc.
-  Verified: the §7 scan finds all 114 unique T006–T119 entries, no missing or duplicate IDs, and no invalid specification anchors. T005 retains its existing open children; deferred owner-request guards remain. Final documentation-only `make ui-unit` passed (`ok: ui-unit`).
-- [ ] **Roadmap reconciliation — Refresh protocol and evidence guidance.**
+  Done: `6d08d85`. Verified: the §7 scan finds all 114 unique T006–T119 entries, no missing or duplicate IDs, and no invalid specification anchors. T005 retains its existing open children; deferred owner-request guards remain. Documentation-only `make ui-unit` passed (`ok: ui-unit`).
+- [x] **Roadmap reconciliation — Refresh protocol and evidence guidance.**
   Correct current Plain selection and quirk-test references. Condense obsolete trace/formatter narratives into immutable provenance and current workflow links; preserve unproved T005 acceptance and deferred debt.
-- [ ] **Roadmap reconciliation — Route active verification through Make.**
+  Done: `6d08d85`. Verified: current Plain initialize selection and the named didOpen regression were checked against source/tests; outgoing quirk variants and appendix acceptance remain unchecked. Historical recorder evidence links replace obsolete current-enforcement claims.
+- [x] **Roadmap reconciliation — Route active verification through Make.**
   Replace live direct test/UI command instructions with existing Make targets. Preserve historical command records as labeled provenance and identify any missing target explicitly.
+  Done: `6d08d85`. Verified: unfinished specification command sweep uses Make targets; T011 owns missing schema-drift integration and T025 owns missing native-host integration. Native F5 verification requires a suitable Make target; unit/integration results are not native evidence. `git diff --check` passed.
 
 - [x] **Investigate and rationalize trace/capture test infrastructure.**
   Done: `5025937` (cleanup implementation and verification linked in immutable `5025937:TASKS_PART_SEVEN.md`). Current retained coverage and native workflow: [fixture guide](tests/fixtures/lsp_traces/README.md) and [UI test plan](ui-test-plan.md). Static trace/parser gates and embedded capture programs are retired; native causality limits remain explicit.
