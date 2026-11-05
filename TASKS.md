@@ -2,7 +2,7 @@
 
 Last review: 2e29535237ad2b0f88dabb4b0a049c41d26419d2
 
-Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 Lua warnings have owners/reasons. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk. Documentation reconciliation does not close Phase 2; T007 remains open.
+Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. `Source-only` labels mark provenance, not implementation commits. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 Lua warnings have owners/reasons. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk. Documentation reconciliation does not close Phase 2; T007 remains open.
 
 ## Ad hoc
 
@@ -42,8 +42,11 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **Documentation cleanup — Repair recent review completion pointers.** Correct source-snapshot labels and retain original completion and verification references in the first 28 compact review records.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `7c0bc3c` → ok: docs-check.
-- [ ] **Documentation cleanup — Repair older review completion pointers.** Correct source-snapshot labels in the remaining 28 compact review records, then finish the review-history cleanup audit.
-- [ ] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Replace dated checkpoint reports and resolved review/bugfix narratives with compact checked records and immutable provenance; preserve live constraints. Repair the completion index before closing: snapshot provenance is not an implementation commit.
+- [x] **Documentation cleanup — Repair older review completion pointers.** Correct source-snapshot labels in the remaining 28 compact review records, then finish the review-history cleanup audit.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c3f5a42` → passed; reference audit confirms all 56 records distinguish original Done hashes from source provenance and reviewed revisions.
+- [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Replace dated checkpoint reports and resolved review/bugfix narratives with compact checked records and immutable provenance; preserve live constraints. Repair the completion index before closing: snapshot provenance is not an implementation commit.
+  - Done: containing commit.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `d9ea816` → ok: docs-check; TASKS.md 970→612 lines, unchecked blocks 136→136.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance.
@@ -120,6 +123,12 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T007.4a1 — Present manual Plain commit instructions.** Finish the weak-lifetime Plain delivery branch and start the single real-server scenario proving manual instructions without custom notifications.
   - Done: `0e9223a`.
   - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `0e9223a` → ok: rust. One real Plain scenario stages and opens commit through standard code actions, receives the exact COMMIT_EDITMSG path by window/showMessage, cancels the active progress token, confirms HEAD unchanged and shuts down cleanly.
+- [x] **T007.4a2 — Prove declared Plain editor opening.** Extend that same scenario to prove a correlated standard showDocument request and readable fallback on rejection.
+  - Done: `c3f5a42`.
+  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `f13dbc1` → ok: rust. One real-stdio scenario covers undeclared support, declared success, and declared rejection; checks correlated request/response, exact URI and flags, fallback, cancellation, unchanged HEAD, no custom effects, and bounded shutdown.
+- [ ] **T007.4a — Deliver pending Plain commit editors through LSP.** Route managed edit effects to declared showDocument or readable manual-open instructions. Start the single real-server T007.4 scenario; later children extend that same scenario.
+- [ ] **T007.4b — Render pending manual commit paths as structured rows.** Derive pending draft rows from trusted registry state and refresh their lifecycle without parsing rendered text. Extend the existing T007.4 scenario only.
+- [ ] **T007.4c — Confirm or abort manually attached commit drafts.** Attach the issued URI through didOpen and expose version-bound Confirm/Abort code actions. Extend the same scenario to prove exact Git completion and abort outcomes; no additional test cases.
 - [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
 - [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
 
@@ -340,34 +349,34 @@ Immutable detail and original verification: `d9ea816:TASKS.md`. These records ar
 - [x] [P1] Make the Helix capture recipe preserve verifiable evidence — Source-only: `d9ea816:TASKS.md`.
 - [x] [P2] Enforce trace and initialize-preset consistency — Source-only: `d9ea816:TASKS.md`.
 - [x] [P2] State that five T034 action classes remain missing — Original ref: `e34ce5a`.
-- [x] [P1] Serialize shared wirelogs on every tested platform — `d9ea816`.
-- [x] [P1] Open shared logs with Windows lock-compatible access — `d9ea816`.
-- [x] [P1] Make identity replacement byte-index safe — `d9ea816`.
-- [x] [P1] Retain the claimed bundled-Neovim native edit — `d9ea816`.
-- [x] Checkpoint review — Opt-in wire recorder and completed documentation cutover. — `d9ea816`.
-- [x] [P2] Correlated secret-prompt errors are recorded without redaction. — `d9ea816`.
-- [x] Checkpoint review — Git mutation identities and structured successors. — `dd92f90cdb11d827606a689a88a280f480d7508d`.
-- [x] Checkpoint review — Plain protocol versions and process ownership. — `d9ea816`.
-- [x] Checkpoint review — Roadmap migration preserves open requirements. — `d9ea816`.
-- [x] [P2] A12 is marked complete in the queue index while its sole retained issue remains open. — `d9ea816`.
-- [x] [P1] Enforce exact action-fixture metadata and source-row mappings — `d9ea816`.
-- [x] [P1] Add a self-contained Neovim selection-and-paste recipe — `d9ea816`.
-- [x] [P2] Harden the Helix action recipe cleanup. — `d9ea816`.
-- [x] [P2] Harden the Neovim selection recipe cleanup. — `d9ea816`.
-- [x] [P2] Repair rapid-recipe syntax without claiming cleanup acceptance. — `d9ea816`.
-- [x] [P2] Harden the Neovim rapid-repair recipe cleanup. — `d9ea816`.
-- [x] [P2] Make capture-recipe cleanup survive failures — `d9ea816`.
-- [x] [P1] Make the phase-gate schema match the actual queue — `d9ea816`.
-- [x] [P2] Restore hygiene-test environment isolation — `d9ea816`.
-- [x] [P2] Remove duplicate Linux verification policy — `d9ea816`.
-- [x] [P2] Remove stale planned-navigation marker claims — `d9ea816`.
-- [x] [P1] Finish terminating the owned Helix recipe server — `d9ea816`.
-- [x] [P2] Isolate Helix recipe repository setup from host Git config — `d9ea816`.
-- [x] [P1] Finish migrating shared test wire fixtures to the strict schema — `d9ea816`.
-- [x] [P2] Test duplicate entries in every typed capability set — `d9ea816`.
-- [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence — `d9ea816`.
-- [x] [P1] Remove retired fields from the public rich-protocol contract — `d9ea816`.
-- [x] [P2] Pin the bundled Neovim declaration at its producer boundary — `d9ea816`.
+- [x] [P1] Serialize shared wirelogs on every tested platform — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Open shared logs with Windows lock-compatible access — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Make identity replacement byte-index safe — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Retain the claimed bundled-Neovim native edit — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint review — Opt-in wire recorder and completed documentation cutover. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Correlated secret-prompt errors are recorded without redaction. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint review — Git mutation identities and structured successors. — Reviewed ref: `dd92f90cdb11d827606a689a88a280f480d7508d`.
+- [x] Checkpoint review — Plain protocol versions and process ownership. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint review — Roadmap migration preserves open requirements. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] A12 is marked complete in the queue index while its sole retained issue remains open. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Enforce exact action-fixture metadata and source-row mappings — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Add a self-contained Neovim selection-and-paste recipe — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Harden the Helix action recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Harden the Neovim selection recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Repair rapid-recipe syntax without claiming cleanup acceptance. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Harden the Neovim rapid-repair recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Make capture-recipe cleanup survive failures — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Make the phase-gate schema match the actual queue — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Restore hygiene-test environment isolation — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Remove duplicate Linux verification policy — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Remove stale planned-navigation marker claims — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Finish terminating the owned Helix recipe server — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Isolate Helix recipe repository setup from host Git config — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Finish migrating shared test wire fixtures to the strict schema — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Test duplicate entries in every typed capability set — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Remove retired fields from the public rich-protocol contract — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Pin the bundled Neovim declaration at its producer boundary — Source-only: `d9ea816:TASKS.md`.
 
 ## Deferred hygiene follow-ups
 
