@@ -254,6 +254,16 @@ pub struct EditRegistry {
     history: Mutex<HashMap<PathBuf, history::History>>,
 }
 
+/// One registry-owned pending draft identity and exact issued URI.
+#[cfg(unix)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDraft {
+    /// Stable server-issued run identity.
+    pub run_id: String,
+    /// Exact URI issued for the run.
+    pub uri: String,
+}
+
 impl EditRegistry {
     fn new() -> Self {
         Self {
@@ -343,6 +353,24 @@ impl EditRegistry {
             .ok_or_else(|| Error::new("Commit draft URI is not pending on this connection"))
     }
 
+    /// Snapshot pending draft identities for one trusted owner and repository.
+    #[cfg(unix)]
+    pub fn pending_for(&self, owner: &str, repo_path: &str) -> Vec<PendingDraft> {
+        let mut pending: Vec<_> = self.lock()
+            .iter()
+            .filter(|(_, entry)| {
+                entry.owner == owner
+                    && entry.draft.repository() == Path::new(repo_path)
+                    && !entry.draft.is_terminal()
+            })
+            .map(|(run_id, entry)| PendingDraft {
+                run_id: run_id.clone(),
+                uri: entry.draft.uri().to_string(),
+            })
+            .collect();
+        pending.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        pending
+    }
     /// No editor-helper file synchronization is available outside Unix yet.
     #[cfg(not(unix))]
     pub fn run_for_uri(&self, _owner: &str, _uri: &str) -> Result<String> {

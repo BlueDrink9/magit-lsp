@@ -1886,6 +1886,13 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let run = magit_lsp::editor::registry()
         .create(tmp.path().to_str().unwrap(), "early-test")
         .unwrap();
+    let registry = magit_lsp::editor::registry();
+    let pending = registry.pending_for("early-test", tmp.path().to_str().unwrap());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].run_id, run);
+    assert_eq!(registry.run_for_uri("early-test", &pending[0].uri).unwrap(), run);
+    assert!(registry.pending_for("other-owner", tmp.path().to_str().unwrap()).is_empty());
+    assert!(registry.pending_for("early-test", "/different/repository").is_empty());
     cancel.cancel();
     let error = magit_lsp::runner::with_cancel(Some(cancel), || {
         magit_lsp::editor::commit(
@@ -1896,7 +1903,8 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
         )
     })
     .expect_err("the pre-cancelled commit must fail");
-    magit_lsp::editor::registry().remove(&run);
+    registry.remove(&run);
+    assert!(registry.pending_for("early-test", tmp.path().to_str().unwrap()).is_empty());
     assert_eq!(
         error.git.expect("a structured Git failure").subcommand,
         "commit"
