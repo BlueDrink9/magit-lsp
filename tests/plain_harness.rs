@@ -836,3 +836,84 @@ fn live_binary_progress_requests_are_serviced_while_command_runs() {
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     client.finish();
 }
+
+fn plain_code_actions(client: &mut ClientPump, uri: &str, line: u32) -> Vec<Value> {
+    let request = client.editor.code_action(
+        uri,
+        json!({"start":{"line":line,"character":0},"end":{"line":line,"character":0}}),
+    );
+    let id = client.send(request);
+    client.until_response(id)["result"].as_array().unwrap().clone()
+}
+
+fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
+    let request = client.editor.execute_command("magit.command", json!([args]));
+    let id = client.send(request);
+    client.until_response(id)
+}
+
+#[test]
+fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut capabilities = caps();
+    capabilities["workspace"] = json!({"applyEdit":true,"workspaceEdit":{"documentChanges":true}});
+    capabilities["textDocument"] = json!({"codeAction":{}});
+    let mut client = ClientPump::new(
+        stdio::TestServer::spawn(&[]),
+        Profile::Standard,
+        capabilities,
+    );
+    let open = client.editor.open(&uri, "stale\n");
+    client.send(open);
+    client.until(|c| c.editor.text(&uri).contains("f.txt"));
+
+    let file_line = client.editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    let actions = plain_code_actions(&mut client, &uri, file_line);
+    let stage = actions.iter().find(|action| action["command"]["arguments"][0]["command"] == "status.stage")
+        .expect("standard code action offers stage")["command"]["arguments"][0].clone();
+    assert!(execute_plain_action(&mut client, stage)["error"].is_null());
+
+    let text = client.editor.text(&uri).to_owned();
+    let line = text.lines().position(|line| line.contains("f.txt")).unwrap_or(0) as u32;
+    let actions = plain_code_actions(&mut client, &uri, line);
+    let open_commit = actions.iter().find(|action| action["command"]["arguments"][0]["command"] == "open.commit")
+        .expect("standard code action offers commit menu")["command"]["arguments"][0].clone();
+    assert!(execute_plain_action(&mut client, open_commit)["error"].is_null());
+
+    let menu_text = client.editor.text(&uri).to_owned();
+    let menu_line = menu_text.lines().position(|line| line.contains("Commit")).unwrap_or(0) as u32;
+    let actions = plain_code_actions(&mut client, &uri, menu_line);
+    let create = actions.iter().find(|action| {
+        action["command"]["arguments"][0]["command"] == "menu.run-action"
+            && action["command"]["arguments"][0]["target"]["itemKey"].is_string()
+    }).expect("standard code action offers commit creation")
+        ["command"]["arguments"][0].clone();
+
+    client.cancel_on_edit = true;
+    let result = execute_plain_action(&mut client, create);
+    assert!(result.get("result").is_some(), "{result}");
+    client.until(|c| !c.cancel_on_edit && {
+        let begins = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin").count();
+        let ends = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end").count();
+        begins > 0 && ends >= begins
+    });
+
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let manual = client.server.notifications.iter().find(|m| m["method"] == "window/showMessage")
+        .expect("Plain editor instructions use standard window/showMessage");
+    assert!(manual["params"]["message"].as_str().unwrap().contains(&expected_path));
+    assert!(manual["params"]["message"].as_str().unwrap().contains("Open"));
+    assert!(client.editor.outbound.iter().all(|m| m["method"] != "window/showDocument"));
+    assert!(
+        client.server.notifications.iter().all(|m| m["method"] != "view/effects"),
+        "unexpected custom notifications: {:?}",
+        client.server.notifications.iter().filter(|m| m["method"] == "view/effects").collect::<Vec<_>>()
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    client.finish();
+}

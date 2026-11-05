@@ -1648,7 +1648,7 @@ impl Session {
         }
     }
 
-    /// Execute an exact retained, read-only Plain menu action through normal menu semantics.
+    /// Execute an exact retained Plain menu action through normal menu semantics.
     pub fn run_plain_menu_action(
         &mut self,
         view_id: &str,
@@ -1660,7 +1660,7 @@ impl Session {
         let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
             && view.menu().is_some_and(|menu| menu.id == menu_id
                 && matches!(menu.item(key), Some(crate::menu::Item::Action { command, status: MenuStatus::Implemented, .. })
-                    if command == "log.current")));
+                    if matches!(command.as_str(), "log.current" | "commit.create"))));
         if !valid {
             return Ok(unbound(key));
         }

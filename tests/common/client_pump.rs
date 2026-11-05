@@ -61,6 +61,14 @@ impl ClientPump {
     /// Route an incoming server request through fake editor.
     pub fn dispatch(&mut self, request: &Value) { self.validate(request); self.dispatch_validated(request); }
     fn dispatch_validated(&mut self, request: &Value) { for frame in self.editor.dispatch(request) { self.server.send(frame); } }
+    fn cancel_pending_edit(&mut self) {
+        if !self.cancel_on_edit { return; }
+        let token = self.server.notifications.iter().rev()
+            .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+            .expect("commit began")["params"]["token"].clone();
+        self.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+        self.cancel_on_edit = false;
+    }
     fn validate(&self, message: &Value) {
         if self.strict { super::editor_model::strict::check(&self.capabilities, message).unwrap_or_else(|e| panic!("{e}")); }
     }
@@ -100,7 +108,15 @@ impl ClientPump {
             self.server.notifications.push(message);
             return;
         }
-        if message["method"].is_string() && !message["id"].is_null() { self.dispatch_validated(&message); return; }
+        if message["method"].is_string() && !message["id"].is_null() {
+            self.dispatch_validated(&message);
+            if message["method"] == "window/showDocument"
+                && message["params"]["uri"].as_str().is_some_and(|uri| uri.ends_with("/.git/COMMIT_EDITMSG"))
+            {
+                self.cancel_pending_edit();
+            }
+            return;
+        }
         if let Some(id) = message["id"].as_i64() {
             if let Some(prompt_id) = self.prompt_responds.remove(&id) {
                 assert!(message["error"].is_null(), "promptRespond {prompt_id} failed: {message}");
@@ -117,10 +133,11 @@ impl ClientPump {
             }
             assert!(self.replies.insert(id, message).is_none(), "duplicate response"); return;
         }
-        if self.cancel_on_edit && message["method"] == "view/effects" && message["params"]["effects"].as_array().is_some_and(|e| e.iter().any(|e| e["type"] == "editDocument")) {
-            let token = self.server.notifications.iter().rev().find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin").expect("commit began")["params"]["token"].clone();
-            self.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
-            self.cancel_on_edit = false;
+        if self.cancel_on_edit && (
+            (message["method"] == "view/effects" && message["params"]["effects"].as_array().is_some_and(|e| e.iter().any(|e| e["type"] == "editDocument")))
+            || (message["method"] == "window/showMessage" && message["params"]["message"].as_str().is_some_and(|s| s.contains("/.git/COMMIT_EDITMSG")))
+        ) {
+            self.cancel_pending_edit();
         }
         self.server.notifications.push(message);
     }

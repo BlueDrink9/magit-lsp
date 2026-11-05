@@ -654,14 +654,12 @@ impl Shared {
                 } }),
                 )));
             }
-            let _ = self
-                .sender
-                .send(custom_ui(&self.client).effects(ViewEffectsParams {
-                    effects: vec![Effect::message(
-                        MessageLevel::Info,
-                        "Cancelling…".to_string(),
-                    )],
-                }));
+            for message in effect_notifications(
+                &self.client,
+                vec![Effect::message(MessageLevel::Info, "Cancelling…")],
+            ) {
+                let _ = self.sender.send(message);
+            }
             run.cancel.cancel();
             if let Some(edit_id) = &run.edit_id {
                 editor::registry().resolve(edit_id, editor::Reply::Abort);
@@ -860,6 +858,58 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
             }
         }
     });
+}
+
+fn send_plain_edit_document(
+    shared: Arc<Shared>,
+    run_id: String,
+    uri: String,
+    title: String,
+    show_document: bool,
+) {
+    if shared.closing.load(Ordering::SeqCst) {
+        editor::registry().resolve(&run_id, editor::Reply::Abort);
+        return;
+    }
+    if !show_document {
+        send_manual_edit_instructions(&shared, &uri, &title);
+        return;
+    }
+    let Ok((pending, receiver)) = shared.register_outbound(
+        "window/showDocument",
+        serde_json::json!({"uri":uri,"external":false,"takeFocus":true}),
+    ) else {
+        if !shared.closing.load(Ordering::SeqCst) {
+            send_manual_edit_instructions(&shared, &uri, &title);
+        }
+        return;
+    };
+    let runtime = shared
+        .runtime
+        .clone()
+        .expect("editor bridge runs inside the server runtime");
+    runtime.spawn(async move {
+        let opened = shared
+            .await_outbound(pending, receiver)
+            .await
+            .ok()
+            .and_then(|response| response.response_result.ok())
+            .and_then(|result| result.get("success").and_then(Value::as_bool))
+            == Some(true);
+        if !opened && !shared.closing.load(Ordering::SeqCst) {
+            send_manual_edit_instructions(&shared, &uri, &title);
+        }
+    });
+}
+
+fn send_manual_edit_instructions(shared: &Shared, uri: &str, title: &str) {
+    if shared.closing.load(Ordering::SeqCst) {
+        return;
+    }
+    let message = format!(
+        "magit-lsp: Open {uri} to edit {title}; save and close the file when done."
+    );
+    let _ = shared.sender.send(show_message(3, message));
 }
 
 /// Start an asynchronous bootstrap after the didOpen notification is accepted.
@@ -1404,18 +1454,52 @@ async fn serve(options: ServerOptions) -> Result<i32> {
         }
     };
     let shared = Shared::new(config, startup_error, sender.clone());
+    let listener_owner = Arc::new(shared.clone());
     if let Some(path) = editor::start_listener(
         {
-            let sender = sender.downgrade();
-            // The bridge's thread outlives the server, so it must not hold a
-            // `Shared` (that would keep the writer channel alive for ever).
-            let client = shared.client.clone();
-            let configs = shared.edit_configs.clone();
+            let shared = Arc::downgrade(&listener_owner);
             Arc::new(move |effects: Vec<Effect>| {
-                let Some(sender) = sender.upgrade() else {
+                let Some(shared) = shared.upgrade() else {
+                    for effect in &effects {
+                        if let Effect::EditDocument { run_id, .. } = effect {
+                            editor::registry().resolve(run_id, editor::Reply::Abort);
+                        }
+                    }
                     return;
                 };
-                let unsupported_edit = client.lock().unwrap_or_else(|p| p.into_inner())
+                if shared.closing.load(Ordering::SeqCst) {
+                    for effect in &effects {
+                        if let Effect::EditDocument { run_id, .. } = effect {
+                            editor::registry().resolve(run_id, editor::Reply::Abort);
+                        }
+                    }
+                    return;
+                }
+                let presentation = shared.client.lock().unwrap_or_else(|p| p.into_inner())
+                    .presentation.clone();
+                if let Some(Presentation::Plain(capabilities)) = presentation {
+                    for effect in effects {
+                        match effect {
+                            Effect::EditDocument { run_id, uri, title, .. } => {
+                                send_plain_edit_document(
+                                    shared.clone(),
+                                    run_id,
+                                    uri,
+                                    title,
+                                    capabilities.show_document,
+                                );
+                            }
+                            message @ Effect::Message { .. } => {
+                                for notification in effect_notifications(&shared.client, vec![message]) {
+                                    let _ = shared.sender.send(notification);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                let unsupported_edit = shared.client.lock().unwrap_or_else(|p| p.into_inner())
                     .presentation.as_ref().is_some_and(|presentation| matches!(
                         presentation, Presentation::Rich(caps) if !caps.supports_effect("editDocument")
                     ));
@@ -1426,16 +1510,16 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         }
                     }
                 }
-                let _ = sender.send(custom_ui(&client).effects(ViewEffectsParams {
+                let _ = shared.sender.send(custom_ui(&shared.client).effects(ViewEffectsParams {
                     effects: effects.clone(),
                 }));
                 // A dynamic client gets the edit's keymap as a normal
                 // `view/keymap`, keyed by the edit id. Static clients use
                 // their own bindings and ignore it.
-                if !unsupported_edit && dynamic_delivery(&client) {
+                if !unsupported_edit && dynamic_delivery(&shared.client) {
                     for effect in &effects {
                         if let Effect::EditDocument { run_id, kind, .. } = effect {
-                            let config = configs
+                            let config = shared.edit_configs
                                 .lock()
                                 .unwrap_or_else(|p| p.into_inner())
                                 .get(run_id)
@@ -1443,7 +1527,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             if let Some(keymap) =
                                 config.and_then(|config| edit_keymap(&config, run_id, kind))
                             {
-                                let _ = sender.send(Message::Notification(Notification::new(
+                                let _ = shared.sender.send(Message::Notification(Notification::new(
                                     VIEW_KEYMAP.to_string(),
                                     keymap,
                                 )));
@@ -1749,6 +1833,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
     shared.stop_watchers();
     // `Shared` also holds a sender clone, so it must go before the writer
     // channel can close.
+    drop(listener_owner);
     drop(shared);
     drop(sender);
 
@@ -2124,7 +2209,7 @@ fn execute_plain_action(
                                     status: crate::menu::MenuStatus::Implemented,
                                     ..
                                 }),
-                            ) => command == "log.current",
+                            ) => matches!(command.as_str(), "log.current" | "commit.create"),
                             _ => false,
                         }
                     });
@@ -2915,20 +3000,28 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             else {
                 continue;
             };
-            if command != "log.current" {
+            if !matches!(command.as_str(), "log.current" | "commit.create") {
                 continue;
             }
             let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
             actions.push(
                 serde_json::to_value(lsp_types::CodeAction {
-                    title: format!("Open {label}"),
+                    title: if command == "log.current" {
+                        format!("Open {label}")
+                    } else {
+                        label.clone()
+                    },
                     kind: None,
                     diagnostics: None,
                     is_preferred: None,
                     disabled: None,
                     edit: None,
                     command: Some(lsp_types::Command {
-                        title: format!("Open {label}"),
+                        title: if command == "log.current" {
+                            format!("Open {label}")
+                        } else {
+                            label.clone()
+                        },
                         command: "magit.command".into(),
                         arguments: Some(vec![args]),
                     }),
@@ -3852,13 +3945,13 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     if let Some(warning) = outcome.warning {
                         effects.push(Effect::message(MessageLevel::Warn, warning));
                     }
-                    messages.push(custom_ui(&shared.client).effects(ViewEffectsParams { effects }));
+                    messages.extend(effect_notifications(&shared.client, effects));
                 }
                 Err(error) => {
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
                         vec![Effect::message(MessageLevel::Error, error.to_string())]
                     });
-                    messages.push(custom_ui(&shared.client).effects(ViewEffectsParams { effects }));
+                    messages.extend(effect_notifications(&shared.client, effects));
                 }
             }
             for message in messages {
@@ -3868,6 +3961,44 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
     if let Err(error) = worker {
         tracing::warn!(%error, "failed to start the commit worker");
     }
+}
+
+fn effect_notifications(client: &Arc<Mutex<ClientCaps>>, effects: Vec<Effect>) -> Vec<Message> {
+    let plain = matches!(
+        client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation
+            .as_ref(),
+        Some(Presentation::Plain(_))
+    );
+    if !plain {
+        return vec![custom_ui(client).effects(ViewEffectsParams { effects })];
+    }
+    effects
+        .into_iter()
+        .filter_map(|effect| match effect {
+            Effect::Message {
+                level,
+                text,
+                hint,
+                detail,
+            } => {
+                let mut message = text;
+                for part in hint.into_iter().chain(detail) {
+                    message.push('\n');
+                    message.push_str(&part);
+                }
+                let kind = match level {
+                    MessageLevel::Error => 1,
+                    MessageLevel::Warn => 2,
+                    MessageLevel::Info => 3,
+                };
+                Some(show_message(kind, message))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// A `window/showMessage` notification: 1 error, 2 warning, 3 info, 4 log.

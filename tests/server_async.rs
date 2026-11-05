@@ -574,7 +574,7 @@ fn managed_draft_shutdown_cancels_saved_checkpoint_and_rejects_pipelined_late_in
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let staged = tmp.git(&["ls-files", "--stage", "-z"]);
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize_rich(json!({}));
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let mut response = false;
@@ -2381,14 +2381,11 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
         if let Some(event) = progress_event(&message) {
             progress.push(event);
         }
-        if message["method"] == json!("view/effects")
-            && message["params"]["effects"]
-                .as_array()
-                .is_some_and(|effects| {
-                    effects.iter().any(|effect| {
-                        effect["type"] == json!("message") && effect["level"] == json!("error")
-                    })
-                })
+        if message["method"] == json!("window/showMessage")
+            && message["params"]["type"] == json!(1)
+            && message["params"]["message"].as_str().is_some_and(|text| {
+                text.contains("`git commit` failed.") && text.contains("pre-commit refused")
+            })
         {
             failure = Some(message);
         }
@@ -2416,21 +2413,9 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
     );
 
     let failure = failure.expect("the failed commit effect");
-    let error = failure["params"]["effects"]
-        .as_array()
-        .and_then(|effects| {
-            effects
-                .iter()
-                .find(|effect| effect["level"] == json!("error"))
-        })
-        .unwrap_or_else(|| panic!("no error effect: {failure}"));
-    assert_eq!(error["text"], json!("`git commit` failed."), "{error}");
-    assert!(
-        error["detail"]
-            .as_str()
-            .is_some_and(|detail| detail.contains("pre-commit refused")),
-        "the hook output is the detail: {error}"
-    );
+    let error = failure["params"]["message"].as_str().unwrap();
+    assert!(error.contains("`git commit` failed."), "{failure}");
+    assert!(error.contains("pre-commit refused"), "hook output: {failure}");
 
     shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
@@ -2575,7 +2560,7 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
 
     let mut server = TestServer::spawn(&[]);
     server.auto_respond_to_progress_create();
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let mut edit = None;
