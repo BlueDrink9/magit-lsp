@@ -8,6 +8,17 @@ mod stdio;
 use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
 
+#[test]
+fn removed_open_view_effect_alias_is_rejected() {
+    assert!(
+        serde_json::from_value::<magit_lsp::protocol::Effect>(json!({
+            "type": "openView",
+            "descriptor": {"id": "view", "kind": "status", "placement": "main"}
+        }))
+        .is_err()
+    );
+}
+
 fn execute(server: &mut stdio::TestServer, editor: &mut FakeEditor, args: Value, id: i64) -> Value {
     server.send(json!({"jsonrpc":"2.0","id":id,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[args]}}));
     loop {

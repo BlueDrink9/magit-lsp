@@ -3506,7 +3506,7 @@ fn dispatched_outcome(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         for effect in &outcome.effects {
             match effect {
-                Effect::OpenView { descriptor } | Effect::PushView { descriptor } => {
+                Effect::PushView { descriptor } => {
                     view_repos.insert(descriptor.id.clone(), repo.to_string());
                     repo_view_pushed = true;
                 }
@@ -3535,7 +3535,7 @@ fn dispatched_outcome(
             .unwrap_or_else(|p| p.into_inner());
         for effect in &outcome.effects {
             match effect {
-                Effect::PushView { descriptor } | Effect::OpenView { descriptor } => {
+                Effect::PushView { descriptor } => {
                     if let Some(entry) = documents.values_mut().find(|entry| entry.repo == repo) {
                         entry.view_id = descriptor.id.clone();
                     }

@@ -46,6 +46,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Audit actual Rust, client and test consumers, then remove reserved `process_log_id`/`processLogId` error metadata that is never populated or consumed. Preserve readable Git failure messages, hints/details and process-log functionality; keep a regression proving no internal identifier leaks onto the wire.
 - [ ] **T004.5b — Remove the unproduced OpenView effect alias.**
   Confirm real producers use PushView, then remove OpenView from protocol, presentation/server matches and both client dispatchers without changing push/root semantics. Preserve real prompt consumers and defer unrelated UI surface changes.
+- [x] **T004.5b1 — Remove the unproduced Rust OpenView effect variant.**
+  Delete only `Effect::OpenView`, its dead matching branches and obsolete variant documentation; preserve the unrelated session `OpenView` state type and real PushView producers. Assert that PushView remains valid and the removed wire alias is rejected; client/documentation cleanup follows separately.
+- [ ] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
+  Keep existing PushView root/return semantics while removing both client aliases and normative OpenView effect documentation. Verify focused native Linux stack behavior in both clients; preserve unrelated dirty README changes and immutable historical captures.
 - [ ] **T004.5c — Consolidate the duplicate recording UI test helper.**
   Retain one shared RecordingUi under test helpers and preserve structured notification/delivery coverage. Audit PromptUi multi-choice's actual client/test consumers before considering deletion; record retained contracts rather than treating generic dispatch as a command producer.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**

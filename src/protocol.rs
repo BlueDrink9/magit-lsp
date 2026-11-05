@@ -30,10 +30,7 @@ pub enum Effect {
     PassThrough { key: String },
     /// Put `text` on the system clipboard.
     Clipboard { text: String },
-    /// Create a window/buffer/panel and show it.
-    /// keep-for: TASKS §3.5 recorded effect contract; shared server handling also supports PushView.
-    OpenView { descriptor: ViewDescriptor },
-    /// As `OpenView`, remembering the previous view so `PopView` returns.
+    /// Create a window/buffer/panel and show it, remembering the previous view so `PopView` returns.
     PushView { descriptor: ViewDescriptor },
     /// Close that view and focus the previous one.
     PopView {

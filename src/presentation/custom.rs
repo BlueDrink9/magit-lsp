@@ -54,7 +54,7 @@ impl CustomRender {
                     Effect::VisitFile { .. } => Some("visitFile"),
                     Effect::EditDocument { .. } => Some("editDocument"),
                     Effect::Clipboard { .. } => Some("clipboard"),
-                    Effect::OpenView { descriptor } | Effect::PushView { descriptor } => {
+                    Effect::PushView { descriptor } => {
                         descriptor.placement = caps.placement(descriptor.placement);
                         None
                     }
