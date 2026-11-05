@@ -38,9 +38,10 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   The initial coverage map did not prove the full captured rapid-repair sequence. Add one focused live-server/FakeEditor regression: rapid edits while repair is outstanding, stale-version rejection, retry from the latest version, exact restoration, and undo followed by repair. Do not compare captured metadata.
   test: the new regression exercises production transport and asserts final editor text and version-sensitive rejection/retry.
 
-- [ ] **Trace cleanup 2 — Delete dead fixtures and embedded capture programs.**
+- [x] **Trace cleanup 2 — Delete dead fixtures and embedded capture programs.**
   Retain only live quirk inputs and current capability declarations. Remove unused traces, sidecars, initialize duplicates and Markdown programs after checking consumers; keep concise provenance with immutable Git references and maintained Make workflows. Delete the audit document and its references without replacing it.
   check: retired fixtures and capture recipes have no active consumers; preserved inputs retain honest native-evidence limits. test: retained quirk and negotiation suites pass.
+  - Verified: `make test-rust FILTER="--test quirks --test plain_core --test plain_render --test wirelog --test plain_harness"` @ 83f79f5 → ok: rust; cleanup commit recorded below
 
 - [ ] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
   Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
