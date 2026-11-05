@@ -218,7 +218,7 @@ fn custom_render_keeps_existing_rich_notification_shapes() {
 #[test]
 fn absent_selector_selects_plain_and_extracts_standard_capabilities() {
     let params = json!({"capabilities":{
-        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{}},
+        "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},
         "textDocument":{"codeAction":{"disabledSupport":true},"completion":{},"foldingRange":{}},
         "window":{"showDocument":{"support":true},"workDoneProgress":true},
         "general":{"positionEncodings":["utf-8","utf-16"]}
@@ -227,7 +227,7 @@ fn absent_selector_selects_plain_and_extracts_standard_capabilities() {
         panic!("expected Plain")
     };
     assert!(caps.apply_edit && caps.document_changes && caps.disabled_actions);
-    assert!(caps.code_actions && caps.execute_command && caps.show_document);
+    assert!(caps.code_actions && caps.show_document);
     assert!(caps.work_done_progress && caps.completion && caps.folding_range);
     assert_eq!(caps.position_encodings, ["utf-8", "utf-16"]);
     assert_eq!(caps.edit_support(), Support::Supported);
@@ -244,7 +244,7 @@ fn plain_support_reports_missing_capability_reasons() {
     );
     assert_eq!(
         caps.action_support(),
-        Support::Missing("textDocument.codeAction and workspace.executeCommand are required")
+        Support::Missing("textDocument.codeAction is not supported")
     );
     assert_eq!(
         caps.show_document_support(),

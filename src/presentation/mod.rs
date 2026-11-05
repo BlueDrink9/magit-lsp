@@ -205,8 +205,6 @@ pub struct PlainCapabilities {
     pub document_changes: bool,
     /// Client supports code actions.
     pub code_actions: bool,
-    /// Client supports execute-command requests.
-    pub execute_command: bool,
     /// Client can represent disabled code actions and reasons.
     pub disabled_actions: bool,
     /// Client supports `window/showDocument`.
@@ -250,9 +248,9 @@ impl PlainCapabilities {
         ) {
             return None;
         }
-        if !self.apply_edit || !self.code_actions || !self.execute_command {
+        if !self.apply_edit || !self.code_actions {
             return Some(PlainContentAction::MissingCapabilities(
-                "workspace.applyEdit, textDocument.codeAction, and workspace.executeCommand are required",
+                "workspace.applyEdit and textDocument.codeAction are required",
             ));
         }
         if command == "status.discard" {
@@ -270,15 +268,23 @@ impl PlainCapabilities {
                 .is_some_and(|v| !v.is_null() && v != false)
         };
         Self {
+            // Declaration is the feature: the client can receive workspace edits.
             apply_edit: b("/workspace/applyEdit"),
+            // Declaration describes the versioned-edit sub-feature, not action support.
             document_changes: b("/workspace/workspaceEdit/documentChanges"),
+            // Declaration is the feature: the client can request and invoke code actions.
             code_actions: present("/textDocument/codeAction"),
-            execute_command: present("/workspace/executeCommand"),
+            // Declaration describes the disabled-action sub-feature only.
             disabled_actions: b("/textDocument/codeAction/disabledSupport"),
+            // Declaration is the feature: the client can open documents by URI.
             show_document: b("/window/showDocument/support"),
+            // Declaration describes progress reporting sub-feature.
             work_done_progress: b("/window/workDoneProgress"),
+            // Declaration is the feature: the client can request completions.
             completion: present("/textDocument/completion"),
+            // Declaration is the feature: the client can request folding ranges.
             folding_range: present("/textDocument/foldingRange"),
+            // Declaration lists supported position-encoding sub-features.
             position_encodings: caps
                 .pointer("/general/positionEncodings")
                 .and_then(Value::as_array)
@@ -302,10 +308,10 @@ impl PlainCapabilities {
     }
     /// Report whether action invocation can be exposed.
     pub fn action_support(&self) -> Support {
-        if self.code_actions && self.execute_command {
+        if self.code_actions {
             Support::Supported
         } else {
-            Support::Missing("textDocument.codeAction and workspace.executeCommand are required")
+            Support::Missing("textDocument.codeAction is not supported")
         }
     }
     /// Report whether file navigation and real-file commit editing can be exposed.

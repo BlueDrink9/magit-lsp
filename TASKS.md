@@ -67,6 +67,15 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit. Close after T006.4a–T006.4b.
   - Done: containing commit.
 
+- [x] **T007.1 — Gate Plain actions on code-action support.** Remove the executeCommand declaration requirement and obsolete capability reporting; document every standard capability read and prove real Plain stage actions with only applyEdit/codeAction. Reuse T005 Neovim quirk coverage. Original T007 clauses 1–3.
+  - Done: containing commit.
+  - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test plain_render --test plain_harness --test quirks"` @ `908c127` → ok: rust.
+- [ ] **T007.1n — Remove the native Plain executeCommand workaround.** Remove the test-client declaration workaround and verify native Plain actions with text/structured evidence only.
+- [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4.
+- [ ] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
+- [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
+- [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
+
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
   Done: `6d08d85`. Verified: authority-pointer sweep finds no live instruction to execute Part Seven as a queue; its detailed scopes remain mandatory references. No feature acceptance was closed.

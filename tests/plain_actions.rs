@@ -157,13 +157,16 @@ fn unavailable_actions_are_omitted_without_disabled_support() {
 }
 
 #[test]
-fn missing_execute_command_capability_disables_actions_with_reason() {
+fn code_actions_work_without_execute_command_declaration() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
         .modify("f.txt", "changed\n")
         .build();
     let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
-    let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let (mut server, mut editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let presentation_path = repo.path().join(".magit");
+    let disk_sentinel = "disk-owned presentation sentinel\n";
+    std::fs::write(&presentation_path, disk_sentinel).unwrap();
     let row = editor
         .text(&uri)
         .lines()
@@ -171,16 +174,31 @@ fn missing_execute_command_capability_disables_actions_with_reason() {
         .unwrap() as u32;
     server.send(json!({"jsonrpc":"2.0","id":94,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
     let response = server.response_with_id(94);
-    let actions = response["result"].as_array().unwrap();
-    let stage = actions
-        .iter()
-        .find(|action| action["data"]["command"] == "status.stage")
-        .expect("disabled stage offer");
-    assert!(stage["disabled"]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("workspace.executeCommand"));
-    assert!(stage["command"].is_null());
+    assert!(response["result"].as_array().unwrap().iter().any(|action|
+        action["command"]["arguments"][0]["command"] == "status.stage"));
+    let stage = offered_stage(&mut server, &editor, &uri, 95);
+    let before_editor = editor.text(&uri).to_owned();
+    assert!(execute_offered(&mut server, &mut editor, stage, 95)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f.txt"]), "changed\n");
+    assert_ne!(editor.text(&uri), before_editor);
+    assert_eq!(fixtures::read(&presentation_path), disk_sentinel);
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn code_actions_are_unsupported_without_declaration() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let caps = json!({"workspace":{"applyEdit":true}});
+    let (mut server, editor, uri) = open_plain_with_capabilities(&repo, caps);
+    let row = editor.text(&uri).lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+    server.send(json!({"jsonrpc":"2.0","id":96,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
+    assert!(!server.response_with_id(96)["result"].as_array().unwrap().iter().any(|action|
+        action["command"]["arguments"][0]["command"] == "status.stage"));
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());

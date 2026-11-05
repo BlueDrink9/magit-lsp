@@ -2585,7 +2585,6 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     "applyEdit": plain.apply_edit,
                     "documentChanges": plain.document_changes,
                     "codeActions": plain.code_actions,
-                    "executeCommand": plain.execute_command,
                     "disabledActions": plain.disabled_actions,
                     "showDocument": plain.show_document,
                     "workDoneProgress": plain.work_done_progress,
