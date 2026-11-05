@@ -94,6 +94,66 @@ fn strict_feature_guard_distinguishes_declarations_from_editor_behavior() {
 }
 
 #[test]
+fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
+    let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities();
+    let rich = editor_model::EditorModel::new(editor_model::RICH_MIN).capabilities();
+    let ordinary = json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}});
+    assert!(editor_model::strict::check(&plain, &ordinary).is_ok());
+    for placement in ["main", "side", "bottom", "float"] {
+        let response = json!({"jsonrpc":"2.0","id":1,"result":{"descriptor":{"placement":placement}}});
+        assert_eq!(editor_model::strict::check(&rich, &response).is_ok(), placement == "main", "base declaration {placement}");
+        let mut declared = rich.clone();
+        declared["experimental"]["magit"]["layout"] = json!([placement]);
+        assert!(editor_model::strict::check(&declared, &response).is_ok(), "declared {placement}");
+    }
+    for (name, declaration, effect) in [
+        ("clipboard", "clipboard", json!({"type":"clipboard"})),
+        ("visitFile", "visitFile", json!({"type":"visitFile"})),
+        ("editDocument", "editDocument", json!({"type":"editDocument"})),
+    ] {
+        let response = json!({"jsonrpc":"2.0","id":1,"result":{"effects":[effect]}});
+        assert!(editor_model::strict::check(&rich, &response).is_err(), "undeclared {name}");
+        let mut declared = rich.clone();
+        declared["experimental"]["magit"]["effects"] = json!([declaration]);
+        assert!(editor_model::strict::check(&declared, &response).is_ok(), "declared {name}");
+    }
+    let mut all = rich.clone();
+    all["experimental"]["magit"]["layout"] = json!(["main", "side", "bottom", "float"]);
+    all["experimental"]["magit"]["effects"] = json!(["clipboard", "visitFile", "editDocument"]);
+    for method in ["view/render", "view/keymap"] {
+        let message = json!({"method":method,"params":{}});
+        assert!(editor_model::strict::check(&plain, &message).is_err());
+        assert!(editor_model::strict::check(&all, &message).is_ok());
+    }
+    for prompt in ["text", "confirm", "choice", "multiChoice", "secret"] {
+        let message = json!({"method":"view/prompt","params":{"kind":prompt,"secret":prompt == "secret"}});
+        assert!(editor_model::strict::check(&rich, &message).is_err(), "undeclared {prompt}");
+        let mut declared = rich.clone();
+        declared["experimental"]["magit"]["prompts"] = json!([prompt]);
+        assert!(editor_model::strict::check(&declared, &message).is_ok(), "declared {prompt}");
+    }
+    let secret_text = json!({"method":"view/prompt","params":{"kind":"text","secret":true}});
+    assert!(editor_model::strict::check(&rich, &secret_text).is_err());
+    let mut secret_declared = rich.clone();
+    secret_declared["experimental"]["magit"]["prompts"] = json!(["secret"]);
+    assert!(editor_model::strict::check(&secret_declared, &secret_text).is_ok());
+    let mixed = json!({"jsonrpc":"2.0","id":1,"result":{"effects":[{"type":"clipboard"},{"type":"unknown"}]}});
+    assert!(editor_model::strict::check(&all, &mixed).is_err());
+    for (feature, declaration, message) in [
+        ("applyEdit", json!({"workspace":{"applyEdit":true}}), json!({"method":"workspace/applyEdit","params":{"edit":{"changes":{}}}})),
+        ("documentChanges", json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}}}), json!({"method":"workspace/applyEdit","params":{"edit":{"documentChanges":[]}}})),
+        ("showDocument", json!({"window":{"showDocument":{"support":true}}}), json!({"method":"window/showDocument","params":{}})),
+        ("progress create", json!({"window":{"workDoneProgress":true}}), json!({"method":"window/workDoneProgress/create","params":{}})),
+        ("progress", json!({"window":{"workDoneProgress":true}}), json!({"method":"$/progress","params":{}})),
+    ] {
+        let mut capabilities = plain.clone();
+        for (key, value) in declaration.as_object().unwrap() { capabilities[key] = value.clone(); }
+        assert!(editor_model::strict::check(&capabilities, &message).is_ok(), "declared {feature}");
+    }
+    assert!(editor_model::strict::check(&all, &json!({"method":"view/unknown","params":{}})).is_err());
+}
+
+#[test]
 fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
     let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, caps());
     let uri = "file:///tmp/plain-harness.txt";

@@ -3,7 +3,18 @@ use serde_json::Value;
 /// Reject an inbound server message that uses an undeclared feature.
 pub fn check(capabilities: &Value, message: &Value) -> Result<(), String> {
     let method = message["method"].as_str().unwrap_or("");
-    if method.is_empty() && !message["result"]["effects"].is_array() { return Ok(()); }
+    if method.is_empty() {
+        let result = &message["result"];
+        if result["effects"].is_array() {
+            let rich = &capabilities["experimental"]["magit"];
+            require(rich.is_object(), "rich response effects", method)?;
+            check_effects(rich, &result["effects"])?;
+        }
+        if let Some(placement) = result["placement"].as_str().or(result["descriptor"]["placement"].as_str()) {
+            check_placement(&capabilities["experimental"]["magit"], placement)?;
+        }
+        return Ok(());
+    }
     let params = &message["params"];
     let rich = &capabilities["experimental"]["magit"];
     let require = |declared: bool, feature: &str| {
@@ -31,11 +42,19 @@ pub fn check(capabilities: &Value, message: &Value) -> Result<(), String> {
         "$/logTrace" | "$/setTrace" | "window/logMessage" | "window/showMessage" => {}
         other => return Err(format!("unknown server method: {other}")),
     }
-    if message["result"]["effects"].is_array() {
-        check_effects(rich, &message["result"]["effects"])?;
-    }
     if let Some(placement) = params["descriptor"]["placement"].as_str() {
-        require(rich["layout"].as_array().is_some_and(|items| items.iter().any(|item| item == placement)), "layout placement")?;
+        check_placement(rich, placement)?;
+    }
+    Ok(())
+}
+
+fn require(declared: bool, feature: &str, method: &str) -> Result<(), String> {
+    if declared { Ok(()) } else { Err(format!("undeclared server feature: {feature} ({method})")) }
+}
+
+fn check_placement(rich: &Value, placement: &str) -> Result<(), String> {
+    if !["main", "side", "bottom", "float"].contains(&placement) || !rich["layout"].as_array().is_some_and(|items| items.iter().any(|item| item == placement)) {
+        return Err(format!("undeclared server feature: layout placement {placement}"));
     }
     Ok(())
 }
