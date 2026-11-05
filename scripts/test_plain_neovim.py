@@ -95,6 +95,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             "for _,x in ipairs(c) do names[#names+1]=x.name end; "
             "return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'), "
             "name=vim.api.nvim_buf_get_name(b), modified=vim.bo[b].modified, clients=names, "
+            "cursor=vim.api.nvim_win_get_cursor(0), "
             "endofline=vim.bo[b].endofline, fixeol=vim.bo[b].fixeol, fileformat=vim.bo[b].fileformat, "
             "rtp=vim.o.runtimepath, version=vim.lsp.util.buf_versions[b], pid=vim.fn.getpid(), "
             "server_pid=c[1] and c[1].rpc.pid, "
@@ -154,6 +155,9 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                     (run_evidence / "failure.json").write_text(json.dumps(diagnostics, indent=2) + "\n")
                     raise RuntimeError(f"timed out waiting for Plain didOpen rendering; diagnostics: {diagnostics}")
             report["bootstrap"] = initial
+            execute_command = initial["capabilities"].get("workspace", {}).get("executeCommand")
+            report["execute_command_capability_absent"] = execute_command is None
+            assert report["execute_command_capability_absent"], initial["capabilities"]
             report["plugin_free"] = not any("magit-lsp" in entry for entry in initial["rtp"].split(","))
             report["project_lua_modules"] = initial["project_modules"]
             if not report["plugin_free"]:
@@ -384,10 +388,16 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             picker("file-stage", file_keys(state()), "Stage the change at point")
             staged = wait_text("Staged changes (1)")
             after_stage = snapshot()
+            report["stage"] = {"offered_and_executed": actions[-1], "render": staged,
+                                "git": after_stage, "expected_index": changed}
+            assert actions[-1]["label"] == "file-stage"
+            assert "Stage the change at point" in [text for _, text in actions[-1]["offered"]]
             assert after_stage["index"] == changed, after_stage
             assert after_stage["head"] == head and after_stage["head_text"] == base and after_stage["worktree"] == changed
             assert after_stage["watcher"] == before["watcher"]
             picker("file-unstage", file_keys(staged), "Unstage the change at point")
+            report["unstage_diagnostic"] = {"action": actions[-1], "post_action_state": state(),
+                                             "git": snapshot()}
             unstaged = wait_text("Unstaged changes (1)")
             assert snapshot() == before
             rows = [i + 1 for i, line in enumerate(unstaged["text"].splitlines()) if line.endswith("-one") or line.endswith("+ONE")]

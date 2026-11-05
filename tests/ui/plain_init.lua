@@ -18,9 +18,6 @@ vim.api.nvim_create_autocmd('VimEnter', {
   once = true,
   callback = function()
     local capabilities = vim.lsp.protocol.make_client_capabilities()
-    -- Stock Neovim executes server commands but omits this optional capability
-    -- object by default. Declare static support, not dynamic registration.
-    capabilities.workspace.executeCommand = { dynamicRegistration = false }
     local client_id = vim.lsp.start({
       name = 'magit-lsp-plain-smoke',
       cmd = { server },

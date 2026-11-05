@@ -70,7 +70,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T007.1 — Gate Plain actions on code-action support.** Remove the executeCommand declaration requirement and obsolete capability reporting; document every standard capability read and prove real Plain stage actions with only applyEdit/codeAction. Reuse T005 Neovim quirk coverage. Original T007 clauses 1–3.
   - Done: containing commit.
   - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test plain_render --test plain_harness --test quirks"` @ `908c127` → ok: rust.
-- [ ] **T007.1n — Remove the native Plain executeCommand workaround.** Remove the test-client declaration workaround and verify native Plain actions with text/structured evidence only.
+- [x] **T007.1n — Remove the native Plain executeCommand workaround.** Remove the test-client declaration workaround and verify native Plain actions with text/structured evidence only.
+  - Done: containing commit.
+  - Verified: `make plain-neovim` @ `70eca61` → ok: build; ok: plain-neovim. Both variants prove declaration absence, stage offer/execution, authoritative render, Git state and cleanup. Evidence: `build/ui/plain-render/{without-final-newline,with-final-newline}/native.json`.
 - [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4.
 - [ ] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
 - [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
