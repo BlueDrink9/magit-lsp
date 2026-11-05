@@ -22,8 +22,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
-- [ ] **T120.2 — Implement staged-safe formatter checks and tests.**
-  Add a shared Rust/Lua/JS/TS formatter runner and focused tests. Check staged content without rewriting the index or unstaged work, report actionable failures, and expose equivalent committed-range checking for CI without mass-formatting legacy sources.
+- [x] **T120.2 — Implement staged-safe formatter checks and tests.**
+  Done: added `python3 scripts/format.py --staged` and `--base <commit>` with isolated index/HEAD snapshots, changed-source checks, pinned StyLua/Prettier and workspace Rust formatting. Tests cover staged/working-copy divergence, parity, deletion and Rust command scope. Next: T120.3 wires the same CLI into opt-in hook, Make and CI; no formatting or index mutation occurs.
 - [ ] **T120.3 — Wire formatter hooks, installation and CI.**
   Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets, focused parity tests and contributor documentation. Run the same formatter checks in CI, then close T120 after all slices pass.
 
