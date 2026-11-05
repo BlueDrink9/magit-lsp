@@ -47,10 +47,14 @@ Start in these components:
 
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap and queue. Decisions,
   glossary, correctness contracts and architecture design (§§0–3) live in
-  [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Protocol (§4), keymaps (§5),
-  views (§6), testing (§8) and open questions (§9) remain in TASKS.md. Read only relevant sections; immutable historical sources
-  are provenance, not proof of current behaviour. Do not duplicate detailed
-  design or progress history here.
+  [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Protocol reference (§4)
+  lives in [`docs/PROTOCOL.md`](./docs/PROTOCOL.md),
+  with detailed client behavior in [`docs/CLIENT_SPEC.md`](./docs/CLIENT_SPEC.md).
+  Keymaps (§5), views (§6), testing (§8) and open questions (§9) remain in
+  TASKS.md.
+  Read only relevant sections; immutable historical sources are
+  provenance, not proof of current behaviour. Do not duplicate detailed design
+  or progress history here.
 - [`README.md`](./README.md) is user-facing: overview, supported features,
   requirements and test instructions.
 - [`ui-test-plan.md`](./ui-test-plan.md) defines real-UI test rules and scenario

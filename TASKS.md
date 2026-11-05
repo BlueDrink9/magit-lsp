@@ -35,7 +35,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: `338b9de`.
 - [x] **Documentation cleanup — Move architecture and glossary reference.** Move §§0–3 intact into `docs/ARCHITECTURE.md`, preserving section identifiers and updating maintained links and entry points. Keep all queue items in `TASKS.md`. Split into the two preceding slices after two unchanged checkpoints.
   - Done: `338b9de`.
-- [ ] **Documentation cleanup — Move protocol reference.** Move §4 into `docs/PROTOCOL.md` and update maintained references without changing the wire contract.
+- [x] **Documentation cleanup — Move protocol reference.** Move §4 into [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and update maintained references without changing the wire contract.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md docs/PROTOCOL.md docs/ARCHITECTURE.md AGENTS.md README.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `6abc89d` → ok: docs-check.
 - [ ] **Documentation cleanup — Move keymaps and view reference.** Move §§5–6 into `docs/KEYMAPS.md` and `docs/VIEWS.md` and update maintained references without changing behavior.
 - [ ] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into `docs/TESTING.md` and `docs/OPEN_QUESTIONS.md`, update maintained links, and audit the parent migration acceptance.
 - [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the four preceding independently checked migrations.
@@ -738,65 +740,8 @@ Sections 3.1–3.19: see [Architecture and design](docs/ARCHITECTURE.md#3-design
 
 ## 4. Protocol reference
 
-No backward compatibility: delete the old `vcs/*` methods as their
-replacements land.
-
-### 4.1 Client → server (current contract)
-
-Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](#ad-hoc).
-
-| Method | Params | Returns |
-| --- | --- | --- |
-| `initialize` | `clientInfo`; rich clients declare `capabilities.experimental.magit` v1. Absence selects Plain. `profile?` remains in initializationOptions. | server capabilities |
-| `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
-| `view/close` | `{viewId}` | — |
-| `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
-| `view/invoke` | `{viewId, command, args?, cursor?, selection?}` | `{effects: [...]}` |
-| `view/rendered` (notification) | `{viewId, version}` | — |
-| `view/resync` | `{viewId}` | full render |
-| `view/resize` (notification) | `{viewId, cols, rows}` | — |
-| `view/setMode` | `{viewId, mode: "interactive"/"text"}` | `{effects}` |
-| `view/promptRespond` | `{promptId, cancelled, value?}` | — |
-
-### 4.2 Server → client
-
-| Method | Params |
-| --- | --- |
-| `view/render` (notification) | `{viewId, version, baseVersion?, text?, edits?: [{startLine, endLine, lines}], cursor?: {line, column}, mode, pending?, menu?: Menu}` |
-| `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, doc, group, status}], mode, pending?, liveKeys?: [string]}` |
-| `view/effects` (notification) | `{effects: [...]}` for asynchronous effects |
-| `view/prompt` (request) | See §3.6; returns `{cancelled, value?}` |
-| standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
-
-Plain mode uses standard document synchronization and code actions/commands for
-semantic action dispatch; concrete views/data carry stable identities and are
-never reconstructed by parsing rendered text. Git-specific discovery,
-mutation validation, commit-file paths, helper lifecycle and completion
-candidates belong to Git backend/workflow providers. Reusable server
-interaction primitives must support serving/stacking views, single and
-multi-item in-buffer selection with stable identities and caller restoration,
-message-edit sessions using a provider-supplied real file and finish/cancel
-callbacks, and semantic action dispatch. Git wrappers retain operation-specific
-semantics. Require a minimal fake-provider independence test, not a production
-jj backend or new wire protocol. Plain message editing reuses the implemented
-real-file/ring contract in §3.10; broader Plain dispatch remains a target.
-
-### 4.3 Example
-
-Client presses `s` with the cursor on a `+` line in an unstaged hunk:
-```json
-{"method":"view/key","params":{"viewId":"v1","version":12,"key":"s","editorMode":"normal","cursor":{"line":18,"column":4}}}
-```
-Server stages the hunk and answers:
-```json
-{"result":{"effects":[]}}
-```
-followed by a notification:
-```json
-{"method":"view/render","params":{"viewId":"v1","version":13,"baseVersion":12,
- "edits":[{"startLine":9,"endLine":22,"lines":["  Staged changes (1)", "…"]}],
- "cursor":{"line":10,"column":4}}}
-```
+The current protocol overview lives in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+Its detailed client behavior contract lives in [`docs/CLIENT_SPEC.md`](docs/CLIENT_SPEC.md).
 
 ---
 
