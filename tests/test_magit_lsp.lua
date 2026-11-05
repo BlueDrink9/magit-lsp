@@ -504,6 +504,18 @@ T['creates a server-named virtual buffer and attaches LSP'] = function()
   MiniTest.expect.equality(attached, true)
 end
 
+T['declares exact bundled Neovim capabilities'] = function()
+  local declaration = child.lua_get("require('magit-lsp.config').client_capabilities().experimental.magit")
+  MiniTest.expect.equality(declaration, {
+    v = 1,
+    keys = 'dynamic',
+    modifiers = child.lua_get("require('magit-lsp.config').key_modifiers()"),
+    layout = { 'main', 'side', 'bottom', 'float' },
+    effects = { 'visitFile', 'editDocument', 'clipboard' },
+    prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
+  })
+end
+
 T['staging a visual line range stages only those lines'] = function()
   setup_child()
   local target = child.lua_get("HELPERS.find_line('+', 'NEW line', 'unstaged')")
