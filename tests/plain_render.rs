@@ -537,6 +537,47 @@ fn render_coalesces_and_echo_before_or_after_response_reconciles_without_version
 }
 
 #[test]
+fn accepted_unconfirmed_edit_expires_and_repairs_only_on_new_evidence() {
+    let mut c = controller(Encoding::Utf16, true);
+    let uri = "file:///status";
+    let mut editor = FakeEditor::new(Profile::Standard);
+    editor.open(uri, "client");
+    editor.documents.get_mut(uri).unwrap().version = 2;
+    c.render("target");
+    let first = c.open(1, "client").unwrap();
+    assert!(c.response(first.id, true).is_none());
+    assert_eq!(c.state(), DocumentState::Applying);
+    assert!(c.expire(first.id + 1).is_none());
+    assert!(c.expire(first.id).is_none());
+    assert_eq!(c.state(), DocumentState::Ready);
+    assert!(c.render("target").is_none());
+    let retry = c.change(2, "client").unwrap();
+    editor.apply_edit(&retry.edit);
+    assert_eq!(editor.text(uri), "target");
+    assert!(c.change(3, editor.text(uri)).is_none());
+    assert!(c.expire(retry.id).is_none());
+    assert!(c.response(retry.id, true).is_none());
+    assert_eq!(c.state(), DocumentState::Ready);
+    assert!(c.action_snapshot("client").is_none());
+    assert!(c.response(first.id, true).is_none());
+    c.close();
+    c.render("reopened target");
+    let reopened = c.open(10, "other").unwrap();
+    assert!(c.expire(retry.id).is_none());
+    assert_eq!(c.state(), DocumentState::Applying);
+    let queued = c.render("newest target");
+    assert!(queued.is_none());
+    assert!(c.response(reopened.id, true).is_none());
+    let latest = c.expire(reopened.id).unwrap();
+    assert_ne!(latest.id, reopened.id);
+    assert_eq!(c.state(), DocumentState::Applying);
+    c.close();
+    assert!(c.expire(latest.id).is_none());
+    assert!(c.response(latest.id, true).is_none());
+    assert_eq!(c.state(), DocumentState::Detached);
+}
+
+#[test]
 fn unversioned_changes_profile_and_stale_rejection_recompute_from_latest_snapshot() {
     let uri = "file:///status";
     let mut c = controller(Encoding::Utf8, false);

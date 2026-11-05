@@ -145,10 +145,13 @@ impl PlainDocument {
             .map(|s| (s.text.as_str(), s.version))
     }
 
-    /// Record an authoritative render and start an edit if the client is ready.
+    /// Record server-authoritative rendered text and start an edit if the client is ready.
     pub fn render(&mut self, text: impl Into<String>) -> Option<ApplyEdit> {
-        self.authoritative = Some(self.snapshot_for(text.into(), 0));
-        self.rejected = None;
+        let snapshot = self.snapshot_for(text.into(), 0);
+        if self.authoritative.as_ref().map_or(true, |old| old.hash != snapshot.hash) {
+            self.rejected = None;
+        }
+        self.authoritative = Some(snapshot);
         self.prepare()
     }
 
@@ -213,7 +216,7 @@ impl PlainDocument {
         std::mem::replace(&mut self.warning_pending, false)
     }
 
-    /// Attach/reopen the document with its exact current editor snapshot.
+    /// Attach/reopen with the exact observed editor snapshot; it does not become server-authoritative.
     pub fn open(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
         self.in_flight = None;
         self.format_suspended = false;
@@ -224,7 +227,7 @@ impl PlainDocument {
         self.prepare()
     }
 
-    /// Observe a didChange notification, reconciling an exact applyEdit echo.
+    /// Record an observed didChange snapshot and reconcile an exact applyEdit echo.
     pub fn change(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
         if self.state == DocumentState::Detached {
             return None;
@@ -284,6 +287,25 @@ impl PlainDocument {
         None
     }
 
+    /// Expire an accepted applyEdit that has not been confirmed by a document echo.
+    ///
+    /// The correlated request ID prevents stale timers from affecting newer flights.
+    /// The observed client snapshot remains distinct from server-authoritative rendered text.
+    pub fn expire(&mut self, id: u64) -> Option<ApplyEdit> {
+        let Some(flight) = self.in_flight.as_ref() else {
+            return None;
+        };
+        if flight.request.id != id || flight.response != Some(true) || flight.echoed {
+            return None;
+        }
+        let target_hash = flight.target.hash;
+        let client_hash = self.client.as_ref().map_or([0; 32], |client| client.hash);
+        self.in_flight = None;
+        self.rejected = Some((target_hash, client_hash));
+        self.state = DocumentState::Ready;
+        self.prepare()
+    }
+
     /// Detach and invalidate pending responses so no late result can resurrect it.
     pub fn close(&mut self) {
         self.state = DocumentState::Detached;
@@ -321,6 +343,7 @@ impl PlainDocument {
         };
         if authoritative.hash == client.hash {
             self.state = DocumentState::Ready;
+            self.rejected = None;
             return None;
         }
         if self.rejected == Some((authoritative.hash, client.hash)) {
