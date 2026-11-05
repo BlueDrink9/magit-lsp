@@ -13,6 +13,9 @@ pub struct ClientPump {
     pub cancel_on_edit: bool,
     strict: bool,
     capabilities: Value,
+    /// Rich rendered state, present when initialize declares the rich protocol.
+    pub rich: Option<super::editor_model::rich::RichEditor>,
+    resyncs: HashMap<i64, String>,
 }
 impl ClientPump {
     fn initialized(mut server: TestServer, capabilities: Value, mut editor: FakeEditor) -> Self {
@@ -22,7 +25,8 @@ impl ClientPump {
             "utf-8" => "utf-8", "utf-16" => "utf-16", "utf-32" => "utf-32",
             other => panic!("invalid negotiated encoding: {other}"),
         };
-        Self { server, editor, replies: Default::default(), cancel_on_edit: false, strict: false, capabilities }
+        let rich = capabilities.get("experimental").and_then(|v| v.get("magit")).is_some();
+        Self { server, editor, replies: Default::default(), cancel_on_edit: false, strict: false, capabilities, rich: rich.then(Default::default), resyncs: Default::default() }
     }
     /// Start a client with custom initialize capabilities.
     pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
@@ -61,8 +65,30 @@ impl ClientPump {
     pub fn step(&mut self) {
         let message = self.server.recv();
         self.validate(&message);
+        if message["method"] == "view/render" {
+            if self.rich.is_none() { self.server.notifications.push(message); return; }
+            let render: magit_lsp::protocol::ViewRender = serde_json::from_value(message["params"].clone()).expect("valid rich render");
+            let view_id = render.view_id.clone();
+            match self.rich.as_mut().expect("rich render requires rich model").apply(render) {
+                super::editor_model::rich::Intent::Ack(version) => self.server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}})),
+                super::editor_model::rich::Intent::Resync => {
+                    let id = allocate_request_id();
+                    assert!(self.resyncs.insert(id, view_id.clone()).is_none());
+                    self.server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/resync","params":{"viewId":view_id}}));
+                }
+            }
+            self.server.notifications.push(message);
+            return;
+        }
         if message["method"].is_string() && !message["id"].is_null() { self.dispatch_validated(&message); return; }
         if let Some(id) = message["id"].as_i64() {
+            if let Some(view_id) = self.resyncs.remove(&id) {
+                let render: magit_lsp::protocol::ViewRender = serde_json::from_value(message["result"].clone()).expect("valid resync render");
+                assert_eq!(render.view_id, view_id);
+                let version = match self.rich.as_mut().expect("rich model").apply(render) { super::editor_model::rich::Intent::Ack(version) => version, super::editor_model::rich::Intent::Resync => panic!("full resync response was stale") };
+                self.server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
+                return;
+            }
             assert!(self.replies.insert(id, message).is_none(), "duplicate response"); return;
         }
         if self.cancel_on_edit && message["method"] == "view/effects" && message["params"]["effects"].as_array().is_some_and(|e| e.iter().any(|e| e["type"] == "editDocument")) {

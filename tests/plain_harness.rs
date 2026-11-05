@@ -132,6 +132,42 @@ fn strict_feature_guard_distinguishes_declarations_from_editor_behavior() {
 }
 
 #[test]
+fn rich_server_render_ack_and_stale_resync_preserve_caller_reply() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("init", [("f.txt", fixtures::TEN_LINES)]).build();
+    let model = editor_model::EditorModel::new(editor_model::RICH_MIN).strict();
+    let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
+    let open = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/open","params":{"kind":"status","args":{"repo_path":repo.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
+    let opened = client.until_response(open);
+    let descriptor = &opened["result"];
+    assert!(descriptor["id"].is_string(), "{opened}");
+    let view = descriptor["id"].as_str().unwrap().to_owned();
+    client.until(|c| c.rich.as_ref().is_some_and(|r| r.views.contains_key(&view)));
+    let state = client.rich.as_ref().unwrap().views[&view].clone();
+    let initial = client.server.notifications.iter().find(|m| m["method"] == "view/render" && m["params"]["viewId"] == view).unwrap();
+    assert_eq!(state.lines, serde_json::from_value::<Vec<String>>(initial["params"]["text"].clone()).unwrap());
+    assert_eq!(state.version, initial["params"]["version"].as_u64().unwrap());
+    assert!(client.server.sent.iter().any(|m| m["method"] == "view/rendered" && m["params"]["viewId"] == view && m["params"]["version"] == state.version));
+    let unrelated = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/resync","params":{"viewId":view}}));
+    client.until(|c| c.server.notifications.iter().any(|m| m["method"] == "view/render" && m["params"]["viewId"] == view));
+    client.rich.as_mut().unwrap().views.get_mut(&view).unwrap().version = 0;
+    let new_file = repo.path().join("new-file.txt");
+    fs::write(&new_file, "watcher-visible\n").unwrap();
+    client.until(|c| c.server.sent.iter().any(|m| m["method"] == "view/resync"));
+    let resync = client.server.sent.iter().find(|m| m["method"] == "view/resync").unwrap();
+    let resync_index = client.server.sent.iter().position(|m| m["method"] == "view/resync").unwrap();
+    assert!(resync["id"].is_number());
+    assert_eq!(resync["params"]["viewId"], view);
+    client.until(|c| c.rich.as_ref().is_some_and(|r| r.views.get(&view).is_some_and(|s| s.lines.iter().any(|line| line.contains("new-file.txt")))));
+    let recovered = &client.rich.as_ref().unwrap().views[&view];
+    let ack = client.server.sent.iter().skip(resync_index + 1).find(|m| m["method"] == "view/rendered" && m["params"]["viewId"] == view && m["params"]["version"] == recovered.version).expect("recovery ack");
+    assert_eq!(ack["params"]["version"], recovered.version);
+    let response = client.until_response(unrelated);
+    assert!(response.get("result").is_some(), "{response}");
+    assert_eq!(repo.git(&["status", "--short"]), "?? new-file.txt\n");
+    client.finish();
+}
+
+#[test]
 fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
     let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities();
     let rich = editor_model::EditorModel::new(editor_model::RICH_MIN).capabilities();
