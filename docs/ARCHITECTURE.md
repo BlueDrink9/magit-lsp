@@ -19,7 +19,7 @@ completed correctness contracts and architecture design.
 | Diff/patch | Git computes diffs; we parse its output and build patches for `git apply` (this is what Magit does, §3.13) |
 | Rendering | Server re-renders fully (as Magit does) and sends line-range edits, so clients stay stable (§3.3) |
 | Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few (§8) |
-| Detail visibility | Four levels: section (staged/unstaged) → files → hunks → individually visible hunks; profile bindings and tests must match (§5.1) |
+| Detail visibility | Four levels: section (staged/unstaged) → files → hunks → individually visible hunks; profile bindings and tests must match ([§5.1](KEYMAPS.md#51-common-scope)) |
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
 | Recommended Git version | Git 2.30.8 is the tested recommendation, not a hard minimum; older versions are not blocked but may have feature failures |
@@ -290,7 +290,7 @@ combine them:
 
 **Terminal limits:** many terminals cannot distinguish `ctrl+Enter`,
 `ctrl+shift+<letter>`, or `shift+Enter` from their plain forms. Clients report
-`keyModifiers: "full" | "basic"` in the versioned rich declaration during `initialize`. Profiles (§5) avoid these
+`keyModifiers: "full" | "basic"` in the versioned rich declaration during `initialize`. [Profiles](KEYMAPS.md#5-default-keymaps-profiles) avoid these
 combinations in the `vim` profile; `standard` assumes a GUI editor.
 
 ### 3.9 Keybinding architecture
@@ -735,4 +735,3 @@ with effectively zero Plain-client changes, without requiring a jj backend,
 generic VCS trait hierarchy, or speculative wire protocol. This does not
 promise a low-cost backend fork; keep Git-specific CLI/domain details where
 they are meaningful. See [the architecture decisions](ARCHITECTURE.md#0-decisions-already-made) and the Plain phase task list.
-
