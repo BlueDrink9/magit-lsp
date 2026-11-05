@@ -104,17 +104,20 @@ Last review: `30de40d`; substantial fixture retirement, live synchronization cov
 
 ## Ad hoc
 
-- [ ] **Autofix staged formatting through shared hook and Make commands.**
+- [x] **Autofix staged formatting through shared hook and Make commands.**
   Review scope: accumulated formatter configuration, installer, CI and shared staged-index mutation warrant a focused safety review before handoff. No named roadmap phase closes; unrelated concurrent trace cleanup and its regressions are outside this handoff.
-  Last review: pending focused formatter safety review of `268e3e3` and its maintained installer/CI interfaces. Reuse the passing full `make test` gate at `6825e11` for unchanged formatter implementation; disposable real-repository hook checks still required. Preserve all unrelated dirty release and instruction changes.
+  Last review: focused formatter safety review completed; implementation and maintained installer/CI interfaces passed the disposable repository checks below. Reuse the passing full `make test` gate at `6825e11` for unchanged formatter implementation. Preserve all unrelated dirty release and instruction changes.
   Replace formatting rejection with safe staged-content autofix; share formatter dispatch with manual Make commands and check-only CI. Preserve unstaged/unrelated edits, executable modes and partial staging; never bypass hooks or add permanent formatter tests.
   check: exercise actual hooks through a Make target in disposable real repositories; formatted commit content must exclude unstaged edits. Formatter errors must block without changing the index or working files. Record one-time results under this item, update formatter instructions, then stop without advancing unrelated work.
+  Done: `fa5c3de`.
+  - Verified: `make -C /tmp/opencode/fmt-final-commit -f /home/william/src/magit-lsp/Makefile hooks-run` @ `fa5c3de` → exit 0; actual hook formatted staged `lua/sample.lua`, preserved mode `100755` and exact worktree bytes, excluded `UNSTAGED_ONLY`; normal fixture commit HEAD contained formatted staged blob only. `git -C /tmp/opencode/fmt-final-commit commit -m 'formatted staged sample'` → exit 0; HEAD content and worktree assertions passed. Malformed-input oracle: `make -C /tmp/opencode/fmt-p1-bad -f /home/william/src/magit-lsp/Makefile hooks-run` @ `5025937` → expected exit 2; staged blob unchanged (`local x=\n`) and worktree SHA-256 unchanged (`8d480a8...c2b29f1`).
 
 ## Review
 
 - [x] **Formatter P1 — Make index publication the final fallible operation.**
   `staged_fix` publishes index changes before worktree mirroring and output that can fail. Remove worktree mirroring and post-publication output; keep formatter errors isolated before index mutation. Document that staged fixes leave working files unchanged.
   check: disposable real repositories through `make hooks-run` prove staged autofix succeeds with an unwritable working file, preserves partial unstaged content and executable mode, and rejects formatter errors without changing index or working bytes. No permanent formatter tests.
+  Done: `fa5c3de`.
   - Verified: `make -C /tmp/opencode/fmt-p1-valid -f /home/william/src/magit-lsp/Makefile hooks-run` @ 5025937 → exit 0; staged `lua/sample.lua` became `local x = 1`, mode remained `100755`, and unwritable worktree bytes (`local x = 1\n-- unstaged\n`) remained unchanged.
   - Verified: `make -C /tmp/opencode/fmt-p1-bad -f /home/william/src/magit-lsp/Makefile hooks-run` @ 5025937 → expected exit 2; malformed Lua error, staged blob stayed `local x=\n`, and worktree SHA-256 stayed `8d480a8...c2b29f1`.
 

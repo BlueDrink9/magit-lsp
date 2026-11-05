@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check or format changed source files without changing the Git index."""
+"""Check or format changed source files, including staged index content."""
 
 from __future__ import annotations
 
@@ -206,7 +206,7 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
         raise RuntimeError("formatter changed files outside staged formatter inputs: " + ", ".join(sorted(unexpected)))
     if not format_paths(sorted(allowed), snapshot_root, False):
         return 1
-    changed: dict[str, tuple[str, str]] = {}
+    changed: dict[str, str] = {}
     for path in allowed:
         candidate = snapshot_root / path
         if not candidate.is_file() or candidate.is_symlink():
