@@ -613,8 +613,8 @@ unique tmux session and socket are gone.
 | Selection replace | Captured: native `ggghvllrX` replaced `Hea` with `XXX` (source row 10); server repair and echo restored baseline. | Captured: native `1G0vllrX<Esc>` produced `XXXd`; action trace metadata and source rows 9, 14 retained in `plain-neovim-0.12.6-actions.*`. |
 | Paste one character | Captured: native `"ay` yank then `"ap` paste inserted `H` at 0:1 (source row 16); server repair and echo restored baseline. | Captured: native register `Q` and `gg0"ap` produced `HQead`; action trace metadata and source rows retained in `plain-neovim-0.12.6-actions.*`. |
 | Paste many characters | Captured: native `vll"by` yank then `"bp` paste inserted `Hea` at 0:1 (source row 22); server repair and echo restored baseline. | Captured: native register `MULTI` and `gg0"ap` produced `HMULTIQead`; it began before prior repair settled. See retained action metadata and limits. |
-| Rapid typing | NOT CAPTURED; separate rapid input not tested. | Captured: native `gg0iRAPID<Esc>`; raw change and metadata retained in `plain-neovim-0.12.6-rapid-repair.*`. |
-| Undo immediately after server repair edit | NOT CAPTURED. | Captured: native `u` sent only after correlated repair reply and baseline buffer restoration; actual undo and follow-on server repair retained in `plain-neovim-0.12.6-rapid-repair.*`. |
+| Rapid typing | Captured: native `RAPID` insertion, retained in `helix-25.07.1-rapid-repair.*`; source rows 9–14. | Captured: native `gg0iRAPID<Esc>`; raw change and metadata retained in `plain-neovim-0.12.6-rapid-repair.*`. |
+| Undo immediately after server repair edit | Captured: native `u` after correlated repair and restored baseline; row 20 proves transient undo text, rows 21–23 show re-repair. Saved rows 19/24 show restored baseline, not transient undo. | Captured: native `u` sent only after correlated repair reply and baseline buffer restoration; actual undo and follow-on server repair retained in `plain-neovim-0.12.6-rapid-repair.*`. |
 
 Neovim action capture source is `/tmp/opencode/t002-neovim-actions/raw-parent/raw.jsonl`, SHA256 `856b70d34cb40b2d221177f89d43b75399adaf8bfa9d543253ace4e5e20360de` (21 rows). `plain-neovim-0.12.6-actions.jsonl` preserves source rows 9 and 14 verbatim; its JSON sidecar records exact native keys, structured before/after text and versions, and source row mapping. Source row 9 is didChange version 5 (`XXX` replacement); row 14 is didChange version 9 and contains Q and MULTI edits together with intervening server edits. Native state versions were 7 and 8 for the two pastes. MULTI began before prior repair settled, so this is action evidence, not a clean-repair claim. The run also executed incidental undo: its `repair_before_undo` still contains `HMULTIQead`, so undo-after-repair is not established and is excluded from the action fixture.
 
@@ -872,7 +872,12 @@ change is also a full-buffer replacement; no native action among the six is
 established there. Single insert is captured for both requested editor families.
 For Neovim, selection replacement, both register pastes, rapid typing, and undo
 after confirmed repair are captured. For Helix, selection replacement and both
-register pastes are captured; rapid typing and undo after confirmed repair remain
-uncaptured. The checked
-T002.2 four-client baseline is complete; parent T002 and full T034 conformance
-remain open.
+register pastes are captured, as are rapid typing and undo after confirmed
+repair. The four-client baseline is complete. The retained Helix source hash was
+independently checked against the available original raw log; fixture retained-
+row checks do not establish native causality or recompute full-source provenance.
+No coalescing claim is made: Helix saved snapshots show repaired baseline while
+row 20 alone proves transient undo; Neovim's undo notification coalesces repair
+echo and undo. T002 acceptance is complete; full T034 conformance beyond listed
+native actions is not claimed. Linux evidence only; Windows/macOS CI remains
+follow-up.

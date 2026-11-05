@@ -76,7 +76,7 @@ Residuals: A12 remains ownerless; R-EDIT-REAL remains not green and T104 tracks
 only a subset. Binary-platform limits and immutable provenance remain documented
 in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 
-### T002 wire-recorder (S)
+### [x] T002 wire-recorder (S) — Complete
 
 - **Depends on:** none.
 - **Target Files:** `src/server.rs` or a new `src/wirelog.rs` (confirm), `tests/wirelog.rs` (new), `tests/fixtures/lsp_traces/`.
@@ -87,7 +87,7 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
   2. Capture one `initialize` and one `didChange` for each of these clients: bundled Neovim, bundled VS Code, plain Neovim and Helix. Record Helix again on its current release. The old 25.07.1 trace did not declare `window.showDocument`. Mark a trace "reconstructed" if you did not capture it. A reconstructed trace does not count as conformance evidence.
   3. For T034, capture these native actions from Helix and Neovim: a single insert, a selection replace, a paste of one character, a paste of several characters, rapid typing, and an undo right after a server repair edit. List each action that you could not capture. Do not infer input action from payload shape alone; the four-client baseline does not complete this acceptance.
   4. Commit preset files named `initialize-<client>-<version>.json`.
-- **Verify:** Run `cargo test --test wirelog`. Make sure that each fixture parses as JSON. Record one capture run for each client as text.
+Done: implementation `8476a8e`. Four native initialize/didChange client baselines and versioned presets retained. T034: Helix selection, one-/multi-character paste, rapid typing and undo after confirmed repair captured; Neovim all six captured, with multi-paste-before-repair limit recorded. Bundled VS Code/Neovim payload shapes do not establish native actions; single insert provenance established for plain Neovim and Helix only. Reconstructed trace is not conformance evidence. Enforced by `cargo test --test wirelog` (12 tests), JSON parsing and manual trace README audit. Full Helix source hash/equality manually verified; automated gate checks retained records/metadata, not native causality. Linux only; Windows/macOS CI follow-up. Phase gate follows this ticket.
 
 ### [x] T003 hygiene-tooling — Complete
 
