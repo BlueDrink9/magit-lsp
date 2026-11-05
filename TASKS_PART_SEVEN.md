@@ -93,23 +93,15 @@ Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is cl
 
 ## Phase 2: Capability model (gates 0.2)
 
-### T004 typed-declaration (M)
+### [x] T004 typed-declaration (M) — Complete
 
-- **Depends on:** none.
-- **Target Files:** `src/presentation/mod.rs`, `src/protocol.rs`, `src/dispatch.rs`, `src/ui.rs`, `src/presentation/custom.rs`, `lua/magit-lsp/config.lua`, `lua/magit-lsp/init.lua`, `clients/vscode/lib/session.js`, `tests/plain_core.rs`.
-- **Reference Files:** the declared blocks in `config.lua` and `session.js`; section C of `docs/evidence/harness-reassessment-inputs.md`.
-- **Constraints:** Compatibility is not a goal. Delete only code that has no real consumer. Search both clients and the tests before you delete.
-- **Acceptance:**
-  1. Add a typed struct `MagitCapabilities` (serde, `deny_unknown_fields`). It replaces the hand parsing of `negotiate()` over `Value`. Test both client blocks against it. Delete variants that no client uses: `keys: forwardAll`, `render: full` and `folds: native`. Remove a field from the block if it has only one possible value.
-  2. Delete `capabilities.prompts`, `placements` and `editorBridge` from `config.lua`.
-  3. Delete this code if no consumer uses it: `PromptUi::multi_choice`, `process_log_id`, `Effect::OpenView` (if only `PushView` is produced), `KeymapDelivery::parse`, `KeyModifiers::parse`, and the duplicate test `RecordingUi`. Keep one shared `RecordingUi`.
-  4. Change `ActionTarget` to camelCase (`nodeId`, `mutationHash`). Update the Plain tests and fixtures.
-  5. Replace the hard-coded match in `RichCapabilities::command_requirement` with a table. Derive the table from the command requirements. Until the recording `Ui` exists, add a unit test. The test must make sure that each command that produces an effect is in the table.
-  6. List the placements that VS Code honors (`views.js`, `effects.js`). Declare only those placements.
-  7. Add a checked emitter in the presentation seam. In test builds, an undeclared effect, prompt kind or placement must fail the test. In production, it must use the documented fallback.
-- **Verify:** Run `cargo test`, `make test-lua` and `node clients/vscode/test/test.js`.
-
-Done: `7006dcc`; immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`. Clause audit and native evidence: [typed capability declarations](docs/evidence/typed-capability-declarations.md). Enforced by `tests/plain_core.rs` (strict schema, both stored native blocks, camelCase targets, registry requirements and placement fallback), `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs`, and the custom-emitter tests in `src/presentation/custom.rs`. Both current native declarations and producer paths have evidence; source/provenance/native causality remain manual, and producer coverage is exercised paths, not exhaustive future discovery. `multiChoice` remains because real clients declare it and shared vectors consume it; no producer command is claimed. Linux full regression passed. Phase 2 remains open for T005–T007.
+Done: audit `7006dcc`; strict schema `b1db385`, registry requirements `9fca760`, checked emitter `470a950`/`b89bf60`.
+Requirement: strict typed declarations for both real clients, camelCase action targets, consumer-safe cleanup, command-owned optional-effect requirements and checked emission with production fallbacks.
+Immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`; [clause audit and native evidence](docs/evidence/typed-capability-declarations.md).
+Enforced by `tests/plain_core.rs`, `tests/plain_actions.rs`, `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs` and library custom-emitter tests; full serialized Linux `make test FILTER=--no-fail-fast` passed.
+`multiChoice` retains real client/shared-vector consumers; no producing command is claimed. One shared test `RecordingUi` remains.
+Native provenance/source equality are manually audited; automated tests cover stored declarations and exercised producers, not live recapture or exhaustive future discovery.
+Actual Phase 2 remains open for T005–T007; Windows/macOS verification remains for CI.
 
 ### T005 quirks-table (M)
 
