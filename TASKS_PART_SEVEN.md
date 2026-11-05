@@ -4,8 +4,8 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 
 ## How to read this document
 
-- Named roadmap phases (the `Phase N` groups below) are phase boundaries; individual tickets, implementation slices and review-fix batches are not. Run the phase gate when the last unchecked item in a named phase completes. The active higher-priority review remains required after eight completed tasks since `Last review:`. The proposed judgment-based orchestration replacement is recorded in [AGENTS.md](./AGENTS.md#working-conventions); it is not active until orchestration instructions change. At each applicable phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
-- A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, and Verify. Each ticket inherits its applicable phase gate from its enclosing named phase and the phase map; gates apply only at actual named phase ends.
+- Named roadmap phases (the `Phase N` groups below) are phase boundaries; individual tickets, implementation slices and review-fix batches are not. Run the phase gate when the last unchecked item in a named phase completes. At each applicable phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
+- A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, and Verify. Each ticket inherits its applicable phase gate from its enclosing named phase and the phase map; gates apply only at actual named phase ends. Follow current review and orchestration instructions in [AGENTS.md](./AGENTS.md#working-conventions).
 - Sizes are S, M or L. They are relative sizes. They are not time estimates.
 - Check each path that has the mark (confirm) before you edit it. If the path is wrong, correct the ticket.
 - Old ticket numbers (for example R-PLAIN-PROMPT) stay in the history. The last section maps old numbers to new numbers.
@@ -418,14 +418,15 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 ### T020 plain-e2e (L)
 
 - **Depends on:** T009, T010. Old ticket: R-PLAIN-E2E.
-- **Target Files:** `tests/plain_e2e.rs` (new), `scripts/ui_lib/*`, `scripts/test_plain_neovim.py` (fold it in, then delete it), `tests/ui/plain_init.lua`, `tests/ui/scenarios/plain-status-stage.scn` and `plain-commit.scn` (new), `ui-test-plan.md`.
+- **Target Files:** `tests/plain_e2e.rs`, `scripts/ui_lib/*`, `scripts/test_plain_neovim.py`, `tests/ui/plain_init.lua`, `tests/ui/scenarios/plain-status-stage.scn` and `plain-commit.scn`, `ui-test-plan.md`.
 - **Reference Files:** `scripts/ui_lib/cli.py`, `driver.py`, `scenario.py`; section A.5 of `ui-test-plan.md`.
-- **Constraints:** Read `scripts/test_plain_neovim.py` before you change it. The init file uses `vim.lsp.start` and no code from `lua/magit-lsp`. The header `profile:` in a `.scn` file already means the keymap profile. The new header is `client: rich | plain`.
+- **Constraints:** Shared configurable native lifecycle now exists. Retain `scripts/test_plain_neovim.py` and reuse `make plain-neovim` with role-aware bounded teardown; do not recreate lifecycle support. The init file uses `vim.lsp.start` and no code from `lua/magit-lsp`. The header `profile:` in a `.scn` file already means the keymap profile. The header `client: rich | plain` selects the client.
 - **Acceptance:**
-  1. Fold `test_plain_neovim.py` into `ui_lib` as `client: plain` (init file and environment). A Plain scenario and a rich scenario are then two `.scn` files in one harness.
-  2. Add a harness test on a disposable repository: open, status, stage a file, stage a hunk, a stale action is rejected, unstage, commit menu, commit file, save, close. The commit must exist with the exact message.
-  3. Add native plain-Neovim scenarios for status and stage, and for commit editing. Run them at 80x24. Record text evidence. No process may stay running.
-- **Verify:** Run `make test-rust FILTER="--test plain_e2e"` and `scripts/ui run tests/ui/scenarios/plain-status-stage.scn tests/ui/scenarios/plain-commit.scn`.
+  1. Integrate plain scenarios into `ui_lib` with `client: plain` (init file and environment), so plain and rich scenarios run in one harness. Keep the standalone script and all its native assertions until replacement coverage passes.
+  2. Add a harness test on a disposable repository: open, status, stage a file, stage a hunk, reject a stale action, unstage, commit menu, commit file, save, close. The commit must exist with the exact message.
+  3. Add native plain scenarios for status/stage and commit editing. Run at 80x24 and record text evidence. Keep this distinct from verified 120x100 coverage. No owned process may remain.
+  4. Delete the standalone script only after replacement coverage demonstrates all its existing assertions.
+- **Verify:** Future acceptance commands: `make test-rust FILTER="--test plain_e2e"`, `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn`, and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn`. These checks have not run for this ticket.
 
 ### T021 helix-smoke (S)
 
