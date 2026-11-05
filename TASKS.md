@@ -11,6 +11,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+Formatter hook and manual Make command follow-up: see the [authoritative ad hoc queue](./TASKS_PART_SEVEN.md#ad-hoc). Finish that requested work, then stop without advancing unrelated tasks.
+
 - [x] **Remove permanent formatter tests and retain one-time verification.**
   Remove the formatter/hook test suite as requested; verify the tools and staged-safe hook once in disposable repositories. Update T120 acceptance and CI scope accordingly; finish formatter setup, then stop without advancing unrelated roadmap work.
 
