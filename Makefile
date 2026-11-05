@@ -30,10 +30,10 @@ test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
 
 test-lua: build
-	$(call run,lua,nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()")
+	$(call run,lua,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()")
 
 test-file: build
-	$(call run,lua,nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')")
+	$(call run,lua,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')")
 
 ui-unit:
 	$(call run,ui-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py')

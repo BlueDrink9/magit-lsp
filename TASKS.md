@@ -21,6 +21,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Remove runtime support for `forwardAll`, render-only-full and native-fold presentation after confirming neither shipped client declares them. Retain supported dynamic/static keys, acknowledged incremental rendering, server-fold semantics and their real-server tests; the following typed-schema slice removes singleton wire fields.
 - [x] **T004.2a — Finish server mode removal and validate supported-mode coverage.**
   Prior slices removed session/capability modes and rewrote tests without committing. Restore the accidentally reverted `ForwardAll` server branch deletion, use workspace rustfmt (not standalone defaults), and verify/commit the existing scoped implementation before checking this child and T004.2.
+- [ ] **T004.3 — Deserialize strict typed rich capability declarations.**
+  Replace hand parsing with serde `MagitCapabilities` and typed key/modifier modes; reject unknown fields, duplicates, invalid values and missing main placement. Remove singleton render/fold fields from live client declarations and tests, remove obsolete Lua capability keys and fallback parsers, and preserve immutable historical captures.
+- [x] **T004.3a — Pin Lua verification to the server built by Make.**
+  Lua negotiation failures came from stale `target/release/magit-lsp` selected by production lookup, while Make built debug. Pin `test-lua` and `test-file` subprocesses to the freshly built debug server without changing production lookup; then finish strict-schema verification.
+- [ ] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
+  Confirm both actual clients send the new typed block, including the bundled VSCode omission observed in T002. Use supported languageclient hooks and only honored VSCode placements; retain focused native Linux text/wire evidence and test both actual declarations against server validation.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
 - [x] **T002.3a — Capture the five remaining native Neovim input actions.**
