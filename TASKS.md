@@ -46,7 +46,7 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: `96504c60fde13587bb69f38e2d66f8dd0758366a`.
 - [x] **T006.3a — Apply rich render state from shared vectors.** Add per-view text, version and metadata state for full, bottom-up edits and metadata-only renders. Shared vectors must prove exact verbatim text, full-over-edits precedence, stale-base resync without mutation and correct ack intent.
   - Verified: `make test-rust FILTER="--test plain_harness"` → ok: rust on this implementation diff.
-  - Done: containing commit.
+  - Done: `53483b9`.
 - [x] **T006.3b — Route rich render acknowledgements and resync through the pump.** Dispatch render notifications into the rich state model, send applied-version acknowledgements, correlate resync replies and recover state without dropping unrelated responses. Prove the pump works against the real rich server.
   - Done: `a4578fe956998619de708c2aee8ee93da20a17dc`. Preceding T006.3a: `7e4c26cf15b95c3e9715b45b3876e4fa92c05f58`.
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions"` → ok: rust. Real rich server test asserts exact text/version, applied ack, watcher-driven stale update, dynamic resync/full recovery/ack, retained unrelated caller response and unchanged Git status except sentinel.
@@ -69,11 +69,15 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 - [x] **T007.1 — Gate Plain actions on code-action support.** Remove the executeCommand declaration requirement and obsolete capability reporting; document every standard capability read and prove real Plain stage actions with only applyEdit/codeAction. Reuse T005 Neovim quirk coverage. Original T007 clauses 1–3.
   - Done: containing commit.
-  - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test plain_render --test plain_harness --test quirks"` @ `908c127` → ok: rust.
+  - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test plain_render --test plain_harness --test quirks"` on the implementation committed in `70eca6154ce29951c05e1f5ae632cfd146e8e6b8` → ok: rust.
 - [x] **T007.1n — Remove the native Plain executeCommand workaround.** Remove the test-client declaration workaround and verify native Plain actions with text/structured evidence only.
   - Done: containing commit.
-  - Verified: `make plain-neovim` @ `70eca61` → ok: build; ok: plain-neovim. Both variants prove declaration absence, stage offer/execution, authoritative render, Git state and cleanup. Evidence: `build/ui/plain-render/{without-final-newline,with-final-newline}/native.json`.
-- [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4.
+  - Verified: `make plain-neovim` on the implementation committed in `1d0422e9fa600c50b5015de4798b3269b856779d` → ok: build; ok: plain-neovim. Both variants prove declaration absence, stage offer/execution, authoritative render, Git state and cleanup. Evidence: `build/ui/plain-render/{without-final-newline,with-final-newline}/native.json`. Earlier run timed out after unstage; added action/cursor/Git diagnostics and rerun passed without a behavior fix. Retain this transient risk for the T007 audit.
+- [x] **T007.2a — Expire unconfirmed Plain edits safely.** Add a deterministic correlated controller timeout transition that leaves Applying without trusting applied=true, preserves hash safety and avoids repeated retries without new evidence.
+  - Done: containing commit.
+  - Verified: `make test-rust FILTER="--test plain_render"` @ `1d0422e` → ok: rust.
+- [ ] **T007.2b — Schedule and prove missing-echo recovery.** Schedule bounded transport watchdogs and prove real-server silent-stale success with no echo recovers on a later snapshot; guard close/reopen and late callbacks.
+- [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4. Close after T007.2a–T007.2b.
 - [ ] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
 - [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
 - [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
