@@ -211,14 +211,14 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                 # Invoke the unmodified runtime picker. In visual mode <Cmd>
                 # preserves the actual native selection for code_action().
                 invocation = "<Cmd>lua vim.lsp.buf.code_action()<CR>" if "V" in keys else ":lua vim.lsp.buf.code_action()<CR>"
-                run(["tmux", "-L", server_id, "clear-history", "-t", "plain"])
+                run(["tmux", "-L", server_id, "clear-history", "-t", driver.SESSION])
                 run(["nvim", "--server", socket, "--remote-send", "<Esc>" + keys + invocation], timeout=8)
                 deadline = time.monotonic() + 30
                 offered_by_number: dict[str, str] = {}
                 last_page_max = 0
                 page = 0
                 while True:
-                    screen = run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"]).stdout
+                    screen = run(["tmux", "-L", server_id, "capture-pane", "-pt", driver.SESSION]).stdout
                     (run_evidence / f"{label}.screen").write_text(screen)
                     visible = re.findall(r"^\s*(\d+): (.+)$", screen, re.MULTILINE)
                     offered_by_number.update(visible)
@@ -230,7 +230,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                         (run_evidence / f"{label}-page-{page}.screen").write_text(screen)
                         last_page_max = maximum
                         page += 1
-                        run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Space"])
+                        run(["tmux", "-L", server_id, "send-keys", "-t", driver.SESSION, "Space"])
                     if time.monotonic() >= deadline:
                         raise RuntimeError(f"native picker timeout ({label}):\n{screen}")
                 offered = sorted(offered_by_number.items(), key=lambda item: int(item[0]))
@@ -243,14 +243,14 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                 choice = matches[0][0] if title else "0"
                 actions.append({"label": label, "offered": offered, "chosen": choice, "discard": discard})
                 # Actual inputlist number, never an invented command payload.
-                run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "-l", choice])
-                run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Enter"])
+                run(["tmux", "-L", server_id, "send-keys", "-t", driver.SESSION, "-l", choice])
+                run(["tmux", "-L", server_id, "send-keys", "-t", driver.SESSION, "Enter"])
                 acknowledged = False
                 while True:
-                    closed = run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"]).stdout
+                    closed = run(["tmux", "-L", server_id, "capture-pane", "-pt", driver.SESSION]).stdout
                     if "Press ENTER or type command to continue" in closed:
                         if not acknowledged:
-                            run(["tmux", "-L", server_id, "send-keys", "-t", "plain", "Enter"])
+                            run(["tmux", "-L", server_id, "send-keys", "-t", driver.SESSION, "Enter"])
                             acknowledged = True
                     elif "Type number" not in closed and not closed.rstrip().endswith("-- More --"):
                         (run_evidence / f"{label}-closed.screen").write_text(closed)

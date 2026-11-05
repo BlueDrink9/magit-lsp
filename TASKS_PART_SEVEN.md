@@ -64,6 +64,11 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   Done: `b8fbf7d`.
   - Verified: `make ui-unit` @ 1c02be9 → ok: ui-unit; `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` reached substantive assertions for both newline variants, then failed at shared `tmux clear-history -t plain`; both `failure.json` files report cleanup_verified=true, no socket remains, and no owned PIDs remain.
 
+- [x] **Trace cleanup 3e — Use shared session identity in retained interactions.**
+  Replace the standalone runner's stale literal tmux pane target with the shared driver's session identity. Keep all native menu and action assertions intact.
+  check: both newline variants pass the retained native workflow and report verified owned-process/socket cleanup.
+  - Verified: `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` @ 13c2ea0 → ok: build; ok: plain-neovim. Both variants report cleanup_verified=true, nvim_socket_remains=false, remaining_owned_pids=[].
+
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
   Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
   check: record exact native results and owned-process/socket cleanup for success and failure, plus Linux-only evidence and Windows/macOS CI limits. Complete the parent only after the cleanup gate.
