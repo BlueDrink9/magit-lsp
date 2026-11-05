@@ -38,6 +38,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **Documentation cleanup — Move protocol reference.** Move §4 into [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and update maintained references without changing the wire contract.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/PROTOCOL.md docs/ARCHITECTURE.md AGENTS.md README.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `6abc89d` → ok: docs-check.
+- [x] **Documentation cleanup — Preserve inline-code heading anchors in link checks.** Fix the focused checker so heading code spans contribute their text to GitHub-style anchors, while code examples remain excluded from link scanning.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="AGENTS.md docs/KEYMAPS.md docs/VIEWS.md"` @ `0d663c7` → passed.
 - [ ] **Documentation cleanup — Move keymaps and view reference.** Move §§5–6 into `docs/KEYMAPS.md` and `docs/VIEWS.md` and update maintained references without changing behavior.
 - [ ] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into `docs/TESTING.md` and `docs/OPEN_QUESTIONS.md`, update maintained links, and audit the parent migration acceptance.
 - [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the four preceding independently checked migrations.

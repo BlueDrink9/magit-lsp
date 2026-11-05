@@ -13,8 +13,9 @@ HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", re.M)
 def check_document(path):
     """Return local Markdown link errors found in one document."""
     text = path.read_text(encoding="utf-8")
+    heading_text = re.sub(r"```.*?```|~~~.*?~~~", "", text, flags=re.S)
+    headings = {slug(match.group(1)) for match in HEADING.finditer(heading_text)}
     text = re.sub(r"```.*?```|~~~.*?~~~|`+[^`]*`+", "", text, flags=re.S)
-    headings = {slug(match.group(1)) for match in HEADING.finditer(text)}
     errors = []
     for match in LINK.finditer(text):
         target = (match.group(1) or match.group(2)).strip().split(maxsplit=1)[0].strip("<>")
@@ -25,7 +26,7 @@ def check_document(path):
         if not destination.exists():
             errors.append(f"{path}: missing path {file_part}")
         elif fragment and destination.suffix.lower() == ".md":
-            dest_text = re.sub(r"```.*?```|~~~.*?~~~|`+[^`]*`+", "", destination.read_text(encoding="utf-8"), flags=re.S)
+            dest_text = re.sub(r"```.*?```|~~~.*?~~~", "", destination.read_text(encoding="utf-8"), flags=re.S)
             dest_headings = {slug(item.group(1)) for item in HEADING.finditer(dest_text)}
             if fragment.lower() not in dest_headings:
                 errors.append(f"{path}: missing heading #{fragment} in {file_part or path.name}")
