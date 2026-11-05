@@ -452,9 +452,8 @@ def wait(pred, label, timeout=20):
     raise RuntimeError('timeout waiting for '+label)
 def screen(): return subprocess.check_output(TMUX+['capture-pane','-p','-t',f'{SESSION}:0.0'], text=True)
 def keys(*ks): cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',*ks])
-def changes():
-    rr=rows(); init=next((r for r in rr if r.get('raw',{}).get('method')=='initialize'),None)
-    return [r for r in rr if init and r.get('pid')==init.get('pid') and r.get('raw',{}).get('method')=='textDocument/didChange']
+def changes(pid, uri, after):
+    return [r for r in rows()[after:] if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('uri')==uri]
 def save_text():
     path=REPO/'.magit'
     try: stamp=(path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)
@@ -475,20 +474,28 @@ try:
     initrow=wait(lambda:next((r for r in rows() if r.get('raw',{}).get('method')=='initialize'),None),'initialize')
     server_pid=initrow['pid']
     if os.getenv('INJECT_AFTER_INITIALIZE'): raise RuntimeError('INJECT_AFTER_INITIALIZE')
-    wait(lambda:any(r.get('raw',{}).get('method')=='textDocument/didOpen' for r in rows()),'didOpen')
+    opened=wait(lambda:next((r for r in rows() if r.get('pid')==initrow['pid'] and r.get('raw',{}).get('method')=='textDocument/didOpen'),None),'same-PID didOpen')
+    doc=opened['raw']['params']['textDocument']['uri']
     wait(lambda:'Head:' in screen() and 'Loading' not in screen(),'render')
     req=wait(lambda:next((r for r in rows() if r.get('direction')=='out' and r.get('raw',{}).get('method')=='workspace/applyEdit'),None),'initial applyEdit')
     wait(lambda:any(r.get('direction')=='in' and r.get('raw',{}).get('id')==req['raw'].get('id') for r in rows()),'render reply')
     before=save_text(); offset=len(rows()); keys('Escape','g','g','g','h','i','R','A','P','I','D','Escape')
-    rapid=wait(lambda:len(changes())>0 and len(rows())>offset,'rapid didChange')
+    rapid=wait(lambda:changes(initrow['pid'],doc,offset),'post-action same-document rapid didChange')
     rr=rows(); init=next(r for r in rr if r.get('raw',{}).get('method')=='initialize'); pid=init['pid']
-    repair,reply=wait(lambda:next(((q,a) for q in rows() if q.get('pid')==pid and q.get('direction')=='out' and q.get('raw',{}).get('method')=='workspace/applyEdit' and q.get('raw',{}).get('id')!=req['raw'].get('id') for a in rows() if a.get('pid')==pid and a.get('direction')=='in' and a.get('raw',{}).get('id')==q['raw'].get('id') and a.get('raw',{}).get('result',{}).get('applied') is True),None),'successful same-ID rapid repair')
+    repair,reply=wait(lambda:next(((q,a) for q in rows()[offset:] if q.get('pid')==pid and q.get('direction')=='out' and q.get('raw',{}).get('method')=='workspace/applyEdit' and q.get('raw',{}).get('params',{}).get('edit',{}).get('documentChanges') and any(x.get('textDocument',{}).get('uri')==doc for x in q['raw']['params']['edit']['documentChanges']) for a in rows()[offset:] if a.get('pid')==pid and a.get('direction')=='in' and a.get('raw',{}).get('id')==q['raw'].get('id') and a.get('raw',{}).get('result',{}).get('applied') is True),None),'successful post-action same-document repair')
     rid=repair['raw']['id']
-    echo=wait(lambda:next((r for r in rows() if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('version')==7),None),'matching repair echo')
+    edit_doc=next(x['textDocument'] for x in repair['raw']['params']['edit']['documentChanges'] if x.get('textDocument',{}).get('uri')==doc)
+    expected_version=edit_doc['version']+1
+    expected_edits=[{'range':e['range'],'text':e['newText']} for e in next(x for x in repair['raw']['params']['edit']['documentChanges'] if x.get('textDocument',{}).get('uri')==doc)['edits']]
+    def matches_echo(r):
+        raw=r.get('raw',{}); params=raw.get('params',{}); td=params.get('textDocument',{}); actual=params.get('contentChanges',[])
+        return (r.get('pid')==pid and raw.get('method')=='textDocument/didChange' and td.get('uri')==doc and td.get('version')==expected_version and
+                [{'range':c.get('range'),'text':c.get('text')} for c in actual]==expected_edits)
+    echo=wait(lambda:next((r for r in rows()[offset:] if matches_echo(r)),None),'post-offset same-PID/document repair echo matching actual applyEdit edits')
     restored=save_text()
     if restored!=before: raise RuntimeError(f'repair did not restore baseline: {restored!r}')
     undo_offset=len(rows()); keys('u')
-    undo_change=wait(lambda:next((r for r in rows()[undo_offset:] if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange'),None),'new post-offset undo didChange')
+    undo_change=wait(lambda:next((r for r in rows()[undo_offset:] if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('uri')==doc),None),'new post-offset same-PID/document undo didChange')
     undo_text=undo_change['raw']['params']['contentChanges'][0]['text']
     if 'RAPID' not in undo_text: raise RuntimeError(f'undo didChange lacks RAPID: {undo_text!r}')
     after_undo_save=save_text()
@@ -539,13 +546,32 @@ PY
 
 This recipe treats the rapid repair as complete only after observing its
 `workspace/applyEdit`, the matching successful same-ID response and the
-version-7 echo, then issuing native `:write` and confirming a fresh `.magit`
+post-offset same-document echo whose ranges and text match the successful
+repair edits (with version derived from the request), then issuing native `:write` and confirming a fresh `.magit`
 file stamp with baseline text. It records `len(rows())` immediately before
-native `u`; only a later didChange is accepted as undo. That wire row proves
+native `u`; only a later same-PID/same-document didChange is accepted as undo. That wire row proves
 transient RAPID text; the subsequent save can already include follow-on
 re-repair and is not described as the undo snapshot. Fresh source extraction
 uses only the drained recorder log. Compare the new run's rows structurally;
 PIDs, row counts and full-source hashes vary between runs.
+
+Re-executed this exact fence from `tests/fixtures` on 2026-11-05. Successful
+run source `/tmp/opencode/t002-helix-rapid-4067777-1793842330806174490-mi_c09s8/raw-parent/raw.jsonl`, SHA256
+`b7cba8e78657c3eedc004426e3f8b6dbc646334cacb713b14aee732844d4a2d9`, 27
+drained rows; PID 4067814 exited. The nine extracted didChange records
+structurally equal the selected source records; extracted SHA256
+`7eab8629aa1f693850c97e087effef70b46eef53d00cc9b9450b1b2977a17141`.
+Request `magit-lsp/outbound/3` got a successful matching response. Fresh native
+save confirmed baseline; post-offset undo wire text was `RAPID`.
+
+Failure probe with `INJECT_AFTER_INITIALIZE=1` exited 1 with primary
+`INJECT_AFTER_INITIALIZE`, no cleanup errors, and retained
+`/tmp/opencode/t002-helix-rapid-4071464-1793842341585891890-13l7bcas`.
+Its initialize-only raw log is 2150 bytes, SHA256
+`87ec39c0421a403003466d96d15d8177acff9c9c641dd08f9fd38b36ff9c97a5`.
+Owned PID 4071499, exact tmux session/socket `t002hx-4071464-1793842341585891890`
+were absent after cleanup. Six older unrelated `t002hx-*` sockets remain; none
+was touched.
 
 The proven original experiment is retained at
 `/tmp/opencode/t002-helix-3762422-1793840011413250451-a338qszf/raw-parent/raw.jsonl`,

@@ -33,6 +33,9 @@ Last review: 3ff0e6ae0923ef7f3fa87f30d995cbded2e14184
   Extract original source rows 9–24 verbatim, with final drained provenance, exact native keys, stale-repair rejection, successful repair and undo/re-repair mappings. Distinguish actual saved baseline snapshots from the transient undo text proved only by the wire; do not close the publication parent yet.
 - [x] **T002.3b2b2 — Publish and execute the Helix rapid-repair recipe.**
   Publish a complete standalone native recipe with action-specific waits and actual restored-buffer confirmation before undo. Execute the exact documented recipe from a checkout subdirectory; retain graceful drain, source equality and owned-resource failure cleanup evidence.
+- [x] **T002.3b2b2a — Derive Helix recipe repair correlation from actual traffic.**
+  Replace the fixed version-7 echo and preexisting-change readiness check with post-action, same-document request/reply/echo correlation derived from the actual successful repair. Rerun the exact updated native recipe and failure probe; retain original capture fixtures unchanged.
+  Done: post-offset same-PID/document repair request, successful same-ID response, edit-derived version and range/text echo, plus post-offset same-document undo. Exact native recipe passed; failure cleanup verified. Evidence and drained source/hash: `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog` and `git diff --check`.
 - [ ] **T002.3b2b3 — Enforce Helix rapid-repair metadata and audit T002 acceptance.**
   Test exact retained rows, action provenance, request/reply/echo ordering and saved-versus-transient state claims. Audit all T002 acceptance clauses before checking parents or the numbered ticket; preserve Linux-only and manual source-audit limits.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
