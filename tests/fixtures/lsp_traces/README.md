@@ -416,6 +416,171 @@ native causality inferred from a payload. Full-source SHA256 and byte-for-byte
 equality against the original raw capture remain manual provenance checks:
 full raw files are not committed.
 
+### Native Helix rapid repair, then undo
+
+Run this complete recipe from any checkout subdirectory on Linux. It requires
+Nix, tmux, Python 3, Git and Helix 25.07.1. The isolated `nix shell` supplies
+`hx`; a unique temporary Git repository, HOME, tmux server, socket and wirelog
+belong to this run. The final source is hashed and action rows extracted only
+after graceful Helix shutdown, server exit and recorder drain. Failures retain
+their directory and report the primary exception separately from cleanup
+errors.
+
+```sh
+nix shell nixpkgs#helix --command python3 - <<'PY'
+import hashlib, json, os, pathlib, shutil, signal, subprocess, tempfile, time
+
+ROOT = pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()).resolve()
+HX = shutil.which('hx')
+if not HX: raise SystemExit('hx missing inside nix shell nixpkgs#helix')
+TAG = f'{os.getpid()}-{time.time_ns()}'
+D = pathlib.Path(tempfile.mkdtemp(prefix=f't002-helix-rapid-{TAG}-', dir='/tmp/opencode'))
+REPO, HOME, CONFIG = D/'repo', D/'home', D/'config'
+RAW = D/'raw-parent/raw.jsonl'
+SOCKET = SESSION = f't002hx-{TAG}'
+TMUX = ['tmux','-L',SOCKET]
+SERVER = (ROOT/'target/debug/magit-lsp').resolve()
+FIXTURE = ROOT/'tests/fixtures/lsp_traces/helix-25.07.1-rapid-repair.json'
+def cmd(args, **kw): return subprocess.run(args, check=True, text=True, **kw)
+def rows(): return [json.loads(x) for x in RAW.read_text().splitlines() if x.strip()] if RAW.exists() else []
+def wait(pred, label, timeout=20):
+    end = time.monotonic()+timeout
+    while time.monotonic() < end:
+        value = pred()
+        if value: return value
+        time.sleep(.05)
+    raise RuntimeError('timeout waiting for '+label)
+def screen(): return subprocess.check_output(TMUX+['capture-pane','-p','-t',f'{SESSION}:0.0'], text=True)
+def keys(*ks): cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',*ks])
+def changes():
+    rr=rows(); init=next((r for r in rr if r.get('raw',{}).get('method')=='initialize'),None)
+    return [r for r in rr if init and r.get('pid')==init.get('pid') and r.get('raw',{}).get('method')=='textDocument/didChange']
+def save_text():
+    path=REPO/'.magit'
+    try: stamp=(path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)
+    except FileNotFoundError: stamp=None
+    keys(':write','Enter')
+    wait(lambda:path.exists() and (path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)!=stamp,'native :write')
+    return path.read_text()
+primary=None; cleanup=[]; server_pid=None; launched=False; report=None
+REPO.mkdir(); HOME.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
+try:
+    if subprocess.check_output([HX,'--version'],text=True).strip()!='helix 25.07.1': raise RuntimeError('wrong Helix version')
+    cmd(['git','init','-q',str(REPO)]); cmd(['git','config','user.name','Capture'],cwd=REPO); cmd(['git','config','user.email','capture@example.invalid'],cwd=REPO)
+    (REPO/'tracked').write_text('base\n'); cmd(['git','add','tracked'],cwd=REPO); cmd(['git','commit','-qm','base'],cwd=REPO); (REPO/'.magit').write_text('Loading…\n')
+    if not SERVER.exists(): cmd(['cargo','build','--manifest-path',str(ROOT/'Cargo.toml')],cwd=ROOT)
+    (CONFIG/'helix/languages.toml').write_text(f'''[language-server.magit-lsp]\ncommand = "{SERVER}"\n\n[[language]]\nname = "magit"\nscope = "source.magit"\nfile-types = [{{ glob = ".magit" }}]\nroots = [".git"]\nlanguage-servers = ["magit-lsp"]\n''')
+    env=os.environ.copy(); env.update(HOME=str(HOME),XDG_CONFIG_HOME=str(CONFIG),XDG_DATA_HOME=str(D/'data'),XDG_STATE_HOME=str(D/'state'),MAGIT_LSP_WIRELOG=str(RAW),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
+    cmd(['tmux','-L',SOCKET,'new-session','-d','-s',SESSION,'-x','120','-y','40',f"cd '{REPO}' && HOME='{HOME}' XDG_CONFIG_HOME='{CONFIG}' MAGIT_LSP_WIRELOG='{RAW}' '{HX}' .magit"],env=env); launched=True
+    initrow=wait(lambda:next((r for r in rows() if r.get('raw',{}).get('method')=='initialize'),None),'initialize')
+    server_pid=initrow['pid']
+    if os.getenv('INJECT_AFTER_INITIALIZE'): raise RuntimeError('INJECT_AFTER_INITIALIZE')
+    wait(lambda:any(r.get('raw',{}).get('method')=='textDocument/didOpen' for r in rows()),'didOpen')
+    wait(lambda:'Head:' in screen() and 'Loading' not in screen(),'render')
+    req=wait(lambda:next((r for r in rows() if r.get('direction')=='out' and r.get('raw',{}).get('method')=='workspace/applyEdit'),None),'initial applyEdit')
+    wait(lambda:any(r.get('direction')=='in' and r.get('raw',{}).get('id')==req['raw'].get('id') for r in rows()),'render reply')
+    before=save_text(); offset=len(rows()); keys('Escape','g','g','g','h','i','R','A','P','I','D','Escape')
+    rapid=wait(lambda:len(changes())>0 and len(rows())>offset,'rapid didChange')
+    rr=rows(); init=next(r for r in rr if r.get('raw',{}).get('method')=='initialize'); pid=init['pid']
+    repair,reply=wait(lambda:next(((q,a) for q in rows() if q.get('pid')==pid and q.get('direction')=='out' and q.get('raw',{}).get('method')=='workspace/applyEdit' and q.get('raw',{}).get('id')!=req['raw'].get('id') for a in rows() if a.get('pid')==pid and a.get('direction')=='in' and a.get('raw',{}).get('id')==q['raw'].get('id') and a.get('raw',{}).get('result',{}).get('applied') is True),None),'successful same-ID rapid repair')
+    rid=repair['raw']['id']
+    echo=wait(lambda:next((r for r in rows() if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange' and r.get('raw',{}).get('params',{}).get('textDocument',{}).get('version')==7),None),'matching repair echo')
+    restored=save_text()
+    if restored!=before: raise RuntimeError(f'repair did not restore baseline: {restored!r}')
+    undo_offset=len(rows()); keys('u')
+    undo_change=wait(lambda:next((r for r in rows()[undo_offset:] if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange'),None),'new post-offset undo didChange')
+    undo_text=undo_change['raw']['params']['contentChanges'][0]['text']
+    if 'RAPID' not in undo_text: raise RuntimeError(f'undo didChange lacks RAPID: {undo_text!r}')
+    after_undo_save=save_text()
+    report={'before':before,'restored':restored,'undo_wire_text':undo_text,'post_undo_saved_text':after_undo_save,'rapid_request_id':rid,'undo_row_after_offset':True}
+except BaseException as exc: primary=exc
+finally:
+    def cleanup_step(label,fn):
+        try: fn()
+        except BaseException as exc: cleanup.append(f'{label}: {exc!r}')
+    def stop_editor():
+        alive=subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+        if not alive: return
+        pane=screen()
+        if 'INSERT' in pane.upper() or 'SELECT' in pane.upper(): raise RuntimeError('editor remains in insert/select mode; graceful quit unsafe')
+        cmd(TMUX+['send-keys','-t',f'{SESSION}:0.0',':quit-all!','Enter'])
+        wait(lambda:subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode!=0,'graceful Helix shutdown',8)
+    if launched: cleanup_step('Helix shutdown',stop_editor)
+    cleanup_step('owned tmux server shutdown',lambda:subprocess.run(TMUX+['kill-server'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL) if subprocess.run(TMUX+['has-session','-t',SESSION],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0 else None)
+    if server_pid:
+        def stop_server():
+            proc=pathlib.Path(f'/proc/{server_pid}')
+            if not proc.exists(): return
+            if pathlib.Path(f'/proc/{server_pid}/exe').resolve()!=SERVER: raise RuntimeError(f'PID {server_pid} executable does not match owned server')
+            if b'MAGIT_LSP_WIRELOG='+os.fsencode(RAW) not in (proc/'environ').read_bytes().split(b'\0'): raise RuntimeError(f'PID {server_pid} wirelog does not match owned run')
+            os.kill(server_pid,signal.SIGTERM); wait(lambda:not proc.exists(),'owned server exit',5)
+        cleanup_step('owned server shutdown',stop_server)
+    socket_path=pathlib.Path(f'/tmp/tmux-{os.getuid()}')/SOCKET
+    cleanup_step('owned tmux socket removal',lambda:socket_path.unlink(missing_ok=True))
+if primary is not None or cleanup: raise RuntimeError(f'primary failure: {primary!r}; cleanup: {cleanup!r}; evidence retained at {D}')
+if report is None: raise RuntimeError(f'run produced no report; evidence retained at {D}')
+deadline=time.monotonic()+15
+while time.monotonic()<deadline:
+    rr=rows()
+    if any(r.get('pid')==server_pid and r.get('raw',{}).get('method')=='exit' for r in rr): break
+    time.sleep(.05)
+else: raise RuntimeError(f'recorder did not drain; evidence retained at {D}')
+source=RAW.read_bytes(); rr=rows(); init=next(r for r in rr if r.get('raw',{}).get('method')=='initialize'); pid=init['pid']
+if any(r.get('pid')==pid and r.get('raw',{}).get('method')=='exit' for r in rr) is False: raise RuntimeError('missing drained exit row')
+changes=[(i+1,r) for i,r in enumerate(rr) if r.get('pid')==pid and r.get('raw',{}).get('method')=='textDocument/didChange']
+if not changes: raise RuntimeError('fresh extraction has no didChange rows')
+extracted=b''.join(json.dumps(r,separators=(',',':'),ensure_ascii=False).encode()+b'\n' for _,r in changes)
+(D/'rapid-repair-didChange.jsonl').write_bytes(extracted)
+report.update(source=str(RAW),source_sha256=hashlib.sha256(source).hexdigest(),source_rows=len(rr),source_pid=pid,extracted_rows=[i for i,_ in changes],extraction_sha256=hashlib.sha256(extracted).hexdigest())
+print(json.dumps(report,indent=2)); print(f'drained source {RAW}; SHA256 {report["source_sha256"]}; rows {len(rr)}; PID {pid} exited; extracted {D/"rapid-repair-didChange.jsonl"}')
+print(f'evidence directory retained: {D}')
+PY
+```
+
+This recipe treats the rapid repair as complete only after observing its
+`workspace/applyEdit`, the matching successful same-ID response and the
+version-7 echo, then issuing native `:write` and confirming a fresh `.magit`
+file stamp with baseline text. It records `len(rows())` immediately before
+native `u`; only a later didChange is accepted as undo. That wire row proves
+transient RAPID text; the subsequent save can already include follow-on
+re-repair and is not described as the undo snapshot. Fresh source extraction
+uses only the drained recorder log. Compare the new run's rows structurally;
+PIDs, row counts and full-source hashes vary between runs.
+
+The proven original experiment is retained at
+`/tmp/opencode/t002-helix-3762422-1793840011413250451-a338qszf/raw-parent/raw.jsonl`,
+SHA256 `9eafe9da27ea8901c12c7d924ea35a4d1826e9f0708bef078505c1359f46f8e9`,
+27 rows, PID 3762457. Fixture `helix-25.07.1-rapid-repair.json` maps source rows
+9–24; retained action rows remain unchanged. The original experiment's native
+saved rows 19/24 show repaired baseline. Row 20 alone shows transient undo
+insertion; rows 21–23 show re-repair. The previously reported post-undo wait
+was weak and is not evidence for row 20.
+
+Executed the exact fence from `tests/fixtures` on 2026-11-05. Fresh source:
+`/tmp/opencode/t002-helix-rapid-3998403-1793841930188442788-xjtqeccl/raw-parent/raw.jsonl`,
+SHA256 `55ad9107fea0802007faeb4690d84276ddd82da73117bb6cabd578752db8a832`,
+27 rows, PID 3998440; extracted native didChange source rows 6, 9, 11–14, 17,
+20, 22 to
+`/tmp/opencode/t002-helix-rapid-3998403-1793841930188442788-xjtqeccl/rapid-repair-didChange.jsonl`,
+SHA256 `aea5e37b2d5e3e2c49f2c0a1b5242db79db6298e0a8354082dc65ce8612387e8`.
+Successful repair was `outbound/3`; save confirmed restored baseline, and the
+post-offset undo row contained `RAPID`. PID exited and its tmux session and
+socket were absent.
+
+Injected-failure run used the same fence with `INJECT_AFTER_INITIALIZE=1`.
+It exited 1 with primary error `INJECT_AFTER_INITIALIZE`, retained
+`/tmp/opencode/t002-helix-rapid-4002092-1793841944874938997-rddzvhwp`, and
+reported no cleanup errors. The one-row initialize log and failure artifacts
+remain; its owned server PID, tmux session and socket were absent afterward.
+
+Failure probe: rerun the exact fence with `INJECT_AFTER_INITIALIZE=1` exported
+in the shell environment (add `INJECT_AFTER_INITIALIZE=1` before the Python
+command). Expected exit is nonzero with `INJECT_AFTER_INITIALIZE` as primary
+failure, retained evidence path, graceful owned cleanup, and no unrelated
+processes touched. Inspect the retained JSONL and confirm initialize was
+observed; this injected point precedes graceful protocol shutdown. Confirm PID,
+unique tmux session and socket are gone.
+
 | Native action | Helix 25.07.1 | Neovim traces |
 |---|---|---|
 | Single insert | Observed payload shape (Helix row 2); native single-key cause documented. | Native A insertion in plain trace row 3; retained. |
