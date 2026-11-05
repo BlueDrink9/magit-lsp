@@ -39,6 +39,61 @@ fn minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate
 }
 
 #[test]
+fn strict_feature_guard_distinguishes_declarations_from_editor_behavior() {
+    let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN).strict();
+    let doc_changes = json!({"jsonrpc":"2.0","id":1,"method":"workspace/applyEdit","params":{"edit":{"documentChanges":[{"textDocument":{"uri":"file:///strict","version":1},"edits":[]}]}}});
+    assert!(editor_model::strict::check(&plain.capabilities(), &doc_changes).unwrap_err().contains("documentChanges"));
+    let declared = editor_model::EditorModel::new(editor_model::PLAIN_MIN).with_module(editor_model::EXTRA_DECLARATIONS);
+    assert!(editor_model::strict::check(&declared.capabilities(), &doc_changes).is_ok());
+    let required = [
+        ("undeclared applyEdit", json!({"method":"workspace/applyEdit","params":{"edit":{"changes":{}}}})),
+        ("showDocument", json!({"method":"window/showDocument","params":{}})),
+        ("progress create", json!({"method":"window/workDoneProgress/create","params":{}})),
+        ("progress", json!({"method":"$/progress","params":{}})),
+    ];
+    for (feature, message) in required {
+        let mut capabilities = plain.capabilities();
+        if feature == "undeclared applyEdit" { capabilities["workspace"]["applyEdit"] = json!(false); }
+        assert!(editor_model::strict::check(&capabilities, &message).is_err(), "{feature}");
+    }
+    let rich = editor_model::EditorModel::new(editor_model::RICH_MIN);
+    let rejected = [
+        json!({"method":"view/render","params":{}}),
+        json!({"method":"view/effects","params":{"effects":[{"type":"message"},{"type":"clipboard"}]}}),
+        json!({"method":"view/effects","params":{"effects":[{"type":"unknown"}]}}),
+        json!({"method":"view/prompt","params":{"kind":"confirm"}}),
+        json!({"method":"view/effects","params":{"effects":[{"type":"pushView","descriptor":{"placement":"side"}}]}}),
+        json!({"method":"view/unknown","params":{}}),
+    ];
+    for message in rejected {
+        let declarations = if message["method"] == "view/render" { plain.capabilities() } else { rich.capabilities() };
+        assert!(editor_model::strict::check(&declarations, &message).is_err(), "{message}");
+    }
+    assert!(editor_model::strict::check(
+        &plain.capabilities(),
+        &json!({"method":"view/effects","params":{"effects":[{"type":"message"}]}})
+    ).is_err());
+    let rich_core_message = json!({"method":"view/effects","params":{"effects":[{"type":"message"}]}});
+    assert!(editor_model::strict::check(&rich.capabilities(), &rich_core_message).is_ok());
+    for (feature, declaration, message) in [
+        ("clipboard", json!({"effects":["clipboard"]}), json!({"method":"view/effects","params":{"effects":[{"type":"message"},{"type":"clipboard"}]}})),
+        ("prompt", json!({"prompts":["confirm"]}), json!({"method":"view/prompt","params":{"kind":"confirm"}})),
+        ("layout", json!({"layout":["main","side"]}), json!({"method":"view/effects","params":{"effects":[{"type":"pushView","descriptor":{"placement":"side"}}]}})),
+    ] {
+        let mut capabilities = rich.capabilities();
+        for (key, value) in declaration.as_object().unwrap() { capabilities["experimental"]["magit"][key] = value.clone(); }
+        assert!(editor_model::strict::check(&capabilities, &message).is_ok(), "declared {feature}");
+    }
+    let behavior = editor_model::EditorModel::new(editor_model::PLAIN_MIN).with_module(editor_model::NEOVIM_UNDECLARED_CHANGES);
+    let mut editor = FakeEditor::from_model(Profile::NoDocumentChanges, &behavior, &magit_lsp::quirks::Resolution { enabled: Default::default() });
+    editor.open("file:///strict", "text");
+    let nonempty = json!({"documentChanges":[{"textDocument":{"uri":"file:///strict","version":1},"edits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":4}},"newText":"edit"}]}]});
+    assert!(editor_model::strict::check(&behavior.capabilities(), &json!({"method":"workspace/applyEdit","params":{"edit":nonempty}})).is_err());
+    assert_eq!(editor.apply_edit(&nonempty)["applied"], true);
+    assert_eq!(editor.text("file:///strict"), "edit");
+}
+
+#[test]
 fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
     let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, caps());
     let uri = "file:///tmp/plain-harness.txt";
@@ -76,15 +131,8 @@ fn plain_did_open_apply_edit_is_pumped_and_echoed() {
     let path = repo.path().join(".magit");
     fixtures::write(&path, "disk sentinel\n");
     let uri = format!("file://{}", path.display());
-    let capabilities = json!({
-        "workspace": {"applyEdit": true},
-        "textDocument": {"codeAction": {}}
-    });
-    let mut client = ClientPump::new(
-        stdio::TestServer::spawn(&[]),
-        Profile::Standard,
-        capabilities,
-    );
+    let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN).strict();
+    let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
     let open = client.editor.open(&uri, "stale\n");
     client.send(open);
     client.until(|client| client.editor.text(&uri).contains("f.txt"));

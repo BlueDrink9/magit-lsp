@@ -1,6 +1,8 @@
 //! Composable fake-editor declarations and behaviors used by conformance tests.
 
 use serde_json::{json, Value};
+#[path = "strict.rs"]
+pub mod strict;
 
 /// Supported exact minimum declaration bases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,13 +52,15 @@ pub struct EditorModel {
     pub base: Base,
     /// Explicit declaration and behavior modules.
     pub modules: Vec<Module>,
+    /// Reject inbound server features absent from declarations.
+    pub strict: bool,
 }
 
 impl EditorModel {
     /// Create a model with the exact requested minimum declaration base.
     pub fn new(base: &str) -> Self {
         let base = match base { PLAIN_MIN => Base::PlainMin, RICH_MIN => Base::RichMin, _ => panic!("unknown editor model base: {base}") };
-        Self { base, modules: Vec::new() }
+        Self { base, modules: Vec::new(), strict: false }
     }
 
     /// Add a module whose declarations and behaviors remain independently inspectable.
@@ -64,6 +68,9 @@ impl EditorModel {
         self.modules.push(module);
         self
     }
+
+    /// Enable inbound server feature validation.
+    pub fn strict(mut self) -> Self { self.strict = true; self }
 
     /// Build initialize capabilities from base plus declared module contributions.
     pub fn capabilities(&self) -> Value {

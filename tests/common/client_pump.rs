@@ -11,16 +11,18 @@ pub struct ClientPump {
     pub editor: FakeEditor,
     replies: HashMap<i64, Value>,
     pub cancel_on_edit: bool,
+    strict: bool,
+    capabilities: Value,
 }
 impl ClientPump {
     fn initialized(mut server: TestServer, capabilities: Value, mut editor: FakeEditor) -> Self {
-        let init = server.initialize(capabilities);
+        let init = server.initialize(capabilities.clone());
         assert!(init["result"]["capabilities"].is_object());
         editor.encoding = match init["result"]["capabilities"]["positionEncoding"].as_str().unwrap_or("utf-16") {
             "utf-8" => "utf-8", "utf-16" => "utf-16", "utf-32" => "utf-32",
             other => panic!("invalid negotiated encoding: {other}"),
         };
-        Self { server, editor, replies: Default::default(), cancel_on_edit: false }
+        Self { server, editor, replies: Default::default(), cancel_on_edit: false, strict: false, capabilities }
     }
     /// Start a client with custom initialize capabilities.
     pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
@@ -29,11 +31,15 @@ impl ClientPump {
     /// Start a client using declarations composed from an editor model.
     pub fn with_model(server: TestServer, profile: Profile, model: &EditorModel) -> Self {
         let resolution = magit_lsp::quirks::Resolution { enabled: Default::default() };
-        Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, &resolution))
+        let mut pump = Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, &resolution));
+        pump.strict = model.strict;
+        pump
     }
     /// Start a client from composed model declarations and resolved quirk behavior.
     pub fn with_resolution(server: TestServer, profile: Profile, model: &EditorModel, resolution: &magit_lsp::quirks::Resolution) -> Self {
-        Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, resolution))
+        let mut pump = Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, resolution));
+        pump.strict = model.strict;
+        pump
     }
     /// Send a message, assigning every request a unique ID.
     pub fn send(&mut self, mut message: Value) -> i64 {
@@ -46,11 +52,16 @@ impl ClientPump {
         id
     }
     /// Route an incoming server request through fake editor.
-    pub fn dispatch(&mut self, request: &Value) { for frame in self.editor.dispatch(request) { self.server.send(frame); } }
+    pub fn dispatch(&mut self, request: &Value) { self.validate(request); self.dispatch_validated(request); }
+    fn dispatch_validated(&mut self, request: &Value) { for frame in self.editor.dispatch(request) { self.server.send(frame); } }
+    fn validate(&self, message: &Value) {
+        if self.strict { super::editor_model::strict::check(&self.capabilities, message).unwrap_or_else(|e| panic!("{e}")); }
+    }
     /// Read and route one server message.
     pub fn step(&mut self) {
         let message = self.server.recv();
-        if message["method"].is_string() && !message["id"].is_null() { self.dispatch(&message); return; }
+        self.validate(&message);
+        if message["method"].is_string() && !message["id"].is_null() { self.dispatch_validated(&message); return; }
         if let Some(id) = message["id"].as_i64() {
             assert!(self.replies.insert(id, message).is_none(), "duplicate response"); return;
         }
