@@ -540,6 +540,34 @@ class RpcHelperTtyTest(unittest.TestCase):
 
 
 class StartPathTest(unittest.TestCase):
+    def test_server_binary_defaults_to_checkout_debug_build(self) -> None:
+        self._assert_server_binary(None, Path(driver.__file__).resolve().parents[2] / "target/debug/magit-lsp")
+
+    def test_explicit_server_binary_override_survives_environment_isolation(self) -> None:
+        self._assert_server_binary({"MAGIT_LSP_BIN": "/tmp/test-magit-lsp"}, Path("/tmp/test-magit-lsp"))
+
+    def _assert_server_binary(self, extra_env: dict[str, str] | None, expected: Path) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            state = startup.SocketState(path=str(run_dir / "nvim.sock"), length=1)
+            captured: dict[str, str] = {}
+
+            def capture(_run: object, env: dict[str, str]) -> None:
+                captured.update(env)
+                raise RuntimeError("stop after environment capture")
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build"),
+                patch.object(driver.startup, "inspect_socket", return_value=state),
+                patch.object(driver, "_launcher_script", side_effect=capture),
+                patch.object(driver, "_cleanup"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    driver.start("clean", extra_env=extra_env)
+        self.assertEqual(Path(captured["MAGIT_LSP_BIN"]), expected)
+
     def test_overlong_socket_path_is_rejected_before_launch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"

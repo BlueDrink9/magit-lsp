@@ -26,6 +26,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Done: strict serde deserialization and client/test migration committed. Enforced by focused rich-schema serde/negotiation checks and the listed verification command; Lua suite passed separately in `7678242`. T004 parent and T004.4 remain open.
 - [x] **T004.3a — Pin Lua verification to the server built by Make.**
   Lua negotiation failures came from stale `target/release/magit-lsp` selected by production lookup, while Make built debug. Pin `test-lua` and `test-file` subprocesses to the freshly built debug server without changing production lookup; then finish strict-schema verification.
+- [x] **T004.3b — Pin native UI verification to the freshly built server.**
+  The isolated native driver drops parent environment variables and currently permits the same stale-release lookup already diagnosed for Lua tests. Set its default server to this checkout's debug binary, retain explicit scenario overrides and make native test/tour targets build first; verify harness tests and text-native tour against the strict protocol.
+  Done: pinned isolated driver environment, retained `extra_env` override and made `ui-test`/`ui-tour` depend on `build`. Enforced by `make ui-unit && timeout --kill-after=10s 900s make ui-tour && git diff --check`.
 - [ ] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
   Confirm both actual clients send the new typed block, including the bundled VSCode omission observed in T002. Use supported languageclient hooks and only honored VSCode placements; retain focused native Linux text/wire evidence and test both actual declarations against server validation.
 - [x] **T004.4a — Register and natively verify the real VSCode declaration feature.**

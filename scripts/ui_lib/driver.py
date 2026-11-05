@@ -778,6 +778,7 @@ def start(
                 "COLORTERM": "truecolor" if color == "truecolor" else "",
                 "NVIM_APPNAME": "magit-ui",
                 "MAGIT_LSP_PROFILE": profile,
+                "MAGIT_LSP_BIN": str(Path(__file__).resolve().parents[2] / "target" / "debug" / "magit-lsp"),
                 "MAGIT_LSP_TRACE": str(run.trace_path),
                 "MAGIT_LSP_UI_ROOT": str(run.repo_path),
             }
