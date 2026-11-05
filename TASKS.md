@@ -6,50 +6,29 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
-- [x] **Documentation cleanup — Add focused documentation verification.** Add a Make target that rejects broken local documentation links and anchors in selected maintained Markdown files; use it for the reference migration without scanning immutable evidence archives.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="AGENTS.md"` @ `33230ec` → passed.
-- [x] **Documentation cleanup — Move decisions and glossary reference.** Move §§0–2 intact into [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#0-decisions-already-made), preserve numbered anchors and rebase links. Update maintained references for these sections only.
-  - Done: `3186a69`.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md AGENTS.md README.md ui-test-plan.md TASKS_PART_SEVEN.md hygiene-allowlist.md docs/CLIENT_SPEC.md"` @ `4c83d0d` → ok: docs-check.
-- [x] **Documentation cleanup — Move core design reference.** Relocate §§3.1–3.9 into `docs/ARCHITECTURE.md`, preserving requirements and numbered headings, and link from the queue.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md"` @ `f82856e` → ok: docs-check.
-- [x] **Documentation cleanup — Move workflow design reference.** Relocate §§3.10–3.19 into `docs/ARCHITECTURE.md`, rebase links and finish the architecture navigation updates.
-  - Done: `338b9de`.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md AGENTS.md README.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `9f8f28f` → ok: docs-check.
-- [x] **Documentation cleanup — Move expanded design reference.** Append §3, including §3.19, to `docs/ARCHITECTURE.md`, preserve numbered anchors and rebase links, and update maintained design references and source entry points. Complete after the two preceding bounded relocations.
-  - Done: `338b9de`.
-- [x] **Documentation cleanup — Move architecture and glossary reference.** Move §§0–3 intact into `docs/ARCHITECTURE.md`, preserving section identifiers and updating maintained links and entry points. Keep all queue items in `TASKS.md`. Split into the two preceding slices after two unchanged checkpoints.
-  - Done: `338b9de`.
-- [x] **Documentation cleanup — Move protocol reference.** Move §4 into [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and update maintained references without changing the wire contract.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/PROTOCOL.md docs/ARCHITECTURE.md AGENTS.md README.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `6abc89d` → ok: docs-check.
-- [x] **Documentation cleanup — Preserve inline-code heading anchors in link checks.** Fix the focused checker so heading code spans contribute their text to GitHub-style anchors, while code examples remain excluded from link scanning.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="AGENTS.md docs/KEYMAPS.md docs/VIEWS.md"` @ `0d663c7` → passed.
-- [x] **Documentation cleanup — Move keymaps and view reference.** Move §§5–6 into `docs/KEYMAPS.md` and `docs/VIEWS.md` and update maintained references without changing behavior.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md"` @ `7d4bee4` → ok: docs-check.
-- [x] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into [`docs/TESTING.md`](docs/TESTING.md) and [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), update maintained links, and audit the parent migration acceptance.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `e4f259d` → ok: docs-check.
-- [x] **Documentation cleanup — Finish maintained reference navigation.** Update repository entry points and maintained cross-links after all reference moves, preserving unrelated dirty documentation changes, and verify the complete maintained documentation set.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `4537ef1` → ok.
-- [x] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the preceding independently checked migrations and navigation pass.
-  - Done: containing commit.
-- [x] **Documentation cleanup — Repair recent review completion pointers.** Correct source-snapshot labels and retain original completion and verification references in the first 28 compact review records.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `7c0bc3c` → ok: docs-check.
-- [x] **Documentation cleanup — Repair older review completion pointers.** Correct source-snapshot labels in the remaining 28 compact review records, then finish the review-history cleanup audit.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c3f5a42` → passed; reference audit confirms all 56 records distinguish original Done hashes from source provenance and reviewed revisions.
-- [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Replace dated checkpoint reports and resolved review/bugfix narratives with compact checked records and immutable provenance; preserve live constraints. Repair the completion index before closing: snapshot provenance is not an implementation commit.
-  - Done: containing commit.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `d9ea816` → ok: docs-check; TASKS.md 970→612 lines, unchecked blocks 136→136.
-- [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance.
+- [x] **Documentation cleanup — Add focused documentation verification.** Done: `93bb9ab` (Makefile ownership correction `4c83d0d`).
+- [x] **Documentation cleanup — Move decisions and glossary reference.** Done: `3186a69`.
+- [x] **Documentation cleanup — Move core design reference.** Done: `9f8f28f`.
+- [x] **Documentation cleanup — Move workflow design reference.** Done: `338b9de`.
+- [x] **Documentation cleanup — Move expanded design reference.** Done: `338b9de`.
+- [x] **Documentation cleanup — Move architecture and glossary reference.** Done: `338b9de`.
+- [x] **Documentation cleanup — Move protocol reference.** Done: `0d663c7`.
+- [x] **Documentation cleanup — Preserve inline-code heading anchors in link checks.** Done: `7d4bee4`.
+- [x] **Documentation cleanup — Move keymaps and view reference.** Done: `e4f259d`.
+- [x] **Documentation cleanup — Move testing and open questions reference.** Done: `4537ef1`.
+- [x] **Documentation cleanup — Finish maintained reference navigation.** Done: `d9ea816`.
+- [x] **Documentation cleanup — Move durable reference material into docs.** Done: `d9ea816`.
+- [x] **Documentation cleanup — Repair recent review completion pointers.** Done: `f13dbc1`.
+- [x] **Documentation cleanup — Repair older review completion pointers.** Done: `e464429`.
+- [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Done: `3ec4751`; provenance correction: `f13dbc1`, `e464429`.
+- [x] **Documentation cleanup — Compact documentation completion records.**
+  - Verification provenance: immutable `e464429:TASKS.md` retains historical check commands; completion refs above identify implementation commits.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` → ok: docs-check.
+
+
+- [ ] **Documentation cleanup — Compact T006 and T007 completion records.** Shorten completed prerequisite records without losing live audit evidence, acceptance dependencies or native evidence limits.
+- [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints.
+- [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links. Complete after the two preceding cleanup slices.
 
 - [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Complete and verify the extracted configurable pump and dynamic request correlation, including the standalone action consumer. No real-server didOpen conformance claim in this slice.
