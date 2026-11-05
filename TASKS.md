@@ -29,6 +29,12 @@ Last review: 3ff0e6ae0923ef7f3fa87f30d995cbded2e14184
   Limits: native saves confirm repaired text, not the transient undo buffer; actual row 20 proves undo. Existing post-undo wait reuses the earlier count. Publication must tighten waits and retain source-equal fixtures/full runnable recipe; parent T002 stays open.
 - [ ] **T002.3b2b — Publish and enforce Helix rapid-repair evidence.**
   After a successful native experiment, retain exact selected wire rows and action/state metadata, publish and execute the complete runnable recipe, and extend fixture checks. Close T002 only after a final acceptance audit.
+- [x] **T002.3b2b1 — Retain the authentic Helix rapid-repair fixture and sidecar.**
+  Extract original source rows 9–24 verbatim, with final drained provenance, exact native keys, stale-repair rejection, successful repair and undo/re-repair mappings. Distinguish actual saved baseline snapshots from the transient undo text proved only by the wire; do not close the publication parent yet.
+- [ ] **T002.3b2b2 — Publish and execute the Helix rapid-repair recipe.**
+  Publish a complete standalone native recipe with action-specific waits and actual restored-buffer confirmation before undo. Execute the exact documented recipe from a checkout subdirectory; retain graceful drain, source equality and owned-resource failure cleanup evidence.
+- [ ] **T002.3b2b3 — Enforce Helix rapid-repair metadata and audit T002 acceptance.**
+  Test exact retained rows, action provenance, request/reply/echo ordering and saved-versus-transient state claims. Audit all T002 acceptance clauses before checking parents or the numbered ticket; preserve Linux-only and manual source-audit limits.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
