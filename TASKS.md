@@ -11,6 +11,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [x] **Remove permanent formatter tests and retain one-time verification.**
+  Remove the formatter/hook test suite as requested; verify the tools and staged-safe hook once in disposable repositories. Update T120 acceptance and CI scope accordingly; finish formatter setup, then stop without advancing unrelated roadmap work.
+
 - [x] **Trace cleanup audit — Decide retained tests and capture tooling.**
   Investigate actual automated consumers and maintained infrastructure before changing scripts or fixtures. Record a concise keep/migrate/delete decision, coverage risks and ordered implementation slices for the immediate cleanup task below; do not preserve machinery merely because it records past work.
   Done: `docs/design/trace-capture-strategy.md`; maps consumers, evidence boundaries, portability limits and dependency-ordered cleanup. No cleanup or native revalidation claimed.
@@ -22,10 +25,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
-- [x] **T120.2 — Implement staged-safe formatter checks and tests.**
-  Done: added `python3 scripts/format.py --staged` and `--base <commit>` with isolated index/HEAD snapshots, changed-source checks, pinned StyLua/Prettier and workspace Rust formatting. Tests cover staged/working-copy divergence, parity, deletion and Rust command scope. Next: T120.3 wires the same CLI into opt-in hook, Make and CI; no formatting or index mutation occurs.
+- [x] **T120.2 — Implement staged-safe formatter checks.**
+  Done: added `python3 scripts/format.py --staged` and `--base <commit>` with isolated index/HEAD snapshots, changed-source checks, pinned StyLua/Prettier and workspace Rust formatting. One-time disposable verification confirms staged-content checks preserve the index and working copy.
 - [ ] **T120.3 — Wire formatter hooks, installation and CI.**
-  Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets, focused parity tests and contributor documentation. Run the same formatter checks in CI, then close T120 after all slices pass.
+  Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets and contributor documentation. Run staged-content formatter checks in the hook and CI; use one-time disposable verification, not permanent formatter tests. Close T120 after all slices pass.
 
 - [ ] **Investigate and rationalize trace/capture test infrastructure.**
   Immediate priority, ahead of formatter work and T005: first establish ongoing purpose, actual consumers and coverage of embedded Python capture recipes and trace tests, including current quirk dependencies; decide what to retain, replace or delete before extracting anything.
@@ -1689,5 +1692,7 @@ the command line and real colours.
    during the spike.
 
 ---
-- [x] **T120.3a — Add opt-in formatter hook installation and safety tests.**
-  Done: added opt-in `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; actual-commit tests cover failures without index/working-copy mutation, formatted success, installer conflicts/idempotence, missing-tool guidance and staged/range parity. Enforced by formatting tests. Next slice commands: `scripts/install-hooks.sh install` and `scripts/install-hooks.sh remove`.
+- [x] **T120.3a — Add opt-in formatter hook installation.**
+  Done: added `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; one-time disposable verification checked install safety and real staged hook behavior.
+- [x] **T120.3a1 — Isolate missing-tool tests and preserve existing hook locations.**
+  Resolve default hooks through Git for worktrees, preserve custom hooks, and give actionable missing-Python guidance; one-time disposable hook checks complete.

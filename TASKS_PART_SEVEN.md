@@ -541,11 +541,11 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 ### T120 formatter-pre-commit (S, active)
 
 - **Depends on:** none.
-- **Target Files:** `.githooks/pre-commit` (new), `scripts/install-hooks.sh` (new), `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`, formatter parity test(s) (new; confirm exact path).
+- **Target Files:** `.githooks/pre-commit` (new), `scripts/install-hooks.sh` (new), `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`.
 - **Reference Files:** `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`, `AGENTS.md`.
-- **Constraints:** Keep Phase 1 closed. Do not install hooks automatically; document opt-in installation. Pin deterministic formatter versions and exact commands. Report actionable errors when required tools are missing. Handle staged and partially staged files without silently staging unrelated edits or overwriting unstaged work. Require workspace-aware Rust formatting. Audit maintained languages before choosing formatter scope. Test hook and CI command parity. Do not include unrelated README, release or install changes.
-- **Acceptance:** Repository-owned hook runs the selected formatters on relevant staged content. Its behavior preserves unstaged and unrelated changes. An opt-in installer configures it safely. Missing tools produce actionable guidance. Tests prove formatter commands and scope match CI. Document supported installation and removal.
-- **Verify:** Run hook and parity tests; run `cargo fmt --all -- --check` and each selected formatter's check command.
+- **Constraints:** Keep Phase 1 closed. Do not install hooks automatically; document opt-in installation. Pin deterministic formatter versions and exact commands. Report actionable errors when required tools are missing. Handle staged and partially staged files without silently staging unrelated edits or overwriting unstaged work. Require workspace-aware Rust formatting. Audit maintained languages before choosing formatter scope. Keep staged-content checks in the hook and CI. Do not add permanent formatter tests. Do not include unrelated README, release or install changes.
+- **Acceptance:** Repository-owned hook and CI check selected formatters on relevant staged content. Hook preserves unstaged and unrelated changes. Installer configures it safely. Missing tools produce actionable guidance. Document supported installation and removal. Verify tool and hook behavior once in disposable repositories; do not retain formatter test files.
+- **Verify:** Run one-time disposable staged hook pass/fail checks for Lua and JS/TS, confirm staged preservation, and check the Rust workspace formatter. Run each installed formatter's version command and `git diff --check`.
 
 ## Phase 8: Release (starts after phases 1 to 6)
 
