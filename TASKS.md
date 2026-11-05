@@ -18,6 +18,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T005.2b1 — Finish and commit initialize quirk resolution.**
   Finalize the existing production integration and typed override seam, restore unrelated formatting changes and define effective report shape for both presentations. Commit after existing regressions pass; new production acceptance cases remain explicitly owned by T005.2b2.
   Done: effective Plain and Rich capability metadata, validated overrides, and unrelated formatting restored. Enforced by `cargo test --test quirks --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`; real-server acceptance tests remain in T005.2b2.
+- [x] **T005.2b2a — Commit real initialize quirk acceptance tests.**
+  Commit the already-passing real-server identity, override, metadata, invalid-config recovery and strict Rich schema tests. Outgoing edit-format proof remains explicitly owned by T005.2b2b.
+- [ ] **T005.2b2b — Prove quirk-controlled outgoing edit format.**
+  Adapt the real Plain didOpen test in tests/plain_render.rs:589 to assert Neovim 0.12.6 sends documentChanges with automatic quirk and changes when disabled, with documentChanges undeclared in both cases. Apply responses and verify final editor text, then close T005.2b2, T005.2b and T005.2.
 - [ ] **T005.2b2 — Prove effective quirk resolution through the real server.**
   Add real initialize/config recovery and behavior tests for known and unknown clients, explicit on/off overrides and strict rich negotiation. Complete T005.2b and T005.2 only after these production acceptance cases pass.
 - [ ] **T005.2b — Resolve and report production initialize quirks.**
