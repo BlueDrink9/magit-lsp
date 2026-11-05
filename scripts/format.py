@@ -213,22 +213,13 @@ def staged_fix(paths: list[str], snapshot_root: Path, index_path: Path, index_en
             raise RuntimeError(f"formatter removed or replaced staged path: {path}")
         blob = git_bytes(["hash-object", "-w", "--path", path, "--", str(candidate)], env=index_env_vars).decode().strip()
         if blob != original[path][1]:
-            changed[path] = (blob, original[path][1])
+            changed[path] = blob
     if not changed:
         return 0
     if observed_index.read_bytes() != before_bytes:
         raise RuntimeError("Git index changed concurrently; retry the commit")
-    updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, (oid, _) in changed.items())
+    updates = b"".join(f"{original[path][0]:o} {oid}\t".encode() + os.fsencode(path) + b"\0" for path, oid in changed.items())
     git_bytes(["update-index", "-z", "--index-info"], env=index_env_vars, input=updates)
-    for path, (_, staged_oid) in changed.items():
-        working = ROOT / path
-        if working.is_file() and not working.is_symlink():
-            work_oid = git_bytes(["hash-object", "--path", path, "--", str(working)], env=index_env_vars).decode().strip()
-            if work_oid == staged_oid:
-                working.write_bytes((snapshot_root / path).read_bytes())
-            else:
-                print(f"preserved unstaged worktree content: {path}", file=sys.stderr)
-        print(f"formatted staged content: {path}")
     return 0
 
 

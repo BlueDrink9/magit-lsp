@@ -31,9 +31,8 @@ never changes the index, so partial staging remains intact; formatted worktree
 content may differ from staged blobs until re-staged.
 
 The pre-commit hook formats staged content through the same dispatcher. It
-updates only eligible staged blobs. It mirrors a fix to a working file only
-when that file still matches the original staged content; partial unstaged
-work remains untouched. Run `make hooks-run` to invoke the actual hook.
+updates only eligible staged blobs and never changes working files. Run
+`make hooks-run` to invoke the actual hook.
 CI checks committed changed paths/check-only through the same runner and cannot write. Rust
 formatting is workspace-aware: if any owned Rust source changes, the runner
 uses `cargo fmt --all` (or `cargo fmt --all -- --check` in check modes).
