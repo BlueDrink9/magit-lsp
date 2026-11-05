@@ -562,7 +562,7 @@ Reproduce on Linux from any checkout subdirectory with Neovim 0.12.6, tmux, Pyth
 ```sh
 ROOT=$(git rev-parse --show-toplevel)
 python3 - "$ROOT" <<'PY'
-import hashlib, json, os, pathlib, subprocess, sys, time
+import hashlib, json, os, pathlib, signal, subprocess, sys, time
 root=pathlib.Path(sys.argv[1]).resolve(); tag=f'{os.getpid()}-{time.time_ns()}'; d=pathlib.Path('/tmp/opencode')/f't002-neovim-rapid-repair-{tag}'
 repo=d/'repo'; raw=d/'raw-parent/raw.jsonl'; sock=f'/tmp/t002-neovim-rapid-repair-{tag}.sock'; label=f't002-rapid-{tag}'
 def run(a,**kw): return subprocess.run(a,text=True,capture_output=True,check=True,**kw)
@@ -583,6 +583,7 @@ def wait(pred,label,seconds=20):
   except subprocess.CalledProcessError: pass
   time.sleep(.05)
  raise RuntimeError('timeout: '+label)
+primary=None; cleanup=[]; pid=None
 d.mkdir(parents=True); repo.mkdir(); (d/'home').mkdir(); raw.parent.mkdir()
 try:
  run(['git','init','-q'],cwd=repo); run(['git','config','user.name','Capture'],cwd=repo); run(['git','config','user.email','capture@example.invalid'],cwd=repo)
@@ -610,21 +611,63 @@ try:
   if echo: break
   time.sleep(.05)
  if not echo: raise RuntimeError('undo didChange not recorded')
-finally:
- subprocess.run(['nvim','--server',sock,'--remote-send','<Cmd>qa!<CR>'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+ run(['nvim','--server',sock,'--remote-send','<Cmd>qa!<CR>'],timeout=8)
  end=time.monotonic()+15
+ wire=rows(); init=next((r for r in wire if r.get('raw',{}).get('method')=='initialize'),None)
+ if init is None or not init.get('pid'): raise RuntimeError('initialize row has no server PID')
+ pid=init['pid']; end=time.monotonic()+15
  while time.monotonic()<end:
-  wire=rows(); init=next((r for r in wire if r.get('raw',{}).get('method')=='initialize'),None); pid=init.get('pid') if init else None
-  exited=pid and any(r.get('pid')==pid and r.get('raw',{}).get('method')=='exit' for r in wire)
+  wire=rows(); exited=any(r.get('pid')==pid and r.get('raw',{}).get('method')=='exit' for r in wire)
   try: os.kill(pid,0); alive=True
-  except (ProcessLookupError,TypeError): alive=False
+  except ProcessLookupError: alive=False
   if exited and not alive: break
   time.sleep(.05)
  else: raise RuntimeError('owned LSP server did not gracefully exit')
- subprocess.run(['tmux','-L',label,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
- if pathlib.Path(sock).exists(): raise RuntimeError('owned Neovim socket remains')
  wire=rows(); (d/'report.json').write_text(json.dumps({'source':str(raw),'source_sha256':hashlib.sha256(raw.read_bytes()).hexdigest(),'source_rows':len(wire),'rapid':changed,'repair_request_id':rid,'repair_request_row':req[0]+1,'reply_row':reply[0]+1,'restored':restored,'undo':undone,'undo_echo_row':echo[0]+1,'server_pid':pid,'server_exit_observed':bool(exited),'socket_remains':False},indent=2)+'\n')
  print((d/'report.json').read_text())
+except BaseException as exc:
+ primary=exc
+finally:
+  try:
+   if not pid:
+    init=next((r for r in rows() if r.get('raw',{}).get('method')=='initialize'),None)
+    if init: pid=init.get('pid')
+  except BaseException as exc:
+   cleanup.append(f'initialize PID lookup: {exc!r}')
+  def cleanup_step(name,fn):
+   try: fn()
+   except BaseException as exc: cleanup.append(f'{name}: {exc!r}')
+  def graceful_nvim():
+   if not pathlib.Path(sock).exists(): return
+   run(['nvim','--server',sock,'--remote-send','<Cmd>qa!<CR>'],timeout=5)
+   deadline=time.monotonic()+5
+   while pathlib.Path(sock).exists() and time.monotonic()<deadline: time.sleep(.05)
+   if pathlib.Path(sock).exists(): raise RuntimeError('Neovim socket remains after graceful quit')
+  cleanup_step('graceful Neovim shutdown',graceful_nvim)
+  cleanup_step('owned tmux shutdown',lambda:subprocess.run(['tmux','-L',label,'kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5))
+  def stop_owned_server():
+   if not pid: return
+   proc=pathlib.Path(f'/proc/{pid}')
+   if not proc.exists(): return
+   server=(root/'target/debug/magit-lsp').resolve()
+   if pathlib.Path(f'/proc/{pid}/exe').resolve()!=server: raise RuntimeError(f'PID {pid} executable is not this run server')
+   if b'MAGIT_LSP_WIRELOG='+os.fsencode(raw) not in (proc/'environ').read_bytes().split(b'\0'): raise RuntimeError(f'PID {pid} wirelog is not this run')
+   os.kill(pid,signal.SIGTERM); deadline=time.monotonic()+5
+   while proc.exists() and time.monotonic()<deadline: time.sleep(.05)
+   if proc.exists(): os.kill(pid,signal.SIGKILL)
+   deadline=time.monotonic()+2
+   while proc.exists() and time.monotonic()<deadline: time.sleep(.05)
+   if proc.exists(): raise RuntimeError(f'owned server PID {pid} survived SIGKILL')
+  cleanup_step('owned server shutdown',stop_owned_server)
+  cleanup_step('owned socket removal',lambda:pathlib.Path(sock).unlink(missing_ok=True))
+  def verify_tmux():
+   if subprocess.run(['tmux','-L',label,'has-session','-t','cap'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: raise RuntimeError('owned tmux session remains')
+  cleanup_step('owned tmux verification',verify_tmux)
+  if primary is not None or cleanup:
+   print(f'FAILED evidence retained: {d}',file=sys.stderr)
+   details=([f'primary failure: {primary!r}'] if primary is not None else [])+[f'cleanup failure: {x}' for x in cleanup]
+   raise RuntimeError('; '.join(details)) from primary
+  print(f'cleanup verified; evidence={d}')
 PY
 ```
 
