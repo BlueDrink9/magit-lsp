@@ -297,7 +297,13 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     let request = retained_index(&repair["request_source_row"]);
     let reply = retained_index(&repair["reply_source_row"]);
     let undo = retained_index(&repair["editor_echo_source_row"]);
+    let undo_action = &rapid["actions"]["undo"];
+    assert_eq!(undo_action["keys"], "u");
+    let undo_change = retained_index(&undo_action["didChange_source_row"]);
+    assert_eq!(undo_action["didChange_source_row"], 14);
+    assert_eq!(undo_change, 3);
     assert_eq!([did, request, reply, undo], [0, 1, 2, 3]);
+    assert_eq!(undo_change, undo);
     assert!(did < request && request < reply && reply < undo);
     assert_eq!(method(&rapid_rows[did]), "textDocument/didChange");
     assert_eq!(changes(&rapid_rows[did])[1]["text"], "RAPID");
