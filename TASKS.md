@@ -38,6 +38,8 @@ Last review: 3ff0e6ae0923ef7f3fa87f30d995cbded2e14184
   Done: post-offset same-PID/document repair request, successful same-ID response, edit-derived version and range/text echo, plus post-offset same-document undo. Exact native recipe passed; failure cleanup verified. Evidence and drained source/hash: `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog` and `git diff --check`.
 - [ ] **T002.3b2b3 — Enforce Helix rapid-repair metadata and audit T002 acceptance.**
   Test exact retained rows, action provenance, request/reply/echo ordering and saved-versus-transient state claims. Audit all T002 acceptance clauses before checking parents or the numbered ticket; preserve Linux-only and manual source-audit limits.
+- [x] **T002.3b2b3a — Test the retained Helix rapid-repair exchange.**
+  Extend the wirelog fixture gate with exact native keys and source-row/action mappings, incremental payloads, stale-repair rejection, successful repair and undo/re-repair/save correlation. Keep original fixture payloads unchanged and distinguish manual full-source provenance from automated retained-record checks.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**

@@ -359,6 +359,168 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
 }
 
 #[test]
+fn helix_rapid_repair_sidecar_matches_retained_exchange() {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lsp_traces");
+    let sidecar: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(directory.join("helix-25.07.1-rapid-repair.json")).unwrap(),
+    )
+    .unwrap();
+    let rows: Vec<serde_json::Value> =
+        std::fs::read_to_string(directory.join("helix-25.07.1-rapid-repair.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    let expected_keys =
+        json!(["Escape", "g", "g", "g", "h", "i", "R", "A", "P", "I", "D", "Escape"]);
+    assert_eq!(sidecar["helix_version"], "helix 25.07.1");
+    assert_eq!(sidecar["source_rows"], 27);
+    assert_eq!(
+        sidecar["retained_source_rows"],
+        json!((9..=24).collect::<Vec<_>>())
+    );
+    assert_eq!(sidecar["source_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(rows.len(), 16);
+    let actions = sidecar["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 6);
+    assert_eq!(actions[0]["keys"], expected_keys);
+    assert_eq!(actions[4]["keys"], json!(["u"]));
+    assert_eq!(
+        actions
+            .iter()
+            .map(|a| a["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "rapid_repair",
+            "stale_repair_rejection",
+            "successful_repair",
+            "restored_baseline_save",
+            "undo_then_repair",
+            "repaired_baseline_save"
+        ]
+    );
+    for (action, mapping) in actions.iter().zip([
+        json!([9, 11, 12, 13, 14]),
+        json!([10, 15]),
+        json!([16, 17, 18]),
+        json!([19]),
+        json!([20, 21, 22, 23]),
+        json!([24]),
+    ]) {
+        assert_eq!(action["wire_rows"], mapping);
+    }
+    let uri = rows[0]["raw"]["params"]["textDocument"]["uri"].clone();
+    let pid = rows[0]["pid"].clone();
+    let methods = [
+        "textDocument/didChange",
+        "workspace/applyEdit",
+        "textDocument/didChange",
+        "textDocument/didChange",
+        "textDocument/didChange",
+        "textDocument/didChange",
+        "",
+        "workspace/applyEdit",
+        "textDocument/didChange",
+        "",
+        "textDocument/didSave",
+        "textDocument/didChange",
+        "workspace/applyEdit",
+        "textDocument/didChange",
+        "",
+        "textDocument/didSave",
+    ];
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row["pid"], pid);
+        assert_eq!(row["raw"]["method"].as_str().unwrap_or(""), methods[i]);
+        assert_eq!(
+            row["direction"],
+            if [1, 7, 12].contains(&i) { "out" } else { "in" }
+        );
+        assert!(row["time"].as_u64().is_some());
+        if row["raw"]["method"] == "textDocument/didChange"
+            || row["raw"]["method"] == "textDocument/didSave"
+        {
+            assert_eq!(row["raw"]["params"]["textDocument"]["uri"], uri);
+        }
+        if i > 0 {
+            assert!(rows[i - 1]["time"].as_u64().unwrap() <= row["time"].as_u64().unwrap());
+        }
+    }
+    for (i, (version, text)) in [(2, "R"), (3, "A"), (4, "P"), (5, "I"), (6, "D")]
+        .iter()
+        .enumerate()
+    {
+        let row_index = [0, 2, 3, 4, 5][i];
+        assert_eq!(
+            rows[row_index]["raw"]["params"]["textDocument"]["version"],
+            *version
+        );
+        assert_eq!(
+            rows[row_index]["raw"]["params"]["contentChanges"][0],
+            json!({"range":{"start":{"line":0,"character":i},"end":{"line":0,"character":i}},"text":text})
+        );
+    }
+    assert_eq!(
+        rows[1]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+        2
+    );
+    assert_eq!(rows[1]["raw"]["id"], "magit-lsp/outbound/2");
+    assert_eq!(
+        rows[1]["raw"]["params"]["edit"]["documentChanges"][0]["edits"][0],
+        json!({"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}})
+    );
+    assert_eq!(rows[6]["raw"]["id"], rows[1]["raw"]["id"]);
+    assert_eq!(rows[6]["raw"]["result"]["applied"], false);
+    assert_eq!(
+        rows[6]["raw"]["result"]["failureReason"],
+        "document has changed"
+    );
+    assert_eq!(rows[7]["raw"]["id"], "magit-lsp/outbound/3");
+    assert_eq!(
+        rows[7]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+        6
+    );
+    assert_eq!(
+        rows[7]["raw"]["params"]["edit"]["documentChanges"][0]["edits"][0],
+        json!({"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}})
+    );
+    assert_eq!(rows[8]["raw"]["params"]["textDocument"]["version"], 7);
+    assert_eq!(rows[8]["raw"]["params"]["contentChanges"][0]["text"], "");
+    assert_eq!(rows[9]["raw"]["id"], rows[7]["raw"]["id"]);
+    assert_eq!(rows[9]["raw"]["result"]["applied"], true);
+    let baseline = rows[10]["raw"]["params"]["text"].as_str().unwrap();
+    assert_eq!(baseline, "Head: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean\n");
+    assert!(baseline.ends_with('\n'));
+    assert_eq!(rows[11]["raw"]["params"]["textDocument"]["version"], 8);
+    assert_eq!(
+        rows[11]["raw"]["params"]["contentChanges"][0]["text"],
+        "RAPID"
+    );
+    assert_eq!(
+        rows[11]["raw"]["params"]["contentChanges"][0]["range"],
+        json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}})
+    );
+    assert_eq!(
+        rows[12]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+        8
+    );
+    assert_eq!(rows[13]["raw"]["params"]["textDocument"]["version"], 9);
+    assert_eq!(rows[13]["raw"]["params"]["contentChanges"][0]["text"], "");
+    assert_eq!(rows[14]["raw"]["result"]["applied"], true);
+    assert_eq!(rows[12]["raw"]["id"], rows[14]["raw"]["id"]);
+    assert_eq!(rows[15]["raw"]["params"]["text"], baseline);
+    assert_eq!(rows[15]["raw"]["params"]["textDocument"]["uri"], uri);
+    assert_eq!(
+        sidecar["state_claims"]["transient_undo_text"]
+            .as_str()
+            .unwrap()
+            .contains("not a native saved snapshot"),
+        true
+    );
+}
+
+#[test]
 fn records_actual_server_transport_and_drains_at_shutdown() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("wire.jsonl");
