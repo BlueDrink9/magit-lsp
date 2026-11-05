@@ -61,7 +61,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 - [x] **Trace cleanup 3d — Remove rich-only readiness from native sessions.**
   The first real run reached Neovim but failed because shared readiness required the rich adapter's debug module. Use bounded standard RPC readiness for external native sessions; retain rich idle readiness for rich callers.
   test: cover native readiness without project modules and retain rich readiness tests. check: the retained native workflow reaches its substantive assertions.
-  Done: `COMMIT_PENDING`.
+  Done: `b8fbf7d`.
   - Verified: `make ui-unit` @ 1c02be9 → ok: ui-unit; `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` reached substantive assertions for both newline variants, then failed at shared `tmux clear-history -t plain`; both `failure.json` files report cleanup_verified=true, no socket remains, and no owned PIDs remain.
 
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
@@ -73,6 +73,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 - [ ] **Autofix staged formatting through shared hook and Make commands.**
   Replace formatting rejection with safe staged-content autofix; share formatter dispatch with manual Make commands and check-only CI. Preserve unstaged/unrelated edits, executable modes and partial staging; never bypass hooks or add permanent formatter tests.
   check: exercise actual hooks through a Make target in disposable real repositories; formatted commit content must exclude unstaged edits. Formatter errors must block without changing the index or working files. Record one-time results under this item, update formatter instructions, then stop without advancing unrelated work.
+  Review scope: accumulated formatter configuration, installer, CI and shared staged-index mutation warrant a focused safety review before handoff. No named roadmap phase closes; unrelated concurrent trace cleanup and its regressions are outside this handoff.
 
 ## Phase map
 
