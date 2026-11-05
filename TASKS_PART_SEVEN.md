@@ -69,6 +69,8 @@ All child tickets of these four tickets are done. Close each umbrella now. Move 
 
 ## Phase 1: Review and hygiene (gates 0.2)
 
+Complete on Linux; verification and review closure are recorded at the top of `TASKS.md`. Windows/macOS execution remains a CI follow-up.
+
 ### [x] T001 docs-diet — Complete
 
 Done: `d12d5a4`. Enforced by bounded migration assertions and `git diff --check`.
@@ -81,13 +83,13 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 Done: production implementation/integration `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`; final test-only Helix evidence `8476a8e`.
 Immutable full acceptance: `61370ad:TASKS_PART_SEVEN.md`. Four-client initialize/didChange presets retained; Helix native selection, one-/multi-character paste, rapid typing and repair-before-undo; Neovim all six, with historical multi-paste-before-repair limit.
 Bundled payload shapes prove no native actions; single-insert provenance only for plain Neovim and Helix. Reconstructed Plain trace is not conformance evidence. Full Helix source hash/equality was manually verified; automated checks cover retained rows and metadata, not native causality.
-`cargo test --test wirelog` (12 tests), fixture JSON parsing and manual provenance audit enforce evidence. Helix save snapshots show restored baseline and wire row 20 proves transient undo; Neovim rapid undo coalesces repair echo and undo, limiting separate-event claims. Linux only; Windows/macOS CI follow-up. Phase 1 implementation complete; phase gate/review pending.
+`cargo test --test wirelog` (12 tests), fixture JSON parsing and manual provenance audit enforce evidence. Helix save snapshots show restored baseline and wire row 20 proves transient undo; Neovim rapid undo coalesces repair echo and undo, limiting separate-event claims. Linux only; Windows/macOS CI follow-up. Phase 1 verification/review accepted; see `TASKS.md`.
 
 ### [x] T003 hygiene-tooling — Complete
 
 Done: `a345a98` (runner/tests), `95c40e5` (tool configs), `741ffa2` (finding dispositions). Enforced by `make hygiene` and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`.
 Linux report-only baseline: cargo-machete 0.9.2 clean; Knip 5.88.1 reports one unlisted dependency and 69 unused exports; luacheck 1.2.0 reports 34 warnings and 0 errors. Findings have reasons or exact owners; report-only exit 0 does not mean debt-free.
-Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T001–T003 implementation is complete; Phase 1 gate and review remain pending.
+Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T001–T003 and the Linux Phase 1 gate/review are complete; see `TASKS.md`.
 
 ## Phase 2: Capability model (gates 0.2)
 

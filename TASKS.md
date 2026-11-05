@@ -2,6 +2,10 @@
 
 Last review: 796a7f633c8c57108644ab72cfc9f099474c9f3a
 
+Phase 1 complete (2026-11-05): T001–T003 implemented and accepted on Linux.
+Full `make test FILTER=--no-fail-fast`, rustfmt, seven hygiene unit tests and text-native UI tour passed; logs: `/tmp/opencode/phase-one-final/`. Sol 5.6 reviewed through `796a7f6`; P1 owned-server termination and P2 Git-configuration isolation were fixed in `a13f932`/`0828277`. Exact normal and injected native Helix recipes passed, including hostile caller Git configuration; twelve wirelog tests and format/diff checks passed after the documentation fixes. No owned server remains; the user's Cargo.toml checksum and unrelated release work are unchanged.
+Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 Lua warnings have owners or reasons, not debt-free acceptance. Windows/macOS execution remains for CI. No P0 requires re-review; deferred P3: redundant generated-file absence assertions in `tests/hygiene/test_hygiene.py`. Next named phase: Phase 2, starting T004.
+
 ## Ad hoc
 
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
