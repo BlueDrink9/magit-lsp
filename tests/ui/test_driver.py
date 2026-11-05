@@ -589,5 +589,39 @@ class StartPathTest(unittest.TestCase):
         tmux.assert_not_called()
 
 
+class NativeSessionTest(unittest.TestCase):
+    def test_configurable_launch_and_readiness_failure_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo, home, init, initial = (base / name for name in ("repo", "home", "init.lua", "start.txt"))
+            repo.mkdir()
+            home.mkdir()
+            init.touch()
+            initial.touch()
+            launched: dict[str, object] = {}
+
+            def launcher(run, env, config, file):
+                launched.update(run=run, env=env, config=config, file=file)
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "_launcher_script", side_effect=launcher),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket", side_effect=driver.StartupError("not ready")),
+                patch.object(driver, "stop") as stop,
+            ):
+                with self.assertRaisesRegex(driver.StartupError, "not ready"):
+                    with driver.native_session(repo, home, init, initial, {"CUSTOM": "yes"}):
+                        self.fail("readiness failure must not enter session")
+            run = launched["run"]
+            self.assertEqual(launched["env"], {"CUSTOM": "yes"})
+            self.assertEqual(launched["config"], init)
+            self.assertEqual(launched["file"], initial)
+            self.assertEqual(run.repo_path, repo)
+            self.assertEqual(run.home_path, home)
+            self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
+            stop.assert_called_once_with(run)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -641,7 +643,7 @@ def _shell() -> str:
     return shutil.which("sh") or "/bin/sh"
 
 
-def _nvim_argv(run: Run) -> list[str]:
+def _nvim_argv(run: Run, init: Path = MINIMAL_INIT, initial_file: Path | None = None) -> list[str]:
     """The Neovim server command, without the environment assignment list."""
     nvim = shutil.which("nvim") or "nvim"
     return [
@@ -649,16 +651,17 @@ def _nvim_argv(run: Run) -> list[str]:
         "--listen",
         str(run.socket_path),
         "-u",
-        str(MINIMAL_INIT),
+        str(init),
         "-i",
         "NONE",
         "-n",
         "--cmd",
         "set ttimeoutlen=0",
+        *([str(initial_file)] if initial_file is not None else []),
     ]
 
 
-def _launcher_script(run: Run, env: dict[str, str]) -> Path:
+def _launcher_script(run: Run, env: dict[str, str], init: Path = MINIMAL_INIT, initial_file: Path | None = None) -> Path:
     """Write a tiny launcher script and return its path.
 
     Passing the cleared environment on the tmux command line made `respawn-pane`
@@ -671,7 +674,7 @@ def _launcher_script(run: Run, env: dict[str, str]) -> Path:
         "env",
         "-i",
         *[f"{key}={value}" for key, value in sorted(env.items())],
-        *_nvim_argv(run),
+        *_nvim_argv(run, init, initial_file),
     ]
     lines = [
         "#!/bin/sh",
@@ -840,6 +843,44 @@ def start(
     except BaseException:
         _cleanup(run)
         raise
+
+
+@contextlib.contextmanager
+def native_session(
+    repo: Path,
+    home: Path,
+    init: Path,
+    initial_file: Path,
+    env: dict[str, str],
+):
+    """Run Neovim for an externally prepared repo and always clean up its session.
+
+    `env` is the complete environment passed to Neovim. Socket and launcher state
+    live in a short temporary path, independent of repository and home paths.
+    """
+    check_tools()
+    temporary = tempfile.TemporaryDirectory(prefix="magit-ui-")
+    directory = Path(temporary.name)
+    run_id = new_run_id()
+    run = Run(run_id, "external", "native", DEFAULT_SIZE[0], DEFAULT_SIZE[1], "ansi",
+              str(directory), str(repo), str(home), str(directory / "nvim.sock"),
+              str(directory / "trace.jsonl"), f"magit-ui-{run_id}")
+    try:
+        run.trace_path.touch()
+        socket = startup.inspect_socket(run.socket_path)
+        if socket.too_long:
+            raise StartupError("native session socket path is too long")
+        _launcher_script(run, env, init, initial_file)
+        _tmux(run, "new-session", "-d", "-s", SESSION, "-x", str(run.cols), "-y", str(run.rows), "-c", str(repo))
+        _tmux(run, "set", "-g", "escape-time", "0")
+        _tmux(run, "set", "-g", "status", "off")
+        _tmux(run, "set", "-g", "default-terminal", "xterm-256color")
+        _tmux(run, "respawn-pane", "-k", "-t", SESSION, "-c", str(repo), _launcher_command(run))
+        _wait_for_socket(run)
+        yield run
+    finally:
+        stop(run)
+        temporary.cleanup()
 
 
 def stop(run: Run) -> None:
