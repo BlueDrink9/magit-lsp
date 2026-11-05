@@ -31,6 +31,14 @@ def pid_is_running(pid: int) -> bool:
     return True
 
 
+def cleanup_verified(ownership: dict[str, int | None], remaining: list[int], socket_remains: bool, tmux_session_remains: bool) -> bool:
+    """Require complete editor/server ownership and teardown evidence."""
+    return (
+        not remaining and not socket_remains and not tmux_session_remains
+        and all(isinstance(ownership.get(role), int) for role in ("editor", "server"))
+    )
+
+
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     kwargs.setdefault("timeout", 30)
     result = subprocess.run(args, text=True, capture_output=True, check=False, **kwargs)
@@ -61,6 +69,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
     server_id = ""
     report: dict[str, object] = {"final_newline": final_newline}
     owned_pids: set[int] = set()
+    ownership: dict[str, int | None] = {}
     failure: BaseException | None = None
 
     def rpc(expr: str) -> str:
@@ -111,7 +120,10 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             presentation.write_bytes(disk_before)
             config = ROOT / "tests/ui/plain_init.lua"
             from ui_lib import driver
-            native = stack.enter_context(driver.native_session(repo, home, config, presentation, env, size=size))
+            native = stack.enter_context(driver.native_session(
+                repo, home, config, presentation, env, size=size, ownership=ownership,
+                server_command=[str(binary)],
+            ))
             socket = str(native.socket_path)
             server_id = native.tmux
             report.update({"tmux_server": str(server_id), "nvim_socket": str(socket)})
@@ -546,7 +558,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
         failure = error
         report["traceback"] = traceback.format_exc()
     finally:
-        pids = sorted(owned_pids)
+        pids = sorted({pid for pid in (*owned_pids, *ownership.values()) if isinstance(pid, int)})
         remaining = []
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -555,11 +567,18 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                 break
             time.sleep(0.1)
         report["cleanup"] = {
+            "owned_roles": ownership,
             "owned_pids": pids,
             "remaining_owned_pids": remaining,
             "nvim_socket_remains": os.path.exists(socket),
+            "tmux_session_remains": bool(server_id and subprocess.run(
+                ["tmux", "-L", server_id, "has-session", "-t", "plain"],
+                capture_output=True, timeout=5,
+            ).returncode == 0),
         }
-        report["cleanup"]["cleanup_verified"] = not remaining and not os.path.exists(socket)
+        report["cleanup"]["cleanup_verified"] = cleanup_verified(
+            ownership, remaining, os.path.exists(socket), report["cleanup"]["tmux_session_remains"]
+        )
         if "native_edit_undo_repair" in report:
             final = report["native_edit_undo_repair"]["after_undo"]
             (run_evidence / "native.screen").write_text(str(final["text"]) + "\n")

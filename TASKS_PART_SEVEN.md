@@ -74,9 +74,11 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   test: existing driver tests cover role records, exec-safe wrappers, missing evidence and teardown capture. Verify with `make ui-unit`.
   - Verified: `make ui-unit` @ 8bd02e3 → ok: ui-unit
 
-- [ ] **Trace cleanup 3f — Make native cleanup evidence non-vacuous.**
+- [x] **Trace cleanup 3f — Make native cleanup evidence non-vacuous.**
   Success currently records only the editor PID; early failure can record none while claiming cleanup. Track owned editor and server processes through the maintained lifecycle, even before state polling succeeds. Verify the owned tmux session and socket are gone without scanning or killing unrelated processes.
-  test: cover early failure and complete owned-process evidence through existing harness tests. check: success and controlled failure runs report non-vacuous cleanup evidence for both newline variants.
+  test: cover early failure, actual wrapper invocation, complete owned-process evidence and missing-role rejection through existing harness tests. check: success and controlled failure runs report non-vacuous cleanup evidence for both newline variants.
+  - Verified: `make ui-unit` @ 25f7e27 → ok: ui-unit; missing-role rejection passes.
+  - Verified: recorded native success and controlled `/bin/false` failure reports for both newline variants contain editor/server roles, `cleanup_verified=true`, `remaining_owned_pids=[]`, `nvim_socket_remains=false` and `tmux_session_remains=false`.
 
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
   Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
