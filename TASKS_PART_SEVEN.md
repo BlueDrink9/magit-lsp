@@ -43,6 +43,12 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   check: retired fixtures and capture recipes have no active consumers; preserved inputs retain honest native-evidence limits. test: retained quirk and negotiation suites pass.
   - Verified: `make test-rust FILTER="--test quirks --test plain_core --test plain_render --test wirelog --test plain_harness"` @ 83f79f5 → ok: rust; cleanup commit recorded below
 
+- [x] **Trace cleanup 3a — Share configurable native session lifecycle.**
+  Expose a minimal maintained driver lifecycle for an externally prepared repository, custom Neovim init and initial file. Reuse bounded socket startup, isolated launch and shared teardown; do not add Plain scenario support or another harness.
+  test: `NativeSessionTest` covers configurable launch and cleanup after readiness failure. check: the normal rich launch remains unchanged.
+  Done: `d80186f`.
+  - Verified: `make ui-unit` @ 37fb07d → ok: ui-unit
+
 - [ ] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
   Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
   test: focused harness regressions and retained native acceptance pass. check: owned processes and sockets are cleaned on success and failure; record Linux-only evidence and other-platform limits.
