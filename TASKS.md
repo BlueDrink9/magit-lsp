@@ -34,7 +34,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `eb87a14` → ok: docs-check. Manual bounded-diff audit: all twelve checked T005 titles remain one-line records; recorded Done/Verified hashes and live evidence limits retained; no other task block changed.
 - [x] **Documentation cleanup — Compact typed-capability completion records.** Done: containing commit. Bounded audit: checked T004 titles/hashes retained; unchecked and external T007 work unchanged; producer, declaration/native and `multiChoice` limits retained.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `5f5f308` → ok: docs-check.
-- [ ] **Documentation cleanup — Compact recorder and migration completion records.** Condense checked policy, T003, T002 and T001 records; remove obsolete instructions and the dated checkpoint after retaining live limits.
+- [x] **Documentation cleanup — Compact recorder and migration completion records.** Done: containing commit. Bounded diff audit: only checked policy/T002/T003/T001 records and this item changed; unchecked blocks and external T007 edits preserved. Retained Linux-only evidence/non-Linux CI follow-ups, report-only hygiene, three quirk initialize inputs/no JSONL parser gate, A12 real-dispatch seams vs deferred T103 redesign, R-EDIT-REAL not green/T104 subset, and immutable migration ledger/scope mappings. Removed obsolete resume, review/model-selection and dated checkpoint instructions. Source-only provenance: `3787c66:TASKS.md`.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` → ok: docs-check.
 - [ ] **Documentation cleanup — Compact capability and recorder completion records.** Complete the two preceding bounded record groups, preserving checked titles and implementation references.
 - [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints. Split into the three preceding bounded record groups.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
@@ -130,12 +131,10 @@ T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
 - [x] **T005.3b — Prove named server workarounds and universal safety.** Done: `65ee6d9`. Verified: `65ee6d9`.
 - [x] **T005.3c — Generate the known-client appendix and audit T005.** Done: `6c95b50`. Verified: `65ee6d9`.
 - [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.** Helix showDocument remains explicit-override-only pending positive evidence; scripted models and declaration captures are not new native evidence. Universal echo/hash and one-document safety remain contracts. Other details: immutable `eb87a14:TASKS.md`.
-- [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
-  Apply current review and orchestration instructions from [AGENTS.md](./AGENTS.md#working-conventions). Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
+- [x] **Record the approved judgment-based review policy and clarify current phase boundaries.** Current review and orchestration policy: [AGENTS.md](./AGENTS.md#working-conventions); named roadmap phase groups are phase boundaries.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
   Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
-- [x] **Update execution limits and future reviewer selection.**
-  Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
+- [x] **Update execution limits and future reviewer selection.** Current execution limits are in [AGENTS.md](./AGENTS.md); obsolete model-selection and skip-review directions removed.
 - [x] **T004.final — Audit and close typed capability declaration acceptance.**
   Source-only: `5f5f308:TASKS.md`. T004 remains closed; Phase 2 remains open through T007.
 - [x] **T004.7 — Check presentation emissions against negotiated declarations.**
@@ -186,28 +185,22 @@ T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
   Done: source-only `5f5f308:TASKS.md`; native evidence provenance retained.
 - [x] **T004.5c — Consolidate the duplicate recording UI test helper.**
   Done: `b5eb865`. `multiChoice` has consumers, but no producing-command proof; native evidence remains provenance.
-- [x] **T002 wire-recorder — Complete.**
-  Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Runtime recorder/security regressions remain in `tests/wirelog.rs`, exercised through `make test-rust FILTER="--test wirelog"`.
-  Original acceptance: immutable `61370ad:TASKS_PART_SEVEN.md`. T002 capture slices, source hashes, native action limits and retired fixture-gate records: immutable `83f79f5:TASKS.md`; final historical Helix fixture work: `8476a8e`. These are provenance, not current enforcement or reproducible capture instructions.
-  Current coverage replaces static trace assertions with live server/fake-editor tests, including stale rapid repair and undo (`83f79f5`), and retained native Neovim acceptance. See completed trace cleanup above and the [fixture guide](tests/fixtures/lsp_traces/README.md). Linux evidence does not establish Windows/macOS or full native-client conformance.
+- [x] **T002 wire-recorder — Complete.** Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Original acceptance: immutable `61370ad:TASKS_PART_SEVEN.md`; capture/native provenance: `83f79f5:TASKS.md`, `8476a8e`. Runtime regressions: `tests/wirelog.rs` (`make test-rust FILTER="--test wirelog"`); three quirk initialize inputs remain, no old JSONL parser gate. Linux evidence is not Windows/macOS or full native-client proof; see [fixture guide](tests/fixtures/lsp_traces/README.md).
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
-  Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
+  Source-only: `3787c66:TASKS.md`.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
-  Add `make hygiene` running cargo-machete, knip and luacheck, reporting missing tools distinctly. Include the twenty largest nongenerated tracked files, a soft growth threshold, and `allow(dead_code)`/`keep-for:` searches; test report-only behavior and failure reporting.
+  Source-only: `3787c66:TASKS.md`.
 - [x] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
-  Run actual tools in an isolated tool environment, retain each baseline finding with a reason, and prove an intentional unused dependency is reported before removing it. Preserve the user's dirty Cargo.toml exactly outside any explicitly scoped metadata change.
+  Source-only: `3787c66:TASKS.md`.
 - [x] **T003.2a — Enforce generated-file filtering and hermetic reporter tests.**
-  Correct the runner's Git attribute parsing: current text splitting retains `: linguist-generated` in keys and therefore never excludes generated paths. Add actual Git-attribute coverage and make missing-tool tests independent of installed host tools; exercise invocation failures and real test cwd layout explicitly.
+  Source-only: `3787c66:TASKS.md`.
 - [x] **T003.4 — Document phase hygiene and complete the tooling contract.**
-  Add AGENTS phase-end/review guidance, ticket-template and T033 hygiene gates. Verify the completed report-only baseline and narrow tests; record Linux evidence and non-Linux CI follow-ups before marking T003 complete.
-Historical T002.1/T002.2 recorder integration, concurrent append/restart fixes and native capture records remain in immutable `83f79f5:TASKS.md` (client capture commits `15a8f63`, `1563bbb`). Current fixture consumers retain only three quirk initialize inputs; current client declarations are tested separately. No old JSONL/sidecar parser gate remains an acceptance requirement.
-- [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
-- [x] **T001.5c — Remove duplicate top matter and retired Plain plans.**
-  Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).
-- [x] **T001.4b — Qualify historical visual evidence.**
-  Add historical banners to evidence documents that cite images; remove PNG passages from the real-file spike without relabelling visual observations as current text proof. Preserve substantive API/wire/Git evidence.
-- [x] **T001.4c — Isolate human-only README image guidance.**
-  Make screenshot/releasing guidance explicitly human-only, with AGENTS links and historical caveats. Existing screenshot code is absent; provide a non-capturing human help target and directory documentation rather than adding agent image paths.
+  Source-only: `3787c66:TASKS.md`; report-only hygiene; Linux evidence only, non-Linux CI follow-ups retained.
+  Historical T002 recorder integration, append/restart fixes and native capture records: immutable `83f79f5:TASKS.md` (`15a8f63`, `1563bbb`). Fixture consumers retain three quirk initialize inputs; client declarations are tested separately. No old JSONL/sidecar parser gate remains.
+- [x] **T001.5b2 — Replace superseded task and history sections.** Source-only: `3787c66:TASKS.md`.
+- [x] **T001.5c — Remove duplicate top matter and retired Plain plans.** Source-only: `3787c66:TASKS.md`; original Plain scope T004–T010/T013/T020–T022, keys T034–T039, deferred T099–T111; immutable sources `2ff1ee7:magit-lsp-plain-client-tasks.md` and `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping: [migration ledger](docs/evidence/task-queue-migration.md).
+- [x] **T001.4b — Qualify historical visual evidence.** Source-only: `3787c66:TASKS.md`.
+- [x] **T001.4c — Isolate human-only README image guidance.** Source-only: `3787c66:TASKS.md`.
 - [x] **T001 docs-diet — Complete.**
   Done: `d12d5a4`. Enforced by `git diff --check` and bounded migration assertions. Residuals: A12 ownerless ([ledger](docs/evidence/task-queue-migration.md)); R-EDIT-REAL not green, T104 subset only; binary-platform limits and immutable provenance retained (`cbec0bf:TASKS.md`).
 - [x] **Retained gap — A12 real-dispatch Git failure handling.** Original scope and acceptance: `da4d422^:REVIEW_REPORT.md` A12. Migrated to `Session`/stdio seams; `server::mutation` and its callers are absent. `tests/server_async.rs::a12_selection_stage_reports_index_lock_as_successful_error_effect` verifies readable real-dispatch failure effects, unchanged Git state, malformed-input JSON-RPC errors and stderr; `tests/errors.rs` and `tests/dispatch.rs` cover error conversion and dispatch. T103 remains the distinct deferred same-session reader-lock redesign. Immutable provenance: `d04dfa2:TASKS.md`; implementation: `4395f73`, `5bb9903`.
@@ -215,10 +208,8 @@ Historical T002.1/T002.2 recorder integration, concurrent append/restart fixes a
 - [x] **Retained decision — R-NAV.** Four tree-owned commands verified; immutable evidence: `da4d422:TASKS.md`.
 - [x] **T001.3b — Compress completed correctness and editor contracts.** Immutable evidence and enforcing checks retained in `da4d422:TASKS.md`.
 - [x] **T001.4a — Migrate versioned VSCode host facts and retire NOTES.** Evidence: `docs/evidence/vscode-host-behaviours.md`.
-- [x] **T001.5a — Align design and test documents with the replacement queue.**
-- [x] **T001.5b1 — Preserve immutable per-ticket scope and verification provenance.** See [migration ledger](docs/evidence/task-queue-migration.md).
-
-Checkpoint (2026-11-05): bounded review through `d90d5da`, not comprehensive audit. `make test FILTER=--no-fail-fast`, rustfmt check and text-native UI tour passed; logs under `/tmp/opencode/queue-checkpoint/`. Fallback peer review was bounded; no comprehensive source-behavior or acceptance audit claimed. T001 documentation migration is complete; broader review remains bounded.
+- [x] **T001.5a — Align design and test documents with the replacement queue.** Source-only: `3787c66:TASKS.md`.
+- [x] **T001.5b1 — Preserve immutable per-ticket scope and verification provenance.** Source-only: `3787c66:TASKS.md`; [migration ledger](docs/evidence/task-queue-migration.md).
 
 Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [AGENTS.md](./AGENTS.md). Behaviour claims require current source/tests. Project status: early stage; backward compatibility is not a goal.
 
