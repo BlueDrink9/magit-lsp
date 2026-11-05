@@ -23,7 +23,7 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="AGENTS.md"` @ `33230ec` → passed.
 - [x] **Documentation cleanup — Move decisions and glossary reference.** Move §§0–2 intact into [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#0-decisions-already-made), preserve numbered anchors and rebase links. Update maintained references for these sections only.
-  - Done: containing commit.
+  - Done: `3186a69`.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md AGENTS.md README.md ui-test-plan.md TASKS_PART_SEVEN.md hygiene-allowlist.md docs/CLIENT_SPEC.md"` @ `4c83d0d` → ok: docs-check.
 - [ ] **Documentation cleanup — Move expanded design reference.** Append §3, including §3.19, to `docs/ARCHITECTURE.md`, preserve numbered anchors and rebase links, and update maintained design references and source entry points.
 - [ ] **Documentation cleanup — Move architecture and glossary reference.** Move §§0–3 intact into `docs/ARCHITECTURE.md`, preserving section identifiers and updating maintained links and entry points. Keep all queue items in `TASKS.md`. Split into the two preceding slices after two unchanged checkpoints.
