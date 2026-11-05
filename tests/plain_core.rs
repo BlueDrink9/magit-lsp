@@ -239,6 +239,8 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
 
 #[test]
 fn rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema() {
+    assert!(negotiate(&initialize(Some(rich_block()))).is_ok());
+
     for (keys, modifiers) in [("dynamic", "full"), ("static", "basic")] {
         let mut value = rich_block();
         value["keys"] = json!(keys);
@@ -252,6 +254,7 @@ fn rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_sc
     }
 
     let valid = r#"{"v":1,"keys":"dynamic","modifiers":"full","layout":["main"],"effects":[],"prompts":[]}"#;
+    // Duplicate JSON object fields are distinct from duplicate values in sets.
     for duplicate in [
         r#""layout":["main"],"layout":["main"]"#,
         r#""effects":[],"effects":[]"#,
@@ -262,6 +265,18 @@ fn rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_sc
         assert!(
             serde_json::from_str::<MagitCapabilities>(&input).is_err(),
             "{input}"
+        );
+    }
+    for (field, duplicate_values) in [
+        ("layout", json!(["main", "main"])),
+        ("effects", json!(["visitFile", "visitFile"])),
+        ("prompts", json!(["confirm", "confirm"])),
+    ] {
+        let mut block = rich_block();
+        block[field] = duplicate_values;
+        assert!(
+            negotiate(&initialize(Some(block))).is_err(),
+            "duplicate values in {field} must be rejected"
         );
     }
     for invalid in [

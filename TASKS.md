@@ -397,7 +397,7 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `796a7f633c
   - **Verify:** `cargo test --test plain_render --test server_async --test text_mode --test editor_bridge && cargo fmt --all -- --check && git diff --check`
   - **Result:** Focused verification passes. Full `make test FILTER=--no-fail-fast` rerun remains pending.
 
-- [ ] **[P2] Test duplicate entries in every typed capability set** (`tests/plain_core.rs:241-286`, `rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema`; `src/presentation/mod.rs:84-127`, `deserialize_names`)
+- [x] **[P2] Test duplicate entries in every typed capability set** (`tests/plain_core.rs:241-286`, `rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema`; `src/presentation/mod.rs:84-127`, `deserialize_names`)
   - **Problem:** The strict-schema test checks duplicate object fields such as two `layout` keys, but never checks duplicate values inside `layout`, `effects`, or `prompts`. Those arrays are the supported sets whose uniqueness `deserialize_names()` explicitly enforces, so the completed T004.3 duplicate claim lacks a direct regression test on the production negotiation path.
   - **Why it matters:** This weakens correctness coverage and readability: the current test's “duplicate” cases exercise serde struct-field handling rather than the custom uniqueness logic introduced by this change.
   - **Change:** Add table-driven cases with repeated supported entries in each array, for example `layout:["main","main"]`, and assert rejection through `negotiate(&initialize(...))`. Keep the existing duplicate-object-field checks only if they document a separate strict JSON contract; name or comment the two categories distinctly.
