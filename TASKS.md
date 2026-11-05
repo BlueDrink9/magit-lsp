@@ -2,7 +2,7 @@
 
 Last review: 2e29535237ad2b0f88dabb4b0a049c41d26419d2
 
-Accumulated-work gate (2026-11-06, T006): shared client-pump extraction, strict declaration checks, rich render/prompt state and recorded presets warrant serialized `make test` and bounded review (14 committed paths, 1016 insertions/120 deletions since Last review). Phase 2 remains open for T007; no phase-end hygiene/UI-tour is due.
+Accumulated-work gate (2026-11-06, T006): shared client-pump extraction, strict declaration checks, rich render/prompt state and recorded presets warrant serialized `make test` and bounded review (16 committed paths, 1025 insertions/120 deletions since Last review). Phase 2 remains open for T007; no phase-end hygiene/UI-tour is due.
 Serialized full `make test` passed build, Rust, Lua, VSCode and keybindings at `2e29535` after fixing omitted integration-crate module registrations. No `magit-lsp` process remained. Bounded review found two P1 and two P2 corrections, no P0 or new P3; resolve them before T007. No re-review is required without P0, and this correction batch does not trigger heavier gates.
 
 Accumulated-work gate (2026-11-06): T005 acceptance, registry-driven editor models, real-server reconciliation and generated client documentation warrant a serialized full test run and bounded review (10 committed paths, 522 insertions/163 deletions since Last review). Phase 2 remains open; this is not a phase-end gate.
@@ -315,7 +315,7 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
    - **Verify:** Run `make test-rust FILTER="--test plain_harness"`, then `make test-file FILE=tests/test_magit_lsp.lua`, then `make vscode-test`.
    - Verified: `make test-rust FILTER="--test plain_harness" && make test-file FILE=tests/test_magit_lsp.lua && make vscode-test` @ `43480bc` → `ok: rust; ok: lua; ok: vscode; ok: keybindings`
 
-- [ ] **[P2] Refresh the T006 accumulated-work gate totals** (`TASKS.md:3-5`, `Last review` and `Accumulated-work gate (2026-11-06, T006)`; `TASKS.md:256`, `T006 gate`)
+- [x] **[P2] Refresh the T006 accumulated-work gate totals** (`TASKS.md:3-5`, `Last review` and `Accumulated-work gate (2026-11-06, T006)`; `TASKS.md:256`, `T006 gate`)
   - **Problem:** The current T006 gate still records 14 paths and 1016 insertions, but the final reviewed range through the consumer-wiring fix contains 16 paths and 1025 insertions. The same file records that two omitted consumer modules were added before the serialized full test, so the scope statement is stale.
   - **Why it matters:** This violates cleanliness and status correctness. The authoritative gate understates the committed scope that its full-test and review claims cover.
   - **Change:** Update only the current T006 accumulated-work gate's path and insertion totals to the final `6c95b50..2e29535` diff. Preserve the T005 historical gate, the consumer-wiring record, supplied test result, and phase wording.
@@ -323,6 +323,7 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Constraints:** Do not change `Last review` until the orchestrator advances it, restate T006 completion elsewhere, or touch unrelated dirty release paths.
   - **Acceptance check:** `git diff --stat 6c95b50cb86fe32d3415eb055baa411e762a4456..2e29535237ad2b0f88dabb4b0a049c41d26419d2` matches the gate totals.
   - **Verify:** Run `make ui-unit`.
+   - Verified: `make ui-unit` @ `2e29535` → `ok: ui-unit`
 
 - [x] **[P1] Pin Neovim stale-apply entry ordering** (`tests/common/fake_editor.rs:126-192`, `FakeEditor::apply_edit`; `tests/plain_harness.rs:204-246`, `registry_models_drive_fake_editor_observable_behavior`)
   - **Problem:** The fake models the Neovim rule, but its tests cover only a stale first entry and a fresh later entry. They do not fail if a future change incorrectly version-checks every later `documentChanges` entry, so the checked T005 model claim does not enforce the original first-entry-versus-later contract.
