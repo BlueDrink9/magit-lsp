@@ -32,7 +32,10 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c14eadc` → ok: docs-check. Manual bounded-diff audit: compacted six checked T120 children and reconciliation records; retained titles, recorded hashes, Done/Verified distinctions, live Part Seven sole-queue/scope requirement, T011/T025 ownership, workflow links, unchecked task blocks and external T007.4 changes.
 - [x] **Documentation cleanup — Compact quirk completion records.** Condense checked T005 records and retain completion, verification and evidence limits.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `eb87a14` → ok: docs-check. Manual bounded-diff audit: all twelve checked T005 titles remain one-line records; recorded Done/Verified hashes and live evidence limits retained; no other task block changed.
-- [ ] **Documentation cleanup — Compact capability and recorder completion records.** Condense checked T004–T001 records and remove the dated checkpoint after retaining live limits.
+- [x] **Documentation cleanup — Compact typed-capability completion records.** Done: containing commit. Bounded audit: checked T004 titles/hashes retained; unchecked and external T007 work unchanged; producer, declaration/native and `multiChoice` limits retained.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `5f5f308` → ok: docs-check.
+- [ ] **Documentation cleanup — Compact recorder and migration completion records.** Condense checked policy, T003, T002 and T001 records; remove obsolete instructions and the dated checkpoint after retaining live limits.
+- [ ] **Documentation cleanup — Compact capability and recorder completion records.** Complete the two preceding bounded record groups, preserving checked titles and implementation references.
 - [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints. Split into the three preceding bounded record groups.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links. Complete after the two preceding cleanup slices.
@@ -131,64 +134,55 @@ T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
 - [x] **T004.final — Audit and close typed capability declaration acceptance.**
-  Reconcile all seven T004 acceptance clauses with current implementation, genuine client evidence and enforcing tests. Run the full serialized regression gate, compress the completed numbered ticket with immutable original acceptance and honest evidence limits, and leave actual Phase 2 open for T005–T007.
+  Source-only: `5f5f308:TASKS.md`. T004 remains closed; Phase 2 remains open through T007.
 - [x] **T004.7 — Check presentation emissions against negotiated declarations.**
-  Fail library test-build emission of undeclared optional effects, prompt kinds/secret text and placements before fallback can mask the violation. Preserve production warning-message and main-placement fallbacks, document them and cover strict rejection plus actual production serialization; do not turn capability probes into failures or expose a production test-only mode.
+  Source-only: `5f5f308:TASKS.md`. Preserve production warning-message and main-placement fallbacks; probes do not fail.
 - [x] **T004.7a — Complete strict-emitter rejection and placement-fallback tests.**
-  Done: strict unit tests reject undeclared effects, prompts, secret text and placements while accepting declared emissions; production tests verify warning and Main-placement fallbacks preserve descriptor identity. Enforced by `cargo test --lib presentation::custom && cargo test --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.7b — Cover both secret dependencies and declared optional effects.**
-  Supervision found the strict unit suite covers text without secret, but not secret without text; declared-effect success only covers visitFile. Add the missing valid-declaration cases for secret-only rejection and successful editDocument/clipboard emission; preserve existing strict and production coverage.
-  Done: `b89bf60`, with secret-only declaration corrected in review commit `78b6f49`; library custom-emitter tests enforce both prompt dependencies and declared-effect success.
+  Done: `b89bf60`; review correction: `78b6f49`.
 - [x] **T004.6 — Derive capability requirements from command metadata.**
-  Replace the presentation-layer command-name match with canonical command-owned optional-effect requirements. Cover actual direct and deferred effect-producing paths before closing this parent; retain preflight rejection before Git or editor work.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.6a — Derive the optional-effect requirement table from the registry.**
-  Put requirements alongside registered command metadata and consume that single source in RichCapabilities. Preserve all seven existing initiating-command requirements, including deferred commit editing and selection copying; do not make generic confirmation require clipboard access.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.6b — Cover actual optional-effect producers against command requirements.**
-  Exercise direct visit/copy, selection-copy completion and commit editor initiation with real repository/session paths. Attribute deferred effects to their initiating commands, verify registry requirements and preserve unsupported-capability preflight protections; do not claim exhaustive coverage from a duplicated list alone.
-  Done: asserted real VisitFile, Clipboard and shared editor-initiation effect paths against registry metadata; existing rich missing-capability tests retain preflight/no-side-effect coverage. Enforced by focused command, log-selection and editor-bridge tests; this covers exercised producers, not every possible optional-effect path.
+  Source-only: `5f5f308:TASKS.md`. Exercised producers, not exhaustive; deferred effects map to initiators.
 - [x] **T004.1 — Use camelCase content-action targets on the wire.**
-  Change `ActionTarget` serialization/deserialization to `nodeId` and `mutationHash`, update live Plain test payloads and assert old snake_case payloads are rejected. Preserve content-addressed identity, selection and stale-target protections; do not alter historical native trace fixtures.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.2 — Remove unconsumed rich rendering and key-delivery modes.**
-  Remove runtime support for `forwardAll`, render-only-full and native-fold presentation after confirming neither shipped client declares them. Retain supported dynamic/static keys, acknowledged incremental rendering, server-fold semantics and their real-server tests; the following typed-schema slice removes singleton wire fields.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.2a — Finish server mode removal and validate supported-mode coverage.**
-  Prior slices removed session/capability modes and rewrote tests without committing. Restore the accidentally reverted `ForwardAll` server branch deletion, use workspace rustfmt (not standalone defaults), and verify/commit the existing scoped implementation before checking this child and T004.2.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.3 — Deserialize strict typed rich capability declarations.**
-  Replace hand parsing with serde `MagitCapabilities` and typed key/modifier modes; reject unknown fields, duplicates, invalid values and missing main placement. Remove singleton render/fold fields from live client declarations and tests, remove obsolete Lua capability keys and fallback parsers, and preserve immutable historical captures.
-  Done: strict serde deserialization and client/test migration committed. Enforced by focused rich-schema serde/negotiation checks and the listed verification command; Lua suite passed separately in `7678242`. T004 parent and T004.4 remain open.
+  Source-only: `5f5f308:TASKS.md`; verification: `7678242`. Immutable captures remain provenance.
 - [x] **T004.3a — Pin Lua verification to the server built by Make.**
-  Lua negotiation failures came from stale `target/release/magit-lsp` selected by production lookup, while Make built debug. Pin `test-lua` and `test-file` subprocesses to the freshly built debug server without changing production lookup; then finish strict-schema verification.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.3b — Pin native UI verification to the freshly built server.**
-  The isolated native driver drops parent environment variables and currently permits the same stale-release lookup already diagnosed for Lua tests. Set its default server to this checkout's debug binary, retain explicit scenario overrides and make native test/tour targets build first; verify harness tests and text-native tour against the strict protocol.
-  Done: pinned isolated driver environment, retained `extra_env` override and made `ui-test`/`ui-tour` depend on `build`. Enforced by `make ui-unit && timeout --kill-after=10s 900s make ui-tour && git diff --check`.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
-  Confirm both actual clients send the new typed block, including the bundled VSCode omission observed in T002. Use supported languageclient hooks and only honored VSCode placements; retain focused native Linux text/wire evidence and test both actual declarations against server validation.
+  Source-only: `5f5f308:TASKS.md`. Source equality/causality manually checked, not live recapture.
 - [x] **T004.4a — Register and natively verify the real VSCode declaration feature.**
-  Replace the unsupported initialize middleware with the installed languageclient StaticFeature API, declare only honored main placement and correct fake-client initialization to model that real API. Verify the actual isolated VSCodium extension host sends the strict block and receives rich service; preserve authentic client identity and immutable older captures.
+  Source-only: `5f5f308:TASKS.md`. Native evidence provenance retained; declaration source equality/causality manually checked.
 - [x] **T004.4b — Validate both current native client declarations against the typed schema.**
-  Capture the current bundled Neovim declaration and retain focused native text/wire evidence for both clients. Test actual emitted blocks against strict server deserialization, keeping historical trace presets immutable and T004 open for its remaining surface/command/emitter audit.
+  Source-only: `5f5f308:TASKS.md`. Immutable captures remain provenance.
 - [x] **T004.4b1 — Retain current native Neovim declaration evidence.**
-  Use the isolated bundled native driver with the freshly built server and opt-in wirelog. Record the exact emitted strict block, client/source identity, rich-render response, text inspection and owned cleanup in the existing capability evidence document; preserve historical captures.
+  Source-only: `5f5f308:TASKS.md`. Native evidence provenance retained.
 - [x] **T004.4b2 — Test the actual native client blocks against strict deserialization.**
-  Extract current Neovim and VSCode declarations from their genuine recorder sources into one new provenance-bearing fixture. Enforce both with production serde/negotiation tests and reject schema drift mutations; document that source equality and native causality are manually verified, not live CI recapture.
+  Source-only: `5f5f308:TASKS.md`. Source equality/causality manually checked, not live recapture.
 - [x] **T004.5a — Remove unused process-log identifiers from readable errors.**
-  Audit actual Rust, client and test consumers, then remove reserved `process_log_id`/`processLogId` error metadata that is never populated or consumed. Preserve readable Git failure messages, hints/details and process-log functionality; keep a regression proving no internal identifier leaks onto the wire.
+  Source-only: `5f5f308:TASKS.md`.
 - [x] **T004.5b — Remove the unproduced OpenView effect alias.**
-  Confirm real producers use PushView, then remove OpenView from protocol, presentation/server matches and both client dispatchers without changing push/root semantics. Preserve real prompt consumers and defer unrelated UI surface changes.
-  Done: `3627f46` (implementation `b16685d`/`f6a859d`); enforced by Rust stack/schema checks, awaited VSCode root propagation, both focused native clients and serialized full regressions.
+  Done: `3627f46` (implementation: `b16685d`, `f6a859d`).
 - [x] **T004.5b1 — Remove the unproduced Rust OpenView effect variant.**
-  Delete only `Effect::OpenView`, its dead matching branches and obsolete variant documentation; preserve the unrelated session `OpenView` state type and real PushView producers. Assert that PushView remains valid and the removed wire alias is rejected; client/documentation cleanup follows separately.
-  Done: `b16685d`; enforced by `cargo test --lib presentation::custom` and the plain_stack/plain_core/server_async suites.
+  Done: `b16685d`.
 - [x] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
-  Keep existing PushView root/return semantics while removing both client aliases and normative OpenView effect documentation. Verify focused native Linux stack behavior in both clients; preserve unrelated dirty README changes and immutable historical captures.
-  Done: `3627f46`; enforced by the preceding client/native checks and the current contract audit.
+  Done: `3627f46`.
 - [x] **T004.5b2a — Delete client effect aliases and verify native stack behavior.**
-  Remove the two client OpenView dispatch aliases without changing existing PushView root propagation. Run the focused Neovim close/reopen scenario and VSCode A06 native stack checks; commit the already staged README-only alias correction without staging user release edits.
-  Done: `f6a859d`; enforced by VSCode unit/integration tests, `close-reopen-views.scn` and native A06 evidence recorded above.
+  Done: `f6a859d`.
 - [x] **T004.5b2b — Reconcile remaining public view-effect documentation.**
-  Remove the retired alias from CLIENT_SPEC and this effect table. Root creation uses `view/open` and its returned descriptor; PushView/pop retain stack semantics. Done: docs cleanup and native Neovim close/reopen plus VSCode A06 evidence (`/tmp/opencode/openview-alias-checkpoint/a06.log`, `/tmp/opencode/vscode-review-dQ43aA/a06-evidence.json`). Enforced by this check and `git diff --check`.
+  Done: source-only `5f5f308:TASKS.md`; native evidence provenance retained.
 - [x] **T004.5c — Consolidate the duplicate recording UI test helper.**
-  Retain one shared `tests/common/recording_ui.rs` recorder with ordered structured render/effect/prompt payload assertions. The `multiChoice` prompt remains: Lua `prompt.lua` and VSCode `prompt.js` consume it; `tests/data/client-contracts.json` retains selection, empty and cancel contracts. This is client/contract coverage, not evidence of a producing command. CustomRender's notification-wire coverage remains in both focused suites.
-  Done: `b5eb865`; enforced by `cargo test --lib presentation::custom`, `cargo test --test plain_core` and serialized full Linux regression gates recorded above.
+  Done: `b5eb865`. `multiChoice` has consumers, but no producing-command proof; native evidence remains provenance.
 - [x] **T002 wire-recorder — Complete.**
   Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Runtime recorder/security regressions remain in `tests/wirelog.rs`, exercised through `make test-rust FILTER="--test wirelog"`.
   Original acceptance: immutable `61370ad:TASKS_PART_SEVEN.md`. T002 capture slices, source hashes, native action limits and retired fixture-gate records: immutable `83f79f5:TASKS.md`; final historical Helix fixture work: `8476a8e`. These are provenance, not current enforcement or reproducible capture instructions.
