@@ -41,6 +41,10 @@ fn select_and_copy_uses_structured_commit_identity_and_cancel_is_read_only() {
             .effects
             .iter()
             .any(|effect| matches!(effect, Effect::Clipboard { text } if text == &old)));
+        assert_eq!(
+            magit_lsp::commands::required_effect("log.select-and-copy"),
+            Some("clipboard")
+        );
         assert!(result
             .effects
             .iter()

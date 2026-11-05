@@ -178,6 +178,10 @@ fn start_head_operation(
     command: &str,
     args: Value,
 ) -> Value {
+    assert_eq!(
+        magit_lsp::commands::required_effect(command),
+        Some("editDocument")
+    );
     eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
         "jsonrpc": "2.0",

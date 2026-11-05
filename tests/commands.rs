@@ -520,6 +520,30 @@ fn visit_reports_the_server_resolved_worktree_location() {
             column: 0,
         }]
     );
+    assert_eq!(
+        magit_lsp::commands::required_effect("common.visit"),
+        Some("visitFile")
+    );
+}
+
+#[test]
+fn copy_value_emits_registered_clipboard_effect() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_copy("line3 CHANGED");
+    let outcome = test.invoke_at("common.copy-value", Cursor { line, column: 0 });
+    assert!(outcome
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Clipboard { .. })));
+    assert_eq!(
+        magit_lsp::commands::required_effect("common.copy-value"),
+        Some("clipboard")
+    );
 }
 
 /// A section header has no file location, so visiting it must explain instead
