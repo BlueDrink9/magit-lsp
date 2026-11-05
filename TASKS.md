@@ -1689,3 +1689,5 @@ the command line and real colours.
    during the spike.
 
 ---
+- [x] **T120.3a — Add opt-in formatter hook installation and safety tests.**
+  Done: added opt-in `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; actual-commit tests cover failures without index/working-copy mutation, formatted success, installer conflicts/idempotence, missing-tool guidance and staged/range parity. Enforced by formatting tests. Next slice commands: `scripts/install-hooks.sh install` and `scripts/install-hooks.sh remove`.

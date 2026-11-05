@@ -1,0 +1,6 @@
+#!/bin/sh
+# Check staged source formatting before creating a commit.
+set -eu
+repo_root=$(git rev-parse --show-toplevel) || exit
+cd "$repo_root"
+exec python3 scripts/format.py --staged

@@ -75,6 +75,26 @@ class FormatIntegration(unittest.TestCase):
         ranged = self.check("--base", base)
         self.assertEqual(staged.returncode, ranged.returncode, staged.stdout + ranged.stdout)
 
+    def test_bad_staged_and_committed_range_have_same_result_with_rename_and_spaces(self):
+        self.tools()
+        self.write("clients/old name.ts", "const x:number=1\n")
+        self.git("add", "clients/old name.ts")
+        staged = self.check("--staged")
+        self.assertNotEqual(staged.returncode, 0, staged.stdout)
+        self.git("commit", "-qm", "bad source")
+        base = self.git("rev-parse", "HEAD^").decode().strip()
+        self.git("mv", "clients/old name.ts", "clients/new name.ts")
+        ranged = self.check("--base", base)
+        self.assertEqual(staged.returncode, ranged.returncode, staged.stdout + ranged.stdout)
+
+    def test_syntax_error_fails_with_formatter_output(self):
+        self.tools()
+        self.write("clients/broken.js", "const = ;\n")
+        self.git("add", "clients/broken.js")
+        result = self.check("--staged")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Prettier 3.9.10", result.stdout)
+
     def test_changed_rust_invokes_workspace_command(self):
         self.write("Cargo.toml", '[workspace]\nmembers = ["crates/a"]\nresolver = "2"\n')
         self.write("crates/a/Cargo.toml", '[package]\nname="a"\nversion="0.1.0"\nedition="2021"\n')
