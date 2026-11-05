@@ -47,7 +47,6 @@ fn message(level: MessageLevel, text: &str, hint: Option<&str>, detail: Option<&
         text: text.to_string(),
         hint: hint.map(str::to_string),
         detail: detail.map(str::to_string),
-        process_log_id: None,
     }
 }
 
@@ -150,13 +149,7 @@ fn a_real_non_fast_forward_push_is_readable_without_a_process_log() {
     );
 
     let effect = Effect::from_git_failure(&failure);
-    let Effect::Message {
-        text,
-        hint,
-        process_log_id,
-        ..
-    } = &effect
-    else {
+    let Effect::Message { text, hint, .. } = &effect else {
         panic!("expected a message effect, got {effect:?}");
     };
     assert_eq!(
@@ -165,14 +158,10 @@ fn a_real_non_fast_forward_push_is_readable_without_a_process_log() {
         failure.stderr
     );
     assert!(hint.is_none());
-    assert!(
-        process_log_id.is_none(),
-        "the link to a process log is reserved"
-    );
     let wire = serde_json::to_value(&effect).expect("serialise the effect");
     assert!(
         wire.get("processLogId").is_none(),
-        "a reserved processLogId must stay off the wire: {wire}"
+        "internal process-log identifiers must stay off the wire: {wire}"
     );
 
     // The mapping follows stderr, not the particular exit code Git used.
@@ -180,7 +169,6 @@ fn a_real_non_fast_forward_push_is_readable_without_a_process_log() {
         let user = map_git_failure(exit_code, &failure.stderr, "push");
         assert_eq!(user.summary, *text, "exit code {exit_code}");
         assert!(user.hint.is_none());
-        assert!(user.process_log_id.is_none());
     }
 }
 
@@ -261,10 +249,14 @@ fn index_lock_failure_returns_a_message_effect_and_status() {
 
     assert_eq!(
         outcome.effects,
-        vec![message(MessageLevel::Error,
+        vec![message(
+            MessageLevel::Error,
             "Another Git process is running in this repository.",
-            Some("If no Git process is running, remove the stale .git/index.lock file and try again."),
-            None)]
+            Some(
+                "If no Git process is running, remove the stale .git/index.lock file and try again."
+            ),
+            None
+        )]
     );
     let status = GitRepo::open(tmp.path())
         .expect("open repo")

@@ -28,10 +28,6 @@ pub struct UserError {
     /// The command that failed, e.g. `git apply --cached`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    /// Reserved link to a captured process log.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    /// keep-for: TASKS §3.5/IMM-3 optional process-log link and R-3.7 integration; currently no error producer sets it.
-    pub process_log_id: Option<u64>,
 }
 
 /// Map a failed Git command to a user-facing error.
@@ -101,7 +97,6 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
             hint: None,
             detail: Some(stderr.trim_end().to_string()),
             command,
-            process_log_id: None,
         };
     };
 
@@ -110,7 +105,6 @@ pub fn map_git_failure(_exit_code: i32, stderr: &str, subcommand: &str) -> UserE
         hint,
         detail: None,
         command,
-        process_log_id: None,
     }
 }
 
@@ -134,7 +128,6 @@ impl Effect {
             text: user.summary,
             hint: user.hint,
             detail: user.detail,
-            process_log_id: user.process_log_id,
         }
     }
 

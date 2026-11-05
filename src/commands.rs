@@ -1096,7 +1096,6 @@ fn commit_operation(
                 text: "Nothing to commit (working tree clean)".to_string(),
                 hint: Some("Use `git commit --allow-empty` to record an empty commit.".to_string()),
                 detail: None,
-                process_log_id: None,
             });
             return Ok(CommandOutcome::default());
         }

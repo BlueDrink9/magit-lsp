@@ -17,7 +17,7 @@ pub enum MessageLevel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Effect {
-    /// Show a notification; `detail` and `processLogId` are optional extras.
+    /// Show a notification; `hint` and `detail` are optional extras.
     Message {
         level: MessageLevel,
         text: String,
@@ -25,9 +25,6 @@ pub enum Effect {
         hint: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
-        #[serde(rename = "processLogId", skip_serializing_if = "Option::is_none")]
-        /// keep-for: TASKS §3.5/IMM-3 recorded optional process-log link; current constructors leave it None.
-        process_log_id: Option<u64>,
     },
     /// The key is not bound here; perform its normal editor behaviour.
     PassThrough { key: String },
@@ -147,7 +144,6 @@ impl Effect {
             text: text.into(),
             hint: None,
             detail: None,
-            process_log_id: None,
         }
     }
 }

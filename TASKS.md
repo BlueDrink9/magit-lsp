@@ -32,7 +32,7 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T004.3b — Pin native UI verification to the freshly built server.**
   The isolated native driver drops parent environment variables and currently permits the same stale-release lookup already diagnosed for Lua tests. Set its default server to this checkout's debug binary, retain explicit scenario overrides and make native test/tour targets build first; verify harness tests and text-native tour against the strict protocol.
   Done: pinned isolated driver environment, retained `extra_env` override and made `ui-test`/`ui-tour` depend on `build`. Enforced by `make ui-unit && timeout --kill-after=10s 900s make ui-tour && git diff --check`.
-- [ ] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
+- [x] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
   Confirm both actual clients send the new typed block, including the bundled VSCode omission observed in T002. Use supported languageclient hooks and only honored VSCode placements; retain focused native Linux text/wire evidence and test both actual declarations against server validation.
 - [x] **T004.4a — Register and natively verify the real VSCode declaration feature.**
   Replace the unsupported initialize middleware with the installed languageclient StaticFeature API, declare only honored main placement and correct fake-client initialization to model that real API. Verify the actual isolated VSCodium extension host sends the strict block and receives rich service; preserve authentic client identity and immutable older captures.
@@ -42,6 +42,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Use the isolated bundled native driver with the freshly built server and opt-in wirelog. Record the exact emitted strict block, client/source identity, rich-render response, text inspection and owned cleanup in the existing capability evidence document; preserve historical captures.
 - [x] **T004.4b2 — Test the actual native client blocks against strict deserialization.**
   Extract current Neovim and VSCode declarations from their genuine recorder sources into one new provenance-bearing fixture. Enforce both with production serde/negotiation tests and reject schema drift mutations; document that source equality and native causality are manually verified, not live CI recapture.
+- [x] **T004.5a — Remove unused process-log identifiers from readable errors.**
+  Audit actual Rust, client and test consumers, then remove reserved `process_log_id`/`processLogId` error metadata that is never populated or consumed. Preserve readable Git failure messages, hints/details and process-log functionality; keep a regression proving no internal identifier leaks onto the wire.
+- [ ] **T004.5b — Remove the unproduced OpenView effect alias.**
+  Confirm real producers use PushView, then remove OpenView from protocol, presentation/server matches and both client dispatchers without changing push/root semantics. Preserve real prompt consumers and defer unrelated UI surface changes.
+- [ ] **T004.5c — Consolidate the duplicate recording UI test helper.**
+  Retain one shared RecordingUi under test helpers and preserve structured notification/delivery coverage. Audit PromptUi multi-choice's actual client/test consumers before considering deletion; record retained contracts rather than treating generic dispatch as a command producer.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
 - [x] **T002.3a — Capture the five remaining native Neovim input actions.**
