@@ -39,7 +39,11 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `4537ef1` → ok.
 - [x] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the preceding independently checked migrations and navigation pass.
   - Done: containing commit.
-- [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Replace dated checkpoint reports and resolved review/bugfix narratives with compact checked records and immutable provenance; preserve live constraints.
+- [x] **Documentation cleanup — Repair recent review completion pointers.** Correct source-snapshot labels and retain original completion and verification references in the first 28 compact review records.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `7c0bc3c` → ok: docs-check.
+- [ ] **Documentation cleanup — Repair older review completion pointers.** Correct source-snapshot labels in the remaining 28 compact review records, then finish the review-history cleanup audit.
+- [ ] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Replace dated checkpoint reports and resolved review/bugfix narratives with compact checked records and immutable provenance; preserve live constraints. Repair the completion index before closing: snapshot provenance is not an implementation commit.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `d9ea816` → ok: docs-check; TASKS.md 970→612 lines, unchecked blocks 136→136.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance.
@@ -308,34 +312,34 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 Immutable detail and original verification: `d9ea816:TASKS.md`. These records are closed, not execution instructions.
 
-- [x] T006 gate — Wire shared editor models into all fake-editor consumers. — `d9ea816`.
-- [x] Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds. — `d9ea816`.
-- [x] Checkpoint — Restore full regressions after strict wire migration. — `d996e19`.
-- [x] Checkpoint — Establish the staged-successor failure cause. — `d9ea816`.
-- [x] Checkpoint — Align staging-cursor regression with the source-successor contract. — `d9ea816`.
-- [x] Checkpoint — Restore log-menu key routing and native passthrough. — `d9ea816`.
-- [x] Checkpoint — Restore full Git-backend hunk comparisons. — `d9ea816`.
-- [x] Checkpoint — Resolve Rust formatting-gate drift. — `d9ea816`.
-- [x] [P1] Correlate scripted prompt responses with real server replies — `d9ea816`.
-- [x] [P1] Enforce static keymap delivery in the strict checker — `d9ea816`.
-- [x] [P2] Put metadata-only rich rendering in the shared contract vectors — `d9ea816`.
-- [x] [P2] Refresh the T006 accumulated-work gate totals — `d9ea816`.
-- [x] [P1] Pin Neovim stale-apply entry ordering — `d9ea816`.
-- [x] [P1] Prove the real Plain apply pipeline becomes ready — `d9ea816`.
-- [x] [P2] Repair T005 completion provenance and open-phase wording — `d9ea816`.
-- [x] [P2] Make capability-match appendix generation exhaustive — `d9ea816`.
-- [x] [P1] Make the secret-only declaration test exercise prompt capabilities — `78b6f49`.
-- [x] [P1] Remove retired capability modes from current client contracts — `db288e4`.
-- [x] [P1] Report checker failures without calling them findings — `d9ea816`.
-- [x] [P1] Model the real VSCode entry graph in Knip — `d9ea816`.
-- [x] [P1] Check Lua against Neovim's actual LuaJIT standard — `d9ea816`.
-- [x] [P1] Complete marker ownership and baseline reconciliation. — `d9ea816`.
-- [x] [P1] Give every retained hygiene finding an owner or reason — `d9ea816`.
-- [x] [P2] Make hygiene tests portable and prove checker working directories — `caf5588`.
-- [x] [P1] Finish native Helix smoke shutdown and recipe verification. — `d9ea816`.
-- [x] [P1] Make the Helix capture recipe preserve verifiable evidence — `d9ea816`.
-- [x] [P2] Enforce trace and initialize-preset consistency — `d9ea816`.
-- [x] [P2] State that five T034 action classes remain missing — `e34ce5a`.
+- [x] T006 gate — Wire shared editor models into all fake-editor consumers. — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
+- [x] Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint — Restore full regressions after strict wire migration. — Done: `d996e19`.
+- [x] Checkpoint — Establish the staged-successor failure cause. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint — Align staging-cursor regression with the source-successor contract. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint — Restore log-menu key routing and native passthrough. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint — Restore full Git-backend hunk comparisons. — Source-only: `d9ea816:TASKS.md`.
+- [x] Checkpoint — Resolve Rust formatting-gate drift. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Correlate scripted prompt responses with real server replies — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
+- [x] [P1] Enforce static keymap delivery in the strict checker — Source-only: `d9ea816:TASKS.md`; Verified refs: `02b7d19`.
+- [x] [P2] Put metadata-only rich rendering in the shared contract vectors — Source-only: `d9ea816:TASKS.md`; Verified refs: `43480bc`.
+- [x] [P2] Refresh the T006 accumulated-work gate totals — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
+- [x] [P1] Pin Neovim stale-apply entry ordering — Source-only: `d9ea816:TASKS.md`; Verified refs: `6c95b50`.
+- [x] [P1] Prove the real Plain apply pipeline becomes ready — Source-only: `d9ea816:TASKS.md`; Verified refs: `e46632b`.
+- [x] [P2] Repair T005 completion provenance and open-phase wording — Source-only: `d9ea816:TASKS.md`; Verified refs: `ae5b78d`.
+- [x] [P2] Make capability-match appendix generation exhaustive — Source-only: `d9ea816:TASKS.md`; Verified refs: `5e61d9f`.
+- [x] [P1] Make the secret-only declaration test exercise prompt capabilities — Done: `78b6f49`.
+- [x] [P1] Remove retired capability modes from current client contracts — Done: `db288e4`.
+- [x] [P1] Report checker failures without calling them findings — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Model the real VSCode entry graph in Knip — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Check Lua against Neovim's actual LuaJIT standard — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Complete marker ownership and baseline reconciliation. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Give every retained hygiene finding an owner or reason — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Make hygiene tests portable and prove checker working directories — Done: `caf5588`, `0550f36`, `33d0554`.
+- [x] [P1] Finish native Helix smoke shutdown and recipe verification. — Source-only: `d9ea816:TASKS.md`.
+- [x] [P1] Make the Helix capture recipe preserve verifiable evidence — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] Enforce trace and initialize-preset consistency — Source-only: `d9ea816:TASKS.md`.
+- [x] [P2] State that five T034 action classes remain missing — Original ref: `e34ce5a`.
 - [x] [P1] Serialize shared wirelogs on every tested platform — `d9ea816`.
 - [x] [P1] Open shared logs with Windows lock-compatible access — `d9ea816`.
 - [x] [P1] Make identity replacement byte-index safe — `d9ea816`.
