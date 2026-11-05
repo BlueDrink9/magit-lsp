@@ -10,6 +10,8 @@ end
 
 local repo = vim.env.PLAIN_REPO
 local server = vim.env.PLAIN_SERVER
+local server_wrapper = vim.env.MAGIT_LSP_SERVER_WRAPPER
+if server_wrapper then server = server_wrapper end
 assert(repo and server)
 
 vim.api.nvim_create_autocmd('VimEnter', {
