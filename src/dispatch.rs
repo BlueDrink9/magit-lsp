@@ -8,6 +8,7 @@ use serde_json::Value;
 
 /// A content-addressed action target tied to an existing server node identity.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActionTarget {
     /// Existing path/content-derived tree node identity.
     pub node_id: String,

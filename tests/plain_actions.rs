@@ -6,8 +6,27 @@ mod fixtures;
 mod stdio;
 
 use fake_editor::{FakeEditor, Profile};
+use magit_lsp::dispatch::ActionTarget;
 use magit_lsp::errors::STALE_VIEW;
 use serde_json::{json, Value};
+
+#[test]
+fn action_target_uses_strict_camel_case_wire_fields() {
+    let target = ActionTarget {
+        node_id: "unstaged/f.txt".into(),
+        mutation_hash: "hash".into(),
+        selection: None,
+    };
+    let wire = serde_json::to_value(&target).unwrap();
+    assert_eq!(wire["nodeId"], "unstaged/f.txt");
+    assert_eq!(wire["mutationHash"], "hash");
+    assert!(wire.get("node_id").is_none());
+    assert!(serde_json::from_value::<ActionTarget>(json!({
+        "node_id": "unstaged/f.txt",
+        "mutation_hash": "hash"
+    }))
+    .is_err());
+}
 
 fn next_apply(server: &mut stdio::TestServer) -> Value {
     loop {
@@ -356,7 +375,7 @@ fn action_ids(server: &mut stdio::TestServer, uri: &str, range: Value, id: i64) 
         .unwrap()
         .iter()
         .filter_map(|a| {
-            a["command"]["arguments"][0]["target"]["node_id"]
+            a["command"]["arguments"][0]["target"]["nodeId"]
                 .as_str()
                 .map(str::to_owned)
         })
@@ -384,7 +403,10 @@ fn action_targets(
         .map(|action| {
             let args = &action["command"]["arguments"][0];
             let target = &args["target"];
-            let content_node = target["node_id"].as_str().map(str::to_owned);
+            let content_node = target["mutationHash"]
+                .as_str()
+                .and_then(|_| target["nodeId"].as_str())
+                .map(str::to_owned);
             let semantic_view = target["viewId"].as_str().map(str::to_owned);
             assert_ne!(
                 content_node.is_some(),
@@ -923,7 +945,7 @@ fn binary_code_actions_are_snapshot_matched_and_reject_invalid_positions() {
     );
     assert!(actions.iter().all(|action| action["disabled"].is_null()));
     assert!(actions.iter().any(
-        |action| action["command"]["arguments"][0]["target"]["node_id"].is_string()
+        |action| action["command"]["arguments"][0]["target"]["nodeId"].is_string()
             && action["command"]["arguments"][0]["viewGeneration"].is_number()
             && action["command"]["arguments"][0]["documentUri"] == uri
     ));
@@ -1062,7 +1084,7 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         assert!(
             actions
                 .iter()
-                .any(|action| action["command"]["arguments"][0]["target"]["node_id"].is_string()),
+                .any(|action| action["command"]["arguments"][0]["target"]["nodeId"].is_string()),
             "content target missing"
         );
         let payload: Vec<_> = actions
@@ -1152,7 +1174,7 @@ fn section_stage_is_fresh_bulk_and_rejects_tampered_side() {
     let mut forged = args.clone();
     let staged_section =
         offered_section(&mut server, &editor, &uri, "Staged", "status.unstage", 604);
-    forged["target"]["node_id"] = staged_section["target"]["node_id"].clone();
+    forged["target"]["nodeId"] = staged_section["target"]["nodeId"].clone();
     let before = repo_state(&repo);
     let index_before = repo.git(&["ls-files", "--stage"]);
     assert_refused(&execute_offered(&mut server, &mut editor, forged, 602));

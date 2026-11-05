@@ -15,6 +15,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
+- [x] **T004.1 — Use camelCase content-action targets on the wire.**
+  Change `ActionTarget` serialization/deserialization to `nodeId` and `mutationHash`, update live Plain test payloads and assert old snake_case payloads are rejected. Preserve content-addressed identity, selection and stale-target protections; do not alter historical native trace fixtures.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
 - [x] **T002.3a — Capture the five remaining native Neovim input actions.**
