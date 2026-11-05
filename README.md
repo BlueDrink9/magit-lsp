@@ -409,7 +409,7 @@ shows one message naming the file and line.
 ## Keys (defaults, subject to customization)
 
 The client hard-codes no keys: these are the `vim` profile defaults from
-TASKS.md §5. Select `standard` with `setup({ profile = 'standard' })`, or
+[docs/KEYMAPS.md](docs/KEYMAPS.md#5-default-keymaps-profiles). Select `standard` with `setup({ profile = 'standard' })`, or
 rebind in `config.toml`.
 
 | Key        | Action                                                   |

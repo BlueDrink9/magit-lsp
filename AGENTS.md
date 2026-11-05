@@ -50,8 +50,10 @@ Start in these components:
   [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Protocol reference (§4)
   lives in [`docs/PROTOCOL.md`](./docs/PROTOCOL.md),
   with detailed client behavior in [`docs/CLIENT_SPEC.md`](./docs/CLIENT_SPEC.md).
-  Keymaps (§5), views (§6), testing (§8) and open questions (§9) remain in
-  TASKS.md.
+  Keymaps ([§5](./docs/KEYMAPS.md#5-default-keymaps-profiles)), views
+  ([§6](./docs/VIEWS.md#6-view-catalog)), testing
+  ([§8](./docs/TESTING.md#8-testing-strategy)) and open questions
+  ([§9](./docs/OPEN_QUESTIONS.md#9-open-questions)) live in maintained docs.
   Read only relevant sections; immutable historical sources are
   provenance, not proof of current behaviour. Do not duplicate detailed design
   or progress history here.

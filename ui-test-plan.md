@@ -16,7 +16,7 @@ Run `make plain-neovim` to build a fresh server binary and exercise both final-n
 
 - [ ] Write the failing scenario first, commit nothing that "fixes" a bug without one.
 - [ ] Never use `sleep` in a test. Wait for the client's `idle` state (§A.3).
-- [ ] Every test runs against deterministic fixtures (the §8.2 git environment) and fixed terminal sizes.
+- [ ] Every test runs against deterministic fixtures ([§8.2 Git environment](docs/TESTING.md#82-determinism)) and fixed terminal sizes.
 - [ ] Every scenario that touches menus runs at **100x30 and 80x24**, under both profiles (`standard`, `vim`).
 - [ ] The final report for a task lists the scenario files, their results, and the paths of the saved `.screen` files.
 - [ ] Known bugs are tracked as scenarios marked `xfail: <bug id>`. The runner reports them as XFAIL. If an `xfail` scenario passes, the runner **fails** until the tag is removed (this forces the fix to remove it).

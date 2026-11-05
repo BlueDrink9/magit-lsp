@@ -47,8 +47,11 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into [`docs/TESTING.md`](docs/TESTING.md) and [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), update maintained links, and audit the parent migration acceptance.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `e4f259d` → ok: docs-check.
-- [ ] **Documentation cleanup — Finish maintained reference navigation.** Update repository entry points and maintained cross-links after all reference moves, preserving unrelated dirty documentation changes, and verify the complete maintained documentation set.
-- [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the preceding independently checked migrations and navigation pass.
+- [x] **Documentation cleanup — Finish maintained reference navigation.** Update repository entry points and maintained cross-links after all reference moves, preserving unrelated dirty documentation changes, and verify the complete maintained documentation set.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `4537ef1` → ok.
+- [x] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the preceding independently checked migrations and navigation pass.
+  - Done: containing commit.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links.
 
 - [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Complete and verify the extracted configurable pump and dynamic request correlation, including the standalone action consumer. No real-server didOpen conformance claim in this slice.
@@ -297,13 +300,13 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 0. [Decisions already made](docs/ARCHITECTURE.md#0-decisions-already-made)
 1. [Glossary](docs/ARCHITECTURE.md#1-glossary)
 2. [Completed correctness contracts](docs/ARCHITECTURE.md#2-completed-correctness-contracts)
-3. Design decisions (expanded)
-4. Protocol reference
-5. Default keymaps (profiles)
-6. View catalog
+3. [Design decisions](docs/ARCHITECTURE.md#3-design-decisions-expanded)
+4. [Protocol reference](docs/PROTOCOL.md#4-protocol-reference)
+5. [Default keymaps (profiles)](docs/KEYMAPS.md#5-default-keymaps-profiles)
+6. [View catalog](docs/VIEWS.md#6-view-catalog)
 7. Numbered implementation queue (this file; [scope archive](./TASKS_PART_SEVEN.md))
 8. [Testing strategy](docs/TESTING.md#8-testing-strategy)
-9. Open questions
+9. [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions)
 
 ---
 
