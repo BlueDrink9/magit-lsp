@@ -49,9 +49,18 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   Done: `d80186f`.
   - Verified: `make ui-unit` @ 37fb07d → ok: ui-unit
 
+- [x] **Trace cleanup 3b — Parameterize shared native terminal size.**
+  Let retained acceptance preserve its existing 120x100 terminal through the shared native-session API. Keep defaults for existing callers.
+  test: driver regressions assert explicit terminal dimensions and reject invalid sizes.
+  - Verified: `make ui-unit` @ d610fec → ok: ui-unit
+
 - [ ] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
   Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
-  test: focused harness regressions and retained native acceptance pass. check: owned processes and sockets are cleaned on success and failure; record Linux-only evidence and other-platform limits.
+  test: focused harness regressions pass. check: the Make workflow exercises the existing native assertions with fresh binary and configurable evidence paths; owned-process checks replace broad process matching.
+
+- [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
+  Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
+  check: record exact native results and owned-process/socket cleanup for success and failure, plus Linux-only evidence and Windows/macOS CI limits. Complete the parent only after the cleanup gate.
 
 ## Ad hoc
 

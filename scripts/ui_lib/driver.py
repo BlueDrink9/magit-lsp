@@ -852,17 +852,19 @@ def native_session(
     init: Path,
     initial_file: Path,
     env: dict[str, str],
+    size: str = f"{DEFAULT_SIZE[0]}x{DEFAULT_SIZE[1]}",
 ):
     """Run Neovim for an externally prepared repo and always clean up its session.
 
     `env` is the complete environment passed to Neovim. Socket and launcher state
     live in a short temporary path, independent of repository and home paths.
     """
+    cols, rows = parse_size(size)
     check_tools()
     temporary = tempfile.TemporaryDirectory(prefix="magit-ui-")
     directory = Path(temporary.name)
     run_id = new_run_id()
-    run = Run(run_id, "external", "native", DEFAULT_SIZE[0], DEFAULT_SIZE[1], "ansi",
+    run = Run(run_id, "external", "native", cols, rows, "ansi",
               str(directory), str(repo), str(home), str(directory / "nvim.sock"),
               str(directory / "trace.jsonl"), f"magit-ui-{run_id}")
     try:

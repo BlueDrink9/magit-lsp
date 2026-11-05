@@ -606,12 +606,12 @@ class NativeSessionTest(unittest.TestCase):
             with (
                 patch.object(driver, "check_tools"),
                 patch.object(driver, "_launcher_script", side_effect=launcher),
-                patch.object(driver, "_tmux"),
+                patch.object(driver, "_tmux") as tmux,
                 patch.object(driver, "_wait_for_socket", side_effect=driver.StartupError("not ready")),
                 patch.object(driver, "stop") as stop,
             ):
                 with self.assertRaisesRegex(driver.StartupError, "not ready"):
-                    with driver.native_session(repo, home, init, initial, {"CUSTOM": "yes"}):
+                    with driver.native_session(repo, home, init, initial, {"CUSTOM": "yes"}, size="120x100"):
                         self.fail("readiness failure must not enter session")
             run = launched["run"]
             self.assertEqual(launched["env"], {"CUSTOM": "yes"})
@@ -619,8 +619,22 @@ class NativeSessionTest(unittest.TestCase):
             self.assertEqual(launched["file"], initial)
             self.assertEqual(run.repo_path, repo)
             self.assertEqual(run.home_path, home)
+            self.assertEqual((run.cols, run.rows), (120, 100))
+            self.assertTrue(any(call_args.args[1:3] == ("new-session", "-d") and call_args.args[5:9] == ("-x", "120", "-y", "100") for call_args in tmux.call_args_list))
             self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
             stop.assert_called_once_with(run)
+
+    def test_invalid_size_is_rejected_before_launch(self) -> None:
+        with (
+            patch.object(driver, "check_tools"),
+            patch.object(driver, "_launcher_script") as launcher,
+            patch.object(driver, "_tmux") as tmux,
+        ):
+            with self.assertRaises(driver.DriverError):
+                with driver.native_session(Path("repo"), Path("home"), Path("init"), Path("start"), {}, size="bad"):
+                    self.fail("invalid size must not enter session")
+        launcher.assert_not_called()
+        tmux.assert_not_called()
 
 
 if __name__ == "__main__":
