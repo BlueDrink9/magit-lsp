@@ -1,0 +1,77 @@
+[
+  {
+    "client": {
+      "name": "Neovim",
+      "version": "0.12.6"
+    },
+    "magit": {
+      "effects": [
+        "visitFile",
+        "editDocument",
+        "clipboard"
+      ],
+      "keys": "dynamic",
+      "layout": [
+        "main",
+        "side",
+        "bottom",
+        "float"
+      ],
+      "modifiers": "basic",
+      "prompts": [
+        "confirm",
+        "text",
+        "choice",
+        "multiChoice",
+        "secret"
+      ],
+      "v": 1
+    },
+    "source": {
+      "path": "/tmp/opencode/t004-neovim/raw.jsonl",
+      "pid": 833505,
+      "row": 1,
+      "sha256": "1a497a77373707ab68583a37ed431f4b9d7ae35d94159dd1b695207aae60251e"
+    },
+    "producer": {
+      "path": "lua/magit-lsp/config.lua",
+      "sha256": "e2cdd00a28865ac8589a5fd8aa827685d1e0b57e50c6074b02d13381f022259f"
+    }
+  },
+  {
+    "client": {
+      "name": "VSCodium",
+      "version": "1.140.0"
+    },
+    "magit": {
+      "effects": [
+        "visitFile",
+        "editDocument",
+        "clipboard"
+      ],
+      "keys": "static",
+      "layout": [
+        "main"
+      ],
+      "modifiers": "full",
+      "prompts": [
+        "confirm",
+        "text",
+        "choice",
+        "multiChoice",
+        "secret"
+      ],
+      "v": 1
+    },
+    "source": {
+      "path": "/tmp/opencode/t004-vscode/raw.jsonl",
+      "pid": 525743,
+      "row": 1,
+      "sha256": "7a6761ec1cfa19b9de0b972eba434e2babf2e7930c94c2fc162fb7eb46af0024"
+    },
+    "producer": {
+      "path": "clients/vscode/lib/session.js",
+      "sha256": "03570767518c8bb8573a40281a70cb0baf70cfba0e03e0f2bf479e154bd48055"
+    }
+  }
+]

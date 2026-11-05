@@ -36,11 +36,11 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Confirm both actual clients send the new typed block, including the bundled VSCode omission observed in T002. Use supported languageclient hooks and only honored VSCode placements; retain focused native Linux text/wire evidence and test both actual declarations against server validation.
 - [x] **T004.4a — Register and natively verify the real VSCode declaration feature.**
   Replace the unsupported initialize middleware with the installed languageclient StaticFeature API, declare only honored main placement and correct fake-client initialization to model that real API. Verify the actual isolated VSCodium extension host sends the strict block and receives rich service; preserve authentic client identity and immutable older captures.
-- [ ] **T004.4b — Validate both current native client declarations against the typed schema.**
+- [x] **T004.4b — Validate both current native client declarations against the typed schema.**
   Capture the current bundled Neovim declaration and retain focused native text/wire evidence for both clients. Test actual emitted blocks against strict server deserialization, keeping historical trace presets immutable and T004 open for its remaining surface/command/emitter audit.
 - [x] **T004.4b1 — Retain current native Neovim declaration evidence.**
   Use the isolated bundled native driver with the freshly built server and opt-in wirelog. Record the exact emitted strict block, client/source identity, rich-render response, text inspection and owned cleanup in the existing capability evidence document; preserve historical captures.
-- [ ] **T004.4b2 — Test the actual native client blocks against strict deserialization.**
+- [x] **T004.4b2 — Test the actual native client blocks against strict deserialization.**
   Extract current Neovim and VSCode declarations from their genuine recorder sources into one new provenance-bearing fixture. Enforce both with production serde/negotiation tests and reject schema drift mutations; document that source equality and native causality are manually verified, not live CI recapture.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.

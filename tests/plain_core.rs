@@ -302,6 +302,44 @@ fn rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_sc
 }
 
 #[test]
+fn current_native_client_capabilities_are_strictly_negotiated() {
+    let records: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/current-client-capabilities.json")).unwrap();
+    assert_eq!(records.len(), 2);
+    for record in records {
+        let block = record["magit"].clone();
+        let declaration: MagitCapabilities = serde_json::from_value(block.clone()).unwrap();
+        let Presentation::Rich(caps) = negotiate(&initialize(Some(block.clone()))).unwrap() else {
+            panic!("native client must negotiate rich presentation")
+        };
+        assert_eq!(caps.keys, declaration.keys);
+        assert_eq!(caps.modifiers, declaration.modifiers);
+        assert_eq!(caps.layout, declaration.layout);
+        assert!(!caps.layout.is_empty());
+        match record["client"]["name"].as_str().unwrap() {
+            "Neovim" => {
+                assert_eq!(caps.keys, KeymapDelivery::Dynamic);
+                assert_eq!(caps.modifiers, KeyModifiers::Basic);
+                assert!(caps.supports_placement("bottom"));
+            }
+            "VSCodium" => {
+                assert_eq!(caps.keys, KeymapDelivery::Static);
+                assert_eq!(caps.modifiers, KeyModifiers::Full);
+                assert_eq!(
+                    caps.layout,
+                    ["main"].into_iter().map(str::to_owned).collect()
+                );
+            }
+            name => panic!("unexpected recorded client {name}"),
+        }
+        let mut mutated = block;
+        mutated["removedOrUnknownField"] = json!(true);
+        assert!(serde_json::from_value::<MagitCapabilities>(mutated.clone()).is_err());
+        assert!(negotiate(&initialize(Some(mutated))).is_err());
+    }
+}
+
+#[test]
 fn unsupported_render_and_fold_modes_are_rejected() {
     let mut block = rich_block();
     block["render"] = json!("full");
