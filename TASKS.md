@@ -2,6 +2,9 @@
 
 Last review: fee95585a7e30a62b521deaa75a91f7f94828844
 
+Phase 2 accumulated-work checkpoint (2026-11-05): strict typed rich declarations, camelCase content targets, removal of unused runtime modes and the real VSCode StaticFeature declaration are implemented. Native VSCodium rendering/editing passed; Lua and native UI harnesses now select the freshly built debug server without changing production lookup. T004 and Phase 2 remain open: next is T004.4b, followed by the unused-surface, command-requirement and checked-emitter acceptance work.
+Sol 5.6 reviewed through `fee9558`; P1 shared wire fixtures and both P2 tests/fake anchors are fixed in `d996e19`, `a6b8329` and `f52431a`. Full Linux `make test FILTER=--no-fail-fast` passed after the helper correction; log `/tmp/opencode/phase-two-typed-checkpoint/test-after-helper-fix.log`. UI-unit, text-native UI tour, rustfmt, seven hygiene tests and report-only pinned hygiene checks passed; focused schema and VSCode checks passed after the final test/comment fixes. No P0 requires re-review. Existing P3 redundant generated-file absence assertions remain deferred. Windows/macOS remain CI follow-ups; no owned server or changes to the user's manifest/release work remain.
+
 Phase 1 complete (2026-11-05): T001–T003 implemented and accepted on Linux.
 Full `make test FILTER=--no-fail-fast`, rustfmt, seven hygiene unit tests and text-native UI tour passed; logs: `/tmp/opencode/phase-one-final/`. Sol 5.6 reviewed through `796a7f6`; P1 owned-server termination and P2 Git-configuration isolation were fixed in `a13f932`/`0828277`. Exact normal and injected native Helix recipes passed, including hostile caller Git configuration; twelve wirelog tests and format/diff checks passed after the documentation fixes. No owned server remains; the user's Cargo.toml checksum and unrelated release work are unchanged.
 Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 Lua warnings have owners or reasons, not debt-free acceptance. Windows/macOS execution remains for CI. No P0 requires re-review; deferred P3: redundant generated-file absence assertions in `tests/hygiene/test_hygiene.py`. Next named phase: Phase 2, starting T004.
@@ -136,7 +139,7 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 ## Bugfix
 
 - [x] **Checkpoint — Restore full regressions after strict wire migration.**
-  Full `make test FILTER=--no-fail-fast` failed `editor_bridge::a_commit_is_created_from_the_typed_message` (obsolete `folds` in shared rich helper) and `plain_render::binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo` (old `node_id` assertion). Implemented matching P1, preserving strict production validation. Focused affected suites pass; full gate rerun remains pending. Log `/tmp/opencode/phase-two-typed-checkpoint/test.log`.
+  Full `make test FILTER=--no-fail-fast` initially failed the obsolete shared rich fields and old `node_id` assertion. Done: `d996e19`, preserving strict production validation. Focused affected suites and the full five-tier rerun passed; logs `/tmp/opencode/phase-two-typed-checkpoint/test.log` and `test-after-helper-fix.log`.
 
 - [x] **Checkpoint — Establish the staged-successor failure cause.**
   Capture exact pre/post structured node identities, hunk IDs and rendered cursor for the single failing views case. Distinguish user folding, bounded overflow, metadata identity or cursor re-resolution using concrete output; retain a concise diagnosis and source paths before changing production behavior.
