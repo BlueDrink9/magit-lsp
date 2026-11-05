@@ -88,7 +88,7 @@ Cancellation is a client-to-server `window/workDoneProgress/cancel` notification
 
 Prompt kinds are `confirm` (boolean), `text` (string), `choice` (`{id}` or `{custom}`), and `multiChoice` (`{ids:[...]}`). All responses include `cancelled`; cancellation has no value requirement. Honor labels/defaults, choice item IDs and secret masking/no-history behavior where applicable (`src/protocol.rs`, `lua/magit-lsp/prompt.lua`, `clients/vscode/lib/prompt.js`).
 
-Effects serialize with camelCase `type` discriminators, e.g. `openView`, `pushView`, `popView`, `focusView`, `visitFile`, `editDocument`, `passThrough`, `clipboard`, `message`, `quit`—not Rust enum variant names. Messages carry level/text and optional hint/detail. Visit-file uses a resolved file URI and zero-based location. Rendering is not an effect. Implement each effect used by enabled commands with readable errors.
+Effects serialize with camelCase `type` discriminators, e.g. `pushView`, `popView`, `focusView`, `visitFile`, `editDocument`, `passThrough`, `clipboard`, `message`, `quit`—not Rust enum variant names. Messages carry level/text and optional hint/detail. Visit-file uses a resolved file URI and zero-based location. Rendering is not an effect. Implement each effect used by enabled commands with readable errors.
 
 ### Current real-file commit editing
 
@@ -169,7 +169,7 @@ These are client-specific, not parity guarantees. Consult the listed sources and
 
 `view/keymap` is `{viewId,scope,version,capture,bindings,mode,pending?,liveKeys?}` (actual camelCase `liveKeys`). A binding is `{command,keys,modes,label,status}`; `keys` lists alternative space-separated canonical chords; modes are `normal|visual`; status is `implemented|planned|unavailable`. Dynamic edit keymaps identify `runId` as `viewId`, though edits are not ordinary `view/open` views; confirmation uses the semantic executeCommand above. History commands are planned.
 
-Prompt kinds serialize `confirm|text|choice|multiChoice`; common required fields are `{promptId,kind,title}` and optional fields include `detail,yesLabel,noLabel,destructive,default,placeholder,secret,items,allowCustom,preselected,min,max` as applicable; no prompt `error` field exists. Values are boolean, string, `{id}`/`{custom}`, or `{ids:[...]}` by kind. `view/promptRespond` is `{promptId,cancelled,value?}`. Effects use camelCase `type`: `message` (`level`=`info|warn|error`, `text`, optional `hint/detail`), `passThrough{key}`, `clipboard{text}`, `openView{descriptor}`, `pushView{descriptor}`, `popView{viewId}`, `focusView{viewId}`, `visitFile{uri,line,column}` (all required; zero-based location), `editDocument`, `quit`. Progress is separate LSP traffic, never an effect.
+Prompt kinds serialize `confirm|text|choice|multiChoice`; common required fields are `{promptId,kind,title}` and optional fields include `detail,yesLabel,noLabel,destructive,default,placeholder,secret,items,allowCustom,preselected,min,max` as applicable; no prompt `error` field exists. Values are boolean, string, `{id}`/`{custom}`, or `{ids:[...]}` by kind. `view/promptRespond` is `{promptId,cancelled,value?}`. Effects use camelCase `type`: `message` (`level`=`info|warn|error`, `text`, optional `hint/detail`), `passThrough{key}`, `clipboard{text}`, `pushView{descriptor}`, `popView{viewId}`, `focusView{viewId}`, `visitFile{uri,line,column}` (all required; zero-based location), `editDocument`, `quit`. Progress is separate LSP traffic, never an effect. Root view creation uses the `view/open` request and its returned descriptor; `pushView` adds a view to the session stack, and `popView` returns to the prior view.
 
 Presentation differs: Neovim displays rendered menu buffers; VS Code may present structured menu data via QuickPick. VS Code pass-through replay and placement are limited/concrete client behavior, not universal parity. Buffer render/keymap notifications until the descriptor/effect is registered. Progress notifications may be emitted before the request response; deferred view notifications follow the response and can arrive before client-side view registration. Dynamic keymaps are complete replacements; do not infer new render versions from them.
 
@@ -240,7 +240,7 @@ Unavailable); `window.workDoneProgress`, `textDocument.completion`,
 `textDocument.foldingRange`, and `general.positionEncodings` gate those features.
 Key/title policy is configuration, not capability. Basic modifier filtering is
 pending implementation. Native folds are expanded; server folds are lazy. Full
-renders are still acknowledged. Mandatory effects are message/openView/pushView/
+renders are still acknowledged. Mandatory effects are message/pushView/
 popView/focusView/passThrough/quit; only listed effects/prompts/placements may
 be optional. Main-only layout retains the view stack. Optional initialize echo:
 `experimental.magit.effective` mode and reasons.

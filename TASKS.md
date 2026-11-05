@@ -44,16 +44,16 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Extract current Neovim and VSCode declarations from their genuine recorder sources into one new provenance-bearing fixture. Enforce both with production serde/negotiation tests and reject schema drift mutations; document that source equality and native causality are manually verified, not live CI recapture.
 - [x] **T004.5a — Remove unused process-log identifiers from readable errors.**
   Audit actual Rust, client and test consumers, then remove reserved `process_log_id`/`processLogId` error metadata that is never populated or consumed. Preserve readable Git failure messages, hints/details and process-log functionality; keep a regression proving no internal identifier leaks onto the wire.
-- [ ] **T004.5b — Remove the unproduced OpenView effect alias.**
+- [x] **T004.5b — Remove the unproduced OpenView effect alias.**
   Confirm real producers use PushView, then remove OpenView from protocol, presentation/server matches and both client dispatchers without changing push/root semantics. Preserve real prompt consumers and defer unrelated UI surface changes.
 - [x] **T004.5b1 — Remove the unproduced Rust OpenView effect variant.**
   Delete only `Effect::OpenView`, its dead matching branches and obsolete variant documentation; preserve the unrelated session `OpenView` state type and real PushView producers. Assert that PushView remains valid and the removed wire alias is rejected; client/documentation cleanup follows separately.
-- [ ] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
+- [x] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
   Keep existing PushView root/return semantics while removing both client aliases and normative OpenView effect documentation. Verify focused native Linux stack behavior in both clients; preserve unrelated dirty README changes and immutable historical captures.
 - [x] **T004.5b2a — Delete client effect aliases and verify native stack behavior.**
   Remove the two client OpenView dispatch aliases without changing existing PushView root propagation. Run the focused Neovim close/reopen scenario and VSCode A06 native stack checks; commit the already staged README-only alias correction without staging user release edits.
-- [ ] **T004.5b2b — Reconcile remaining public view-effect documentation.**
-  Remove the retired alias from CLIENT_SPEC and the canonical TASKS effect table, retaining PushView/pop/root semantics. Close the client/documentation and alias-removal parents only after this contract cleanup and the preceding native validation are complete.
+- [x] **T004.5b2b — Reconcile remaining public view-effect documentation.**
+  Remove the retired alias from CLIENT_SPEC and this effect table. Root creation uses `view/open` and its returned descriptor; PushView/pop retain stack semantics. Done: docs cleanup and native Neovim close/reopen plus VSCode A06 evidence (`/tmp/opencode/openview-alias-checkpoint/a06.log`, `/tmp/opencode/vscode-review-dQ43aA/a06-evidence.json`). Enforced by this check and `git diff --check`.
 - [ ] **T004.5c — Consolidate the duplicate recording UI test helper.**
   Retain one shared RecordingUi under test helpers and preserve structured notification/delivery coverage. Audit PromptUi multi-choice's actual client/test consumers before considering deletion; record retained contracts rather than treating generic dispatch as a command producer.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
@@ -629,8 +629,7 @@ ordinary linear code. Tests supply a `ScriptedUi`.
 | `type` | Fields | Client must |
 | --- | --- | --- |
 | `message` | `level: info/warn/error`, `text` (one line), `hint?`, `detail?` | Show a notification at that level; offer a way to open `detail` when present |
-| `openView` | `descriptor` (id, kind, uri, title, placement, mode, scope, capture) | Create a window/buffer/panel per `placement`, show it, attach the LSP client to it |
-| `pushView` | same as `openView` | As `openView`, remembering the previous view so `popView` returns to it |
+| `pushView` | `descriptor` (id, kind, uri, title, placement, mode, scope, capture) | Create a window/buffer/panel per `placement`, show it, attach the LSP client, and remember the previous view so `popView` returns to it |
 | `popView` | `viewId` | Close that view and focus the previous one |
 | `focusView` | `viewId` | Focus it |
 | `showDocument` | `uri`, `line?`, `column?` | Open a real file (standard `window/showDocument`) |
