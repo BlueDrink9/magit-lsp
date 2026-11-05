@@ -644,55 +644,57 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
     let disk_before = std::fs::read(&path).unwrap();
     let uri = format!("file://{}", path.display());
     let root_uri = format!("file://{}", repo.path().display());
-    let mut server = stdio::TestServer::spawn(&[]);
-    let mut initialize = stdio::initialize_message();
-    initialize["params"]["capabilities"] = json!({
-        "workspace": {"applyEdit": true, "workspaceEdit": {"documentChanges": true}},
-        "general": {"positionEncodings": ["utf-16"]}
-    });
-    initialize["params"]["workspaceFolders"] = json!([{"uri":root_uri,"name":"repo"}]);
-    server.send(initialize);
-    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
-    assert!(server.response_with_id(1)["result"]["capabilities"].is_object());
+    for (overrides, expected_format) in [(json!({}), "documentChanges"), (
+        json!({"quirks":{"assume-document-changes":false}}),
+        "changes",
+    )] {
+        let mut server = stdio::TestServer::spawn(&[]);
+        let mut initialize = stdio::initialize_message();
+        initialize["params"]["clientInfo"] = json!({"name":"Neovim","version":"0.12.6"});
+        initialize["params"]["initializationOptions"] = overrides;
+        initialize["params"]["capabilities"] = json!({
+            "workspace": {"applyEdit": true},
+            "general": {"positionEncodings": ["utf-16"]}
+        });
+        initialize["params"]["workspaceFolders"] = json!([{"uri":root_uri,"name":"repo"}]);
+        server.send(initialize);
+        server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+        assert!(server.response_with_id(1)["result"]["capabilities"].is_object());
 
-    let mut editor = FakeEditor::new(Profile::Standard);
-    server.send(editor.open(&uri, "stale editor text\n"));
-    let request = loop {
-        let message = server.recv_raw();
-        if message["method"] == "workspace/applyEdit" {
-            break message;
+        let mut editor = FakeEditor::new(Profile::Standard);
+        server.send(editor.open(&uri, "stale editor text\n"));
+        let request = loop {
+            let message = server.recv_raw();
+            if message["method"] == "workspace/applyEdit" {
+                break message;
+            }
+            assert_ne!(message["method"], "view/render", "Plain must not receive custom renders");
+        };
+        assert!(request["params"]["edit"][expected_format].is_object() || request["params"]["edit"][expected_format].is_array());
+        let opposite = if expected_format == "changes" { "documentChanges" } else { "changes" };
+        assert!(request["params"]["edit"][opposite].is_null());
+        let frames = editor.dispatch(&request);
+        assert!(frames.iter().any(|frame| frame["id"] == request["id"]));
+        assert!(frames.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+        assert!(editor.text(&uri).contains("line3 CHANGED"));
+        assert!(!editor.text(&uri).contains("stale"));
+        for frame in frames {
+            server.send(frame);
         }
-        assert_ne!(
-            message["method"], "view/render",
-            "Plain must not receive custom renders"
-        );
-    };
-    assert!(request["params"]["edit"]["documentChanges"].is_array());
-    let rendered = editor.dispatch(&request);
-    assert!(rendered
-        .iter()
-        .any(|frame| frame["method"] == "textDocument/didChange"));
-    assert!(editor.text(&uri).contains("line3 CHANGED"));
-    assert!(!editor.text(&uri).contains("stale"));
-    for frame in rendered {
-        server.send(frame);
-    }
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-        // The server's correlated response to applyEdit is observed through
-        // the same live stream; echoes are sent above in real client order.
-        if server
-            .sent
-            .iter()
-            .any(|frame| frame["method"] == "textDocument/didChange")
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline
+            && !server.sent.iter().any(|frame| frame["method"] == "textDocument/didChange")
         {
-            break;
+            std::thread::yield_now();
         }
-        std::thread::yield_now();
+        assert!(server.sent.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+        assert!(editor.text(&uri).contains("line3 CHANGED"));
+        assert_eq!(std::fs::read(&path).unwrap(), disk_before);
+        server.shutdown_and_exit();
+        let (status, messages) = server.finish_with_messages(Duration::from_secs(10));
+        assert!(status.success(), "{messages:?}");
+        assert!(messages.iter().all(|frame| frame["method"] != "view/render"));
     }
-    assert_eq!(std::fs::read(&path).unwrap(), disk_before);
-    server.shutdown_and_exit();
-    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]

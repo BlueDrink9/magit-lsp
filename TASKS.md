@@ -40,8 +40,12 @@ Historical trace/capture evidence and implementation records below describe the 
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
 - [x] **T120.2 — Implement staged-safe formatter checks.**
   Done: added `python3 scripts/format.py --staged` and `--base <commit>` with isolated index/HEAD snapshots, changed-source checks, pinned StyLua/Prettier and workspace Rust formatting. One-time disposable verification confirms staged-content checks preserve the index and working copy.
+- [x] **T120.3a — Add opt-in formatter hook installation.**
+  Done: added `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; one-time disposable verification checked install safety and real staged hook behavior.
+- [x] **T120.3a1 — Isolate missing-tool tests and preserve existing hook locations.**
+  Fix the missing-formatter test so it never deletes a binary through shared node_modules; restore locked dependencies. Resolve default hooks through Git for worktrees, preserve custom hooks, and give actionable missing-Python guidance.
 - [x] **T120.3b — Integrate formatter CI checks and contributor commands.**
-  Done: current Make/CI integration; enforced by `make format-check hooks-install hooks-remove`, `python3 scripts/format.py --staged`, and CI committed-range checks. One-time empty-tree and changed-range checks passed.
+  Add shared Make targets, committed-range CI checking and focused contributor documentation, without permanent formatter tests. Keep legacy-source normalization out of scope, close T120 after its children pass, and preserve concurrent work.
 - [x] **T120.3 — Wire formatter hooks, installation and CI.**
   Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets and contributor documentation. Run staged-content formatter checks in the hook and CI; use one-time disposable verification, not permanent formatter tests. Close T120 after all slices pass.
 
@@ -57,13 +61,13 @@ Historical trace/capture evidence and implementation records below describe the 
   Done: effective Plain and Rich capability metadata, validated overrides, and unrelated formatting restored. Enforced by `cargo test --test quirks --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`; real-server acceptance tests remain in T005.2b2.
 - [x] **T005.2b2a — Commit real initialize quirk acceptance tests.**
   Commit the already-passing real-server identity, override, metadata, invalid-config recovery and strict Rich schema tests. Outgoing edit-format proof remains explicitly owned by T005.2b2b.
-- [ ] **T005.2b2b — Prove quirk-controlled outgoing edit format.**
-  Extend `actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file` in `tests/plain_render.rs` to assert Neovim 0.12.6 sends documentChanges with the automatic quirk and changes when disabled, with documentChanges undeclared in both cases. Apply responses and verify final editor text, then close T005.2b2, T005.2b and T005.2. Existing documentChanges coverage does not prove these quirk variants.
-- [ ] **T005.2b2 — Prove effective quirk resolution through the real server.**
+- [x] **T005.2b2b — Prove quirk-controlled outgoing edit format.**
+  Done: real Plain server test proves Neovim 0.12.6 receives `documentChanges` automatically and `changes` with the quirk disabled, despite neither initialize declaring documentChanges. FakeEditor applies each response and sends response/echo frames; final editor text and unchanged `.magit` presentation file are asserted, with no custom render. Verified: `make test-rust FILTER="--test plain_render --test quirks --test plain_core --test server_async" @ d2faf01 → ok: rust`.
+- [x] **T005.2b2 — Prove effective quirk resolution through the real server.**
   Add real initialize/config recovery and behavior tests for known and unknown clients, explicit on/off overrides and strict rich negotiation. Complete T005.2b and T005.2 only after these production acceptance cases pass.
-- [ ] **T005.2b — Resolve and report production initialize quirks.**
+- [x] **T005.2b — Resolve and report production initialize quirks.**
   Consume layered settings and the registry at initialize, apply capability overrides and expose effective results; enforce production server behavior and strict rich negotiation in focused tests. Complete T005.2 after both children pass.
-- [ ] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
+- [x] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
   Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
 - [ ] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
   Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
@@ -1833,7 +1837,3 @@ the command line and real colours.
    during the spike.
 
 ---
-- [x] **T120.3a — Add opt-in formatter hook installation.**
-  Done: added `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; one-time disposable verification checked install safety and real staged hook behavior.
-- [x] **T120.3a1 — Isolate missing-tool tests and preserve existing hook locations.**
-  Resolve default hooks through Git for worktrees, preserve custom hooks, and give actionable missing-Python guidance; one-time disposable hook checks complete.
