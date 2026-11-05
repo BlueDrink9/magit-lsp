@@ -236,7 +236,8 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Constraints:** Do not change production server behavior, broaden the modeled Neovim version range, or claim new native evidence.
   - Verified: `make test-rust FILTER="--test plain_harness"` @ `6c95b50` → ok: rust
 
-- [ ] **[P1] Prove the real Plain apply pipeline becomes ready** (`tests/plain_render.rs:159-215`, `named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety`; `src/presentation/plain.rs:227-285`, `PlainDocument::change` and `PlainDocument::response`)
+- [x] **[P1] Prove the real Plain apply pipeline becomes ready** (`tests/plain_render.rs:159-215`, `named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety`; `src/presentation/plain.rs:227-285`, `PlainDocument::change` and `PlainDocument::response`)
+  - Verified: `make test-rust FILTER="--test plain_render"` @ e46632b → ok: rust
   - **Problem:** The real-server test proves text reconciliation and hash-gated actions, but never proves the controller left `Applying`. `action_snapshot` is hash-based and does not inspect `DocumentState`, so the final nonempty code action can pass even if response/echo handling leaves the pipeline stuck.
   - **Why it matters:** This violates correctness and test validity of the checked T005 workaround/universal-safety claim. A stuck controller would suppress later authoritative renders despite this acceptance test passing.
   - **Change:** After dispatching the retry response and exact echo, trigger a new authoritative server render in each existing known-disabled/unknown case, preferably by writing a watcher-visible worktree file. Require a subsequent one-document `workspace/applyEdit`, dispatch its response/echo, and assert the editor reaches the new authoritative text while `.magit` remains unchanged. Keep the pre-reconciliation empty-action and exact-hash action assertions.

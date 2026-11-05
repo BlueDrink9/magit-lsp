@@ -207,7 +207,14 @@ fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safe
             server.send(editor.edit(&uri, &authoritative));
             server.send(json!({"jsonrpc":"2.0","id":71,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
             assert!(!server.response_with_id(71)["result"].as_array().unwrap().is_empty());
+            let watcher_path = repo.path().join("retry-readiness-watcher.txt");
+            fixtures::write(&watcher_path, "retry readiness watcher\n");
+            let follow_up = next_edit(&mut server);
+            assert_eq!(follow_up["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+            for frame in editor.dispatch(&follow_up) { server.send(frame); }
+            assert!(editor.text(&uri).contains("retry-readiness-watcher.txt"));
             assert_eq!(std::fs::read(&path).unwrap(), b"disk sentinel\n");
+            assert_eq!(std::fs::read(&watcher_path).unwrap(), b"retry readiness watcher\n");
             server.shutdown_and_exit();
             assert!(server.finish(std::time::Duration::from_secs(10)).success());
         }
