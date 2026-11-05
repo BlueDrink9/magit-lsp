@@ -148,6 +148,9 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 
 ## Bugfix
 
+- [x] **Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds.**
+  Prior full regression passed build/Rust/Lua, then failed VSCode's disconnect-draft case while a parallel focused Lua target rebuilt the running server: Git's helper path contained `magit-lsp (deleted)`. Serialized `make vscode-test` passed build, VSCode and keybindings without concurrent builds; `cargo fmt --all -- --check` and `git diff --check` also passed. Log: `/tmp/opencode/current-declarations-checkpoint/vscode-serialized.log`. This does not claim a full `make test` rerun; cross-build lifecycle remains a follow-up.
+
 - [x] **Checkpoint — Restore full regressions after strict wire migration.**
   Full `make test FILTER=--no-fail-fast` initially failed the obsolete shared rich fields and old `node_id` assertion. Done: `d996e19`, preserving strict production validation. Focused affected suites and the full five-tier rerun passed; logs `/tmp/opencode/phase-two-typed-checkpoint/test.log` and `test-after-helper-fix.log`.
 
