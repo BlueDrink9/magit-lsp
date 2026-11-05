@@ -16,14 +16,7 @@ Formatter hook and manual Make command follow-up: see the [authoritative ad hoc 
 - [x] **Remove permanent formatter tests and retain one-time verification.**
   Remove the formatter/hook test suite as requested; verify the tools and staged-safe hook once in disposable repositories. Update T120 acceptance and CI scope accordingly; finish formatter setup, then stop without advancing unrelated roadmap work.
 
-- [x] **Trace cleanup audit — Decide retained tests and capture tooling.**
-  Investigate actual automated consumers and maintained infrastructure before changing scripts or fixtures. Record a concise keep/migrate/delete decision, coverage risks and ordered implementation slices for the immediate cleanup task below; do not preserve machinery merely because it records past work.
-  Done: `docs/design/trace-capture-strategy.md`; maps consumers, evidence boundaries, portability limits and dependency-ordered cleanup. No cleanup or native revalidation claimed.
-
-- [ ] **Investigate and rationalize trace/capture test infrastructure.**
-  Immediate priority, ahead of formatter work and T005: first establish ongoing purpose, actual consumers and coverage of embedded Python capture recipes and trace tests, including current quirk dependencies; decide what to retain, replace or delete before extracting anything.
-  Audit decision and ordered slices: [trace capture strategy](docs/design/trace-capture-strategy.md).
-  Heavily deduplicate justified tests and reuse maintained infrastructure; extract only necessary recipes into reproducible standalone tools, remove machine-specific paths and nonportable runtime assumptions, and delete unsupported or redundant machinery. Keep essential provenance distinct from runtime dependencies; verify on Linux and record other-platform CI limits.
+Historical trace/capture evidence and implementation records below describe the state at immutable Git revision `83f79f5cbf2e272a8be92673ef3c8bd41118c23e`; they are not active capture workflows. Current cleanup status is tracked only in the [authoritative queue](./TASKS_PART_SEVEN.md#immediate).
 
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
@@ -33,10 +26,6 @@ Formatter hook and manual Make command follow-up: see the [authoritative ad hoc 
   Done: current Make/CI integration; enforced by `make format-check hooks-install hooks-remove`, `python3 scripts/format.py --staged`, and CI committed-range checks. One-time empty-tree and changed-range checks passed.
 - [x] **T120.3 — Wire formatter hooks, installation and CI.**
   Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets and contributor documentation. Run staged-content formatter checks in the hook and CI; use one-time disposable verification, not permanent formatter tests. Close T120 after all slices pass.
-
-- [ ] **Investigate and rationalize trace/capture test infrastructure.**
-  Immediate priority, ahead of formatter work and T005: first establish ongoing purpose, actual consumers and coverage of embedded Python capture recipes and trace tests, including current quirk dependencies; decide what to retain, replace or delete before extracting anything.
-  Heavily deduplicate justified tests and reuse maintained infrastructure; extract only necessary recipes into reproducible standalone tools, remove machine-specific paths and nonportable runtime assumptions, and delete unsupported or redundant machinery. Keep essential provenance distinct from runtime dependencies; verify on Linux and record other-platform CI limits.
 
 - [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
   Done: workspace formatting passes; no errors reproduced. Deferred implementation: T120 formatter-pre-commit. Enforced now by `cargo fmt --all -- --check`.

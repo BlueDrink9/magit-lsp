@@ -82,6 +82,11 @@ Last review: pending trace-cleanup gate at `6825e11`; substantial fixture retire
   - Verified: `make ui-unit` @ 25f7e27 → ok: ui-unit; missing-role rejection passes.
   - Verified: recorded native success and controlled `/bin/false` failure reports for both newline variants contain editor/server roles, `cleanup_verified=true`, `remaining_owned_pids=[]`, `nvim_socket_remains=false` and `tmux_session_remains=false`.
 
+- [x] **Trace cleanup 3c1 — Commit legacy migration and retained workflow guidance.**
+  Replace duplicate legacy task/audit records with the queue link, label immutable historical capture evidence, and document the maintained native Make command and arguments. Retain Linux-only evidence limits and do not add another strategy document.
+  check: no active audit-document reference or embedded capture program remains; only live declaration fixtures remain. Preserve unrelated formatter hunks.
+  - Verified: `make ui-unit` @ 30de40d → ok: ui-unit; legacy references, retained workflow guidance and three live fixture declarations checked.
+
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
   Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
   check: record exact native results and owned-process/socket cleanup for success and failure, plus Linux-only evidence and Windows/macOS CI limits. Complete the parent only after the cleanup gate.

@@ -50,6 +50,7 @@ def tmux_session_remains(server_id: str) -> bool:
 
 
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    """Run a bounded subprocess and raise with captured output on failure."""
     kwargs.setdefault("timeout", 30)
     result = subprocess.run(args, text=True, capture_output=True, check=False, **kwargs)
     if result.returncode:
@@ -61,6 +62,7 @@ def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
 
 
 def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) -> None:
+    """Run native acceptance for one final-newline variant."""
     for executable in ("nvim", "tmux", "git"):
         if not shutil.which(executable):
             raise RuntimeError(f"required executable not found: {executable}")

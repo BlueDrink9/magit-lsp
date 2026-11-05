@@ -6,6 +6,10 @@ Linked from `TASKS.md`. Agent-facing. Written so that each item can be implement
 
 Follow the authoritative [no-vision policy in AGENTS.md](./AGENTS.md#working-conventions).
 
+### Retained native Plain Neovim workflow
+
+Run `make plain-neovim` to build a fresh server binary and exercise both final-newline variants. Set `PLAIN_ARGS` to pass runner arguments; it overrides Make's `--binary`, `--evidence` and `--size` defaults. Use `TMPDIR` to select a portable temporary root. The maintained driver uses finite waits and shared role-aware teardown. Evidence is JSON, `.screen` and logs only; never use images. Linux was verified; Windows/macOS remain CI follow-ups. No Helix harness exists.
+
 **Status of the causes below.** The "suspected cause" lines are hypotheses written without reading the current code. Confirm each with a failing test before changing anything.
 
 ## 0. Rules

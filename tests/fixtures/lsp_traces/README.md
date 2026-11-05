@@ -21,3 +21,4 @@ are maintained through `make test-rust FILTER="--test quirks"` and
 `make test-rust FILTER="--test plain_core"`. Historical README and captures
 remain as provenance at immutable Git revision
 `83f79f5cbf2e272a8be92673ef3c8bd41118c23e`.
+For maintained native Plain Neovim acceptance, use [`make plain-neovim`](../../../ui-test-plan.md#retained-native-plain-neovim-workflow).
