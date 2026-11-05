@@ -1,8 +1,8 @@
 # magit-lsp — Roadmap
 
-Last review: fee95585a7e30a62b521deaa75a91f7f94828844
+Last review: a5ae0459e419e1eadd8163b4371734498d14ada0
 
-Phase 2 accumulated-work checkpoint (2026-11-05): strict typed rich declarations, camelCase content targets, removal of unused runtime modes and the real VSCode StaticFeature declaration are implemented. Native VSCodium rendering/editing passed; Lua and native UI harnesses now select the freshly built debug server without changing production lookup. T004 and Phase 2 remain open: next is T004.4b, followed by the unused-surface, command-requirement and checked-emitter acceptance work.
+Phase 2 accumulated-work checkpoint (2026-11-05): both current native client declarations are retained and validated against the strict schema; unused process-log error identifiers are removed. Independent manual checks matched both recorder hashes, blocks, client/PID identities and producer hashes. Sol 5.6 reviewed through `a5ae045`; P1 public contract and P2 Neovim producer-boundary tests are pending. Formatting, seven hygiene tests, report-only pinned hygiene and text-native UI tour passed; the full regression gate is still running. T004 and Phase 2 remain open for the remaining surface audit, command requirements and checked emitter.
 Sol 5.6 reviewed through `fee9558`; P1 shared wire fixtures and both P2 tests/fake anchors are fixed in `d996e19`, `a6b8329` and `f52431a`. Full Linux `make test FILTER=--no-fail-fast` passed after the helper correction; log `/tmp/opencode/phase-two-typed-checkpoint/test-after-helper-fix.log`. UI-unit, text-native UI tour, rustfmt, seven hygiene tests and report-only pinned hygiene checks passed; focused schema and VSCode checks passed after the final test/comment fixes. No P0 requires re-review. Existing P3 redundant generated-file absence assertions remain deferred. Windows/macOS remain CI follow-ups; no owned server or changes to the user's manifest/release work remain.
 
 Phase 1 complete (2026-11-05): T001–T003 implemented and accepted on Linux.
@@ -426,6 +426,24 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `796a7f633c
   - **Constraints:** Touch only `clients/vscode/test/fake/languageclient.js`, `clients/vscode/test/open.test.js`, and `TASKS.md`. Do not change production registration, replace the supported StaticFeature with middleware, claim the pending Neovim/T004.4b evidence, rerun native VSCodium solely for this comment-only fix, use images, or require unavailable Windows/macOS hosts.
   - **Verify:** `npm --prefix clients/vscode run test:unit && npm --prefix clients/vscode run test:integration && git diff --check`
 
+Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `fee95585a7e30a62b521deaa75a91f7f94828844..a5ae0459e419e1eadd8163b4371734498d14ada0`, all 12 changed paths, and relevant typed capability producers/validation, error wire contracts, public client specification, and test helpers. Found one P1 and one P2 task; no P0. No suites were run. The supplied Linux verification and still-running full test remain worker evidence; no PASS is claimed here. Windows/macOS remain CI follow-ups. T004.5b, T004.5c, RecordingUi consolidation, command-requirement coverage, and checked-emitter work remain intentionally pending and are not findings. P3 deferred separately: retain the pre-existing redundant generated-file absence assertions in `tests/hygiene/test_hygiene.py`; no new P3 finding.
+
+- [x] **[P1] Remove retired fields from the public rich-protocol contract** (`TASKS.md:584-613`, §3.5 effects table; `docs/CLIENT_SPEC.md:81-92,144-180`, message contract, capability table, and illustrative initialize exchange)
+  - **Problem:** Production removed `processLogId`, `render`, and `folds`, but the canonical effects table and client specification still advertise `processLogId`; the client spec's example also sends the now-rejected `render` and `folds` capability fields. A client following these current documents will fail strict rich negotiation or implement message metadata the server cannot emit.
+  - **Why it matters:** This is a correctness and cohesion defect in the public wire contract. T004.3 and T004.5a cannot leave current normative documentation describing rejected or nonexistent fields.
+  - **Change:** In `TASKS.md` §3.5, define `message` as `level`, `text`, optional `hint`, and optional `detail` only. In `docs/CLIENT_SPEC.md`, remove `processLogId` from both message summaries and the quick reference; rewrite the process-log feature row so process-log views remain a separate command/view workflow rather than message-ID handling. Remove `render` and `folds` from the illustrative `experimental.magit` block so it is accepted by current `MagitCapabilities`; preserve the process-log feature itself and immutable historical evidence files.
+  - **Done when:** Every current normative message payload lists only fields present in `Effect::Message`, the illustrative rich declaration passes the strict v1 schema, and process-log functionality is still documented without claiming a message link.
+  - **Constraints:** Touch only `TASKS.md` and `docs/CLIENT_SPEC.md`. Do not edit archived/evidence captures, reintroduce removed protocol fields, remove process-log commands/views, complete T004.5b/T004.5c, touch the user's dirty `Cargo.toml`/`README.md` or untracked release files, or use images.
+  - **Verify:** `grep -n -E 'processLogId|"render"|"folds"' TASKS.md docs/CLIENT_SPEC.md` returns no current-contract matches; then run the narrow existing protocol/schema documentation checks and `git diff --check`.
+
+- [ ] **[P2] Pin the bundled Neovim declaration at its producer boundary** (`lua/magit-lsp/config.lua:82-108`, `key_modifiers` and `client_capabilities`; `tests/test_magit_lsp.lua:470-505`, main MiniTest set; `tests/fixtures/current-client-capabilities.json:1-38`, Neovim record)
+  - **Problem:** The new Rust test validates a manually copied Neovim block, but no automated test calls `config.client_capabilities()` and compares the production Lua output with that retained contract. The VSCode integration test asserts its producer's exact declaration, while a later valid-but-wrong Neovim producer change can leave `current_native_client_capabilities_are_strictly_negotiated` green against a stale fixture.
+  - **Why it matters:** This weakens correctness coverage and cohesion of the two client declarations. Manual recorder provenance proves this snapshot, but it is not regression enforcement at the Neovim producer boundary.
+  - **Change:** Add one focused Lua test that loads `magit-lsp.config`, calls `client_capabilities()` in the existing headless Neovim harness, and asserts the exact `experimental.magit` v1 keys, layouts, effects, and prompts plus the actual `key_modifiers()` result. Assert no retired/unknown rich fields are present. Keep the Rust fixture test as strict server-side validation; do not parse Lua source or recapture native traffic in CI.
+  - **Done when:** Changing any production Neovim declaration field without updating its explicit contract fails the Lua test, the retained basic-modifier fixture still negotiates through production Rust validation, and the existing VSCode exact-declaration assertion remains unchanged.
+  - **Constraints:** Touch only `tests/test_magit_lsp.lua` and `TASKS.md`. Do not add live native recapture, source-file hash checks, generated fixtures, compatibility aliases, new capabilities, image evidence, or claims that the Lua unit test proves native provenance.
+  - **Verify:** Run the narrow Lua test target containing the new declaration case, `cargo test --test plain_core current_native_client_capabilities_are_strictly_negotiated`, `cargo fmt --all -- --check`, and `git diff --check`.
+
 ## Deferred hygiene follow-ups
 
 - [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
@@ -599,7 +617,7 @@ ordinary linear code. Tests supply a `ScriptedUi`.
 
 | `type` | Fields | Client must |
 | --- | --- | --- |
-| `message` | `level: info/warn/error`, `text` (one line), `hint?`, `detail?`, `processLogId?` | Show a notification at that level. If `detail`/`processLogId` present, offer a way to open it |
+| `message` | `level: info/warn/error`, `text` (one line), `hint?`, `detail?` | Show a notification at that level; offer a way to open `detail` when present |
 | `openView` | `descriptor` (id, kind, uri, title, placement, mode, scope, capture) | Create a window/buffer/panel per `placement`, show it, attach the LSP client to it |
 | `pushView` | same as `openView` | As `openView`, remembering the previous view so `popView` returns to it |
 | `popView` | `viewId` | Close that view and focus the previous one |
