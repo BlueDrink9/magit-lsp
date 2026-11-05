@@ -113,6 +113,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
   - Done: `338b9de`.
   - Verified: `make test-file FILE=tests/test_plain_apply_edit.lua` @ `338b9de` → ok: build; ok: lua. Five stock-handler cases: documentChanges yes/no × matching/stale version, plus matching first and positive-stale second entry; exact text/tick and applied results asserted.
+- [x] **T007.4a1 — Present manual Plain commit instructions.** Finish the weak-lifetime Plain delivery branch and start the single real-server scenario proving manual instructions without custom notifications.
+  - Done: `0e9223a`.
+  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `0e9223a` → ok: rust. One real Plain scenario stages and opens commit through standard code actions, receives the exact COMMIT_EDITMSG path by window/showMessage, cancels the active progress token, confirms HEAD unchanged and shuts down cleanly.
 - [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
 - [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
 
