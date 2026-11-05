@@ -248,6 +248,13 @@ mod tests {
         assert_rejected(|| {
             ui.prompt(value);
         });
+        let ui = CustomRender::negotiated(|| Some(caps(&["secret"], &["confirm"], &["main"])));
+        let mut secret_only = prompt(PromptKind::Text);
+        secret_only.secret = Some(true);
+        assert!(!ui.allows_prompt(&secret_only));
+        assert_rejected(|| {
+            ui.prompt(secret_only);
+        });
         for placement in [Placement::Side, Placement::Bottom, Placement::Float] {
             let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
             assert_rejected(|| {
@@ -264,7 +271,7 @@ mod tests {
     fn strict_emitter_accepts_declared_and_core_emissions() {
         let ui = CustomRender::negotiated(|| {
             Some(caps(
-                &["visitFile"],
+                &["visitFile", "editDocument", "clipboard"],
                 &["confirm", "text", "choice", "multiChoice", "secret"],
                 &["main", "side", "bottom", "float"],
             ))
@@ -294,6 +301,31 @@ mod tests {
             }),
             Message::Notification(_)
         ));
+        let effects = ViewEffectsParams {
+            effects: vec![
+                Effect::EditDocument {
+                    run_id: "r".into(),
+                    uri: "file:///a".into(),
+                    text: "body".into(),
+                    version: 7,
+                    kind: "commit".into(),
+                    title: "Edit".into(),
+                    mode: crate::protocol::EditDocumentMode::RealFile,
+                    scope: "s".into(),
+                },
+                Effect::Clipboard {
+                    text: "copied".into(),
+                },
+            ],
+        };
+        let Message::Notification(note) = ui.effects(effects) else {
+            panic!("notification expected")
+        };
+        assert_eq!(note.params["effects"][0]["type"], "editDocument");
+        assert_eq!(note.params["effects"][0]["text"], "body");
+        assert_eq!(note.params["effects"][0]["runId"], "r");
+        assert_eq!(note.params["effects"][1]["type"], "clipboard");
+        assert_eq!(note.params["effects"][1]["text"], "copied");
         for placement in [
             Placement::Main,
             Placement::Side,

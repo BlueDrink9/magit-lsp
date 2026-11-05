@@ -22,6 +22,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Fail library test-build emission of undeclared optional effects, prompt kinds/secret text and placements before fallback can mask the violation. Preserve production warning-message and main-placement fallbacks, document them and cover strict rejection plus actual production serialization; do not turn capability probes into failures or expose a production test-only mode.
 - [x] **T004.7a — Complete strict-emitter rejection and placement-fallback tests.**
   Done: strict unit tests reject undeclared effects, prompts, secret text and placements while accepting declared emissions; production tests verify warning and Main-placement fallbacks preserve descriptor identity. Enforced by `cargo test --lib presentation::custom && cargo test --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`.
+- [x] **T004.7b — Cover both secret dependencies and declared optional effects.**
+  Supervision found the strict unit suite covers text without secret, but not secret without text; declared-effect success only covers visitFile. Add the missing valid-declaration cases for secret-only rejection and successful editDocument/clipboard emission; preserve existing strict and production coverage.
 - [x] **T004.6 — Derive capability requirements from command metadata.**
   Replace the presentation-layer command-name match with canonical command-owned optional-effect requirements. Cover actual direct and deferred effect-producing paths before closing this parent; retain preflight rejection before Git or editor work.
 - [x] **T004.6a — Derive the optional-effect requirement table from the registry.**
