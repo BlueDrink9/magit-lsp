@@ -109,6 +109,8 @@ Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is cl
   7. Add a checked emitter in the presentation seam. In test builds, an undeclared effect, prompt kind or placement must fail the test. In production, it must use the documented fallback.
 - **Verify:** Run `cargo test`, `make test-lua` and `node clients/vscode/test/test.js`.
 
+Done: `<commit>`; immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`. Clause audit and native evidence: [typed capability declarations](docs/evidence/typed-capability-declarations.md). Enforced by `tests/plain_core.rs` (strict schema, both stored native blocks, camelCase targets, registry requirements and placement fallback), `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs`, and the custom-emitter tests in `src/presentation/custom.rs`. Both current native declarations and producer paths have evidence; source/provenance/native causality remain manual, and producer coverage is exercised paths, not exhaustive future discovery. `multiChoice` remains because real clients declare it and shared vectors consume it; no producer command is claimed. Linux full regression passed. Phase 2 remains open for T005–T007.
+
 ### T005 quirks-table (M)
 
 - **Depends on:** T002.
