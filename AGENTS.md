@@ -45,13 +45,13 @@ Start in these components:
 
 ## Read the right source
 
-- [`TASKS.md`](./TASKS.md) is canonical for the roadmap, glossary, design and
-  protocol (§§1–4), keymaps (§5), views (§6), the dependency-ordered
-  implementation/review queue (§7), testing (§8), and open questions (§9).
-  The sole numbered implementation and review queue is `TASKS.md`;
-  `TASKS.md` holds canonical design, contracts and open questions. Read only
-  relevant sections; immutable historical sources are provenance, not proof of
-  current behaviour. Do not duplicate detailed design or progress history here.
+- [`TASKS.md`](./TASKS.md) is canonical for the roadmap and queue. Decisions,
+  glossary and correctness contracts live in
+  [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Expanded design and protocol
+  remain in TASKS.md (§§3–4), as do keymaps (§5), views (§6), testing (§8) and
+  open questions (§9). Read only relevant sections; immutable historical sources
+  are provenance, not proof of current behaviour. Do not duplicate detailed
+  design or progress history here.
 - [`README.md`](./README.md) is user-facing: overview, supported features,
   requirements and test instructions.
 - [`ui-test-plan.md`](./ui-test-plan.md) defines real-UI test rules and scenario

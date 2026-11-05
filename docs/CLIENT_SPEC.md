@@ -332,7 +332,7 @@ to authoritative text. Completion is supplied by typed providers. Menus and
 prompts offer actions on every line and every non-root view has Back. Views are
 expanded by default; sections over 400 lines are collapsed with an expand action
 (the limit is configurable). The single
-effect/prompt capability mapping is in the [Plain task list](../magit-lsp-plain-client-tasks.md#2-plain-mode-effect-and-prompt-support-the-one-capability-table);
+effect/prompt capability mapping is tracked in the [authoritative implementation queue](../TASKS.md);
 it is the planned mapping and is not duplicated here. Secrets and askpass are
 unsupported: cancel cleanly with a message; credential-dependent network work
 fails readably.
