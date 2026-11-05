@@ -538,7 +538,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   7. Report a matrix of scenario by driver. Show each skip with its reason. Make sure that each feature has at least one driver that did not skip.
 - **Verify:** Run `make ui-unit`. Run `scripts/ui run` on the conformance set with `client: rich` and with `client: plain`.
 
-### T120 formatter-pre-commit (S, deferred)
+### T120 formatter-pre-commit (S, active)
 
 - **Depends on:** none.
 - **Target Files:** `.githooks/pre-commit` (new), `scripts/install-hooks.sh` (new), `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`, formatter parity test(s) (new; confirm exact path).

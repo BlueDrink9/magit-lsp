@@ -31,6 +31,8 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@johnnymorganz/stylua-bin": "2.6.0",
+    "prettier": "3.9.10",
     "typescript": "^6.0.3"
   },
   "contributes": {
