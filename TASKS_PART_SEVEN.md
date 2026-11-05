@@ -78,22 +78,16 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 
 ### [x] T002 wire-recorder (S) — Complete
 
-- **Depends on:** none.
-- **Target Files:** `src/server.rs` or a new `src/wirelog.rs` (confirm), `tests/wirelog.rs` (new), `tests/fixtures/lsp_traces/`.
-- **Reference Files:** `docs/evidence/harness-reassessment-inputs.md`; `tests/fixtures/lsp_traces/reconstructed-plain.jsonl`.
-- **Constraints:** The recorder is off by default. An environment variable turns it on, for example `MAGIT_LSP_WIRELOG=<path>`. Write JSON lines. Each line has a direction, a time and the raw JSON. Remove home directories and user names. Do not record answers to `secret` prompts or askpass values. Do not write to standard output. Do not change timing.
-- **Acceptance:**
-  1. The recorder writes both directions in wire order, for requests, responses and notifications. A test replays a recording through the JSON-RPC framing.
-  2. Capture one `initialize` and one `didChange` for each of these clients: bundled Neovim, bundled VS Code, plain Neovim and Helix. Record Helix again on its current release. The old 25.07.1 trace did not declare `window.showDocument`. Mark a trace "reconstructed" if you did not capture it. A reconstructed trace does not count as conformance evidence.
-  3. For T034, capture these native actions from Helix and Neovim: a single insert, a selection replace, a paste of one character, a paste of several characters, rapid typing, and an undo right after a server repair edit. List each action that you could not capture. Do not infer input action from payload shape alone; the four-client baseline does not complete this acceptance.
-  4. Commit preset files named `initialize-<client>-<version>.json`.
-Done: implementation `8476a8e`. Four native initialize/didChange client baselines and versioned presets retained. T034: Helix selection, one-/multi-character paste, rapid typing and undo after confirmed repair captured; Neovim all six captured, with multi-paste-before-repair limit recorded. Bundled VS Code/Neovim payload shapes do not establish native actions; single insert provenance established for plain Neovim and Helix only. Reconstructed trace is not conformance evidence. Enforced by `cargo test --test wirelog` (12 tests), JSON parsing and manual trace README audit. Full Helix source hash/equality manually verified; automated gate checks retained records/metadata, not native causality. Linux only; Windows/macOS CI follow-up. Phase gate follows this ticket.
+Done: production implementation/integration `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`; final test-only Helix evidence `8476a8e`.
+Immutable full acceptance: `61370ad:TASKS_PART_SEVEN.md`. Four-client initialize/didChange presets retained; Helix native selection, one-/multi-character paste, rapid typing and repair-before-undo; Neovim all six, with historical multi-paste-before-repair limit.
+Bundled payload shapes prove no native actions; single-insert provenance only for plain Neovim and Helix. Reconstructed Plain trace is not conformance evidence. Full Helix source hash/equality was manually verified; automated checks cover retained rows and metadata, not native causality.
+`cargo test --test wirelog` (12 tests), fixture JSON parsing and manual provenance audit enforce evidence. Helix save snapshots show restored baseline and wire row 20 proves transient undo; Neovim rapid undo coalesces repair echo and undo, limiting separate-event claims. Linux only; Windows/macOS CI follow-up. Phase 1 implementation complete; phase gate/review pending.
 
 ### [x] T003 hygiene-tooling — Complete
 
 Done: `a345a98` (runner/tests), `95c40e5` (tool configs), `741ffa2` (finding dispositions). Enforced by `make hygiene` and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`.
 Linux report-only baseline: cargo-machete 0.9.2 clean; Knip 5.88.1 reports one unlisted dependency and 69 unused exports; luacheck 1.2.0 reports 34 warnings and 0 errors. Findings have reasons or exact owners; report-only exit 0 does not mean debt-free.
-Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T002 remains open, so Phase 1 is not complete.
+Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T001–T003 implementation is complete; Phase 1 gate and review remain pending.
 
 ## Phase 2: Capability model (gates 0.2)
 
