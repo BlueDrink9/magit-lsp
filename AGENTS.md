@@ -48,7 +48,7 @@ Start in these components:
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap, glossary, design and
   protocol (§§1–4), keymaps (§5), views (§6), the dependency-ordered
   implementation/review queue (§7), testing (§8), and open questions (§9).
-  The sole numbered implementation and review queue is `TASKS_PART_SEVEN.md`;
+  The sole numbered implementation and review queue is `TASKS.md`;
   `TASKS.md` holds canonical design, contracts and open questions. Read only
   relevant sections; immutable historical sources are provenance, not proof of
   current behaviour. Do not duplicate detailed design or progress history here.
