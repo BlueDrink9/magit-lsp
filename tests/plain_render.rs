@@ -840,7 +840,7 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     server.send(editor.open(&uri, "stale editor text\n"));
     let first = next_edit(&mut server);
     assert_eq!(first["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
-    editor.edit(&uri, "newer client snapshot\n");
+    let newer_snapshot = editor.edit(&uri, "newer client snapshot\n");
     let response = editor.dispatch(&first);
     assert_eq!(response[0]["result"]["applied"], true);
     assert!(!response.iter().any(|frame| frame["method"] == "textDocument/didChange"));
@@ -849,6 +849,40 @@ fn silent_stale_success_without_echo_recovers_after_watcher_render() {
     fixtures::write(&watcher, "recovery bytes\n");
     let repair = next_edit(&mut server);
     assert_eq!(repair["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    let repair_response = editor.dispatch(&repair);
+    assert_eq!(repair_response[0]["result"]["applied"], true);
+    let repair_id = repair["id"].clone();
+    assert_eq!(repair_response[0]["id"], repair_id);
+    assert!(!repair_response.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+    for frame in repair_response {
+        server.send(frame);
+    }
+    server.send(json!({"jsonrpc":"2.0","id":70,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
+    assert!(server.response_with_id(70)["result"].as_array().unwrap().is_empty());
+    server.send(newer_snapshot);
+    let current_repair = next_edit(&mut server);
+    assert_eq!(current_repair["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    let current_response = editor.dispatch(&current_repair);
+    let current_id = current_repair["id"].clone();
+    assert!(current_response.iter().any(|frame| frame["id"] == current_id && frame["result"]["applied"] == true));
+    let authoritative = editor.text(&uri).to_owned();
+    assert!(authoritative.contains("watcher-recovery.txt"));
+    for frame in current_response {
+        server.send(frame);
+    }
+    let second_watcher = repo.path().join("watcher-ready.txt");
+    fixtures::write(&second_watcher, "ready watcher bytes\n");
+    let ready_update = next_edit(&mut server);
+    assert_eq!(ready_update["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    let ready_response = editor.dispatch(&ready_update);
+    let ready_id = ready_update["id"].clone();
+    let next_authoritative = editor.text(&uri).to_owned();
+    assert!(ready_response.iter().any(|frame| frame["id"] == ready_id && frame["result"]["applied"] == true));
+    assert!(next_authoritative.contains("watcher-ready.txt"));
+    for frame in ready_response {
+        server.send(frame);
+    }
+    assert_ne!(next_authoritative, authoritative);
     assert_eq!(std::fs::read(&path).unwrap(), disk_before);
     server.shutdown_and_exit();
     assert!(server.finish(std::time::Duration::from_secs(10)).success());

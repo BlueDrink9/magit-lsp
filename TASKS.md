@@ -19,6 +19,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [x] **Documentation cleanup — Add focused documentation verification.** Add a Make target that rejects broken local documentation links and anchors in selected maintained Markdown files; use it for the reference migration without scanning immutable evidence archives.
+  - Done: `pending commit`.
+  - Verified: `make docs-check DOC_FILES="AGENTS.md"` @ `33230ec` → passed.
+- [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points.
+- [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links.
+
 - [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Complete and verify the extracted configurable pump and dynamic request correlation, including the standalone action consumer. No real-server didOpen conformance claim in this slice.
   - Done: `1570ec0`. Verified: `make test-rust FILTER="--test plain_harness --test plain_actions"` passed on the committed implementation diff.
 - [x] **T006.1b — Prove Plain didOpen applyEdit through the client pump.** Add the actual stdio server didOpen/applyEdit regression; pump responses/echoes must reach authoritative text without modifying the presentation file or receiving rich renders.
@@ -79,7 +85,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T007.2b1 — Schedule the correlated echo watchdog.** Wire one-second expiry into the existing runtime and prove that silent stale success plus a changed authoritative snapshot emits a fresh edit without any client echo.
   - Done: containing commit.
   - Verified: `make test-rust FILTER="--test plain_render --test server_async"` → ok: rust; stdio test receives fresh one-document edit after registry-modeled silent-stale success without echo, disk sentinel unchanged. One-second grace and ID/incarnation/closing guards verified by code; deterministic expiry tests passed.
-- [ ] **T007.2b2 — Prove post-watchdog convergence and readiness.** Complete response/snapshot routing after expiry, verify exact editor convergence and a subsequent watcher update, and retain lifecycle/hash safety.
+- [x] **T007.2b2 — Prove post-watchdog convergence and readiness.** Complete response/snapshot routing after expiry, verify exact editor convergence and a subsequent watcher update, and retain lifecycle/hash safety.
+  - Verified: `make test-rust FILTER="--test plain_render --test server_async"` on implementation-current diff based on `33230ec` → ok: rust. Real-server scenario withholds newer didChange until first watchdog repair, rejects pre-convergence actions, forwards correlated response and actual snapshot, converges after a fresh one-document edit, then converges after a second distinct watcher update. Disk sentinel unchanged; existing expiry, late-ID and lifecycle cases pass.
 - [ ] **T007.2b — Schedule and prove missing-echo recovery.** Schedule bounded transport watchdogs and prove real-server silent-stale success with no echo recovers on a later snapshot; guard close/reopen and late callbacks. Close after T007.2b1–T007.2b2.
 - [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4. Close after T007.2a–T007.2b.
 - [ ] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
