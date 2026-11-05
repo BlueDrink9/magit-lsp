@@ -32,7 +32,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 | 4 | Specification | T011 to T013 | Yes |
 | 5 | Commit selection and rebase | T014 to T019 | Yes |
 | 6 | Plain acceptance | T020 to T022 | Yes |
-| 7 | Test stabilization | T023 to T029 | No (runs in parallel) |
+| 7 | Test stabilization | T023 to T029, T120 | No (runs in parallel) |
 | 8 | Release | T030 to T033 | Starts after phases 1 to 6 |
 | 9 | Plain keys | T034 to T039 | No (starts after T022) |
 | 10 | Small features | T040 to T047 | No |
@@ -538,6 +538,15 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   7. Report a matrix of scenario by driver. Show each skip with its reason. Make sure that each feature has at least one driver that did not skip.
 - **Verify:** Run `make ui-unit`. Run `scripts/ui run` on the conformance set with `client: rich` and with `client: plain`.
 
+### T120 formatter-pre-commit (S, deferred)
+
+- **Depends on:** none.
+- **Target Files:** `.githooks/pre-commit` (new), `scripts/install-hooks.sh` (new), `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`, formatter parity test(s) (new; confirm exact path).
+- **Reference Files:** `Makefile`, `Cargo.toml`, `.github/workflows/ci.yml`, `clients/vscode/package.json`, `AGENTS.md`.
+- **Constraints:** Keep Phase 1 closed. Do not install hooks automatically; document opt-in installation. Pin deterministic formatter versions and exact commands. Report actionable errors when required tools are missing. Handle staged and partially staged files without silently staging unrelated edits or overwriting unstaged work. Require workspace-aware Rust formatting. Audit maintained languages before choosing formatter scope. Test hook and CI command parity. Do not include unrelated README, release or install changes.
+- **Acceptance:** Repository-owned hook runs the selected formatters on relevant staged content. Its behavior preserves unstaged and unrelated changes. An opt-in installer configures it safely. Missing tools produce actionable guidance. Tests prove formatter commands and scope match CI. Document supported installation and removal.
+- **Verify:** Run hook and parity tests; run `cargo fmt --all -- --check` and each selected formatter's check command.
+
 ## Phase 8: Release (starts after phases 1 to 6)
 
 Do not schedule other feature work between the gates and the release. A ticket stays open until its evidence exists.
@@ -738,7 +747,7 @@ Use this list to find a ticket from the history. Each open ticket in the old `TA
 - **Phase 4:** H-11 is T011. H-12 is T012. H-13, R-PLAIN-SPEC and the new work after R-CLIENT-SPEC are T013.
 - **Phase 5:** R-SELECT-OPS is T014. R-4.1a is T015. R-EDIT-KINDS is T016. R-OP-STATE is T017. R-TODO is T018. R-7.3a is T019.
 - **Phase 6:** R-PLAIN-E2E is T020. R-PLAIN-HELIX is T021. R-PLAIN-GATE is T022.
-- **Phase 7:** H-06 is T023. H-07 is T024. H-08 is T025. H-09 is T026. H-10 is T027. H-16 is T028. H-17 is T029.
+- **Phase 7:** H-06 is T023. H-07 is T024. H-08 is T025. H-09 is T026. H-10 is T027. H-16 is T028. H-17 is T029. T120 is the deferred formatter-pre-commit ticket.
 - **Phase 8:** R-REL-1 is T030. R-REL-2 is T031. R-REL-3 is T032. R-REL-4 is T033.
 - **Phase 9:** PK-1 to PK-6 are T034 to T039.
 - **Phase 10:** R-4.1-signing is T040. R-5.3a is T041. R-6.3a is T042. R-6.1a is T043. R-8.2a is T044. R-9.1a is T045. R-9.5a is T046. The edit-config command from section 9 of `TASKS.md` is T047 (it had no ticket).

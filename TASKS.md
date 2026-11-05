@@ -11,6 +11,13 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [ ] **Investigate and rationalize trace/capture test infrastructure.**
+  Immediate priority, ahead of formatter work and T005: first establish ongoing purpose, actual consumers and coverage of embedded Python capture recipes and trace tests, including current quirk dependencies; decide what to retain, replace or delete before extracting anything.
+  Heavily deduplicate justified tests and reuse maintained infrastructure; extract only necessary recipes into reproducible standalone tools, remove machine-specific paths and nonportable runtime assumptions, and delete unsupported or redundant machinery. Keep essential provenance distinct from runtime dependencies; verify on Linux and record other-platform CI limits.
+
+- [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
+  Done: workspace formatting passes; no errors reproduced. Deferred implementation: T120 formatter-pre-commit. Enforced now by `cargo fmt --all -- --check`.
+
 - [x] **T005.1 — Define the evidence-backed quirk registry and resolver.**
   Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `cargo test --test quirks` against captured initialize declarations, version/name boundaries, capability matching and override validation.
 - [x] **T005.2a — Add validated layered quirk settings.**
