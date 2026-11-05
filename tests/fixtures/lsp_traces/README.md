@@ -430,18 +430,24 @@ errors.
 nix shell nixpkgs#helix --command python3 - <<'PY'
 import hashlib, json, os, pathlib, shutil, signal, subprocess, tempfile, time
 
-ROOT = pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True).strip()).resolve()
-HX = shutil.which('hx')
-if not HX: raise SystemExit('hx missing inside nix shell nixpkgs#helix')
 TAG = f'{os.getpid()}-{time.time_ns()}'
 D = pathlib.Path(tempfile.mkdtemp(prefix=f't002-helix-rapid-{TAG}-', dir='/tmp/opencode'))
 REPO, HOME, CONFIG = D/'repo', D/'home', D/'config'
+HOME.mkdir(); CONFIG.mkdir(parents=True)
+env=os.environ.copy()
+for key in list(env):
+    if key.startswith('GIT_CONFIG_'): env.pop(key)
+env.update(HOME=str(HOME),XDG_CONFIG_HOME=str(CONFIG),XDG_DATA_HOME=str(D/'data'),XDG_STATE_HOME=str(D/'state'),GIT_CONFIG_GLOBAL=str(CONFIG/'gitconfig'),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
+(CONFIG/'gitconfig').write_text('')
+ROOT = pathlib.Path(subprocess.check_output(['git','rev-parse','--show-toplevel'], text=True, env=env).strip()).resolve()
+HX = shutil.which('hx')
+if not HX: raise SystemExit('hx missing inside nix shell nixpkgs#helix')
 RAW = D/'raw-parent/raw.jsonl'
 SOCKET = SESSION = f't002hx-{TAG}'
 TMUX = ['tmux','-L',SOCKET]
 SERVER = (ROOT/'target/debug/magit-lsp').resolve()
 FIXTURE = ROOT/'tests/fixtures/lsp_traces/helix-25.07.1-rapid-repair.json'
-def cmd(args, **kw): return subprocess.run(args, check=True, text=True, **kw)
+def cmd(args, **kw): return subprocess.run(args, check=True, text=True, env=env, **kw)
 def rows(): return [json.loads(x) for x in RAW.read_text().splitlines() if x.strip()] if RAW.exists() else []
 def wait(pred, label, timeout=20):
     end = time.monotonic()+timeout
@@ -462,15 +468,15 @@ def save_text():
     wait(lambda:path.exists() and (path.stat().st_ino,path.stat().st_mtime_ns,path.stat().st_size)!=stamp,'native :write')
     return path.read_text()
 primary=None; cleanup=[]; server_pid=None; launched=False; report=None
-REPO.mkdir(); HOME.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
+REPO.mkdir(); (CONFIG/'helix').mkdir(parents=True); RAW.parent.mkdir()
 try:
-    if subprocess.check_output([HX,'--version'],text=True).strip()!='helix 25.07.1': raise RuntimeError('wrong Helix version')
+    if subprocess.check_output([HX,'--version'],text=True,env=env).strip()!='helix 25.07.1': raise RuntimeError('wrong Helix version')
     cmd(['git','init','-q',str(REPO)]); cmd(['git','config','user.name','Capture'],cwd=REPO); cmd(['git','config','user.email','capture@example.invalid'],cwd=REPO)
     (REPO/'tracked').write_text('base\n'); cmd(['git','add','tracked'],cwd=REPO); cmd(['git','commit','-qm','base'],cwd=REPO); (REPO/'.magit').write_text('Loading…\n')
     if not SERVER.exists(): cmd(['cargo','build','--manifest-path',str(ROOT/'Cargo.toml')],cwd=ROOT)
     (CONFIG/'helix/languages.toml').write_text(f'''[language-server.magit-lsp]\ncommand = "{SERVER}"\n\n[[language]]\nname = "magit"\nscope = "source.magit"\nfile-types = [{{ glob = ".magit" }}]\nroots = [".git"]\nlanguage-servers = ["magit-lsp"]\n''')
-    env=os.environ.copy(); env.update(HOME=str(HOME),XDG_CONFIG_HOME=str(CONFIG),XDG_DATA_HOME=str(D/'data'),XDG_STATE_HOME=str(D/'state'),MAGIT_LSP_WIRELOG=str(RAW),GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
-    cmd(['tmux','-L',SOCKET,'new-session','-d','-s',SESSION,'-x','120','-y','40',f"cd '{REPO}' && HOME='{HOME}' XDG_CONFIG_HOME='{CONFIG}' MAGIT_LSP_WIRELOG='{RAW}' '{HX}' .magit"],env=env); launched=True
+    env['MAGIT_LSP_WIRELOG']=str(RAW)
+    cmd(['tmux','-L',SOCKET,'new-session','-d','-s',SESSION,'-x','120','-y','40',f"cd '{REPO}' && exec '{HX}' .magit"]); launched=True
     initrow=wait(lambda:next((r for r in rows() if r.get('raw',{}).get('method')=='initialize'),None),'initialize')
     server_pid=initrow['pid']
     if os.getenv('INJECT_AFTER_INITIALIZE'): raise RuntimeError('INJECT_AFTER_INITIALIZE')
