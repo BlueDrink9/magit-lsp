@@ -40,6 +40,7 @@ Last review: 3ff0e6ae0923ef7f3fa87f30d995cbded2e14184
   Test exact retained rows, action provenance, request/reply/echo ordering and saved-versus-transient state claims. Audit all T002 acceptance clauses before checking parents or the numbered ticket; preserve Linux-only and manual source-audit limits.
 - [x] **T002.3b2b3a — Test the retained Helix rapid-repair exchange.**
   Extend the wirelog fixture gate with exact native keys and source-row/action mappings, incremental payloads, stale-repair rejection, successful repair and undo/re-repair/save correlation. Keep original fixture payloads unchanged and distinguish manual full-source provenance from automated retained-record checks.
+  Done: retained exchange gate enforces complete rapid/echo/undo arrays, all outbound edits and URIs, re-repair payload, request/reply linkage, rejection index, sidecar source PID/SHA/version/state-origin/newline claims, and saved-versus-transient distinction. Fixtures unchanged. Enforced by `cargo test --test wirelog`.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**

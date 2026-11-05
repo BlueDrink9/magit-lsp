@@ -380,7 +380,10 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
         sidecar["retained_source_rows"],
         json!((9..=24).collect::<Vec<_>>())
     );
-    assert_eq!(sidecar["source_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        sidecar["source_sha256"],
+        "9eafe9da27ea8901c12c7d924ea35a4d1826e9f0708bef078505c1359f46f8e9"
+    );
     assert_eq!(rows.len(), 16);
     let actions = sidecar["actions"].as_array().unwrap();
     assert_eq!(actions.len(), 6);
@@ -412,6 +415,7 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
     }
     let uri = rows[0]["raw"]["params"]["textDocument"]["uri"].clone();
     let pid = rows[0]["pid"].clone();
+    assert_eq!(sidecar["source_pid"], pid);
     let methods = [
         "textDocument/didChange",
         "workspace/applyEdit",
@@ -457,8 +461,8 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
             *version
         );
         assert_eq!(
-            rows[row_index]["raw"]["params"]["contentChanges"][0],
-            json!({"range":{"start":{"line":0,"character":i},"end":{"line":0,"character":i}},"text":text})
+            rows[row_index]["raw"]["params"]["contentChanges"],
+            json!([{"range":{"start":{"line":0,"character":i},"end":{"line":0,"character":i}},"text":text}])
         );
     }
     assert_eq!(
@@ -467,16 +471,47 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
     );
     assert_eq!(rows[1]["raw"]["id"], "magit-lsp/outbound/2");
     assert_eq!(
+        rows[1]["raw"]["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rows[1]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"],
+        uri
+    );
+    assert_eq!(
+        rows[1]["raw"]["params"]["edit"]["documentChanges"][0]["edits"],
+        json!([{"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}}])
+    );
+    assert_eq!(
         rows[1]["raw"]["params"]["edit"]["documentChanges"][0]["edits"][0],
         json!({"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}})
     );
     assert_eq!(rows[6]["raw"]["id"], rows[1]["raw"]["id"]);
     assert_eq!(rows[6]["raw"]["result"]["applied"], false);
+    assert_eq!(rows[6]["raw"]["result"]["failedChange"], 0);
     assert_eq!(
         rows[6]["raw"]["result"]["failureReason"],
         "document has changed"
     );
     assert_eq!(rows[7]["raw"]["id"], "magit-lsp/outbound/3");
+    assert_eq!(
+        rows[7]["raw"]["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rows[7]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"],
+        uri
+    );
+    assert_eq!(
+        rows[7]["raw"]["params"]["edit"]["documentChanges"][0]["edits"],
+        json!([{"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}}])
+    );
     assert_eq!(
         rows[7]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
         6
@@ -486,13 +521,20 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
         json!({"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}})
     );
     assert_eq!(rows[8]["raw"]["params"]["textDocument"]["version"], 7);
-    assert_eq!(rows[8]["raw"]["params"]["contentChanges"][0]["text"], "");
+    assert_eq!(
+        rows[8]["raw"]["params"]["contentChanges"],
+        json!([{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}},"text":""}])
+    );
     assert_eq!(rows[9]["raw"]["id"], rows[7]["raw"]["id"]);
     assert_eq!(rows[9]["raw"]["result"]["applied"], true);
     let baseline = rows[10]["raw"]["params"]["text"].as_str().unwrap();
     assert_eq!(baseline, "Head: main\n\nStaged changes (0)\n\nUnstaged changes (0)\n\nUntracked files (0)\n\nWorking tree clean\n");
     assert!(baseline.ends_with('\n'));
     assert_eq!(rows[11]["raw"]["params"]["textDocument"]["version"], 8);
+    assert_eq!(
+        rows[11]["raw"]["params"]["contentChanges"],
+        json!([{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"text":"RAPID"}])
+    );
     assert_eq!(
         rows[11]["raw"]["params"]["contentChanges"][0]["text"],
         "RAPID"
@@ -505,10 +547,34 @@ fn helix_rapid_repair_sidecar_matches_retained_exchange() {
         rows[12]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
         8
     );
+    assert_eq!(
+        rows[12]["raw"]["params"]["edit"]["documentChanges"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rows[12]["raw"]["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"],
+        uri
+    );
+    assert_eq!(
+        rows[12]["raw"]["params"]["edit"]["documentChanges"][0]["edits"],
+        json!([{"newText":"","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}}}])
+    );
     assert_eq!(rows[13]["raw"]["params"]["textDocument"]["version"], 9);
-    assert_eq!(rows[13]["raw"]["params"]["contentChanges"][0]["text"], "");
+    assert_eq!(
+        rows[13]["raw"]["params"]["contentChanges"],
+        json!([{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}},"text":""}])
+    );
     assert_eq!(rows[14]["raw"]["result"]["applied"], true);
     assert_eq!(rows[12]["raw"]["id"], rows[14]["raw"]["id"]);
+    assert_eq!(actions[0]["versions"], json!([2, 3, 4, 5, 6]));
+    assert_eq!(actions[4]["version"], 8);
+    for index in [3, 5] {
+        assert_eq!(actions[index]["state_origin"], "native_saved_snapshot");
+        assert_eq!(actions[index]["text_ends_with_final_newline"], true);
+    }
     assert_eq!(rows[15]["raw"]["params"]["text"], baseline);
     assert_eq!(rows[15]["raw"]["params"]["textDocument"]["uri"], uri);
     assert_eq!(
