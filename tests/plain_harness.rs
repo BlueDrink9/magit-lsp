@@ -893,16 +893,22 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     }).expect("standard code action offers commit creation")
         ["command"]["arguments"][0].clone();
 
-    client.cancel_on_edit = true;
     let result = execute_plain_action(&mut client, create);
     assert!(result.get("result").is_some(), "{result}");
-    client.until(|c| !c.cancel_on_edit && {
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_uri = format!("file://{expected_path}");
+    client.until(|c| c.editor.text(&uri).contains(&expected_uri));
+    assert!(client.editor.text(&uri).lines().any(|line| line == expected_uri), "pending URI row absent: {}", client.editor.text(&uri));
+    let token = client.server.notifications.iter()
+        .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+        .expect("commit progress began")["params"]["token"].clone();
+    client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    client.until(|c| {
         let begins = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin").count();
         let ends = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end").count();
-        begins > 0 && ends >= begins
+        begins > 0 && ends >= begins && !c.editor.text(&uri).contains(&expected_path)
     });
 
-    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
     let requests: Vec<_> = client.editor.outbound.iter().filter(|m| m["method"] == "window/showDocument").collect();
     assert_eq!(requests.len(), usize::from(declared), "{case}");
     if let Some(success) = succeeds {

@@ -216,6 +216,8 @@ pub struct OpenView {
     visibility_level: u8,
     /// Where the session publishes this view; consulted for resync markers.
     published: PublishedViews,
+    repo_path: String,
+    draft_owner: Option<String>,
 }
 
 impl OpenView {
@@ -375,6 +377,11 @@ impl OpenView {
             viewport: self.descriptor.viewport,
             pending: &pending,
         });
+        #[cfg(unix)]
+        if let Some(owner) = &self.draft_owner {
+            let drafts = crate::editor::registry().pending_for(owner, &self.repo_path);
+            tree.append_pending_drafts(&drafts);
+        }
         let version = old_version + 1;
         tree.version = version;
 
@@ -424,11 +431,18 @@ fn initialize_open_view(
     placement: Placement,
     viewport: Viewport,
     mut view: Box<dyn View>,
+    draft_owner: Option<String>,
 ) -> (ViewDescriptor, ViewRender, OpenView) {
+    let repo_path_owned = repo_path.to_string();
     let mut tree = view.render(&Ctx {
         viewport,
         pending: &[],
     });
+    #[cfg(unix)]
+    if let Some(owner) = &draft_owner {
+        let drafts = crate::editor::registry().pending_for(owner, &repo_path_owned);
+        tree.append_pending_drafts(&drafts);
+    }
     let version = 1;
     tree.version = version;
     let descriptor = ViewDescriptor {
@@ -468,6 +482,8 @@ fn initialize_open_view(
         dirty: false,
         visibility_level: 4,
         published: PublishedViews::default(),
+        repo_path: repo_path_owned,
+        draft_owner,
     };
     (descriptor, render, open_view)
 }
@@ -544,6 +560,7 @@ pub struct Session {
     pending_prompt: Option<PendingPrompt>,
     pending_selections: BTreeMap<String, PendingSelection>,
     published: PublishedViews,
+    draft_owner: Option<String>,
 }
 
 struct PendingPrompt {
@@ -640,7 +657,15 @@ impl Session {
             pending_prompt: None,
             pending_selections: BTreeMap::new(),
             published: PublishedViews::default(),
+            draft_owner: None,
         }
+    }
+
+    /// Create a session with optional Plain draft ownership for registry-backed rows.
+    pub fn new_with_draft_owner(repo_path: impl Into<String>, owner: Option<String>) -> Self {
+        let mut session = Self::new(repo_path);
+        session.draft_owner = owner;
+        session
     }
 
     /// Apply the connection's negotiated rich feature set to all session transitions.
@@ -796,7 +821,7 @@ impl Session {
         }
         let placement = self.placement(placement);
         let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -1789,7 +1814,7 @@ impl Session {
         }
 
         let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view);
+            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))

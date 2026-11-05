@@ -221,6 +221,46 @@ pub struct Tree {
 }
 
 impl Tree {
+    /// Append registry-derived pending draft rows with stable run identity and exact URI metadata.
+    #[cfg(unix)]
+    pub fn append_pending_drafts(&mut self, drafts: &[crate::editor::PendingDraft]) {
+        for draft in drafts {
+            let id = format!("pending-draft:{}", draft.run_id);
+            let line = self.lines.len();
+            self.lines.push(draft.uri.clone());
+            self.line_nodes.push(LineNode {
+                node: id.clone(),
+                kind: NodeKind::Message,
+                section: Some("pending-drafts".into()),
+                path: Some(draft.uri.clone()),
+                hunk_id: None,
+                status: None,
+                marker: None,
+                line_index: None,
+                new_line: None,
+                text: None,
+            });
+            self.nodes.push(Node {
+                id,
+                kind: NodeKind::Message,
+                label: draft.uri.clone(),
+                start_line: line,
+                end_line: line,
+                section: Some("pending-drafts".into()),
+                path: Some(draft.uri.clone()),
+                hunk_id: None,
+                status: None,
+                marker: None,
+                line_index: None,
+                new_line: None,
+                copy: None,
+                mutation: None,
+                commit: None,
+                children: Vec::new(),
+            });
+        }
+    }
+
     /// The immediate structural parent of a stable node identity.
     pub fn parent(&self, id: &str) -> Option<&Node> {
         self.nodes

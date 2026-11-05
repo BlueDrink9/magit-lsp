@@ -1106,9 +1106,43 @@ fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
     if let Some(handle) = shared.session(repo) {
         return handle;
     }
-    let candidate = Arc::new(Mutex::new(Session::new(repo)));
+    let draft_owner = matches!(
+        shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+        Some(Presentation::Plain(_))
+    )
+    .then(|| shared.draft_owner.as_ref().clone());
+    let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(repo, draft_owner)));
     let mut sessions = shared.sessions.lock().unwrap_or_else(|p| p.into_inner());
     sessions.entry(repo.to_owned()).or_insert(candidate).clone()
+}
+
+fn refresh_pending_views(shared: &Shared, repo: &str) -> Result<Vec<ViewRender>> {
+    let Some(handle) = shared.session(repo) else {
+        return Ok(Vec::new());
+    };
+    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+    let ids: Vec<_> = session
+        .views()
+        .iter()
+        .map(|view| view.descriptor().id.clone())
+        .collect();
+    let mut renders = Vec::new();
+    for id in ids {
+        if let Some(render) = session.refresh(&id)? {
+            renders.push(render);
+        }
+    }
+    Ok(renders)
+}
+
+fn report_pending_refresh_error(shared: &Shared, error: Error) {
+    tracing::warn!(%error, "failed to refresh pending commit draft rows");
+    let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
+        vec![Effect::message(MessageLevel::Error, error.to_string())]
+    });
+    for message in effect_notifications(&shared.client, effects) {
+        let _ = shared.sender.send(message);
+    }
 }
 
 fn plain_change(shared: &Shared, uri: &str) {
@@ -1483,11 +1517,26 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             Effect::EditDocument { run_id, uri, title, .. } => {
                                 send_plain_edit_document(
                                     shared.clone(),
-                                    run_id,
+                                    run_id.clone(),
                                     uri,
                                     title,
                                     capabilities.show_document,
                                 );
+                                let repo = shared.progress.lock().unwrap_or_else(|p| p.into_inner())
+                                    .values()
+                                    .find(|run| run.edit_id.as_deref() == Some(&run_id))
+                                    .and_then(|run| run.repo.clone());
+                                if let Some(repo) = repo {
+                                    let shared = shared.clone();
+                                    std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
+                                        Ok(renders) => for render in renders {
+                                            if let Some(message) = deliver_render(&shared, render) {
+                                                let _ = shared.sender.send(message);
+                                            }
+                                        },
+                                        Err(error) => report_pending_refresh_error(&shared, error),
+                                    });
+                                }
                             }
                             message @ Effect::Message { .. } => {
                                 for notification in effect_notifications(&shared.client, vec![message]) {
@@ -3469,7 +3518,12 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         Some(handle) => handle,
         None => {
             // Repository discovery/initialisation must not own the registry.
-            let candidate = Arc::new(Mutex::new(Session::new(&repo)));
+            let draft_owner = matches!(
+                shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+                Some(Presentation::Plain(_))
+            )
+            .then(|| shared.draft_owner.as_ref().clone());
+            let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(&repo, draft_owner)));
             shared
                 .sessions
                 .lock()
@@ -3948,6 +4002,16 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
                     messages.extend(effect_notifications(&shared.client, effects));
                 }
                 Err(error) => {
+                    if !shared.closing.load(Ordering::SeqCst) {
+                        match refresh_pending_views(&shared, &repo) {
+                            Ok(renders) => for render in renders {
+                                if let Some(message) = deliver_render(&shared, render) {
+                                    messages.push(message);
+                                }
+                            },
+                            Err(refresh_error) => report_pending_refresh_error(&shared, refresh_error),
+                        }
+                    }
                     let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
                         vec![Effect::message(MessageLevel::Error, error.to_string())]
                     });
