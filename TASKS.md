@@ -253,12 +253,13 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
    - Reviewed: `git show --stat` confirms outgoing format `11d1c8b`, fake models `f224f94`, workaround safety `65ee6d9`, and generated appendix `6c95b50` contain their named slices. Current Phase 2 wording says T006–T007; historical checkpoints and original acceptance remain unchanged.
    - Verified: `make test-rust FILTER="--test quirks"` @ `ae5b78d` → ok: rust
 
-- [ ] **[P2] Make capability-match appendix generation exhaustive** (`scripts/generate_client_behaviors.rs:1-15`, `render`; `tests/quirks.rs:7-27`, `known_client_appendix_matches_registry`)
+- [x] **[P2] Make capability-match appendix generation exhaustive** (`scripts/generate_client_behaviors.rs:1-15`, `render`; `tests/quirks.rs:7-27`, `known_client_appendix_matches_registry`)
   - **Problem:** `render` matches `Match::Capability(_)` and always prints “Declares `experimental.magit`”. Adding another `CapabilityTest` would therefore compile and pass the drift test while generating false documentation for that registry entry.
   - **Why it matters:** This violates correctness and cohesion of the registry-derived appendix. Its drift check guarantees byte agreement with the generator, not fidelity when the generator silently collapses distinct metadata.
   - **Change:** Import `CapabilityTest` and match `Match::Capability(CapabilityTest::DeclaresMagit)` explicitly, as already done for `Capability`. Keep rendering sourced from `REGISTRY`; do not introduce a parallel documentation table.
   - **Done when:** A new `CapabilityTest` variant causes a compile-time non-exhaustive-match failure until its documentation rendering is defined, and `make test-rust FILTER="--test quirks"` passes with the checked appendix unchanged.
   - **Constraints:** Do not change registry matches, generated wording unrelated to capability tests, or the public quirk configuration contract.
+  - Verified: `make test-rust FILTER="--test quirks"` @ `5e61d9f` → ok: rust
 
 Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `b5eb865f6cfacaf6a1a352d8ba96bab6dae65600..e6546ce6d6bc5c474a88036c85cce3a6e0836d4f`. Scope covered all 11 changed paths plus command preflight, deferred clipboard/editor producers, rich placement normalization, strict-emitter fallbacks and the T004 acceptance record. Found one P1 task; no P0/P2. Supplied serialized Linux gates were not rerun. Coverage does not prove exhaustive future producer discovery, native recapture/provenance, or non-Linux behavior. Existing P3 generated-file assertions remain deferred. Unrelated dirty `Cargo.toml`/`README.md` and untracked release files were not touched; no image tools were used.
 

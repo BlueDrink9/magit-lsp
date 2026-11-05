@@ -1,4 +1,4 @@
-use magit_lsp::quirks::{Capability, Match, REGISTRY};
+use magit_lsp::quirks::{Capability, CapabilityTest, Match, REGISTRY};
 
 /// Render the registry-derived known-client behavior appendix.
 pub fn render() -> String {
@@ -6,7 +6,7 @@ pub fn render() -> String {
     for q in REGISTRY {
         let matching = match q.matches {
             Some(Match::ClientVersion { name, min, max }) => format!("Exact name `{name}`; inclusive version `{min}`–`{max}`"),
-            Some(Match::Capability(_)) => "Declares `experimental.magit`".into(),
+            Some(Match::Capability(CapabilityTest::DeclaresMagit)) => "Declares `experimental.magit`".into(),
             None => "None; explicit user override only".into(),
         };
         let capability = q.capability.map(|c| format!("{} `{}`", if c.enabled { "add" } else { "remove" }, match c.capability { Capability::DocumentChanges => "workspace.workspaceEdit.documentChanges", Capability::ShowDocument => "window.showDocument.support" })).unwrap_or_else(|| "—".into());
