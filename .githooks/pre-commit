@@ -3,4 +3,8 @@
 set -eu
 repo_root=$(git rev-parse --show-toplevel) || exit
 cd "$repo_root"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "magit-lsp hook: python3 is required; install Python 3 and retry the commit" >&2
+    exit 1
+fi
 exec python3 scripts/format.py --staged

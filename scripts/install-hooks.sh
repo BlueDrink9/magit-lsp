@@ -38,9 +38,13 @@ if [ -n "$effective" ]; then
     echo "install-hooks: refusing existing core.hooksPath: $effective" >&2
     exit 1
 fi
-if [ -e .git/hooks/pre-commit ]; then
-    echo "install-hooks: refusing existing .git/hooks/pre-commit" >&2
+default_hooks=$(git rev-parse --git-path hooks)
+case "$default_hooks" in /*) ;; *) default_hooks=$root/$default_hooks ;; esac
+for hook in "$default_hooks"/*; do
+    [ -e "$hook" ] || continue
+    case "$hook" in *.sample) continue ;; esac
+    echo "install-hooks: refusing existing default hook: $hook" >&2
     exit 1
-fi
+done
 git config --local core.hooksPath "$owned_path"
 echo "Installed repository formatter hook. Remove with: scripts/install-hooks.sh remove"

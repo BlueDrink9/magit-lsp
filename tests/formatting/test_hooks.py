@@ -33,7 +33,7 @@ class HookIntegration(unittest.TestCase):
         if STYLUA.exists() and PRETTIER.exists():
             modules = self.repo / "clients/vscode/node_modules"
             modules.parent.mkdir(parents=True, exist_ok=True)
-            modules.symlink_to(ROOT / "clients/vscode/node_modules", target_is_directory=True)
+            shutil.copytree(ROOT / "clients/vscode/node_modules", modules, symlinks=True)
             shutil.copy(ROOT / ".stylua.toml", self.repo / ".stylua.toml")
             shutil.copy(ROOT / ".prettierrc.json", self.repo / ".prettierrc.json")
 
@@ -74,11 +74,27 @@ class HookIntegration(unittest.TestCase):
         hook.write_text("#!/bin/sh\necho custom\n")
         result = self.install()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("refusing existing .git/hooks/pre-commit", result.stdout)
+        self.assertIn("refusing existing default hook", result.stdout)
         self.assertEqual(hook.read_text(), "#!/bin/sh\necho custom\n")
 
-    @unittest.skipUnless(STYLUA.exists() and PRETTIER.exists(), "locked formatters are not installed")
+    def test_refuses_linked_worktree_default_hook(self):
+        self.git("config", "--unset", "core.hooksPath")
+        linked = Path(self.temp.name) / "linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "linked", str(linked)], cwd=self.repo, check=True)
+        hooks = Path(subprocess.check_output(["git", "rev-parse", "--git-path", "hooks"], cwd=linked, text=True).strip())
+        if not hooks.is_absolute():
+            hooks = linked / hooks
+        hooks.mkdir(parents=True, exist_ok=True)
+        custom = hooks / "pre-commit"
+        custom.write_text("#!/bin/sh\necho custom\n")
+        result = subprocess.run(["sh", str(ROOT / "scripts/install-hooks.sh")], cwd=linked,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing existing default hook", result.stdout)
+        self.assertEqual(custom.read_text(), "#!/bin/sh\necho custom\n")
+
     def test_actual_commits_reject_bad_and_allow_formatted_lua_and_web(self):
+        self.assertTrue(STYLUA.exists() and PRETTIER.exists(), "run npm ci --prefix clients/vscode")
         for path, bad, good in (
             ("lua/a.lua", 'local x="bad"\n', 'local x = "good"\n'),
             ("clients/a.ts", "const x:number=1\n", "const x: number = 1;\n"),
@@ -97,6 +113,8 @@ class HookIntegration(unittest.TestCase):
     def test_missing_formatter_gives_install_guidance(self):
         self.source("lua/a.lua", 'local x = "ok"\n')
         (self.repo / "clients/vscode/node_modules/.bin/stylua").unlink()
+        self.assertTrue(STYLUA.is_file())
+        self.assertTrue(PRETTIER.is_file())
         result = self.git("commit", "-m", "missing", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("install locked VSCode dependencies with npm ci in clients/vscode", result.stdout)
