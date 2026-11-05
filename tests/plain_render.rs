@@ -819,6 +819,42 @@ fn actual_plain_did_open_applies_authoritative_status_without_writing_presentati
 }
 
 #[test]
+fn silent_stale_success_without_echo_recovers_after_watcher_render() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk sentinel\n");
+    let disk_before = std::fs::read(&path).unwrap();
+    let uri = format!("file://{}", path.display());
+    let root_uri = format!("file://{}", repo.path().display());
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["clientInfo"] = json!({"name":"Neovim","version":"0.12.6"});
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
+    init["params"]["workspaceFolders"] = json!([{"uri":root_uri,"name":"repo"}]);
+    server.send(init);
+    assert!(server.response_with_id(1)["result"].is_object());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    let empty = json!({});
+    let resolution = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: Some("Neovim"), version: Some("0.12.6"), capabilities: &empty }, None).unwrap();
+    let mut editor = FakeEditor::from_resolution(Profile::Standard, &resolution);
+    server.send(editor.open(&uri, "stale editor text\n"));
+    let first = next_edit(&mut server);
+    assert_eq!(first["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    editor.edit(&uri, "newer client snapshot\n");
+    let response = editor.dispatch(&first);
+    assert_eq!(response[0]["result"]["applied"], true);
+    assert!(!response.iter().any(|frame| frame["method"] == "textDocument/didChange"));
+    server.send(response[0].clone());
+    let watcher = repo.path().join("watcher-recovery.txt");
+    fixtures::write(&watcher, "recovery bytes\n");
+    let repair = next_edit(&mut server);
+    assert_eq!(repair["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(std::fs::read(&path).unwrap(), disk_before);
+    server.shutdown_and_exit();
+    assert!(server.finish(std::time::Duration::from_secs(10)).success());
+}
+
+#[test]
 fn binary_format_drift_warns_once_refuses_actions_and_recovers_on_reopen() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", fixtures::TEN_LINES)])

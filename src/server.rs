@@ -841,7 +841,23 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
         };
         if let Some((next, warning)) = next {
             if warning { let _ = shared.sender.send(show_message(2, "magit-lsp: the editor keeps changing the presentation file's line endings or final newline; close and reopen the file to resynchronize".into())); }
-            if let Some(next) = next { send_plain_edit(&shared, uri, incarnation, next); }
+            if let Some(next) = next { send_plain_edit(&shared, uri.clone(), incarnation, next); }
+            if applied {
+                let shared = shared.clone();
+                let uri = uri.clone();
+                let edit_id = edit.id;
+                let runtime = shared.runtime.clone().expect("Plain transport owns a Tokio runtime");
+                runtime.spawn(async move {
+                    // Give the client one second to echo an accepted edit; late callbacks are harmless because expiry correlates both flight ID and URI incarnation.
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    let _plain = shared.plain_lifecycle.lock().unwrap_or_else(|p| p.into_inner());
+                    if shared.closing.load(Ordering::SeqCst) || !plain_incarnation_is_current(&shared, &uri, incarnation) { return; }
+                    let next = shared.plain_documents.lock().unwrap_or_else(|p| p.into_inner())
+                        .get_mut(&uri).filter(|entry| entry.incarnation == incarnation)
+                        .and_then(|entry| entry.controller.expire(edit_id));
+                    if let Some(next) = next { send_plain_edit(&shared, uri, incarnation, next); }
+                });
+            }
         }
     });
 }
