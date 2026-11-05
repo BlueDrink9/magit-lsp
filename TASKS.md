@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: 3ff0e6ae0923ef7f3fa87f30d995cbded2e14184
+Last review: 796a7f633c8c57108644ab72cfc9f099474c9f3a
 
 ## Ad hoc
 
@@ -342,6 +342,22 @@ Checkpoint closure (2026-11-05): both P1 findings and the P2 cleanup finding abo
   - **Done when:** `make hygiene` no longer reports navigation markers at `src/commands.rs`, the commands remain implemented and unchanged, and `hygiene-allowlist.md` matches the fresh marker report.
   - **Constraints:** Do not change command behavior, bindings, R-NAV status, unrelated markers, or deferred hygiene owners.
   - **Verify:** `make hygiene && grep -n 'keep-for:' src/commands.rs hygiene-allowlist.md`
+
+- [x] **[P1] Finish terminating the owned Helix recipe server** (`tests/fixtures/lsp_traces/README.md:504-527`, rapid-repair recipe `finally` and `stop_server`)
+  - **Problem:** `stop_server` sends `SIGTERM` and raises after five seconds if the owned process remains, but never escalates to `SIGKILL`. A failed or wedged server therefore survives the recipe even though the recipe promises owned-resource cleanup.
+  - **Why it matters:** This is a correctness and cleanliness defect in the executable evidence recipe. Capture failures must not leak an owned `magit-lsp` process or make later runs ambiguous.
+  - **Change:** Keep the existing `/proc/<pid>/exe` and exact `MAGIT_LSP_WIRELOG` ownership checks, then implement bounded termination: send `SIGTERM`, wait; if the same owned PID still exists, revalidate ownership, send `SIGKILL`, and wait again. Record a cleanup error only if the process survives the final bound or ownership cannot be established. Preserve the primary exception and continue all remaining cleanup steps.
+  - **Done when:** The exact normal recipe and `INJECT_AFTER_INITIALIZE=1` probe leave no owned server, tmux session, or socket; cleanup has a bounded `SIGKILL` fallback and still cannot signal an unrelated or reused PID.
+  - **Constraints:** Touch only `tests/fixtures/lsp_traces/README.md` and `TASKS.md`. Do not use `pkill`/`killall`, delete retained evidence, alter fixtures or provenance claims, touch unrelated dirty release files, use images, or claim Windows/macOS execution.
+  - **Verify:** Extract and compile the fenced Python, run the exact Linux recipe normally and with `INJECT_AFTER_INITIALIZE=1`, inspect the recorded PID plus exact tmux session/socket after each run, then run `git diff --check`.
+
+- [ ] **[P2] Isolate Helix recipe repository setup from host Git config** (`tests/fixtures/lsp_traces/README.md:464-473`, rapid-repair recipe repository setup and launch environment)
+  - **Problem:** The recipe creates and commits the fixture repository before constructing or passing its isolated `HOME`, `XDG_*`, `GIT_CONFIG_NOSYSTEM`, and noninteractive environment. Host settings such as `commit.gpgSign`, `core.hooksPath`, or `init.defaultBranch` can change or fail setup, contradicting the documented isolated-run contract.
+  - **Why it matters:** This violates correctness and cohesion of the runnable provenance recipe. A fresh checkout should not depend on the reviewer's personal Git configuration.
+  - **Change:** Construct one capture environment before any Git command and use it for `git init`, local identity configuration, add/commit, and the tmux/Helix launch. Isolate global and system Git configuration using the recipe-owned HOME/config paths and existing `GIT_CONFIG_NOSYSTEM=1`; retain explicit local capture identity and `GIT_TERMINAL_PROMPT=0`. Do not hard-code a branch unless the recipe's assertions require one; baseline comparisons should remain derived from actual saved text.
+  - **Done when:** Repository setup and editor launch use the same isolated environment, and the recipe succeeds despite hostile caller settings such as signing and a failing global hooks path without reading the caller's Git config.
+  - **Constraints:** Do after: `Finish terminating the owned Helix recipe server`. Touch only `tests/fixtures/lsp_traces/README.md` and `TASKS.md`. Do not alter captured fixtures, historical source hashes, action claims, unrelated recipes, dirty `Cargo.toml`/`README.md`, or untracked release files.
+  - **Verify:** Run the fenced recipe from a checkout subdirectory with hostile Git settings supplied through the caller's normal global config/environment, confirm its own commit and native evidence run complete, then run the existing `INJECT_AFTER_INITIALIZE=1` cleanup probe and `git diff --check`.
 
 ## Deferred hygiene follow-ups
 

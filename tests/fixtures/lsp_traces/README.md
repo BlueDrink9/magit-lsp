@@ -517,10 +517,23 @@ finally:
     if server_pid:
         def stop_server():
             proc=pathlib.Path(f'/proc/{server_pid}')
-            if not proc.exists(): return
-            if pathlib.Path(f'/proc/{server_pid}/exe').resolve()!=SERVER: raise RuntimeError(f'PID {server_pid} executable does not match owned server')
-            if b'MAGIT_LSP_WIRELOG='+os.fsencode(RAW) not in (proc/'environ').read_bytes().split(b'\0'): raise RuntimeError(f'PID {server_pid} wirelog does not match owned run')
-            os.kill(server_pid,signal.SIGTERM); wait(lambda:not proc.exists(),'owned server exit',5)
+            def validate_owner():
+                if not proc.exists(): return False
+                if pathlib.Path(f'/proc/{server_pid}/exe').resolve()!=SERVER: raise RuntimeError(f'PID {server_pid} executable does not match owned server')
+                if b'MAGIT_LSP_WIRELOG='+os.fsencode(RAW) not in (proc/'environ').read_bytes().split(b'\0'): raise RuntimeError(f'PID {server_pid} wirelog does not match owned run')
+                return True
+            def wait_exit(seconds):
+                end=time.monotonic()+seconds
+                while time.monotonic()<end:
+                    if not validate_owner(): return True
+                    time.sleep(.05)
+                return not validate_owner()
+            if not validate_owner(): return
+            os.kill(server_pid,signal.SIGTERM)
+            if wait_exit(5): return
+            if not validate_owner(): return
+            os.kill(server_pid,signal.SIGKILL)
+            if not wait_exit(5): raise RuntimeError(f'owned server PID {server_pid} survived SIGKILL bound')
         cleanup_step('owned server shutdown',stop_server)
     socket_path=pathlib.Path(f'/tmp/tmux-{os.getuid()}')/SOCKET
     cleanup_step('owned tmux socket removal',lambda:socket_path.unlink(missing_ok=True))
