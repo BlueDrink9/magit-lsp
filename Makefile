@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format update-client-behaviors
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -68,3 +68,6 @@ color-spike: build
 
 readme-shots:
 	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
+
+update-client-behaviors:
+	$(call run,update-client-behaviors,UPDATE_CLIENT_BEHAVIORS=1 cargo test -q --test quirks known_client_appendix_matches_registry)

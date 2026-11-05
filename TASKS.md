@@ -74,10 +74,13 @@ Historical trace/capture evidence and implementation records below describe the 
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test quirks"` @ 11d1c8b → passed
 - [x] **T005.3b — Prove named server workarounds and universal safety.**
   Cover every named registry workaround through server behavior, including unreliable apply results, echo/hash reconciliation with quirks disabled or absent, and single-document applyEdit requests.
+  Done: `f224f94`.
   - Verified: `make test-rust FILTER="--test plain_render --test quirks"` @ f224f94 → ok: rust
-- [ ] **T005.3c — Generate the known-client appendix and audit T005.**
+- [x] **T005.3c — Generate the known-client appendix and audit T005.**
   Generate the client-spec appendix from registry metadata with a permanent drift check through Make. Audit all original T005 acceptance clauses and close T005.3/T005 only when evidence is complete.
-- [ ] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
+  Done: `65ee6d9`.
+  - Verified: `make update-client-behaviors && make test-rust FILTER="--test quirks --test plain_harness --test plain_render --test plain_core --test server_async"` → ok. T005 clause 1: `tests/quirks.rs` authentic initialize declarations and `src/quirks.rs` registry cover Neovim 0.12.6 and Helix 25.07.1 entries; Helix `showDocument` remains explicit-override-only pending positive evidence. Clause 2: `tests/plain_harness.rs::all_documented_profiles_have_assertable_behavior` and registry-driven model coverage; `tests/plain_render.rs::named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety` covers workaround and universal echo/hash plus single-document applyEdit safety. Unknown clients have zero matches (`tests/quirks.rs::captured_declarations_and_authentic_identity_match`). Clause 3: generated appendix drift check. No new native execution claimed.
+- [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
   Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
   Apply current review and orchestration instructions from [AGENTS.md](./AGENTS.md#working-conventions). Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
@@ -1284,7 +1287,7 @@ replacements land.
 
 ### 4.1 Client → server (current contract)
 
-Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; remaining T005 behavior and appendix acceptance stays open in [Ad hoc](#ad-hoc).
+Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](#ad-hoc).
 
 | Method | Params | Returns |
 | --- | --- | --- |
@@ -1531,7 +1534,7 @@ This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_
 
 ### Feature — Phase 2 (open)
 
-T005 remains open through its authoritative [Ad hoc children](#ad-hoc); full scope: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
+T005 is complete through its authoritative [Ad hoc children](#ad-hoc); full scope and original acceptance: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
 - [ ] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
 - [ ] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m).
 
