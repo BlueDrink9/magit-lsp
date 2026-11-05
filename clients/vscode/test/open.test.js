@@ -109,12 +109,15 @@ module.exports = async function testStatusOpenLifecycle() {
   };
 
   class LanguageClient {
-    constructor() {
+    constructor(_id, _name, _server, options) {
       this.handlers = notifications;
+      this.features = [];
+      this.options = options;
       this.initializeResult = { capabilities: { semanticTokensProvider: {
         legend: { tokenTypes: ['magit.section'], tokenModifiers: [] },
       } } };
     }
+    registerFeature(feature) { this.features.push(feature); }
     onNotification(name, handler) { notifications.set(name, handler); }
     start() { return Promise.resolve(); }
     stop() { return Promise.resolve(); }

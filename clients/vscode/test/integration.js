@@ -23,16 +23,16 @@ const { LanguageClient, instances } = require('./fake/languageclient');
 /** Scripted client with explicit, validated work-done progress support. */
 class IntegrationClient extends LanguageClient {
   constructor(id, name, serverOptions, clientOptions) {
-    const initialize = clientOptions.middleware.initialize;
     super(id, name, serverOptions, {
       ...clientOptions,
-      middleware: {
-        ...clientOptions.middleware,
-        initialize(params, next, token) {
-          params.capabilities.window = { workDoneProgress: true };
-          return initialize(params, next, token);
-        },
+    });
+    this.registerFeature({
+      fillClientCapabilities(capabilities) {
+        capabilities.window = { workDoneProgress: true };
       },
+      initialize() {},
+      getState() { return { kind: 'static' }; },
+      clear() {},
     });
     this.createdProgress = new Set();
     this.progress = new Map();
@@ -224,6 +224,13 @@ async function run() {
     const commands = vscode.__test.commands;
     const client = instances.at(-1);
     assert(client, 'the extension started a language client');
+    const declaration = client.requests.find((request) => request.method === 'initialize').params.capabilities.experimental.magit;
+    assert.deepEqual(declaration, {
+      v: 1, keys: 'static', modifiers: 'full', layout: ['main'],
+      effects: ['visitFile', 'editDocument', 'clipboard'],
+      prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+    });
+    assert.equal(Object.hasOwn(declaration, 'views'), false);
 
     // 1. Open the status view and display the server's text verbatim.
     await commands.get('magit.open')();

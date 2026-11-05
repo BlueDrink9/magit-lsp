@@ -23,7 +23,7 @@ function createClient() {
   const command = config.get('serverPath') || 'magit-lsp';
   const profile = config.get('profile') || 'standard';
 
-  return new LanguageClient(
+  const client = new LanguageClient(
     'magit-lsp',
     'magit-lsp',
     { command, args: [] },
@@ -38,24 +38,26 @@ function createClient() {
       middleware: {
         // The explicit provider maps dotted server types to legal VSCode IDs.
         provideDocumentSemanticTokens: () => null,
-        initialize(params, second, third) {
-          params.clientInfo = { name: 'Visual Studio Code', version: vscode.version };
-          params.capabilities = params.capabilities || {};
-          params.capabilities.experimental = params.capabilities.experimental || {};
-          params.capabilities.experimental.magit = {
-            v: 1,
-            keys: 'static',
-            modifiers: 'full',
-            layout: ['main', 'side', 'bottom', 'float'],
-            effects: ['visitFile', 'editDocument', 'clipboard'],
-            prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
-          };
-          const next = typeof second === 'function' ? second : third;
-          return next(params);
-        },
       },
     }
   );
+  client.registerFeature({
+    fillClientCapabilities(capabilities) {
+      capabilities.experimental = capabilities.experimental || {};
+      capabilities.experimental.magit = {
+        v: 1,
+        keys: 'static',
+        modifiers: 'full',
+        layout: ['main'],
+        effects: ['visitFile', 'editDocument', 'clipboard'],
+        prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+      };
+    },
+    initialize() {},
+    getState() { return { kind: 'static' }; },
+    clear() {},
+  });
+  return client;
 }
 
 /**

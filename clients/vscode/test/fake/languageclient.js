@@ -43,6 +43,7 @@ class LanguageClient {
     this.requests = [];
     this.notes = [];
     this.initializeResult = undefined;
+    this.features = [];
     this.stderr = '';
     this.exited = undefined;
     instances.push(this);
@@ -57,6 +58,9 @@ class LanguageClient {
   onNotification(method, handler) {
     this.notifications.set(method, handler);
   }
+
+  /** Register a feature using vscode-languageclient's public static-feature API. */
+  registerFeature(feature) { this.features.push(feature); }
 
   /**
    * Start the server, run the LSP initialize handshake and resolve.
@@ -79,20 +83,17 @@ class LanguageClient {
     this.process.stdout.on('data', (chunk) => this.receive(chunk));
     this.process.stderr.on('data', (chunk) => { this.stderr += chunk.toString(); });
 
+    const capabilities = {};
+    for (const feature of this.features) feature.fillClientCapabilities?.(capabilities);
     const params = {
       processId: process.pid,
       clientInfo: { name: 'magit-lsp-node-test', version: '0.0.0' },
       rootUri: this.clientOptions.rootUri || null,
-      capabilities: {},
+      capabilities,
       initializationOptions: this.clientOptions.initializationOptions,
     };
-    const next = async (requestParams) => this.request('initialize', requestParams);
-    const middleware = this.clientOptions.middleware || {};
-    if (middleware.initialize) {
-      this.initializeResult = await middleware.initialize(params, next, undefined);
-    } else {
-      this.initializeResult = await next(params);
-    }
+    this.initializeResult = await this.request('initialize', params);
+    for (const feature of this.features) feature.initialize?.(this.initializeResult.capabilities, this.clientOptions.documentSelector);
     this.sendNotification('initialized', {});
   }
 
