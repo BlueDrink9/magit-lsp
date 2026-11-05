@@ -58,8 +58,8 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Done: `f6a859d`; enforced by VSCode unit/integration tests, `close-reopen-views.scn` and native A06 evidence recorded above.
 - [x] **T004.5b2b — Reconcile remaining public view-effect documentation.**
   Remove the retired alias from CLIENT_SPEC and this effect table. Root creation uses `view/open` and its returned descriptor; PushView/pop retain stack semantics. Done: docs cleanup and native Neovim close/reopen plus VSCode A06 evidence (`/tmp/opencode/openview-alias-checkpoint/a06.log`, `/tmp/opencode/vscode-review-dQ43aA/a06-evidence.json`). Enforced by this check and `git diff --check`.
-- [ ] **T004.5c — Consolidate the duplicate recording UI test helper.**
-  Retain one shared RecordingUi under test helpers and preserve structured notification/delivery coverage. Audit PromptUi multi-choice's actual client/test consumers before considering deletion; record retained contracts rather than treating generic dispatch as a command producer.
+- [x] **T004.5c — Consolidate the duplicate recording UI test helper.**
+  Retain one shared `tests/common/recording_ui.rs` recorder with ordered structured render/effect/prompt payload assertions. The `multiChoice` prompt remains: Lua `prompt.lua` and VSCode `prompt.js` consume it; `tests/data/client-contracts.json` retains selection, empty and cancel contracts. This is client/contract coverage, not evidence of a producing command. CustomRender's notification-wire coverage remains in both focused suites.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
 - [x] **T002.3a — Capture the five remaining native Neovim input actions.**

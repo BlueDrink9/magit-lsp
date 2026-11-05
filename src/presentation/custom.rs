@@ -106,87 +106,8 @@ impl Ui for CustomRender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Cursor, Effect, MessageLevel};
+    use crate::protocol::{Effect, MessageLevel};
     use crate::view::ViewMode;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct RecordingUi(Mutex<Vec<(&'static str, serde_json::Value)>>);
-
-    impl Ui for RecordingUi {
-        fn render(&self, value: ViewRender) -> Message {
-            self.0
-                .lock()
-                .unwrap()
-                .push(("render", serde_json::to_value(&value).unwrap()));
-            Message::Notification(Notification::new(
-                VIEW_RENDER.to_owned(),
-                serde_json::to_value(value).unwrap(),
-            ))
-        }
-        fn effects(&self, value: ViewEffectsParams) -> Message {
-            self.0
-                .lock()
-                .unwrap()
-                .push(("effects", serde_json::to_value(&value).unwrap()));
-            Message::Notification(Notification::new(
-                VIEW_EFFECTS.to_owned(),
-                serde_json::to_value(value).unwrap(),
-            ))
-        }
-        fn prompt(&self, value: ViewPromptParams) -> Message {
-            self.0
-                .lock()
-                .unwrap()
-                .push(("prompt", serde_json::to_value(&value).unwrap()));
-            Message::Notification(Notification::new(
-                VIEW_PROMPT.to_owned(),
-                serde_json::to_value(value).unwrap(),
-            ))
-        }
-    }
-
-    #[test]
-    fn recording_ui_receives_typed_delivery_without_transport() {
-        let ui = RecordingUi::default();
-        let _ = ui.render(ViewRender {
-            view_id: "v".into(),
-            version: 1,
-            base_version: None,
-            text: Some(vec!["status".into()]),
-            edits: None,
-            cursor: Some(Cursor { line: 0, column: 0 }),
-            mode: ViewMode::default(),
-            pending: String::new(),
-            menu: None,
-        });
-        let _ = ui.effects(ViewEffectsParams {
-            effects: vec![Effect::message(MessageLevel::Info, "ok")],
-        });
-        let _ = ui.prompt(ViewPromptParams {
-            prompt_id: "p1".into(),
-            kind: crate::protocol::PromptKind::Confirm,
-            title: "Continue?".into(),
-            detail: None,
-            yes_label: None,
-            no_label: None,
-            destructive: None,
-            default: None,
-            placeholder: None,
-            secret: None,
-            items: None,
-            allow_custom: None,
-            preselected: None,
-            min: None,
-            max: None,
-        });
-        let got = ui.0.lock().unwrap();
-        assert_eq!(got.len(), 3);
-        assert_eq!(got[0].0, "render");
-        assert_eq!(got[1].0, "effects");
-        assert_eq!(got[2].0, "prompt");
-        assert_eq!(got[2].1["promptId"], "p1");
-    }
 
     #[test]
     fn custom_adapter_preserves_notification_wire_shape() {

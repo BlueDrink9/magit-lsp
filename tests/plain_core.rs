@@ -1,10 +1,14 @@
-use lsp_server::{Message, Notification};
+use lsp_server::Message;
 use magit_lsp::presentation::{
     negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, Support, Ui,
 };
 use magit_lsp::protocol::*;
 use serde_json::{json, Value};
 use std::sync::Mutex;
+
+#[path = "common/recording_ui.rs"]
+mod recording_ui;
+use recording_ui::RecordingUi;
 
 #[test]
 fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
@@ -64,37 +68,10 @@ fn initialize(block: Option<Value>) -> Value {
     json!({"capabilities":caps})
 }
 
-#[derive(Default)]
-struct RecordingUi(Mutex<Vec<(&'static str, Value)>>);
-
-impl Ui for RecordingUi {
-    fn render(&self, value: ViewRender) -> Message {
-        self.0
-            .lock()
-            .unwrap()
-            .push(("render", serde_json::to_value(&value).unwrap()));
-        Notification::new(VIEW_RENDER.into(), serde_json::to_value(value).unwrap()).into()
-    }
-    fn effects(&self, value: ViewEffectsParams) -> Message {
-        self.0
-            .lock()
-            .unwrap()
-            .push(("effects", serde_json::to_value(&value).unwrap()));
-        Notification::new(VIEW_EFFECTS.into(), serde_json::to_value(value).unwrap()).into()
-    }
-    fn prompt(&self, value: ViewPromptParams) -> Message {
-        self.0
-            .lock()
-            .unwrap()
-            .push(("prompt", serde_json::to_value(&value).unwrap()));
-        Notification::new(VIEW_PROMPT.into(), serde_json::to_value(value).unwrap()).into()
-    }
-}
-
 #[test]
-fn recording_ui_receives_typed_render_effect_and_prompt_independent_of_transport() {
+fn shared_recording_ui_captures_order_and_payloads() {
     let ui = RecordingUi::default();
-    let render = ViewRender {
+    ui.render(ViewRender {
         view_id: "v".into(),
         version: 3,
         base_version: None,
@@ -104,8 +81,7 @@ fn recording_ui_receives_typed_render_effect_and_prompt_independent_of_transport
         mode: magit_lsp::view::ViewMode::Interactive,
         pending: String::new(),
         menu: None,
-    };
-    ui.render(render);
+    });
     ui.effects(ViewEffectsParams {
         effects: vec![Effect::message(MessageLevel::Info, "notice")],
     });
