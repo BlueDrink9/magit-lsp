@@ -9,6 +9,7 @@ completed correctness contracts and architecture design.
 | --- | --- |
 | Async runtime | `tokio` |
 | Config format | TOML, with `include` of other TOML files (absolute or relative), default location from the OS config dir (XDG on Linux) |
+| macOS config dir | `dirs` / `~/Library/Application Support` |
 | Neovim default profile | `vim` (evil-style) |
 | Non-modal default profile | `standard` (Magit mnemonics, direct keys, no Emacs idioms) |
 | Emacs idioms (`C-c C-c`, `M-n`, …) | Not kept. No `emacs` profile is shipped |
@@ -18,7 +19,7 @@ completed correctness contracts and architecture design.
 | VCS boundary | Keep presentation and standard-LSP transport VCS-neutral so future jj support requires effectively zero Plain-client changes. Keep Git discovery, mutation validation, commit-file paths, helper lifecycle and completion lookup in backend/workflow providers. Do not add a jj backend, lowest-common-denominator VCS hierarchy, or speculative wire protocol |
 | Diff/patch | Git computes diffs; we parse its output and build patches for `git apply` (this is what Magit does, §3.13) |
 | Rendering | Server re-renders fully (as Magit does) and sends line-range edits, so clients stay stable (§3.3) |
-| Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few (§8) |
+| Tests | Mostly Rust, in-process, asserting buffer text and repo state. Neovim tests are kept but few ([testing strategy](TESTING.md#8-testing-strategy)) |
 | Detail visibility | Four levels: section (staged/unstaged) → files → hunks → individually visible hunks; profile bindings and tests must match ([§5.1](KEYMAPS.md#51-common-scope)) |
 | Menu saved arguments | Defer `menus.save_scope` persistence; remove/defer the setting until semantics are understood |
 | Magit parity keys | Verify keys against the Magit manual, not memory |
@@ -79,7 +80,7 @@ in [the implementation queue](../TASKS.md). Historical completion marks are not 
 ### Completed correctness contracts (immutable completion record: `da4d422:TASKS.md`)
 
 - **IMM-1:** Unstage works in unborn repositories and rename paths. Tests: `tests/dispatch.rs`; oldest-Git/fallback evidence gap remains.
-- **IMM-2:** Normalize tree-based inclusive selections; retain only changes and safely reverse-apply. Tests: patch/dispatch suites; randomized property evidence per [§8.3](../TASKS.md#83-other-rust-layers).
+- **IMM-2:** Normalize tree-based inclusive selections; retain only changes and safely reverse-apply. Tests: patch/dispatch suites; randomized property evidence per [§8.3](TESTING.md#83-other-rust-layers).
 - **IMM-3:** Git failures become readable message effects; protocol faults remain RPC errors. Tests: `tests/errors.rs`; mapped failures enforced, broader UI evidence retained in archive.
 - **IMM-4:** Neovim status buffer is render-only except text mode; writes blocked. Tests: `tests/editor_bridge.rs`; native rules and evidence remain in immutable record.
 - **IMM-5:** Git diff context determines hunk merge; patch builder does not compute diffs. Tests: patch fixtures and cached diff parity.
@@ -136,7 +137,7 @@ snapshots, which associate document text with render state without that custom
 ack protocol. Plain presentation uses standard LSP documents and providers. The adopted target
 uses the declared capability block, logical stack and bounded prompts/placements;
 this supersedes the obsolete no-prompts/no-placements/no-editor-bridge target claim. Virtual-content transports and custom URIs remain
-out of Plain scope; see §9 for deferred LSP 3.18 work.
+out of Plain scope; see [open questions](OPEN_QUESTIONS.md#9-open-questions) for deferred LSP 3.18 work.
 
 ### 3.5 Commands and effects
 
@@ -689,10 +690,8 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
 - **Format:** TOML.
 - **Default location:** the OS config directory, `<config>/magit-lsp/config.toml`:
   Linux and other Unix `$XDG_CONFIG_HOME` or `~/.config`; Windows `%APPDATA%`;
-  macOS: use `~/.config` (XDG-style) unless `$XDG_CONFIG_HOME` is set, because
-  that is what terminal-tool users expect (the `etcetera` crate's
-  `choose_base_strategy` does this; the `dirs` crate would instead pick
-  `~/Library/Application Support` — decide at implementation time, §9).
+  the recorded macOS choice is `dirs` / `~/Library/Application Support`.
+  This is a design decision, not verification of current runtime behavior.
 - **Overrides:** `--config <path>` flag and `MAGIT_LSP_CONFIG` env var.
 - **Includes:**
   ```toml

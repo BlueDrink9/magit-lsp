@@ -44,8 +44,11 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **Documentation cleanup — Move keymaps and view reference.** Move §§5–6 into `docs/KEYMAPS.md` and `docs/VIEWS.md` and update maintained references without changing behavior.
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md"` @ `7d4bee4` → ok: docs-check.
-- [ ] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into `docs/TESTING.md` and `docs/OPEN_QUESTIONS.md`, update maintained links, and audit the parent migration acceptance.
-- [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the four preceding independently checked migrations.
+- [x] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into [`docs/TESTING.md`](docs/TESTING.md) and [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md), update maintained links, and audit the parent migration acceptance.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `e4f259d` → ok: docs-check.
+- [ ] **Documentation cleanup — Finish maintained reference navigation.** Update repository entry points and maintained cross-links after all reference moves, preserving unrelated dirty documentation changes, and verify the complete maintained documentation set.
+- [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points. Split into the preceding independently checked migrations and navigation pass.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links.
 
 - [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Complete and verify the extracted configurable pump and dynamic request correlation, including the standalone action consumer. No real-server didOpen conformance claim in this slice.
@@ -299,7 +302,7 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 5. Default keymaps (profiles)
 6. View catalog
 7. Numbered implementation queue (this file; [scope archive](./TASKS_PART_SEVEN.md))
-8. Testing strategy
+8. [Testing strategy](docs/TESTING.md#8-testing-strategy)
 9. Open questions
 
 ---
@@ -948,133 +951,10 @@ Every ticket states **Target Files** (exclusive write boundary), **Reference Fil
 
 ## 8. Testing strategy
 
-**Target distribution:** ~80% Rust in-process, ~15% protocol-level (spawned
-binary over stdio), ~5% Neovim. The Neovim tests that exist stay as
-integration tests; their *intent* for logic moves to Rust.
-
-### 8.1 In-process `TestSession` harness (main tool)
-
-The harness is implemented in `tests/common/session.rs` (IMM-7; completed
-history in the archive); extend it there rather than adding another session
-type, with visibility/keymap/effects inspection as needed. Drive the real key/invoke path,
-locate cursor targets through tree metadata, snapshot buffers (`insta` or
-`expect-test`) and assert repo state with Git. `ScriptedUi` queues text,
-confirm, choice and `edit_document(|text| …)` replies.
-
-### 8.2 Determinism
-
-Fixtures set `GIT_AUTHOR_DATE`, `GIT_COMMITTER_DATE`, `GIT_CONFIG_NOSYSTEM=1`,
-a temp `HOME`, `XDG_CONFIG_HOME` to a temp dir, `LC_ALL=C`, fixed author and
-committer, so hashes are stable and appear verbatim in snapshots. Normalise
-only temp paths and timings.
-
-### 8.3 Other Rust layers
-
-- **Patch engine:** `proptest` — random file pairs and random selections;
-  `git apply --cached --check` passes; staging everything selected gives the
-  expected index; stage-then-unstage is identity; selections containing context
-  or header lines never produce a corrupt patch (IMM-2).
-- **Fixture matrix:** renames, copies, mode changes, symlinks, binary, CRLF,
-  no trailing newline, spaces/unicode/quote paths, unborn HEAD, detached HEAD,
-  merge conflicts, in-progress rebase/merge/cherry-pick, worktrees, submodules,
-  empty repo, large diffs, changes 4 lines apart and 20 lines apart (hunk
-  merging, IMM-5).
-- **Keymap:** no duplicate keys within a scope chain; every command has a doc
-  and a binding in each profile (R5); manifest snapshot per profile; text-mode
-  keymap has only the toggle; workbench deny-list; key-notation round trips
-  for every translator.
-- **Config:** include order, relative/absolute/`~`/env expansion, optional
-  includes, cycle detection, array-replace/table-merge, error messages with
-  file and line.
-- **Document model:** stable Node IDs across refresh; cursor successor;
-  stale-action rejection; lazy bodies not computed while collapsed.
-- **Menus:** render snapshots at several widths; switch/option/action flows
-  through `ScriptedUi`; `Planned` entries show the message and change nothing.
-- **Editor bridge/askpass:** fake `GIT_EDITOR` flow end to end through the
-  socket helper; client disconnect aborts Git.
-- **Error mapping:** one test per row of the IMM-3 table.
-
-### 8.4 Colour and presentation tests (T028)
-
-Test token names and role coverage. Add a Rust token-response test for a fixture,
-client data tests that map each legend type to a Neovim link or VS Code scope,
-and one ANSI smoke test per client using one colour scheme. The smoke test checks
-that added and removed cells have different foreground colours. Do not test
-contrast, multiple schemes, theme changes, or HTML rendering. `:TOhtml` cannot
-see semantic-token namespaces; the historical IMM-8 spike is not acceptance.
-
-### 8.5 Protocol-level tests
-
-A few tests spawn the real binary over stdio: `initialize` capabilities,
-`view/open` → `view/render`, `view/key` round trip, ack/resync, prompt request
-and response, standard LSP requests (`documentSymbol`, `semanticTokens`).
-
-### 8.6 Neovim integration (kept, few)
-
-
-Attach and no orphan processes; atomic keymap replace (old keys gone, new
-present, nothing between); visual-selection forwarding; fold-key mirroring
-(including a user `nnoremap <Tab> za`); `passThrough` of an unbound key;
-read-only enforcement (IMM-4); text-mode toggle; error notifications (IMM-3);
-prompt effects via stubbed `vim.ui.input`/`vim.ui.select`; the editor bridge
-opens the commit-message buffer in the same instance; bottom menu placement.
-
-### 8.7 CI
-
-`make test-rust` on Linux/macOS/Windows; Neovim tests on stable and nightly;
-manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
-on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
-`make ui-test` and uploads `build/ui/` on failure (R-UI-6).
-
-### 8.8 Real-UI tests (L3)
-
-L3 drives a real Neovim inside tmux and asserts on the captured screen. It
-catches what the other layers cannot: timing, chord timeouts, key encoding,
-the command line and real colours.
-
-| Layer | Tool | Use it for |
-| --- | --- | --- |
-| L1 | Rust `TestSession` | Menu content, pending-chord state, view-stack depth, messages, token attributes |
-| L2 | mini.test child Neovim | Window counts, floats, keymaps applied, buffer options, `:messages` |
-| L3 | Real Neovim in tmux | What the user sees: timing, chord timeouts, key encoding, the command line, real colours |
-
-- `scripts/ui start <fixture>` builds a deterministic repo (§8.2 environment)
-  and opens the client in a dedicated tmux server; `keys`, `wait`, `screen`,
-  `state`, `trace` and `stop` form the "inspect, act, inspect" loop described
-  in `AGENTS.md`.
-- `lua/magit-lsp/debug.lua` exposes `snapshot()` (windows, view stack, pending
-  chord, render versions, keymap, messages) and `idle()`; `MAGIT_LSP_TRACE=<path>`
-  records per-hop timings for `ui trace`.
-- Scenarios are `.scn` files in `tests/ui/` using the DSL in
-  `ui-test-plan.md` §A.5. Artefacts land in `build/ui/<scenario>/` as
-  `.screen` and `.ansi`.
-- **Never sleep:** poll `idle()` with `ui wait`.
-- A known bug is an `xfail: <bug id>` scenario. The runner reports XFAIL, and a
-  passing `xfail` fails the run until the tag is removed.
-- `make ui-test` runs every scenario; `make ui-tour` writes
-  `build/ui/tour.md`; `make ui-unit` runs the harness's own Python tests.
-- Every menu scenario runs under both profiles (`standard`, `vim`) at 100x30
-  and 80x24; `size-only`/`profile-only` opt out for latency and the tour.
-
----
+See [Testing strategy](docs/TESTING.md#8-testing-strategy).
 
 ## 9. Open questions
 
-1. **macOS config dir:** `~/.config` via `etcetera` (proposed) or
-   `~/Library/Application Support` via `dirs`.
-    -- Use dirs. We should have a root command for editing the config file in the client though.
-2. **Escape behavior:** Escape cancels most views. Commit-message and rebase
-   buffers may need client-specific exit behavior; retain this caveat.
-3. **VSCode menu default:** QuickPick (proposed) vs. text document in a lower
-   editor group. Revisit after the Phase 2 spike.
-4. **Per-repo config trust:** is `.magit-lsp.toml` worth the risk surface?
-   Currently limited to keys and display, behind `trust_repo_config`.
-5. **Minimum supported Git version** (decide by running IMM-1 tests on old
-   versions).
-6. **Full-line background tinting:** wanted; T094 owns the feature.
-7. **LSP 3.18 `workspace/textDocumentContent`** adoption when clients support it.
-8. **Fold keys in VSCode** for users with customised `editor.toggleFold`:
-   the "mirror my shortcuts" command (proposed) vs. any better mechanism found
-   during the spike.
+See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 ---
