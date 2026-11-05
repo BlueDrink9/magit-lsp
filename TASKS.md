@@ -15,6 +15,11 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `cargo test --test quirks` against captured initialize declarations, version/name boundaries, capability matching and override validation.
 - [x] **T005.2a — Add validated layered quirk settings.**
   Extend existing configuration loading with a quirks table of known registry ids to booleans, including TOML layers and initializationOptions. Test precedence and rejection of invalid ids or values; preserve existing configuration recovery conventions.
+- [x] **T005.2b1 — Finish and commit initialize quirk resolution.**
+  Finalize the existing production integration and typed override seam, restore unrelated formatting changes and define effective report shape for both presentations. Commit after existing regressions pass; new production acceptance cases remain explicitly owned by T005.2b2.
+  Done: effective Plain and Rich capability metadata, validated overrides, and unrelated formatting restored. Enforced by `cargo test --test quirks --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`; real-server acceptance tests remain in T005.2b2.
+- [ ] **T005.2b2 — Prove effective quirk resolution through the real server.**
+  Add real initialize/config recovery and behavior tests for known and unknown clients, explicit on/off overrides and strict rich negotiation. Complete T005.2b and T005.2 only after these production acceptance cases pass.
 - [ ] **T005.2b — Resolve and report production initialize quirks.**
   Consume layered settings and the registry at initialize, apply capability overrides and expose effective results; enforce production server behavior and strict rich negotiation in focused tests. Complete T005.2 after both children pass.
 - [ ] **T005.2 — Integrate quirk configuration and effective initialize reporting.**

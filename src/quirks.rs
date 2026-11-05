@@ -128,6 +128,14 @@ pub const REGISTRY: &[Quirk] = &[
 /// Resolve automatic evidence matches, then apply validated user on/off overrides.
 pub fn resolve(client: Client<'_>, overrides: Option<&Value>) -> Result<Resolution, String> {
     let user = parse_overrides(overrides)?;
+    Ok(resolve_validated(client, user.into_iter()))
+}
+
+/// Resolve quirks using already-validated configuration overrides.
+pub fn resolve_validated<'a>(
+    client: Client<'_>,
+    overrides: impl IntoIterator<Item = (&'a str, bool)>,
+) -> Resolution {
     let mut enabled: BTreeSet<_> = REGISTRY
         .iter()
         .filter(|q| {
@@ -136,14 +144,19 @@ pub fn resolve(client: Client<'_>, overrides: Option<&Value>) -> Result<Resoluti
         })
         .map(|q| q.id)
         .collect();
-    for (id, on) in user {
+    for (id, on) in overrides {
+        let quirk = REGISTRY
+            .iter()
+            .find(|quirk| quirk.id == id)
+            .expect("validated quirk configuration contains only registry ids");
+        let id = quirk.id;
         if on {
             enabled.insert(id);
         } else {
             enabled.remove(id);
         }
     }
-    Ok(Resolution { enabled })
+    Resolution { enabled }
 }
 
 /// Parse an object of quirk-id to boolean overrides, rejecting unknown ids and types.

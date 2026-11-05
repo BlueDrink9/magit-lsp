@@ -2241,7 +2241,9 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                     .get(&p.uri)
                     .is_some_and(|doc| !doc.repair && doc.version == p.version)
                 {
-                    return Err(Error::new("Wait for the exact synchronized document version; full-text repair may be required"));
+                    return Err(Error::new(
+                        "Wait for the exact synchronized document version; full-text repair may be required",
+                    ));
                 }
             }
             if let Some(warning) = editor::registry().finish(&shared.draft_owner, &p)? {
@@ -2480,7 +2482,48 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
     match request.method.as_str() {
         "initialize" => {
             let mut notifications = Vec::new();
-            let presentation = negotiate(&params).map_err(|error| Error::new(error.to_string()))?;
+            let init = params
+                .get("initializationOptions")
+                .cloned()
+                .filter(|value| !value.is_null());
+            if let Some(value) = init {
+                let outcome = shared.config.set_initialization(Some(value));
+                for error in &outcome.errors {
+                    notifications.push(show_message(1, format!("magit-lsp config: {error}")));
+                }
+            }
+            let config = shared.config.config();
+            let caps = params.get("capabilities").unwrap_or(&Value::Null);
+            let identity = params.get("clientInfo").unwrap_or(&Value::Null);
+            let resolution = crate::quirks::resolve_validated(
+                crate::quirks::Client {
+                    name: identity.get("name").and_then(Value::as_str),
+                    version: identity.get("version").and_then(Value::as_str),
+                    capabilities: caps,
+                },
+                config
+                    .quirks
+                    .iter()
+                    .map(|(id, enabled)| (id.as_str(), *enabled)),
+            );
+            let mut presentation =
+                negotiate(&params).map_err(|error| Error::new(error.to_string()))?;
+            if let Presentation::Plain(plain) = &mut presentation {
+                for id in &resolution.enabled {
+                    if let Some(quirk) = crate::quirks::REGISTRY.iter().find(|q| q.id == *id) {
+                        if let Some(override_) = quirk.capability {
+                            match override_.capability {
+                                crate::quirks::Capability::DocumentChanges => {
+                                    plain.document_changes = override_.enabled
+                                }
+                                crate::quirks::Capability::ShowDocument => {
+                                    plain.show_document = override_.enabled
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             let (delivery, key_modifiers) = match &presentation {
                 Presentation::Rich(rich) => (rich.keys, rich.modifiers),
                 Presentation::Plain(_) => (KeymapDelivery::Dynamic, KeyModifiers::Full),
@@ -2492,7 +2535,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 client.delivery = delivery;
                 client.key_modifiers = key_modifiers;
-                client.presentation = Some(presentation);
+                client.presentation = Some(presentation.clone());
                 client.plain = match client.presentation.as_ref() {
                     Some(Presentation::Plain(caps)) => Some(caps.clone()),
                     _ => None,
@@ -2526,22 +2569,48 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     });
             }
             tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
-            let init = params
-                .get("initializationOptions")
-                .cloned()
-                .filter(|value| !value.is_null());
-            if let Some(value) = init {
-                let outcome = shared.config.set_initialization(Some(value));
-                for error in &outcome.errors {
-                    notifications.push(show_message(1, format!("magit-lsp config: {error}")));
-                }
-            }
             if let Some(error) = &shared.startup_error {
                 notifications.push(show_message(1, format!("magit-lsp config: {error}")));
             }
             tracing::debug!(files = ?shared.config.files(), "configuration ready");
+            let mut server_caps = capabilities(
+                shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .encoding,
+            )?;
+            let effective_caps = match &presentation {
+                Presentation::Plain(plain) => serde_json::json!({
+                    "applyEdit": plain.apply_edit,
+                    "documentChanges": plain.document_changes,
+                    "codeActions": plain.code_actions,
+                    "executeCommand": plain.execute_command,
+                    "disabledActions": plain.disabled_actions,
+                    "showDocument": plain.show_document,
+                    "workDoneProgress": plain.work_done_progress,
+                    "completion": plain.completion,
+                    "foldingRange": plain.folding_range,
+                    "positionEncodings": plain.position_encodings,
+                }),
+                Presentation::Rich(rich) => serde_json::json!({
+                    "keys": rich.keys,
+                    "modifiers": rich.modifiers,
+                    "layout": rich.layout,
+                    "effects": rich.effects,
+                    "prompts": rich.prompts,
+                }),
+            };
+            let enabled: Vec<_> = resolution
+                .enabled
+                .iter()
+                .filter_map(|id| crate::quirks::REGISTRY.iter().find(|q| q.id == *id))
+                .map(|q| serde_json::json!({"id":q.id,"model":q.model,"workaround":q.workaround}))
+                .collect();
+            server_caps["experimental"]["magit"]["effective"] =
+                serde_json::json!({"capabilities":effective_caps,"quirks":enabled});
             Ok(Dispatched::with(
-                serde_json::json!({ "capabilities": capabilities(shared.client.lock().unwrap_or_else(|p| p.into_inner()).encoding)? }),
+                serde_json::json!({ "capabilities": server_caps }),
                 notifications,
             ))
         }
