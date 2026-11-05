@@ -83,6 +83,7 @@ for (const vector of renderVectors) {
     assert.deepEqual(result.lines, vector.expectedLines);
     assert.equal(result.version, vector.expectedVersion);
     assert.equal(result.status, vector.outcome === 'resync' ? 'resync' : vector.render.text ? 'full' : vector.render.edits ? 'edits' : 'none');
+    if (vector.expectedMetadata) assert.equal(result.mode, vector.expectedMetadata.mode);
   });
 }
 

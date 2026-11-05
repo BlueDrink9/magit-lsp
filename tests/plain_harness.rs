@@ -19,7 +19,7 @@ fn caps() -> Value { json!({"window":{"workDoneProgress":true},"general":{"posit
 #[test]
 fn shared_rich_render_vectors_apply_exact_text_and_intents() {
     #[derive(serde::Deserialize)]
-    struct Vector { name: String, #[serde(rename="initialLines")] initial_lines: Vec<String>, #[serde(rename="initialVersion")] initial_version: u64, render: magit_lsp::protocol::ViewRender, #[serde(rename="expectedLines")] expected_lines: Vec<String>, #[serde(rename="expectedVersion")] expected_version: u64, outcome: String }
+    struct Vector { name: String, #[serde(rename="initialLines")] initial_lines: Vec<String>, #[serde(rename="initialVersion")] initial_version: u64, render: magit_lsp::protocol::ViewRender, #[serde(rename="expectedLines")] expected_lines: Vec<String>, #[serde(rename="expectedVersion")] expected_version: u64, #[serde(rename="expectedMetadata")] expected_metadata: Option<Value>, outcome: String }
     #[derive(serde::Deserialize)]
     struct Contracts { renders: Vec<Vector> }
     for vector in serde_json::from_str::<Contracts>(include_str!("data/client-contracts.json")).unwrap().renders {
@@ -29,6 +29,7 @@ fn shared_rich_render_vectors_apply_exact_text_and_intents() {
         let state = &editor.views[&vector.render.view_id];
         assert_eq!(state.lines, vector.expected_lines, "{}", vector.name);
         assert_eq!(state.version, vector.expected_version, "{}", vector.name);
+        if let Some(expected) = vector.expected_metadata { assert_eq!(json!({"mode":state.mode,"pending":state.pending,"cursor":state.cursor,"menu":state.menu}), expected, "{}", vector.name); }
         match vector.outcome.as_str() { "ack" => assert_eq!(intent, editor_model::rich::Intent::Ack(vector.expected_version)), "resync" => assert_eq!(intent, editor_model::rich::Intent::Resync), other => panic!("unknown outcome {other}") }
     }
 }
@@ -99,19 +100,12 @@ fn queued_prompt_routing_uses_unique_correlated_request_ids() {
 }
 
 #[test]
-fn rich_metadata_only_stale_and_view_isolation() {
+fn rich_stale_render_isolation() {
     use editor_model::rich::{Intent, RichEditor, ViewState};
     let mut editor = RichEditor::default();
     editor.views.insert("a".into(), ViewState { lines: vec!["keep".into()], version: 1, ..ViewState::default() });
-    let render: magit_lsp::protocol::ViewRender = serde_json::from_value(json!({"viewId":"a","version":2,"mode":"text","pending":"g","cursor":{"line":0,"column":1}})).unwrap();
-    assert_eq!(editor.apply(render), Intent::Ack(2));
-    assert_eq!(editor.views["a"].lines, vec!["keep"]);
-    assert_eq!(editor.views["a"].mode, magit_lsp::view::ViewMode::Text);
-    assert_eq!(editor.views["a"].pending, "g");
-    assert_eq!(editor.views["a"].cursor, Some(magit_lsp::protocol::Cursor { line: 0, column: 1 }));
-    assert_eq!(editor.views["a"].menu, None);
     let before = editor.views["a"].clone();
-    let stale: magit_lsp::protocol::ViewRender = serde_json::from_value(json!({"viewId":"a","version":3,"baseVersion":1,"edits":[{"startLine":0,"endLine":1,"lines":["bad"]}],"mode":"interactive"})).unwrap();
+    let stale: magit_lsp::protocol::ViewRender = serde_json::from_value(json!({"viewId":"a","version":3,"baseVersion":0,"edits":[{"startLine":0,"endLine":1,"lines":["bad"]}],"mode":"interactive"})).unwrap();
     assert_eq!(editor.apply(stale), Intent::Resync);
     assert_eq!(editor.views["a"], before);
     let other: magit_lsp::protocol::ViewRender = serde_json::from_value(json!({"viewId":"b","version":1,"text":["other"],"mode":"interactive"})).unwrap();

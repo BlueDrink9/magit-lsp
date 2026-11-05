@@ -2664,7 +2664,7 @@ T['shared render vectors apply through the Lua view adapter'] = function()
       VIEW.apply_render(vector.render, 303)
       VIEW.flush_acks(303)
       result[#result + 1] = { lines = vim.api.nvim_buf_get_lines(view.buf, 0, -1, false),
-        version = view.version, ack = ACKS[#ACKS], resync = RESYNCS[1] }
+        version = view.version, mode = view.mode, ack = ACKS[#ACKS], resync = RESYNCS[1] }
       VIEW.close(view.key, true)
     end
     return result
@@ -2673,6 +2673,9 @@ T['shared render vectors apply through the Lua view adapter'] = function()
     local result = results[index]
     MiniTest.expect.equality(result.lines, vector.expectedLines, vector.name .. ': buffer lines')
     MiniTest.expect.equality(result.version, vector.expectedVersion, vector.name .. ': view version')
+    if vector.expectedMetadata then
+      MiniTest.expect.equality(result.mode, vector.expectedMetadata.mode, vector.name .. ': mode')
+    end
     if vector.outcome == 'ack' then
       MiniTest.expect.equality(result.ack, vector.render.version, vector.name .. ': ACK')
       MiniTest.expect.equality(result.resync, nil, vector.name .. ': no resync')

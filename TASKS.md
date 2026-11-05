@@ -305,14 +305,15 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Verify:** Run `make test-rust FILTER="--test plain_harness"`.
   - Verified: `make test-rust FILTER="--test plain_harness"` @ `02b7d19` → `ok: rust`
 
-- [ ] **[P2] Put metadata-only rich rendering in the shared contract vectors** (`tests/data/client-contracts.json:2-7`, `renders`; `tests/plain_harness.rs:19-34`, `shared_rich_render_vectors_apply_exact_text_and_intents`; `tests/plain_harness.rs:72-91`, `rich_metadata_only_stale_and_view_isolation`)
+- [x] **[P2] Put metadata-only rich rendering in the shared contract vectors** (`tests/data/client-contracts.json:2-7`, `renders`; `tests/plain_harness.rs:19-34`, `shared_rich_render_vectors_apply_exact_text_and_intents`; `tests/plain_harness.rs:72-91`, `rich_stale_render_isolation`)
   - **Problem:** T006.3a says shared vectors prove metadata-only rendering, but the shared fixture contains only full, edit and stale-edit rows. The separate Rust-only case advances a metadata-only render from version 1 to 2, contradicting the current protocol rule that metadata-only renders preserve content version, and it does not make metadata part of the cross-client contract row.
   - **Why it matters:** This violates test validity and status cleanliness. The checked acceptance claim points to a shared oracle that does not contain the claimed case, while its substitute uses an impossible producer state.
   - **Change:** Add a metadata-only row to `renders` with no `text` or `edits`, `render.version == initialVersion`, and explicit expected mode, pending sequence, cursor and menu metadata. Extend the Rust vector schema/assertions to check those fields and exact ack intent. Remove the duplicate metadata assertions from `rich_metadata_only_stale_and_view_isolation`, retaining its stale-no-mutation and per-view isolation checks.
   - **Done when:** The shared row fails if text or version changes, metadata is not applied exactly, or the current version is not acknowledged; no bespoke test duplicates the same metadata-only oracle.
   - **Constraints:** Do not change production render semantics, invent a new protocol field, weaken full-over-edits/stale-resync vectors, or add image evidence.
   - **Acceptance test:** All Rust, Lua and VSCode consumers execute the new shared metadata-only row; the Rust fake additionally asserts its structured metadata state.
-  - **Verify:** Run `make test-rust FILTER="--test plain_harness"`, then `make test-file FILE=tests/test_magit_lsp.lua`, then `make vscode-test`.
+   - **Verify:** Run `make test-rust FILTER="--test plain_harness"`, then `make test-file FILE=tests/test_magit_lsp.lua`, then `make vscode-test`.
+   - Verified: `make test-rust FILTER="--test plain_harness" && make test-file FILE=tests/test_magit_lsp.lua && make vscode-test` @ `43480bc` → `ok: rust; ok: lua; ok: vscode; ok: keybindings`
 
 - [ ] **[P2] Refresh the T006 accumulated-work gate totals** (`TASKS.md:3-5`, `Last review` and `Accumulated-work gate (2026-11-06, T006)`; `TASKS.md:256`, `T006 gate`)
   - **Problem:** The current T006 gate still records 14 paths and 1016 insertions, but the final reviewed range through the consumer-wiring fix contains 16 paths and 1025 insertions. The same file records that two omitted consumer modules were added before the serialized full test, so the scope statement is stale.
