@@ -17,6 +17,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
 - [x] **T004.1 — Use camelCase content-action targets on the wire.**
   Change `ActionTarget` serialization/deserialization to `nodeId` and `mutationHash`, update live Plain test payloads and assert old snake_case payloads are rejected. Preserve content-addressed identity, selection and stale-target protections; do not alter historical native trace fixtures.
+- [x] **T004.2 — Remove unconsumed rich rendering and key-delivery modes.**
+  Remove runtime support for `forwardAll`, render-only-full and native-fold presentation after confirming neither shipped client declares them. Retain supported dynamic/static keys, acknowledged incremental rendering, server-fold semantics and their real-server tests; the following typed-schema slice removes singleton wire fields.
+- [x] **T004.2a — Finish server mode removal and validate supported-mode coverage.**
+  Prior slices removed session/capability modes and rewrote tests without committing. Restore the accidentally reverted `ForwardAll` server branch deletion, use workspace rustfmt (not standalone defaults), and verify/commit the existing scoped implementation before checking this child and T004.2.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
   Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
 - [x] **T002.3a — Capture the five remaining native Neovim input actions.**

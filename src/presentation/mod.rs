@@ -44,10 +44,10 @@ pub fn negotiate(params: &Value) -> Result<Presentation, CapabilityError> {
     if version != Some(1) {
         return Err(invalid("v must be 1"));
     }
-    let keys = parse_enum(object, "keys", &["dynamic", "static", "forwardAll"])?;
+    let keys = parse_enum(object, "keys", &["dynamic", "static"])?;
     let modifiers = parse_enum(object, "modifiers", &["full", "basic"])?;
-    let render = parse_enum(object, "render", &["edits", "full"])?;
-    let folds = parse_enum(object, "folds", &["server", "native"])?;
+    let _render = parse_enum(object, "render", &["edits"])?;
+    let _folds = parse_enum(object, "folds", &["server"])?;
     let layout = parse_set(object, "layout", &["main", "side", "bottom", "float"])?;
     if !layout.contains("main") {
         return Err(invalid(
@@ -67,11 +67,9 @@ pub fn negotiate(params: &Value) -> Result<Presentation, CapabilityError> {
     Ok(Presentation::Rich(RichCapabilities {
         keys,
         modifiers,
-        render,
         layout,
         effects,
         prompts,
-        folds,
     }))
 }
 
@@ -126,16 +124,12 @@ pub struct RichCapabilities {
     pub keys: String,
     /// Modifier fidelity requested by the client.
     pub modifiers: String,
-    /// Render transport selected by the client.
-    pub render: String,
     /// Declared logical view placements; always includes `main`.
     pub layout: BTreeSet<String>,
     /// Optional effects the client can handle.
     pub effects: BTreeSet<String>,
     /// Optional prompt kinds the client can handle.
     pub prompts: BTreeSet<String>,
-    /// Fold presentation strategy.
-    pub folds: String,
 }
 
 impl RichCapabilities {

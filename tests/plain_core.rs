@@ -229,8 +229,6 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
     };
     assert_eq!(caps.keys, "dynamic");
     assert_eq!(caps.modifiers, "full");
-    assert_eq!(caps.render, "edits");
-    assert_eq!(caps.folds, "server");
     assert!(caps.supports_placement("bottom"));
     assert!(!caps.supports_placement("side"));
     assert!(caps.supports_effect("visitFile"));
@@ -240,42 +238,23 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
 }
 
 #[test]
-fn reduced_key_render_and_fold_modes_do_not_disable_explicit_commands() {
+fn unsupported_render_and_fold_modes_are_rejected() {
     let mut block = rich_block();
-    block["modifiers"] = json!("basic");
     block["render"] = json!("full");
+    assert!(negotiate(&initialize(Some(block))).is_err());
+    let mut block = rich_block();
     block["folds"] = json!("native");
-    let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
-        panic!("expected rich")
-    };
-    for command in [
-        "status.stage",
-        "open.commit",
-        "common.hide-all",
-        "menu.save-args",
-    ] {
-        assert_eq!(caps.command_requirement(command), None, "{command}");
-    }
-    assert_eq!(
-        caps.command_requirement("commit.create"),
-        Some("editDocument")
-    );
+    assert!(negotiate(&initialize(Some(block))).is_err());
 }
 
 #[test]
 fn rich_v1_accepts_each_declared_enum_option() {
-    for keys in ["dynamic", "static", "forwardAll"] {
+    for keys in ["dynamic", "static"] {
         for modifiers in ["full", "basic"] {
-            for render in ["full", "edits"] {
-                for folds in ["server", "native"] {
-                    let mut block = rich_block();
-                    block["keys"] = json!(keys);
-                    block["modifiers"] = json!(modifiers);
-                    block["render"] = json!(render);
-                    block["folds"] = json!(folds);
-                    assert!(negotiate(&initialize(Some(block))).is_ok());
-                }
-            }
+            let mut block = rich_block();
+            block["keys"] = json!(keys);
+            block["modifiers"] = json!(modifiers);
+            assert!(negotiate(&initialize(Some(block))).is_ok());
         }
     }
     let mut block = rich_block();
@@ -324,6 +303,21 @@ fn malformed_or_unknown_rich_declarations_are_rejected() {
         {
             let mut b = rich_block();
             b["folds"] = json!("client");
+            b
+        },
+        {
+            let mut b = rich_block();
+            b["keys"] = json!("forwardAll");
+            b
+        },
+        {
+            let mut b = rich_block();
+            b["render"] = json!("full");
+            b
+        },
+        {
+            let mut b = rich_block();
+            b["folds"] = json!("native");
             b
         },
     ] {

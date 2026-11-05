@@ -28,216 +28,179 @@ fn invoke_rich(server: &mut TestServer, id: i64, view: &str, command: &str) -> V
 }
 
 #[test]
-fn rich_full_and_edits_delivery_after_ack_reflow_real_menu() {
-    for delivery in ["full", "edits"] {
-        let (tmp, _) = RepoFixture::new()
-            .commit("init", [("f.txt", TEN_LINES)])
-            .build();
-        let mut server = TestServer::spawn(&[]);
-        let mut caps = limited_rich(json!([]), json!([]));
-        caps["experimental"]["magit"]["render"] = json!(delivery);
-        server.initialize(caps);
-        let status = open_view(&mut server, 2, &repo_param(tmp.path()));
-        let opened = invoke_rich(&mut server, 3, &status, "open.commit");
-        let menu = opened["result"]["effects"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|effect| effect["type"] == "pushView")
-            .unwrap()["descriptor"]["id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let initial = server.recv();
-        assert_eq!(initial["method"], "view/render");
-        assert_eq!(server.recv()["method"], "view/keymap");
-        let mut text: Vec<String> =
-            serde_json::from_value(initial["params"]["text"].clone()).unwrap();
-        let mut version = 1;
-        // Consecutive acknowledgements must not enable edits for full clients.
-        for cols in [60, 140] {
-            server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+fn rich_acknowledged_edits_reflow_real_menu() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!([]), json!([])));
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.commit");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let initial = server.recv();
+    assert_eq!(initial["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    let mut text: Vec<String> = serde_json::from_value(initial["params"]["text"].clone()).unwrap();
+    let mut version = 1;
+    // Acknowledged versions are the base for subsequent edits.
+    for cols in [60, 140] {
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
                 "params":{"viewId":menu,"version":version}}));
-            server.send(json!({"jsonrpc":"2.0","method":"view/resize",
+        server.send(json!({"jsonrpc":"2.0","method":"view/resize",
                 "params":{"viewId":menu,"cols":cols,"rows":30}}));
-            let render = server.recv();
-            assert_eq!(render["method"], "view/render", "{render}");
-            let params = &render["params"];
-            assert_eq!(params["version"], version + 1);
-            if delivery == "full" {
-                assert!(params.get("edits").is_none(), "{render}");
-                assert!(params.get("baseVersion").is_none(), "{render}");
-                text = serde_json::from_value(params["text"].clone()).unwrap();
-            } else {
-                assert!(params.get("text").is_none(), "{render}");
-                assert_eq!(params["baseVersion"], version);
-                let edits: Vec<magit_lsp::protocol::LineEdit> =
-                    serde_json::from_value(params["edits"].clone()).unwrap();
-                text = magit_lsp::diff_text::apply_edits(&text, &edits);
-            }
-            let expected = if cols == 60 {
-                include_str!("snapshots/menu-60.txt")
-            } else {
-                include_str!("snapshots/menu-140.txt")
-            };
-            assert_eq!(text.join("\n"), expected.trim_end());
-            version += 1;
-        }
-        shutdown_and_exit(&mut server);
-        assert!(server.finish(Duration::from_secs(10)).success());
+        let render = server.recv();
+        assert_eq!(render["method"], "view/render", "{render}");
+        let params = &render["params"];
+        assert_eq!(params["version"], version + 1);
+        assert!(params.get("text").is_none(), "{render}");
+        assert_eq!(params["baseVersion"], version);
+        let edits: Vec<magit_lsp::protocol::LineEdit> =
+            serde_json::from_value(params["edits"].clone()).unwrap();
+        text = magit_lsp::diff_text::apply_edits(&text, &edits);
+        let expected = if cols == 60 {
+            include_str!("snapshots/menu-60.txt")
+        } else {
+            include_str!("snapshots/menu-140.txt")
+        };
+        assert_eq!(text.join("\n"), expected.trim_end());
+        version += 1;
     }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
-fn rich_native_folds_keep_expanded_text_and_acknowledged_provider_across_visibility_and_refresh() {
-    for folds in ["native", "server"] {
-        let (tmp, _) = RepoFixture::new()
-            .commit("init", [("f.txt", TEN_LINES)])
-            .modify_standard()
-            .build();
-        let mut server = TestServer::spawn(&[]);
-        let mut caps = limited_rich(json!([]), json!([]));
-        caps["experimental"]["magit"]["render"] = json!("full");
-        caps["experimental"]["magit"]["folds"] = json!(folds);
-        let initialized = server.initialize(caps);
-        assert_eq!(
-            initialized["result"]["capabilities"]["foldingRangeProvider"],
-            true
-        );
-        server.send(open_view_message(2, &repo_param(tmp.path())));
-        let opened = server.response_with_id(2);
-        let view = opened["result"]["id"].as_str().unwrap().to_owned();
-        let uri = opened["result"]["uri"].as_str().unwrap().to_owned();
-        let initial = server.recv();
-        assert_eq!(initial["method"], "view/render");
-        assert_eq!(server.recv()["method"], "view/keymap");
-        let initial_text = initial["params"]["text"].clone();
-        assert!(initial_text
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line.as_str().unwrap().contains("+line3 CHANGED")));
-        server.send(
-            json!({"jsonrpc":"2.0","id":10,"method":"textDocument/foldingRange",
+fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    let initialized = server.initialize(limited_rich(json!([]), json!([])));
+    assert_eq!(
+        initialized["result"]["capabilities"]["foldingRangeProvider"],
+        true
+    );
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let opened = server.response_with_id(2);
+    let view = opened["result"]["id"].as_str().unwrap().to_owned();
+    let uri = opened["result"]["uri"].as_str().unwrap().to_owned();
+    let initial = server.recv();
+    assert_eq!(initial["method"], "view/render");
+    assert_eq!(server.recv()["method"], "view/keymap");
+    let initial_text = initial["params"]["text"].clone();
+    let mut text: Vec<String> = serde_json::from_value(initial_text.clone()).unwrap();
+    assert!(initial_text
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|line| line.as_str().unwrap().contains("+line3 CHANGED")));
+    server.send(
+        json!({"jsonrpc":"2.0","id":10,"method":"textDocument/foldingRange",
             "params":{"textDocument":{"uri":uri}}}),
-        );
-        let initial_ranges = server.response_with_id(10)["result"].clone();
-        assert!(
-            !initial_ranges.as_array().unwrap().is_empty(),
-            "initial expanded tree supplies native fold ranges"
-        );
-        let mut version = 1;
-        for (index, command) in [
-            "common.hide-all",
-            "common.refresh",
-            "common.show-all",
-            "common.less-detail",
-            "common.detail-level-1",
-            "common.cycle-visibility",
-            "common.hide-section",
-            "common.toggle-section",
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+    );
+    let initial_ranges = server.response_with_id(10)["result"].clone();
+    assert!(
+        !initial_ranges.as_array().unwrap().is_empty(),
+        "initial expanded tree supplies native fold ranges"
+    );
+    let mut version = 1;
+    for (index, command) in [
+        "common.hide-all",
+        "common.refresh",
+        "common.show-all",
+        "common.less-detail",
+        "common.detail-level-1",
+        "common.cycle-visibility",
+        "common.hide-section",
+        "common.toggle-section",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
                 "params":{"viewId":view,"version":version}}));
-            if folds == "native" || index == 0 {
-                server.send(
-                    json!({"jsonrpc":"2.0","id":11,"method":"textDocument/foldingRange",
+        if index == 0 {
+            server.send(
+                json!({"jsonrpc":"2.0","id":11,"method":"textDocument/foldingRange",
                     "params":{"textDocument":{"uri":uri}}}),
-                );
-                let ranges = server.response_with_id(11)["result"]
-                    .as_array()
-                    .unwrap()
-                    .clone();
-                assert!(
-                    !ranges.is_empty(),
-                    "full delivery still records acks: {folds}"
-                );
-                let len = initial_text.as_array().unwrap().len() as u64;
-                assert!(ranges
-                    .iter()
-                    .all(|range| range["startLine"].as_u64().unwrap()
-                        < range["endLine"].as_u64().unwrap()
-                        && range["endLine"].as_u64().unwrap() < len));
-            } else if index == 1 {
-                server.send(
-                    json!({"jsonrpc":"2.0","id":11,"method":"textDocument/foldingRange",
+            );
+            let ranges = server.response_with_id(11)["result"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert!(
+                !ranges.is_empty(),
+                "acknowledged provider exposes ranges for expanded text"
+            );
+            let len = initial_text.as_array().unwrap().len() as u64;
+            assert!(ranges
+                .iter()
+                .all(|range| range["startLine"].as_u64().unwrap()
+                    < range["endLine"].as_u64().unwrap()
+                    && range["endLine"].as_u64().unwrap() < len));
+        } else if index == 1 {
+            server.send(
+                json!({"jsonrpc":"2.0","id":11,"method":"textDocument/foldingRange",
                     "params":{"textDocument":{"uri":uri}}}),
-                );
-                assert_eq!(
-                    server.response_with_id(11)["result"],
-                    json!([]),
-                    "ack of a full render advances the provider snapshot to collapsed text"
-                );
-            }
-            // Resolve a positional fold through structured symbols, never text.
-            let line = if command.ends_with("-section") && folds == "native" {
-                first_hunk_line(&mut server, &uri)
-            } else {
-                0
-            };
-            let id = 20 + index as i64;
-            server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+            );
+            assert_eq!(
+                server.response_with_id(11)["result"],
+                json!([]),
+                "ack of an edit advances provider snapshot to collapsed text"
+            );
+        }
+        // Resolve a positional fold through structured symbols, never text.
+        let line = 0;
+        let id = 20 + index as i64;
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
                 "params":{"viewId":view,"command":command,"version":version,
                     "cursor":{"line":line,"column":0}}}));
-            let response = server.response_with_id(id);
-            assert!(response.get("error").is_none(), "{response}");
-            assert_eq!(response["result"]["effects"], json!([]), "{response}");
-            let render = server.recv();
-            assert_eq!(render["method"], "view/render", "{render}");
-            assert_eq!(render["params"]["version"], version + 1);
-            assert!(render["params"].get("edits").is_none());
-            assert!(render["params"].get("baseVersion").is_none());
-            if folds == "native" || command == "common.show-all" {
-                assert_eq!(render["params"]["text"], initial_text, "{folds}: {command}");
-            } else if index <= 1 {
-                assert!(
-                    render["params"]["text"].as_array().unwrap().len()
-                        < initial_text.as_array().unwrap().len(),
-                    "server collapse survives refresh"
-                );
-                if index == 0 {
-                    server.send(
-                        json!({"jsonrpc":"2.0","id":12,"method":"textDocument/foldingRange",
+        let response = server.response_with_id(id);
+        assert!(response.get("error").is_none(), "{response}");
+        assert_eq!(response["result"]["effects"], json!([]), "{response}");
+        let render = server.recv();
+        assert_eq!(render["method"], "view/render", "{render}");
+        assert_eq!(render["params"]["version"], version + 1);
+        assert_eq!(render["params"]["baseVersion"], version);
+        let edits: Vec<magit_lsp::protocol::LineEdit> =
+            serde_json::from_value(render["params"]["edits"].clone()).unwrap();
+        text = magit_lsp::diff_text::apply_edits(&text, &edits);
+        if command == "common.show-all" {
+            assert_eq!(
+                text,
+                serde_json::from_value::<Vec<String>>(initial_text.clone()).unwrap(),
+                "{command}"
+            );
+        } else if index <= 1 {
+            assert!(
+                text.len() < initial_text.as_array().unwrap().len(),
+                "server collapse survives refresh"
+            );
+            if index == 0 {
+                server.send(
+                    json!({"jsonrpc":"2.0","id":12,"method":"textDocument/foldingRange",
                         "params":{"textDocument":{"uri":uri}}}),
-                    );
-                    assert_eq!(
-                        server.response_with_id(12)["result"],
-                        initial_ranges,
-                        "until ack, providers still describe the previous expanded text"
-                    );
-                }
+                );
+                assert_eq!(
+                    server.response_with_id(12)["result"],
+                    initial_ranges,
+                    "until ack, providers still describe the previous expanded text"
+                );
             }
-            version += 1;
         }
-        if folds == "native" {
-            // Moving the diff to a new section creates new file/hunk identities.
-            // Native expansion must apply to that refreshed tree, not just the
-            // nodes which existed when the view opened.
-            server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
-                "params":{"viewId":view,"version":version}}));
-            let staged = invoke_rich(&mut server, 40, &view, "status.stage-all");
-            assert_eq!(staged["result"]["effects"], json!([]), "{staged}");
-            let rendered = server.recv();
-            assert_eq!(rendered["method"], "view/render");
-            let text = rendered["params"]["text"].as_array().unwrap();
-            assert!(
-                text.iter()
-                    .any(|line| line.as_str().unwrap().contains("Staged changes")),
-                "{rendered}"
-            );
-            assert!(
-                text.iter()
-                    .any(|line| line.as_str().unwrap().contains("+line3 CHANGED")),
-                "{rendered}"
-            );
-            assert!(!cached_diff(tmp.path()).is_empty());
-        }
-        shutdown_and_exit(&mut server);
-        assert!(server.finish(Duration::from_secs(10)).success());
+        version += 1;
     }
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
@@ -426,14 +389,18 @@ fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_ef
     assert!(!observed
         .iter()
         .any(|message| message["method"] == "view/prompt"));
-    assert!(!observed.iter().any(
-        |message| message["params"]["effects"]
+    assert!(!observed.iter().any(|message| {
+        message["params"]["effects"]
             .as_array()
-            .is_some_and(|effects| effects.iter().any(|effect| matches!(
-                effect["type"].as_str(),
-                Some("editDocument" | "clipboard" | "visitFile")
-            )))
-    ));
+            .is_some_and(|effects| {
+                effects.iter().any(|effect| {
+                    matches!(
+                        effect["type"].as_str(),
+                        Some("editDocument" | "clipboard" | "visitFile")
+                    )
+                })
+            })
+    }));
     for line in read(&trace).lines() {
         let event: Value = serde_json::from_str(line).unwrap();
         if event["event"] == "start" {
@@ -493,13 +460,15 @@ fn rich_missing_confirm_leaves_no_mutation_or_pending_prompt() {
     assert!(!observed
         .iter()
         .any(|message| message["method"] == "view/prompt"));
-    assert!(!observed.iter().any(
-        |message| message["params"]["effects"]
+    assert!(!observed.iter().any(|message| {
+        message["params"]["effects"]
             .as_array()
-            .is_some_and(|effects| effects
-                .iter()
-                .any(|effect| effect["type"] == "editDocument"))
-    ));
+            .is_some_and(|effects| {
+                effects
+                    .iter()
+                    .any(|effect| effect["type"] == "editDocument")
+            })
+    }));
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
     assert_eq!(read(&tmp.path().join("f.txt")), "changed\n");
@@ -1714,76 +1683,34 @@ fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
 }
 
 #[test]
-fn forward_all_passes_through_unbound_keys_and_dispatches_bound_keys() {
-    let (tmp, _repo) = RepoFixture::new()
-        .commit("init", [("f.txt", TEN_LINES)])
-        .modify_standard()
-        .build();
-    let repo = repo_param(tmp.path());
-    let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"forwardAll","modifiers":"full","render":"edits","layout":["main"],"effects":[],"prompts":[],"folds":"server"}}}));
-    server.send(open_view_message(2, &repo));
-    let opened = server.response_with_id(2);
-    let view_id = opened["result"]["id"]
-        .as_str()
-        .expect("view id")
-        .to_string();
-    let uri = opened["result"]["uri"]
-        .as_str()
-        .expect("view uri")
-        .to_string();
-    let render = server.recv();
-    assert_eq!(render["method"], json!("view/render"));
-    let version = render["params"]["version"]
-        .as_u64()
-        .expect("render version");
-    assert!(render["params"]["text"].is_array());
-    let line = first_hunk_line(&mut server, &uri);
-    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view_id,"version":version}}));
-
-    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/key","params":{"viewId":view_id,"version":version,"key":"~","editorMode":"normal","cursor":{"line":line,"column":0}}}));
-    let passthrough = server.response_with_id(3);
-    assert_eq!(
-        passthrough["result"]["effects"],
-        json!([{"type":"passThrough","key":"~"}])
-    );
-    let before_diff = git(tmp.path(), &["diff", "--", "f.txt"]);
-    assert!(
-        !before_diff.is_empty(),
-        "fixture starts with an unstaged change"
-    );
-    assert_eq!(
-        git(tmp.path(), &["diff", "--", "f.txt"]),
-        before_diff,
-        "unbound key must not mutate the repository"
-    );
-
-    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key","params":{"viewId":view_id,"version":version,"key":"s","editorMode":"normal","cursor":{"line":line,"column":0}}}));
-    let mut bound_response = None;
-    let mut staged_render = None;
-    while bound_response.is_none() || staged_render.is_none() {
-        let message = server.recv();
-        if message["id"] == json!(4) {
-            bound_response = Some(message);
-        } else if message["method"] == json!("view/render") {
-            staged_render = Some(message);
-        }
+fn server_rejects_unsupported_presentation_modes() {
+    for (field, value) in [
+        ("keys", "forwardAll"),
+        ("render", "full"),
+        ("folds", "native"),
+    ] {
+        let mut server = TestServer::spawn(&[]);
+        let mut caps = limited_rich(json!([]), json!([]));
+        caps["experimental"]["magit"][field] = json!(value);
+        server.send(
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":caps}}),
+        );
+        let response = server.response_with_id(1);
+        assert!(
+            response.get("error").is_some(),
+            "{field}={value}: {response}"
+        );
+        server.send(json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"capabilities":limited_rich(json!([]), json!([]))}}));
+        let response = server.response_with_id(2);
+        assert!(
+            response.get("result").is_some(),
+            "supported capabilities: {response}"
+        );
+        server.send(json!({"jsonrpc":"2.0","id":3,"method":"shutdown","params":null}));
+        assert_eq!(server.response_with_id(3)["result"], Value::Null);
+        server.send(json!({"jsonrpc":"2.0","method":"exit","params":null}));
+        assert!(server.finish(Duration::from_secs(10)).success());
     }
-    assert_eq!(
-        bound_response.expect("bound response")["result"]["effects"],
-        json!([])
-    );
-    assert_eq!(
-        staged_render.expect("staged render")["params"]["version"],
-        json!(version + 1)
-    );
-    assert_eq!(
-        hunk_count(&cached_diff(tmp.path())),
-        1,
-        "bound stage key stages the repository change"
-    );
-    shutdown_and_exit(&mut server);
-    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
@@ -2617,10 +2544,14 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     let ready = tmp.path().join("hook.ready");
     let child_pid = tmp.path().join("hook-child.pid");
     let hook = tmp.path().join(".git/hooks/commit-msg");
-    write(&hook, &format!(
-        "#!/bin/sh\ntrap '' TERM\nsh -c 'echo $$ > \"$1\"; touch \"$2\"; exec sleep 60' sh '{}' '{}' </dev/null >/dev/null 2>&1 &\nwait\n",
-        child_pid.display(), ready.display()
-    ));
+    write(
+        &hook,
+        &format!(
+            "#!/bin/sh\ntrap '' TERM\nsh -c 'echo $$ > \"$1\"; touch \"$2\"; exec sleep 60' sh '{}' '{}' </dev/null >/dev/null 2>&1 &\nwait\n",
+            child_pid.display(),
+            ready.display()
+        ),
+    );
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     fn start_time(pid: i32) -> Option<u64> {

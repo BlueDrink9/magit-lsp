@@ -317,8 +317,6 @@ pub enum KeymapDelivery {
     Dynamic,
     /// The client ships static bindings; no push is needed.
     Static,
-    /// The client forwards every key; the server answers `PassThrough`.
-    ForwardAll,
 }
 
 impl KeymapDelivery {
@@ -326,7 +324,6 @@ impl KeymapDelivery {
     pub fn parse(value: &str) -> Self {
         match value {
             "static" => KeymapDelivery::Static,
-            "forwardAll" => KeymapDelivery::ForwardAll,
             _ => KeymapDelivery::Dynamic,
         }
     }

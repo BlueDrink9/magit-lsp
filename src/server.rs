@@ -3418,15 +3418,7 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         session.set_keymaps(keymaps);
         session.start_key(&p)?
     };
-    let mut outcome = drive_execution(shared, &repo, step)?;
-    if shared.delivery() == KeymapDelivery::ForwardAll
-        && matches!(
-            outcome.effects.as_slice(),
-            [Effect::Message { text, .. }] if text.starts_with("Unbound key: ")
-        )
-    {
-        outcome.effects = vec![Effect::PassThrough { key: p.key }];
-    }
+    let outcome = drive_execution(shared, &repo, step)?;
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }
 
