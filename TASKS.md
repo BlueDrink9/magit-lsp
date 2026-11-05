@@ -45,10 +45,13 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Verified: `make test-rust FILTER="--test plain_harness"` → ok: rust on this implementation diff.
   - Done: containing commit.
 - [x] **T006.3b — Route rich render acknowledgements and resync through the pump.** Dispatch render notifications into the rich state model, send applied-version acknowledgements, correlate resync replies and recover state without dropping unrelated responses. Prove the pump works against the real rich server.
-  - Done: containing commit. Preceding T006.3a: `7e4c26cf15b95c3e9715b45b3876e4fa92c05f58`.
+  - Done: `a4578fe956998619de708c2aee8ee93da20a17dc`. Preceding T006.3a: `7e4c26cf15b95c3e9715b45b3876e4fa92c05f58`.
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions"` → ok: rust. Real rich server test asserts exact text/version, applied ack, watcher-driven stale update, dynamic resync/full recovery/ack, retained unrelated caller response and unchanged Git status except sentinel.
-- [ ] **T006.3c — Model shared prompt-vector responses.** Implement scripted prompt decisions independently of expected answers, all shared prompt vectors and prompt response routing with dynamic request IDs. Keep cancellation, empty values, defaults, custom choices and secret declarations distinct.
-- [ ] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5. Close after T006.3a–T006.3c.
+- [x] **T006.3c — Model shared prompt-vector responses.** Implement scripted prompt decisions independently of expected answers, all shared prompt vectors and prompt response routing with dynamic request IDs. Keep cancellation, empty values, defaults, custom choices and secret declarations distinct.
+  - Done: containing commit.
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test prompts"` @ `a4578fe` → ok: rust.
+- [x] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5. Close after T006.3a–T006.3c.
+  - Done: containing commit.
 - [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit.
 
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**

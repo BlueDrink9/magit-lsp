@@ -34,6 +34,42 @@ fn shared_rich_render_vectors_apply_exact_text_and_intents() {
 }
 
 #[test]
+fn shared_prompt_vectors_derive_answers_and_focus() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Vector { name: String, params: magit_lsp::protocol::ViewPromptParams, response: Value, custom_response: Option<Value>, answer: Value, focus: Option<Vec<String>> }
+    #[derive(serde::Deserialize)] struct Contracts { prompts: Vec<Vector> }
+    for vector in serde_json::from_str::<Contracts>(include_str!("data/client-contracts.json")).unwrap().prompts {
+        let input = editor_model::prompts::PromptInput { response: vector.response, custom_response: vector.custom_response };
+        let outcome = editor_model::prompts::answer(&vector.params, &input);
+        assert_eq!(outcome.answer, vector.answer, "{}", vector.name);
+        assert_eq!(outcome.focus, vector.focus, "{}", vector.name);
+    }
+}
+
+#[test]
+fn queued_prompt_routing_uses_unique_correlated_request_ids() {
+    let model = editor_model::EditorModel::new(editor_model::RICH_MIN)
+        .with_module(editor_model::Module { declares: r#"{"experimental":{"magit":{"prompts":["text"]}}}"#, behaves: &[] })
+        .strict();
+    let capabilities = model.capabilities();
+    let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
+    client.queue_prompt(editor_model::prompts::PromptInput { response: json!(""), custom_response: None });
+    client.queue_prompt(editor_model::prompts::PromptInput { response: json!("second"), custom_response: None });
+    let first = json!({"method":"view/prompt","params":{"promptId":"p1","kind":"text","title":"One"}});
+    let second = json!({"method":"view/prompt","params":{"promptId":"p2","kind":"text","title":"Two"}});
+    assert!(client.route_scripted_prompt(&first));
+    assert!(client.route_scripted_prompt(&second));
+    let sent: Vec<_> = client.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").collect();
+    assert_eq!(sent.len(), 2);
+    assert_ne!(sent[0]["id"], sent[1]["id"]);
+    assert_eq!(sent[0]["params"], json!({"promptId":"p1","cancelled":false,"value":""}));
+    assert_eq!(sent[1]["params"]["promptId"], "p2");
+    assert!(editor_model::strict::check(&capabilities, &first).is_ok());
+    client.finish();
+}
+
+#[test]
 fn rich_metadata_only_stale_and_view_isolation() {
     use editor_model::rich::{Intent, RichEditor, ViewState};
     let mut editor = RichEditor::default();
