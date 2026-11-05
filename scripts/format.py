@@ -34,7 +34,10 @@ def changed_paths(base: str | None) -> list[str]:
             raise RuntimeError("unmerged index entries found; resolve conflicts before formatting")
         raw = run_git("diff", "--cached", "--name-status", "-z", "--find-renames")
     else:
-        raw = run_git("diff", "--name-status", "-z", "--find-renames", f"{base}...HEAD")
+        if base == "EMPTY_TREE":
+            raw = run_git("diff", "--name-status", "-z", "--find-renames", base_tree(), "HEAD")
+        else:
+            raw = run_git("diff", "--name-status", "-z", "--find-renames", f"{base}...HEAD")
     fields = raw.decode("utf-8", errors="surrogateescape").split("\0")
     paths: list[str] = []
     i = 0
@@ -48,6 +51,11 @@ def changed_paths(base: str | None) -> list[str]:
         if status[0] != "D":
             paths.append(path)
     return paths
+
+
+def base_tree() -> str:
+    """Return Git's canonical empty-tree object id for new-branch comparisons."""
+    return run_git("hash-object", "-t", "tree", "/dev/null").decode().strip()
 
 
 def eligible(path: str) -> bool:
@@ -97,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--staged", action="store_true", help="check staged index content")
-    mode.add_argument("--base", metavar="COMMIT", help="check HEAD changes against commit")
+    mode.add_argument("--base", metavar="COMMIT", help="check HEAD changes against commit, or EMPTY_TREE for a new branch")
     args = parser.parse_args(argv)
     try:
         global ROOT
