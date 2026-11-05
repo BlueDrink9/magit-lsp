@@ -22,6 +22,32 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 8. `applied: true` does not prove applyEdit succeeded. Compare resulting text hash; send one document per `applyEdit`.
 9. Compress completed tickets to 12 lines or less: requirement, `Done: <commit>`, and enforcing test. Put evidence narrative in commit message.
 
+## Immediate
+
+- [ ] **Investigate and rationalize trace/capture test infrastructure.**
+  Verify the audit against current consumers, then implement cleanup ahead of formatter work and T005. Retain recorder/security regressions, active quirk inputs and capability negotiation. Replace unique static-evidence claims with existing fake-editor/server behavior coverage; delete redundant traces, sidecars and parse-only checks.
+  Remove executable Markdown programs. Extract tools only for named ongoing workflows, reuse maintained Neovim/VSCode/fake-editor infrastructure, and do not add a Helix harness. Retained workflows need Make targets, parameterized inputs, portable temporary paths, bounded waits and shared cleanup. Distinguish historical provenance from runtime dependencies.
+  Preserve unrelated dirty files and concurrent formatter work. Verify through serialized foreground Make targets, without manual formatters, hook bypasses or images. Delete the completed audit document and its references; retain concise decisions, not another strategy document. Linux execution only; Windows/macOS remain CI follow-ups.
+  test: retain meaningful recorder, quirk and negotiation regressions and any unique behavior migrated from historical evidence. check: verify consumer retirement, retained workflow reproducibility and exact scoped results; commit the authoritative completion record here.
+
+- [x] **Trace cleanup 1 — Replace historical assertions with live behavior coverage.**
+  Remove static trace/sidecar comparisons and reconstructed parse-only checks. Keep all runtime recorder/security regressions. Use existing fake-editor/server tests for sequential edits, stale repair rejection, retry, undo and final text; add only missing behavior regressions.
+  test: recorder, synchronization, harness, quirk and current capability-negotiation suites pass with live behavioral assertions. check: record the old-to-live coverage map and consumer audit in the commit message.
+
+- [ ] **Trace cleanup 2 — Delete dead fixtures and embedded capture programs.**
+  Retain only live quirk inputs and current capability declarations. Remove unused traces, sidecars, initialize duplicates and Markdown programs after checking consumers; keep concise provenance with immutable Git references and maintained Make workflows. Delete the audit document and its references without replacing it.
+  check: retired fixtures and capture recipes have no active consumers; preserved inputs retain honest native-evidence limits. test: retained quirk and negotiation suites pass.
+
+- [ ] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
+  Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
+  test: focused harness regressions and retained native acceptance pass. check: owned processes and sockets are cleaned on success and failure; record Linux-only evidence and other-platform limits.
+
+## Ad hoc
+
+- [ ] **Autofix staged formatting through shared hook and Make commands.**
+  Replace formatting rejection with safe staged-content autofix; share formatter dispatch with manual Make commands and check-only CI. Preserve unstaged/unrelated edits, executable modes and partial staging; never bypass hooks or add permanent formatter tests.
+  check: exercise actual hooks through a Make target in disposable real repositories; formatted commit content must exclude unstaged edits. Formatter errors must block without changing the index or working files. Record one-time results under this item, update formatter instructions, then stop without advancing unrelated work.
+
 ## Phase map
 
 | Phase | Name | Tickets | Gates 0.2? |

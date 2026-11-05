@@ -238,16 +238,6 @@ fn utf16_surrogate_midpoint_is_rejected_and_crlf_lines_are_addressable() {
     assert_eq!(e.text("file:///u"), "😀x\r\nY");
 }
 
-#[test]
-fn reconstructed_trace_is_valid_jsonl() {
-    for line in fs::read_to_string("tests/fixtures/lsp_traces/reconstructed-plain.jsonl")
-        .unwrap()
-        .lines()
-    {
-        let _: Value = serde_json::from_str(line).unwrap();
-    }
-}
-
 fn replacement(start: u64, end: u64, text: &str) -> Value {
     json!({"range":{"start":{"line":0,"character":start},"end":{"line":0,"character":end}},"newText":text})
 }
