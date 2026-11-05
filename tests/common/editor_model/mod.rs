@@ -7,6 +7,8 @@ pub mod strict;
 pub mod rich;
 #[path = "prompts.rs"]
 pub mod prompts;
+#[path = "presets.rs"]
+pub mod presets;
 
 /// Supported exact minimum declaration bases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,22 +31,22 @@ pub const RICH_MIN: &str = "rich-min";
 
 /// Neovim's explicitly modeled documentChanges acceptance behavior.
 // anchor: Neovim 0.12.6 trace contract in tests/fixtures/lsp_traces/README.md.
-pub const NEOVIM_UNDECLARED_CHANGES: Module = Module { declares: "{}", behaves: &["neovim-accepts-undeclared-documentChanges"] };
+pub const NEOVIM_UNDECLARED_CHANGES: Module = Module { declares: std::borrow::Cow::Borrowed("{}"), behaves: &["neovim-accepts-undeclared-documentChanges"] };
 /// Neovim's observed stale-first/later-entry apply behavior.
 // anchor: T005 contract and retained rapid-repair evidence in tests/fixtures/lsp_traces/README.md.
-pub const SILENT_STALE_APPLY: Module = Module { declares: "{}", behaves: &["silent-stale-apply"] };
+pub const SILENT_STALE_APPLY: Module = Module { declares: std::borrow::Cow::Borrowed("{}"), behaves: &["silent-stale-apply"] };
 /// The test-only decomposed didChange behavior.
 // anchor: tests/plain_render.rs decomposed-change profile assertions.
-pub const DECOMPOSED_CHANGES: Module = Module { declares: "{}", behaves: &["decomposed-changes"] };
+pub const DECOMPOSED_CHANGES: Module = Module { declares: std::borrow::Cow::Borrowed("{}"), behaves: &["decomposed-changes"] };
 /// Declaration contribution for optional workspace and window features.
 // anchor: tests/plain_harness.rs minimum model composition contract.
-pub const EXTRA_DECLARATIONS: Module = Module { declares: r#"{"workspace":{"workspaceEdit":{"documentChanges":true}},"window":{"showDocument":{"support":true}}}"#, behaves: &[] };
+pub const EXTRA_DECLARATIONS: Module = Module { declares: std::borrow::Cow::Borrowed(r#"{"workspace":{"workspaceEdit":{"documentChanges":true}},"window":{"showDocument":{"support":true}}}"#), behaves: &[] };
 
 /// One independently anchored model contribution.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Module {
     /// LSP declarations contributed by this module.
-    pub declares: &'static str,
+    pub declares: std::borrow::Cow<'static, str>,
     /// Fake-editor behaviors contributed by this module.
     pub behaves: &'static [&'static str],
 }
@@ -84,7 +86,7 @@ impl EditorModel {
             json!({"experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}})
         };
         for module in &self.modules {
-            let declarations: Value = serde_json::from_str(module.declares).expect("module declarations are JSON");
+            let declarations: Value = serde_json::from_str(&module.declares).expect("module declarations are JSON");
             merge(&mut value, declarations);
         }
         value

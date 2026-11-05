@@ -50,7 +50,7 @@ fn shared_prompt_vectors_derive_answers_and_focus() {
 #[test]
 fn queued_prompt_routing_uses_unique_correlated_request_ids() {
     let model = editor_model::EditorModel::new(editor_model::RICH_MIN)
-        .with_module(editor_model::Module { declares: r#"{"experimental":{"magit":{"prompts":["text"]}}}"#, behaves: &[] })
+        .with_module(editor_model::Module { declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#), behaves: &[] })
         .strict();
     let capabilities = model.capabilities();
     let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
@@ -110,6 +110,74 @@ fn minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate
     let mut pump = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &rich);
     assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":rich.capabilities()})), Ok(magit_lsp::presentation::Presentation::Rich(_))));
     pump.finish();
+}
+
+#[test]
+fn recorded_presets_and_named_profiles_bind_declarations_and_registry_behaviors() {
+    use editor_model::presets::{model, profile_model, NamedProfile, Preset};
+    let plain = model(Preset::StockNeovim);
+    let helix = model(Preset::Helix);
+    let bundled = model(Preset::BundledNeovim);
+    let vscode = model(Preset::BundledVsCode);
+    for (preset, identity, expected) in [
+        (plain, 0, serde_json::from_str::<Value>(include_str!("fixtures/lsp_traces/initialize-plain-neovim-0.12.6.json")).unwrap()["capabilities"].clone()),
+        (helix, 1, serde_json::from_str::<Value>(include_str!("fixtures/lsp_traces/initialize-helix-25.07.1.json")).unwrap()["capabilities"].clone()),
+        (bundled, 2, { let rows: Value = serde_json::from_str(include_str!("fixtures/current-client-capabilities.json")).unwrap(); let row = rows.as_array().unwrap().iter().find(|r| r["client"]["name"] == "Neovim").unwrap(); json!({"experimental":{"magit":row["magit"]}}) }),
+        (vscode, 3, { let rows: Value = serde_json::from_str(include_str!("fixtures/current-client-capabilities.json")).unwrap(); let row = rows.as_array().unwrap().iter().find(|r| r["client"]["name"] == "VSCodium").unwrap(); json!({"experimental":{"magit":row["magit"]}}) }),
+    ] {
+        let (preset, identity_value) = preset;
+        let capabilities = preset.capabilities();
+        assert_eq!(capabilities, expected, "preset {identity}");
+        if identity >= 2 { assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":capabilities})), Ok(magit_lsp::presentation::Presentation::Rich(_)))); }
+        let (client_name, client_version) = (identity_value["name"].as_str(), identity_value["version"].as_str());
+        let resolution = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: client_name, version: client_version, capabilities: &capabilities }, None).unwrap();
+        let mut editor = FakeEditor::from_model(Profile::Standard, &preset, &resolution);
+        editor.open("file:///preset", "old");
+        for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|quirk| resolution.enabled.contains(quirk.id)) {
+            match quirk.model {
+                Some("neovim-accepts-undeclared-documentChanges") => {
+                    editor.profile = Profile::NoDocumentChanges;
+                    let edit = json!({"documentChanges":[{"textDocument":{"uri":"file:///preset","version":1},"edits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"newText":"new"}]}]});
+                    assert_eq!(editor.apply_edit(&edit)["applied"], true);
+                    assert_eq!(editor.text("file:///preset"), "new");
+                }
+                Some("silent-stale-apply") => {
+                    editor.edit("file:///preset", "local");
+                    let edit = json!({"documentChanges":[{"textDocument":{"uri":"file:///preset","version":1},"edits":[replacement(0,3,"BAD")]},{"textDocument":{"uri":"file:///later","version":1},"edits":[replacement(0,5,"later")]}]});
+                    editor.open("file:///later", "stale");
+                    editor.edit("file:///later", "local");
+                    assert_eq!(editor.apply_edit(&edit)["applied"], true);
+                    assert_eq!(editor.text("file:///preset"), "local");
+                    assert_eq!(editor.text("file:///later"), "later");
+                }
+                Some("decomposed-changes") => {
+                    let change = editor.edit("file:///preset", "new");
+                    assert!(change["params"]["contentChanges"].as_array().unwrap().len() > 1);
+                    let mut replay = FakeEditor::new(Profile::Standard);
+                    replay.open("file:///preset", "old");
+                    for part in change["params"]["contentChanges"].as_array().unwrap() {
+                        assert!(part["range"].is_object());
+                        assert_eq!(replay.apply_edit(&json!({"changes":{"file:///preset":[{"range":part["range"],"newText":part["text"]}]}}))["applied"], true);
+                    }
+                    assert_eq!(replay.text("file:///preset"), "new");
+                }
+                Some(other) => panic!("unhandled resolved registry model {other}"),
+                None => {}
+            }
+        }
+    }
+    assert_eq!(profile_model(NamedProfile::Plain).capabilities(), editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities());
+    assert_eq!(profile_model(NamedProfile::RichNative).capabilities()["experimental"]["magit"]["keys"], "dynamic");
+    assert_eq!(profile_model(NamedProfile::RichNative).capabilities()["experimental"]["magit"]["modifiers"], "basic");
+    assert_eq!(profile_model(NamedProfile::RichDoc).capabilities()["experimental"]["magit"]["keys"], "static");
+    assert_eq!(profile_model(NamedProfile::RichDoc).capabilities()["experimental"]["magit"]["modifiers"], "full");
+    let empty = json!({});
+    let unknown = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: Some("unknown"), version: Some("1"), capabilities: &empty }, None).unwrap();
+    assert!(unknown.enabled.is_empty());
+    let mut unknown_editor = FakeEditor::from_resolution(Profile::Standard, &unknown);
+    unknown_editor.open("file:///unknown", "old");
+    assert_eq!(unknown_editor.edit("file:///unknown", "new")["params"]["contentChanges"].as_array().unwrap().len(), 1);
+    assert_eq!(unknown_editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":"file:///unknown","version":1},"edits":[]}]}))["applied"], false);
 }
 
 #[test]

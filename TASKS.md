@@ -52,7 +52,11 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test prompts"` @ `a4578fe` → ok: rust.
 - [x] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5. Close after T006.3a–T006.3c.
   - Done: containing commit.
-- [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit.
+- [x] **T006.4a — Bind recorded client presets and named profiles.** Compose evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode model presets and `rich-native`, `rich-doc`, `plain` profiles. Derive behavior modules from resolved quirk metadata and preserve immutable captures; declarations are not native behavior proof.
+  - Done: containing commit. Preceding T006.3c/T006.3: `158692e8c5e09ea3f24c0daf225fcf977152f1ef`.
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test quirks"` → ok: rust on current diff.
+- [ ] **T006.4b — Audit original fake-editor acceptance.** Check all seven original T006 clauses against current tests, close only demonstrated acceptance and link the authoritative queue. Preserve the distinction between scripted model checks and actual-server conformance.
+- [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit. Close after T006.4a–T006.4b.
 
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
