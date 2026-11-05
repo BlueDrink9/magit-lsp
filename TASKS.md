@@ -69,6 +69,13 @@ Historical trace/capture evidence and implementation records below describe the 
   Consume layered settings and the registry at initialize, apply capability overrides and expose effective results; enforce production server behavior and strict rich negotiation in focused tests. Complete T005.2 after both children pass.
 - [x] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
   Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
+- [x] **T005.3a — Drive fake-editor behavior from quirk registry models.**
+  Add a registry-driven fake-editor configuration seam and permanent behavioral coverage for every modeled quirk. Preserve existing profiles and keep the modeled evidence limits explicit.
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test quirks"` @ 11d1c8b → passed
+- [ ] **T005.3b — Prove named server workarounds and universal safety.**
+  Cover every named registry workaround through server behavior, including unreliable apply results, echo/hash reconciliation with quirks disabled or absent, and single-document applyEdit requests.
+- [ ] **T005.3c — Generate the known-client appendix and audit T005.**
+  Generate the client-spec appendix from registry metadata with a permanent drift check through Make. Audit all original T005 acceptance clauses and close T005.3/T005 only when evidence is complete.
 - [ ] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
   Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**

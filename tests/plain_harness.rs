@@ -202,6 +202,50 @@ fn all_documented_profiles_have_assertable_behavior() {
 }
 
 #[test]
+fn registry_models_drive_fake_editor_observable_behavior() {
+    use magit_lsp::quirks::{self, Client, Resolution, REGISTRY};
+    for quirk in REGISTRY.iter().filter(|q| q.model.is_some()) {
+        let resolution = Resolution { enabled: [quirk.id].into_iter().collect() };
+        let profile = if quirk.model == Some("neovim-accepts-undeclared-documentChanges") { Profile::NoDocumentChanges } else { Profile::Standard };
+        let mut editor = FakeEditor::from_resolution(profile, &resolution);
+        let uri = "file:///model";
+                editor.open(uri, "old");
+        match quirk.model.unwrap() {
+            "neovim-accepts-undeclared-documentChanges" => {
+                assert_eq!(editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[]}]}))["applied"], true);
+            }
+            "silent-stale-apply" => {
+                editor.edit(uri, "new");
+                let result = editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[replacement(0,3,"BAD")]}]}));
+                assert_eq!(result["applied"], true);
+                assert_eq!(editor.text(uri), "new");
+            }
+            "decomposed-changes" => {
+                let notification = editor.edit(uri, "new");
+                assert!(notification["params"]["contentChanges"][0]["range"].is_object());
+            }
+            other => panic!("unhandled registry model: {other}"),
+        }
+    }
+    let empty = json!({});
+    let neovim = quirks::resolve(Client { name: Some("Neovim"), version: Some("0.12.6"), capabilities: &empty }, None).unwrap();
+    let mut editor = FakeEditor::from_resolution(Profile::NoDocumentChanges, &neovim);
+    let uri = "file:///combined";
+    editor.open(uri, "old");
+    assert_eq!(editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[]}]}))["applied"], true);
+    editor.edit(uri, "new");
+    editor.open("file:///later", "old");
+    let stale = editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[replacement(0,3,"FIRST") ]},{"textDocument":{"uri":"file:///later","version":1},"edits":[replacement(0,3,"LATER")]}]}));
+    assert_eq!(stale["applied"], true);
+    assert_eq!(editor.text(uri), "new");
+    assert_eq!(editor.text("file:///later"), "LATER");
+    let helix = quirks::resolve(Client { name: Some("helix"), version: Some("25.07.1"), capabilities: &empty }, None).unwrap();
+    let mut editor = FakeEditor::from_resolution(Profile::Standard, &helix);
+    editor.open(uri, "old");
+    assert!(editor.edit(uri, "new")["params"]["contentChanges"][0]["range"].is_object());
+}
+
+#[test]
 fn versioned_apply_edit_validates_before_mutating_and_supports_multiple_changes() {
     let mut e = FakeEditor::new(Profile::Standard);
     let u = "file:///d";

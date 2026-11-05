@@ -3,6 +3,9 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Model { UndeclaredDocumentChanges, SilentStaleApply, DecomposedChanges }
+
 /// Client compatibility behavior toggled by a conformance test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Profile {
@@ -27,6 +30,7 @@ pub struct Document {
 pub struct FakeEditor {
     pub documents: HashMap<String, Document>,
     pub profile: Profile,
+    models: Vec<Model>,
     pub encoding: &'static str,
     pending: Vec<Value>,
     pub outbound: Vec<Value>,
@@ -38,11 +42,29 @@ impl FakeEditor {
         Self {
             documents: HashMap::new(),
             profile,
+            models: Vec::new(),
             encoding: "utf-16",
             pending: Vec::new(),
             outbound: Vec::new(),
         }
     }
+    /// Build a fake editor from resolved registry models while retaining its legacy profile.
+    pub fn from_resolution(profile: Profile, resolution: &magit_lsp::quirks::Resolution) -> Self {
+        let mut editor = Self::new(profile);
+        for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
+            if let Some(name) = quirk.model {
+                let model = match name {
+                    "neovim-accepts-undeclared-documentChanges" => Model::UndeclaredDocumentChanges,
+                    "silent-stale-apply" => Model::SilentStaleApply,
+                    "decomposed-changes" => Model::DecomposedChanges,
+                    other => panic!("unhandled fake-editor model: {other}"),
+                };
+                editor.models.push(model);
+            }
+        }
+        editor
+    }
+    fn modeled(&self, model: Model) -> bool { self.models.contains(&model) }
     /// Open a document and return its didOpen notification.
     pub fn open(&mut self, uri: &str, text: &str) -> Value {
         self.documents.insert(
@@ -56,11 +78,12 @@ impl FakeEditor {
     }
     /// Replace document text; debounce profile queues the notification until flush.
     pub fn edit(&mut self, uri: &str, text: &str) -> Value {
+        let decomposes = matches!(self.profile, Profile::DecomposedChanges) || self.modeled(Model::DecomposedChanges);
         let d = self.documents.get_mut(uri).expect("open document");
         let old = d.text.clone();
         d.version += 1;
         d.text = text.into();
-        let changes = if matches!(self.profile, Profile::DecomposedChanges) {
+        let changes = if decomposes {
             decomposed(&old, text, self.encoding)
         } else {
             vec![json!({"text":text})]
@@ -109,6 +132,7 @@ impl FakeEditor {
         }
         if edit.get("documentChanges").is_some()
             && matches!(self.profile, Profile::NoDocumentChanges)
+            && !self.modeled(Model::UndeclaredDocumentChanges)
         {
             return rejected("documentChanges is unsupported");
         }
@@ -136,7 +160,8 @@ impl FakeEditor {
         };
         let mut replacements = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for change in changes {
+        let check_version = !self.modeled(Model::SilentStaleApply);
+        for (index, change) in changes.iter().enumerate() {
             if change.get("kind").is_some() {
                 return rejected("resource operations are unsupported");
             }
@@ -152,12 +177,13 @@ impl FakeEditor {
             let Some(version) = change["textDocument"].get("version") else {
                 return rejected("missing version");
             };
-            if !version.is_null() && version.as_i64() != Some(doc.version) {
+            if check_version && !version.is_null() && version.as_i64() != Some(doc.version) {
                 return rejected("document version is stale or malformed");
             }
             let Some(edits) = change["edits"].as_array() else {
                 return rejected("missing edits");
             };
+            if !check_version && index == 0 && !version.is_null() && version.as_i64() != Some(doc.version) { continue; }
             let Some(result) = apply_edits(&doc.text, edits, self.encoding) else {
                 return rejected("invalid or overlapping edits");
             };
@@ -209,7 +235,7 @@ impl FakeEditor {
             for uri in uris {
                 let doc = &self.documents[&uri];
                 if doc.version != before[&uri].version {
-                    let changes = if matches!(self.profile, Profile::DecomposedChanges) {
+                    let changes = if matches!(self.profile, Profile::DecomposedChanges) || self.modeled(Model::DecomposedChanges) {
                         decomposed(&before[&uri].text, &doc.text, self.encoding)
                     } else {
                         vec![json!({"text":doc.text})]
