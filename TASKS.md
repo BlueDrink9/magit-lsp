@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: 796a7f633c8c57108644ab72cfc9f099474c9f3a
+Last review: fee95585a7e30a62b521deaa75a91f7f94828844
 
 Phase 1 complete (2026-11-05): T001–T003 implemented and accepted on Linux.
 Full `make test FILTER=--no-fail-fast`, rustfmt, seven hygiene unit tests and text-native UI tour passed; logs: `/tmp/opencode/phase-one-final/`. Sol 5.6 reviewed through `796a7f6`; P1 owned-server termination and P2 Git-configuration isolation were fixed in `a13f932`/`0828277`. Exact normal and injected native Helix recipes passed, including hostile caller Git configuration; twelve wirelog tests and format/diff checks passed after the documentation fixes. No owned server remains; the user's Cargo.toml checksum and unrelated release work are unchanged.
@@ -134,6 +134,9 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 ---
 
 ## Bugfix
+
+- [x] **Checkpoint — Restore full regressions after strict wire migration.**
+  Full `make test FILTER=--no-fail-fast` failed `editor_bridge::a_commit_is_created_from_the_typed_message` (obsolete `folds` in shared rich helper) and `plain_render::binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo` (old `node_id` assertion). Implemented matching P1, preserving strict production validation. Focused affected suites pass; full gate rerun remains pending. Log `/tmp/opencode/phase-two-typed-checkpoint/test.log`.
 
 - [x] **Checkpoint — Establish the staged-successor failure cause.**
   Capture exact pre/post structured node identities, hunk IDs and rendered cursor for the single failing views case. Distinguish user folding, bounded overflow, metadata identity or cursor re-resolution using concrete output; retain a concise diagnosis and source paths before changing production behavior.
@@ -382,6 +385,33 @@ Checkpoint closure (2026-11-05): both P1 findings and the P2 cleanup finding abo
   - **Done when:** Repository setup and editor launch use the same isolated environment, and the recipe succeeds despite hostile caller settings such as signing and a failing global hooks path without reading the caller's Git config.
   - **Constraints:** Do after: `Finish terminating the owned Helix recipe server`. Touch only `tests/fixtures/lsp_traces/README.md` and `TASKS.md`. Do not alter captured fixtures, historical source hashes, action claims, unrelated recipes, dirty `Cargo.toml`/`README.md`, or untracked release files.
   - **Verify:** Run the fenced recipe from a checkout subdirectory with hostile Git settings supplied through the caller's normal global config/environment, confirm its own commit and native evidence run complete, then run the existing `INJECT_AFTER_INITIALIZE=1` cleanup probe and `git diff --check`.
+
+Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `796a7f633c8c57108644ab72cfc9f099474c9f3a..fee95585a7e30a62b521deaa75a91f7f94828844`, all 22 changed paths, and relevant capability, test-helper, VSCode StaticFeature, client-declaration, render, and native-driver surroundings. Found one P1 and two P2 tasks; no P0. No tests were rerun. Supplied focused Rust, Lua, VSCode, isolated VSCodium, UI-unit, UI-tour, rustfmt, and hygiene results remain worker evidence. The background full `make test FILTER=--no-fail-fast` had no completed PASS at review time. Linux-only local evidence; Windows/macOS remain CI follow-ups. T004/T004.4b and Phase 2 remain open. P3 deferred separately: retain the pre-existing redundant generated-file absence assertions in `tests/hygiene/test_hygiene.py`; no new P3 finding.
+
+- [x] **[P1] Finish migrating shared test wire fixtures to the strict schema** (`tests/common/stdio.rs:171-180`, `TestServer::initialize_rich`; `tests/plain_render.rs:253-271`, `plain_documents_preserve_line_endings_and_reject_phantom_rows`)
+  - **Problem:** `initialize_rich()` still sends removed `render` and `folds` fields, so strict `deny_unknown_fields` initialization fails for its callers in `server_async`, `text_mode`, and `editor_bridge`. `plain_render` also still searches emitted action targets under `node_id`, although production now emits only `nodeId`, causing its content-action assertion to fail.
+  - **Why it matters:** This is a correctness regression in the full Rust suite. The shared helper no longer represents any accepted rich client declaration, and stale assertions reject the new wire contract.
+  - **Change:** Remove only the obsolete singleton `render` and `folds` members from `TestServer::initialize_rich`, retaining the full supported layout/effect/prompt declaration. Make the helper fail immediately with the initialize response if strict negotiation does not return capabilities, then return the valid response as before. Update both `plain_render` target lookups from `node_id` to `nodeId`; do not add aliases or relax production deserialization.
+  - **Done when:** Every `initialize_rich()` caller negotiates rich v1 successfully, the line-ending/phantom-row test finds camelCase content targets, and the four affected Rust integration suites pass.
+  - **Constraints:** Touch only `tests/common/stdio.rs`, `tests/plain_render.rs`, and `TASKS.md`. Do not change the production schema, restore removed modes, edit immutable trace fixtures, mark T004/T004.4b complete, touch the user's dirty `Cargo.toml`/`README.md` or untracked release work, use images, or require unavailable Windows/macOS hosts.
+  - **Verify:** `cargo test --test plain_render --test server_async --test text_mode --test editor_bridge && cargo fmt --all -- --check && git diff --check`
+  - **Result:** Focused verification passes. Full `make test FILTER=--no-fail-fast` rerun remains pending.
+
+- [ ] **[P2] Test duplicate entries in every typed capability set** (`tests/plain_core.rs:241-286`, `rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema`; `src/presentation/mod.rs:84-127`, `deserialize_names`)
+  - **Problem:** The strict-schema test checks duplicate object fields such as two `layout` keys, but never checks duplicate values inside `layout`, `effects`, or `prompts`. Those arrays are the supported sets whose uniqueness `deserialize_names()` explicitly enforces, so the completed T004.3 duplicate claim lacks a direct regression test on the production negotiation path.
+  - **Why it matters:** This weakens correctness coverage and readability: the current test's “duplicate” cases exercise serde struct-field handling rather than the custom uniqueness logic introduced by this change.
+  - **Change:** Add table-driven cases with repeated supported entries in each array, for example `layout:["main","main"]`, and assert rejection through `negotiate(&initialize(...))`. Keep the existing duplicate-object-field checks only if they document a separate strict JSON contract; name or comment the two categories distinctly.
+  - **Done when:** Focused tests fail if duplicate-set rejection is removed from any of the three custom deserializers and pass for each unique supported set.
+  - **Constraints:** Touch only `tests/plain_core.rs` and `TASKS.md`. Do not change accepted values, permit duplicates by relying on `BTreeSet` deduplication, alter production error wording, complete T004.4b, or claim cross-platform execution.
+  - **Verify:** `cargo test --test plain_core rich_capabilities_deserialize_roundtrip_supported_modes_and_reject_invalid_schema && cargo fmt --all -- --check && git diff --check`
+
+- [ ] **[P2] Anchor the fake StaticFeature APIs to real VSCode evidence** (`clients/vscode/test/fake/languageclient.js:60-64`, `LanguageClient.registerFeature`; `clients/vscode/test/open.test.js:113-123`, inline `LanguageClient.registerFeature`)
+  - **Problem:** Both changed test clients now fake `registerFeature`, and the integration fake also simulates `fillClientCapabilities`/`initialize`, but neither fake API has the required `// anchor:` reference to a real client or trace. Without that provenance, these parallel implementations can drift from `vscode-languageclient` while unit/integration tests remain green.
+  - **Why it matters:** This violates cohesion and cleanliness of the repository's fake-capability policy. The real VSCodium run exists, but the fake surfaces do not identify the evidence that constrains them.
+  - **Change:** Add concise `// anchor:` comments beside both fake `registerFeature` surfaces. Point to the installed `StaticFeature` contract as exercised by production `clients/vscode/lib/session.js` and to the retained actual VSCodium initialize evidence in `docs/evidence/typed-capability-declarations.md`; state that `open.test.js` only accepts registration and does not model initialization. Do not invent extra fake lifecycle behavior merely for symmetry.
+  - **Done when:** Every changed fake capability surface names its real API/evidence anchor, the integration declaration assertion still uses the fake feature lifecycle, and existing VSCode tests pass.
+  - **Constraints:** Touch only `clients/vscode/test/fake/languageclient.js`, `clients/vscode/test/open.test.js`, and `TASKS.md`. Do not change production registration, replace the supported StaticFeature with middleware, claim the pending Neovim/T004.4b evidence, rerun native VSCodium solely for this comment-only fix, use images, or require unavailable Windows/macOS hosts.
+  - **Verify:** `npm --prefix clients/vscode run test:unit && npm --prefix clients/vscode run test:integration && git diff --check`
 
 ## Deferred hygiene follow-ups
 

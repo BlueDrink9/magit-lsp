@@ -257,7 +257,7 @@ fn binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo()
             .clone();
         let content = actions
             .iter()
-            .find(|action| action["command"]["arguments"][0]["target"]["node_id"].is_string())
+            .find(|action| action["command"]["arguments"][0]["target"]["nodeId"].is_string())
             .unwrap_or_else(|| panic!("file row action source {source:?}: {actions:?}"));
         assert!(content["command"]["arguments"][0]["viewGeneration"].is_number());
         let phantom = editor.text(&uri).lines().count() as u32;
@@ -267,7 +267,7 @@ fn binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo()
         assert!(
             phantom_actions
                 .iter()
-                .all(|action| !action["command"]["arguments"][0]["target"]["node_id"].is_string()),
+                .all(|action| !action["command"]["arguments"][0]["target"]["nodeId"].is_string()),
             "phantom row {phantom} actions {phantom_actions:?}"
         );
         server.shutdown_and_exit();
