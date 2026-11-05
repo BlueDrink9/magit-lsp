@@ -295,7 +295,7 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Verify:** Run `make test-rust FILTER="--test plain_harness"`.
   - Verified: `make test-rust FILTER="--test plain_harness"` @ `2e29535` → `ok: rust`
 
-- [ ] **[P1] Enforce static keymap delivery in the strict checker** (`tests/common/editor_model/strict.rs:23-45`, `check`; `tests/plain_harness.rs:274-340`, `strict_guard_covers_response_effects_and_declared_feature_matrix`)
+- [x] **[P1] Enforce static keymap delivery in the strict checker** (`tests/common/editor_model/strict.rs:23-45`, `check`; `tests/plain_harness.rs:274-340`, `strict_guard_covers_response_effects_and_declared_feature_matrix`)
   - **Problem:** `check` treats `view/render` and `view/keymap` alike and accepts both whenever `experimental.magit` exists. A `keys: "static"` client explicitly does not accept pushed `view/keymap` notifications, so strict mode misses an undeclared server feature for the recorded `rich-doc`/VSCode profile.
   - **Why it matters:** This violates correctness of strict declaration enforcement and cohesion with `KeymapDelivery` production semantics. A server regression that pushes dynamic keymaps to a static client would pass T006's strict matrix.
   - **Change:** Keep `view/render` gated by a valid rich declaration, but require `experimental.magit.keys == "dynamic"` for `view/keymap`. Extend the strict matrix with both delivery modes, preferably using the named rich profiles: static accepts renders and rejects keymap pushes; dynamic accepts both.
@@ -303,6 +303,7 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Constraints:** Do not change production keymap delivery, reject static clients from rich rendering, or add compatibility modes.
   - **Acceptance test:** `strict_guard_covers_response_effects_and_declared_feature_matrix` explicitly distinguishes static and dynamic key delivery.
   - **Verify:** Run `make test-rust FILTER="--test plain_harness"`.
+  - Verified: `make test-rust FILTER="--test plain_harness"` @ `02b7d19` → `ok: rust`
 
 - [ ] **[P2] Put metadata-only rich rendering in the shared contract vectors** (`tests/data/client-contracts.json:2-7`, `renders`; `tests/plain_harness.rs:19-34`, `shared_rich_render_vectors_apply_exact_text_and_intents`; `tests/plain_harness.rs:72-91`, `rich_metadata_only_stale_and_view_isolation`)
   - **Problem:** T006.3a says shared vectors prove metadata-only rendering, but the shared fixture contains only full, edit and stale-edit rows. The separate Rust-only case advances a metadata-only render from version 1 to 2, contradicting the current protocol rule that metadata-only renders preserve content version, and it does not make metadata part of the cross-client contract row.

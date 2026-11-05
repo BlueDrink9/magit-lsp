@@ -29,7 +29,11 @@ pub fn check(capabilities: &Value, message: &Value) -> Result<(), String> {
         }
         "window/showDocument" => require(capabilities["window"]["showDocument"]["support"] == true, "showDocument")?,
         "window/workDoneProgress/create" | "$/progress" => require(capabilities["window"]["workDoneProgress"] == true, "workDoneProgress")?,
-        "view/render" | "view/keymap" => require(rich.is_object(), "rich rendering")?,
+        "view/render" => require(rich.is_object(), "rich rendering")?,
+        "view/keymap" => {
+            require(rich.is_object(), "rich rendering")?;
+            require(rich["keys"] == "dynamic", "dynamic keymap delivery")?;
+        }
         "view/prompt" => {
             let kind = params["kind"].as_str().unwrap_or("");
             let prompts = rich["prompts"].as_array();

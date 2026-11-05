@@ -304,6 +304,8 @@ fn rich_server_render_ack_and_stale_resync_preserve_caller_reply() {
 fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
     let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN).capabilities();
     let rich = editor_model::EditorModel::new(editor_model::RICH_MIN).capabilities();
+    let static_rich = editor_model::presets::profile_model(editor_model::presets::NamedProfile::RichDoc).capabilities();
+    let dynamic_rich = editor_model::presets::profile_model(editor_model::presets::NamedProfile::RichNative).capabilities();
     let ordinary = json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}});
     assert!(editor_model::strict::check(&plain, &ordinary).is_ok());
     for placement in ["main", "side", "bottom", "float"] {
@@ -327,10 +329,13 @@ fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
     let mut all = rich.clone();
     all["experimental"]["magit"]["layout"] = json!(["main", "side", "bottom", "float"]);
     all["experimental"]["magit"]["effects"] = json!(["clipboard", "visitFile", "editDocument"]);
-    for method in ["view/render", "view/keymap"] {
-        let message = json!({"method":method,"params":{}});
-        assert!(editor_model::strict::check(&plain, &message).is_err());
-        assert!(editor_model::strict::check(&all, &message).is_ok());
+    let render = json!({"method":"view/render","params":{}});
+    let keymap = json!({"method":"view/keymap","params":{}});
+    assert!(editor_model::strict::check(&plain, &render).is_err());
+    assert!(editor_model::strict::check(&plain, &keymap).is_err());
+    for (profile, message) in [("rich-doc", &render), ("rich-doc", &keymap), ("rich-native", &render), ("rich-native", &keymap)] {
+        let capabilities = if profile == "rich-doc" { &static_rich } else { &dynamic_rich };
+        assert_eq!(editor_model::strict::check(capabilities, message).is_ok(), message["method"] == "view/render" || profile == "rich-native", "{profile} {}", message["method"]);
     }
     for prompt in ["text", "confirm", "choice", "multiChoice"] {
         let message = json!({"method":"view/prompt","params":{"kind":prompt}});
