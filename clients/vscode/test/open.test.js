@@ -117,6 +117,7 @@ module.exports = async function testStatusOpenLifecycle() {
         legend: { tokenTypes: ['magit.section'], tokenModifiers: [] },
       } } };
     }
+    // anchor: vscode-languageclient 9.0.1 StaticFeature (features.d.ts), production session.js and native VSCodium evidence: docs/evidence/typed-capability-declarations.md; this fake only accepts registration and does not model initialization.
     registerFeature(feature) { this.features.push(feature); }
     onNotification(name, handler) { notifications.set(name, handler); }
     start() { return Promise.resolve(); }

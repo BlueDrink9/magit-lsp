@@ -59,6 +59,7 @@ class LanguageClient {
     this.notifications.set(method, handler);
   }
 
+  // anchor: vscode-languageclient 9.0.1 StaticFeature (features.d.ts), used by production session.js; native VSCodium initialize evidence: docs/evidence/typed-capability-declarations.md.
   /** Register a feature using vscode-languageclient's public static-feature API. */
   registerFeature(feature) { this.features.push(feature); }
 
