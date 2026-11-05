@@ -11,6 +11,15 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
+- [x] **Trace cleanup audit — Decide retained tests and capture tooling.**
+  Investigate actual automated consumers and maintained infrastructure before changing scripts or fixtures. Record a concise keep/migrate/delete decision, coverage risks and ordered implementation slices for the immediate cleanup task below; do not preserve machinery merely because it records past work.
+  Done: `docs/design/trace-capture-strategy.md`; maps consumers, evidence boundaries, portability limits and dependency-ordered cleanup. No cleanup or native revalidation claimed.
+
+- [ ] **Investigate and rationalize trace/capture test infrastructure.**
+  Immediate priority, ahead of formatter work and T005: first establish ongoing purpose, actual consumers and coverage of embedded Python capture recipes and trace tests, including current quirk dependencies; decide what to retain, replace or delete before extracting anything.
+  Audit decision and ordered slices: [trace capture strategy](docs/design/trace-capture-strategy.md).
+  Heavily deduplicate justified tests and reuse maintained infrastructure; extract only necessary recipes into reproducible standalone tools, remove machine-specific paths and nonportable runtime assumptions, and delete unsupported or redundant machinery. Keep essential provenance distinct from runtime dependencies; verify on Linux and record other-platform CI limits.
+
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
 - [ ] **T120.2 — Implement staged-safe formatter checks and tests.**
