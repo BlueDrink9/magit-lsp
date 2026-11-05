@@ -35,13 +35,18 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: `27c8a70790926b0ebdd6c807db9977b477cc9c90`.
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test quirks"` @ `219f8e8` → ok: rust.
 - [x] **T006.2b2 — Complete response-effect guards and strict feature matrix.** Cover feature-bearing response effects/descriptors, every optional effect, prompt secrecy and all standard declared equivalents with stable table-driven oracles. Verify no rich response path silently skips declarations.
-  - Done: this commit.
+  - Done: `96504c60fde13587bb69f38e2d66f8dd0758366a`.
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test quirks"` @ `27c8a70` → ok: rust.
 - [x] **T006.2b — Enforce strict server feature declarations in the pump.** Validate both requests and notifications, including optional rich effects/layout/prompts and standard LSP features, before dispatch. Prove undeclared uses fail, declared equivalents pass, and explicit quirk behavior remains distinguishable from declarations. Split after two checkpoints; close after T006.2b1 and T006.2b2.
-  - Done: this commit.
+  - Done: `96504c60fde13587bb69f38e2d66f8dd0758366a`.
 - [x] **T006.2 — Compose declared editor models and strict feature checks.** Add `plain-min`/`rich-min` bases, anchored declaration/behavior modules and strict undeclared-use checks; reuse registry-derived behavior models and retain legacy profiles. Original scope: T006 clauses 2–4. Close after T006.2a and T006.2b.
-  - Done: this commit.
-- [ ] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5.
+  - Done: `96504c60fde13587bb69f38e2d66f8dd0758366a`.
+- [x] **T006.3a — Apply rich render state from shared vectors.** Add per-view text, version and metadata state for full, bottom-up edits and metadata-only renders. Shared vectors must prove exact verbatim text, full-over-edits precedence, stale-base resync without mutation and correct ack intent.
+  - Verified: `make test-rust FILTER="--test plain_harness"` → ok: rust on this implementation diff.
+  - Done: containing commit.
+- [ ] **T006.3b — Route rich render acknowledgements and resync through the pump.** Dispatch render notifications into the rich state model, send applied-version acknowledgements, correlate resync replies and recover state without dropping unrelated responses. Prove the pump works against the real rich server.
+- [ ] **T006.3c — Model shared prompt-vector responses.** Implement scripted prompt decisions independently of expected answers, all shared prompt vectors and prompt response routing with dynamic request IDs. Keep cancellation, empty values, defaults, custom choices and secret declarations distinct.
+- [ ] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5. Close after T006.3a–T006.3c.
 - [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit.
 
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**

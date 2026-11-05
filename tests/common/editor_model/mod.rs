@@ -3,6 +3,8 @@
 use serde_json::{json, Value};
 #[path = "strict.rs"]
 pub mod strict;
+#[path = "rich.rs"]
+pub mod rich;
 
 /// Supported exact minimum declaration bases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
