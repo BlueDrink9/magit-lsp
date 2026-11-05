@@ -183,6 +183,7 @@ impl FakeEditor {
             let Some(edits) = change["edits"].as_array() else {
                 return rejected("missing edits");
             };
+            // anchor: Neovim 0.12.6 workspace/applyEdit behavior; T005 contract in TASKS_PART_SEVEN.md and retained rapid-repair evidence in tests/fixtures/lsp_traces/README.md.
             if !check_version && index == 0 && !version.is_null() && version.as_i64() != Some(doc.version) { continue; }
             let Some(result) = apply_edits(&doc.text, edits, self.encoding) else {
                 return rejected("invalid or overlapping edits");

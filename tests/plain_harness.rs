@@ -235,7 +235,8 @@ fn registry_models_drive_fake_editor_observable_behavior() {
     assert_eq!(editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[]}]}))["applied"], true);
     editor.edit(uri, "new");
     editor.open("file:///later", "old");
-    let stale = editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[replacement(0,3,"FIRST") ]},{"textDocument":{"uri":"file:///later","version":1},"edits":[replacement(0,3,"LATER")]}]}));
+    editor.edit("file:///later", "later-local");
+    let stale = editor.apply_edit(&json!({"documentChanges":[{"textDocument":{"uri":uri,"version":1},"edits":[replacement(0,3,"FIRST") ]},{"textDocument":{"uri":"file:///later","version":1},"edits":[replacement(0,11,"LATER")]}]}));
     assert_eq!(stale["applied"], true);
     assert_eq!(editor.text(uri), "new");
     assert_eq!(editor.text("file:///later"), "LATER");

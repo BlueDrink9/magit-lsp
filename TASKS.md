@@ -1,6 +1,9 @@
 # magit-lsp — Roadmap
 
-Last review: 9702973340ffc1108bc4e4d9b995f03b2324e76f
+Last review: 6c95b50cb86fe32d3415eb055baa411e762a4456
+
+Accumulated-work gate (2026-11-06): T005 acceptance, registry-driven editor models, real-server reconciliation and generated client documentation warrant a serialized full test run and bounded review (10 committed paths, 522 insertions/163 deletions since Last review). Phase 2 remains open; this is not a phase-end gate.
+Serialized `make test` passed build, Rust, Lua, VSCode and keybindings at `6c95b50`; bounded review found two P1 and two P2 corrections below, no P0 or new P3. Resolve these corrections before resuming the normal queue; no phase-end hygiene/UI-tour or new native evidence is claimed.
 
 Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T005–T007 remain open.
 
@@ -222,6 +225,37 @@ Completed entries below preserve historical diagnoses and verification records. 
 ## Review
 
 Completed checkpoint entries below preserve historical findings and original command records, including retired fixture gates. They do not reinstate capture workflows or define current verification commands. Current execution uses [AGENTS.md](AGENTS.md#verification) and the open queue; immutable pre-retirement context is `83f79f5:TASKS.md`.
+
+Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed changes `9702973340ffc1108bc4e4d9b995f03b2324e76f..6c95b50` across all 10 changed paths, plus the quirk registry, Plain controller and original T005 clauses. Found two P1 and two P2 tasks; no P0. Supplied serialized `make test` evidence was not rerun. Unrelated dirty release/configuration/documentation work and this review's gate note were preserved. No image tools or native evidence were used. P3: no new finding; the existing deferred generated-file assertion cleanup remains unchanged.
+
+- [x] **[P1] Pin Neovim stale-apply entry ordering** (`tests/common/fake_editor.rs:126-192`, `FakeEditor::apply_edit`; `tests/plain_harness.rs:204-246`, `registry_models_drive_fake_editor_observable_behavior`)
+  - **Problem:** The fake models the Neovim rule, but its tests cover only a stale first entry and a fresh later entry. They do not fail if a future change incorrectly version-checks every later `documentChanges` entry, so the checked T005 model claim does not enforce the original first-entry-versus-later contract.
+  - **Why it matters:** This violates test validity and correctness of T005 acceptance. Neovim skips stale first-entry edits while omitting the version check after the first entry, and reports `applied: true`; both halves need an observable oracle.
+  - **Change:** Extend `registry_models_drive_fake_editor_observable_behavior` with two open documents whose local versions both exceed the versions in one multi-entry request. Assert the stale first entry remains unchanged, the stale later entry is applied, and the result is `applied: true`. Retain the single-entry stale-skip assertion. Add `// anchor: Neovim 0.12.6 workspace/applyEdit behavior; T005 contract in TASKS_PART_SEVEN.md and retained rapid-repair evidence in tests/fixtures/lsp_traces/README.md.` beside the `silent-stale-apply` fake behavior.
+  - **Done when:** The test fails both if the first stale edit is applied and if the later stale edit is rejected/skipped; `make test-rust FILTER="--test plain_harness"` passes.
+  - **Constraints:** Do not change production server behavior, broaden the modeled Neovim version range, or claim new native evidence.
+  - Verified: `make test-rust FILTER="--test plain_harness"` @ `6c95b50` → ok: rust
+
+- [ ] **[P1] Prove the real Plain apply pipeline becomes ready** (`tests/plain_render.rs:159-215`, `named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety`; `src/presentation/plain.rs:227-285`, `PlainDocument::change` and `PlainDocument::response`)
+  - **Problem:** The real-server test proves text reconciliation and hash-gated actions, but never proves the controller left `Applying`. `action_snapshot` is hash-based and does not inspect `DocumentState`, so the final nonempty code action can pass even if response/echo handling leaves the pipeline stuck.
+  - **Why it matters:** This violates correctness and test validity of the checked T005 workaround/universal-safety claim. A stuck controller would suppress later authoritative renders despite this acceptance test passing.
+  - **Change:** After dispatching the retry response and exact echo, trigger a new authoritative server render in each existing known-disabled/unknown case, preferably by writing a watcher-visible worktree file. Require a subsequent one-document `workspace/applyEdit`, dispatch its response/echo, and assert the editor reaches the new authoritative text while `.magit` remains unchanged. Keep the pre-reconciliation empty-action and exact-hash action assertions.
+  - **Done when:** The test times out or fails if the retry leaves `PlainDocument` in `Applying`; it passes for the auto-enabled Neovim case, explicit server override-off case, and unknown-client case through `make test-rust FILTER="--test plain_render"`.
+  - **Constraints:** Keep echo/hash reconciliation universal; do not gate it on `apply-result-unreliable`, weaken one-document emission assertions, add sleeps, or add native evidence.
+
+- [ ] **[P2] Repair T005 completion provenance and open-phase wording** (`TASKS.md:7-9,66-86`, T005 completion records; `TASKS_PART_SEVEN.md:206-232`, Phase 2 and original T005 scope)
+  - **Problem:** The authoritative queue assigns each final T005 slice the preceding commit: outgoing format cites `d2faf01` instead of `11d1c8b`, fake models cite `11d1c8b` instead of `f224f94`, workaround safety cites `f224f94` instead of `65ee6d9`, and appendix closure cites `65ee6d9` instead of `6c95b50`. Current prose also says T005–T007 remain open although the same queue marks T005 complete.
+  - **Why it matters:** This violates cleanliness and status correctness. The recorded commits do not contain the work they allegedly prove, and current phase text contradicts the sole live queue.
+  - **Change:** Correct the four T005 slice commit references to the commits that contain their implementations. Change only current open-phase wording from T005–T007 to T006–T007 in `TASKS.md` and `TASKS_PART_SEVEN.md`; preserve dated historical checkpoint statements and the original T005 clauses without creating a second completion checkbox.
+  - **Done when:** Every cited commit contains the named slice, all current phase text says T006–T007 remain open, and T005 completion remains recorded only by the existing authoritative queue entries.
+  - **Constraints:** Preserve the accumulated-work gate note, historical dated claims, original T005 acceptance text, and all unrelated backlog status.
+
+- [ ] **[P2] Make capability-match appendix generation exhaustive** (`scripts/generate_client_behaviors.rs:1-15`, `render`; `tests/quirks.rs:7-27`, `known_client_appendix_matches_registry`)
+  - **Problem:** `render` matches `Match::Capability(_)` and always prints “Declares `experimental.magit`”. Adding another `CapabilityTest` would therefore compile and pass the drift test while generating false documentation for that registry entry.
+  - **Why it matters:** This violates correctness and cohesion of the registry-derived appendix. Its drift check guarantees byte agreement with the generator, not fidelity when the generator silently collapses distinct metadata.
+  - **Change:** Import `CapabilityTest` and match `Match::Capability(CapabilityTest::DeclaresMagit)` explicitly, as already done for `Capability`. Keep rendering sourced from `REGISTRY`; do not introduce a parallel documentation table.
+  - **Done when:** A new `CapabilityTest` variant causes a compile-time non-exhaustive-match failure until its documentation rendering is defined, and `make test-rust FILTER="--test quirks"` passes with the checked appendix unchanged.
+  - **Constraints:** Do not change registry matches, generated wording unrelated to capability tests, or the public quirk configuration contract.
 
 Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `b5eb865f6cfacaf6a1a352d8ba96bab6dae65600..e6546ce6d6bc5c474a88036c85cce3a6e0836d4f`. Scope covered all 11 changed paths plus command preflight, deferred clipboard/editor producers, rich placement normalization, strict-emitter fallbacks and the T004 acceptance record. Found one P1 task; no P0/P2. Supplied serialized Linux gates were not rerun. Coverage does not prove exhaustive future producer discovery, native recapture/provenance, or non-Linux behavior. Existing P3 generated-file assertions remain deferred. Unrelated dirty `Cargo.toml`/`README.md` and untracked release files were not touched; no image tools were used.
 
