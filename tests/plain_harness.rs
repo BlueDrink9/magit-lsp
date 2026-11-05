@@ -45,6 +45,65 @@ fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
 }
 
 #[test]
+fn plain_did_open_apply_edit_is_pumped_and_echoed() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+        .modify_standard()
+        .build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk sentinel\n");
+    let uri = format!("file://{}", path.display());
+    let capabilities = json!({
+        "workspace": {"applyEdit": true},
+        "textDocument": {"codeAction": {}}
+    });
+    let mut client = ClientPump::new(
+        stdio::TestServer::spawn(&[]),
+        Profile::Standard,
+        capabilities,
+    );
+    let open = client.editor.open(&uri, "stale\n");
+    client.send(open);
+    client.until(|client| client.editor.text(&uri).contains("f.txt"));
+
+    let requests: Vec<_> = client
+        .editor
+        .outbound
+        .iter()
+        .filter(|message| message["method"] == "workspace/applyEdit")
+        .collect();
+    assert!(!requests.is_empty(), "server sent no workspace/applyEdit");
+    assert!(client.server.sent.iter().any(|message| {
+        message["id"] == requests[0]["id"] && message["result"]["applied"] == true
+    }));
+    assert!(client.server.sent.iter().any(|message| {
+        message["method"] == "textDocument/didChange"
+            && message["params"]["textDocument"]["uri"] == uri
+    }));
+    assert_eq!(
+        client
+            .server
+            .sent
+            .iter()
+            .filter(|message| message["method"] == "textDocument/didOpen")
+            .count(),
+        1
+    );
+    assert!(client
+        .server
+        .sent
+        .iter()
+        .all(|message| message["method"] != "view/render"));
+    assert!(client
+        .server
+        .notifications
+        .iter()
+        .all(|message| message["method"] != "view/render"));
+    assert_eq!(fs::read(&path).unwrap(), b"disk sentinel\n");
+    client.finish();
+}
+
+#[test]
 fn all_documented_profiles_have_assertable_behavior() {
     let profiles = [
         Profile::DecomposedChanges,
