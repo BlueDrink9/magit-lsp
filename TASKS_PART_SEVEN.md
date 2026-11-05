@@ -58,6 +58,12 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
   test: focused harness regressions pass. check: the Make workflow exercises the existing native assertions with fresh binary and configurable evidence paths; owned-process checks replace broad process matching.
 
+- [x] **Trace cleanup 3d — Remove rich-only readiness from native sessions.**
+  The first real run reached Neovim but failed because shared readiness required the rich adapter's debug module. Use bounded standard RPC readiness for external native sessions; retain rich idle readiness for rich callers.
+  test: cover native readiness without project modules and retain rich readiness tests. check: the retained native workflow reaches its substantive assertions.
+  Done: `COMMIT_PENDING`.
+  - Verified: `make ui-unit` @ 1c02be9 → ok: ui-unit; `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` reached substantive assertions for both newline variants, then failed at shared `tmux clear-history -t plain`; both `failure.json` files report cleanup_verified=true, no socket remains, and no owned PIDs remain.
+
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
   Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
   check: record exact native results and owned-process/socket cleanup for success and failure, plus Linux-only evidence and Windows/macOS CI limits. Complete the parent only after the cleanup gate.

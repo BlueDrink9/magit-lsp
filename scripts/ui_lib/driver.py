@@ -284,6 +284,21 @@ def _idle_probe(run: Run) -> startup.IdleProbe:
     return startup.IdleProbe("unexpected", result.returncode, stdout, stderr)
 
 
+def _rpc_probe(run: Run) -> startup.IdleProbe:
+    """Check standard RPC availability without loading project Lua modules."""
+    try:
+        result = _nvim(run, "--remote-expr", "1", timeout=2.0)
+    except subprocess.TimeoutExpired as error:
+        return startup.IdleProbe("timeout", stdout=_decode_output(error.stdout),
+                                 stderr=_decode_output(error.stderr), detail="after 2s")
+    except OSError as error:
+        return startup.IdleProbe("error", detail=str(error))
+    stdout, stderr = result.stdout.strip(), result.stderr.strip()
+    if result.returncode == 0 and stdout == "1":
+        return startup.IdleProbe("true", result.returncode, stdout, stderr)
+    return startup.IdleProbe("error", result.returncode, stdout, stderr)
+
+
 def _decode_output(output: str | bytes | None) -> str:
     """Normalize `TimeoutExpired` output for bounded diagnostic reporting."""
     if isinstance(output, bytes):
@@ -563,12 +578,17 @@ def _pane_dead(run: Run) -> bool:
     return result.returncode != 0 or result.stdout.strip() == "1"
 
 
-def _wait_for_socket(run: Run, timeout_ms: int = SOCKET_TIMEOUT_MS) -> None:
+def _wait_for_socket(
+    run: Run,
+    timeout_ms: int = SOCKET_TIMEOUT_MS,
+    readiness_probe=None,
+) -> None:
+    readiness_probe = readiness_probe or _idle_probe
     deadline = time.monotonic() + timeout_ms / 1000
     last_probe: startup.IdleProbe | None = None
     while time.monotonic() < deadline:
         if run.socket_path.exists():
-            last_probe = _idle_probe(run)
+            last_probe = readiness_probe(run)
             if last_probe.outcome == "true":
                 return
         if _pane_dead(run):
@@ -878,7 +898,7 @@ def native_session(
         _tmux(run, "set", "-g", "status", "off")
         _tmux(run, "set", "-g", "default-terminal", "xterm-256color")
         _tmux(run, "respawn-pane", "-k", "-t", SESSION, "-c", str(repo), _launcher_command(run))
-        _wait_for_socket(run)
+        _wait_for_socket(run, readiness_probe=_rpc_probe)
         yield run
     finally:
         stop(run)

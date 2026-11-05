@@ -590,6 +590,13 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeSessionTest(unittest.TestCase):
+    def test_rpc_readiness_uses_only_standard_expression(self) -> None:
+        result = subprocess.CompletedProcess([], 0, stdout="1\n", stderr="")
+        with patch.object(driver, "_nvim", return_value=result) as nvim:
+            probe = driver._rpc_probe(make_run("/tmp"))
+        self.assertEqual(probe.outcome, "true")
+        self.assertEqual(nvim.call_args.args[1:], ("--remote-expr", "1"))
+
     def test_configurable_launch_and_readiness_failure_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
