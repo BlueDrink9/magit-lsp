@@ -50,6 +50,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Delete only `Effect::OpenView`, its dead matching branches and obsolete variant documentation; preserve the unrelated session `OpenView` state type and real PushView producers. Assert that PushView remains valid and the removed wire alias is rejected; client/documentation cleanup follows separately.
 - [ ] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
   Keep existing PushView root/return semantics while removing both client aliases and normative OpenView effect documentation. Verify focused native Linux stack behavior in both clients; preserve unrelated dirty README changes and immutable historical captures.
+- [x] **T004.5b2a — Delete client effect aliases and verify native stack behavior.**
+  Remove the two client OpenView dispatch aliases without changing existing PushView root propagation. Run the focused Neovim close/reopen scenario and VSCode A06 native stack checks; commit the already staged README-only alias correction without staging user release edits.
+- [ ] **T004.5b2b — Reconcile remaining public view-effect documentation.**
+  Remove the retired alias from CLIENT_SPEC and the canonical TASKS effect table, retaining PushView/pop/root semantics. Close the client/documentation and alias-removal parents only after this contract cleanup and the preceding native validation are complete.
 - [ ] **T004.5c — Consolidate the duplicate recording UI test helper.**
   Retain one shared RecordingUi under test helpers and preserve structured notification/delivery coverage. Audit PromptUi multi-choice's actual client/test consumers before considering deletion; record retained contracts rather than treating generic dispatch as a command producer.
 - [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**

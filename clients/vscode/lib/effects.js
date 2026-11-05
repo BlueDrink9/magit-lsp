@@ -75,11 +75,10 @@ async function applyEffects(effectList, originViewId) {
       case 'passThrough':
         await replay(effect.key);
         break;
-      case 'openView':
       case 'pushView':
         {
           const state = views.ensureView(effect.descriptor);
-          if (state) state.rootId = rootId || (effect.type === 'openView' ? state.id : undefined);
+          if (state) state.rootId = rootId;
         }
         await views.showView(effect.descriptor);
         break;

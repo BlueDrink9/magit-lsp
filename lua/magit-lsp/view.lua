@@ -1029,7 +1029,7 @@ function M.apply_effects(effects, source)
       if M.host.replay then
         M.host.replay(effect.key)
       end
-    elseif kind == 'pushView' or kind == 'openView' then
+    elseif kind == 'pushView' then
       M.open(effect.descriptor, {
         client_id = client_id,
         root = source and source.root,

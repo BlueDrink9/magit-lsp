@@ -265,7 +265,7 @@ a split or tab placement the file opens in the other window so the status view
 stays visible.
 
 Menus are separate `magit://menu.*` buffers created from the server's
-`pushView`/`openView` effects. The default placement is a bottom floating
+`pushView` effects. The default placement is a bottom floating
 window (`relative="editor"`, full width, height = rendered lines capped at 40%
 of the screen); `setup({ menu = { style = "split" } })` uses
 `botright {height}split` instead. The client only applies `view/render`,

@@ -327,6 +327,10 @@ async function run() {
     const initialMenuState = require('../lib/store').store.views.get(
       require('../lib/store').store.quickPickViewId
     );
+    const { applyEffects } = require('../lib/effects');
+    initialMenuState.rootId = undefined;
+    await applyEffects([{ type: 'pushView', descriptor: initialMenuState.descriptor }], 'v1');
+    assert.equal(initialMenuState.rootId, statusState.rootId, 'PushView inherits the originating root');
     assert.match(menu.title, /Commit/);
     menu.select(menu.items.find((item) => item.key === 'c'));
 
@@ -408,6 +412,8 @@ async function run() {
     await typedState.pressQueue;
     assert.deepEqual(keyRequestsSince(closeStart, typedState.id), ['q']);
     assert.equal(viewStore.views.has(typedState.id), false);
+    await applyEffects([{ type: 'popView', viewId: typedState.id }], 'v1');
+    assert.equal(viewStore.views.has(typedState.id), false, 'PopView leaves the closed child absent');
 
     // The real prompt handler must interpret the first displayed row as No
     // when the server's default is false (including destructive prompts).
