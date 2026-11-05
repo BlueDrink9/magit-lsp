@@ -21,8 +21,9 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   Remove runtime support for `forwardAll`, render-only-full and native-fold presentation after confirming neither shipped client declares them. Retain supported dynamic/static keys, acknowledged incremental rendering, server-fold semantics and their real-server tests; the following typed-schema slice removes singleton wire fields.
 - [x] **T004.2a — Finish server mode removal and validate supported-mode coverage.**
   Prior slices removed session/capability modes and rewrote tests without committing. Restore the accidentally reverted `ForwardAll` server branch deletion, use workspace rustfmt (not standalone defaults), and verify/commit the existing scoped implementation before checking this child and T004.2.
-- [ ] **T004.3 — Deserialize strict typed rich capability declarations.**
+- [x] **T004.3 — Deserialize strict typed rich capability declarations.**
   Replace hand parsing with serde `MagitCapabilities` and typed key/modifier modes; reject unknown fields, duplicates, invalid values and missing main placement. Remove singleton render/fold fields from live client declarations and tests, remove obsolete Lua capability keys and fallback parsers, and preserve immutable historical captures.
+  Done: strict serde deserialization and client/test migration committed. Enforced by focused rich-schema serde/negotiation checks and the listed verification command; Lua suite passed separately in `7678242`. T004 parent and T004.4 remain open.
 - [x] **T004.3a — Pin Lua verification to the server built by Make.**
   Lua negotiation failures came from stale `target/release/magit-lsp` selected by production lookup, while Make built debug. Pin `test-lua` and `test-file` subprocesses to the freshly built debug server without changing production lookup; then finish strict-schema verification.
 - [ ] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**

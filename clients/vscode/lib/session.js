@@ -46,11 +46,9 @@ function createClient() {
             v: 1,
             keys: 'static',
             modifiers: 'full',
-            render: 'edits',
             layout: ['main', 'side', 'bottom', 'float'],
             effects: ['visitFile', 'editDocument', 'clipboard'],
             prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
-            folds: 'server',
           };
           const next = typeof second === 'function' ? second : third;
           return next(params);

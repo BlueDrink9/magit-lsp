@@ -2482,10 +2482,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             let mut notifications = Vec::new();
             let presentation = negotiate(&params).map_err(|error| Error::new(error.to_string()))?;
             let (delivery, key_modifiers) = match &presentation {
-                Presentation::Rich(rich) => (
-                    KeymapDelivery::parse(&rich.keys),
-                    KeyModifiers::parse(&rich.modifiers),
-                ),
+                Presentation::Rich(rich) => (rich.keys, rich.modifiers),
                 Presentation::Plain(_) => (KeymapDelivery::Dynamic, KeyModifiers::Full),
             };
             {

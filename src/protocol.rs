@@ -310,7 +310,8 @@ impl lsp_types::request::Request for ViewKeyRequest {
 }
 
 /// How a client wants to receive keymaps (§3.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum KeymapDelivery {
     /// The server pushes `view/keymap` and the client applies it atomically.
     #[default]
@@ -319,32 +320,13 @@ pub enum KeymapDelivery {
     Static,
 }
 
-impl KeymapDelivery {
-    /// Parse the `capabilities.keymapDelivery` value, defaulting to `dynamic`.
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "static" => KeymapDelivery::Static,
-            _ => KeymapDelivery::Dynamic,
-        }
-    }
-}
-
 /// How faithfully a client can report key modifiers (§3.8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum KeyModifiers {
     #[default]
     Full,
     Basic,
-}
-
-impl KeyModifiers {
-    /// Parse the `capabilities.keyModifiers` value, defaulting to `full`.
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "basic" => KeyModifiers::Basic,
-            _ => KeyModifiers::Full,
-        }
-    }
 }
 
 /// Method name of the server's keymap notification.

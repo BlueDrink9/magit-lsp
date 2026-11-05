@@ -1,5 +1,6 @@
 //! Validated client presentation capabilities read at the LSP initialize boundary.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -37,83 +38,96 @@ pub fn negotiate(params: &Value) -> Result<Presentation, CapabilityError> {
     let Some(block) = caps.pointer("/experimental/magit") else {
         return Ok(Presentation::Plain(PlainCapabilities::from_lsp(caps)));
     };
-    let object = block
-        .as_object()
-        .ok_or_else(|| invalid("must be an object"))?;
-    let version = object.get("v").and_then(Value::as_u64);
-    if version != Some(1) {
-        return Err(invalid("v must be 1"));
-    }
-    let keys = parse_enum(object, "keys", &["dynamic", "static"])?;
-    let modifiers = parse_enum(object, "modifiers", &["full", "basic"])?;
-    let _render = parse_enum(object, "render", &["edits"])?;
-    let _folds = parse_enum(object, "folds", &["server"])?;
-    let layout = parse_set(object, "layout", &["main", "side", "bottom", "float"])?;
-    if !layout.contains("main") {
-        return Err(invalid(
-            "layout must include main (the view stack uses main)",
+    let declaration: MagitCapabilities =
+        serde_json::from_value(block.clone()).map_err(|error| invalid(&error.to_string()))?;
+    Ok(Presentation::Rich(RichCapabilities {
+        keys: declaration.keys,
+        modifiers: declaration.modifiers,
+        layout: declaration.layout,
+        effects: declaration.effects,
+        prompts: declaration.prompts,
+    }))
+}
+
+/// Strict version-1 rich client declaration accepted during initialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MagitCapabilities {
+    /// Rich protocol version.
+    #[serde(deserialize_with = "deserialize_v1")]
+    pub v: u8,
+    /// Client keymap delivery strategy.
+    pub keys: crate::protocol::KeymapDelivery,
+    /// Client key modifier fidelity.
+    pub modifiers: crate::protocol::KeyModifiers,
+    /// Supported view placements.
+    #[serde(deserialize_with = "deserialize_layout")]
+    pub layout: BTreeSet<String>,
+    /// Supported optional effects.
+    #[serde(deserialize_with = "deserialize_effects")]
+    pub effects: BTreeSet<String>,
+    /// Supported prompt kinds.
+    #[serde(deserialize_with = "deserialize_prompts")]
+    pub prompts: BTreeSet<String>,
+}
+
+fn deserialize_v1<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
+    let version = u8::deserialize(deserializer)?;
+    if version != 1 {
+        return Err(serde::de::Error::custom(
+            "unsupported rich protocol version",
         ));
     }
-    let effects = parse_set(
-        object,
-        "effects",
-        &["visitFile", "editDocument", "clipboard"],
-    )?;
-    let prompts = parse_set(
-        object,
-        "prompts",
+    Ok(version)
+}
+
+fn deserialize_names<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+    allowed: &[&str],
+    main: bool,
+) -> Result<BTreeSet<String>, D::Error> {
+    let values = Vec::<String>::deserialize(deserializer)?;
+    let mut result = BTreeSet::new();
+    for value in values {
+        if !allowed.contains(&value.as_str()) {
+            return Err(serde::de::Error::custom(format!(
+                "unsupported value {value:?}"
+            )));
+        }
+        if !result.insert(value.clone()) {
+            return Err(serde::de::Error::custom(format!(
+                "duplicate value {value:?}"
+            )));
+        }
+    }
+    if main && !result.contains("main") {
+        return Err(serde::de::Error::custom("layout must include main"));
+    }
+    Ok(result)
+}
+
+fn deserialize_layout<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeSet<String>, D::Error> {
+    deserialize_names(d, &["main", "bottom", "side", "float"], true)
+}
+fn deserialize_effects<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeSet<String>, D::Error> {
+    deserialize_names(d, &["visitFile", "clipboard", "editDocument"], false)
+}
+fn deserialize_prompts<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeSet<String>, D::Error> {
+    deserialize_names(
+        d,
         &["confirm", "text", "choice", "multiChoice", "secret"],
-    )?;
-    Ok(Presentation::Rich(RichCapabilities {
-        keys,
-        modifiers,
-        layout,
-        effects,
-        prompts,
-    }))
+        false,
+    )
 }
 
 fn invalid(message: &str) -> CapabilityError {
     CapabilityError(format!("capabilities.experimental.magit {message}"))
-}
-
-fn parse_enum(
-    object: &serde_json::Map<String, Value>,
-    field: &str,
-    allowed: &[&str],
-) -> Result<String, CapabilityError> {
-    let value = object
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid(&format!("{field} is required and must be a string")))?;
-    if !allowed.contains(&value) {
-        return Err(invalid(&format!("{field} has unsupported value {value:?}")));
-    }
-    Ok(value.to_owned())
-}
-
-fn parse_set(
-    object: &serde_json::Map<String, Value>,
-    field: &str,
-    allowed: &[&str],
-) -> Result<BTreeSet<String>, CapabilityError> {
-    let values = object
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid(&format!("{field} is required and must be an array")))?;
-    let mut result = BTreeSet::new();
-    for value in values {
-        let item = value
-            .as_str()
-            .ok_or_else(|| invalid(&format!("{field} entries must be strings")))?;
-        if !allowed.contains(&item) {
-            return Err(invalid(&format!("{field} has unsupported value {item:?}")));
-        }
-        if !result.insert(item.to_owned()) {
-            return Err(invalid(&format!("{field} contains duplicate {item:?}")));
-        }
-    }
-    Ok(result)
 }
 
 /// Validated custom-render declarations. Core effects are mandatory protocol behavior;
@@ -121,9 +135,9 @@ fn parse_set(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RichCapabilities {
     /// Key delivery strategy.
-    pub keys: String,
+    pub keys: crate::protocol::KeymapDelivery,
     /// Modifier fidelity requested by the client.
-    pub modifiers: String,
+    pub modifiers: crate::protocol::KeyModifiers,
     /// Declared logical view placements; always includes `main`.
     pub layout: BTreeSet<String>,
     /// Optional effects the client can handle.

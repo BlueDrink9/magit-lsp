@@ -101,15 +101,10 @@ function M.client_capabilities()
     v = 1,
     keys = 'dynamic',
     modifiers = M.key_modifiers(),
-    render = 'edits',
     layout = { 'main', 'side', 'bottom', 'float' },
     effects = { 'visitFile', 'editDocument', 'clipboard' },
     prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
-    folds = 'server',
   }
-  capabilities.prompts = true
-  capabilities.placements = { 'main', 'side', 'bottom', 'float' }
-  capabilities.editorBridge = false
   return capabilities
 end
 

@@ -16,8 +16,8 @@ fn repo_param(path: &std::path::Path) -> Value {
 
 fn limited_rich(effects: Value, prompts: Value) -> Value {
     json!({"experimental":{"magit":{
-        "v":1,"keys":"dynamic","modifiers":"full","render":"edits",
-        "layout":["main"],"effects":effects,"prompts":prompts,"folds":"server"
+        "v":1,"keys":"dynamic","modifiers":"full",
+        "layout":["main"],"effects":effects,"prompts":prompts
     }}})
 }
 
@@ -1641,7 +1641,7 @@ fn static_keymap_delivery_suppresses_open_and_reload_pushes() {
     let config = config_path.to_string_lossy().to_string();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
-    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"static","modifiers":"full","render":"edits","layout":["main"],"effects":[],"prompts":[],"folds":"server"}}}));
+    server.initialize(json!({"experimental":{"magit":{"v":1,"keys":"static","modifiers":"full","layout":["main"],"effects":[],"prompts":[]}}}));
 
     server.send(open_view_message(2, &repo));
     let opened = server.response_with_id(2);

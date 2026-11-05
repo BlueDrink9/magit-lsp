@@ -97,10 +97,10 @@ fn real_binary_accepts_workspace_file_uri_and_preserves_explicit_rich_open() {
     let mut init = common::stdio::initialize_message();
     init["params"]["rootUri"] = serde_json::Value::String(uri);
     init["params"]["capabilities"] = serde_json::json!({"experimental":{"magit":{
-        "v":1,"keys":"dynamic","modifiers":"full","render":"edits",
+        "v":1,"keys":"dynamic","modifiers":"full",
         "layout":["main","side","bottom","float"],
         "effects":["visitFile","editDocument","clipboard"],
-        "prompts":["confirm","text","choice","multiChoice","secret"],"folds":"server"
+        "prompts":["confirm","text","choice","multiChoice","secret"]
     }}});
     server.send(init);
     server.send(serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}));

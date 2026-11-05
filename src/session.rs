@@ -690,7 +690,7 @@ impl Session {
         let keymap = keymap.clone().with_basic_modifiers(
             self.rich_capabilities
                 .as_ref()
-                .is_some_and(|caps| caps.modifiers == "basic"),
+                .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
         );
         let text = view.mode() == ViewMode::Text;
         let bindings = if text {
@@ -1069,7 +1069,7 @@ impl Session {
             keymap.with_basic_modifiers(
                 self.rich_capabilities
                     .as_ref()
-                    .is_some_and(|caps| caps.modifiers == "basic"),
+                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
             )
         });
 
