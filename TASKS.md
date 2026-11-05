@@ -53,10 +53,16 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 - [x] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Implement rich full/edit/metadata rendering, ack/resync and shared prompt-vector behavior in the common editor model. Original scope: T006 clause 5. Close after T006.3a–T006.3c.
   - Done: containing commit.
 - [x] **T006.4a — Bind recorded client presets and named profiles.** Compose evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode model presets and `rich-native`, `rich-doc`, `plain` profiles. Derive behavior modules from resolved quirk metadata and preserve immutable captures; declarations are not native behavior proof.
-  - Done: containing commit. Preceding T006.3c/T006.3: `158692e8c5e09ea3f24c0daf225fcf977152f1ef`.
+  - Done: `cf74f8911d474b5f63c5def41b10864248c8f67e`. Preceding T006.3c/T006.3: `158692e8c5e09ea3f24c0daf225fcf977152f1ef`.
   - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test quirks"` → ok: rust on current diff.
-- [ ] **T006.4b — Audit original fake-editor acceptance.** Check all seven original T006 clauses against current tests, close only demonstrated acceptance and link the authoritative queue. Preserve the distinction between scripted model checks and actual-server conformance.
-- [ ] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit. Close after T006.4a–T006.4b.
+- [x] **T006.4b — Audit original fake-editor acceptance.** Check all seven original T006 clauses against current tests, close only demonstrated acceptance and link the authoritative queue. Preserve the distinction between scripted model checks and actual-server conformance.
+  - Audit evidence: clause 1 `queued_prompt_routing_uses_unique_correlated_request_ids` and `ClientPump` dynamic IDs; 2 `minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate`; 3 `strict_feature_guard_distinguishes_declarations_from_editor_behavior` and `strict_guard_covers_response_effects_and_declared_feature_matrix`; 4 `registry_models_drive_fake_editor_observable_behavior`; 5 shared rich/prompt vector tests and `rich_server_render_ack_and_stale_resync_preserve_caller_reply`; 6 `recorded_presets_and_named_profiles_bind_declarations_and_registry_behaviors`; 7 `plain_did_open_apply_edit_is_pumped_and_echoed` (real-server conformance).
+  - Historical exception: the 12 behavioral tests from pre-T006 baseline `0b8c39e` remain. `reconstructed_trace_is_valid_jsonl` was an additional historical smoke test, explicitly retired by `864f58c` (“Replace historical trace assertions with live coverage”); its fixture was later deliberately removed by `37fb07d`. This retirement is not a T006 behavior gap.
+  - T006.4a completed in `cf74f89`. Scripted model checks do not claim server conformance; recorded declarations do not claim fresh native behavior evidence.
+  - Done: containing commit.
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test plain_actions --test quirks"` @ `cf74f89` → ok: rust (reused; test implementation exactly matches that commit).
+- [x] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Add evidence-bounded stock Neovim, Helix, bundled Neovim/VSCode presets and named `rich-native`, `rich-doc`, `plain` profiles; verify all original T006 clauses without claiming scripted requests as server conformance or declaration captures as native behavior evidence. Original scope: T006 clause 6 and final audit. Close after T006.4a–T006.4b.
+  - Done: containing commit.
 
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
@@ -1616,7 +1622,8 @@ This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_
 ### Feature — Phase 2 (open)
 
 T005 is complete through its authoritative [Ad hoc children](#ad-hoc); full scope and original acceptance: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
-- [ ] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
+- [x] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
+  - Done: containing commit.
 - [ ] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m).
 
 ### Feature — Phase 3: Plain interaction
