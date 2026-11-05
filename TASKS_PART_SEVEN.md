@@ -95,7 +95,7 @@ Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is cl
 
 ### [x] T004 typed-declaration (M) — Complete
 
-Done: audit `7006dcc`; strict schema `b1db385`, registry requirements `9fca760`, checked emitter `470a950`/`b89bf60`.
+Done: audit `7006dcc`; strict schema `b1db385`, registry requirements `9fca760`, checked emitter `470a950`/`b89bf60`, reviewed secret-only case `78b6f49`.
 Requirement: strict typed declarations for both real clients, camelCase action targets, consumer-safe cleanup, command-owned optional-effect requirements and checked emission with production fallbacks.
 Immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`; [clause audit and native evidence](docs/evidence/typed-capability-declarations.md).
 Enforced by `tests/plain_core.rs`, `tests/plain_actions.rs`, `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs` and library custom-emitter tests; full serialized Linux `make test FILTER=--no-fail-fast` passed.
