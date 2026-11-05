@@ -1,5 +1,6 @@
 use crate::fake_editor::{allocate_request_id, FakeEditor, Profile};
 use crate::stdio::TestServer;
+use crate::editor_model::EditorModel;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -12,17 +13,27 @@ pub struct ClientPump {
     pub cancel_on_edit: bool,
 }
 impl ClientPump {
-    /// Start a client with custom initialize capabilities.
-    pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
-        let init=server.initialize(capabilities);
+    fn initialized(mut server: TestServer, capabilities: Value, mut editor: FakeEditor) -> Self {
+        let init = server.initialize(capabilities);
         assert!(init["result"]["capabilities"].is_object());
-        let mut editor = FakeEditor::new(profile);
-        editor.encoding = match init["result"]["capabilities"]["positionEncoding"]
-            .as_str().unwrap_or("utf-16") {
+        editor.encoding = match init["result"]["capabilities"]["positionEncoding"].as_str().unwrap_or("utf-16") {
             "utf-8" => "utf-8", "utf-16" => "utf-16", "utf-32" => "utf-32",
             other => panic!("invalid negotiated encoding: {other}"),
         };
         Self { server, editor, replies: Default::default(), cancel_on_edit: false }
+    }
+    /// Start a client with custom initialize capabilities.
+    pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
+        Self::initialized(server, capabilities, FakeEditor::new(profile))
+    }
+    /// Start a client using declarations composed from an editor model.
+    pub fn with_model(server: TestServer, profile: Profile, model: &EditorModel) -> Self {
+        let resolution = magit_lsp::quirks::Resolution { enabled: Default::default() };
+        Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, &resolution))
+    }
+    /// Start a client from composed model declarations and resolved quirk behavior.
+    pub fn with_resolution(server: TestServer, profile: Profile, model: &EditorModel, resolution: &magit_lsp::quirks::Resolution) -> Self {
+        Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, resolution))
     }
     /// Send a message, assigning every request a unique ID.
     pub fn send(&mut self, mut message: Value) -> i64 {

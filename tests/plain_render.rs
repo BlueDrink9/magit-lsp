@@ -1,6 +1,8 @@
 //! Deterministic tests for the reusable Plain document synchronization controller.
 #[path = "common/fake_editor.rs"]
 mod fake_editor;
+#[path = "common/editor_model/mod.rs"]
+mod editor_model;
 
 use fake_editor::{FakeEditor, Profile};
 use magit_lsp::docstore::Encoding;

@@ -1,6 +1,8 @@
 //! Plain editor conformance self-tests and real-binary protocol smoke test.
 #[path = "common/fake_editor.rs"]
 mod fake_editor;
+#[path = "common/editor_model/mod.rs"]
+mod editor_model;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "common/stdio.rs"]
@@ -11,9 +13,22 @@ use client_pump::ClientPump;
 use fake_editor::{FakeEditor, Profile};
 use serde_json::{json, Value};
 use std::fs;
-use std::time::Duration;
 
 fn caps() -> Value { json!({"window":{"workDoneProgress":true},"general":{"positionEncodings":["utf-8","utf-16","utf-32"]}}) }
+
+#[test]
+fn minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate() {
+    let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
+    assert_eq!(plain.capabilities(), json!({"workspace":{"applyEdit":true},"textDocument":{"codeAction":{}}}));
+    let rich = editor_model::EditorModel::new(editor_model::RICH_MIN);
+    assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":rich.capabilities()})), Ok(magit_lsp::presentation::Presentation::Rich(_))));
+    let composed = plain.clone().with_module(editor_model::SILENT_STALE_APPLY);
+    assert_eq!(composed.capabilities(), plain.capabilities());
+    assert_eq!(composed.behaviors().collect::<Vec<_>>(), ["silent-stale-apply"]);
+    let mut pump = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &rich);
+    assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":rich.capabilities()})), Ok(magit_lsp::presentation::Presentation::Rich(_))));
+    pump.finish();
+}
 
 #[test]
 fn real_binary_lifecycle_and_current_unsupported_methods_are_honest() {
@@ -174,7 +189,8 @@ fn registry_models_drive_fake_editor_observable_behavior() {
     for quirk in REGISTRY.iter().filter(|q| q.model.is_some()) {
         let resolution = Resolution { enabled: [quirk.id].into_iter().collect() };
         let profile = if quirk.model == Some("neovim-accepts-undeclared-documentChanges") { Profile::NoDocumentChanges } else { Profile::Standard };
-        let mut editor = FakeEditor::from_resolution(profile, &resolution);
+        let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
+        let mut editor = FakeEditor::from_model(profile, &model, &resolution);
         let uri = "file:///model";
                 editor.open(uri, "old");
         match quirk.model.unwrap() {

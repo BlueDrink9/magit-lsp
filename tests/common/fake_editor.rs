@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
+use crate::editor_model::EditorModel;
 
 static NEXT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
 
@@ -61,16 +62,32 @@ impl FakeEditor {
         let mut editor = Self::new(profile);
         for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
             if let Some(name) = quirk.model {
-                let model = match name {
-                    "neovim-accepts-undeclared-documentChanges" => Model::UndeclaredDocumentChanges,
-                    "silent-stale-apply" => Model::SilentStaleApply,
-                    "decomposed-changes" => Model::DecomposedChanges,
-                    other => panic!("unhandled fake-editor model: {other}"),
-                };
-                editor.models.push(model);
+                let behavior = crate::editor_model::registry_behavior(name).unwrap_or_else(|| panic!("unhandled fake-editor model: {name}"));
+                editor.push_behavior(behavior);
             }
         }
         editor
+    }
+    /// Create fake editor from composed declarations and registry-derived behaviors.
+    pub fn from_model(profile: Profile, model: &EditorModel, resolution: &magit_lsp::quirks::Resolution) -> Self {
+        let mut editor = Self::new(profile);
+        for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
+            if let Some(name) = quirk.model { let behavior = crate::editor_model::registry_behavior(name).unwrap_or_else(|| panic!("unhandled fake-editor model: {name}")); editor.push_behavior(behavior); }
+        }
+        for behavior in model.behaviors() {
+            editor.push_behavior(behavior);
+        }
+        editor
+    }
+    fn push_behavior(&mut self, behavior: &str) {
+        let model = match behavior {
+            // anchor: T005 fixture contract for Neovim stale-first/later-entry handling.
+            "silent-stale-apply" => Model::SilentStaleApply,
+            "neovim-accepts-undeclared-documentChanges" => Model::UndeclaredDocumentChanges,
+            "decomposed-changes" => Model::DecomposedChanges,
+            other => panic!("unhandled editor behavior module: {other}"),
+        };
+        self.models.push(model);
     }
     fn modeled(&self, model: Model) -> bool { self.models.contains(&model) }
     /// Open a document and return its didOpen notification.

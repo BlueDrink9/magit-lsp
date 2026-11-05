@@ -1,5 +1,7 @@
 #[path = "common/fake_editor.rs"]
 mod fake_editor;
+#[path = "common/editor_model/mod.rs"]
+mod editor_model;
 #[path = "common/mod.rs"]
 mod fixtures;
 #[path = "common/stdio.rs"]
