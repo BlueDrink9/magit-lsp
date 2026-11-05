@@ -1,8 +1,9 @@
 # magit-lsp — Roadmap
 
-Last review: 6c95b50cb86fe32d3415eb055baa411e762a4456
+Last review: 2e29535237ad2b0f88dabb4b0a049c41d26419d2
 
 Accumulated-work gate (2026-11-06, T006): shared client-pump extraction, strict declaration checks, rich render/prompt state and recorded presets warrant serialized `make test` and bounded review (14 committed paths, 1016 insertions/120 deletions since Last review). Phase 2 remains open for T007; no phase-end hygiene/UI-tour is due.
+Serialized full `make test` passed build, Rust, Lua, VSCode and keybindings at `2e29535` after fixing omitted integration-crate module registrations. No `magit-lsp` process remained. Bounded review found two P1 and two P2 corrections, no P0 or new P3; resolve them before T007. No re-review is required without P0, and this correction batch does not trigger heavier gates.
 
 Accumulated-work gate (2026-11-06): T005 acceptance, registry-driven editor models, real-server reconciliation and generated client documentation warrant a serialized full test run and bounded review (10 committed paths, 522 insertions/163 deletions since Last review). Phase 2 remains open; this is not a phase-end gate.
 Serialized `make test` passed build, Rust, Lua, VSCode and keybindings at `6c95b50`; bounded review found two P1 and two P2 corrections below, no P0 or new P3. Resolve these corrections before resuming the normal queue; no phase-end hygiene/UI-tour or new native evidence is claimed.
@@ -281,6 +282,45 @@ Completed entries below preserve historical diagnoses and verification records. 
 Completed checkpoint entries below preserve historical findings and original command records, including retired fixture gates. They do not reinstate capture workflows or define current verification commands. Current execution uses [AGENTS.md](AGENTS.md#verification) and the open queue; immutable pre-retirement context is `83f79f5:TASKS.md`.
 
 Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed changes `9702973340ffc1108bc4e4d9b995f03b2324e76f..6c95b50` across all 10 changed paths, plus the quirk registry, Plain controller and original T005 clauses. Found two P1 and two P2 tasks; no P0. Supplied serialized `make test` evidence was not rerun. Unrelated dirty release/configuration/documentation work and this review's gate note were preserved. No image tools or native evidence were used. P3: no new finding; the existing deferred generated-file assertion cleanup remains unchanged.
+
+Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed changes `6c95b50cb86fe32d3415eb055baa411e762a4456..2e29535237ad2b0f88dabb4b0a049c41d26419d2` across all 16 changed paths, the original T006 clauses, shared contract vectors, production capability semantics, bundled render consumers and existing review queue. Found two P1 and two P2 tasks; no P0. Supplied serialized `make test` evidence was not rerun. Unrelated dirty release/configuration/documentation paths were not touched. No image tools were used; no P3 finding was added.
+
+- [x] **[P1] Correlate scripted prompt responses with real server replies** (`tests/common/client_pump.rs:66-110`, `ClientPump::route_scripted_prompt` and `ClientPump::step`; `tests/plain_harness.rs:50-70`, `queued_prompt_routing_uses_unique_correlated_request_ids`)
+  - **Problem:** The test fabricates two `view/prompt` notifications that the live server never issued, sends `view/promptRespond` requests for their unknown prompt IDs, then calls `finish` without checking either response. The server can reject both requests while the test still claims unique correlated routing, because the generated request IDs are not returned or tracked as prompt replies.
+  - **Why it matters:** This violates correctness and test validity. The shared pump can silently accept a failed prompt answer, so T006's checked prompt-routing evidence does not exercise the behavior it claims.
+  - **Change:** Track each `view/promptRespond` request ID separately in `ClientPump`, correlate its response in `step`, and fail on an error or non-null result. Return or expose the generated ID so the test can await completion. Replace the synthetic-notification test with a real rich-server text prompt, using an existing menu option prompt such as commit `= A`, queue two scripted inputs if two-ID ordering remains under test, and assert the prompt response result plus the resumed originating request. Add an adjacent `// anchor:` to the text-prompt declaration module, citing the shared prompt contract/current rich declaration evidence.
+  - **Done when:** The test fails for an unknown/wrong `promptId`, a rejected `view/promptRespond`, a reused request ID, or a reply correlated to the wrong request; the real prompt resumes with the scripted value.
+  - **Constraints:** Do not add a production prompt path, weaken prompt declaration checks, treat a fabricated notification as server conformance, or change T008 scope.
+  - **Acceptance test:** `queued_prompt_routing_uses_unique_correlated_request_ids` drives a server-issued prompt and observes successful correlated replies rather than ignored error responses.
+  - **Verify:** Run `make test-rust FILTER="--test plain_harness"`.
+  - Verified: `make test-rust FILTER="--test plain_harness"` @ `2e29535` → `ok: rust`
+
+- [ ] **[P1] Enforce static keymap delivery in the strict checker** (`tests/common/editor_model/strict.rs:23-45`, `check`; `tests/plain_harness.rs:274-340`, `strict_guard_covers_response_effects_and_declared_feature_matrix`)
+  - **Problem:** `check` treats `view/render` and `view/keymap` alike and accepts both whenever `experimental.magit` exists. A `keys: "static"` client explicitly does not accept pushed `view/keymap` notifications, so strict mode misses an undeclared server feature for the recorded `rich-doc`/VSCode profile.
+  - **Why it matters:** This violates correctness of strict declaration enforcement and cohesion with `KeymapDelivery` production semantics. A server regression that pushes dynamic keymaps to a static client would pass T006's strict matrix.
+  - **Change:** Keep `view/render` gated by a valid rich declaration, but require `experimental.magit.keys == "dynamic"` for `view/keymap`. Extend the strict matrix with both delivery modes, preferably using the named rich profiles: static accepts renders and rejects keymap pushes; dynamic accepts both.
+  - **Done when:** A synthetic `view/keymap` fails against `keys: "static"`, succeeds against `keys: "dynamic"`, and `view/render` succeeds for both rich declarations.
+  - **Constraints:** Do not change production keymap delivery, reject static clients from rich rendering, or add compatibility modes.
+  - **Acceptance test:** `strict_guard_covers_response_effects_and_declared_feature_matrix` explicitly distinguishes static and dynamic key delivery.
+  - **Verify:** Run `make test-rust FILTER="--test plain_harness"`.
+
+- [ ] **[P2] Put metadata-only rich rendering in the shared contract vectors** (`tests/data/client-contracts.json:2-7`, `renders`; `tests/plain_harness.rs:19-34`, `shared_rich_render_vectors_apply_exact_text_and_intents`; `tests/plain_harness.rs:72-91`, `rich_metadata_only_stale_and_view_isolation`)
+  - **Problem:** T006.3a says shared vectors prove metadata-only rendering, but the shared fixture contains only full, edit and stale-edit rows. The separate Rust-only case advances a metadata-only render from version 1 to 2, contradicting the current protocol rule that metadata-only renders preserve content version, and it does not make metadata part of the cross-client contract row.
+  - **Why it matters:** This violates test validity and status cleanliness. The checked acceptance claim points to a shared oracle that does not contain the claimed case, while its substitute uses an impossible producer state.
+  - **Change:** Add a metadata-only row to `renders` with no `text` or `edits`, `render.version == initialVersion`, and explicit expected mode, pending sequence, cursor and menu metadata. Extend the Rust vector schema/assertions to check those fields and exact ack intent. Remove the duplicate metadata assertions from `rich_metadata_only_stale_and_view_isolation`, retaining its stale-no-mutation and per-view isolation checks.
+  - **Done when:** The shared row fails if text or version changes, metadata is not applied exactly, or the current version is not acknowledged; no bespoke test duplicates the same metadata-only oracle.
+  - **Constraints:** Do not change production render semantics, invent a new protocol field, weaken full-over-edits/stale-resync vectors, or add image evidence.
+  - **Acceptance test:** All Rust, Lua and VSCode consumers execute the new shared metadata-only row; the Rust fake additionally asserts its structured metadata state.
+  - **Verify:** Run `make test-rust FILTER="--test plain_harness"`, then `make test-file FILE=tests/test_magit_lsp.lua`, then `make vscode-test`.
+
+- [ ] **[P2] Refresh the T006 accumulated-work gate totals** (`TASKS.md:3-5`, `Last review` and `Accumulated-work gate (2026-11-06, T006)`; `TASKS.md:256`, `T006 gate`)
+  - **Problem:** The current T006 gate still records 14 paths and 1016 insertions, but the final reviewed range through the consumer-wiring fix contains 16 paths and 1025 insertions. The same file records that two omitted consumer modules were added before the serialized full test, so the scope statement is stale.
+  - **Why it matters:** This violates cleanliness and status correctness. The authoritative gate understates the committed scope that its full-test and review claims cover.
+  - **Change:** Update only the current T006 accumulated-work gate's path and insertion totals to the final `6c95b50..2e29535` diff. Preserve the T005 historical gate, the consumer-wiring record, supplied test result, and phase wording.
+  - **Done when:** The gate reports 16 changed paths and 1025 insertions/120 deletions for the reviewed range, with no duplicate completion claim or altered historical checkpoint.
+  - **Constraints:** Do not change `Last review` until the orchestrator advances it, restate T006 completion elsewhere, or touch unrelated dirty release paths.
+  - **Acceptance check:** `git diff --stat 6c95b50cb86fe32d3415eb055baa411e762a4456..2e29535237ad2b0f88dabb4b0a049c41d26419d2` matches the gate totals.
+  - **Verify:** Run `make ui-unit`.
 
 - [x] **[P1] Pin Neovim stale-apply entry ordering** (`tests/common/fake_editor.rs:126-192`, `FakeEditor::apply_edit`; `tests/plain_harness.rs:204-246`, `registry_models_drive_fake_editor_observable_behavior`)
   - **Problem:** The fake models the Neovim rule, but its tests cover only a stale first entry and a fresh later entry. They do not fail if a future change incorrectly version-checks every later `documentChanges` entry, so the checked T005 model claim does not enforce the original first-entry-versus-later contract.

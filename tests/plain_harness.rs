@@ -49,23 +49,52 @@ fn shared_prompt_vectors_derive_answers_and_focus() {
 
 #[test]
 fn queued_prompt_routing_uses_unique_correlated_request_ids() {
+    let prompt_module = editor_model::Module { declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#), behaves: &[] };
+    // anchor: rich text-prompt contract in tests/data/client-contracts.json and stdio evidence in tests/server_async.rs.
     let model = editor_model::EditorModel::new(editor_model::RICH_MIN)
-        .with_module(editor_model::Module { declares: std::borrow::Cow::Borrowed(r#"{"experimental":{"magit":{"prompts":["text"]}}}"#), behaves: &[] })
+        .with_module(prompt_module)
         .strict();
-    let capabilities = model.capabilities();
     let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
     client.queue_prompt(editor_model::prompts::PromptInput { response: json!(""), custom_response: None });
     client.queue_prompt(editor_model::prompts::PromptInput { response: json!("second"), custom_response: None });
-    let first = json!({"method":"view/prompt","params":{"promptId":"p1","kind":"text","title":"One"}});
-    let second = json!({"method":"view/prompt","params":{"promptId":"p2","kind":"text","title":"Two"}});
-    assert!(client.route_scripted_prompt(&first));
-    assert!(client.route_scripted_prompt(&second));
-    let sent: Vec<_> = client.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").collect();
-    assert_eq!(sent.len(), 2);
-    assert_ne!(sent[0]["id"], sent[1]["id"]);
-    assert_eq!(sent[0]["params"], json!({"promptId":"p1","cancelled":false,"value":""}));
-    assert_eq!(sent[1]["params"]["promptId"], "p2");
-    assert!(editor_model::strict::check(&capabilities, &first).is_ok());
+    let (repo, _) = fixtures::RepoFixture::new().commit("init", [("f.txt", fixtures::TEN_LINES)]).build();
+    let open = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/open","params":{"kind":"status","args":{"repo_path":repo.path().to_string_lossy()},"viewport":{"cols":80,"rows":24}}}));
+    let status = client.until_response(open)["result"]["id"].as_str().unwrap().to_owned();
+    client.until(|c| c.rich.as_ref().is_some_and(|r| r.views.contains_key(&status)));
+    let invoke = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/invoke","params":{"viewId":status,"command":"open.commit"}}));
+    let opened = client.until_response(invoke);
+    let menu = opened["result"]["effects"].as_array().unwrap().iter().find(|e| e["type"] == "pushView").unwrap()["descriptor"]["id"].as_str().unwrap().to_owned();
+    client.until(|c| c.rich.as_ref().is_some_and(|r| r.views.contains_key(&menu)));
+    let key = |key: &str, version| json!({"jsonrpc":"2.0","id":0,"method":"view/key","params":{"viewId":menu,"version":version,"key":key,"editorMode":"normal","cursor":{"line":0,"column":0}}});
+    let prefix = client.send(key("=", client.rich.as_ref().unwrap().views[&menu].version));
+    assert!(client.until_response(prefix)["error"].is_null());
+    let first = client.send(key("A", client.rich.as_ref().unwrap().views[&menu].version));
+    let before_answer = client.rich.as_ref().unwrap().views[&menu].version;
+    client.until(|c| c.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").count() == 1);
+    let first_prompt_id = client.prompt_response_ids()[0];
+    client.until_response(first_prompt_id);
+    let first_reply = client.until_response(first);
+    assert_eq!(first_reply["result"]["effects"], json!([]));
+    client.until(|c| c.rich.as_ref().unwrap().views[&menu].version > before_answer);
+    let second_prefix = client.send(key("=", client.rich.as_ref().unwrap().views[&menu].version));
+    assert_eq!(client.until_response(second_prefix)["result"]["effects"], json!([]));
+    let clear = client.send(key("A", client.rich.as_ref().unwrap().views[&menu].version));
+    assert_eq!(client.until_response(clear)["result"]["effects"], json!([]));
+    let after_clear = client.rich.as_ref().unwrap().views[&menu].version;
+    client.until(|c| c.rich.as_ref().unwrap().views[&menu].version > after_clear);
+    let third_prefix = client.send(key("=", client.rich.as_ref().unwrap().views[&menu].version));
+    assert_eq!(client.until_response(third_prefix)["result"]["effects"], json!([]));
+    let second = client.send(key("A", client.rich.as_ref().unwrap().views[&menu].version));
+    client.until(|c| c.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").count() == 2);
+    let ids: Vec<_> = client.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").map(|m| m["id"].as_i64().unwrap()).collect();
+    assert_ne!(ids[0], ids[1]);
+    let answers: Vec<_> = client.server.sent.iter().filter(|m| m["method"] == "view/promptRespond").collect();
+    assert_eq!(answers[0]["params"]["value"], "");
+    assert_eq!(answers[1]["params"]["value"], "second");
+    client.until_response(ids[1]);
+    assert_eq!(client.until_response(second)["result"]["effects"], json!([]));
+    let unknown = client.send(json!({"jsonrpc":"2.0","id":0,"method":"view/promptRespond","params":{"promptId":"unknown-prompt-id","cancelled":false,"value":"ignored"}}));
+    assert!(client.until_response(unknown)["error"].is_object(), "unknown prompt response must remain observable");
     client.finish();
 }
 

@@ -17,6 +17,7 @@ pub struct ClientPump {
     /// Rich rendered state, present when initialize declares the rich protocol.
     pub rich: Option<super::editor_model::rich::RichEditor>,
     resyncs: HashMap<i64, String>,
+    prompt_responds: HashMap<i64, String>,
     prompt_inputs: VecDeque<super::editor_model::prompts::PromptInput>,
 }
 impl ClientPump {
@@ -28,7 +29,7 @@ impl ClientPump {
             other => panic!("invalid negotiated encoding: {other}"),
         };
         let rich = capabilities.get("experimental").and_then(|v| v.get("magit")).is_some();
-        Self { server, editor, replies: Default::default(), cancel_on_edit: false, strict: false, capabilities, rich: rich.then(Default::default), resyncs: Default::default(), prompt_inputs: Default::default() }
+        Self { server, editor, replies: Default::default(), cancel_on_edit: false, strict: false, capabilities, rich: rich.then(Default::default), resyncs: Default::default(), prompt_responds: Default::default(), prompt_inputs: Default::default() }
     }
     /// Start a client with custom initialize capabilities.
     pub fn new(mut server: TestServer, profile: Profile, capabilities: Value) -> Self {
@@ -66,23 +67,24 @@ impl ClientPump {
     /// Queue one answer for the next incoming scripted prompt.
     pub fn queue_prompt(&mut self, input: super::editor_model::prompts::PromptInput) { self.prompt_inputs.push_back(input); }
     /// Route a declared prompt only when scripted input is queued.
-    pub fn route_scripted_prompt(&mut self, message: &Value) -> bool {
+    pub fn route_scripted_prompt(&mut self, message: &Value) -> Option<i64> {
         self.validate(message);
-        if message["method"] != "view/prompt" || self.prompt_inputs.is_empty() { return false; }
+        if message["method"] != "view/prompt" || self.prompt_inputs.is_empty() { return None; }
         let input = self.prompt_inputs.pop_front().unwrap();
         let params: magit_lsp::protocol::ViewPromptParams = serde_json::from_value(message["params"].clone()).expect("valid prompt");
         let outcome = super::editor_model::prompts::answer(&params, &input);
         let id = allocate_request_id();
+        assert!(self.prompt_responds.insert(id, params.prompt_id.clone()).is_none());
         let mut response = json!({"jsonrpc":"2.0","id":id,"method":"view/promptRespond","params":{"promptId":params.prompt_id,"cancelled":outcome.answer["cancelled"]}});
         if !outcome.answer["cancelled"].as_bool().unwrap() { response["params"]["value"] = outcome.answer["value"].clone(); }
         self.server.send(response);
-        true
+        Some(id)
     }
     /// Read and route one server message.
     pub fn step(&mut self) {
         let message = self.server.recv();
         self.validate(&message);
-        if message["method"] == "view/prompt" && self.route_scripted_prompt(&message) { return; }
+        if message["method"] == "view/prompt" && self.route_scripted_prompt(&message).is_some() { return; }
         if message["method"] == "view/render" {
             if self.rich.is_none() { self.server.notifications.push(message); return; }
             let render: magit_lsp::protocol::ViewRender = serde_json::from_value(message["params"].clone()).expect("valid rich render");
@@ -100,6 +102,12 @@ impl ClientPump {
         }
         if message["method"].is_string() && !message["id"].is_null() { self.dispatch_validated(&message); return; }
         if let Some(id) = message["id"].as_i64() {
+            if let Some(prompt_id) = self.prompt_responds.remove(&id) {
+                assert!(message["error"].is_null(), "promptRespond {prompt_id} failed: {message}");
+                assert_eq!(message["result"], Value::Null, "promptRespond {prompt_id} must return null: {message}");
+                assert!(self.replies.insert(id, message).is_none(), "duplicate prompt response");
+                return;
+            }
             if let Some(view_id) = self.resyncs.remove(&id) {
                 let render: magit_lsp::protocol::ViewRender = serde_json::from_value(message["result"].clone()).expect("valid resync render");
                 assert_eq!(render.view_id, view_id);
@@ -123,6 +131,8 @@ impl ClientPump {
     }
     /// Wait for and remove response by request ID.
     pub fn until_response(&mut self, id: i64) -> Value { self.until(|c|c.replies.contains_key(&id)); self.replies.remove(&id).unwrap() }
+    /// Return IDs of outstanding scripted prompt response requests.
+    pub fn prompt_response_ids(&self) -> Vec<i64> { self.prompt_responds.keys().copied().collect() }
     /// Shut down server within bounded time.
     pub fn finish(mut self) {
         let id=self.send(json!({"jsonrpc":"2.0","id":0,"method":"shutdown","params":null}));
