@@ -21,10 +21,18 @@ fn minimum_editor_models_declare_exact_base_contracts_and_keep_behavior_separate
     let plain = editor_model::EditorModel::new(editor_model::PLAIN_MIN);
     assert_eq!(plain.capabilities(), json!({"workspace":{"applyEdit":true},"textDocument":{"codeAction":{}}}));
     let rich = editor_model::EditorModel::new(editor_model::RICH_MIN);
+    assert_eq!(rich.capabilities(), json!({"experimental":{"magit":{"v":1,"keys":"dynamic","modifiers":"basic","layout":["main"],"effects":[],"prompts":[]}}}));
     assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":rich.capabilities()})), Ok(magit_lsp::presentation::Presentation::Rich(_))));
     let composed = plain.clone().with_module(editor_model::SILENT_STALE_APPLY);
     assert_eq!(composed.capabilities(), plain.capabilities());
     assert_eq!(composed.behaviors().collect::<Vec<_>>(), ["silent-stale-apply"]);
+    let declarations = plain.clone().with_module(editor_model::EXTRA_DECLARATIONS);
+    assert_eq!(declarations.capabilities(), json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{}},"window":{"showDocument":{"support":true}}}));
+    let empty = magit_lsp::quirks::Resolution { enabled: Default::default() };
+    let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN).with_module(editor_model::DECOMPOSED_CHANGES);
+    let mut modeled = FakeEditor::from_model(Profile::Standard, &model, &empty);
+    modeled.open("file:///model.txt", "ab");
+    assert!(modeled.edit("file:///model.txt", "ac")["params"]["contentChanges"][0].get("range").is_some());
     let mut pump = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &rich);
     assert!(matches!(magit_lsp::presentation::negotiate(&json!({"capabilities":rich.capabilities()})), Ok(magit_lsp::presentation::Presentation::Rich(_))));
     pump.finish();

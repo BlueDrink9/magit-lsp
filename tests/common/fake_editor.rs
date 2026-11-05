@@ -13,7 +13,7 @@ pub fn allocate_request_id() -> i64 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Model { UndeclaredDocumentChanges, SilentStaleApply, DecomposedChanges }
+pub enum Model { UndeclaredDocumentChanges, SilentStaleApply, DecomposedChanges }
 
 /// Client compatibility behavior toggled by a conformance test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,30 +63,21 @@ impl FakeEditor {
         for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
             if let Some(name) = quirk.model {
                 let behavior = crate::editor_model::registry_behavior(name).unwrap_or_else(|| panic!("unhandled fake-editor model: {name}"));
-                editor.push_behavior(behavior);
+                editor.models.push(behavior);
             }
         }
         editor
     }
     /// Create fake editor from composed declarations and registry-derived behaviors.
     pub fn from_model(profile: Profile, model: &EditorModel, resolution: &magit_lsp::quirks::Resolution) -> Self {
-        let mut editor = Self::new(profile);
-        for quirk in magit_lsp::quirks::REGISTRY.iter().filter(|q| resolution.enabled.contains(q.id)) {
-            if let Some(name) = quirk.model { let behavior = crate::editor_model::registry_behavior(name).unwrap_or_else(|| panic!("unhandled fake-editor model: {name}")); editor.push_behavior(behavior); }
-        }
+        let mut editor = Self::from_resolution(profile, resolution);
         for behavior in model.behaviors() {
             editor.push_behavior(behavior);
         }
         editor
     }
     fn push_behavior(&mut self, behavior: &str) {
-        let model = match behavior {
-            // anchor: T005 fixture contract for Neovim stale-first/later-entry handling.
-            "silent-stale-apply" => Model::SilentStaleApply,
-            "neovim-accepts-undeclared-documentChanges" => Model::UndeclaredDocumentChanges,
-            "decomposed-changes" => Model::DecomposedChanges,
-            other => panic!("unhandled editor behavior module: {other}"),
-        };
+        let model = crate::editor_model::registry_behavior(behavior).unwrap_or_else(|| panic!("unhandled editor behavior module: {behavior}"));
         self.models.push(model);
     }
     fn modeled(&self, model: Model) -> bool { self.models.contains(&model) }

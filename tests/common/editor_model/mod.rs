@@ -6,12 +6,12 @@ use serde_json::{json, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Base { PlainMin, RichMin }
 
-/// Map registry behavior names to canonical fake-editor behavior names.
-pub fn registry_behavior(name: &str) -> Option<&'static str> {
+/// Translate a registry behavior name to its fake-editor model.
+pub fn registry_behavior(name: &str) -> Option<crate::fake_editor::Model> {
     match name {
-        "neovim-accepts-undeclared-documentChanges" => Some("neovim-accepts-undeclared-documentChanges"),
-        "silent-stale-apply" => Some("silent-stale-apply"),
-        "decomposed-changes" => Some("decomposed-changes"),
+        "neovim-accepts-undeclared-documentChanges" => Some(crate::fake_editor::Model::UndeclaredDocumentChanges),
+        "silent-stale-apply" => Some(crate::fake_editor::Model::SilentStaleApply),
+        "decomposed-changes" => Some(crate::fake_editor::Model::DecomposedChanges),
         _ => None,
     }
 }
@@ -30,6 +30,9 @@ pub const SILENT_STALE_APPLY: Module = Module { declares: "{}", behaves: &["sile
 /// The test-only decomposed didChange behavior.
 // anchor: tests/plain_render.rs decomposed-change profile assertions.
 pub const DECOMPOSED_CHANGES: Module = Module { declares: "{}", behaves: &["decomposed-changes"] };
+/// Declaration contribution for optional workspace and window features.
+// anchor: tests/plain_harness.rs minimum model composition contract.
+pub const EXTRA_DECLARATIONS: Module = Module { declares: r#"{"workspace":{"workspaceEdit":{"documentChanges":true}},"window":{"showDocument":{"support":true}}}"#, behaves: &[] };
 
 /// One independently anchored model contribution.
 #[derive(Clone, Copy, Debug)]
