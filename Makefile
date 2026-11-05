@@ -1,10 +1,17 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format update-client-behaviors
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-client-behaviors color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
 export CARGO_TERM_COLOR=never
 export CARGO_TERM_PROGRESS_WHEN=never
-LOG_TAIL ?= 150
+LOG_TAIL ?= 60
+# Always test the freshly built debug server, never a stale release binary.
+# (Confirm scripts/ui and clients/vscode read MAGIT_LSP_BIN.)
+export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
+# Optional: isolate tests from your Git config. Fixtures may then need
+# explicit GIT_AUTHOR_*/GIT_COMMITTER_* env, and private git deps may break.
+# export GIT_CONFIG_GLOBAL := /dev/null
+# export GIT_CONFIG_NOSYSTEM := 1
 
 define run
 @if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)\n'; rm -f "$$log"; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
@@ -15,6 +22,9 @@ build:
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
+
+docs-check:
+	$(call run,docs-check,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/docs -p 'test_*.py' && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py $(DOC_FILES))
 
 format:
 	python3 scripts/format.py --working-tree --write
@@ -60,6 +70,15 @@ plain-neovim: build
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)
 
+ui-file: build
+	$(call run,ui-file,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) $(FILE))
+
+update-snapshots:
+	$(call run,update-snapshots,UPDATE_EXPECT=1 cargo test -q --test manifest --test parity --test menu --test menus)
+
+update-client-behaviors:
+	$(call run,update-client-behaviors,UPDATE_CLIENT_BEHAVIORS=1 cargo test -q --test quirks known_client_appendix_matches_registry)
+
 ui-tour: build
 	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
 
@@ -68,6 +87,3 @@ color-spike: build
 
 readme-shots:
 	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
-
-update-client-behaviors:
-	$(call run,update-client-behaviors,UPDATE_CLIENT_BEHAVIORS=1 cargo test -q --test quirks known_client_appendix_matches_registry)

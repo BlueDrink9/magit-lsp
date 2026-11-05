@@ -20,7 +20,7 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 ## Ad hoc
 
 - [x] **Documentation cleanup — Add focused documentation verification.** Add a Make target that rejects broken local documentation links and anchors in selected maintained Markdown files; use it for the reference migration without scanning immutable evidence archives.
-  - Done: `pending commit`.
+  - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="AGENTS.md"` @ `33230ec` → passed.
 - [ ] **Documentation cleanup — Move durable reference material into docs.** Move the glossary, enduring contracts, architecture/design, protocol overview, keymaps, view catalog, testing guidance and unresolved design questions to linked documentation. Keep the queue authoritative and update maintained documentation entry points.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links.
@@ -86,9 +86,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: containing commit.
   - Verified: `make test-rust FILTER="--test plain_render --test server_async"` → ok: rust; stdio test receives fresh one-document edit after registry-modeled silent-stale success without echo, disk sentinel unchanged. One-second grace and ID/incarnation/closing guards verified by code; deterministic expiry tests passed.
 - [x] **T007.2b2 — Prove post-watchdog convergence and readiness.** Complete response/snapshot routing after expiry, verify exact editor convergence and a subsequent watcher update, and retain lifecycle/hash safety.
+  - Done: `5209f6e76623db5965983b202f0708fa8e09eb6e`.
   - Verified: `make test-rust FILTER="--test plain_render --test server_async"` on implementation-current diff based on `33230ec` → ok: rust. Real-server scenario withholds newer didChange until first watchdog repair, rejects pre-convergence actions, forwards correlated response and actual snapshot, converges after a fresh one-document edit, then converges after a second distinct watcher update. Disk sentinel unchanged; existing expiry, late-ID and lifecycle cases pass.
-- [ ] **T007.2b — Schedule and prove missing-echo recovery.** Schedule bounded transport watchdogs and prove real-server silent-stale success with no echo recovers on a later snapshot; guard close/reopen and late callbacks. Close after T007.2b1–T007.2b2.
-- [ ] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4. Close after T007.2a–T007.2b.
+- [x] **T007.2b — Schedule and prove missing-echo recovery.** Schedule bounded transport watchdogs and prove real-server silent-stale success with no echo recovers on a later snapshot; guard close/reopen and late callbacks. Done: `5209f6e76623db5965983b202f0708fa8e09eb6e`; enforcing tests recorded under T007.2b1–T007.2b2.
+- [x] **T007.2 — Recover Plain Applying state after a missing echo.** Add a bounded echo watchdog and real-server silent-stale-apply recovery coverage. Original T007 clause 4. Done: `5209f6e76623db5965983b202f0708fa8e09eb6e`; enforcing tests recorded under T007.2a–T007.2b.
 - [ ] **T007.3 — Exercise Neovim applyEdit in process.** Add the four declaration/version combinations and a second-stale-entry case using real changedtick and positive stale versions. Original T007 clause 5.
 - [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
 - [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
