@@ -1,6 +1,8 @@
 # magit-lsp — Roadmap
 
-Last review: e6546ce6d6bc5c474a88036c85cce3a6e0836d4f
+Last review: 9702973340ffc1108bc4e4d9b995f03b2324e76f
+
+Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T005–T007 remain open.
 
 Phase 2 accumulated-work checkpoint (2026-11-05): T004 is complete, including registry-owned command requirements and checked-emitter coverage; actual Phase 2 remains open for T005–T007. Sol 5.6 reviewed `b5eb865..e6546ce` (11 paths, 472 insertions and 34 deletions). Its sole P1 acceptance-test correction is complete in `78b6f49`: the secret-only case now declares the prompt capability and asserts secret support without text support. No P0/P2 was found; manual native provenance and exercised-producer limits remain explicit. Next: T005 quirks-table.
 Serialized full `make test FILTER=--no-fail-fast` passed build, Rust, Lua, VSCode and keybindings after `e6546ce`, before the test-only review correction. After `78b6f49`, all three custom-emitter library tests and all thirteen Plain-core tests passed, as did rustfmt and diff checks. Seven hygiene tests and pinned report-only hygiene passed; hygiene still reports one unlisted dependency, 69 unused exports and 34 Lua warnings under existing owners/reasons. Logs: `/tmp/opencode/typed-emitter-checkpoint/`. No new native rerun or full UI-tour is claimed for this registry/test-emitter checkpoint. Do not overlap binary-replacing Cargo/Make targets with live-server suites. No owned server remains; user manifest checksum and unrelated release work are unchanged. Windows/macOS remain CI follow-ups; existing P3 redundant generated-file absence assertions remain deferred. No P0 requires re-review; this checkpoint is closed.
@@ -11,12 +13,25 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 ## Ad hoc
 
-Formatter hook and manual Make command follow-up: see the [authoritative ad hoc queue](./TASKS_PART_SEVEN.md#ad-hoc). Finish that requested work, then stop without advancing unrelated tasks.
+- [ ] **Roadmap reconciliation — Restore one authoritative queue.**
+  Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
+- [ ] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
+  Give each unfinished heading/table ticket its own checkbox and valid specification link. Retain phase order and owner-request gates; keep T105 only in Phase 6A and T005 child status in Ad hoc.
+  Verified: the §7 scan finds all 114 unique T006–T119 entries, no missing or duplicate IDs, and no invalid specification anchors. T005 retains its existing open children; deferred owner-request guards remain. Final documentation-only `make ui-unit` passed (`ok: ui-unit`).
+- [ ] **Roadmap reconciliation — Refresh protocol and evidence guidance.**
+  Correct current Plain selection and quirk-test references. Condense obsolete trace/formatter narratives into immutable provenance and current workflow links; preserve unproved T005 acceptance and deferred debt.
+- [ ] **Roadmap reconciliation — Route active verification through Make.**
+  Replace live direct test/UI command instructions with existing Make targets. Preserve historical command records as labeled provenance and identify any missing target explicitly.
+
+- [x] **Investigate and rationalize trace/capture test infrastructure.**
+  Done: `5025937` (cleanup implementation and verification linked in immutable `5025937:TASKS_PART_SEVEN.md`). Current retained coverage and native workflow: [fixture guide](tests/fixtures/lsp_traces/README.md) and [UI test plan](ui-test-plan.md). Static trace/parser gates and embedded capture programs are retired; native causality limits remain explicit.
+- [x] **Autofix staged formatting through shared hook and Make commands.**
+  Done: `9702973`, including final index-publication safety fix `fa5c3de`. Current staged-only behavior and contributor commands: [formatting guide](docs/FORMATTING.md). Disposable real-hook verification is recorded at immutable `9702973:TASKS_PART_SEVEN.md`; no permanent formatter tests.
 
 - [x] **Remove permanent formatter tests and retain one-time verification.**
   Remove the formatter/hook test suite as requested; verify the tools and staged-safe hook once in disposable repositories. Update T120 acceptance and CI scope accordingly; finish formatter setup, then stop without advancing unrelated roadmap work.
 
-Historical trace/capture evidence and implementation records below describe the state at immutable Git revision `83f79f5cbf2e272a8be92673ef3c8bd41118c23e`; they are not active capture workflows. Current cleanup status is tracked only in the [authoritative queue](./TASKS_PART_SEVEN.md#immediate).
+Historical trace/capture evidence and implementation records below describe the state at immutable Git revision `83f79f5cbf2e272a8be92673ef3c8bd41118c23e`; they are not active capture workflows. Current cleanup status is tracked in this file's [Ad hoc queue](#ad-hoc).
 
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
   Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
@@ -28,10 +43,10 @@ Historical trace/capture evidence and implementation records below describe the 
   Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets and contributor documentation. Run staged-content formatter checks in the hook and CI; use one-time disposable verification, not permanent formatter tests. Close T120 after all slices pass.
 
 - [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
-  Done: workspace formatting passes; no errors reproduced. Deferred implementation: T120 formatter-pre-commit. Enforced now by `cargo fmt --all -- --check`.
+  Historical formatting checkpoint; superseded by completed T120 and the staged-only hook follow-up above. Use [current formatting guidance](docs/FORMATTING.md), not this record as a workspace-wide formatting claim.
 
 - [x] **T005.1 — Define the evidence-backed quirk registry and resolver.**
-  Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `cargo test --test quirks` against captured initialize declarations, version/name boundaries, capability matching and override validation.
+  Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `make test-rust FILTER="--test quirks"` against retained initialize declarations, version/name boundaries, capability matching and override validation.
 - [x] **T005.2a — Add validated layered quirk settings.**
   Extend existing configuration loading with a quirks table of known registry ids to booleans, including TOML layers and initializationOptions. Test precedence and rejection of invalid ids or values; preserve existing configuration recovery conventions.
 - [x] **T005.2b1 — Finish and commit initialize quirk resolution.**
@@ -40,7 +55,7 @@ Historical trace/capture evidence and implementation records below describe the 
 - [x] **T005.2b2a — Commit real initialize quirk acceptance tests.**
   Commit the already-passing real-server identity, override, metadata, invalid-config recovery and strict Rich schema tests. Outgoing edit-format proof remains explicitly owned by T005.2b2b.
 - [ ] **T005.2b2b — Prove quirk-controlled outgoing edit format.**
-  Adapt the real Plain didOpen test in tests/plain_render.rs:589 to assert Neovim 0.12.6 sends documentChanges with automatic quirk and changes when disabled, with documentChanges undeclared in both cases. Apply responses and verify final editor text, then close T005.2b2, T005.2b and T005.2.
+  Extend `actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file` in `tests/plain_render.rs` to assert Neovim 0.12.6 sends documentChanges with the automatic quirk and changes when disabled, with documentChanges undeclared in both cases. Apply responses and verify final editor text, then close T005.2b2, T005.2b and T005.2. Existing documentChanges coverage does not prove these quirk variants.
 - [ ] **T005.2b2 — Prove effective quirk resolution through the real server.**
   Add real initialize/config recovery and behavior tests for known and unknown clients, explicit on/off overrides and strict rich negotiation. Complete T005.2b and T005.2 only after these production acceptance cases pass.
 - [ ] **T005.2b — Resolve and report production initialize quirks.**
@@ -55,7 +70,6 @@ Historical trace/capture evidence and implementation records below describe the 
   Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
 - [x] **Update execution limits and future reviewer selection.**
   Remove the previous deadline and use verified model `openai/gpt-5.6-sol` for future reviewer calls, not worker calls. Skip the additionally discussed review: no review remains pending; retain the prior bounded fallback review and P2 fixes as recorded, and do not advance Last review. Continue the numbered queue; preserve unrelated local changes.
-- [ ] **Work through `TASKS_PART_SEVEN.md` without a deadline.** Continue autonomously until interrupted, following dependencies and retaining required validation and reviews; preserve unrelated local changes.
 - [x] **T004.final — Audit and close typed capability declaration acceptance.**
   Reconcile all seven T004 acceptance clauses with current implementation, genuine client evidence and enforcing tests. Run the full serialized regression gate, compress the completed numbered ticket with immutable original acceptance and honest evidence limits, and leave actual Phase 2 open for T005–T007.
 - [x] **T004.7 — Check presentation emissions against negotiated declarations.**
@@ -115,40 +129,10 @@ Historical trace/capture evidence and implementation records below describe the 
 - [x] **T004.5c — Consolidate the duplicate recording UI test helper.**
   Retain one shared `tests/common/recording_ui.rs` recorder with ordered structured render/effect/prompt payload assertions. The `multiChoice` prompt remains: Lua `prompt.lua` and VSCode `prompt.js` consume it; `tests/data/client-contracts.json` retains selection, empty and cancel contracts. This is client/contract coverage, not evidence of a producing command. CustomRender's notification-wire coverage remains in both focused suites.
   Done: `b5eb865`; enforced by `cargo test --lib presentation::custom`, `cargo test --test plain_core` and serialized full Linux regression gates recorded above.
-- [x] **T002.final — Reconcile completion records at the Phase 1 boundary.**
-  Compress the completed numbered T002 record to at most 12 lines with immutable acceptance provenance, implementation and enforcement commits. Remove stale present-tense claims that T002 or Phase 1 implementation remains open; distinguish historical baseline limits from current full native-action coverage and pending phase-gate acceptance.
-- [x] **T002.3a — Capture the five remaining native Neovim input actions.**
-  In isolated plugin-free Neovim, record native selection replacement, one-character register paste, multi-character register paste, rapid typing and undo immediately after an actual server repair. Retain source-equal wire records, action commands and structured before/after state; update only Neovim matrix cells proved by the run and preserve any genuine limits.
-- [x] **T002.3a1 — Capture native Neovim selection and register pastes.**
-  Retain source-equal wire rows and native metadata for visual replacement and one-/multi-character register pastes. Multi-paste began before prior repair settled; incidental undo does not prove repair-before-undo. Done: committed evidence; enforced by source-equality and wirelog checks.
-- [x] **T002.3a2 — Capture Neovim rapid input and undo after repair.**
-  Historical Neovim capture context: Helix coverage completed later; current matrix and remaining limits are summarized in T002 below and the trace README. Enforced by `cargo test --test wirelog` and source audit.
-- [x] **T002.3b — Capture the five remaining native Helix input actions.**
-  Use the current-release isolated native Helix setup to record the same five actions, with actual paste/input provenance and repair-before-undo ordering. Retain source-equal wire records and reproducible text-only commands; do not infer actions from payload shape or mark T002 complete without an honest final acceptance audit.
-- [x] **T002.3b1 — Capture native Helix selection and register pastes.**
-  Wait for the actual server-rendered presentation, then capture selection replacement and one-/multi-character register pastes. Treat yanks as nonmutating setup, not edits requiring didChange; preserve exact native keys, source rows and final drained provenance.
-- [x] **T002.3b2 — Capture Helix rapid input and undo after repair.**
-  Extend the proven native Helix setup with rapid input and undo only after actual repair restoration. Verify source equality and all action evidence before closing the parent slice or T002.
-- [x] **T002.3b2a — Run the native Helix rapid-repair experiment.**
-  Done: `3ff0e6a`. Actual Helix 25.07.1 source `/tmp/opencode/t002-helix-3762422-1793840011413250451-a338qszf/raw-parent/raw.jsonl`, SHA256 `9eafe9da27ea8901c12c7d924ea35a4d1826e9f0708bef078505c1359f46f8e9`, 27 drained rows.
-  Driver `/tmp/opencode/t002-helix-rapid-experiment/driver.py`; mixed JSON/text report `/tmp/opencode/t002-helix-rapid-experiment/run.json` (not under the source directory). Rows 9/11–14 insert R/A/P/I/D at versions 2–6; row 15 rejects stale `outbound/2`; rows 16–18 repair through `outbound/3` and v7; native save 19 confirms restored baseline. Undo row 20 inserts RAPID at v8; rows 21–23 re-repair through `outbound/4` and v9; save 24 sees baseline. Rows 25–27 are shutdown/reply/exit; no owned process remains.
-  Limits: native saves confirm repaired text, not the transient undo buffer; actual row 20 proves undo. The published recipe uses post-action correlated waits; full-source equality/hash were manually verified, while automated checks cover retained records.
-- [x] **T002.3b2b — Publish and enforce Helix rapid-repair evidence.**
-  Retain exact selected wire rows and action/state metadata, publish and execute the complete runnable recipe, and extend fixture checks. Close T002 only after a final acceptance audit.
-- [x] **T002.3b2b1 — Retain the authentic Helix rapid-repair fixture and sidecar.**
-  Extract original source rows 9–24 verbatim, with final drained provenance, exact native keys, stale-repair rejection, successful repair and undo/re-repair mappings. Distinguish actual saved baseline snapshots from the transient undo text proved only by the wire; do not close the publication parent yet.
-- [x] **T002.3b2b2 — Publish and execute the Helix rapid-repair recipe.**
-  Publish a complete standalone native recipe with action-specific waits and actual restored-buffer confirmation before undo. Execute the exact documented recipe from a checkout subdirectory; retain graceful drain, source equality and owned-resource failure cleanup evidence.
-- [x] **T002.3b2b2a — Derive Helix recipe repair correlation from actual traffic.**
-  Replace the fixed version-7 echo and preexisting-change readiness check with post-action, same-document request/reply/echo correlation derived from the actual successful repair. Rerun the exact updated native recipe and failure probe; retain original capture fixtures unchanged.
-  Done: post-offset same-PID/document repair request, successful same-ID response, edit-derived version and range/text echo, plus post-offset same-document undo. Exact native recipe passed; failure cleanup verified. Evidence and drained source/hash: `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog` and `git diff --check`.
-- [x] **T002.3b2b3 — Enforce Helix rapid-repair metadata and audit T002 acceptance.**
-  Test exact retained rows, action provenance, request/reply/echo ordering and saved-versus-transient state claims. Audit all T002 acceptance clauses before checking parents or the numbered ticket; preserve Linux-only and manual source-audit limits.
 - [x] **T002 wire-recorder — Complete.**
-  Done: implementation/integration `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`; final test-only Helix evidence `8476a8e`. Immutable full acceptance: `61370ad:TASKS_PART_SEVEN.md`. Four-client presets and native action coverage: Helix selection, one-/multi-character paste, rapid typing and repair-before-undo; Neovim all six, with historical multi-paste-before-repair limitation. Bundled payload shapes prove no native actions; single-insert provenance exists only for plain Neovim and Helix. Reconstructed Plain trace is not conformance evidence. `cargo test --test wirelog` (12 tests), JSON parsing and manual provenance audit enforce retained evidence; manual source hash/equality is not automated. Helix save snapshots show restored baseline; wire row 20 proves transient undo. Neovim rapid undo coalesces repair echo and undo, limiting separate-event claims. Linux evidence only; Windows/macOS CI follow-up. Phase 1 implementation is complete; phase gate/review remains pending.
-- [x] **T002.3b2b3a — Test the retained Helix rapid-repair exchange.**
-  Extend the wirelog fixture gate with exact native keys and source-row/action mappings, incremental payloads, stale-repair rejection, successful repair and undo/re-repair/save correlation. Keep original fixture payloads unchanged and distinguish manual full-source provenance from automated retained-record checks.
-  Done: retained exchange gate enforces complete rapid/echo/undo arrays, all outbound edits and URIs, re-repair payload, request/reply linkage, rejection index, sidecar source PID/SHA/version/state-origin/newline claims, and saved-versus-transient distinction. Fixtures unchanged. Enforced by `cargo test --test wirelog`.
+  Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Runtime recorder/security regressions remain in `tests/wirelog.rs`, exercised through `make test-rust FILTER="--test wirelog"`.
+  Original acceptance: immutable `61370ad:TASKS_PART_SEVEN.md`. T002 capture slices, source hashes, native action limits and retired fixture-gate records: immutable `83f79f5:TASKS.md`; final historical Helix fixture work: `8476a8e`. These are provenance, not current enforcement or reproducible capture instructions.
+  Current coverage replaces static trace assertions with live server/fake-editor tests, including stale rapid repair and undo (`83f79f5`), and retained native Neovim acceptance. See completed trace cleanup above and the [fixture guide](tests/fixtures/lsp_traces/README.md). Linux evidence does not establish Windows/macOS or full native-client conformance.
 - [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
   Add scoped luacheck and knip configurations for actual shipped code, tests and scripts. Declare editor-provided globals/modules explicitly; do not hide findings with blanket exclusions. Keep T003 open until runner, reasoned baselines and policy verification are complete.
 - [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
@@ -159,25 +143,7 @@ Historical trace/capture evidence and implementation records below describe the 
   Correct the runner's Git attribute parsing: current text splitting retains `: linguist-generated` in keys and therefore never excludes generated paths. Add actual Git-attribute coverage and make missing-tool tests independent of installed host tools; exercise invocation failures and real test cwd layout explicitly.
 - [x] **T003.4 — Document phase hygiene and complete the tooling contract.**
   Add AGENTS phase-end/review guidance, ticket-template and T033 hygiene gates. Verify the completed report-only baseline and narrow tests; record Linux evidence and non-Linux CI follow-ups before marking T003 complete.
-- [x] **T002.1a — Build the redacted JSONL recorder and framing tests.**
-  Implement a reusable recorder with ordered background file writes and recursive identity/credential redaction. Test direction/order, JSON validity, real framing replay and credential absence before server integration.
-- [x] **T002.1b — Wire opt-in recording into the actual server transport.** Actual-binary opt-in, disabled/error paths, drain and collision-safe redaction; `cargo test --test wirelog`.
-- [x] **T002.2a — Capture plain Neovim declarations and edit shapes.**
-  Done: captured initialize params and three genuine didChange messages from plugin-free Neovim 0.12.6; validated JSON and source equality. Evidence: `tests/fixtures/lsp_traces/`. Partial coverage only: full replacement, insertion and deletion observed; remaining T034 shapes, exact launch/cleanup commands and complete conformance not captured.
-- [x] **T002.2b — Capture bundled Neovim declarations and native edits.**
-  Done: captured bundled Neovim initialize and authentic native didChange. Evidence, exact commands, observed draft/edit state, source hash and cleanup: `tests/fixtures/lsp_traces/README.md`.
-- [x] **T002.2c1 — Forward recorder configuration through the native VSCode launcher.**
-  Add only the opt-in wirelog variable to the isolated launcher's environment allowlist; preserve existing isolation and native text-only behavior. The following capture slice supplies actual-host evidence.
-- [x] **T002.2c2 — Prevent multi-session wirelog corruption.**
-  Native VSCode capture exposed concurrent recorder truncation: `/tmp/opencode/t002-vscode/raw.jsonl` contains 121972 NUL bytes amid valid records. Preserve complete JSONL across recorder instances/processes sharing a path, serialize complete lines off the LSP hot path, and test overlap/restarts without losing prior records.
-- [x] **T002.2c — Capture bundled VSCode declarations and native edits.**
-  Retain same-PID initialize and first native change with observed omission of `experimental.magit`; native provenance, versions, invocation and cleanup are documented in the trace README. Mismatch remains for T004 audit. Enforced by `cargo test --test wirelog` and JSON/source-equality checks.
-- [x] **T002.2d — Capture current Helix declarations and edit shapes or record availability limits.**
-  Done: captured Helix 25.07.1 initialize and native edits; documented bounded coverage, provenance and limits in `tests/fixtures/lsp_traces/README.md`. Enforced by `cargo test --test wirelog` and trace JSON parsing.
-- [x] **T002.2e — Audit capture provenance and enumerate missing edit shapes.**
-  Done: trace README documents Helix reproduction, audited rows and explicit action matrix; no input action inferred from payload shape.
-- [x] **T002.2 — Capture real client initialize and change evidence.**
-  Done: four client captures and versioned initialize presets retained; recorder implementation `e34ce5a`, client captures `15a8f63`, `1563bbb`. Reconstructed trace remains distinct. Enforced by `cargo test --test wirelog`, JSON parsing and source audit in trace README. T034 six-action Helix/Neovim coverage remains incomplete as enumerated there; no full conformance claim.
+Historical T002.1/T002.2 recorder integration, concurrent append/restart fixes and native capture records remain in immutable `83f79f5:TASKS.md` (client capture commits `15a8f63`, `1563bbb`). Current fixture consumers retain only three quirk initialize inputs; current client declarations are tested separately. No old JSONL/sidecar parser gate remains an acceptance requirement.
 - [x] **T001.5b2 — Replace superseded task and history sections.** Replace old §7 with the numbered queue link and explicit gaps; remove §§10–12 and obsolete checkpoint/ad hoc records; retain template and honest limits.
 - [x] **T001.5c — Remove duplicate top matter and retired Plain plans.**
   Remove the superseded checkpoint/Contents block left by cutover. Delete both old Plain planning files after confirming their open IDs map to the existing migration ledger; preserve immutable source references and any actual unmatched issue. Plain client scope: T004–T010, T013, T020–T022; keys scope: T034–T039; deferred/speculative scope: T099–T111 where applicable. Immutable sources: `2ff1ee7:magit-lsp-plain-client-tasks.md`, `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping and unmatched-requirement audit: [migration ledger](docs/evidence/task-queue-migration.md).
@@ -207,13 +173,15 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 4. Protocol reference
 5. Default keymaps (profiles)
 6. View catalog
-7. Numbered implementation queue ([`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md))
+7. Numbered implementation queue (this file; [scope archive](./TASKS_PART_SEVEN.md))
 8. Testing strategy
 9. Open questions
 
 ---
 
 ## Bugfix
+
+Completed entries below preserve historical diagnoses and verification records. They are not pending execution instructions; use the current Make-only verification rules in [AGENTS.md](AGENTS.md#verification).
 
 - [x] **Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds.**
   Prior full regression passed build/Rust/Lua, then failed VSCode's disconnect-draft case while a parallel focused Lua target rebuilt the running server: Git's helper path contained `magit-lsp (deleted)`. Serialized `make vscode-test` passed build, VSCode and keybindings without concurrent builds; `cargo fmt --all -- --check` and `git diff --check` also passed. Log: `/tmp/opencode/current-declarations-checkpoint/vscode-serialized.log`. This does not claim a full `make test` rerun; cross-build lifecycle remains a follow-up.
@@ -234,6 +202,8 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
   `cargo fmt --all -- --check` reports existing workspace-wide formatting differences; log `/tmp/opencode/queue-checkpoint/fmt.log`. Apply rustfmt only to the reported Rust files, preserve unrelated user edits, and verify the full formatting check.
 
 ## Review
+
+Completed checkpoint entries below preserve historical findings and original command records, including retired fixture gates. They do not reinstate capture workflows or define current verification commands. Current execution uses [AGENTS.md](AGENTS.md#verification) and the open queue; immutable pre-retirement context is `83f79f5:TASKS.md`.
 
 Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed `b5eb865f6cfacaf6a1a352d8ba96bab6dae65600..e6546ce6d6bc5c474a88036c85cce3a6e0836d4f`. Scope covered all 11 changed paths plus command preflight, deferred clipboard/editor producers, rich placement normalization, strict-emitter fallbacks and the T004 acceptance record. Found one P1 task; no P0/P2. Supplied serialized Linux gates were not rerun. Coverage does not prove exhaustive future producer discovery, native recapture/provenance, or non-Linux behavior. Existing P3 generated-file assertions remain deferred. Unrelated dirty `Cargo.toml`/`README.md` and untracked release files were not touched; no image tools were used.
 
@@ -537,6 +507,8 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `fee95585a7
 
 ## Deferred hygiene follow-ups
 
+Keep this debt open. Run tools through `make hygiene` and focused suites through `make vscode-test`, `make test-rust FILTER="..."`, or `make test-file FILE=...`; a report-only exit is not a clean bill of health. Any additional executable check needs its own Make target before execution.
+
 - [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
 - [ ] **Audit unused VSCode exports: commands and context** — `clients/vscode/lib/commands.js` (`openStatus`, `viewport`, `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`); `context.js` (`deriveContext`, `inactiveContext`, `staticScope`). Verify focused VSCode tests and Knip.
 - [ ] **Audit unused VSCode exports: draft and edit lifecycle** — `clients/vscode/lib/drafts.js` (`cancel`, `close`, `confirm`, `disconnect`, `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`, `setup`); `edit.js` (`KIND`, `SCHEME`, `draftAction`, `isEditEffect`, `languageForKind`); `edits.js` (`onDocumentClosed`, `onActiveEditorChanged`, `confirmEditCommand`, `cancelEditCommand`, `currentEdit`). Verify edit lifecycle tests and Knip.
@@ -546,10 +518,10 @@ Checkpoint review (2026-11-05): GPT-5.6 Sol reviewed committed range `fee95585a7
 - [ ] **Resolve Lua warning findings** — `lua/magit-lsp/debug.lua:91`, `edit.lua:98`, `highlights.lua:19`, `hooks.lua:42,49,56,63,70,78,103`, `init.lua:122,167,373`, `keymap.lua:83`, `keys.lua:256`, `requests.lua:179`, `view.lua:626,728`, `scripts/color_spike.lua:57`, `tests/spikes/real_file_nvim.lua:14,27,40,47`, `tests/test_magit_lsp.lua:45,514,894,1143,1526,1550,1553,1555,1556,1557,1743`. Verify pinned luacheck; guarded `table.unpack` fallback is tested at line 1743, but LuaJIT runtime reports `table.unpack == nil`.
 - [ ] **Reduce evidence archive size** — `docs/evidence/harness-reassessment-inputs.md`; preserve immutable evidence while reducing tracked file below 100000 bytes. Verify `make hygiene` size report.
 - [ ] **Split server implementation below hygiene limit** — `src/server.rs`; preserve behavior and reduce below 100000 bytes. Verify focused Rust tests and `make hygiene`.
-- [ ] **Split async server tests below hygiene limit** — `tests/server_async.rs`; preserve coverage and reduce below 100000 bytes. Verify `cargo test --test server_async` and `make hygiene`.
+- [ ] **Split async server tests below hygiene limit** — `tests/server_async.rs`; preserve coverage and reduce below 100000 bytes. Verify `make test-rust FILTER="--test server_async"` and `make hygiene`.
 - [ ] **Split Neovim integration tests below hygiene limit** — `tests/test_magit_lsp.lua`; preserve coverage and reduce below 100000 bytes. Verify focused Neovim tests and `make hygiene`.
 - [ ] **Split canonical task roadmap below hygiene limit** — `TASKS.md`; retain canonical design while reducing below 100000 bytes. Verify documentation links and `make hygiene`.
-- [ ] **Split editor bridge tests below hygiene limit** — `tests/editor_bridge.rs`; preserve coverage and reduce below 100000 bytes. Verify `cargo test --test editor_bridge` and `make hygiene`.
+- [ ] **Split editor bridge tests below hygiene limit** — `tests/editor_bridge.rs`; preserve coverage and reduce below 100000 bytes. Verify `make test-rust FILTER="--test editor_bridge"` and `make hygiene`.
 
 These decisions are canonical unless superseded by an explicit later decision
 here. General agent working conventions and verification guidance live in
@@ -1295,7 +1267,9 @@ they are meaningful. See §0 and the Plain phase task list.
 No backward compatibility: delete the old `vcs/*` methods as their
 replacements land.
 
-### 4.1 Client → server (current contract; Plain presentation selection is intended, not yet implemented)
+### 4.1 Client → server (current contract)
+
+Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; remaining T005 behavior and appendix acceptance stays open in [Ad hoc](#ad-hoc).
 
 | Method | Params | Returns |
 | --- | --- | --- |
@@ -1538,7 +1512,178 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 
 ## 7. Numbered implementation queue
 
-The sole active numbered backlog is [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md). Old ticket scope and Verify text remain recoverable from immutable `d04dfa2:TASKS.md`; provenance is not completion evidence. See [migration ledger](docs/evidence/task-queue-migration.md).
+This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md) is an archived scope and provenance document; its detailed ticket specifications remain linked and do not track status. Original scope and Verify text remain recoverable from immutable `d04dfa2:TASKS.md`; provenance is not completion evidence. See [migration ledger](docs/evidence/task-queue-migration.md).
+
+### Feature — Phase 2 (open)
+
+T005 remains open through its authoritative [Ad hoc children](#ad-hoc); full scope: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
+- [ ] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
+- [ ] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m).
+
+### Feature — Phase 3: Plain interaction
+
+- [ ] **T008 — prompts-and-picks.** [Scope](./TASKS_PART_SEVEN.md#t008-prompts-and-picks-l).
+- [ ] **T009 — stable-id-selection.** [Scope](./TASKS_PART_SEVEN.md#t009-stable-id-selection-m).
+- [ ] **T010 — plain-commit-editing.** [Scope](./TASKS_PART_SEVEN.md#t010-plain-commit-editing-s).
+
+### Feature — Phase 4: Specification
+
+- [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+- [ ] **T012 — example-files.** [Scope](./TASKS_PART_SEVEN.md#t012-example-files-s).
+- [ ] **T013 — client-spec.** [Scope](./TASKS_PART_SEVEN.md#t013-client-spec-l).
+
+### Feature — Phase 5: Commit selection and rebase
+
+- [ ] **T014 — selected-commit-continuation.** [Scope](./TASKS_PART_SEVEN.md#t014-selected-commit-continuation-m).
+- [ ] **T015 — fixup-action.** [Scope](./TASKS_PART_SEVEN.md#t015-fixup-action-m).
+- [ ] **T016 — editor-helper-kinds.** [Scope](./TASKS_PART_SEVEN.md#t016-editor-helper-kinds-s).
+- [ ] **T017 — rebase-state.** [Scope](./TASKS_PART_SEVEN.md#t017-rebase-state-m).
+- [ ] **T018 — rebase-todo.** [Scope](./TASKS_PART_SEVEN.md#t018-rebase-todo-m).
+- [ ] **T019 — interactive-rebase.** [Scope](./TASKS_PART_SEVEN.md#t019-interactive-rebase-l).
+
+### Feature — Phase 6: Plain acceptance
+
+- [ ] **T020 — plain-e2e.** [Scope](./TASKS_PART_SEVEN.md#t020-plain-e2e-l).
+- [ ] **T021 — helix-smoke.** [Scope](./TASKS_PART_SEVEN.md#t021-helix-smoke-s).
+- [ ] **T022 — plain-gate.** [Scope](./TASKS_PART_SEVEN.md#t022-plain-gate-s).
+
+### Feature — Phase 6A: Rich protocol v1 and client prototypes
+
+- [ ] **T112 — rich-protocol-audit.** [Scope](./TASKS_PART_SEVEN.md#t112-rich-protocol-audit-s).
+- [ ] **T113 — rich-protocol-decisions.** [Scope](./TASKS_PART_SEVEN.md#t113-rich-protocol-decisions-s).
+- [ ] **T114 — rich-protocol-cleanup.** [Scope](./TASKS_PART_SEVEN.md#t114-rich-protocol-cleanup-m).
+- [ ] **T105 — vscode-f5-cause.** [Scope](./TASKS_PART_SEVEN.md#t105-vscode-f5-cause-s); rescheduled here, not duplicated under Deferred.
+- [ ] **T119 — min-git-version.** [Scope](./TASKS_PART_SEVEN.md#t119-min-git-version-s).
+- [ ] **T115 — visual-studio-client.** [Scope](./TASKS_PART_SEVEN.md#t115-visual-studio-client-l).
+- [ ] **T116 — zed-client.** [Scope](./TASKS_PART_SEVEN.md#t116-zed-client-l).
+- [ ] **T117 — jetbrains-client.** [Scope](./TASKS_PART_SEVEN.md#t117-jetbrains-client-l).
+- [ ] **T118 — rich-protocol-freeze.** [Scope](./TASKS_PART_SEVEN.md#t118-rich-protocol-freeze-s).
+
+### Feature — Phase 7: Test stabilization (does not gate 0.2)
+
+- [ ] **T023 — capability-lattice.** [Scope](./TASKS_PART_SEVEN.md#t023-capability-lattice-m).
+- [ ] **T024 — host-spike.** [Scope](./TASKS_PART_SEVEN.md#t024-host-spike-s).
+- [ ] **T025 — e2e-runner.** [Scope](./TASKS_PART_SEVEN.md#t025-e2e-runner-m).
+- [ ] **T026 — host-cases.** [Scope](./TASKS_PART_SEVEN.md#t026-host-cases-l).
+- [ ] **T027 — keybinding-compaction.** [Scope](./TASKS_PART_SEVEN.md#t027-keybinding-compaction-m).
+- [ ] **T028 — colour-roles.** [Scope](./TASKS_PART_SEVEN.md#t028-colour-roles-s).
+- [ ] **T029 — scenario-slimming.** [Scope](./TASKS_PART_SEVEN.md#t029-scenario-slimming-m).
+
+### Feature — Phase 8: Release
+
+Starts after phases 1–6. Do not insert unrelated features between release gates and release. Evidence remains required.
+
+- [ ] **T030 — release-artifacts.** [Scope](./TASKS_PART_SEVEN.md#t030-release-artifacts-m).
+- [ ] **T031 — client-install-docs.** [Scope](./TASKS_PART_SEVEN.md#t031-client-install-docs-s).
+- [ ] **T032 — release-readme.** [Scope](./TASKS_PART_SEVEN.md#t032-release-readme-m).
+- [ ] **T033 — release-go-no-go.** [Scope](./TASKS_PART_SEVEN.md#t033-release-go-no-go-m); explicit human approval remains required.
+
+### Feature — Phase 9: Plain keys (optional; starts after T022)
+
+- [ ] **T034 — key-edit-shapes.** [Scope](./TASKS_PART_SEVEN.md#t034-key-edit-shapes-s-gate).
+- [ ] **T035 — key-classifier.** [Scope](./TASKS_PART_SEVEN.md#t035-key-classifier-m).
+- [ ] **T036 — key-policy-settings.** [Scope](./TASKS_PART_SEVEN.md#t036-key-policy-settings-m).
+- [ ] **T037 — key-execution.** [Scope](./TASKS_PART_SEVEN.md#t037-key-execution-m).
+- [ ] **T038 — key-safety-e2e.** [Scope](./TASKS_PART_SEVEN.md#t038-key-safety-e2e-m).
+- [ ] **T039 — plain-keys-docs.** [Scope](./TASKS_PART_SEVEN.md#t039-plain-keys-docs-s).
+
+### Feature — Phase 10: Small features
+
+Each ticket below retains its row's full scope and dependencies in the [Phase 10 specification table](./TASKS_PART_SEVEN.md#phase-10-small-features).
+
+- [ ] **T040 — commit-signing.**
+- [ ] **T041 — log-variants.**
+- [ ] **T042 — remote-config-tags.**
+- [ ] **T043 — branch-basics.**
+- [ ] **T044 — notes-ignore.**
+- [ ] **T045 — theming-docs.**
+- [ ] **T046 — forking-docs.**
+- [ ] **T047 — config-location-edit.**
+
+### Feature — Phase 11: Read views
+
+Each ticket below retains its row's full scope and dependencies in the [Phase 11 specification table](./TASKS_PART_SEVEN.md#phase-11-read-views).
+
+- [ ] **T048 — view-data.**
+- [ ] **T049 — revision-view.**
+- [ ] **T050 — diff-view.**
+- [ ] **T051 — picker-inspect.**
+- [ ] **T052 — refs-view.**
+- [ ] **T053 — file-at-revision.**
+- [ ] **T054 — reflog-view.**
+- [ ] **T055 — line-history-view.**
+- [ ] **T056 — log-links-hover.**
+- [ ] **T057 — log-semantic-styling.**
+
+### Feature — Phase 12: Shared Git workflows
+
+Each ticket below retains its row's full scope and dependencies in the [Phase 12 specification table](./TASKS_PART_SEVEN.md#phase-12-shared-git-workflows).
+
+- [ ] **T058 — diff-arguments.**
+- [ ] **T059 — push-baseline.**
+- [ ] **T060 — status-history-sections.**
+- [ ] **T061 — unpulled-and-headers.**
+- [ ] **T062 — commit-staged-diff.**
+- [ ] **T063 — commit-trailers-lint.**
+- [ ] **T064 — commit-edit-close.**
+- [ ] **T065 — targeted-fixup-squash.**
+- [ ] **T066 — instant-rewrite.**
+- [ ] **T067 — branch-checkout-spin.**
+- [ ] **T068 — network-seam.**
+- [ ] **T069 — fetch-push-pull.**
+- [ ] **T070 — branch-reset.**
+- [ ] **T071 — annotated-tags.**
+- [ ] **T072 — stash-views.**
+- [ ] **T073 — stash-operations.**
+
+### Feature — Phase 13: Advanced workflows
+
+Each ticket below retains its row's full scope and dependencies in the [Phase 13 specification table](./TASKS_PART_SEVEN.md#phase-13-advanced-workflows).
+
+- [ ] **T074 — merge-conflicts.**
+- [ ] **T075 — mergetool-effect.**
+- [ ] **T076 — sequencer-state.**
+- [ ] **T077 — cherry-view.**
+- [ ] **T078 — rebase-options.**
+- [ ] **T079 — rebase-merges.**
+- [ ] **T080 — scripted-sequence-edit.**
+- [ ] **T081 — picker-integrations.**
+- [ ] **T082 — blame-view.**
+- [ ] **T083 — blame-inline.**
+- [ ] **T084 — run-command.**
+- [ ] **T085 — patch-workflows.**
+- [ ] **T086 — am-state.**
+- [ ] **T087 — bisect-state.**
+- [ ] **T088 — multi-repo-identity.**
+- [ ] **T089 — worktree-operations.**
+- [ ] **T090 — submodule-workflows.**
+- [ ] **T091 — buffer-repo-context.**
+- [ ] **T092 — any-buffer-dispatch.**
+- [ ] **T093 — section-layout-policy.**
+- [ ] **T094 — full-line-tint.**
+- [ ] **T095 — profiling-budgets.**
+- [ ] **T096 — incremental-render.**
+- [ ] **T097 — windows-paths.**
+- [ ] **T098 — jj-fork.**
+
+### Deferred — Phase 14: Not scheduled
+
+DO NOT START these tickets until the owner asks. Each retains its row's full scope and constraints in the [deferred specification table](./TASKS_PART_SEVEN.md#phase-14-deferred-not-scheduled). T105 is rescheduled to Phase 6A, not duplicated here.
+
+- [ ] **T099 — edit-history.**
+- [ ] **T100 — windows-editor-bridge.**
+- [ ] **T101 — macos-editor-bridge.**
+- [ ] **T102 — cross-hunk-selection-audit.**
+- [ ] **T103 — same-session-read-redesign.**
+- [ ] **T104 — editor-lifecycle-residuals.**
+- [ ] **T106 — pick-delivery-modes.**
+- [ ] **T107 — skip-at-point-option.**
+- [ ] **T108 — server-fuzzy-picker.**
+- [ ] **T109 — multi-client-repository.**
+- [ ] **T110 — rich-protocol-form.**
+- [ ] **T111 — open-design-questions.**
+
+T001–T004 and T120 are complete and excluded from this unchecked index. A checkbox is not permission to bypass dependencies or deferred owner approval. Each linked specification remains mandatory acceptance, not a fresh completion claim.
 
 ### Retained gaps
 
@@ -1628,7 +1773,7 @@ opens the commit-message buffer in the same instance; bottom menu placement.
 
 ### 8.7 CI
 
-`cargo test` on Linux/macOS/Windows; Neovim tests on stable and nightly;
+`make test-rust` on Linux/macOS/Windows; Neovim tests on stable and nightly;
 manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
 on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
 `make ui-test` and uploads `build/ui/` on failure (R-UI-6).

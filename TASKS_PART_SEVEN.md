@@ -1,11 +1,11 @@
-# magit-lsp roadmap: numbered tickets in ASD-STE
+# Archived numbered ticket specifications and provenance
 
-This document replaces section 7 of TASKS.md. It lists every open ticket. Each ticket has a number and a short name, for example `T008 prompts-and-picks`. The tickets are in phases. The text follows ASD-STE100 style. No automatic STE checker has validated it.
+This archive preserves detailed ticket scope and provenance. TASKS.md owns live status and its §7 checkbox index; this document is not a status queue. Each ticket has a number and a short name, for example `T008 prompts-and-picks`. The tickets are in phases. The text follows ASD-STE100 style. No automatic STE checker has validated it.
 
 ## How to read this document
 
-- Named roadmap phases (the `Phase N` groups below) are phase boundaries; individual tickets, implementation slices and review-fix batches are not. Run the phase gate when the last unchecked item in a named phase completes. At each applicable phase gate, run `make hygiene` (after T003 is done). Fix each finding, or make a ticket for it.
-- A ticket has these fields: Depends on, Target Files, Reference Files, Constraints, Acceptance, and Verify. Each ticket inherits its applicable phase gate from its enclosing named phase and the phase map; gates apply only at actual named phase ends. Follow current review and orchestration instructions in [AGENTS.md](./AGENTS.md#working-conventions).
+- Named roadmap phases (the `Phase N` groups below), not individual tickets or review-fix batches, define phase boundaries. Current review cadence, gates and finding dispositions follow [AGENTS.md](./AGENTS.md#working-conventions) and its referenced skills.
+- A specification records Depends on, Target Files, Reference Files, Constraints, Acceptance, and Verify. Schedule executable work and record completion only in [TASKS.md](./TASKS.md#7-numbered-implementation-queue).
 - Sizes are S, M or L. They are relative sizes. They are not time estimates.
 - Check each path that has the mark (confirm) before you edit it. If the path is wrong, correct the ticket.
 - Old ticket numbers (for example R-PLAIN-PROMPT) stay in the history. The last section maps old numbers to new numbers.
@@ -13,7 +13,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 ## Rules for all tickets
 
 1. Follow the authoritative [no-vision rule](./AGENTS.md#working-conventions); use text and structured evidence only.
-2. Apply shared working and verification rules in [AGENTS.md](./AGENTS.md#working-conventions). CI runs all tests; full local runs are optional. Set `MAGIT_NATIVE=1` for the local native tier.
+2. Apply shared working and verification rules in [AGENTS.md](./AGENTS.md#verification). Executable verification uses Make targets. If none fits a future check, add an explicitly owned target-creation ticket before execution; do not improvise direct commands or substitute unit coverage for native evidence.
 3. Feature Rust state tests and conformance scenarios are required. Native Neovim evidence is for new visible behavior only; VSCode evidence is for changed declared capabilities or files under `clients/vscode/`.
 4. Golden changes require a dedicated commit. Explain every changed hunk in its commit message. Keep goldens small and normalized; add immutable semantic assertions. Never mark goldens generated.
 5. Ship generated files only when clients need them; mark them generated and add CI drift checks. Do not commit other generated files.
@@ -194,9 +194,8 @@ in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 ### [x] T002 wire-recorder (S) — Complete
 
 Done: production implementation/integration `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`; final test-only Helix evidence `8476a8e`.
-Immutable full acceptance: `61370ad:TASKS_PART_SEVEN.md`. Four-client initialize/didChange presets retained; Helix native selection, one-/multi-character paste, rapid typing and repair-before-undo; Neovim all six, with historical multi-paste-before-repair limit.
-Bundled payload shapes prove no native actions; single-insert provenance only for plain Neovim and Helix. Reconstructed Plain trace is not conformance evidence. Full Helix source hash/equality was manually verified; automated checks cover retained rows and metadata, not native causality.
-`cargo test --test wirelog` (12 tests), fixture JSON parsing and manual provenance audit enforce evidence. Helix save snapshots show restored baseline and wire row 20 proves transient undo; Neovim rapid undo coalesces repair echo and undo, limiting separate-event claims. Linux only; Windows/macOS CI follow-up. Phase 1 verification/review accepted; see `TASKS.md`.
+Immutable original acceptance: `61370ad:TASKS_PART_SEVEN.md`; historical native captures, source hashes and their causality limits: `83f79f5:TASKS.md`. Those static trace/parser gates and runnable capture recipes were retired, not retained as current enforcement.
+Current runtime recorder/security coverage uses `make test-rust FILTER="--test wirelog"`. Live repair/undo coverage and the retained native Neovim workflow are described in the [fixture guide](tests/fixtures/lsp_traces/README.md). Completion and Linux-only evidence are recorded in the authoritative [TASKS.md queue](TASKS.md#ad-hoc); no Windows/macOS or complete native-client conformance claim follows.
 
 ### [x] T003 hygiene-tooling — Complete
 
@@ -230,7 +229,7 @@ Actual Phase 2 remains open for T005–T007; Windows/macOS verification remains 
   1. Add these entries: `assume-document-changes` and `apply-result-unreliable` for Neovim; `decomposed-changes` for Helix; `assume-show-document` for Helix builds that handle `showDocument` without a declaration. Enable the last entry only after T002 records the evidence.
   2. Each quirk that has a `model` has a fake-editor test. Each quirk that has a `workaround` has a server test. An unknown client gets no quirks.
   3. Generate a "Known client behaviors" appendix for the client spec (T013).
-- **Verify:** Run `cargo test --test quirks`.
+- **Verify:** Run `make test-rust FILTER="--test quirks"`.
 
 ### T006 fake-editor-model (L)
 
@@ -287,7 +286,7 @@ Actual Phase 2 remains open for T005–T007; Windows/macOS verification remains 
   9. Neovim declares static picks only (`vim.ui.select`). Cut long lists with a marker, or use the document renderer. Check each pick again at execution time.
   10. A test runs each registered command against the recording `Ui`. It generates `docs/plain-support.md`, keyed by effective capabilities and reasons. A command that sends an unsupported effect becomes `Unavailable{reason}`. An unsupported effect at runtime gives a readable message and a clean cancel.
   11. Add a mixed-rung test. In each step, the client handles the prompt natively or by document. Cancel at each step. Make sure that nothing changes, the caller returns, and the view stack depth is the same.
-- **Verify:** Run `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`, `make test-lua` and `node clients/vscode/test/test.js`.
+- **Verify:** Run `make test-rust FILTER="--test plain_prompt --test manifest --test parity"`, `make test-lua` and `make vscode-test`.
 
 ### T009 stable-id-selection (M)
 
@@ -319,7 +318,7 @@ The client spec is a main deliverable. A person must be able to read it and impl
 ### T011 schema-generation (M)
 
 - **Depends on:** T004.
-- **Target Files:** `src/protocol.rs`, `src/menu.rs`, `src/view.rs`, `src/dispatch.rs`, `src/editor.rs`, `Cargo.toml`, a generator binary or xtask (new), `docs/schema/` (generated), `clients/vscode/types/*.d.ts` (generated), `lua/magit-lsp/types.lua` (generated).
+- **Target Files:** `src/protocol.rs`, `src/menu.rs`, `src/view.rs`, `src/dispatch.rs`, `src/editor.rs`, `Cargo.toml`, `Makefile`, a generator binary or xtask (new), `docs/schema/` (generated), `clients/vscode/types/*.d.ts` (generated), `lua/magit-lsp/types.lua` (generated).
 - **Reference Files:** section C of `docs/evidence/harness-reassessment-inputs.md` (the serde hazards).
 - **Constraints:** Handle these hazards:
   - `ViewKind` has a custom `Serialize`. Use `#[schemars(with = "String")]` or write the schema by hand.
@@ -335,7 +334,7 @@ The client spec is a main deliverable. A person must be able to read it and impl
   4. Generate the payload tables for the client spec from the schema.
   5. A test checks each recorded fixture and each example file against the schema.
   6. Only the effect list and the prompt list are the same in both clients. Generate those two from the typed block. Keep the key translators and token mappings separate.
-- **Verify:** Run the schema drift check, `make vscode-test` and the Rust validation test.
+- **Verify:** Expose the new schema drift and Rust validation checks through Make targets as part of this ticket, then run them and `make vscode-test`. A schema-drift target does not exist yet; do not substitute direct generator commands or claim this acceptance passed.
 
 ### T012 example-files (S)
 
@@ -343,7 +342,7 @@ The client spec is a main deliverable. A person must be able to read it and impl
 - **Target Files:** `docs/examples/<level>-<name>.jsonl` (new), `tests/examples.rs` (new).
 - **Constraints:** Each line is `{dir, message, note?, source}`. `dir` is `c2s` or `s2c`. `source` is `recorded` or `written`. These files are the only source of JSON in the client spec. Do not write JSON by hand in the spec text.
 - **Acceptance:** Each message is valid against the schema. A harness test sends the client-to-server lines to the real binary and compares the normalized server lines. Each example is also a golden. The first set has these examples: minimal initialize and Plain open; a code-action stage; a document prompt; the rich open, render, ack and key loop with progress order; a commit edit confirm and abort.
-- **Verify:** Run `cargo test --test examples`.
+- **Verify:** Run `make test-rust FILTER="--test examples"` after this ticket creates the suite.
 
 ### T013 client-spec (L)
 
@@ -370,7 +369,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Reference Files:** `TASKS.md` section 3.7; the current log select code and the `PromptAction` continuation.
 - **Constraints:** The identity of a selection is the full commit id from the structured node. Never use rendered text or a row index.
 - **Acceptance:** The full selected commit id, the captured operation arguments and the caller all survive the select-mode continuation. Tests cover confirm, cancel and a stale selection.
-- **Verify:** Run `cargo test --test commands` and `scripts/ui run tests/ui/scenarios/commit-select-*.scn`.
+- **Verify:** Run `make test-rust FILTER="--test commands"` and `make ui-file FILE='tests/ui/scenarios/commit-select-*.scn'`.
 
 ### T015 fixup-action (M)
 
@@ -379,7 +378,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Reference Files:** `docs/evidence/commit-head-operations.md`; the fixup section of the Magit manual.
 - **Constraints:** Use the server-owned log select. Do not use a client picker. Other menus and actions do not gate the release.
 - **Acceptance:** Tests of the exact repository state show that the selected commit is the fixup target. Cancel changes nothing and returns the caller. Confirm returns to the caller. Failures are readable.
-- **Verify:** Run `cargo test --test commands` and `scripts/ui run tests/ui/scenarios/commit-fixup.scn`.
+- **Verify:** Run `make test-rust FILTER="--test commands"` and `make ui-file FILE=tests/ui/scenarios/commit-fixup.scn`.
 
 ### T016 editor-helper-kinds (S)
 
@@ -387,7 +386,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Target Files:** `src/editor.rs`, `tests/editor_bridge.rs`.
 - **Constraints:** A todo run must not use the commit history or the close rules of a commit message.
 - **Acceptance:** The helper checks each kind (commit message and todo) against the expected target. Each kind has its own policy. A wrong kind or wrong target is rejected.
-- **Verify:** Run `cargo test --test editor_bridge`.
+- **Verify:** Run `make test-rust FILTER="--test editor_bridge"`.
 
 ### T017 rebase-state (M)
 
@@ -395,7 +394,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Target Files:** `src/git.rs`, `src/status_view.rs`, `src/commands.rs`, `tests/rebase_state.rs` (new), `tests/ui/scenarios/rebase-state.scn` (new).
 - **Reference Files:** the in-progress rebase fixtures in `scripts/ui_lib/fixtures.py`.
 - **Acceptance:** The server finds the rebase state and the operation in progress. The server represents and reports these outcomes safely: continue, skip, abort and conflict.
-- **Verify:** Run `cargo test --test rebase_state` and `scripts/ui run tests/ui/scenarios/rebase-state.scn`.
+- **Verify:** Run `make test-rust FILTER="--test rebase_state"` and `make ui-file FILE=tests/ui/scenarios/rebase-state.scn`.
 
 ### T018 rebase-todo (M)
 
@@ -403,7 +402,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Target Files:** a new `src/rebase_todo.rs` (confirm), `src/view.rs`, `tests/rebase_todo.rs` (new), `tests/ui/scenarios/rebase-todo.scn` (new).
 - **Constraints:** The server parses and writes the todo. Reject unsupported grammar safely. Full rebase-merges support is T079.
 - **Acceptance:** The server parses, edits, reorders, checks and writes the linear todo. A todo that is not valid, or uses unsupported grammar, is rejected. The file does not change.
-- **Verify:** Run `cargo test --test rebase_todo` and `scripts/ui run tests/ui/scenarios/rebase-todo.scn`.
+- **Verify:** Run `make test-rust FILTER="--test rebase_todo"` and `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
 
 ### T019 interactive-rebase (L)
 
@@ -411,7 +410,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 - **Target Files:** `src/commands.rs`, the rebase menu registry, `tests/rebase_interactive.rs` (new), `tests/ui/scenarios/rebase-interactive.scn` (new).
 - **Constraints:** The server owns the selection and the structured todo. Other history and branch features do not gate the release.
 - **Acceptance:** Tests of the exact repository state cover: the selected base, execution of the edited todo, continue, abort and the conflict state. Cancel before execution changes nothing. Failures are readable.
-- **Verify:** Run `cargo test --test rebase_interactive` and `scripts/ui run tests/ui/scenarios/rebase-interactive.scn`.
+- **Verify:** Run `make test-rust FILTER="--test rebase_interactive"` and `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
 
 ## Phase 6: Plain acceptance (gates 0.2)
 
@@ -499,7 +498,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 - **Reference Files:** `docs/design/rich-protocol-v1.md`.
 - **Constraints:** Compatibility with old clients is not a goal. Make the wire changes now, before v1 is stable. Apply only the decisions in T113.
 - **Acceptance:** Apply each "fix" decision on the server and on both clients. Delete each dead field and dead code path that T112 confirmed. Add the protocol version check on the server and on both clients. Update the shared test vectors. Each decision has a test that fails without the change. Update `docs/CLIENT_SPEC.md` for each wire change.
-- **Verify:** Run `cargo test`, `make test-lua` and `node clients/vscode/test/test.js`. Run `scripts/ui run` on the status and menu scenarios.
+- **Verify:** Run `make test` and `make ui-file FILE=<scenario>.scn` for the status and menu scenarios.
 
 ### T105 vscode-f5-cause (S)
 
@@ -507,7 +506,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 - **Target Files:** `docs/evidence/vscode-host-behaviours.md`, `clients/vscode/lib/*.js`.
 - **Context:** Historical text evidence in `docs/evidence/vscode-host-behaviours.md` records F5 reaching the renderer as Alt+F5 on Codium 1.140.06880 with extension 0.1.0. Cause remains unproven; this is not a current-behavior claim or native F5 fix.
 - **Acceptance:** Find the cause. Write it in the evidence file with the Codium version. Fix it, or document the limit and remove F5 from the generated bindings.
-- **Verify:** Run the test that presses F5 in the status view. It must show the refresh, or the binding must not exist.
+- **Verify:** Run the regression that presses F5 in the status view through a native-host Make target. It must show the refresh, or the binding must not exist. If no existing target reaches that case, schedule target creation before this verification; `make vscode-test` alone is not native F5 evidence.
 
 ### T119 min-git-version (S)
 
@@ -587,7 +586,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 ### T025 e2e-runner (M)
 
 - **Depends on:** T024.
-- **Target Files:** `clients/vscode/test/e2e/run.mjs`, `real-file-lifecycle.mjs`, `real-file-spike.mjs` (confirm), a new Xvfb wrapper script.
+- **Target Files:** `clients/vscode/test/e2e/run.mjs`, `real-file-lifecycle.mjs`, `real-file-spike.mjs` (confirm), `Makefile`, a new Xvfb wrapper script.
 - **Context:** CI uses a qwerty layout. The desktop of the owner uses Colemak. The current runner passes `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` through. It sets `keyboard.dispatch: keyCode` to compensate for the layout. A spike calls `bspc` on the real window manager.
 - **Acceptance:**
   1. Start a private Xvfb on a free display for each run. Run `setxkbmap -display :N us` each time. Remove `keyboard.dispatch: keyCode`.
@@ -597,7 +596,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   5. Read dialogs as DOM text. Click them by role.
   6. The native tier is optional on your machine (`MAGIT_NATIVE=1`). CI always runs it.
   7. Add one line to the README. Say that bindings such as `shift+/` assume a US-like layout.
-- **Verify:** On a machine with a non-US desktop layout, run `MAGIT_NATIVE=1 npm --prefix clients/vscode run test:e2e`. Record the output of `setxkbmap -query` for the private display.
+- **Verify:** Add a Make target for the native VSCode host suite, preserving `MAGIT_NATIVE=1`; no such target exists yet. Run that target on a non-US desktop layout and record the private display's keyboard-layout state through the maintained runner. `make vscode-test` is not native-host acceptance.
 
 ### T026 host-cases (L)
 
@@ -611,7 +610,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   5. Move feature acceptance (`head-operations`, most A34 variants, the theme case) to Rust or Node tests, or delete it.
   6. Port what the fakes still cover. Then delete `fake/vscode.js`, `fake/languageclient.js` and `integration.js`. If T024 decided to keep a minimal stub, follow that decision.
   7. Add a loop over each declared effect, prompt kind and layout. Add a loop that presses each contributed binding in its scope. Add goldens from the T002 recorder. They must be small and normalized, with semantic assertions.
-- **Verify:** Run `MAGIT_NATIVE=1 npm --prefix clients/vscode run test:e2e` and `make vscode-test`.
+- **Verify:** Run the native-host Make target added by T025, then `make vscode-test`. Do not replace native-host evidence with the unit/integration target.
 
 ### T027 keybinding-compaction (M)
 
@@ -624,7 +623,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   4. Mark the generated block as generated (see rule 4). Check for drift in `make vscode-test`.
   5. Add a denylist test for the generated bindings. The test must fail if `ctrl+p`, `ctrl+shift+p`, `ctrl+w`, `ctrl+tab`, `f1` or `alt+tab` is bound. List each exception with its reason and its `when` clause.
   6. If the Rust generator already makes Neovim bindings, check if `lua/magit-lsp/keys.lua` can be smaller.
-- **Verify:** Run `make vscode-test` and `node clients/vscode/test/test.js`. Record the number of generated entries before and after.
+- **Verify:** Run `make vscode-test`. Record the number of generated entries before and after.
 
 ### T028 colour-roles (S)
 
@@ -636,7 +635,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   2. Reduce the 28 token types to about 10 roles: heading, muted, added, removed, changed, path, hash or identifier, ref, key or accent, warning or error. A modifier only adds an attribute. Each emitted type names its role. A test fails when a role is missing. Use a standard LSP token type when one fits.
   3. Derive the scopes of VS Code from the role table. VS Code now contributes 5 of 28 types and ignores `tokenTypeGroups`.
   4. Add three tests. First, a Rust test of the token response for a fixture view. Second, a data test for each client: each legend type has a Neovim link or a VS Code scope. Third, one ANSI smoke test for each client with one color scheme. It must show that added and removed cells have different foreground colors. Use `decoder.py` and `expect style`.
-- **Verify:** Run the Rust token tests and `make test-lua`. Run one `.scn` color smoke test.
+- **Verify:** Run `make test-rust FILTER="--test semantic_tokens"`, `make test-lua` and `make ui-file FILE=<color-scenario>.scn` for the selected color smoke scenario.
 
 ### T029 scenario-slimming (M)
 
@@ -650,14 +649,14 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   5. Derive `requires:` from the recording `Ui`. Driver-only properties are `closeSignal`, `cursorControl` and `nativeDialogs`.
   6. Run the same scenario on the fake editor and on real plain Neovim. A difference is a bug in the fake.
   7. Report a matrix of scenario by driver. Show each skip with its reason. Make sure that each feature has at least one driver that did not skip.
-- **Verify:** Run `make ui-unit`. Run `scripts/ui run` on the conformance set with `client: rich` and with `client: plain`.
+- **Verify:** Run `make ui-unit` and `make ui-file FILE=<scenario>.scn` for each conformance scenario, with both `client: rich` and `client: plain` variants supplied by this ticket.
 
 ### [x] T120 formatter-pre-commit (S) — Complete
 
 Requirement: pinned formatters, staged-safe opt-in hook, changed-committed-source CI, Make commands and contributor instructions; no permanent formatter tests or broad reformat.
 Done: formatter foundation commits `ba1de69`, `da82af7`, `566c7ce`; Make/CI integration added here.
-Enforced by `cargo fmt --all -- --check`, `python3 scripts/format.py --staged`, `make format-check hooks-install hooks-remove`, and CI's `python3 scripts/format.py --base` range check.
-One-time disposable checks cover staged-hook preservation, changed-range detection and the empty-tree first-push baseline.
+Current commands and staged-only publication semantics are defined in [docs/FORMATTING.md](docs/FORMATTING.md). `make hooks-run` exercises the real hook; `make format-check` checks working changes. The hook does not mirror formatted blobs into working files.
+One-time disposable checks cover staged-hook preservation, malformed-input rejection, changed-range detection and the empty-tree first-push baseline. Final safety evidence: immutable `9702973:TASKS_PART_SEVEN.md`; live completion is recorded only in [TASKS.md](TASKS.md#ad-hoc).
 
 ## Phase 8: Release (starts after phases 1 to 6)
 
@@ -736,7 +735,7 @@ The settings have these layers. The most specific layer wins. Layer 1: built-in 
 - **Depends on:** T037.
 - **Target Files:** `tests/plain_keys_safety.rs` (new), `tests/plain_keys_e2e.rs` (new), `tests/ui/scenarios/plain-keys-*.scn` (new), `docs/evidence/plain-keys-helix.md` (new).
 - **Acceptance:** Write a property test. It makes random edit sequences (inserts, deletes, pastes, undo-like re-inserts, mixed with renders and echoes) on a real disposable repository. Git state changes only for an armed, eligible candidate with the correct shape against a matching snapshot. After any divergence, the document equals the authoritative text. Add these targeted tests: a fast repeated key; a server echo never runs; a paste and a many-character input are rejected; edits in another URI are ignored; edits in a prompt field are field input; edits in the commit file are never read as keys; keys off ignores all edits; an old pending deletion never joins a later insert; an undo after a repair is repaired (document the known re-insert risk). Add plain-Neovim scenarios: a single-key stage in insert mode; a stage by visual-selection replace; typing with keys off is repaired; a destructive key is refused. Add a Helix manual checklist: selection-replace pairing; restore after the timeout for a lone deletion; keys on and off.
-- **Verify:** Run `make test-rust FILTER="--test plain_keys_safety --test plain_keys_e2e"` and `scripts/ui run tests/ui/scenarios/plain-keys-*.scn`.
+- **Verify:** Run `make test-rust FILTER="--test plain_keys_safety --test plain_keys_e2e"` and `make ui-file FILE='tests/ui/scenarios/plain-keys-*.scn'`.
 
 ### T039 plain-keys-docs (S)
 
