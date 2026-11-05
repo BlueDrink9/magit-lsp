@@ -26,6 +26,7 @@ START_TIMEOUT_MS = 20000
 SOCKET_TIMEOUT_MS = 15000
 SCREEN_POLL_MS = 50
 SCREEN_TIMEOUT_MS = 2000
+TMUX_TIMEOUT = 5.0
 
 
 class DriverError(RuntimeError):
@@ -166,10 +167,12 @@ def _forget_last_run(run_id: str) -> None:
 
 
 def _tmux(run: Run, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run one tmux command with a finite timeout."""
     result = subprocess.run(
         ["tmux", "-L", run.tmux, *args],
         capture_output=True,
         text=True,
+        timeout=TMUX_TIMEOUT,
     )
     if check and result.returncode != 0:
         raise DriverError(
@@ -637,7 +640,7 @@ def _cleanup(run: Run) -> None:
     """Remove every resource a run created; safe to call repeatedly."""
     try:
         _tmux(run, "kill-server", check=False)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
     shutil.rmtree(run.dir, ignore_errors=True)
     _forget_last_run(run.id)
@@ -879,7 +882,10 @@ def start(
         _update_last_run(run.id)
         return run
     except BaseException:
-        _cleanup(run)
+        try:
+            _cleanup(run)
+        except BaseException:
+            pass
         raise
 
 
@@ -934,12 +940,14 @@ def native_session(
                     ownership[role] = int(path.read_text(encoding="utf-8").strip())
                 except (OSError, ValueError):
                     ownership[role] = None
-        stop(run)
-        temporary.cleanup()
+        try:
+            stop(run)
+        finally:
+            temporary.cleanup()
 
 
 def stop(run: Run) -> None:
-    """Quit Neovim, kill its tmux server and delete the run's files."""
+    """Attempt bounded Neovim and tmux teardown, then delete run files."""
     if run.socket_path.exists():
         try:
             _nvim(
@@ -955,7 +963,7 @@ def stop(run: Run) -> None:
             time.sleep(0.02)
     try:
         _tmux(run, "kill-server", check=False)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
     shutil.rmtree(run.dir, ignore_errors=True)
     _forget_last_run(run.id)

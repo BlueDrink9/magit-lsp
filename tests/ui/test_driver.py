@@ -76,6 +76,26 @@ class DocumentTest(unittest.TestCase):
         self.assertIn("vim.json.encode", driver._DOCUMENT_EXPR)
 
 
+class TmuxTimeoutTest(unittest.TestCase):
+    def test_tmux_subprocess_has_finite_timeout(self) -> None:
+        run = make_run("/tmp/test-run")
+        result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch.object(driver.subprocess, "run", return_value=result) as subprocess_run:
+            driver._tmux(run, "list-sessions")
+        self.assertEqual(subprocess_run.call_args.kwargs["timeout"], driver.TMUX_TIMEOUT)
+
+    def test_cleanup_continues_after_tmux_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            with (
+                patch.object(driver, "_tmux", side_effect=subprocess.TimeoutExpired("tmux", 5)),
+                patch.object(driver, "_forget_last_run") as forget,
+            ):
+                driver._cleanup(run)
+            self.assertFalse(run.dir.exists())
+            forget.assert_called_once_with(run.id)
+
+
 class StateJsonTest(unittest.TestCase):
     def test_pretty_by_default_and_compact_when_indent_is_none(self) -> None:
         with patch.object(driver, "snapshot", return_value={"a": 1, "b": [2]}):

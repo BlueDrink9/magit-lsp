@@ -102,9 +102,10 @@ Last review: pending trace-cleanup gate at `6825e11`; substantial fixture retire
   - Verified: `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` @ 6825e11 → both newline variants pass; cleanup verified, no owned PIDs, socket or tmux session remain.
   - Verified: `make plain-neovim PLAIN_ARGS='--binary /bin/false --evidence /tmp/opencode/trace-cleanup-failure'` @ 6825e11 → expected exit 2; both newline variants record cleanup_verified=true, no owned PIDs, socket or tmux session remain.
 
-- [ ] **Trace review P2 — Bound shared tmux subprocesses.**
+- [x] **Trace review P2 — Bound shared tmux subprocesses.**
   Shared `_tmux` calls have no subprocess timeout, so native startup and teardown can exceed their claimed bounds. Add a consistent timeout and keep exception cleanup reliable.
   test: existing driver tests exercise timeout propagation and bounded cleanup without hiding failure.
+  - Verified: `make ui-unit` @ 944d823 → ok: ui-unit.
 
 ## Phase map
 
