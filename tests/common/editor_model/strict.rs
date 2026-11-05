@@ -32,8 +32,9 @@ pub fn check(capabilities: &Value, message: &Value) -> Result<(), String> {
         "view/render" | "view/keymap" => require(rich.is_object(), "rich rendering")?,
         "view/prompt" => {
             let kind = params["kind"].as_str().unwrap_or("");
-            let prompt = if params["secret"] == true { "secret" } else { kind };
-            require(rich["prompts"].as_array().is_some_and(|items| items.iter().any(|item| item == prompt)), "prompt")?;
+            let prompts = rich["prompts"].as_array();
+            let declares = |prompt: &str| prompts.is_some_and(|items| items.iter().any(|item| item == prompt));
+            require(declares(kind) && (params["secret"] != true || declares("secret")), "prompt")?;
         }
         "view/effects" => {
             require(rich.is_object(), "rich effects")?;

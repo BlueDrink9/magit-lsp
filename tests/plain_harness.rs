@@ -235,8 +235,8 @@ fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
         assert!(editor_model::strict::check(&plain, &message).is_err());
         assert!(editor_model::strict::check(&all, &message).is_ok());
     }
-    for prompt in ["text", "confirm", "choice", "multiChoice", "secret"] {
-        let message = json!({"method":"view/prompt","params":{"kind":prompt,"secret":prompt == "secret"}});
+    for prompt in ["text", "confirm", "choice", "multiChoice"] {
+        let message = json!({"method":"view/prompt","params":{"kind":prompt}});
         assert!(editor_model::strict::check(&rich, &message).is_err(), "undeclared {prompt}");
         let mut declared = rich.clone();
         declared["experimental"]["magit"]["prompts"] = json!([prompt]);
@@ -244,9 +244,17 @@ fn strict_guard_covers_response_effects_and_declared_feature_matrix() {
     }
     let secret_text = json!({"method":"view/prompt","params":{"kind":"text","secret":true}});
     assert!(editor_model::strict::check(&rich, &secret_text).is_err());
+    let mut text_declared = rich.clone();
+    text_declared["experimental"]["magit"]["prompts"] = json!(["text"]);
+    assert!(editor_model::strict::check(&text_declared, &secret_text).is_err());
     let mut secret_declared = rich.clone();
     secret_declared["experimental"]["magit"]["prompts"] = json!(["secret"]);
-    assert!(editor_model::strict::check(&secret_declared, &secret_text).is_ok());
+    assert!(editor_model::strict::check(&secret_declared, &secret_text).is_err());
+    let mut both_declared = rich.clone();
+    both_declared["experimental"]["magit"]["prompts"] = json!(["text", "secret"]);
+    assert!(editor_model::strict::check(&both_declared, &secret_text).is_ok());
+    let unknown_secret = json!({"method":"view/prompt","params":{"kind":"unknown","secret":true}});
+    assert!(editor_model::strict::check(&both_declared, &unknown_secret).is_err());
     let mixed = json!({"jsonrpc":"2.0","id":1,"result":{"effects":[{"type":"clipboard"},{"type":"unknown"}]}});
     assert!(editor_model::strict::check(&all, &mixed).is_err());
     for (feature, declaration, message) in [
