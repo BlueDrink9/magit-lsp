@@ -8,6 +8,7 @@
 
 use crate::keymap::{self, EditorMode, Keymap};
 use crate::keys::KeyChord;
+use crate::quirks;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -221,6 +222,8 @@ pub struct Config {
     pub profile: Profile,
     pub trust_repo_config: bool,
     pub keys: KeysConfig,
+    /// Validated per-client quirk overrides, layered by quirk identifier.
+    pub quirks: BTreeMap<String, bool>,
     pub diff: DiffSettings,
     pub sections: SectionSettings,
     pub ui: UiSettings,
@@ -247,6 +250,7 @@ impl Default for Config {
             profile: Profile::Vim,
             trust_repo_config: false,
             keys: KeysConfig::default(),
+            quirks: BTreeMap::new(),
             diff: DiffSettings {
                 context: 3,
                 whitespace: None,
@@ -454,6 +458,7 @@ struct Layered {
     profile: Option<Profile>,
     trust_repo_config: Option<bool>,
     keys: KeysConfig,
+    quirks: BTreeMap<String, bool>,
     diff_context: Option<u32>,
     diff_whitespace: Option<String>,
     sections_order: Option<Vec<String>>,
@@ -475,6 +480,7 @@ fn apply_layered(config: &mut Config, layered: Layered) {
         config.trust_repo_config = trust;
     }
     config.keys.merge(layered.keys);
+    config.quirks.extend(layered.quirks);
     if let Some(context) = layered.diff_context {
         config.diff.context = context;
     }
@@ -623,6 +629,21 @@ fn apply_document(
                     ConfigError::new("`keys` must be a table").at_file_line(file, line)
                 })?;
                 apply_keys(table, file, source, &mut layered.keys)?;
+            }
+            "quirks" => {
+                let table = settings_table(item, "quirks", file, line)?;
+                for (id, value) in table.iter() {
+                    let line = item_line(source, value);
+                    if !quirks::REGISTRY.iter().any(|quirk| quirk.id == id) {
+                        return Err(ConfigError::new(format!("unknown quirk id: {id}"))
+                            .at_file_line(file, line));
+                    }
+                    let enabled = value.as_bool().ok_or_else(|| {
+                        ConfigError::new(format!("quirk override {id} must be boolean"))
+                            .at_file_line(file, line)
+                    })?;
+                    layered.quirks.insert(id.to_string(), enabled);
+                }
             }
             "diff" => {
                 let table = settings_table(item, "diff", file, line)?;
@@ -982,6 +1003,15 @@ fn apply_initialization(config: &mut Config, value: &serde_json::Value) -> Resul
     }
     if let Some(keys) = value.get("keys") {
         config.keys.merge(keys_from_json(keys, &label)?);
+    }
+    if let Some(value) = value.get("quirks") {
+        let overrides = quirks::parse_overrides(Some(value))
+            .map_err(|message| ConfigError::new(message).at_file(&label))?;
+        config.quirks.extend(
+            overrides
+                .into_iter()
+                .map(|(id, enabled)| (id.to_owned(), enabled)),
+        );
     }
     if let Some(plain) = value.get("plain") {
         let Some(plain) = plain.as_object() else {

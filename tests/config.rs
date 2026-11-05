@@ -31,6 +31,62 @@ fn status_keymap(config: &magit_lsp::config::Config, command: &str) -> Vec<Strin
 }
 
 #[test]
+fn quirks_layer_by_id_and_validate_toml_and_initialization_options() {
+    let dir = TempDir::new().unwrap();
+    let include = dir.path().join("include.toml");
+    let user = dir.path().join("user.toml");
+    let repo = dir.path().join("repo");
+    write(&include, "[quirks]\nassume-show-document = true\n");
+    write(&user, "include = [\"include.toml\"]\ntrust_repo_config = true\n[quirks]\nassume-show-document = false\n");
+    write(
+        &repo.join(".magit-lsp.toml"),
+        "[quirks]\nassume-show-document = true\n",
+    );
+    let config = load_config(&LoadOptions {
+        config_path: Some(user),
+        repo_path: Some(repo),
+        initialization: Some(serde_json::json!({"quirks":{"assume-show-document":false}})),
+    })
+    .unwrap();
+    assert_eq!(config.quirks.get("assume-show-document"), Some(&true));
+
+    let init = load_config(&LoadOptions {
+        config_path: Some(include),
+        initialization: Some(serde_json::json!({"quirks":{"assume-show-document":false}})),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(init.quirks.get("assume-show-document"), Some(&false));
+
+    write(
+        &dir.path().join("bad.toml"),
+        "[quirks]\nnot-a-quirk = true\n",
+    );
+    assert!(load(&dir.path().join("bad.toml"))
+        .unwrap_err()
+        .message
+        .contains("unknown quirk id"));
+    write(
+        &dir.path().join("bad.toml"),
+        "[quirks]\nassume-show-document = 1\n",
+    );
+    assert!(load(&dir.path().join("bad.toml"))
+        .unwrap_err()
+        .message
+        .contains("must be boolean"));
+    write(&dir.path().join("bad.toml"), "quirks = true\n");
+    assert!(load(&dir.path().join("bad.toml"))
+        .unwrap_err()
+        .message
+        .contains("must be a table"));
+    assert!(load_config(&LoadOptions {
+        initialization: Some(serde_json::json!({"quirks":{"nope":true}})),
+        ..Default::default()
+    })
+    .is_err());
+}
+
+#[test]
 fn repository_services_cache_layers_and_reload_without_overwriting_base() {
     let dir = TempDir::new().unwrap();
     let root = dir.path().join("repo");

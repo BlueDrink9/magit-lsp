@@ -13,6 +13,10 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
 
 - [x] **T005.1 — Define the evidence-backed quirk registry and resolver.**
   Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `cargo test --test quirks` against captured initialize declarations, version/name boundaries, capability matching and override validation.
+- [x] **T005.2a — Add validated layered quirk settings.**
+  Extend existing configuration loading with a quirks table of known registry ids to booleans, including TOML layers and initializationOptions. Test precedence and rejection of invalid ids or values; preserve existing configuration recovery conventions.
+- [ ] **T005.2b — Resolve and report production initialize quirks.**
+  Consume layered settings and the registry at initialize, apply capability overrides and expose effective results; enforce production server behavior and strict rich negotiation in focused tests. Complete T005.2 after both children pass.
 - [ ] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
   Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
 - [ ] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
@@ -1236,6 +1240,8 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
   `stage=["s"]`, `discard=["x","Delete"]`, `amend=["a"]`). Arrays replace
   profile lists; `unbind=["K"]` removes a binding. A scope's `confirm=["Space"]`
   overrides common confirm only there (e.g. `[keys.log]`).
+- **Quirks:** `[quirks]` maps known registry ids to booleans; the same object
+  may be supplied in `initializationOptions`. Overrides merge by id across layers.
 - Other settings (non-exhaustive): `[diff] context, whitespace`, `[sections]
   order, default_visibility`, `[log] default_args, margin`, `[ui]
   confirm_discard = true`. Menu argument persistence semantics must be reviewed
