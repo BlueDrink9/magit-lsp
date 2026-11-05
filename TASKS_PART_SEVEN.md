@@ -34,6 +34,10 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   Remove static trace/sidecar comparisons and reconstructed parse-only checks. Keep all runtime recorder/security regressions. Use existing fake-editor/server tests for sequential edits, stale repair rejection, retry, undo and final text; add only missing behavior regressions.
   test: recorder, synchronization, harness, quirk and current capability-negotiation suites pass with live behavioral assertions. check: record the old-to-live coverage map and consumer audit in the commit message.
 
+- [x] **Trace cleanup 1b — Exercise stale rapid repair and undo against the server.**
+  The initial coverage map did not prove the full captured rapid-repair sequence. Add one focused live-server/FakeEditor regression: rapid edits while repair is outstanding, stale-version rejection, retry from the latest version, exact restoration, and undo followed by repair. Do not compare captured metadata.
+  test: the new regression exercises production transport and asserts final editor text and version-sensitive rejection/retry.
+
 - [ ] **Trace cleanup 2 — Delete dead fixtures and embedded capture programs.**
   Retain only live quirk inputs and current capability declarations. Remove unused traces, sidecars, initialize duplicates and Markdown programs after checking consumers; keep concise provenance with immutable Git references and maintained Make workflows. Delete the audit document and its references without replacing it.
   check: retired fixtures and capture recipes have no active consumers; preserved inputs retain honest native-evidence limits. test: retained quirk and negotiation suites pass.

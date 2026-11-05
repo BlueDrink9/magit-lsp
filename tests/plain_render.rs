@@ -218,6 +218,53 @@ fn binary_profiles_watch_and_repair_divergence_in_both_response_orders() {
 }
 
 #[test]
+fn binary_stale_rapid_repair_retries_latest_version_and_repairs_undo() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", fixtures::TEN_LINES)])
+        .build();
+    let path = repo.path().join(".magit");
+    fixtures::write(&path, "disk sentinel\n");
+    let uri = format!("file://{}", path.display());
+    let mut server = plain_server(repo.path(), true, true);
+    let mut editor = FakeEditor::new(Profile::Standard);
+    server.send(editor.open(&uri, "stale"));
+    let initial = next_edit(&mut server);
+    assert_eq!(editor.apply_edit(&initial["params"]["edit"])["applied"], true);
+    let expected = editor.text(&uri).to_owned();
+    server.send(json!({"jsonrpc":"2.0","id":initial["id"],"result":{"applied":true}}));
+
+    server.send(editor.edit(&uri, "rapid edit one"));
+    server.send(editor.edit(&uri, "rapid edit two"));
+    let stale_repair = next_edit(&mut server);
+    let stale_version = stale_repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
+    let latest_change = editor.edit(&uri, "rapid edit three");
+    let latest_version = latest_change["params"]["textDocument"]["version"].clone();
+    server.send(latest_change);
+    assert_ne!(stale_version, latest_version);
+    let rejected = editor.apply_edit(&stale_repair["params"]["edit"]);
+    assert_eq!(rejected["applied"], false);
+    assert!(rejected["failureReason"].as_str().unwrap().contains("version"));
+    server.send(json!({"jsonrpc":"2.0","id":stale_repair["id"],"result":rejected}));
+
+    let retry = next_edit(&mut server);
+    assert_eq!(retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], latest_version);
+    assert_eq!(editor.apply_edit(&retry["params"]["edit"])["applied"], true);
+    assert_eq!(editor.text(&uri), expected);
+    server.send(json!({"jsonrpc":"2.0","id":retry["id"],"result":{"applied":true}}));
+    server.send(editor.edit(&uri, &expected));
+
+    // Undo restores the user's pre-repair text; server must repair it again.
+    server.send(editor.edit(&uri, "rapid edit three"));
+    let undo_repair = next_edit(&mut server);
+    assert_eq!(editor.apply_edit(&undo_repair["params"]["edit"])["applied"], true);
+    assert_eq!(editor.text(&uri), expected);
+    server.send(json!({"jsonrpc":"2.0","id":undo_repair["id"],"result":{"applied":true}}));
+    server.send(editor.edit(&uri, &expected));
+    server.shutdown_and_exit();
+    assert!(server.finish(std::time::Duration::from_secs(10)).success());
+}
+
+#[test]
 fn binary_open_sentinel_converges_after_true_response_before_faithful_eof_echo() {
     for (source, expected_ending) in [
         ("sentinel\n", "\n"),
