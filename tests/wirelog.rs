@@ -118,11 +118,21 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     }
     let selected = load("plain-neovim-0.12.6-actions.json");
     let selected_rows = read_rows("plain-neovim-0.12.6-actions.jsonl");
+    assert_eq!(selected["fixture_source_rows"], json!([9, 14]));
     let selected_indices = selected["fixture_source_rows"].as_array().unwrap();
     let action_metadata = selected["actions"].as_array().unwrap();
     assert_eq!(selected_indices.len(), 2);
     assert_eq!(selected_rows.len(), 2);
     assert_eq!(action_metadata.len(), 3);
+    assert_eq!(action_metadata[0]["action"], "visual replacement");
+    assert_eq!(action_metadata[0]["keys"], "1G0vllrX<Esc>");
+    assert_eq!(action_metadata[1]["action"], "one-character register paste");
+    assert_eq!(action_metadata[1]["keys"], "gg0\"ap");
+    assert_eq!(
+        action_metadata[2]["action"],
+        "multi-character register paste"
+    );
+    assert_eq!(action_metadata[2]["keys"], "gg0\"ap");
     assert_eq!(selected_indices.len(), selected_rows.len());
     for (position, (index, row)) in selected_indices.iter().zip(&selected_rows).enumerate() {
         assert_eq!(index.as_u64().unwrap() as usize, [9, 14][position]);
@@ -175,15 +185,40 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
 
     let helix = load("helix-25.07.1-actions.json");
     let helix_rows = read_rows("helix-25.07.1-actions.jsonl");
+    assert_eq!(helix["source_rows"], json!([10, 16, 22]));
     let expected = [
-        ("selection_replace", 10, "XXX", 2),
-        ("named_register_paste_one", 16, "H", 4),
-        ("named_register_paste_multi", 22, "Hea", 6),
+        (
+            "selection_replace",
+            10,
+            "XXX",
+            2,
+            json!(["Escape", "g", "g", "g", "h", "v", "l", "l", "r", "X"]),
+        ),
+        (
+            "named_register_paste_one",
+            16,
+            "H",
+            4,
+            json!([
+                "Escape", "g", "g", "g", "h", "\"", "a", "y", "Escape", "g", "g", "g", "h", "\"",
+                "a", "p"
+            ]),
+        ),
+        (
+            "named_register_paste_multi",
+            22,
+            "Hea",
+            6,
+            json!([
+                "Escape", "g", "g", "g", "h", "v", "l", "l", "\"", "b", "y", "Escape", "g", "g",
+                "g", "h", "\"", "b", "p"
+            ]),
+        ),
     ];
     assert_eq!(helix["actions"].as_array().unwrap().len(), 3);
     assert_eq!(helix_rows.len(), 3);
     assert_eq!(helix["source_rows"].as_array().unwrap().len(), 3);
-    for (position, (action, (name, row_number, text, version))) in helix["actions"]
+    for (position, (action, (name, row_number, text, version, keys))) in helix["actions"]
         .as_array()
         .unwrap()
         .iter()
@@ -191,7 +226,8 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         .enumerate()
     {
         assert_eq!(action["name"], name);
-        assert_eq!(action["wire_rows"][0], row_number);
+        assert_eq!(action["keys"], keys);
+        assert_eq!(action["wire_rows"], json!([row_number, row_number + 2]));
         let row = &helix_rows[position];
         assert_eq!(method(row), "textDocument/didChange");
         assert_eq!(row["raw"]["params"]["textDocument"]["version"], version);
@@ -206,16 +242,17 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
             changes(row)[0]["range"]["start"]["character"],
             if name == "selection_replace" { 0 } else { 1 }
         );
-        assert_eq!(action["wire_rows"].as_array().unwrap().len(), 2);
-        assert_eq!(action["wire_rows"][1], expected[position].1 + 2);
         assert_eq!(action["before"], action["after"]);
     }
 
     let rapid = load("plain-neovim-0.12.6-rapid-repair.json");
     let rapid_rows = read_rows("plain-neovim-0.12.6-rapid-repair.jsonl");
+    assert_eq!(rapid["fixture_source_rows"], json!([9, 10, 13, 14]));
     assert_eq!(rapid["fixture_source_rows"].as_array().unwrap().len(), 4);
     assert_eq!(rapid_rows.len(), 4);
     let rapid_action = &rapid["actions"]["rapid_input"];
+    assert_eq!(rapid_action["keys"], "gg0iRAPID<Esc>");
+    assert_eq!(rapid_action["wire_row_offset"], 8);
     let hash = |text: &str| format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         hash(rapid_action["before"]["text"].as_str().unwrap()),
@@ -260,6 +297,7 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
     let request = retained_index(&repair["request_source_row"]);
     let reply = retained_index(&repair["reply_source_row"]);
     let undo = retained_index(&repair["editor_echo_source_row"]);
+    assert_eq!([did, request, reply, undo], [0, 1, 2, 3]);
     assert!(did < request && request < reply && reply < undo);
     assert_eq!(method(&rapid_rows[did]), "textDocument/didChange");
     assert_eq!(changes(&rapid_rows[did])[1]["text"], "RAPID");
@@ -293,6 +331,7 @@ fn action_sidecars_match_retained_wire_rows_and_state_hashes() {
         uri.as_str()
     );
     let reply_row = &rapid_rows[reply];
+    assert_eq!(repair["reply"], *reply_row);
     assert_eq!(reply_row["direction"], "in");
     assert_eq!(reply_row["raw"]["id"], repair["request_id"]);
     assert_eq!(reply_row["raw"]["result"]["applied"], true);
