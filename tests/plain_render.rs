@@ -143,6 +143,77 @@ fn plain_server(root: &std::path::Path, apply: bool, versioned: bool) -> stdio::
     server
 }
 
+fn workaround_server(root: &std::path::Path, client: Value, overrides: Value) -> stdio::TestServer {
+    let mut server = stdio::TestServer::spawn(&[]);
+    let mut init = stdio::initialize_message();
+    init["params"]["clientInfo"] = client;
+    init["params"]["capabilities"] = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true}},"textDocument":{"codeAction":{"dynamicRegistration":true}}});
+    init["params"]["initializationOptions"] = json!({"quirks":overrides});
+    init["params"]["workspaceFolders"] = json!([{"uri":format!("file://{}",root.display()),"name":"repo"}]);
+    server.send(init);
+    assert!(server.response_with_id(1)["result"].is_object());
+    server.send(json!({"jsonrpc":"2.0","method":"initialized","params":{}}));
+    server
+}
+
+#[test]
+fn named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety() {
+    let workaround_names: Vec<_> = magit_lsp::quirks::REGISTRY.iter().filter_map(|q| q.workaround).collect();
+    assert_eq!(workaround_names, vec!["reconcile-apply-result"]);
+    for name in workaround_names {
+        match name {
+            "reconcile-apply-result" => {}
+            other => panic!("uncovered server workaround: {other}"),
+        }
+        for (client, overrides, server_override) in [
+            (json!({"name":"Neovim","version":"0.12.6"}), json!({"apply-result-unreliable":true}), json!({})),
+            (json!({"name":"Neovim","version":"0.12.6"}), json!({"apply-result-unreliable":true}), json!({"apply-result-unreliable":false})),
+            (json!({"name":"Unknown","version":"1"}), json!({"apply-result-unreliable":true}), json!({})),
+        ] {
+            let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", fixtures::TEN_LINES)]).build();
+            let path = repo.path().join(".magit");
+            fixtures::write(&path, "disk sentinel\n");
+            let uri = format!("file://{}", path.display());
+            let mut server = workaround_server(repo.path(), client.clone(), server_override);
+            let empty_capabilities = json!({});
+            let resolution = magit_lsp::quirks::resolve(magit_lsp::quirks::Client { name: client["name"].as_str(), version: client["version"].as_str(), capabilities: &empty_capabilities }, Some(&overrides)).unwrap();
+            let mut editor = FakeEditor::from_resolution(Profile::Standard, &resolution);
+            server.send(editor.open(&uri, "stale"));
+            let initial = next_edit(&mut server);
+            assert_eq!(initial["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+            assert_eq!(editor.apply_edit(&initial["params"]["edit"])["applied"], true);
+            let authoritative = editor.text(&uri).to_owned();
+            server.send(json!({"jsonrpc":"2.0","id":initial["id"],"result":{"applied":true}}));
+            server.send(editor.edit(&uri, "rapid one"));
+            server.send(editor.edit(&uri, "rapid two"));
+            let stale = next_edit(&mut server);
+            assert_eq!(stale["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+            let stale_version = stale["params"]["edit"]["documentChanges"][0]["textDocument"]["version"].clone();
+            let latest = editor.edit(&uri, "rapid three");
+            let latest_version = latest["params"]["textDocument"]["version"].clone();
+            server.send(latest);
+            assert_ne!(stale_version, latest_version);
+            let stale_result = editor.apply_edit(&stale["params"]["edit"]);
+            assert_eq!(stale_result["applied"], true);
+            assert_ne!(editor.text(&uri), authoritative);
+            server.send(json!({"jsonrpc":"2.0","id":stale["id"],"result":stale_result}));
+            let retry = next_edit(&mut server);
+            assert_eq!(retry["params"]["edit"]["documentChanges"].as_array().unwrap().len(), 1);
+            assert_eq!(retry["params"]["edit"]["documentChanges"][0]["textDocument"]["version"], latest_version);
+            server.send(json!({"jsonrpc":"2.0","id":70,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
+            assert!(server.response_with_id(70)["result"].as_array().unwrap().is_empty());
+            for frame in editor.dispatch(&retry) { server.send(frame); }
+            assert_eq!(editor.text(&uri), authoritative);
+            server.send(editor.edit(&uri, &authoritative));
+            server.send(json!({"jsonrpc":"2.0","id":71,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"context":{"diagnostics":[]}}}));
+            assert!(!server.response_with_id(71)["result"].as_array().unwrap().is_empty());
+            assert_eq!(std::fs::read(&path).unwrap(), b"disk sentinel\n");
+            server.shutdown_and_exit();
+            assert!(server.finish(std::time::Duration::from_secs(10)).success());
+        }
+    }
+}
+
 #[test]
 fn binary_profiles_watch_and_repair_divergence_in_both_response_orders() {
     for profile in [
