@@ -21,7 +21,7 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **Documentation cleanup — Repair recent review completion pointers.** Done: `f13dbc1`.
 - [x] **Documentation cleanup — Repair older review completion pointers.** Done: `e464429`.
 - [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Done: `3ec4751`; provenance correction: `f13dbc1`, `e464429`.
-- [x] **Documentation cleanup — Compact documentation completion records.**
+- [x] **Documentation cleanup — Compact documentation completion records.** Done: `a45fcde`.
   - Verification provenance: immutable `e464429:TASKS.md` retains historical check commands; completion refs above identify implementation commits.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` → ok: docs-check.
 
