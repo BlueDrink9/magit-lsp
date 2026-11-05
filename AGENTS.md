@@ -46,10 +46,9 @@ Start in these components:
 ## Read the right source
 
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap and queue. Decisions,
-  glossary and correctness contracts live in
-  [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Expanded design and protocol
-  remain in TASKS.md (§§3–4), as do keymaps (§5), views (§6), testing (§8) and
-  open questions (§9). Read only relevant sections; immutable historical sources
+  glossary, correctness contracts and architecture design (§§0–3) live in
+  [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Protocol (§4), keymaps (§5),
+  views (§6), testing (§8) and open questions (§9) remain in TASKS.md. Read only relevant sections; immutable historical sources
   are provenance, not proof of current behaviour. Do not duplicate detailed
   design or progress history here.
 - [`README.md`](./README.md) is user-facing: overview, supported features,

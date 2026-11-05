@@ -50,7 +50,7 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   listed as `Planned` and reports its roadmap item. `Escape`, `ctrl+c` or `q`
   closes the menu; `ctrl+s`/`ctrl+r` save/reset the current arguments.
 - **Commit message editor**: `c c` with a staged change starts `git commit`
-  through the editor bridge (§3.10). The server now owns versioned managed
+  through the [editor bridge](docs/ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor). The server now owns versioned managed
   drafts: saving checkpoints only; explicit finish or normal user close submits
   the selected saved checkpoint, while explicit abort cancels. Native Neovim
   and VSCode adapters are still pending migration (R-EDIT-4/5/6); native commit
@@ -58,7 +58,7 @@ easy to build for any editor. See `AGENTS.md` for the protocol and internals.
   up to 50 submitted messages / 1 MiB per repository, including failed commits,
   with previous/next recall and unsent-draft restoration; recall never saves or
   commits. Adapter authors should use the versioned `draft/history` replacement
-  contract in `TASKS.md` §3.10, not client-owned history. Credential prompts from
+  contract in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor), not client-owned history. Credential prompts from
   Git (SSH passphrases, HTTPS tokens) still go through the same bridge.
 - **Colourised** buffer (sections, file statuses, `+`/`-` diff lines).
 - **Foldable** sections and files: the server owns visibility, and the client
@@ -245,7 +245,7 @@ The client declares `keymapDelivery = "dynamic"` and `keyModifiers = "basic"`
 in terminals (`"full"` in a GUI), then applies every `view/keymap` the server
 sends atomically: it deletes exactly the maps it applied last time, sets the
 new buffer-local maps and records them in one synchronous call. Keys are
-translated from the canonical notation of TASKS.md §3.8 (`ctrl+c`, `g r`,
+translated from the canonical notation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#38-key-notation) (`ctrl+c`, `g r`,
 `shift+Tab`, …) by `lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
 binding comes from the server.
 

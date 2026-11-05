@@ -29,12 +29,12 @@ Hygiene remains report-only: one unlisted dependency, 69 unused exports and 34 L
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md"` @ `f82856e` → ok: docs-check.
 - [x] **Documentation cleanup — Move workflow design reference.** Relocate §§3.10–3.19 into `docs/ARCHITECTURE.md`, rebase links and finish the architecture navigation updates.
-  - Done: containing commit.
+  - Done: `338b9de`.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md AGENTS.md README.md docs/CLIENT_SPEC.md ui-test-plan.md hygiene-allowlist.md LICENSING.md"` @ `9f8f28f` → ok: docs-check.
 - [x] **Documentation cleanup — Move expanded design reference.** Append §3, including §3.19, to `docs/ARCHITECTURE.md`, preserve numbered anchors and rebase links, and update maintained design references and source entry points. Complete after the two preceding bounded relocations.
-  - Done: containing commit.
+  - Done: `338b9de`.
 - [x] **Documentation cleanup — Move architecture and glossary reference.** Move §§0–3 intact into `docs/ARCHITECTURE.md`, preserving section identifiers and updating maintained links and entry points. Keep all queue items in `TASKS.md`. Split into the two preceding slices after two unchanged checkpoints.
-  - Done: containing commit.
+  - Done: `338b9de`.
 - [ ] **Documentation cleanup — Move protocol reference.** Move §4 into `docs/PROTOCOL.md` and update maintained references without changing the wire contract.
 - [ ] **Documentation cleanup — Move keymaps and view reference.** Move §§5–6 into `docs/KEYMAPS.md` and `docs/VIEWS.md` and update maintained references without changing behavior.
 - [ ] **Documentation cleanup — Move testing and open questions reference.** Move §§8–9 into `docs/TESTING.md` and `docs/OPEN_QUESTIONS.md`, update maintained links, and audit the parent migration acceptance.
