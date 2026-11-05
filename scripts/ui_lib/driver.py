@@ -681,7 +681,7 @@ def _nvim_argv(run: Run, init: Path = MINIMAL_INIT, initial_file: Path | None = 
     ]
 
 
-def _launcher_script(run: Run, env: dict[str, str], init: Path = MINIMAL_INIT, initial_file: Path | None = None) -> Path:
+def _launcher_script(run: Run, env: dict[str, str], init: Path = MINIMAL_INIT, initial_file: Path | None = None, roles: dict[str, Path] | None = None) -> Path:
     """Write a tiny launcher script and return its path.
 
     Passing the cleared environment on the tmux command line made `respawn-pane`
@@ -705,11 +705,29 @@ def _launcher_script(run: Run, env: dict[str, str], init: Path = MINIMAL_INIT, i
         'exit "$status"',
         "",
     ]
+    if roles and "editor" in roles:
+        wrapper = _role_wrapper(run, "editor", roles["editor"], _nvim_argv(run, init, initial_file))
+        arguments[-len(_nvim_argv(run, init, initial_file)):] = [str(wrapper)]
     script.write_text("\n".join(lines), encoding="utf-8")
     # The script contains the whole cleared environment, which may include
     # credentials inherited from the parent shell; keep it owner-only.
     script.chmod(0o600)
     return script
+
+
+def _role_wrapper(run: Run, role: str, pid_file: Path, command: list[str]) -> Path:
+    """Write an exec-safe wrapper that atomically records one process role."""
+    wrapper = run.dir / f"{role}-exec.sh"
+    record = shlex.quote(str(pid_file))
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$$\" > {record}.tmp\n"
+        f"mv {record}.tmp {record}\n"
+        f"exec {shlex.join(command)}\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+    return wrapper
 
 
 def _launcher_command(run: Run) -> str:
@@ -873,11 +891,15 @@ def native_session(
     initial_file: Path,
     env: dict[str, str],
     size: str = f"{DEFAULT_SIZE[0]}x{DEFAULT_SIZE[1]}",
+    ownership: dict[str, int | None] | None = None,
+    server_command: list[str] | None = None,
 ):
     """Run Neovim for an externally prepared repo and always clean up its session.
 
     `env` is the complete environment passed to Neovim. Socket and launcher state
     live in a short temporary path, independent of repository and home paths.
+    When given, `server_command` is wrapped and its path is exposed as
+    `MAGIT_LSP_SERVER_WRAPPER` in the Neovim environment.
     """
     cols, rows = parse_size(size)
     check_tools()
@@ -892,7 +914,11 @@ def native_session(
         socket = startup.inspect_socket(run.socket_path)
         if socket.too_long:
             raise StartupError("native session socket path is too long")
-        _launcher_script(run, env, init, initial_file)
+        role_files = {role: directory / f"{role}.pid" for role in ("editor", "server")}
+        if server_command is not None:
+            server_wrapper = _role_wrapper(run, "server", role_files["server"], server_command)
+            env = {**env, "MAGIT_LSP_SERVER_WRAPPER": str(server_wrapper)}
+        _launcher_script(run, env, init, initial_file, role_files)
         _tmux(run, "new-session", "-d", "-s", SESSION, "-x", str(run.cols), "-y", str(run.rows), "-c", str(repo))
         _tmux(run, "set", "-g", "escape-time", "0")
         _tmux(run, "set", "-g", "status", "off")
@@ -901,6 +927,13 @@ def native_session(
         _wait_for_socket(run, readiness_probe=_rpc_probe)
         yield run
     finally:
+        if ownership is not None:
+            for role in ("editor", "server"):
+                path = directory / f"{role}.pid"
+                try:
+                    ownership[role] = int(path.read_text(encoding="utf-8").strip())
+                except (OSError, ValueError):
+                    ownership[role] = None
         stop(run)
         temporary.cleanup()
 

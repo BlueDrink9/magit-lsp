@@ -69,6 +69,15 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   check: both newline variants pass the retained native workflow and report verified owned-process/socket cleanup.
   - Verified: `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` @ 13c2ea0 → ok: build; ok: plain-neovim. Both variants report cleanup_verified=true, nvim_socket_remains=false, remaining_owned_pids=[].
 
+- [x] **Trace cleanup 3f1 — Record native launch ownership in shared lifecycle.**
+  Shared native sessions write role-tagged PID records before exec, independent of Neovim RPC. Preserve foreground terminal input and launcher exit diagnostics. Capture records before teardown removes temporary files; support the acceptance server command through the same lifecycle.
+  test: existing driver tests cover role records, exec-safe wrappers, missing evidence and teardown capture. Verify with `make ui-unit`.
+  - Verified: `make ui-unit` @ 8bd02e3 → ok: ui-unit
+
+- [ ] **Trace cleanup 3f — Make native cleanup evidence non-vacuous.**
+  Success currently records only the editor PID; early failure can record none while claiming cleanup. Track owned editor and server processes through the maintained lifecycle, even before state polling succeeds. Verify the owned tmux session and socket are gone without scanning or killing unrelated processes.
+  test: cover early failure and complete owned-process evidence through existing harness tests. check: success and controlled failure runs report non-vacuous cleanup evidence for both newline variants.
+
 - [ ] **Trace cleanup 3c — Verify retained native workflow and finalize retirement.**
   Run retained Plain Neovim acceptance for both newline variants through Make, plus a controlled failure-path cleanup check. Finish authoritative migration and concise retained-workflow documentation; preserve unrelated formatter hunks.
   check: record exact native results and owned-process/socket cleanup for success and failure, plus Linux-only evidence and Windows/macOS CI limits. Complete the parent only after the cleanup gate.

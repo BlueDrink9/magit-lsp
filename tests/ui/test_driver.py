@@ -590,6 +590,23 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeSessionTest(unittest.TestCase):
+    def test_exec_wrappers_record_roles_and_missing_server_stays_unproven(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            run.dir.mkdir(exist_ok=True)
+            roles = {name: run.dir / f"{name}.pid" for name in ("editor", "server")}
+            driver._launcher_script(run, {}, roles=roles)
+            wrapper = run.dir / "editor-exec.sh"
+            text = wrapper.read_text(encoding="utf-8")
+            self.assertIn('"$$"', text)
+            self.assertIn("exec ", text)
+            self.assertNotIn("&", text)
+            server_wrapper = driver._role_wrapper(run, "server", roles["server"], ["server-bin", "--foreground"])
+            server_text = server_wrapper.read_text(encoding="utf-8")
+            self.assertIn('"$$"', server_text)
+            self.assertIn("exec server-bin --foreground", server_text)
+            self.assertFalse(roles["server"].exists())
+
     def test_rpc_readiness_uses_only_standard_expression(self) -> None:
         result = subprocess.CompletedProcess([], 0, stdout="1\n", stderr="")
         with patch.object(driver, "_nvim", return_value=result) as nvim:
@@ -606,9 +623,11 @@ class NativeSessionTest(unittest.TestCase):
             init.touch()
             initial.touch()
             launched: dict[str, object] = {}
+            ownership: dict[str, int | None] = {}
 
-            def launcher(run, env, config, file):
-                launched.update(run=run, env=env, config=config, file=file)
+            def launcher(run, env, config, file, roles=None):
+                launched.update(run=run, env=env, config=config, file=file, roles=roles)
+                roles["editor"].write_text("123\n", encoding="utf-8")
 
             with (
                 patch.object(driver, "check_tools"),
@@ -618,7 +637,7 @@ class NativeSessionTest(unittest.TestCase):
                 patch.object(driver, "stop") as stop,
             ):
                 with self.assertRaisesRegex(driver.StartupError, "not ready"):
-                    with driver.native_session(repo, home, init, initial, {"CUSTOM": "yes"}, size="120x100"):
+                    with driver.native_session(repo, home, init, initial, {"CUSTOM": "yes"}, size="120x100", ownership=ownership):
                         self.fail("readiness failure must not enter session")
             run = launched["run"]
             self.assertEqual(launched["env"], {"CUSTOM": "yes"})
@@ -630,6 +649,7 @@ class NativeSessionTest(unittest.TestCase):
             self.assertTrue(any(call_args.args[1:3] == ("new-session", "-d") and call_args.args[5:9] == ("-x", "120", "-y", "100") for call_args in tmux.call_args_list))
             self.assertLessEqual(len(str(run.socket_path).encode()), startup.SOCKET_PATH_LIMIT)
             stop.assert_called_once_with(run)
+            self.assertEqual(ownership, {"editor": 123, "server": None})
 
     def test_invalid_size_is_rejected_before_launch(self) -> None:
         with (
