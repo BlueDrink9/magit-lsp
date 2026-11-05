@@ -248,9 +248,12 @@ mod tests {
         assert_rejected(|| {
             ui.prompt(value);
         });
-        let ui = CustomRender::negotiated(|| Some(caps(&["secret"], &["confirm"], &["main"])));
         let mut secret_only = prompt(PromptKind::Text);
         secret_only.secret = Some(true);
+        let secret_only_caps = caps(&[], &["secret"], &["main"]);
+        assert!(secret_only_caps.supports_prompt("secret"));
+        assert!(!secret_only_caps.supports_prompt("text"));
+        let ui = CustomRender::negotiated(move || Some(secret_only_caps.clone()));
         assert!(!ui.allows_prompt(&secret_only));
         assert_rejected(|| {
             ui.prompt(secret_only);
