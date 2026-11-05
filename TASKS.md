@@ -28,7 +28,11 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 - [x] **Documentation cleanup — Compact T006 and T007 completion records.** Shorten completed prerequisite records without losing live audit evidence, acceptance dependencies or native evidence limits.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `e50d516` → ok: docs-check. Manual preservation audit: compacted checked records through T007.3; verified unchecked blocks unchanged and T007.4 records untouched, including externally updated T007.4a1/a2/a; retained T007.1n native.json paths/timeout risk, T007.5 six-clause native requirement, original clause coverage, model/server and declaration/native evidence limits.
-- [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints.
+- [x] **Documentation cleanup — Compact formatter completion records.** Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c14eadc` → ok: docs-check. Manual bounded-diff audit: compacted six checked T120 children and reconciliation records; retained titles, recorded hashes, Done/Verified distinctions, live Part Seven sole-queue/scope requirement, T011/T025 ownership, workflow links, unchecked task blocks and external T007.4 changes.
+- [ ] **Documentation cleanup — Compact quirk completion records.** Condense the checked T005 records while preserving explicit completion and verification references.
+- [ ] **Documentation cleanup — Compact capability and recorder completion records.** Condense checked T004–T001 records and remove the dated checkpoint after retaining live limits.
+- [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints. Split into the three preceding bounded record groups.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
 - [ ] **Documentation cleanup — Condense obsolete history and preserve live work.** Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links. Complete after the two preceding cleanup slices.
 
@@ -76,40 +80,33 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
 
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
-  Make this file the sole status queue. Preserve unfinished numbered work in a compact linked index; retain Part Seven as scope/provenance, not a competing completion ledger. Remove stale execution directives without closing genuine gaps.
-  Done: `6d08d85`. Verified: authority-pointer sweep finds no live instruction to execute Part Seven as a queue; its detailed scopes remain mandatory references. No feature acceptance was closed.
+  Done: `6d08d85`.
 - [x] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
-  Give each unfinished heading/table ticket its own checkbox and valid specification link. Retain phase order and owner-request gates; keep T105 only in Phase 6A and T005 child status in Ad hoc.
-  Done: `6d08d85`. Verified: the §7 scan finds all 114 unique T006–T119 entries, no missing or duplicate IDs, and no invalid specification anchors. T005 retains its existing open children; deferred owner-request guards remain. Documentation-only `make ui-unit` passed (`ok: ui-unit`).
+  Done: `6d08d85`.
 - [x] **Roadmap reconciliation — Refresh protocol and evidence guidance.**
-  Correct current Plain selection and quirk-test references. Condense obsolete trace/formatter narratives into immutable provenance and current workflow links; preserve unproved T005 acceptance and deferred debt.
-  Done: `6d08d85`. Verified: current Plain initialize selection and the named didOpen regression were checked against source/tests; outgoing quirk variants and appendix acceptance remain unchecked. Historical recorder evidence links replace obsolete current-enforcement claims.
+  Done: `6d08d85`.
 - [x] **Roadmap reconciliation — Route active verification through Make.**
-  Replace live direct test/UI command instructions with existing Make targets. Preserve historical command records as labeled provenance and identify any missing target explicitly.
-  Done: `6d08d85`. Verified: unfinished specification command sweep uses Make targets; T011 owns missing schema-drift integration and T025 owns missing native-host integration. Native F5 verification requires a suitable Make target; unit/integration results are not native evidence. `git diff --check` passed.
+  Done: `6d08d85`.
 
 - [x] **Investigate and rationalize trace/capture test infrastructure.**
-  Done: `5025937` (cleanup implementation and verification linked in immutable `5025937:TASKS_PART_SEVEN.md`). Current retained coverage and native workflow: [fixture guide](tests/fixtures/lsp_traces/README.md) and [UI test plan](ui-test-plan.md). Static trace/parser gates and embedded capture programs are retired; native causality limits remain explicit.
+  Done: `5025937`. Current workflow: [fixture guide](tests/fixtures/lsp_traces/README.md), [UI test plan](ui-test-plan.md).
 - [x] **Autofix staged formatting through shared hook and Make commands.**
-  Done: `9702973`, including final index-publication safety fix `fa5c3de`. Current staged-only behavior and contributor commands: [formatting guide](docs/FORMATTING.md). Disposable real-hook verification is recorded at immutable `9702973:TASKS_PART_SEVEN.md`; no permanent formatter tests.
+  Done: `9702973`; final index-publication fix `fa5c3de`. Current guide: [formatting guide](docs/FORMATTING.md).
 
 - [x] **Remove permanent formatter tests and retain one-time verification.**
-  Remove the formatter/hook test suite as requested; verify the tools and staged-safe hook once in disposable repositories. Update T120 acceptance and CI scope accordingly; finish formatter setup, then stop without advancing unrelated roadmap work.
+  Source-only: `bceb82d:TASKS.md`.
 
-Historical trace/capture evidence and implementation records below describe the state at immutable Git revision `83f79f5cbf2e272a8be92673ef3c8bd41118c23e`; they are not active capture workflows. Current cleanup status is tracked in this file's [Ad hoc queue](#ad-hoc).
+Historical references are provenance, not current instructions. Current workflow: [fixture guide](tests/fixtures/lsp_traces/README.md), [UI test plan](ui-test-plan.md), [formatting guide](docs/FORMATTING.md).
+This file remains the sole queue; Part Seven is scope/provenance, not a competing queue. T011 owns schema-drift integration; T025 owns native-host integration.
 
 - [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
-  Implement the requested hook tooling foundation with locked StyLua and Prettier dependencies and repository-owned configurations. Cover maintained Lua and JS/TS sources; preserve unrelated release changes and immutable fixtures.
 - [x] **T120.2 — Implement staged-safe formatter checks.**
-  Done: added `python3 scripts/format.py --staged` and `--base <commit>` with isolated index/HEAD snapshots, changed-source checks, pinned StyLua/Prettier and workspace Rust formatting. One-time disposable verification confirms staged-content checks preserve the index and working copy.
 - [x] **T120.3a — Add opt-in formatter hook installation.**
-  Done: added `scripts/install-hooks.sh` install/remove commands and `.githooks/pre-commit`; one-time disposable verification checked install safety and real staged hook behavior.
 - [x] **T120.3a1 — Isolate missing-tool tests and preserve existing hook locations.**
-  Fix the missing-formatter test so it never deletes a binary through shared node_modules; restore locked dependencies. Resolve default hooks through Git for worktrees, preserve custom hooks, and give actionable missing-Python guidance.
 - [x] **T120.3b — Integrate formatter CI checks and contributor commands.**
-  Add shared Make targets, committed-range CI checking and focused contributor documentation, without permanent formatter tests. Keep legacy-source normalization out of scope, close T120 after its children pass, and preserve concurrent work.
 - [x] **T120.3 — Wire formatter hooks, installation and CI.**
-  Add an opt-in repository-owned pre-commit hook, safe installation/removal, Make targets and contributor documentation. Run staged-content formatter checks in the hook and CI; use one-time disposable verification, not permanent formatter tests. Close T120 after all slices pass.
+
+T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
 
 - [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
   Historical formatting checkpoint; superseded by completed T120 and the staged-only hook follow-up above. Use [current formatting guidance](docs/FORMATTING.md), not this record as a workspace-wide formatting claim.
