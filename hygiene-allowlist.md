@@ -108,20 +108,20 @@ Tracked marker matches:
   fixture inputs and assertions enforcing those needles and report formats.
 - `src/config.rs:136`, `:143`, `:145`, `:152`, `:159`, `:161`: inactive or
   partially applied configuration schema, with roadmap references in source;
-  review against TASKS §3.18 / R-5.5 / R-3.6 / R-5.1.
+  review against [architecture §3.18](docs/ARCHITECTURE.md#318-configuration) / R-5.5 / R-3.6 / R-5.1.
 - `src/errors.rs:33`, `src/protocol.rs:29`: optional process-log link retained
   by IMM-3/R-3.7 although no current producer sets it.
 - `src/protocol.rs:37`: effect contract supports `PushView` through shared
   server handling.
-- `src/keymap.rs:63`: keymap payload metadata retained per TASKS §3.9 despite
+- `src/keymap.rs:63`: keymap payload metadata retained per [architecture §3.9](docs/ARCHITECTURE.md#39-keybinding-architecture) despite
   no functional client reader.
-- `src/menu.rs:19`: reader schema retained for TASKS §3.11 Phase-2/R-2.7.
+- `src/menu.rs:19`: reader schema retained for [architecture §3.11](docs/ARCHITECTURE.md#311-menus-transients-and-how-they-appear-in-each-editor) Phase-2/R-2.7.
 - `src/semantic_tokens.rs:44`, `:48` and `lua/magit-lsp/highlights.lua:19`:
   selected token use plus planned/disabled/bold modifier and type-to-theme
-  presentation contracts in TASKS §3.15/R-5.3.
-- `src/ui.rs:27`: generic prompt kind retained for TASKS §3.6/R-3.1; no current
+  presentation contracts in [architecture §3.15](docs/ARCHITECTURE.md#315-highlighting-and-theme-integration)/R-5.3.
+- `src/ui.rs:27`: generic prompt kind retained for [architecture §3.6](docs/ARCHITECTURE.md#36-prompts-what-each-kind-means)/R-3.1; no current
   command emits it.
-- `src/view.rs:158`: descriptor viewport retained per TASKS §3.2 for clients.
+- `src/view.rs:158`: descriptor viewport retained per [architecture §3.2](docs/ARCHITECTURE.md#32-sessions-views-and-the-view-stack) for clients.
   `src/view.rs:263`: view contract retained for LogView page extension,
   TASKS §7/R-5.1.
 - `tests/common/mod.rs:6`: test-only `allow(dead_code)` keeps shared test helpers

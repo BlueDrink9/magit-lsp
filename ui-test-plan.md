@@ -69,7 +69,8 @@ Run `make plain-neovim` to build a fresh server binary and exercise both final-n
 
 ## Phase 3E — Managed commit draft native acceptance (design mapping)
 
-Canonical protocol and bounds are in `TASKS.md` §3.10; this section does not
+Canonical protocol and bounds are in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor); this section does not
 claim the planned draft protocol or adapters are implemented. Keep the existing
 `commit-cancel-progress.scn` realFile evidence historical until coordinated
 cutover. At cutover, extend that scenario and add focused native cases, using

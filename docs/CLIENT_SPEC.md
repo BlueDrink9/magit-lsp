@@ -138,7 +138,8 @@ best-effort saved text on abort, never didSave alone. Ring parity remains unveri
 rich history recall is removed/planned under R-EDIT-HISTORY. No `draft/*` wire
 methods, draft-error notification or managed provider remain. Recovery is best
 effort, not crash durability. The bridge is Unix-only; platform acceptance is not
-implied. Focused production native evidence exists in TASKS §3.10, but parent
+implied. Focused production native evidence exists in
+[`ARCHITECTURE.md`](ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor), but parent
 R-EDIT-REAL broad native/adversarial/full-phase acceptance remains pending.
 
 The former virtual managed-draft protocol and custom dirty-close picker are
@@ -366,7 +367,7 @@ fallback above, never synthetic didClose. Historical step-0 observations remain 
 [`real-file-client-spike.md`](evidence/real-file-client-spike.md); scoped clean
 close-window/reload/folder-change runs observed no qualifying closed event, not a
 general shutdown guarantee. Never interpret transport shutdown/deactivation as
-confirmation. TASKS §3.10 records focused production evidence and remaining
+confirmation. [Architecture §3.10](ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor) records focused production evidence and remaining
 R-EDIT-REAL acceptance, including unchanged-message amend parity and broader
 native/adversarial/full-phase gates.
 
