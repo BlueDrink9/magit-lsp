@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import argparse
+import contextlib
 import os
 import re
 import shutil
@@ -11,14 +13,26 @@ import subprocess
 import tempfile
 import time
 import traceback
-import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE = ROOT / "build/ui/plain-render"
+DEFAULT_EVIDENCE = ROOT / "build/ui/plain-render"
+DEFAULT_BINARY = Path(os.environ.get("MAGIT_LSP_BIN", ROOT / "target/debug/magit-lsp"))
+
+
+def pid_is_running(pid: int) -> bool:
+    """Return whether an owned process id still exists, without process-name scans."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    kwargs.setdefault("timeout", 30)
     result = subprocess.run(args, text=True, capture_output=True, check=False, **kwargs)
     if result.returncode:
         raise RuntimeError(
@@ -28,15 +42,13 @@ def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     return result
 
 
-def run_variant(final_newline: bool) -> None:
+def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) -> None:
     for executable in ("nvim", "tmux", "git"):
         if not shutil.which(executable):
             raise RuntimeError(f"required executable not found: {executable}")
-    binary = ROOT / "target/release/magit-lsp"
     if not binary.exists():
-        raise RuntimeError(f"release binary missing: {binary}")
-    name = "plain-" + uuid.uuid4().hex[:10]
-    run_evidence = EVIDENCE / ("with-final-newline" if final_newline else "without-final-newline")
+        raise RuntimeError(f"debug binary missing: {binary}")
+    run_evidence = evidence / ("with-final-newline" if final_newline else "without-final-newline")
     run_evidence.mkdir(parents=True, exist_ok=True)
     # A previous run must not leave success/failure artifacts behind.
     for artifact in ("native.json", "failure.json"):
@@ -45,9 +57,10 @@ def run_variant(final_newline: bool) -> None:
     # Neovim appends to its shared state log; isolate this run's trace before launch.
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     trace_path.unlink(missing_ok=True)
-    socket = f"/tmp/{name}.sock"
-    server_id = name
-    report: dict[str, object] = {"tmux_server": server_id, "nvim_socket": socket, "final_newline": final_newline}
+    socket = ""
+    server_id = ""
+    report: dict[str, object] = {"final_newline": final_newline}
+    owned_pids: set[int] = set()
     failure: BaseException | None = None
 
     def rpc(expr: str) -> str:
@@ -70,10 +83,16 @@ def run_variant(final_newline: bool) -> None:
             "rich_notifications=vim.g.plain_smoke_rich_notifications}) end)()"
         )
         expr = "luaeval(" + json.dumps(lua) + ")"
-        return json.loads(rpc(expr))
+        value = json.loads(rpc(expr))
+        for key in ("pid", "server_pid"):
+            pid = value.get(key)
+            if isinstance(pid, int):
+                owned_pids.add(pid)
+        return value
 
     try:
-        with tempfile.TemporaryDirectory(prefix="plain-render-") as temporary:
+        with contextlib.ExitStack() as stack:
+            temporary = stack.enter_context(tempfile.TemporaryDirectory(prefix="plain-render-"))
             temp = Path(temporary)
             repo = temp / "repo"
             repo.mkdir()
@@ -91,7 +110,11 @@ def run_variant(final_newline: bool) -> None:
             disk_before = b"stale presentation sentinel\n" if final_newline else b"stale presentation sentinel"
             presentation.write_bytes(disk_before)
             config = ROOT / "tests/ui/plain_init.lua"
-            run(["tmux", "-L", server_id, "new-session", "-d", "-x", "120", "-y", "100", "-s", "plain", "nvim", "--listen", socket, "-u", str(config), str(presentation)], cwd=repo, env=env)
+            from ui_lib import driver
+            native = stack.enter_context(driver.native_session(repo, home, config, presentation, env, size=size))
+            socket = str(native.socket_path)
+            server_id = native.tmux
+            report.update({"tmux_server": str(server_id), "nvim_socket": str(socket)})
             deadline = time.monotonic() + 30
             rpc_error = ""
             while True:
@@ -103,7 +126,7 @@ def run_variant(final_newline: bool) -> None:
                     rpc_error = str(error)
                 if time.monotonic() >= deadline:
                     diagnostics: dict[str, object] = {"last_state": locals().get("initial", {}), "rpc_error": rpc_error}
-                    diagnostics["tmux"] = subprocess.run(["tmux", "-L", server_id, "capture-pane", "-pt", "plain"], capture_output=True, text=True).stdout
+                    diagnostics["tmux"] = subprocess.run(["tmux", "-L", server_id, "capture-pane", "-pt", driver.SESSION], capture_output=True, text=True, timeout=5).stdout
                     (run_evidence / "failure.json").write_text(json.dumps(diagnostics, indent=2) + "\n")
                     raise RuntimeError(f"timed out waiting for Plain didOpen rendering; diagnostics: {diagnostics}")
             report["bootstrap"] = initial
@@ -523,19 +546,20 @@ def run_variant(final_newline: bool) -> None:
         failure = error
         report["traceback"] = traceback.format_exc()
     finally:
-        killed = subprocess.run(["tmux", "-L", server_id, "kill-server"], capture_output=True, text=True)
-        # Neovim owns its stdio LSP child; killing the owned tmux server stops
-        # the editor and that child together.
-        remaining_server = subprocess.run(["pgrep", "-fx", str(binary)], capture_output=True, text=True)
+        pids = sorted(owned_pids)
+        remaining = []
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            remaining = [pid for pid in pids if pid_is_running(pid)]
+            if not remaining:
+                break
+            time.sleep(0.1)
         report["cleanup"] = {
-            "tmux_kill_returncode": killed.returncode,
-            "tmux_sessions_remain": subprocess.run(["tmux", "-L", server_id, "list-sessions"], capture_output=True, text=True).returncode == 0,
+            "owned_pids": pids,
+            "remaining_owned_pids": remaining,
             "nvim_socket_remains": os.path.exists(socket),
-            "server_remaining": remaining_server.stdout.strip(),
         }
-        if os.path.exists(socket):
-            os.unlink(socket)
-        report["cleanup"]["cleanup_verified"] = not report["cleanup"]["tmux_sessions_remain"] and not os.path.exists(socket) and not report["cleanup"]["server_remaining"]
+        report["cleanup"]["cleanup_verified"] = not remaining and not os.path.exists(socket)
         if "native_edit_undo_repair" in report:
             final = report["native_edit_undo_repair"]["after_undo"]
             (run_evidence / "native.screen").write_text(str(final["text"]) + "\n")
@@ -571,10 +595,15 @@ def run_variant(final_newline: bool) -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
+    parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
+    parser.add_argument("--size", default="120x100")
+    args = parser.parse_args()
     errors: list[str] = []
     for with_final_newline in (False, True):
         try:
-            run_variant(with_final_newline)
+            run_variant(with_final_newline, args.binary, args.evidence, args.size)
         except BaseException as error:
             errors.append(f"{with_final_newline=}: {error}")
     if errors:

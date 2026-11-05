@@ -54,7 +54,7 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   test: driver regressions assert explicit terminal dimensions and reject invalid sizes.
   - Verified: `make ui-unit` @ d610fec → ok: ui-unit
 
-- [ ] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
+- [x] **Trace cleanup 3 — Consolidate retained native acceptance lifecycle.**
   Preserve substantive Plain Neovim acceptance, replace bespoke launch/process cleanup with maintained infrastructure, parameterize inputs and bound waits. Expose the retained workflow through Make, without adding a Helix harness or expanding unrelated T020 behavior.
   test: focused harness regressions pass. check: the Make workflow exercises the existing native assertions with fresh binary and configurable evidence paths; owned-process checks replace broad process matching.
 

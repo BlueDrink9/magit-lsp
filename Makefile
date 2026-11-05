@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -52,6 +52,10 @@ test-file: build
 
 ui-unit:
 	$(call run,ui-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/ui -p 'test_*.py')
+
+PLAIN_ARGS ?=
+plain-neovim: build
+	$(call run,plain-neovim,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" python3 scripts/test_plain_neovim.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
 
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)
