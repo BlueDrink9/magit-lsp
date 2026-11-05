@@ -2,10 +2,12 @@
 
 Last review: 6c95b50cb86fe32d3415eb055baa411e762a4456
 
+Accumulated-work gate (2026-11-06, T006): shared client-pump extraction, strict declaration checks, rich render/prompt state and recorded presets warrant serialized `make test` and bounded review (14 committed paths, 1016 insertions/120 deletions since Last review). Phase 2 remains open for T007; no phase-end hygiene/UI-tour is due.
+
 Accumulated-work gate (2026-11-06): T005 acceptance, registry-driven editor models, real-server reconciliation and generated client documentation warrant a serialized full test run and bounded review (10 committed paths, 522 insertions/163 deletions since Last review). Phase 2 remains open; this is not a phase-end gate.
 Serialized `make test` passed build, Rust, Lua, VSCode and keybindings at `6c95b50`; bounded review found two P1 and two P2 corrections below, no P0 or new P3. Resolve these corrections before resuming the normal queue; no phase-end hygiene/UI-tour or new native evidence is claimed.
 
-Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T006–T007 remain open.
+Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T007 remains open.
 
 Phase 2 accumulated-work checkpoint (2026-11-05): T004 is complete, including registry-owned command requirements and checked-emitter coverage; actual Phase 2 remains open for T005–T007. Sol 5.6 reviewed `b5eb865..e6546ce` (11 paths, 472 insertions and 34 deletions). Its sole P1 acceptance-test correction is complete in `78b6f49`: the secret-only case now declares the prompt capability and asserts secret support without text support. No P0/P2 was found; manual native provenance and exercised-producer limits remain explicit. Next: T005 quirks-table.
 Serialized full `make test FILTER=--no-fail-fast` passed build, Rust, Lua, VSCode and keybindings after `e6546ce`, before the test-only review correction. After `78b6f49`, all three custom-emitter library tests and all thirteen Plain-core tests passed, as did rustfmt and diff checks. Seven hygiene tests and pinned report-only hygiene passed; hygiene still reports one unlisted dependency, 69 unused exports and 34 Lua warnings under existing owners/reasons. Logs: `/tmp/opencode/typed-emitter-checkpoint/`. No new native rerun or full UI-tour is claimed for this registry/test-emitter checkpoint. Do not overlap binary-replacing Cargo/Make targets with live-server suites. No owned server remains; user manifest checksum and unrelated release work are unchanged. Windows/macOS remain CI follow-ups; existing P3 redundant generated-file absence assertions remain deferred. No P0 requires re-review; this checkpoint is closed.
@@ -250,6 +252,9 @@ Canonical roadmap and design; see [AGENTS.md](./AGENTS.md). Behaviour claims req
 ---
 
 ## Bugfix
+
+- [x] **T006 gate — Wire shared editor models into all fake-editor consumers.** Full `make test` at `8149945` failed compiling `plain_stack` and `plain_vis`: `tests/common/fake_editor.rs` imports `crate::editor_model`, absent from those integration crates. Registered the shared module in both omitted consumers; the other fake-editor consumers already register it. The targeted suites pass, retiring the recorded build failure. Failure log: `build/test-logs/rust.NBr1Ea`.
+  - Verified: `make test-rust FILTER="--test plain_stack --test plain_vis"` @ `8149945` → ok: rust.
 
 Completed entries below preserve historical diagnoses and verification records. They are not pending execution instructions; use the current Make-only verification rules in [AGENTS.md](AGENTS.md#verification).
 
