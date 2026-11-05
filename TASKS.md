@@ -30,7 +30,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `e50d516` → ok: docs-check. Manual preservation audit: compacted checked records through T007.3; verified unchecked blocks unchanged and T007.4 records untouched, including externally updated T007.4a1/a2/a; retained T007.1n native.json paths/timeout risk, T007.5 six-clause native requirement, original clause coverage, model/server and declaration/native evidence limits.
 - [x] **Documentation cleanup — Compact formatter completion records.** Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c14eadc` → ok: docs-check. Manual bounded-diff audit: compacted six checked T120 children and reconciliation records; retained titles, recorded hashes, Done/Verified distinctions, live Part Seven sole-queue/scope requirement, T011/T025 ownership, workflow links, unchecked task blocks and external T007.4 changes.
-- [ ] **Documentation cleanup — Compact quirk completion records.** Condense the checked T005 records while preserving explicit completion and verification references.
+- [x] **Documentation cleanup — Compact quirk completion records.** Condense checked T005 records and retain completion, verification and evidence limits.
+  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `eb87a14` → ok: docs-check. Manual bounded-diff audit: all twelve checked T005 titles remain one-line records; recorded Done/Verified hashes and live evidence limits retained; no other task block changed.
 - [ ] **Documentation cleanup — Compact capability and recorder completion records.** Condense checked T004–T001 records and remove the dated checkpoint after retaining live limits.
 - [ ] **Documentation cleanup — Compact legacy completion records.** Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints. Split into the three preceding bounded record groups.
 - [ ] **Documentation cleanup — Condense completed-task records.** Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
@@ -111,36 +112,18 @@ T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
 - [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
   Historical formatting checkpoint; superseded by completed T120 and the staged-only hook follow-up above. Use [current formatting guidance](docs/FORMATTING.md), not this record as a workspace-wide formatting claim.
 
-- [x] **T005.1 — Define the evidence-backed quirk registry and resolver.**
-  Done: evidence-bounded registry, validated overrides and precedence resolver; Helix showDocument remains evidence-gated. Enforced by `make test-rust FILTER="--test quirks"` against retained initialize declarations, version/name boundaries, capability matching and override validation.
-- [x] **T005.2a — Add validated layered quirk settings.**
-  Extend existing configuration loading with a quirks table of known registry ids to booleans, including TOML layers and initializationOptions. Test precedence and rejection of invalid ids or values; preserve existing configuration recovery conventions.
-- [x] **T005.2b1 — Finish and commit initialize quirk resolution.**
-  Finalize the existing production integration and typed override seam, restore unrelated formatting changes and define effective report shape for both presentations. Commit after existing regressions pass; new production acceptance cases remain explicitly owned by T005.2b2.
-  Done: effective Plain and Rich capability metadata, validated overrides, and unrelated formatting restored. Enforced by `cargo test --test quirks --test plain_core --test server_async && cargo fmt --all -- --check && git diff --check`; real-server acceptance tests remain in T005.2b2.
-- [x] **T005.2b2a — Commit real initialize quirk acceptance tests.**
-  Commit the already-passing real-server identity, override, metadata, invalid-config recovery and strict Rich schema tests. Outgoing edit-format proof remains explicitly owned by T005.2b2b.
-- [x] **T005.2b2b — Prove quirk-controlled outgoing edit format.**
-  Done: real Plain server test proves Neovim 0.12.6 receives `documentChanges` automatically and `changes` with the quirk disabled, despite neither initialize declaring documentChanges. FakeEditor applies each response and sends response/echo frames; final editor text and unchanged `.magit` presentation file are asserted, with no custom render. Verified: `make test-rust FILTER="--test plain_render --test quirks --test plain_core --test server_async" @ d2faf01 → ok: rust`.
-- [x] **T005.2b2 — Prove effective quirk resolution through the real server.**
-  Add real initialize/config recovery and behavior tests for known and unknown clients, explicit on/off overrides and strict rich negotiation. Complete T005.2b and T005.2 only after these production acceptance cases pass.
-- [x] **T005.2b — Resolve and report production initialize quirks.**
-  Consume layered settings and the registry at initialize, apply capability overrides and expose effective results; enforce production server behavior and strict rich negotiation in focused tests. Complete T005.2 after both children pass.
-- [x] **T005.2 — Integrate quirk configuration and effective initialize reporting.**
-  Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
-- [x] **T005.3a — Drive fake-editor behavior from quirk registry models.**
-  Add a registry-driven fake-editor configuration seam and permanent behavioral coverage for every modeled quirk. Preserve existing profiles and keep the modeled evidence limits explicit.
-  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test quirks"` @ f224f94 → passed
-- [x] **T005.3b — Prove named server workarounds and universal safety.**
-  Cover every named registry workaround through server behavior, including unreliable apply results, echo/hash reconciliation with quirks disabled or absent, and single-document applyEdit requests.
-  Done: `65ee6d9`.
-  - Verified: `make test-rust FILTER="--test plain_render --test quirks"` @ 65ee6d9 → ok: rust
-- [x] **T005.3c — Generate the known-client appendix and audit T005.**
-  Generate the client-spec appendix from registry metadata with a permanent drift check through Make. Audit all original T005 acceptance clauses and close T005.3/T005 only when evidence is complete.
-  Done: `6c95b50`.
-  - Verified: `make update-client-behaviors && make test-rust FILTER="--test quirks --test plain_harness --test plain_render --test plain_core --test server_async"` → ok. T005 clause 1: `tests/quirks.rs` authentic initialize declarations and `src/quirks.rs` registry cover Neovim 0.12.6 and Helix 25.07.1 entries; Helix `showDocument` remains explicit-override-only pending positive evidence. Clause 2: `tests/plain_harness.rs::all_documented_profiles_have_assertable_behavior` and registry-driven model coverage; `tests/plain_render.rs::named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety` covers workaround and universal echo/hash plus single-document applyEdit safety. Unknown clients have zero matches (`tests/quirks.rs::captured_declarations_and_authentic_identity_match`). Clause 3: generated appendix drift check. No new native execution claimed.
-- [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
-  Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
+- [x] **T005.1 — Define the evidence-backed quirk registry and resolver.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2a — Add validated layered quirk settings.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2b1 — Finish and commit initialize quirk resolution.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2b2a — Commit real initialize quirk acceptance tests.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2b2b — Prove quirk-controlled outgoing edit format.** Source-only: `eb87a14:TASKS.md`. Verified: `d2faf01`.
+- [x] **T005.2b2 — Prove effective quirk resolution through the real server.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2b — Resolve and report production initialize quirks.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.2 — Integrate quirk configuration and effective initialize reporting.** Source-only: `eb87a14:TASKS.md`.
+- [x] **T005.3a — Drive fake-editor behavior from quirk registry models.** Source-only: `eb87a14:TASKS.md`. Verified: `f224f94`.
+- [x] **T005.3b — Prove named server workarounds and universal safety.** Done: `65ee6d9`. Verified: `65ee6d9`.
+- [x] **T005.3c — Generate the known-client appendix and audit T005.** Done: `6c95b50`. Verified: `65ee6d9`.
+- [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.** Helix showDocument remains explicit-override-only pending positive evidence; scripted models and declaration captures are not new native evidence. Universal echo/hash and one-document safety remain contracts. Other details: immutable `eb87a14:TASKS.md`.
 - [x] **Record the approved judgment-based review policy and clarify current phase boundaries.**
   Apply current review and orchestration instructions from [AGENTS.md](./AGENTS.md#working-conventions). Named roadmap phase groups, not tickets, slices or review-fix batches, are actual phase boundaries. Then resume T003.4 and the queue.
 - [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
