@@ -19,7 +19,7 @@ source documents; proposal text alone is not closure evidence.
 | A09 | Complete; `da4d422^:REVIEW_REPORT.md` finding A09 and its acceptance evidence; process-log token record. |
 | A10 | Complete; `da4d422^:REVIEW_REPORT.md` finding A10 and its acceptance evidence; repository configuration record. |
 | A11 | Managed-draft cutover complete; owner R-EDIT-6; residual R-EDIT-REAL lifecycle cases T104, platform gates T100/T101. See `da4d422^:REVIEW_REPORT.md` A11 and TASKS R-EDIT-6 evidence; not acceptance of these residuals. |
-| A12 | Open retained gap: finding is real-dispatch Git-failure handling and removal of `server::mutation` (`da4d422^:REVIEW_REPORT.md` A12). No numbered replacement owner evidenced; do not map to unrelated T103 reader-lock work. |
+| A12 | Complete in the authoritative [queue record](../../TASKS.md#retained-gaps): original scope and acceptance `da4d422^:REVIEW_REPORT.md` A12; implementation commits `4395f73` (test/seam migration) and `5bb9903` (`server::mutation` deletion). Permanent tests `tests/server_async.rs::a12_selection_stage_reports_index_lock_as_successful_error_effect`, `tests/errors.rs`, and `tests/dispatch.rs` retain real-dispatch readable failure, protocol-error and stderr coverage. T103 remains the separate deferred same-session reader-lock redesign. |
 | A13 | Complete; `da4d422^:REVIEW_REPORT.md` finding A13 and acceptance evidence. |
 | A14 | Complete; `da4d422^:REVIEW_REPORT.md` finding A14 and acceptance evidence. |
 | A15 | Complete; `da4d422^:REVIEW_REPORT.md` finding A15 and acceptance evidence. |
@@ -91,8 +91,9 @@ this statement as evidence of implementation.
 
 ## Retained gaps and evidence limits
 
-- A12 retains its exact real-dispatch Git-failure scope; no numbered owner is
-  evidenced. T103 is the separate deferred reader-lock redesign.
+- A12 completion is recorded only in the authoritative queue checkbox. Current
+  tests and implementation commits are linked there; T103 remains the separate
+  deferred reader-lock redesign.
 - R-EDIT-REAL parent acceptance is not green. T104 covers only listed residual
   lifecycle cases; preserve the broader gates and historical failures.
 - BUG-READ-1's larger redesign is intentionally deferred to T103.
@@ -152,8 +153,8 @@ locate the complete record. This is scope provenance, not evidence of completion
 R-EDIT-REAL residuals remain not-green: last-window exit, dirty shutdown,
 cross-build, wider reload/workspace changes, platform coverage and broad
 failed gates. T104 names only its lifecycle subset. A12 remains real-dispatch
-Git-failure handling and removal of `server::mutation`; it has no numbered
-owner and is not T103's reader-lock redesign. Future section layout maps to
+Git-failure handling and removal of `server::mutation`; its completion is in the
+authoritative queue and it is not T103's reader-lock redesign. Future section layout maps to
 T093 only if that server-policy scope is correct; whole-file-only binary
 updates remain an explicit residual with no owner. Keep §9 dirs/T047 and the
 Escape caveat; this note does not rewrite either requirement.
