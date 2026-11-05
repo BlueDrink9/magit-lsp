@@ -39,6 +39,16 @@ def cleanup_verified(ownership: dict[str, int | None], remaining: list[int], soc
     )
 
 
+def tmux_session_remains(server_id: str) -> bool:
+    """Check whether the owned driver's tmux session still exists."""
+    from ui_lib import driver
+
+    return subprocess.run(
+        ["tmux", "-L", server_id, "has-session", "-t", driver.SESSION],
+        capture_output=True, timeout=5,
+    ).returncode == 0
+
+
 def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     kwargs.setdefault("timeout", 30)
     result = subprocess.run(args, text=True, capture_output=True, check=False, **kwargs)
@@ -571,10 +581,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             "owned_pids": pids,
             "remaining_owned_pids": remaining,
             "nvim_socket_remains": os.path.exists(socket),
-            "tmux_session_remains": bool(server_id and subprocess.run(
-                ["tmux", "-L", server_id, "has-session", "-t", "plain"],
-                capture_output=True, timeout=5,
-            ).returncode == 0),
+            "tmux_session_remains": bool(server_id and tmux_session_remains(server_id)),
         }
         report["cleanup"]["cleanup_verified"] = cleanup_verified(
             ownership, remaining, os.path.exists(socket), report["cleanup"]["tmux_session_remains"]

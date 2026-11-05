@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import runpy
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -34,6 +35,18 @@ class OwnedPidTest(unittest.TestCase):
         verify = runner["cleanup_verified"]
         self.assertFalse(verify({"editor": 123, "server": None}, [], False, False))
         self.assertTrue(verify({"editor": 123, "server": 456}, [], False, False))
+
+
+class TmuxCleanupTest(unittest.TestCase):
+    """Check teardown probes the actual shared tmux session."""
+
+    def test_live_shared_session_is_reported_present(self) -> None:
+        with patch.object(runner["subprocess"], "run", return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.assertTrue(runner["tmux_session_remains"]("owned-server"))
+        run.assert_called_once_with(
+            ["tmux", "-L", "owned-server", "has-session", "-t", "magit"],
+            capture_output=True, timeout=5,
+        )
 
 
 if __name__ == "__main__":

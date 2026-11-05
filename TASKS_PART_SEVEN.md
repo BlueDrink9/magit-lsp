@@ -24,6 +24,8 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
 
 ## Immediate
 
+Last review: pending trace-cleanup gate at `6825e11`; substantial fixture retirement, live synchronization coverage and shared native launch/teardown changes warrant full verification and a scoped review.
+
 - [ ] **Investigate and rationalize trace/capture test infrastructure.**
   Verify the audit against current consumers, then implement cleanup ahead of formatter work and T005. Retain recorder/security regressions, active quirk inputs and capability negotiation. Replace unique static-evidence claims with existing fake-editor/server behavior coverage; delete redundant traces, sidecars and parse-only checks.
   Remove executable Markdown programs. Extract tools only for named ongoing workflows, reuse maintained Neovim/VSCode/fake-editor infrastructure, and do not add a Helix harness. Retained workflows need Make targets, parameterized inputs, portable temporary paths, bounded waits and shared cleanup. Distinguish historical provenance from runtime dependencies.
@@ -90,6 +92,19 @@ This document replaces section 7 of TASKS.md. It lists every open ticket. Each t
   Replace formatting rejection with safe staged-content autofix; share formatter dispatch with manual Make commands and check-only CI. Preserve unstaged/unrelated edits, executable modes and partial staging; never bypass hooks or add permanent formatter tests.
   check: exercise actual hooks through a Make target in disposable real repositories; formatted commit content must exclude unstaged edits. Formatter errors must block without changing the index or working files. Record one-time results under this item, update formatter instructions, then stop without advancing unrelated work.
   Review scope: accumulated formatter configuration, installer, CI and shared staged-index mutation warrant a focused safety review before handoff. No named roadmap phase closes; unrelated concurrent trace cleanup and its regressions are outside this handoff.
+
+## Review
+
+- [x] **Trace review P1 — Check the actual owned tmux session.**
+  Cleanup currently probes `plain`, but the shared session is `magit`. Use the shared identity and verify the exact command through an existing unit regression.
+  test: a live shared session cannot be reported absent because a stale target was checked. check: rerun native success and controlled failure with honest cleanup evidence.
+  - Verified: `make ui-unit` @ 6825e11 → ok: ui-unit; live-session regression asserts `has-session -t magit`.
+  - Verified: `make plain-neovim PLAIN_ARGS='--evidence /tmp/opencode/trace-cleanup-native'` @ 6825e11 → both newline variants pass; cleanup verified, no owned PIDs, socket or tmux session remain.
+  - Verified: `make plain-neovim PLAIN_ARGS='--binary /bin/false --evidence /tmp/opencode/trace-cleanup-failure'` @ 6825e11 → expected exit 2; both newline variants record cleanup_verified=true, no owned PIDs, socket or tmux session remain.
+
+- [ ] **Trace review P2 — Bound shared tmux subprocesses.**
+  Shared `_tmux` calls have no subprocess timeout, so native startup and teardown can exceed their claimed bounds. Add a consistent timeout and keep exception cleanup reliable.
+  test: existing driver tests exercise timeout propagation and bounded cleanup without hiding failure.
 
 ## Phase map
 
