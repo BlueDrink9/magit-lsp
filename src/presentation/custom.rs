@@ -47,6 +47,10 @@ impl CustomRender {
     }
 
     /// Enforce optional effects and placement on notifications and response payloads.
+    ///
+    /// Test builds assert on undeclared emissions before production fallbacks run.
+    /// Production builds replace unsupported optional effects with warnings and
+    /// unsupported placements with `main` while preserving descriptor identity.
     pub fn prepare_effects(&self, mut effects: ViewEffectsParams) -> ViewEffectsParams {
         if let Some(caps) = (self.capabilities)() {
             for effect in &mut effects.effects {
@@ -55,6 +59,19 @@ impl CustomRender {
                     Effect::EditDocument { .. } => Some("editDocument"),
                     Effect::Clipboard { .. } => Some("clipboard"),
                     Effect::PushView { descriptor } => {
+                        #[cfg(test)]
+                        {
+                            let name = match descriptor.placement {
+                                crate::view::Placement::Main => "main",
+                                crate::view::Placement::Side => "side",
+                                crate::view::Placement::Bottom => "bottom",
+                                crate::view::Placement::Float => "float",
+                            };
+                            assert!(
+                                caps.supports_placement(name),
+                                "undeclared placement emitted: {name}"
+                            );
+                        }
                         descriptor.placement = caps.placement(descriptor.placement);
                         None
                     }
@@ -62,6 +79,8 @@ impl CustomRender {
                 };
                 if let Some(required) = required.filter(|required| !caps.supports_effect(required))
                 {
+                    #[cfg(test)]
+                    assert!(false, "undeclared optional effect emitted: {required}");
                     *effect = Effect::message(
                         MessageLevel::Warn,
                         format!("Client does not support {required}"),
@@ -73,6 +92,7 @@ impl CustomRender {
     }
 
     /// Check before registering a waiter or entering an editor-helper transition.
+    /// This is a non-panicking preflight probe; strict emission checks run separately.
     pub fn allows_prompt(&self, prompt: &ViewPromptParams) -> bool {
         (self.capabilities)().is_none_or(|caps| caps.allows_prompt(prompt))
     }
@@ -91,6 +111,10 @@ impl Ui for CustomRender {
         Self::notify(VIEW_EFFECTS, &self.prepare_effects(effects))
     }
     fn prompt(&self, prompt: ViewPromptParams) -> Message {
+        #[cfg(test)]
+        if (self.capabilities)().is_some_and(|caps| !caps.allows_prompt(&prompt)) {
+            panic!("undeclared prompt emitted: {:?}", prompt.kind);
+        }
         if !self.allows_prompt(&prompt) {
             return self.effects(ViewEffectsParams {
                 effects: vec![Effect::message(
@@ -106,8 +130,186 @@ impl Ui for CustomRender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Effect, MessageLevel};
-    use crate::view::ViewMode;
+    use crate::protocol::{Effect, MessageLevel, PromptItem, PromptKind};
+    use crate::view::{Placement, Scope, ViewDescriptor, ViewKind, ViewMode, Viewport};
+    use std::collections::BTreeSet;
+
+    fn caps(effects: &[&str], prompts: &[&str], layout: &[&str]) -> RichCapabilities {
+        RichCapabilities {
+            keys: crate::protocol::KeymapDelivery::Dynamic,
+            modifiers: crate::protocol::KeyModifiers::Full,
+            layout: layout
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect::<BTreeSet<_>>(),
+            effects: effects.iter().map(|value| (*value).to_owned()).collect(),
+            prompts: prompts.iter().map(|value| (*value).to_owned()).collect(),
+        }
+    }
+
+    fn prompt(kind: PromptKind) -> ViewPromptParams {
+        ViewPromptParams {
+            prompt_id: "p".into(),
+            kind,
+            title: "Question".into(),
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: None,
+            default: None,
+            placeholder: None,
+            secret: None,
+            items: Some(vec![PromptItem {
+                id: "x".into(),
+                label: "X".into(),
+                description: None,
+                detail: None,
+            }]),
+            allow_custom: None,
+            preselected: None,
+            min: None,
+            max: None,
+        }
+    }
+
+    fn descriptor(placement: Placement) -> ViewDescriptor {
+        ViewDescriptor {
+            id: "view-id".into(),
+            kind: ViewKind::Other("custom.kind".into()),
+            uri: "file:///view".into(),
+            title: "Title".into(),
+            placement,
+            mode: ViewMode::Text,
+            scope: Scope::new("scope"),
+            capture: true,
+            viewport: Viewport { cols: 91, rows: 37 },
+        }
+    }
+
+    fn assert_rejected(action: impl FnOnce()) {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(action))
+            .expect_err("undeclared emission must panic");
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        assert!(
+            message.starts_with("undeclared optional effect emitted:")
+                || message.starts_with("undeclared prompt emitted:")
+                || message.starts_with("undeclared placement emitted:"),
+            "unexpected panic: {message}"
+        );
+    }
+
+    #[test]
+    fn strict_emitter_rejects_undeclared_effects_prompts_and_placements() {
+        let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+        for effect in [
+            Effect::VisitFile {
+                uri: "file:///a".into(),
+                line: 1,
+                column: 2,
+            },
+            Effect::EditDocument {
+                run_id: "r".into(),
+                uri: "file:///a".into(),
+                text: "x".into(),
+                version: 1,
+                kind: "commit".into(),
+                title: "t".into(),
+                mode: crate::protocol::EditDocumentMode::RealFile,
+                scope: "s".into(),
+            },
+            Effect::Clipboard { text: "x".into() },
+        ] {
+            assert_rejected(|| {
+                ui.effects(ViewEffectsParams {
+                    effects: vec![effect],
+                });
+            });
+        }
+        for kind in [
+            PromptKind::Confirm,
+            PromptKind::Text,
+            PromptKind::Choice,
+            PromptKind::MultiChoice,
+        ] {
+            let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+            assert!(!ui.allows_prompt(&prompt(kind)));
+            assert_rejected(|| {
+                ui.prompt(prompt(kind));
+            });
+        }
+        let ui = CustomRender::negotiated(|| Some(caps(&[], &["text", "confirm"], &["main"])));
+        let mut value = prompt(PromptKind::Text);
+        value.secret = Some(true);
+        assert!(!ui.allows_prompt(&value));
+        assert_rejected(|| {
+            ui.prompt(value);
+        });
+        for placement in [Placement::Side, Placement::Bottom, Placement::Float] {
+            let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+            assert_rejected(|| {
+                ui.effects(ViewEffectsParams {
+                    effects: vec![Effect::PushView {
+                        descriptor: descriptor(placement),
+                    }],
+                });
+            });
+        }
+    }
+
+    #[test]
+    fn strict_emitter_accepts_declared_and_core_emissions() {
+        let ui = CustomRender::negotiated(|| {
+            Some(caps(
+                &["visitFile"],
+                &["confirm", "text", "choice", "multiChoice", "secret"],
+                &["main", "side", "bottom", "float"],
+            ))
+        });
+        assert!(ui.allows_prompt(&prompt(PromptKind::Confirm)));
+        for kind in [
+            PromptKind::Confirm,
+            PromptKind::Text,
+            PromptKind::Choice,
+            PromptKind::MultiChoice,
+        ] {
+            assert!(matches!(ui.prompt(prompt(kind)), Message::Notification(_)));
+        }
+        let mut secret = prompt(PromptKind::Text);
+        secret.secret = Some(true);
+        assert!(matches!(ui.prompt(secret), Message::Notification(_)));
+        assert!(matches!(
+            ui.effects(ViewEffectsParams {
+                effects: vec![
+                    Effect::VisitFile {
+                        uri: "file:///a".into(),
+                        line: 0,
+                        column: 0
+                    },
+                    Effect::message(MessageLevel::Info, "ok")
+                ]
+            }),
+            Message::Notification(_)
+        ));
+        for placement in [
+            Placement::Main,
+            Placement::Side,
+            Placement::Bottom,
+            Placement::Float,
+        ] {
+            assert!(matches!(
+                ui.effects(ViewEffectsParams {
+                    effects: vec![Effect::PushView {
+                        descriptor: descriptor(placement)
+                    }]
+                }),
+                Message::Notification(_)
+            ));
+        }
+    }
 
     #[test]
     fn custom_adapter_preserves_notification_wire_shape() {

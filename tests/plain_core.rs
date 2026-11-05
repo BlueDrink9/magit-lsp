@@ -32,6 +32,11 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
         panic!()
     };
     assert_eq!(refused.params["effects"][0]["type"], "message");
+    assert_eq!(refused.params["effects"][0]["level"], "warn");
+    assert_eq!(
+        refused.params["effects"][0]["text"],
+        "Client does not support clipboard"
+    );
     let prompt: ViewPromptParams = serde_json::from_value(json!({
         "promptId":"p", "kind":"text", "title":"Password", "secret":true
     }))
@@ -51,6 +56,55 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
             message.method,
             if allowed { VIEW_PROMPT } else { VIEW_EFFECTS }
         );
+        if !allowed {
+            assert_eq!(message.params["effects"][0]["level"], "warn");
+            assert_eq!(
+                message.params["effects"][0]["text"],
+                "Client does not support this prompt"
+            );
+        }
+    }
+}
+
+#[test]
+fn unsupported_view_placement_falls_back_to_main_without_changing_descriptor() {
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(json!({
+        "v": 1,
+        "keys": "dynamic",
+        "modifiers": "full",
+        "layout": ["main"],
+        "effects": [],
+        "prompts": []
+    }))))
+    .unwrap() else {
+        panic!()
+    };
+    let ui = CustomRender::negotiated(move || Some(caps.clone()));
+
+    for placement in [
+        magit_lsp::view::Placement::Side,
+        magit_lsp::view::Placement::Bottom,
+        magit_lsp::view::Placement::Float,
+    ] {
+        let descriptor = magit_lsp::view::ViewDescriptor {
+            id: "view-id".into(),
+            kind: magit_lsp::view::ViewKind::Other("custom.kind".into()),
+            uri: "file:///view".into(),
+            title: "Title".into(),
+            placement,
+            mode: magit_lsp::view::ViewMode::Text,
+            scope: magit_lsp::view::Scope::new("scope"),
+            capture: true,
+            viewport: magit_lsp::view::Viewport { cols: 91, rows: 37 },
+        };
+        let mut expected = serde_json::to_value(&descriptor).unwrap();
+        expected["placement"] = json!("main");
+        let Message::Notification(message) = ui.effects(ViewEffectsParams {
+            effects: vec![Effect::PushView { descriptor }],
+        }) else {
+            panic!()
+        };
+        assert_eq!(message.params["effects"][0]["descriptor"], expected);
     }
 }
 

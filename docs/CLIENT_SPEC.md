@@ -27,6 +27,13 @@ The remainder of this document specifies the current `customRender` contract.
 
 Direction is relative to the language server. Custom capabilities are client preferences, not arbitrary-method negotiation.
 
+In production, undeclared optional effects become warning-message effects, and
+undeclared non-main view placements fall back to `main` without changing the
+view descriptor identity. Undeclared prompts become warning effects.
+`cfg(test)` library builds assert at emission time before these fallbacks;
+`allows_prompt` remains a non-panicking preflight check. No declaration keeps
+the legacy unrestricted behavior.
+
 | Method | Direction / JSON-RPC kind | Result or purpose |
 |---|---|---|
 | `initialize` | client → server request (standard) | `capabilities.experimental.magit` declares rich v1; absence selects Plain. Key preferences are `keys` and `modifiers` inside that block. Profile remains in initialization options. |
