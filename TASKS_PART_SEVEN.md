@@ -213,7 +213,7 @@ Immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`; [clause audit and 
 Enforced by `tests/plain_core.rs`, `tests/plain_actions.rs`, `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs` and library custom-emitter tests; full serialized Linux `make test FILTER=--no-fail-fast` passed.
 `multiChoice` retains real client/shared-vector consumers; no producing command is claimed. One shared test `RecordingUi` remains.
 Native provenance/source equality are manually audited; automated tests cover stored declarations and exercised producers, not live recapture or exhaustive future discovery.
-Actual Phase 2 remains open for T005–T007; Windows/macOS verification remains for CI.
+Actual Phase 2 remains open for T006–T007; Windows/macOS verification remains for CI.
 
 ### T005 quirks-table (M)
 

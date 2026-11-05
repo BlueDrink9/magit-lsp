@@ -5,7 +5,7 @@ Last review: 6c95b50cb86fe32d3415eb055baa411e762a4456
 Accumulated-work gate (2026-11-06): T005 acceptance, registry-driven editor models, real-server reconciliation and generated client documentation warrant a serialized full test run and bounded review (10 committed paths, 522 insertions/163 deletions since Last review). Phase 2 remains open; this is not a phase-end gate.
 Serialized `make test` passed build, Rust, Lua, VSCode and keybindings at `6c95b50`; bounded review found two P1 and two P2 corrections below, no P0 or new P3. Resolve these corrections before resuming the normal queue; no phase-end hygiene/UI-tour or new native evidence is claimed.
 
-Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T005–T007 remain open.
+Review provenance: the later trace/lifecycle and formatter checkpoints are preserved at immutable `9702973:TASKS_PART_SEVEN.md`. Earlier dated checkpoints below are historical, not instructions to repeat retired capture gates. Documentation reconciliation does not close a roadmap phase; T006–T007 remain open.
 
 Phase 2 accumulated-work checkpoint (2026-11-05): T004 is complete, including registry-owned command requirements and checked-emitter coverage; actual Phase 2 remains open for T005–T007. Sol 5.6 reviewed `b5eb865..e6546ce` (11 paths, 472 insertions and 34 deletions). Its sole P1 acceptance-test correction is complete in `78b6f49`: the secret-only case now declares the prompt capability and asserts secret support without text support. No P0/P2 was found; manual native provenance and exercised-producer limits remain explicit. Next: T005 quirks-table.
 Serialized full `make test FILTER=--no-fail-fast` passed build, Rust, Lua, VSCode and keybindings after `e6546ce`, before the test-only review correction. After `78b6f49`, all three custom-emitter library tests and all thirteen Plain-core tests passed, as did rustfmt and diff checks. Seven hygiene tests and pinned report-only hygiene passed; hygiene still reports one unlisted dependency, 69 unused exports and 34 Lua warnings under existing owners/reasons. Logs: `/tmp/opencode/typed-emitter-checkpoint/`. No new native rerun or full UI-tour is claimed for this registry/test-emitter checkpoint. Do not overlap binary-replacing Cargo/Make targets with live-server suites. No owned server remains; user manifest checksum and unrelated release work are unchanged. Windows/macOS remain CI follow-ups; existing P3 redundant generated-file absence assertions remain deferred. No P0 requires re-review; this checkpoint is closed.
@@ -74,14 +74,14 @@ Historical trace/capture evidence and implementation records below describe the 
   Resolve the registry at the production initialize boundary using layered user configuration, apply capability overrides and report effective results under experimental.magit.effective. Test real server responses, invalid configuration and unknown clients without weakening rich declaration validation.
 - [x] **T005.3a — Drive fake-editor behavior from quirk registry models.**
   Add a registry-driven fake-editor configuration seam and permanent behavioral coverage for every modeled quirk. Preserve existing profiles and keep the modeled evidence limits explicit.
-  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test quirks"` @ 11d1c8b → passed
+  - Verified: `make test-rust FILTER="--test plain_harness --test plain_render --test quirks"` @ f224f94 → passed
 - [x] **T005.3b — Prove named server workarounds and universal safety.**
   Cover every named registry workaround through server behavior, including unreliable apply results, echo/hash reconciliation with quirks disabled or absent, and single-document applyEdit requests.
-  Done: `f224f94`.
-  - Verified: `make test-rust FILTER="--test plain_render --test quirks"` @ f224f94 → ok: rust
+  Done: `65ee6d9`.
+  - Verified: `make test-rust FILTER="--test plain_render --test quirks"` @ 65ee6d9 → ok: rust
 - [x] **T005.3c — Generate the known-client appendix and audit T005.**
   Generate the client-spec appendix from registry metadata with a permanent drift check through Make. Audit all original T005 acceptance clauses and close T005.3/T005 only when evidence is complete.
-  Done: `65ee6d9`.
+  Done: `6c95b50`.
   - Verified: `make update-client-behaviors && make test-rust FILTER="--test quirks --test plain_harness --test plain_render --test plain_core --test server_async"` → ok. T005 clause 1: `tests/quirks.rs` authentic initialize declarations and `src/quirks.rs` registry cover Neovim 0.12.6 and Helix 25.07.1 entries; Helix `showDocument` remains explicit-override-only pending positive evidence. Clause 2: `tests/plain_harness.rs::all_documented_profiles_have_assertable_behavior` and registry-driven model coverage; `tests/plain_render.rs::named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety` covers workaround and universal echo/hash plus single-document applyEdit safety. Unknown clients have zero matches (`tests/quirks.rs::captured_declarations_and_authentic_identity_match`). Clause 3: generated appendix drift check. No new native execution claimed.
 - [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.**
   Drive fake-editor models from registry metadata, cover every modeled behavior and named server workaround, generate the Known client behaviors appendix and audit all T005 acceptance clauses. Preserve universal echo/hash safety and one-document applyEdit requests; retain explicit native-evidence limits.
@@ -244,12 +244,14 @@ Bounded accumulated-work review (2026-11-06): GPT-5.6 Sol reviewed committed cha
   - **Done when:** The test times out or fails if the retry leaves `PlainDocument` in `Applying`; it passes for the auto-enabled Neovim case, explicit server override-off case, and unknown-client case through `make test-rust FILTER="--test plain_render"`.
   - **Constraints:** Keep echo/hash reconciliation universal; do not gate it on `apply-result-unreliable`, weaken one-document emission assertions, add sleeps, or add native evidence.
 
-- [ ] **[P2] Repair T005 completion provenance and open-phase wording** (`TASKS.md:7-9,66-86`, T005 completion records; `TASKS_PART_SEVEN.md:206-232`, Phase 2 and original T005 scope)
+- [x] **[P2] Repair T005 completion provenance and open-phase wording** (`TASKS.md:7-9,66-86`, T005 completion records; `TASKS_PART_SEVEN.md:206-232`, Phase 2 and original T005 scope)
   - **Problem:** The authoritative queue assigns each final T005 slice the preceding commit: outgoing format cites `d2faf01` instead of `11d1c8b`, fake models cite `11d1c8b` instead of `f224f94`, workaround safety cites `f224f94` instead of `65ee6d9`, and appendix closure cites `65ee6d9` instead of `6c95b50`. Current prose also says T005–T007 remain open although the same queue marks T005 complete.
   - **Why it matters:** This violates cleanliness and status correctness. The recorded commits do not contain the work they allegedly prove, and current phase text contradicts the sole live queue.
   - **Change:** Correct the four T005 slice commit references to the commits that contain their implementations. Change only current open-phase wording from T005–T007 to T006–T007 in `TASKS.md` and `TASKS_PART_SEVEN.md`; preserve dated historical checkpoint statements and the original T005 clauses without creating a second completion checkbox.
   - **Done when:** Every cited commit contains the named slice, all current phase text says T006–T007 remain open, and T005 completion remains recorded only by the existing authoritative queue entries.
-  - **Constraints:** Preserve the accumulated-work gate note, historical dated claims, original T005 acceptance text, and all unrelated backlog status.
+   - **Constraints:** Preserve the accumulated-work gate note, historical dated claims, original T005 acceptance text, and all unrelated backlog status.
+   - Reviewed: `git show --stat` confirms outgoing format `11d1c8b`, fake models `f224f94`, workaround safety `65ee6d9`, and generated appendix `6c95b50` contain their named slices. Current Phase 2 wording says T006–T007; historical checkpoints and original acceptance remain unchanged.
+   - Verified: `make test-rust FILTER="--test quirks"` @ `ae5b78d` → ok: rust
 
 - [ ] **[P2] Make capability-match appendix generation exhaustive** (`scripts/generate_client_behaviors.rs:1-15`, `render`; `tests/quirks.rs:7-27`, `known_client_appendix_matches_registry`)
   - **Problem:** `render` matches `Match::Capability(_)` and always prints “Declares `experimental.magit`”. Adding another `CapabilityTest` would therefore compile and pass the drift test while generating false documentation for that registry entry.
