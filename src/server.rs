@@ -860,8 +860,65 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
     });
 }
 
+/// Deliver effects to a Plain client through standard LSP notifications only.
+///
+/// Plain clients never receive the custom `view/effects` channel: messages
+/// become `window/showMessage` and an edit document is re-presented through
+/// `window/showDocument` (or manual instructions) as declared.
+fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
+    let show_document = match shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .presentation
+        .as_ref()
+    {
+        Some(Presentation::Plain(capabilities)) => capabilities.show_document,
+        _ => false,
+    };
+    for effect in effects {
+        match effect {
+            Effect::EditDocument { run_id, uri, title, .. } => {
+                send_plain_edit_document(
+                    shared.clone(),
+                    run_id.clone(),
+                    uri,
+                    title,
+                    show_document,
+                );
+                let repo = shared
+                    .progress
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .values()
+                    .find(|run| run.edit_id.as_deref() == Some(&run_id))
+                    .and_then(|run| run.repo.clone());
+                if let Some(repo) = repo {
+                    let shared = shared.clone();
+                    std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
+                        Ok(renders) => {
+                            for render in renders {
+                                if let Some(message) = deliver_render(&shared, render) {
+                                    let _ = shared.sender.send(message);
+                                }
+                            }
+                        }
+                        Err(error) => report_pending_refresh_error(&shared, error),
+                    });
+                }
+            }
+            message @ Effect::Message { .. } => {
+                for notification in effect_notifications(&shared.client, vec![message]) {
+                    let _ = shared.sender.send(notification);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn send_plain_edit_document(
-    shared: Arc<Shared>,
+    shared: Shared,
     run_id: String,
     uri: String,
     title: String,
@@ -1511,41 +1568,8 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                 }
                 let presentation = shared.client.lock().unwrap_or_else(|p| p.into_inner())
                     .presentation.clone();
-                if let Some(Presentation::Plain(capabilities)) = presentation {
-                    for effect in effects {
-                        match effect {
-                            Effect::EditDocument { run_id, uri, title, .. } => {
-                                send_plain_edit_document(
-                                    shared.clone(),
-                                    run_id.clone(),
-                                    uri,
-                                    title,
-                                    capabilities.show_document,
-                                );
-                                let repo = shared.progress.lock().unwrap_or_else(|p| p.into_inner())
-                                    .values()
-                                    .find(|run| run.edit_id.as_deref() == Some(&run_id))
-                                    .and_then(|run| run.repo.clone());
-                                if let Some(repo) = repo {
-                                    let shared = shared.clone();
-                                    std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
-                                        Ok(renders) => for render in renders {
-                                            if let Some(message) = deliver_render(&shared, render) {
-                                                let _ = shared.sender.send(message);
-                                            }
-                                        },
-                                        Err(error) => report_pending_refresh_error(&shared, error),
-                                    });
-                                }
-                            }
-                            message @ Effect::Message { .. } => {
-                                for notification in effect_notifications(&shared.client, vec![message]) {
-                                    let _ = shared.sender.send(notification);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                if matches!(presentation, Some(Presentation::Plain(_))) {
+                    deliver_plain_effects(&shared, effects);
                     return;
                 }
                 let unsupported_edit = shared.client.lock().unwrap_or_else(|p| p.into_inner())
@@ -1809,6 +1833,15 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         .plain_lifecycle
                         .lock()
                         .unwrap_or_else(|p| p.into_inner());
+                    let plain = matches!(
+                        shared
+                            .client
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .presentation
+                            .as_ref(),
+                        Some(Presentation::Plain(_))
+                    );
                     if let Err(error) = draft_notification(&shared, &notification) {
                         if notification.method == "textDocument/didChange" {
                             shared
@@ -1832,10 +1865,22 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 error.to_string(),
                                 notification.method == "textDocument/didClose",
                                 |effects| {
-                                    let _ = sender.send(
-                                        custom_ui(&shared.client)
-                                            .effects(ViewEffectsParams { effects }),
-                                    );
+                                    if plain {
+                                        // The reader holds `plain_lifecycle` for the
+                                        // whole notification arm, and only
+                                        // `terminal_cleanup` sets `closing` (under
+                                        // that same lock). A shutdown therefore
+                                        // cannot race this delivery: either the
+                                        // draft is still pending here, or terminal
+                                        // cleanup already aborted it and
+                                        // `notification_failure` emitted nothing.
+                                        deliver_plain_effects(&shared, effects);
+                                    } else {
+                                        let _ = sender.send(
+                                            custom_ui(&shared.client)
+                                                .effects(ViewEffectsParams { effects }),
+                                        );
+                                    }
                                 },
                             );
                         } else {

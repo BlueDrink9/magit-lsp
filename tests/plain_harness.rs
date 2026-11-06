@@ -1038,3 +1038,72 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     client.finish();
     }
 }
+
+#[test]
+fn plain_stale_commit_draft_change_reports_rejection_without_custom_effects() {
+    let (repo, _) = fixtures::RepoFixture::new().commit("initial", [("f.txt", "before\n")]).modify_standard().build();
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let mut capabilities = caps();
+    capabilities["workspace"] = json!({"applyEdit":true,"workspaceEdit":{"documentChanges":true}});
+    capabilities["textDocument"] = json!({"codeAction":{}});
+    let mut client = ClientPump::new(stdio::TestServer::spawn(&[]), Profile::Standard, capabilities);
+    let open = client.editor.open(&uri, "stale\n");
+    client.send(open);
+    client.until(|c| c.editor.text(&uri).contains("f.txt"));
+
+    let text = client.editor.text(&uri).to_owned();
+    let line = text.lines().position(|line| line.contains("f.txt")).unwrap_or(0) as u32;
+    let stage = plain_code_actions(&mut client, &uri, line).into_iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "status.stage")
+        .expect("standard code action offers stage")["command"]["arguments"][0].clone();
+    assert!(execute_plain_action(&mut client, stage)["error"].is_null());
+
+    let text = client.editor.text(&uri).to_owned();
+    let line = text.lines().position(|line| line.contains("f.txt")).unwrap_or(0) as u32;
+    let open_commit = plain_code_actions(&mut client, &uri, line).into_iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "open.commit")
+        .expect("standard code action offers commit menu")["command"]["arguments"][0].clone();
+    assert!(execute_plain_action(&mut client, open_commit)["error"].is_null());
+
+    let menu_text = client.editor.text(&uri).to_owned();
+    let menu_line = menu_text.lines().position(|line| line.contains("Commit")).unwrap_or(0) as u32;
+    let create = plain_code_actions(&mut client, &uri, menu_line).into_iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "menu.run-action")
+        .expect("standard code action offers commit creation")["command"]["arguments"][0].clone();
+    let result = execute_plain_action(&mut client, create);
+    assert!(result.get("result").is_some(), "{result}");
+
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_uri = format!("file://{expected_path}");
+    client.until(|c| c.editor.text(&uri).contains(&expected_uri));
+    let token = client.server.notifications.iter()
+        .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
+        .expect("commit progress began")["params"]["token"].clone();
+
+    let initial = std::fs::read_to_string(&expected_path).unwrap();
+    let did_open = client.editor.open(&expected_uri, &initial);
+    client.send(did_open);
+    // Version 1 is already open: replaying it is a stale, duplicated change.
+    client.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":expected_uri,"version":1},
+        "contentChanges":[{"text":"Rejected stale body\n"}]
+    }}));
+    client.until(|c| c.server.notifications.iter().any(|m| {
+        m["method"] == "window/showMessage"
+            && m["params"]["message"].as_str().is_some_and(|message| message.contains("commit draft:"))
+    }));
+    let rejection = client.server.notifications.iter()
+        .find(|m| m["method"] == "window/showMessage"
+            && m["params"]["message"].as_str().is_some_and(|message| message.contains("commit draft:")))
+        .unwrap();
+    assert!(rejection["params"]["message"].as_str().unwrap().contains("Your text is retained"));
+    assert!(
+        client.server.notifications.iter().all(|m| m["method"] != "view/effects"),
+        "Plain draft failures must not emit custom effects: {:?}",
+        client.server.notifications.iter().filter(|m| m["method"] == "view/effects").collect::<Vec<_>>()
+    );
+
+    client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+    client.until(|c| !c.editor.text(&uri).contains(&expected_path));
+    client.finish();
+}
