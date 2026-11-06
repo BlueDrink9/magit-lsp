@@ -46,7 +46,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make test-rust FILTER="--test prompts --test plain_prompt --test plain_sync"` @ `3e95ee6` → ok: rust.
 - [x] **T008.5b2b — Open Plain menu option rows as prompts.** Done: `ebfa0fc`. Offer/execute `menu.run-option`; an implemented Option row prepares the prompt and pushes the prompt document. T008 clauses 5, 7.
   - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `ebfa0fc` → ok: rust. `tests/plain_actions.rs` covers offering and executing the commit menu's `--author` option from the Plain document: the prompt renders into `.magit` with no `view/prompt`, and repeating the same args while the prompt is open returns a readable stale refusal with no second render.
-- [ ] **T008.5b2c — Activate confirm and text prompt rows from Plain documents.** Offer and execute `prompt.answer` row actions with stale checks. T008 clauses 1–2, 5.
+- [x] **T008.5b2c — Activate confirm and text prompt rows from Plain documents.** Done: `5564a03`. Offer and execute `prompt.answer` row actions with stale checks. T008 clauses 1–2, 5.
+  - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `5564a03` → ok: rust.
+  - Check: a captured `prompt.answer` replayed after a repaired title edit returns the stale message and leaves exactly one prompt.
 - [ ] **T008.5c — Activate confirm and text prompt rows from Rich keys.** Enter on a prompt row, reconciled field edits through `didChange`. T008 clauses 1–2, 5.
 - [ ] **T008.6 — Render choice and multiChoice document prompts.** Rows, allowCustom field with default, preselection, Done; optional field completion. T008 clause 2.
 - [ ] **T008.7 — Declare the typed pick capability.** Purpose/multi/free text/preselection/item fields/fallbackView; no undeclared shape; client declarations and vectors. T008 clause 3.
