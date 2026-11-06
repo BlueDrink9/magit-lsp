@@ -547,3 +547,5 @@ Immutable detail and original verification: `d9ea816:TASKS.md`. These records ar
 - [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence — Source-only: `d9ea816:TASKS.md`.
 - [x] [P1] Remove retired fields from the public rich-protocol contract — Source-only: `d9ea816:TASKS.md`.
 - [x] [P2] Pin the bundled Neovim declaration at its producer boundary — Source-only: `d9ea816:TASKS.md`.
+- [x] **T007.4n1a — Disable native showDocument support on the wire.** Neovim deep-merges explicit capability fields over defaults; use `window.showDocument = { support = false }` and require the server's effective value to be false. Done: `c361960`.
+  - Verified: `make ui-unit` @ `c361960` → ok: ui-unit. Source anchor: Neovim `client.lua:437`, `vim.tbl_deep_extend('force', make_client_capabilities(), self.capabilities)`. Prior native failure: both variants timed out before manual draft row in `build/test-logs/plain-neovim.UWQ5TW`; failure JSON showed effective `showDocument=true` despite nil config.
