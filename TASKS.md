@@ -317,6 +317,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Done when:** A Plain (no `experimental.magit`) real-stdio test sends a stale `didChange` or a failed `didClose` on the issued `COMMIT_EDITMSG` URI and asserts the client receives `window/showMessage` (and, on failed close, a `window/showDocument`/manual instruction for the same run) with no `view/effects` notification on the wire; existing Plain and Rich draft tests still pass.
   - **Constraints:** Do not touch `src/editor.rs` beyond its existing `notification_failure` contract. Do not add a new scenario file; extend the existing Plain commit-editor scenario or a `plain_harness` test.
 
+- [x] **[P2] Document the registry-lock-during-emit invariant behind the detached refresh thread** (`src/editor.rs:840-876`, `src/server.rs:1531`) Done: `e70f748`. Verified: make test-rust FILTER="--test plain_harness".
+  - **Problem:** `handle_edit` invokes `emitter(...)` while holding `editor::registry().lock()` (the `entries` guard stays alive through the call). The Plain emitter must therefore run `refresh_pending_views` on a separate thread, because that refresh re-enters the registry lock via `render_with_delivery` → `registry().pending_for` and would self-deadlock on the emitter's own thread. The `std::thread::spawn(move || …)` at `src/server.rs:1531` exists precisely to break that cycle, but nothing records it, and the thread is detached (never joined, holds a full `Shared` clone until it finishes).
+  - **Why it matters:** Readability/simplicity — a hidden lock-ordering invariant that a future "simplification" (running the refresh inline) would turn into a deadlock.
+  - **Change:** Add a comment at `src/server.rs:1531` stating why the refresh must run on a separate thread (the emitter is called under `editor::registry().lock()` in `handle_edit`, and an inline refresh would re-acquire that lock through `EditRegistry::pending_for`). Optionally add a matching note at `src/editor.rs:865` that `emitter` runs while the registry lock is held.
+  - **Done when:** Both sites carry a comment that names the lock and the deadlock it prevents; no behavior change and existing Rust tests pass.
+  - **Constraints:** Comment-only change; do not restructure lock ownership in this task.
+
 ## Completed work
 
 - [x] **Documentation cleanup — Compact capability and recorder completion records.** Done: containing commit.
