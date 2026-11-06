@@ -658,6 +658,22 @@ impl GitRepo {
         Ok(value.trim().to_string())
     }
 
+    /// Whether `value` resolves to a revision in this repository.
+    pub fn verify_revision(&self, value: &str) -> bool {
+        self.run(&["rev-parse", "--verify", "--end-of-options", value])
+            .is_ok()
+    }
+
+    /// Whether `value` names a configured remote.
+    pub fn verify_remote(&self, value: &str) -> bool {
+        self.run(&["remote", "get-url", value]).is_ok()
+    }
+
+    /// Whether `value` resolves as a revision or names a configured remote.
+    pub fn verify_ref_or_remote(&self, value: &str) -> bool {
+        self.verify_revision(value) || self.verify_remote(value)
+    }
+
     /// Compute the full status with every file's diff hunks.
     ///
     /// Views that hide bodies use [`Self::status_listing`] and load hunks only

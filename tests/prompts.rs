@@ -39,6 +39,27 @@ fn stage_author_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::prot
     request
 }
 
+/// Stage `open.branch`'s `--set-upstream-to` option prompt and return its request.
+fn stage_ref_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+    use magit_lsp::keymap::EditorMode;
+    use magit_lsp::protocol::{Cursor, ViewKeyParams};
+    use magit_lsp::session::Execution;
+    let mut key = ViewKeyParams {
+        view_id: view_id.to_string(),
+        version: test.version(),
+        key: "=".to_string(),
+        editor_mode: EditorMode::Normal,
+        cursor: Cursor { line: 0, column: 0 },
+        selection: None,
+    };
+    test.session.start_key(&key).unwrap();
+    key.key = "u".to_string();
+    let Execution::Prompt(request) = test.session.start_key(&key).unwrap() else {
+        panic!("option prompt");
+    };
+    request
+}
+
 /// Stage `commit.create`'s staging confirm on an unstaged status view.
 fn stage_commit_confirm(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
     use magit_lsp::protocol::ViewInvokeParams;
@@ -671,6 +692,77 @@ fn answering_a_text_document_prompt_submits_the_edited_field() {
     assert!(test.session.active_prompt_id().is_none());
     assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
     assert!(matches!(completion.next, Execution::Done(_)));
+}
+
+#[test]
+fn a_ref_option_rejects_an_unknown_ref_or_remote() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.branch");
+    let request = stage_ref_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+
+    let document = prompt_document(&test, &prompt_id, Some("no-such-ref"));
+    let completion = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:submit", request.prompt_id), &document)
+        .unwrap();
+
+    let magit_lsp::session::Execution::Done(result) = completion.next else {
+        panic!("the rejected answer ends the prompt");
+    };
+    assert_eq!(
+        result.effects,
+        vec![Effect::message(
+            magit_lsp::protocol::MessageLevel::Warn,
+            "Unknown ref or remote: no-such-ref".to_string()
+        )]
+    );
+    assert_eq!(test.session().views().iter().count(), depth);
+    assert_eq!(option_value(&test, &menu.id, "=u"), None);
+    assert!(!test.session.prompt_active());
+    assert_eq!(test.view_id(), menu.id);
+}
+
+#[test]
+fn revision_option_values_validate_against_the_repository() {
+    use magit_lsp::menu::Reader;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_string();
+
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Ref, "main")
+        .is_ok());
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Ref, "HEAD")
+        .is_ok());
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Ref, "no-such-ref")
+        .unwrap_err()
+        .contains("Unknown ref or remote"));
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Commit, &head)
+        .is_ok());
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Commit, "0000000000000000000000000000000000000000")
+        .unwrap_err()
+        .contains("Unknown commit"));
 }
 
 #[test]

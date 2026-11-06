@@ -7,7 +7,7 @@
 
 use crate::commands::{self, SelectionOperation, SelectionRequest};
 use crate::diff_text;
-use crate::git::GitLogOptions;
+use crate::git::{GitLogOptions, GitRepo};
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
 use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
@@ -596,6 +596,7 @@ enum SessionContinuation {
         key: String,
         menu: crate::menu::Menu,
         cursor: Cursor,
+        reader: Reader,
     },
     Command {
         command_id: String,
@@ -1628,7 +1629,12 @@ impl Session {
             return Ok(Execution::Done(InvokeResult::empty()));
         }
         let mut result = match pending.action {
-            SessionContinuation::Option { key, menu, cursor } => {
+            SessionContinuation::Option {
+                key,
+                menu,
+                cursor,
+                reader,
+            } => {
                 if self
                     .views
                     .get(&pending.view_id)
@@ -1649,6 +1655,12 @@ impl Session {
                     _ => return Err(Error::new("Unexpected option answer")),
                 };
                 if let Some(value) = value {
+                    if let Err(message) = self.validate_option_value(reader, &value) {
+                        return Ok(Execution::Done(InvokeResult {
+                            effects: vec![Effect::message(MessageLevel::Warn, message)],
+                            ..InvokeResult::empty()
+                        }));
+                    }
                     self.views
                         .get_mut(&pending.view_id)
                         .and_then(|view| view.menu_mut())
@@ -1877,6 +1889,7 @@ impl Session {
                             key: key.to_string(),
                             menu,
                             cursor: params.cursor,
+                            reader,
                         }),
                         Vec::new(),
                     );
@@ -1900,6 +1913,7 @@ impl Session {
                         key: key.to_string(),
                         menu,
                         cursor: params.cursor,
+                        reader,
                     },
                 );
                 Ok(InvokeResult::empty())
@@ -1961,6 +1975,33 @@ impl Session {
         }
     }
 
+    /// Check a free-text option value still names a usable revision.
+    pub fn validate_option_value(
+        &self,
+        reader: Reader,
+        value: &str,
+    ) -> std::result::Result<(), String> {
+        match reader {
+            Reader::Commit => {
+                let repo = GitRepo::open(&self.repo_path)
+                    .map_err(|_| format!("Unknown commit: {value}"))?;
+                repo.resolve_commit(value)
+                    .map_err(|_| format!("Unknown commit: {value}"))?;
+                Ok(())
+            }
+            Reader::Ref => {
+                let repo = GitRepo::open(&self.repo_path)
+                    .map_err(|_| format!("Unknown ref or remote: {value}"))?;
+                if repo.verify_ref_or_remote(value) {
+                    Ok(())
+                } else {
+                    Err(format!("Unknown ref or remote: {value}"))
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Run a menu action, reporting Planned items and routing
     /// Implemented commands through the registry.
     fn menu_action(
@@ -1994,6 +2035,42 @@ impl Session {
                 ..InvokeResult::empty()
             }),
             MenuStatus::Implemented => {
+                if !matches!(
+                    command.as_str(),
+                    "common.cancel" | "menu.back" | "menu.reset-args"
+                ) {
+                    let options = self
+                        .views
+                        .get(view_id)
+                        .and_then(|view| view.menu())
+                        .map(|menu| {
+                            menu.groups
+                                .iter()
+                                .flat_map(|group| group.items.iter())
+                                .filter_map(|item| match item {
+                                    crate::menu::Item::Option {
+                                        value: Some(value),
+                                        reader,
+                                        label,
+                                        ..
+                                    } => Some((*reader, label.clone(), value.clone())),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    for (reader, label, value) in options {
+                        if let Err(message) = self.validate_option_value(reader, &value) {
+                            return Ok(InvokeResult {
+                                effects: vec![Effect::message(
+                                    MessageLevel::Warn,
+                                    format!("The selected {label} is no longer valid: {message}"),
+                                )],
+                                ..InvokeResult::empty()
+                            });
+                        }
+                    }
+                }
                 let Some(registered) = commands::registry().get(&command) else {
                     return Ok(InvokeResult {
                         effects: vec![Effect::message(
@@ -2170,6 +2247,7 @@ impl Session {
                 key: key.to_string(),
                 menu,
                 cursor,
+                reader,
             },
         );
         let request = self
@@ -2801,7 +2879,12 @@ impl Session {
                     });
                 }
                 if operation == SelectionOperation::PickCommit && valid.len() == 1 {
-                    let Some(SessionContinuation::Option { key, menu, cursor }) = continuation
+                    let Some(SessionContinuation::Option {
+                        key,
+                        menu,
+                        cursor,
+                        reader: _,
+                    }) = continuation
                     else {
                         return Ok(InvokeResult {
                             effects: vec![Effect::message(
