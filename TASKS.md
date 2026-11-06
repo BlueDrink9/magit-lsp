@@ -83,6 +83,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Done: `0b54901`. A declared pick is delivered as `view/pick` and the answer resumes the staged prompt; undeclared clients keep the document fallback. Two `server_async` tests cover the native answer and the fallback.
   - Verified: `make test-rust FILTER="--test server_async --test plain_core --test prompts"` @ `0b54901` → ok: rust.
 - [ ] **T008.9c3 — Apply pick preference limits per client.** A user preference inside the declared shape wins; beyond it needs the explicit per-client config key by `clientInfo.name`, otherwise fallback plus a readable message. T008 clause 6.
+- [x] **T008.9c3a — Add pick preference configuration.** `PickSettings` with a global `max_items` and per-client `clients`, parsed and layered from `[pick]`; invalid values are rejected with file and line. T008 clause 6.
+  - Done: `c7dadc3`.
+  - Verified: `make test-rust FILTER="--test config"` @ `c7dadc3` → ok.
 - [x] **T008.9d — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9c pick. T008 clause 2.
   - Done: `9f0a70e20eb7a60c6049dc271c860fcd51db4f36`.
   - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `9f0a70e20eb7a60c6049dc271c860fcd51db4f36` → ok.
