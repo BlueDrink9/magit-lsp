@@ -902,12 +902,45 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     let token = client.server.notifications.iter()
         .find(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin")
         .expect("commit progress began")["params"]["token"].clone();
-    client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
-    client.until(|c| {
-        let begins = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin").count();
-        let ends = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end").count();
-        begins > 0 && ends >= begins && !c.editor.text(&uri).contains(&expected_path)
-    });
+    if !declared {
+        let initial = std::fs::read_to_string(&expected_path).unwrap();
+        let did_open = client.editor.open(&expected_uri, &initial);
+        client.send(did_open);
+        let edited = "Exact synchronized commit body\n\nReviewed manually.\n";
+        let did_change = client.editor.edit(&expected_uri, edited);
+        client.send(did_change);
+        let actions = client.editor.code_action(
+            &expected_uri,
+            json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}}),
+        );
+        let id = client.send(actions);
+        let offered = client.until_response(id)["result"].as_array().unwrap().clone();
+        let confirm = offered.iter().find(|action| action["command"]["arguments"][0]["command"] == "common.confirm")
+            .expect("attached draft offers Confirm")["command"]["arguments"][0].clone();
+        assert_eq!(confirm["version"], 2);
+        let mut stale = confirm.clone();
+        stale["version"] = json!(1);
+        let rejected = execute_plain_action(&mut client, stale);
+        assert!(rejected["error"].is_object(), "stale version must fail: {rejected}");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+        assert!(execute_plain_action(&mut client, confirm)["error"].is_null());
+        client.until(|c| !c.editor.text(&uri).contains(&expected_path));
+        assert_eq!(repo.git(&["log", "-1", "--format=%B"]), format!("{edited}\n"));
+        assert_eq!(repo.git(&["status", "--porcelain"]), "");
+        let terminal = client.editor.code_action(
+            &expected_uri,
+            json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}}),
+        );
+        let id = client.send(terminal);
+        assert!(client.until_response(id)["result"].as_array().unwrap().is_empty());
+    } else {
+        client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
+        client.until(|c| {
+            let begins = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "begin").count();
+            let ends = c.server.notifications.iter().filter(|m| m["method"] == "$/progress" && m["params"]["value"]["kind"] == "end").count();
+            begins > 0 && ends >= begins && !c.editor.text(&uri).contains(&expected_path)
+        });
+    }
 
     let requests: Vec<_> = client.editor.outbound.iter().filter(|m| m["method"] == "window/showDocument").collect();
     assert_eq!(requests.len(), usize::from(declared), "{case}");
@@ -933,7 +966,11 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         "unexpected custom notifications: {:?}",
         client.server.notifications.iter().filter(|m| m["method"] == "view/effects").collect::<Vec<_>>()
     );
-    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{case}");
+    if declared {
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{case}");
+    } else {
+        assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "manual Confirm must commit: {case}");
+    }
     client.finish();
     }
 }

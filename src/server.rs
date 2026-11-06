@@ -2917,6 +2917,30 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
 
 fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> Value {
     let uri = params.text_document.uri.as_str();
+    #[cfg(unix)]
+    if let Ok(run_id) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
+        let version = {
+            let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+            documents
+                .get(uri)
+                .filter(|document| !document.repair)
+                .map(|document| document.version)
+        };
+        if let Some(version) = version {
+            let args = serde_json::json!({
+                "command": "common.confirm",
+                "runId": run_id,
+                "uri": uri,
+                "version": version,
+                "source": "synchronized",
+            });
+            return serde_json::json!([{
+                "title": "Confirm commit",
+                "command": {"title": "Confirm commit", "command": "magit.command", "arguments": [args]},
+            }]);
+        }
+        return Value::Array(Vec::new());
+    }
     let (text, tree, view_id, generation, scope, repo, menu) = {
         let _lifecycle = shared
             .plain_lifecycle
