@@ -16,6 +16,16 @@ use std::collections::BTreeSet;
 /// refused rather than truncated, so the server never silently drops input.
 pub const MAX_FIELD_BYTES: usize = 4096;
 
+/// Outcome of ingesting one client document revision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reconcile {
+    /// Whether the client changed lines outside prompt fields.
+    ///
+    /// A repaired document adopts no text at all; the caller should re-render
+    /// the authoritative tree and push it back to the client.
+    pub repaired: bool,
+}
+
 /// One editable field of a prompt document.
 struct Field {
     id: String,
@@ -235,6 +245,100 @@ impl PromptDocument {
         validate_field(&field.label, text)?;
         field.value = text.to_string();
         Ok(())
+    }
+
+    /// Ingest one client revision of the rendered document.
+    ///
+    /// Field positions come from the authoritative tree rendered at `cols`;
+    /// text is never parsed to recover structure. A field's value is adopted
+    /// only when every non-field line matches that render, the line count is
+    /// unchanged, and each field is exactly one single-line `NodeKind::Field`
+    /// node. Otherwise this returns [`Reconcile::repaired`] and keeps every
+    /// stored value, so the caller re-renders instead of trusting the client.
+    ///
+    /// LF and CRLF line endings are accepted, with or without a final
+    /// terminator. An over-limit value, or a field line that still contains a
+    /// stray carriage return, is refused with a readable error and leaves all
+    /// previous values unchanged.
+    pub fn reconcile(&mut self, document: &str, cols: usize) -> Result<Reconcile, String> {
+        let tree = self.render(cols);
+
+        let mut lines: Vec<&str> = document.split('\n').collect();
+        if document.ends_with('\n') {
+            lines.pop();
+        }
+        for line in &mut lines {
+            if let Some(stripped) = line.strip_suffix('\r') {
+                *line = stripped;
+            }
+        }
+
+        let mut repaired = false;
+
+        let field_node_count = tree
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Field)
+            .count();
+        if field_node_count != self.fields.len() {
+            repaired = true;
+        }
+
+        let mut field_lines = Vec::with_capacity(self.fields.len());
+        for field in &self.fields {
+            let matches: Vec<&Node> = tree
+                .nodes
+                .iter()
+                .filter(|node| node.kind == NodeKind::Field && node.id == field.id)
+                .collect();
+            match matches.as_slice() {
+                [node]
+                    if node.start_line == node.end_line
+                        && node.start_line < tree.lines.len() =>
+                {
+                    field_lines.push(node.start_line);
+                }
+                _ => {
+                    repaired = true;
+                    field_lines.push(0);
+                }
+            }
+        }
+        let mut seen_lines = BTreeSet::new();
+        if field_lines.iter().any(|line| !seen_lines.insert(*line)) {
+            repaired = true;
+        }
+
+        if lines.len() != tree.lines.len() {
+            repaired = true;
+        }
+
+        if !repaired {
+            for (index, expected) in tree.lines.iter().enumerate() {
+                if field_lines.contains(&index) {
+                    continue;
+                }
+                if lines[index] != expected.as_str() {
+                    repaired = true;
+                    break;
+                }
+            }
+        }
+
+        if repaired {
+            return Ok(Reconcile { repaired: true });
+        }
+
+        let mut values = Vec::with_capacity(self.fields.len());
+        for (field, line) in self.fields.iter().zip(field_lines.iter()) {
+            let text = lines[*line];
+            validate_field(&field.label, text)?;
+            values.push(text.to_string());
+        }
+        for (field, value) in self.fields.iter_mut().zip(values) {
+            field.value = value;
+        }
+        Ok(Reconcile { repaired: false })
     }
 
     /// Toggle one item row without rebuilding the tree, returning its new state.

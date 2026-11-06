@@ -350,3 +350,103 @@ fn field_kind_serializes_as_field() {
         json!("field")
     );
 }
+
+fn text_document() -> PromptDocument {
+    document(json!({
+        "promptId": "rev",
+        "kind": "text",
+        "title": "Revision",
+        "default": "HEAD~1"
+    }))
+}
+
+#[test]
+fn reconcile_adopts_a_field_only_edit() {
+    let mut document = text_document();
+    let outcome = document
+        .reconcile("Revision\n\nv2.0\nSubmit\nCancel", 80)
+        .expect("document accepted");
+    assert!(!outcome.repaired);
+    assert_eq!(document.field_text("prompt:rev:field"), Some("v2.0"));
+}
+
+#[test]
+fn reconcile_repairs_non_field_edits_without_adopting_them() {
+    let mut document = text_document();
+    let title_edit = document
+        .reconcile("Changed\n\nv2.0\nSubmit\nCancel", 80)
+        .expect("document accepted");
+    assert!(title_edit.repaired);
+    assert_eq!(
+        document.field_text("prompt:rev:field"),
+        Some("HEAD~1"),
+        "a repaired document adopts no field text either"
+    );
+
+    let row_edit = document
+        .reconcile("Revision\n\nv2.0\nApply\nCancel", 80)
+        .expect("document accepted");
+    assert!(row_edit.repaired);
+    assert_eq!(document.field_text("prompt:rev:field"), Some("HEAD~1"));
+}
+
+#[test]
+fn reconcile_repairs_inserted_and_deleted_lines() {
+    let mut document = text_document();
+    let inserted = document
+        .reconcile("Revision\n\nHEAD~1\nSubmit\nCancel\nextra", 80)
+        .expect("document accepted");
+    assert!(inserted.repaired);
+    let deleted = document
+        .reconcile("Revision\n\nHEAD~1\nSubmit", 80)
+        .expect("document accepted");
+    assert!(deleted.repaired);
+    assert_eq!(document.field_text("prompt:rev:field"), Some("HEAD~1"));
+}
+
+#[test]
+fn reconcile_adopts_an_empty_field_value() {
+    let mut document = text_document();
+    let outcome = document
+        .reconcile("Revision\n\n\nSubmit\nCancel", 80)
+        .expect("document accepted");
+    assert!(!outcome.repaired);
+    assert_eq!(document.field_text("prompt:rev:field"), Some(""));
+}
+
+#[test]
+fn reconcile_accepts_crlf_and_a_final_terminator() {
+    let mut document = text_document();
+    let outcome = document
+        .reconcile("Revision\r\n\r\nfeature/x\r\nSubmit\r\nCancel\r\n", 80)
+        .expect("document accepted");
+    assert!(!outcome.repaired);
+    assert_eq!(document.field_text("prompt:rev:field"), Some("feature/x"));
+}
+
+#[test]
+fn reconcile_refuses_invalid_values_and_keeps_the_old_one() {
+    let mut document = text_document();
+    let oversized = "x".repeat(MAX_FIELD_BYTES + 1);
+    let text = format!("Revision\n\n{oversized}\nSubmit\nCancel");
+    let error = document.reconcile(&text, 80).unwrap_err();
+    assert!(error.contains("limit"), "{error}");
+    assert_eq!(document.field_text("prompt:rev:field"), Some("HEAD~1"));
+
+    let error = document
+        .reconcile("Revision\n\nbad\rvalue\nSubmit\nCancel", 80)
+        .unwrap_err();
+    assert!(error.contains("single line"), "{error}");
+    assert_eq!(document.field_text("prompt:rev:field"), Some("HEAD~1"));
+}
+
+#[test]
+fn reconciled_field_values_survive_later_renders() {
+    let mut document = text_document();
+    document
+        .reconcile("Revision\n\nv3\nSubmit\nCancel", 80)
+        .expect("document accepted");
+    assert_eq!(document.render(80).lines[2], "v3");
+    assert_eq!(document.render(40).lines[2], "v3");
+    assert_eq!(document.field_text("prompt:rev:field"), Some("v3"));
+}
