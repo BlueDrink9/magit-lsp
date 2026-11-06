@@ -7,8 +7,10 @@ const render = require('../lib/render');
 const menu = require('../lib/menu');
 const foldkeys = require('../lib/foldkeys');
 const prompt = require('../lib/prompt');
+const pick = require('../lib/pick');
 const edit = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
+const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
@@ -414,6 +416,52 @@ test('shared prompt vectors preserve protocol answer semantics', () => {
     }
     assert.deepEqual(answer, vector.answer, vector.name);
   }
+});
+
+// lib/pick.js --------------------------------------------------------------
+
+test('shared pick vectors answer view/pickRespond exactly', () => {
+  for (const vector of pickVectors) {
+    const params = vector.params;
+    const items = pick.pickItems(params);
+    assert.deepEqual(items.map((item) => item.label), params.items.map((item) => item.label),
+      vector.name);
+    if (vector.response === null) {
+      assert.deepEqual(pick.answerFor(params, undefined), vector.expected, vector.name);
+      continue;
+    }
+    let picked = items[vector.response - 1];
+    if (params.multi) {
+      picked = [picked];
+    }
+    assert.deepEqual(pick.answerFor(params, picked), vector.expected, vector.name);
+  }
+});
+
+test('pick items carry preselection, description and detail', () => {
+  const params = {
+    items: [
+      { id: 'a', label: 'A', description: 'first', detail: 'detail a' },
+      { id: 'b', label: 'B' },
+    ],
+    preselection: ['b'],
+  };
+  assert.deepEqual(pick.pickItems(params), [
+    { id: 'a', label: 'A', description: 'first', detail: 'detail a', picked: false },
+    { id: 'b', label: 'B', description: undefined, detail: undefined, picked: true },
+  ]);
+});
+
+test('cancelling a pick answers an empty selection', () => {
+  assert.deepEqual(pick.answerFor({}, undefined), { cancelled: true, selected: [] });
+  assert.deepEqual(pick.answerFor({}, null), { cancelled: true, selected: [] });
+});
+
+test('a multi pick maps every picked row to its id', () => {
+  assert.deepEqual(
+    pick.answerFor({ multi: true }, [{ id: 'a' }, { id: 'c' }]),
+    { cancelled: false, selected: ['a', 'c'] }
+  );
 });
 
 // summary ------------------------------------------------------------------

@@ -116,6 +116,7 @@ function activate(context) {
   const client = store.client;
   client.onNotification('view/render', requests.applyRender);
    client.onNotification('view/prompt', requests.handlePrompt);
+  client.onNotification('view/pick', requests.handlePick);
    // The explicit full-sync stream excludes the draft scheme from the language
    // client's automatic document selector, avoiding duplicate native versions.
    if (client.onDidChangeState) context.subscriptions.push(client.onDidChangeState((event) => {

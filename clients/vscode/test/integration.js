@@ -361,6 +361,57 @@ async function run() {
       'the menu row was forwarded as a canonical key, not a client command'
     );
 
+    // 4b. A server pick becomes a QuickPick and answers with item ids.
+    const pickParams = {
+      pickId: 'pick-integration',
+      purpose: 'select-revision',
+      prompt: 'Select a revision',
+      multi: false,
+      allowFreeText: false,
+      preselection: [],
+      items: [
+        { id: 'a', label: 'alpha' },
+        { id: 'b', label: 'beta' },
+      ],
+    };
+    let pickItems;
+    vscode.__test.setQuickPickAnswer((items) => {
+      pickItems = items;
+      return items[1];
+    });
+    client.dispatch({ jsonrpc: '2.0', method: 'view/pick', params: pickParams });
+    await waitFor(
+      () => client.requests.some((request) => request.method === 'view/pickRespond'
+        && request.params.pickId === 'pick-integration'),
+      'pick response'
+    );
+    assert.deepEqual(
+      client.requests.find((request) => request.method === 'view/pickRespond'
+        && request.params.pickId === 'pick-integration').params,
+      { pickId: 'pick-integration', cancelled: false, selected: ['b'] }
+    );
+    assert(pickItems, 'the pick offered items through showQuickPick');
+    assert.deepEqual(pickItems.map((item) => item.id), ['a', 'b']);
+
+    // Cancelling a pick answers an empty selection.
+    vscode.__test.setQuickPickAnswer(() => undefined);
+    const cancelPickId = 'pick-cancel-integration';
+    client.dispatch({
+      jsonrpc: '2.0',
+      method: 'view/pick',
+      params: { ...pickParams, pickId: cancelPickId },
+    });
+    await waitFor(
+      () => client.requests.some((request) => request.method === 'view/pickRespond'
+        && request.params.pickId === cancelPickId),
+      'pick cancel response'
+    );
+    assert.deepEqual(
+      client.requests.find((request) => request.method === 'view/pickRespond'
+        && request.params.pickId === cancelPickId).params,
+      { pickId: cancelPickId, cancelled: true, selected: [] }
+    );
+
     // Exercise real showMenu accept handlers on live menu views. Synthetic
     // structured rows cover canonical shapes absent from the standard profile;
     // their keys still travel through requests.press to the real server.

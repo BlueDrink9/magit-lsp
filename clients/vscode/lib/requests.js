@@ -4,6 +4,7 @@ const vscode = require('vscode');
 
 const render = require('./render');
 const prompt = require('./prompt');
+const pick = require('./pick');
 const effects = require('./effects');
 const menus = require('./menus');
 const views = require('./views');
@@ -231,6 +232,63 @@ async function promptFor(params) {
 }
 
 /**
+ * Ask the user a server pick and answer it with `view/pickRespond`.
+ *
+ * @param {object} params `view/pick` params
+ */
+async function handlePick(params) {
+  if (!params || !params.pickId || !store.client) {
+    return;
+  }
+
+  let answer = { cancelled: true, selected: [] };
+  try {
+    answer = await pickFor(params);
+  } catch (error) {
+    store.output.appendLine(`view/pick "${params.prompt}" failed: ${message(error)}`);
+  }
+
+  try {
+    await store.clientReady;
+    await store.client.sendRequest('view/pickRespond', {
+      pickId: params.pickId,
+      cancelled: answer.cancelled,
+      selected: answer.selected,
+    });
+  } catch (error) {
+    store.output.appendLine(`view/pickRespond failed: ${message(error)}`);
+  }
+}
+
+/**
+ * Show one pick with the matching VSCode widget.
+ *
+ * Free text and grouped items are not declared client capabilities, so they
+ * warn and cancel rather than presenting a shape the server cannot read.
+ *
+ * @param {object} params `view/pick` params
+ * @returns {Promise<{cancelled: boolean, selected: string[]}>}
+ */
+async function pickFor(params) {
+  const items = params.items || [];
+  if (params.allowFreeText || items.some((item) => item.group)) {
+    const reason = params.allowFreeText
+      ? 'free-text answers are not supported'
+      : 'grouped items are not supported';
+    store.output.appendLine(`view/pick "${params.prompt}" cancelled: ${reason}`);
+    vscode.window.showWarningMessage(`magit-lsp: pick cancelled, ${reason}`);
+    return { cancelled: true, selected: [] };
+  }
+
+  const picked = await vscode.window.showQuickPick(pick.pickItems(params), {
+    title: params.prompt,
+    canPickMany: Boolean(params.multi),
+    ignoreFocusOut: true,
+  });
+  return pick.answerFor(params, picked);
+}
+
+/**
  * Ask the server for the full text after a lost update.
  *
  * @param {string} viewId
@@ -256,4 +314,6 @@ exports.invoke = invoke;
 exports.applyRender = applyRender;
 exports.handlePrompt = handlePrompt;
 exports.promptFor = promptFor;
+exports.handlePick = handlePick;
+exports.pickFor = pickFor;
 exports.resync = resync;
