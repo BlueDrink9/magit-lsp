@@ -102,6 +102,8 @@ struct ClientCaps {
     close_confirms: bool,
     work_done_progress: bool,
     encoding: Encoding,
+    /// `clientInfo.name` reported at initialize; selects per-client settings.
+    client_name: Option<String>,
     /// Git repositories discovered from initialize workspace roots for Plain resolution.
     workspace_repositories: Vec<crate::presentation::resolve::Repository>,
     plain: Option<crate::presentation::PlainCapabilities>,
@@ -116,6 +118,7 @@ impl Default for ClientCaps {
             close_confirms: true,
             work_done_progress: false,
             encoding: Encoding::Utf16,
+            client_name: None,
             workspace_repositories: Vec::new(),
             plain: None,
         }
@@ -3092,6 +3095,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     _ => None,
                 };
                 client.workspace_repositories = initialize_workspace_roots(&params);
+                client.client_name = params
+                    .pointer("/clientInfo/name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 client.encoding = params
                     .pointer("/capabilities/general/positionEncodings")
                     .and_then(Value::as_array)
@@ -4215,24 +4222,43 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
             Execution::Pick(mut pick) => {
                 let ui = custom_ui(&shared.client);
                 let declared = ui.pick_limit();
-                let preference = shared.config.config().pick.max_items;
+                let config = shared.config.config();
+                let preference = config.pick.max_items;
                 let over_limit = matches!(
                     (preference, declared),
                     (Some(pref), Some(limit)) if pref > limit
                 );
-                if !over_limit {
-                    if let Some(limit) = preference {
-                        let handle = shared
-                            .session(repo)
-                            .ok_or_else(|| Error::new("Prompt session closed"))?;
-                        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                        session.truncate_pending_pick(limit);
-                        if let Some(updated) = session.pending_pick_request() {
-                            pick = updated;
-                        }
+                let client_name = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .client_name
+                    .clone();
+                // A configured per-client limit may permit a native pick above
+                // the declared maximum, capped by the global preference.
+                let overridden = match (over_limit, preference) {
+                    (true, Some(pref)) => client_name
+                        .as_ref()
+                        .and_then(|name| config.pick.clients.get(name))
+                        .map(|limit| (*limit).min(pref)),
+                    _ => None,
+                };
+                let limit = if over_limit { overridden } else { preference };
+                if let Some(limit) = limit {
+                    let handle = shared
+                        .session(repo)
+                        .ok_or_else(|| Error::new("Prompt session closed"))?;
+                    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                    session.truncate_pending_pick(limit);
+                    if let Some(updated) = session.pending_pick_request() {
+                        pick = updated;
                     }
                 }
-                if !over_limit && ui.allows_pick(&pick) {
+                let native = match overridden {
+                    Some(limit) => ui.allows_pick_with_limit(&pick, Some(limit)),
+                    None => !over_limit && ui.allows_pick(&pick),
+                };
+                if native {
                     let answer = shared.picks.ask(&ui, &pick);
                     let handle = shared
                         .session(repo)
@@ -4276,17 +4302,21 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                     };
                     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
                     let mut result = session.open_document_prompt(&request)?;
-                    if let (true, Some(pref), Some(limit)) =
+                    if let (true, Some(pref), Some(declared)) =
                         (over_limit, preference, declared)
                     {
+                        let hint = match client_name.as_deref() {
+                            Some(name) => format!("Set pick.clients[\"{name}\"] to override."),
+                            None => "Set pick.clients.<client> to override.".to_string(),
+                        };
                         result.effects.insert(
                             0,
                             Effect::message(
                                 MessageLevel::Warn,
                                 format!(
-                                    "This client can show at most {limit} picker items; \
-                                     the configured preference is {pref}. Using the document \
-                                     picker."
+                                    "This client declares at most {declared} picker items; \
+                                     the configured preference is {pref}. {hint} Using the \
+                                     document picker."
                                 ),
                             ),
                         );

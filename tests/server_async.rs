@@ -3395,6 +3395,143 @@ fn pick_preference_beyond_the_declared_limit_uses_the_document_picker() {
     assert!(server.finish(Duration::from_secs(10)).success());
 }
 
+/// Initialize with a named `clientInfo`, which `TestServer::initialize` omits.
+fn initialize_named(server: &mut TestServer, capabilities: Value, name: &str) -> Value {
+    let mut message = initialize_message();
+    message["params"]["capabilities"] = capabilities;
+    message["params"]["clientInfo"] = json!({"name": name, "version": "1"});
+    server.send(message);
+    server.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+    server.response_with_id(1)
+}
+
+#[test]
+fn pick_client_override_allows_native_beyond_the_declared_limit() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    for branch in ["b1", "b2", "b3", "b4"] {
+        tmp.git(&["branch", branch]);
+    }
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        "[pick]\nmax_items = 10\n[pick.clients]\nTest = 5\n",
+    )
+    .expect("write config");
+    let config = config_path.to_string_lossy().to_string();
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    let mut capabilities = rich_pick_capabilities();
+    capabilities["experimental"]["magit"]["pick"]["maxItems"] = json!(2);
+    initialize_named(&mut server, capabilities, "Test");
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+    let version = menu_render["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":menu,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let pick = loop {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/pick") {
+            break message;
+        }
+    };
+    let params = &pick["params"];
+    assert_eq!(
+        params["items"].as_array().unwrap().len(),
+        5,
+        "the per-client override allows the full native pick: {pick}"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/pickRespond",
+        "params":{"pickId":params["pickId"],"cancelled":true,"selected":[]}}));
+    let _ = server.response_with_id(5);
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn pick_override_absent_names_the_client_in_the_fallback() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    tmp.git(&["branch", "b1"]);
+    tmp.git(&["branch", "b2"]);
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "[pick]\nmax_items = 10\n").expect("write config");
+    let config = config_path.to_string_lossy().to_string();
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    let mut capabilities = rich_pick_capabilities();
+    capabilities["experimental"]["magit"]["pick"]["maxItems"] = json!(2);
+    initialize_named(&mut server, capabilities, "Test");
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"u","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+
+    let answer = server.response_with_id(5);
+    let effects = answer["result"]["effects"].as_array().expect("effects");
+    let warn = effects
+        .iter()
+        .find(|effect| effect["type"] == json!("message") && effect["level"] == json!("warn"))
+        .unwrap_or_else(|| panic!("the over-limit warning: {answer}"));
+    assert!(
+        warn["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pick.clients[\"Test\"]")),
+        "{warn}"
+    );
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/pick")),
+        "the absent override must not send a native pick: {:?}",
+        server.notifications
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 #[test]
 fn rich_choice_item_row_enter_answers_the_pick() {
     let (tmp, _repo) = RepoFixture::new()

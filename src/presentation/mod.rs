@@ -199,6 +199,17 @@ impl RichCapabilities {
     /// A missing declaration, or any requested shape it does not opt into,
     /// means the client must use the document fallback instead.
     pub fn allows_pick(&self, pick: &crate::protocol::ViewPickParams) -> bool {
+        self.allows_pick_with_limit(pick, self.pick.as_ref().and_then(|p| p.max_items))
+    }
+
+    /// Whether the client's declared pick shapes can present this request when
+    /// `limit` overrides the declared item maximum. Every other shape check
+    /// still applies; `limit` of `None` means no item-count restriction.
+    pub fn allows_pick_with_limit(
+        &self,
+        pick: &crate::protocol::ViewPickParams,
+        limit: Option<usize>,
+    ) -> bool {
         let Some(caps) = self.pick.as_ref() else {
             return false;
         };
@@ -222,10 +233,7 @@ impl RichCapabilities {
         if pick.fallback_view.is_some() && !caps.fallback_view {
             return false;
         }
-        if caps
-            .max_items
-            .is_some_and(|max| pick.items.len() > max)
-        {
+        if limit.is_some_and(|max| pick.items.len() > max) {
             return false;
         }
         true

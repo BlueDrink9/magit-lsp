@@ -124,6 +124,19 @@ impl CustomRender {
         }
     }
 
+    /// Whether the client's declared pick shapes can present this request when
+    /// `limit` overrides the declared item maximum.
+    pub fn allows_pick_with_limit(
+        &self,
+        pick: &crate::protocol::ViewPickParams,
+        limit: Option<usize>,
+    ) -> bool {
+        match (self.prompt_support)() {
+            PromptSupport::Rich(caps) => caps.allows_pick_with_limit(pick, limit),
+            PromptSupport::Plain | PromptSupport::Unnegotiated => false,
+        }
+    }
+
     /// The maximum item count this client declared, if any.
     pub fn pick_limit(&self) -> Option<usize> {
         match (self.prompt_support)() {
