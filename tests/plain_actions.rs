@@ -1392,3 +1392,167 @@ fn plain_menu_option_row_opens_a_document_prompt() {
         "a repeated menu option must not render a second prompt"
     );
 }
+
+/// The rendered row index of the first line whose trimmed text equals `label`.
+fn exact_row(text: &str, label: &str) -> u32 {
+    text.lines()
+        .position(|line| line.trim() == label)
+        .unwrap_or_else(|| panic!("missing {label:?} row: {text}")) as u32
+}
+
+/// The only offered `prompt.answer` argument on `row`.
+fn offered_prompt_answer(
+    server: &mut stdio::TestServer,
+    uri: &str,
+    row: u32,
+    id: i64,
+) -> Value {
+    let args = offered_for_range(
+        server,
+        uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "prompt.answer",
+        id,
+    );
+    assert!(!args.is_null(), "prompt.answer not offered on row {row}");
+    args
+}
+
+#[test]
+fn plain_text_prompt_submit_row_answers_with_the_typed_value() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.commit",
+        120,
+    );
+    execute_offered(&mut server, &mut editor, open, 121);
+    let menu_text = editor.text(&uri).to_owned();
+    let author = menu_text
+        .lines()
+        .position(|line| line.contains("Override the author"))
+        .expect("author option row") as u32;
+    let option = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":author,"character":0},"end":{"line":author,"character":0}}),
+        "menu.run-option",
+        122,
+    );
+    execute_offered(&mut server, &mut editor, option, 123);
+
+    let prompt_text = editor.text(&uri).to_owned();
+    let submit = exact_row(&prompt_text, "Submit");
+    let mut lines: Vec<String> = prompt_text.lines().map(str::to_owned).collect();
+    let field = (submit - 1) as usize;
+    lines[field] = "Typed Author <typed@example.com>".into();
+    let edited = lines.join("\n");
+    server.send(editor.edit(&uri, &edited));
+
+    let answer = offered_prompt_answer(&mut server, &uri, submit, 124);
+    assert_eq!(answer["command"], "prompt.answer");
+    let submitted = execute_offered(&mut server, &mut editor, answer, 125);
+    assert!(
+        submitted["error"].is_null(),
+        "prompt submit failed: {submitted}"
+    );
+
+    let closed = editor.text(&uri).to_owned();
+    assert!(!closed.contains("Submit"), "prompt stayed open: {closed}");
+    assert!(
+        closed
+            .lines()
+            .any(|line| line.contains("Override the author") && line.contains("Typed Author <typed@example.com>")),
+        "menu does not reflect the author: {closed}"
+    );
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/prompt"),
+        "Plain prompt must not request a native prompt"
+    );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn plain_confirm_prompt_cancel_row_closes_without_touching_git() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.commit",
+        130,
+    );
+    execute_offered(&mut server, &mut editor, open, 131);
+    let menu_text = editor.text(&uri).to_owned();
+    let create = menu_text
+        .lines()
+        .position(|line| {
+            line.trim_start().starts_with("c  ") && line.contains("Commit")
+        })
+        .expect("create action row") as u32;
+    let action = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":create,"character":0},"end":{"line":create,"character":0}}),
+        "menu.run-action",
+        132,
+    );
+    execute_offered(&mut server, &mut editor, action, 133);
+
+    let prompt_text = editor.text(&uri).to_owned();
+    assert!(
+        prompt_text.contains("Nothing staged. Stage all changes and commit?"),
+        "confirm prompt missing: {prompt_text}"
+    );
+    let no = exact_row(&prompt_text, "No");
+    let before = repo_state(&repo);
+    let answer = offered_prompt_answer(&mut server, &uri, no, 134);
+    let cancelled = execute_offered(&mut server, &mut editor, answer, 135);
+    assert!(
+        cancelled["error"].is_null(),
+        "confirm cancel failed: {cancelled}"
+    );
+
+    let closed = editor.text(&uri).to_owned();
+    assert!(
+        !closed.contains("Nothing staged. Stage all changes and commit?"),
+        "prompt stayed open: {closed}"
+    );
+    assert_eq!(repo_state(&repo), before, "cancel must not touch Git");
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/prompt"),
+        "Plain prompt must not request a native prompt"
+    );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+

@@ -2368,7 +2368,22 @@ fn execute_plain_action(
                 0
             }
             crate::dispatch::PlainActionTarget::Node(target) => {
-                if !crate::dispatch::visibility_command(&params.command).is_some()
+                if params.command == "prompt.answer" {
+                    let valid = scope == "prompt"
+                        && target.view_id == view_id
+                        && tree.node(&target.node_id).is_some_and(|node| {
+                            node.kind == crate::tree::NodeKind::Line
+                                && node.id.strip_prefix("prompt:").is_some_and(|rest| {
+                                    matches!(
+                                        rest.rsplit(':').next(),
+                                        Some("yes" | "no" | "submit" | "cancel")
+                                    )
+                                })
+                        });
+                    if !valid {
+                        return plain_stale_message();
+                    }
+                } else if !crate::dispatch::visibility_command(&params.command).is_some()
                     || target.view_id != view_id
                     || scope != "status"
                 {
@@ -2377,10 +2392,12 @@ fn execute_plain_action(
                 let Some(node) = tree.node(&target.node_id) else {
                     return plain_stale_message();
                 };
-                if matches!(
-                    params.command.as_str(),
-                    "common.toggle-section" | "common.show-section" | "common.hide-section"
-                ) && tree.collapsible_ancestor(&node.id).is_none()
+                if params.command != "prompt.answer"
+                    && matches!(
+                        params.command.as_str(),
+                        "common.toggle-section" | "common.show-section" | "common.hide-section"
+                    )
+                    && tree.collapsible_ancestor(&node.id).is_none()
                 {
                     return plain_stale_message();
                 }
@@ -2466,16 +2483,26 @@ fn execute_plain_action(
         }
         if params.command == "menu.run-action" {
             let ui = ServerUi::new(shared);
-            let result = handle
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .run_plain_menu_action(
+            let (mut result, pending) = {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                let result = session.run_plain_menu_action(
                     &view_id,
                     params.view_generation,
                     &target.menu_id,
                     &target.item_key,
                     &ui,
                 )?;
+                (result, session.pending_prompt_request())
+            };
+            if let Some(request) = pending {
+                let next =
+                    drive_execution(shared, &repo, crate::session::Execution::Prompt(request))?;
+                result.effects.extend(next.effects);
+                result.opened.extend(next.opened);
+                result.render = next.render.or(result.render);
+                result.keymap = next.keymap.or(result.keymap);
+                result.commit = next.commit.or(result.commit);
+            }
             return dispatched_outcome(shared, &repo, result);
         }
         if params.command == "menu.run-option" {
@@ -2491,6 +2518,23 @@ fn execute_plain_action(
             let outcome = drive_execution(shared, &repo, step)?;
             return dispatched_outcome(shared, &repo, outcome);
         }
+    }
+    if params.command == "prompt.answer" {
+        let node_id = match &params.target {
+            crate::dispatch::PlainActionTarget::Node(target) => target.node_id.clone(),
+            _ => return plain_stale_message(),
+        };
+        let crate::session::PromptCompletion { mut result, next } = {
+            let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+            session.answer_document_prompt(&node_id, &text)?
+        };
+        let next = drive_execution(shared, &repo, next)?;
+        result.effects.extend(next.effects);
+        result.opened.extend(next.opened);
+        result.render = next.render.or(result.render);
+        result.keymap = next.keymap.or(result.keymap);
+        result.commit = next.commit.or(result.commit);
+        return dispatched_outcome(shared, &repo, result);
     }
     let request = crate::dispatch::DispatchRequest {
         command: params.command,
@@ -3220,6 +3264,39 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     else {
         return Value::Array(Vec::new());
     };
+    if scope == "prompt"
+        && line_node.kind == crate::tree::NodeKind::Line
+        && line_node.id.strip_prefix("prompt:").is_some_and(|rest| {
+            matches!(
+                rest.rsplit(':').next(),
+                Some("yes" | "no" | "submit" | "cancel")
+            )
+        })
+    {
+        let args = serde_json::json!({
+            "command": "prompt.answer",
+            "documentUri": uri,
+            "target": { "viewId": view_id, "nodeId": line_node.id },
+            "viewGeneration": generation,
+        });
+        let title = line_node.label.clone();
+        let action = serde_json::to_value(lsp_types::CodeAction {
+            title: title.clone(),
+            kind: None,
+            diagnostics: None,
+            is_preferred: None,
+            disabled: None,
+            edit: None,
+            command: Some(lsp_types::Command {
+                title,
+                command: "magit.command".into(),
+                arguments: Some(vec![args]),
+            }),
+            data: None,
+        })
+        .unwrap_or(Value::Null);
+        return Value::Array(vec![action]);
+    }
     let mut actions = Vec::new();
     if let Some(menu) = menu {
         for item in menu.groups.iter().flat_map(|group| &group.items) {

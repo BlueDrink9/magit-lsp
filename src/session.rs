@@ -1247,6 +1247,11 @@ impl Session {
         self.pending_prompt.is_some()
     }
 
+    /// The staged prompt request awaiting delivery, if any.
+    pub fn pending_prompt_request(&self) -> Option<ViewPromptParams> {
+        self.pending_prompt.as_ref().map(|pending| pending.request.clone())
+    }
+
     fn drive(&mut self, mut step: Execution, ui: &dyn PromptUi) -> Result<InvokeResult> {
         loop {
             match step {
