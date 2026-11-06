@@ -157,7 +157,9 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             report["bootstrap"] = initial
             execute_command = initial["capabilities"].get("workspace", {}).get("executeCommand")
             report["execute_command_capability_absent"] = execute_command is None
+            report["show_document_capability_absent"] = initial["capabilities"].get("window", {}).get("showDocument") is None
             assert report["execute_command_capability_absent"], initial["capabilities"]
+            assert report["show_document_capability_absent"], initial["capabilities"]
             report["plugin_free"] = not any("magit-lsp" in entry for entry in initial["rtp"].split(","))
             report["project_lua_modules"] = initial["project_modules"]
             if not report["plugin_free"]:
@@ -413,6 +415,66 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             staged_row = next(i + 1 for i, line in enumerate(partial_render["text"].splitlines()) if "tracked.txt" in line)
             picker("subsequent-request", f"{staged_row}G0", None)
             assert snapshot() == partial
+
+            def begin_manual_draft(label: str) -> tuple[str, dict[str, object]]:
+                current = state()
+                row = next(i + 1 for i, line in enumerate(current["text"].splitlines())
+                           if "tracked.txt" in line or "abort-draft.txt" in line)
+                picker(f"{label}-open-commit-menu", f"{row}G0", "Open the commit menu")
+                menu = wait_text("git commit")
+                picker(f"{label}-create-commit", "1G0", "Commit")
+                issued = wait_state(f"{label} issued draft row", lambda value:
+                                    ".git/COMMIT_EDITMSG" in value["text"])
+                rows = [line for line in issued["text"].splitlines() if ".git/COMMIT_EDITMSG" in line]
+                assert len(rows) == 1, issued
+                uri = rows[0].strip()
+                path = uri.removeprefix("file://")
+                assert uri == (repo / ".git/COMMIT_EDITMSG").as_uri(), (uri, repo)
+                return path, issued
+
+            confirmed_head = git("rev-parse", "HEAD")
+            confirm_path, confirm_row = begin_manual_draft("manual-confirm")
+            instructions = rpc("luaeval(" + json.dumps("vim.fn.execute('messages')") + ")")
+            assert ("COMMIT_EDITMSG" in instructions and "Confirm" in instructions and "Abort" in instructions
+                    and (repo / ".git/COMMIT_EDITMSG").as_uri() in instructions), instructions
+            report["manual_confirm"] = {"issued_uri": (repo / ".git/COMMIT_EDITMSG").as_uri(),
+                                        "row": confirm_row, "instructions": instructions}
+            run(["nvim", "--server", socket, "--remote-send", f":edit {confirm_path}<CR>"], timeout=8)
+            draft = wait_state("ordinary edit attaches commit draft", lambda value:
+                               value["name"] == confirm_path and "magit-lsp-plain-smoke" in value["clients"])
+            assert draft["name"] == confirm_path
+            exact_message = "Native manual commit\n\nEdited through ordinary Neovim input."
+            run(["nvim", "--server", socket, "--remote-send",
+                 "ggdGiNative manual commit<CR><CR>Edited through ordinary Neovim input.<Esc>"], timeout=8)
+            edited_draft = wait_state("exact manual commit text", lambda value: value["text"] == exact_message)
+            picker("manual-confirm-action", "gg", "Confirm commit")
+            confirmed = wait_state("manual commit row retirement", lambda value:
+                                   ".git/COMMIT_EDITMSG" not in value["text"])
+            assert git("rev-parse", "HEAD") != confirmed_head
+            assert git("log", "-1", "--format=%B") == exact_message + "\n"
+            assert git("status", "--porcelain") == ""
+            report["manual_confirm"].update({"selected_action": actions[-1], "edited_buffer": edited_draft,
+                                             "retired_status": confirmed, "head_before": confirmed_head,
+                                             "head_after": git("rev-parse", "HEAD"), "commit_body": git("log", "-1", "--format=%B")})
+
+            (repo / "abort-draft.txt").write_text("abort fixture\n")
+            git("add", "abort-draft.txt")
+            wait_text("abort-draft.txt")
+            abort_before = {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
+                            "worktree": git("diff", "--binary"), "status": git("status", "--porcelain")}
+            abort_path, abort_row = begin_manual_draft("manual-abort")
+            abort_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
+            run(["nvim", "--server", socket, "--remote-send", f":edit {abort_path}<CR>"], timeout=8)
+            abort_draft = wait_state("ordinary edit attaches abort draft", lambda value: value["name"] == abort_path)
+            picker("manual-abort-action", "gg", "Abort commit")
+            abort_after = {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
+                           "worktree": git("diff", "--binary"), "status": git("status", "--porcelain")}
+            abort_retired = wait_state("manual abort row retirement", lambda value:
+                                       ".git/COMMIT_EDITMSG" not in value["text"])
+            assert abort_after == abort_before, (abort_before, abort_after)
+            report["manual_abort"] = {"issued_uri": abort_uri, "row": abort_row, "attached_buffer": abort_draft,
+                                      "selected_action": actions[-1], "retired_status": abort_retired,
+                                      "git_before": abort_before, "git_after": abort_after}
 
             # Build an actual oversized unstaged section only after the
             # established menu/stage assertions have completed.
