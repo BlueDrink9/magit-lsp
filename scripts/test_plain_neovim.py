@@ -157,9 +157,15 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             report["bootstrap"] = initial
             execute_command = initial["capabilities"].get("workspace", {}).get("executeCommand")
             report["execute_command_capability_absent"] = execute_command is None
-            report["show_document_capability_absent"] = initial["capabilities"].get("window", {}).get("showDocument") is None
+            show_document = initial["capabilities"].get("window", {}).get("showDocument")
+            effective_show_document = (initial["server_capabilities"].get("experimental", {})
+                                       .get("magit", {}).get("effective", {})
+                                       .get("capabilities", {}).get("showDocument"))
+            report["show_document_capability_disabled"] = show_document == {"support": False} and effective_show_document is False
             assert report["execute_command_capability_absent"], initial["capabilities"]
-            assert report["show_document_capability_absent"], initial["capabilities"]
+            assert report["show_document_capability_disabled"], {
+                "configured": show_document, "effective": effective_show_document,
+            }
             report["plugin_free"] = not any("magit-lsp" in entry for entry in initial["rtp"].split(","))
             report["project_lua_modules"] = initial["project_modules"]
             if not report["plugin_free"]:
