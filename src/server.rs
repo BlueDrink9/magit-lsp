@@ -895,6 +895,12 @@ fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
                     .and_then(|run| run.repo.clone());
                 if let Some(repo) = repo {
                     let shared = shared.clone();
+                    // The emitter that delivers these effects runs inside
+                    // `handle_edit` while `editor::registry().lock()` is held, so
+                    // the refresh must run off the emitting thread: it re-enters
+                    // that lock through `EditRegistry::pending_for` and would
+                    // self-deadlock inline. This detached thread only reads
+                    // registry state and delivers renders through the sender.
                     std::thread::spawn(move || match refresh_pending_views(&shared, &repo) {
                         Ok(renders) => {
                             for render in renders {
@@ -1173,6 +1179,10 @@ fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
     sessions.entry(repo.to_owned()).or_insert(candidate).clone()
 }
 
+/// Re-render the views that show pending drafts for `repo` and return the renders.
+///
+/// Must not be called on a thread that already holds the draft registry lock:
+/// it re-enters that lock through `EditRegistry::pending_for`.
 fn refresh_pending_views(shared: &Shared, repo: &str) -> Result<Vec<ViewRender>> {
     let Some(handle) = shared.session(repo) else {
         return Ok(Vec::new());
