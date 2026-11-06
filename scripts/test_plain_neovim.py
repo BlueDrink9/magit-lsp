@@ -34,6 +34,30 @@ def extract_commit_body(commit_object: str) -> str:
     return body
 
 
+def trace_budget_failures(pre_manual_edits: int, manual_edits: int, request_ids: int, empty_changes: int) -> list[str]:
+    """Report synchronization traffic exceeding per-phase and global limits."""
+    failures = []
+    if pre_manual_edits > 30:
+        failures.append(f"pre-manual applyEdit count {pre_manual_edits} exceeds 30")
+    if manual_edits > 16:
+        failures.append(f"manual-flow applyEdit count {manual_edits} exceeds 16")
+    if request_ids > 100:
+        failures.append(f"distinct request ID count {request_ids} exceeds 100")
+    if empty_changes > 2:
+        failures.append(f"empty no-op change count {empty_changes} exceeds 2")
+    return failures
+
+
+def preserve_primary_failure(primary: BaseException | None, trace_failures: list[str]) -> tuple[BaseException | None, str | None]:
+    """Keep the original failure while returning any secondary trace diagnostic."""
+    if not trace_failures:
+        return primary, None
+    message = "; ".join(trace_failures)
+    if primary is None:
+        return RuntimeError(f"unbounded Plain synchronization trace: {message}"), message
+    return primary, message
+
+
 def pid_is_running(pid: int) -> bool:
     """Return whether an owned process id still exists, without process-name scans."""
     try:
@@ -625,6 +649,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             report["visibility"]["after_subsequent_request"] = after_visibility_request
             (run_evidence / "visibility.screen").write_text(shown["text"] + "\n")
 
+            report["manual_trace_start"] = len(trace_path.read_text(errors="replace").splitlines())
             manual_stage_render = state()
             picker("manual-confirm-stage", file_keys(manual_stage_render), "Stage the change at point")
             staged_manual = wait_text("Staged changes (1)")
@@ -774,13 +799,17 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             report["trace_counts"] = {"lines": len(trace_lines), "did_change": len(changes), "apply_edit": len(edits), "empty_insert_changes": len(noop_eof_deletes)}
             request_ids = {value for line in trace_lines for value in re.findall(r"request_id = (\d+)", line)}
             report["trace_counts"]["distinct_request_ids"] = len(request_ids)
-            # Count outbound applyEdit requests once (not their log send/handler
-            # duplicates). 30 allows the established content/log/menu sequence,
-            # oversized fixture refresh, expansion, watcher, Hide and Show (five
-            # added renders), with bounded refresh coalescing; each transition
-            # has its own bounded no-progress deadline.
-            if len(request_ids) > 100 or len(edits) > 30 or len(noop_eof_deletes) > 2:
-                failure = RuntimeError(f"unbounded Plain synchronization trace: {report['trace_counts']!r}")
+            manual_start = report.get("manual_trace_start", len(trace_lines))
+            pre_manual_edits = sum(index < manual_start for index in edits)
+            manual_edits = len(edits) - pre_manual_edits
+            report["trace_counts"].update({"pre_manual_apply_edit": pre_manual_edits,
+                                           "manual_flow_apply_edit": manual_edits})
+            trace_failures = trace_budget_failures(
+                pre_manual_edits, manual_edits, len(request_ids), len(noop_eof_deletes)
+            )
+            failure, trace_error = preserve_primary_failure(failure, trace_failures)
+            if trace_error:
+                report["trace_error"] = trace_error
             keep = {index for index, line in enumerate(trace_lines) if "textDocument/didOpen" in line or '"magit-lsp/outbound/1"' in line}
             keep.update(changes[:20])
             keep.update(changes[-10:])

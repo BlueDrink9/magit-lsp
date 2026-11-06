@@ -53,6 +53,37 @@ class CommitBodyTest(unittest.TestCase):
             runner["extract_commit_body"]("tree abc\nauthor A\n")
 
 
+class TraceBudgetTest(unittest.TestCase):
+    """Bound pre-manual and manual synchronization traffic separately."""
+
+    def test_accepts_each_budget_at_limit(self) -> None:
+        failures = runner["trace_budget_failures"](30, 16, 100, 2)
+        self.assertEqual(failures, [])
+
+    def test_rejects_pre_manual_and_manual_apply_edit_excess(self) -> None:
+        failures = runner["trace_budget_failures"](31, 17, 0, 0)
+        self.assertEqual(len(failures), 2)
+        self.assertIn("pre-manual", failures[0])
+        self.assertIn("manual-flow", failures[1])
+
+    def test_rejects_request_id_and_noop_excess(self) -> None:
+        failures = runner["trace_budget_failures"](0, 0, 101, 3)
+        self.assertEqual(len(failures), 2)
+        self.assertIn("request ID", failures[0])
+        self.assertIn("no-op", failures[1])
+
+    def test_trace_overflow_does_not_replace_primary_failure(self) -> None:
+        primary = RuntimeError("abort draft attachment timed out")
+        retained, trace_error = runner["preserve_primary_failure"](primary, ["manual-flow applyEdit count 17 exceeds 16"])
+        self.assertIs(retained, primary)
+        self.assertIn("manual-flow", trace_error)
+
+    def test_trace_overflow_fails_when_no_primary_failure_exists(self) -> None:
+        failure, trace_error = runner["preserve_primary_failure"](None, ["pre-manual applyEdit count 31 exceeds 30"])
+        self.assertIn("unbounded Plain synchronization trace", str(failure))
+        self.assertIn("pre-manual", trace_error)
+
+
 class OwnedPidTest(unittest.TestCase):
     """Check portable process existence handling for owned PIDs."""
 
