@@ -21,6 +21,11 @@ DEFAULT_EVIDENCE = ROOT / "build/ui/plain-render"
 DEFAULT_BINARY = Path(os.environ.get("MAGIT_LSP_BIN", ROOT / "target/debug/magit-lsp"))
 
 
+def normalize_scalar_output(output: str) -> str:
+    """Remove command-output line endings from scalar Git values."""
+    return output.rstrip("\r\n")
+
+
 def pid_is_running(pid: int) -> bool:
     """Return whether an owned process id still exists, without process-name scans."""
     try:
@@ -242,6 +247,9 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             def git(*args: str) -> str:
                 return run(["git", *args], cwd=repo, env=env).stdout
 
+            def git_scalar(*args: str) -> str:
+                return normalize_scalar_output(git(*args))
+
             base = "one\ntwo\nthree\n"
             changed = "ONE\ntwo\nTHREE\n"
             # Keep both edits in one hunk: staging just the first replacement
@@ -250,11 +258,11 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             git("add", "tracked.txt")
             git("commit", "-qm", "action baseline")
             (repo / "tracked.txt").write_text(changed)
-            head = git("rev-parse", "HEAD")
+            head = git_scalar("rev-parse", "HEAD")
 
             def snapshot() -> dict[str, str]:
-                return {"head": git("rev-parse", "HEAD"), "head_text": git("show", "HEAD:tracked.txt"),
-                        "index": git("show", ":tracked.txt"), "index_tree": git("write-tree"),
+                return {"head": git_scalar("rev-parse", "HEAD"), "head_text": git("show", "HEAD:tracked.txt"),
+                        "index": git("show", ":tracked.txt"), "index_tree": git_scalar("write-tree"),
                         "worktree": (repo / "tracked.txt").read_text(),
                         "watcher": (repo / "watcher-only.txt").read_text()}
 
@@ -468,7 +476,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             git("commit", "-qm", "oversized baseline")
             (repo / "oversized.txt").write_text(large_changed)
             def full_git_state() -> dict[str, str]:
-                return {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
+                return {"head": git_scalar("rev-parse", "HEAD"), "index": git_scalar("write-tree"),
                         "cached": git("diff", "--cached", "--binary", "HEAD"),
                         "worktree": git("diff", "--binary"),
                         "status": git("status", "--porcelain=v1", "-z")}
@@ -612,7 +620,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             manual_stage_render = state()
             picker("manual-confirm-stage", file_keys(manual_stage_render), "Stage the change at point")
             staged_manual = wait_text("Staged changes (1)")
-            manual_stage_tree = git("write-tree")
+            manual_stage_tree = git_scalar("write-tree")
             assert git("diff", "--cached", "--binary", "HEAD"), "native manual Confirm prerequisite staged no content"
             assert actions[-1]["label"] == "manual-confirm-stage"
             assert "Stage the change at point" in [text for _, text in actions[-1]["offered"]]
@@ -636,8 +644,8 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             assert status_before_draft["name"] == initial["name"]
             status_buffer = status_before_draft["buffer"]
             confirm_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
-            pre_confirm_head = git("rev-parse", "HEAD")
-            pre_confirm_tree = git("write-tree")
+            pre_confirm_head = git_scalar("rev-parse", "HEAD")
+            pre_confirm_tree = git_scalar("write-tree")
             assert pre_confirm_tree == manual_stage_tree
             pre_confirm_diff = git("diff", "--binary")
             pre_confirm_worktree = {name: (repo / name).read_bytes().hex()
@@ -659,10 +667,10 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
             confirmed = wait_state("manual confirm status row retirement", lambda value:
                                    value["name"] == initial["name"] and confirm_uri not in value["text"])
-            post_confirm_head = git("rev-parse", "HEAD")
+            post_confirm_head = git_scalar("rev-parse", "HEAD")
             assert post_confirm_head != pre_confirm_head
-            assert git("rev-list", "--count", f"{pre_confirm_head}..HEAD") == "1"
-            assert git("rev-parse", "HEAD^{tree}") == pre_confirm_tree
+            assert git_scalar("rev-list", "--count", f"{pre_confirm_head}..HEAD") == "1"
+            assert git_scalar("rev-parse", "HEAD^{tree}") == pre_confirm_tree
             assert git("log", "-1", "--format=%B") == exact_message + "\n"
             assert git("diff", "--binary") == pre_confirm_diff
             post_confirm_worktree = {name: (repo / name).read_bytes().hex()
@@ -679,7 +687,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             (repo / "abort-draft.txt").write_text("abort fixture\n")
             git("add", "abort-draft.txt")
             abort_fixture = wait_text("abort-draft.txt")
-            abort_before = {"head": git("rev-parse", "HEAD"), "index_tree": git("write-tree"),
+            abort_before = {"head": git_scalar("rev-parse", "HEAD"), "index_tree": git_scalar("write-tree"),
                             "worktree_diff": git("diff", "--binary"),
                             "worktree_bytes": {name: (repo / name).read_bytes().hex()
                                                for name in ("tracked.txt", "watcher-only.txt", "oversized.txt", "abort-draft.txt")},
@@ -694,7 +702,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
             abort_retired = wait_state("manual abort status row retirement", lambda value:
                                        value["name"] == initial["name"] and abort_uri not in value["text"])
-            abort_after = {"head": git("rev-parse", "HEAD"), "index_tree": git("write-tree"),
+            abort_after = {"head": git_scalar("rev-parse", "HEAD"), "index_tree": git_scalar("write-tree"),
                            "worktree_diff": git("diff", "--binary"),
                            "worktree_bytes": {name: (repo / name).read_bytes().hex()
                                               for name in ("tracked.txt", "watcher-only.txt", "oversized.txt", "abort-draft.txt")},

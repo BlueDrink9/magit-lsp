@@ -15,6 +15,30 @@ sys.path.insert(0, str(ROOT / "scripts"))
 runner = runpy.run_path(str(ROOT / "scripts/test_plain_neovim.py"), run_name="plain_neovim_runner")
 
 
+class GitScalarOutputTest(unittest.TestCase):
+    """Keep scalar Git normalization separate from file content reads."""
+
+    def test_scalar_output_loses_command_newline(self) -> None:
+        for output, expected in (("revision-id\n", "revision-id"), ("1\r\n", "1")):
+            with self.subTest(output=output), patch.object(
+                runner["subprocess"], "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=output, stderr=""),
+            ) as run:
+                raw_output = runner["run"](["git", "scalar"]).stdout
+                self.assertEqual(runner["normalize_scalar_output"](raw_output), expected)
+            run.assert_called_once()
+
+    def test_blob_bytes_without_final_newline_remain_unchanged(self) -> None:
+        for blob in ("file bytes\x00without newline", "file bytes\x00with newline\n"):
+            with self.subTest(blob=blob), patch.object(
+                runner["subprocess"], "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=blob, stderr=""),
+            ) as run:
+                result = runner["run"](["git", "cat-file", "blob"])
+            self.assertEqual(result.stdout, blob)
+            run.assert_called_once()
+
+
 class OwnedPidTest(unittest.TestCase):
     """Check portable process existence handling for owned PIDs."""
 

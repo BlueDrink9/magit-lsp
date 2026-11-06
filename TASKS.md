@@ -553,3 +553,5 @@ Immutable detail and original verification: `d9ea816:TASKS.md`. These records ar
 - [x] **T007.4n1c — Acknowledge observed native message prompts before state reads.** Keep native LSP handlers unchanged. Bound state-read retries, capture text evidence, and acknowledge only a concrete hit-enter or more prompt; unrelated RPC failures remain failures.
   - Done: `49cc25f`; recovery follow-up: `82d59c8`.
   - Verified: `make ui-unit` on `82d59c8` plus the added regression tests → ok: ui-unit. Tests cover unchanged non-timeout RPC errors and final timeout preservation without final acknowledgement; prior observed-prompt and text-evidence checks remain enforced.
+- [x] **T007.4n1d — Normalize native Git scalar output without changing file bytes.** Done: containing commit. Native failure: `build/test-logs/plain-neovim.7zVWEw`.
+  - Verified: `make ui-unit` → ok: ui-unit. Regression coverage exercises scalar IDs/counts and the real raw-output helper with both final-newline variants. Audited every `rev-parse`, `write-tree` and `rev-list --count` call: all use scalar normalization; blob/text reads remain raw.
