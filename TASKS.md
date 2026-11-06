@@ -86,7 +86,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.9d — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9c pick. T008 clause 2.
   - Done: `9f0a70e20eb7a60c6049dc271c860fcd51db4f36`.
   - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `9f0a70e20eb7a60c6049dc271c860fcd51db4f36` → ok.
-- [ ] **T008.9e — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9c pick. T008 clause 2.
+- [x] **T008.9e — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9c pick. T008 clause 2.
+  - Done: `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44`.
+  - Verified: `make test-rust FILTER="--test server_async --test prompts"` @ `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44` → ok.
 - [x] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
   - Done: `98a0a4c`. Custom choice clears the item-id default before the text prompt; empty secret answers cancel in both clients.
   - Verified: `make test-lua && make vscode-test && make docs-check` @ `98a0a4c` → ok.
