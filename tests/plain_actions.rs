@@ -1327,3 +1327,68 @@ fn execution_refuses_when_the_document_is_closed() {
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
 }
+
+#[test]
+fn plain_menu_option_row_opens_a_document_prompt() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.commit",
+        10,
+    );
+    assert!(!open.is_null(), "open.commit not offered");
+    let opened = execute_offered(&mut server, &mut editor, open, 11);
+    assert!(opened["error"].is_null(), "open.commit failed: {opened}");
+    let menu_text = editor.text(&uri).to_owned();
+    let author = menu_text
+        .lines()
+        .position(|line| line.contains("Override the author"))
+        .expect("author option row") as u32;
+    let option = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":author,"character":0},"end":{"line":author,"character":0}}),
+        "menu.run-option",
+        12,
+    );
+    assert!(!option.is_null(), "menu.run-option not offered");
+    assert_eq!(option["target"]["itemKey"], "=A");
+    let executed = execute_offered(&mut server, &mut editor, option.clone(), 13);
+    assert!(
+        executed["error"].is_null(),
+        "menu.run-option failed: {executed}"
+    );
+    let prompt_text = editor.text(&uri).to_owned();
+    assert!(
+        prompt_text.contains("Override the author (--author=)"),
+        "prompt title missing: {prompt_text}"
+    );
+    assert!(prompt_text.contains("Submit"), "submit row missing: {prompt_text}");
+    assert!(prompt_text.contains("Cancel"), "cancel row missing: {prompt_text}");
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/prompt"),
+        "Plain prompt must not request a native prompt"
+    );
+
+    let again = execute_offered(&mut server, &mut editor, option, 14);
+    assert_refused(&again);
+    assert_eq!(
+        editor.text(&uri),
+        prompt_text,
+        "a repeated menu option must not render a second prompt"
+    );
+}

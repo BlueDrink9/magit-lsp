@@ -2041,6 +2041,65 @@ impl Session {
         Ok(result)
     }
 
+    /// Stage the prompt for an exact retained Plain menu option row.
+    ///
+    /// Any mismatch (unknown view, stale generation, wrong menu, non-option or
+    /// unimplemented row) leaves state untouched and returns `Done` for `key`.
+    pub fn start_plain_menu_option(
+        &mut self,
+        view_id: &str,
+        generation: u64,
+        menu_id: &str,
+        key: &str,
+    ) -> Result<Execution> {
+        let item = self
+            .views
+            .get(view_id)
+            .filter(|view| view.version() == generation)
+            .and_then(|view| view.menu())
+            .filter(|menu| menu.id == menu_id)
+            .and_then(|menu| menu.item(key).cloned());
+        let Some(crate::menu::Item::Option {
+            reader,
+            label,
+            flag,
+            status: MenuStatus::Implemented,
+            ..
+        }) = item
+        else {
+            return Ok(Execution::Done(unbound(key)));
+        };
+        let request = self.option_prompt(&label, &flag, reader);
+        if let Some(result) = self.unsupported_prompt(&request) {
+            return Ok(Execution::Done(result));
+        }
+        let menu = self
+            .views
+            .get(view_id)
+            .and_then(|view| view.menu())
+            .expect("menu checked above")
+            .clone();
+        let cursor = Cursor { line: 0, column: 0 };
+        self.prepare_prompt(
+            view_id,
+            Some(cursor),
+            request,
+            SessionContinuation::Option {
+                key: key.to_string(),
+                menu,
+                cursor,
+            },
+        );
+        let request = self
+            .pending_prompt
+            .as_ref()
+            .expect("prompt just staged")
+            .request
+            .clone();
+        self.publish();
+        Ok(Execution::Prompt(request))
+    }
+
     /// Pop the exact retained concrete log view and focus its caller.
     pub fn back_from_plain_log(&mut self, view_id: &str, generation: u64) -> Result<InvokeResult> {
         let valid = self.views.get(view_id).is_some_and(|view| {

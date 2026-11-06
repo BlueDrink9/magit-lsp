@@ -2408,6 +2408,13 @@ fn execute_plain_action(
                                     ..
                                 }),
                             ) => matches!(command.as_str(), "log.current" | "commit.create"),
+                            (
+                                "menu.run-option",
+                                Some(crate::menu::Item::Option {
+                                    status: crate::menu::MenuStatus::Implemented,
+                                    ..
+                                }),
+                            ) => true,
                             _ => false,
                         }
                     });
@@ -2470,6 +2477,19 @@ fn execute_plain_action(
                     &ui,
                 )?;
             return dispatched_outcome(shared, &repo, result);
+        }
+        if params.command == "menu.run-option" {
+            let step = handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .start_plain_menu_option(
+                    &view_id,
+                    params.view_generation,
+                    &target.menu_id,
+                    &target.item_key,
+                )?;
+            let outcome = drive_execution(shared, &repo, step)?;
+            return dispatched_outcome(shared, &repo, outcome);
         }
     }
     let request = crate::dispatch::DispatchRequest {
@@ -3232,6 +3252,48 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                     is_preferred: None,
                     disabled: (!implemented).then(|| lsp_types::CodeActionDisabled {
                         reason: "Unavailable: menu switch is not implemented".into(),
+                    }),
+                    edit: None,
+                    command: implemented.then(|| lsp_types::Command {
+                        title,
+                        command: "magit.command".into(),
+                        arguments: Some(vec![args.clone()]),
+                    }),
+                    data: (!implemented).then_some(args),
+                })
+                .unwrap_or(Value::Null),
+            );
+        }
+        for item in menu.groups.iter().flat_map(|group| &group.items) {
+            let crate::menu::Item::Option {
+                key, label, status, ..
+            } = item
+            else {
+                continue;
+            };
+            let implemented = matches!(status, crate::menu::MenuStatus::Implemented);
+            if !implemented
+                && !capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.disabled_actions)
+            {
+                continue;
+            }
+            let args = serde_json::json!({
+                "command": "menu.run-option",
+                "documentUri": uri,
+                "target": { "viewId": view_id, "menuId": menu.id, "itemKey": key },
+                "viewGeneration": generation,
+            });
+            let title = format!("Set {label}");
+            actions.push(
+                serde_json::to_value(lsp_types::CodeAction {
+                    title: title.clone(),
+                    kind: None,
+                    diagnostics: None,
+                    is_preferred: None,
+                    disabled: (!implemented).then(|| lsp_types::CodeActionDisabled {
+                        reason: "Unavailable: menu option is not implemented".into(),
                     }),
                     edit: None,
                     command: implemented.then(|| lsp_types::Command {
