@@ -572,6 +572,17 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             report["visibility"]["after_subsequent_request"] = after_visibility_request
             (run_evidence / "visibility.screen").write_text(shown["text"] + "\n")
 
+            manual_stage_render = state()
+            picker("manual-confirm-stage", file_keys(manual_stage_render), "Stage the change at point")
+            staged_manual = wait_text("Staged changes (1)")
+            manual_stage_tree = git("write-tree")
+            assert git("diff", "--cached", "--binary", "HEAD"), "native manual Confirm prerequisite staged no content"
+            assert actions[-1]["label"] == "manual-confirm-stage"
+            assert "Stage the change at point" in [text for _, text in actions[-1]["offered"]]
+            report["manual_confirm_stage"] = {"selected_action": actions[-1], "render": staged_manual,
+                                               "tree": manual_stage_tree,
+                                               "cached_diff": git("diff", "--cached", "--binary", "HEAD")}
+
             def begin_manual_draft(label: str) -> tuple[str, dict[str, object]]:
                 current = state()
                 row = next(i + 1 for i, line in enumerate(current["text"].splitlines())
@@ -590,6 +601,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             confirm_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
             pre_confirm_head = git("rev-parse", "HEAD")
             pre_confirm_tree = git("write-tree")
+            assert pre_confirm_tree == manual_stage_tree
             pre_confirm_diff = git("diff", "--binary")
             pre_confirm_worktree = {name: (repo / name).read_bytes().hex()
                                     for name in ("tracked.txt", "watcher-only.txt", "oversized.txt")}
