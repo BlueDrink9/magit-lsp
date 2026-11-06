@@ -85,7 +85,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [ ] **T008.9c3 — Apply pick preference limits per client.** A user preference inside the declared shape wins; beyond it needs the explicit per-client config key by `clientInfo.name`, otherwise fallback plus a readable message. T008 clause 6.
 - [ ] **T008.9d — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9c pick. T008 clause 2.
 - [ ] **T008.9e — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9c pick. T008 clause 2.
-- [ ] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
+- [x] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
+  - Done: `98a0a4c`. Custom choice clears the item-id default before the text prompt; empty secret answers cancel in both clients.
+  - Verified: `make test-lua && make vscode-test && make docs-check` @ `98a0a4c` → ok.
 - [ ] **T008.12 — Generate docs/plain-support.md from the command registry.** Recording-Ui matrix, `Unavailable` reasons, maintained target and staleness check. T008 clause 10.
 - [ ] **T008.13 — Add the mixed-rung conformance test.** Cancel at each step; no Git/index change; caller returns; view-stack depth unchanged. T008 clause 11.
 
