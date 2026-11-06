@@ -39,6 +39,20 @@ class GitScalarOutputTest(unittest.TestCase):
             run.assert_called_once()
 
 
+class CommitBodyTest(unittest.TestCase):
+    """Preserve commit body content after the header separator."""
+
+    def test_extracts_body_without_changing_final_newline_or_paragraphs(self) -> None:
+        extract = runner["extract_commit_body"]
+        for body in ("message\n", "first\n\nsecond\n", "\n", ""):
+            with self.subTest(body=body):
+                self.assertEqual(extract("tree abc\nauthor A\n\n" + body), body)
+
+    def test_missing_header_body_separator_fails(self) -> None:
+        with self.assertRaises(ValueError):
+            runner["extract_commit_body"]("tree abc\nauthor A\n")
+
+
 class OwnedPidTest(unittest.TestCase):
     """Check portable process existence handling for owned PIDs."""
 

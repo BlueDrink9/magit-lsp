@@ -26,6 +26,14 @@ def normalize_scalar_output(output: str) -> str:
     return output.rstrip("\r\n")
 
 
+def extract_commit_body(commit_object: str) -> str:
+    """Return commit body after headers, preserving its exact content."""
+    _, separator, body = commit_object.partition("\n\n")
+    if not separator:
+        raise ValueError("commit object has no header/body separator")
+    return body
+
+
 def pid_is_running(pid: int) -> bool:
     """Return whether an owned process id still exists, without process-name scans."""
     try:
@@ -671,14 +679,19 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             assert post_confirm_head != pre_confirm_head
             assert git_scalar("rev-list", "--count", f"{pre_confirm_head}..HEAD") == "1"
             assert git_scalar("rev-parse", "HEAD^{tree}") == pre_confirm_tree
-            assert git("log", "-1", "--format=%B") == exact_message + "\n"
+            actual_commit_body = extract_commit_body(git("cat-file", "commit", "HEAD"))
+            expected_commit_body = exact_message + "\n"
+            assert actual_commit_body == expected_commit_body, (
+                f"commit body mismatch: actual={actual_commit_body!r}, "
+                f"expected={expected_commit_body!r}"
+            )
             assert git("diff", "--binary") == pre_confirm_diff
             post_confirm_worktree = {name: (repo / name).read_bytes().hex()
                                      for name in pre_confirm_worktree}
             assert post_confirm_worktree == pre_confirm_worktree
             report["manual_confirm"].update({"selected_action": actions[-1], "edited_buffer": edited_draft,
-                                             "retired_status": confirmed, "head_after": post_confirm_head,
-                                             "commit_body": git("log", "-1", "--format=%B"),
+                                              "retired_status": confirmed, "head_after": post_confirm_head,
+                                              "commit_body": actual_commit_body,
                                              "worktree_before_after": [pre_confirm_worktree, post_confirm_worktree],
                                              "unstaged_diff_before_after": [pre_confirm_diff, git("diff", "--binary")]})
             confirmed_buffer = draft["buffer"]
