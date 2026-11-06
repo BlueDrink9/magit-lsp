@@ -548,12 +548,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - Done: containing commit.
   - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/CLIENT_SPEC.md"` @ `ccf6cbb` → ok: docs-check. Source audit: `src/protocol.rs:47-49,419-455`; `src/server.rs:4100-4150`.
 
-- [ ] **[P1] Make bare docs-check validate every maintained reference** (`Makefile:26-27`, `docs-check`; `scripts/check_docs.py:44-49`, `main`)
+- [x] **[P1] Make bare docs-check validate every maintained reference** (`Makefile:26-27`, `docs-check`; `scripts/check_docs.py:44-49`, `main`)
   - **Problem:** `make docs-check` passes no paths by default, so `check_docs.py` checks only `TASKS.md`; every cleanup verification must repeat a long `DOC_FILES` override to cover the relocated references. A normal gate can therefore pass while links in `AGENTS.md`, `README.md`, `ui-test-plan.md`, or `docs/{ARCHITECTURE,PROTOCOL,KEYMAPS,VIEWS,TESTING,OPEN_QUESTIONS,CLIENT_SPEC}.md` are broken.
   - **Why it matters:** This weakens test validity and violates DRY. The new maintained navigation has no reliable default gate, and duplicated file lists can drift.
   - **Change:** Give the `docs-check` target one repository-owned default `DOC_FILES` list containing the maintained files used by this cleanup, including `hygiene-allowlist.md` and `LICENSING.md`. Preserve command-line override support for bounded checks; do not add a second list in Python.
   - **Done when:** Bare `make docs-check` checks the full maintained set, an explicit `DOC_FILES=...` still narrows it, and breaking a link in a non-`TASKS.md` maintained file makes the bare target fail.
   - **Constraints:** Do not scan immutable evidence/history recursively, add network checks, or run runtime/native suites.
+  - Verified: `make docs-check` with injected broken link in `docs/VIEWS.md` exited 2 and named `docs/VIEWS.md: missing path missing-docs-check-probe.md`; `make docs-check DOC_FILES="AGENTS.md"` → ok: docs-check; restored `docs/VIEWS.md` byte-for-byte; final `make docs-check` → ok: docs-check.
 
 - [ ] **[P2] Stop calling the resolved config-directory choice open** (`TASKS.md:518-524`, `Retained gaps`; `docs/OPEN_QUESTIONS.md:5-11`, `Config editing`)
   - **Problem:** `Retained gaps` still says §9 has an unresolved “config-directory/root-edit,” but §9 now records the macOS `dirs` location as resolved and leaves only the root config-edit command plus runtime verification open.
