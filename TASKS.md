@@ -554,6 +554,7 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Change:** Give the `docs-check` target one repository-owned default `DOC_FILES` list containing the maintained files used by this cleanup, including `hygiene-allowlist.md` and `LICENSING.md`. Preserve command-line override support for bounded checks; do not add a second list in Python.
   - **Done when:** Bare `make docs-check` checks the full maintained set, an explicit `DOC_FILES=...` still narrows it, and breaking a link in a non-`TASKS.md` maintained file makes the bare target fail.
   - **Constraints:** Do not scan immutable evidence/history recursively, add network checks, or run runtime/native suites.
+  - Done: `0474efc`.
   - Verified: `make docs-check` with injected broken link in `docs/VIEWS.md` exited 2 and named `docs/VIEWS.md: missing path missing-docs-check-probe.md`; `make docs-check DOC_FILES="AGENTS.md"` → ok: docs-check; restored `docs/VIEWS.md` byte-for-byte; final `make docs-check` → ok: docs-check.
 
 - [ ] **[P2] Stop calling the resolved config-directory choice open** (`TASKS.md:518-524`, `Retained gaps`; `docs/OPEN_QUESTIONS.md:5-11`, `Config editing`)
