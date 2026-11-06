@@ -897,6 +897,109 @@ fn a_field_edit_reconciles_to_the_typed_author_without_a_render() {
 }
 
 #[test]
+fn a_commit_message_option_picks_a_log_commit_into_the_menu_option() {
+    use magit_lsp::protocol::Cursor;
+    use magit_lsp::tree::NodeKind;
+    use magit_lsp::view::ViewKind;
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let expected = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_string();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (menu, _) = test.open_via_command("open.commit");
+    test.ack();
+
+    test.press_ui("=");
+    test.press_ui("C");
+    let log_id = test.view_id().to_string();
+    let log = test
+        .session()
+        .views()
+        .get(&log_id)
+        .expect("the selection log");
+    assert_eq!(log.descriptor().kind, ViewKind::Log);
+    let text = test.text_of(&log_id).join("\n");
+    assert!(
+        text.contains("Select a commit for --reuse-message="),
+        "{text}"
+    );
+    assert!(log
+        .tree()
+        .nodes
+        .iter()
+        .any(|node| node.kind == NodeKind::Commit));
+    assert!(!test.session.prompt_active());
+
+    test.ack();
+    let node = test
+        .session()
+        .views()
+        .get(&log_id)
+        .unwrap()
+        .tree()
+        .nodes
+        .iter()
+        .find(|node| node.commit.as_deref() == Some(&expected))
+        .expect("the HEAD~1 commit row")
+        .start_line;
+    let result = test.invoke_at(
+        "common.confirm",
+        Cursor {
+            line: node,
+            column: 0,
+        },
+    );
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &log_id)),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(test.view_id(), menu.id);
+    assert_eq!(
+        option_value(&test, &menu.id, "=C").as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+fn cancelling_the_commit_message_log_leaves_the_option_unset() {
+    use magit_lsp::view::ViewKind;
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (menu, _) = test.open_via_command("open.commit");
+    test.ack();
+
+    test.press_ui("=");
+    test.press_ui("c");
+    let log_id = test.view_id().to_string();
+    assert_eq!(
+        test.session().views().get(&log_id).unwrap().descriptor().kind,
+        ViewKind::Log
+    );
+
+    let result = test.invoke("common.cancel");
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &log_id)),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(test.view_id(), menu.id);
+    assert_eq!(option_value(&test, &menu.id, "=c"), None);
+}
+
+#[test]
 fn a_title_edit_repairs_the_prompt_document_at_a_higher_version() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

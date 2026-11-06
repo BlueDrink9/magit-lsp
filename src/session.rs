@@ -5,7 +5,7 @@
 //! the server; the wire form is a line-range update unless the client has not
 //! acked the base version.
 
-use crate::commands::{self, SelectionOperation};
+use crate::commands::{self, SelectionOperation, SelectionRequest};
 use crate::diff_text;
 use crate::git::GitLogOptions;
 use crate::keyhandler::{self, MenuResolution, PendingChord, Resolution};
@@ -590,6 +590,7 @@ struct PendingPrompt {
     action: SessionContinuation,
 }
 
+#[derive(Clone)]
 enum SessionContinuation {
     Option {
         key: String,
@@ -635,6 +636,8 @@ pub struct PromptReconcile {
 struct PendingSelection {
     caller_id: String,
     operation: SelectionOperation,
+    /// Where the picked commit lands; absent for a copy-only selection.
+    continuation: Option<SessionContinuation>,
 }
 
 /// What a `view/invoke` produced: effects plus the render that follows it.
@@ -1850,6 +1853,35 @@ impl Session {
                     return self.menu_rerender(view_id, params.cursor);
                 }
 
+                if reader == Reader::Commit {
+                    let menu = self
+                        .views
+                        .get(view_id)
+                        .and_then(|view| view.menu())
+                        .expect("menu option")
+                        .clone();
+                    let request = SelectionRequest {
+                        options: GitLogOptions::default(),
+                        settings: CommitSelection {
+                            purpose: format!("{label} ({flag})"),
+                            prompt: format!("Select a commit for {flag}"),
+                            multi: false,
+                            allow_free_text: true,
+                        },
+                        operation: SelectionOperation::PickCommit,
+                    };
+                    return self.push_selection(
+                        view_id,
+                        request,
+                        Some(SessionContinuation::Option {
+                            key: key.to_string(),
+                            menu,
+                            cursor: params.cursor,
+                        }),
+                        Vec::new(),
+                    );
+                }
+
                 let request = self.option_prompt(&label, &flag, reader);
                 if let Some(result) = self.unsupported_prompt(&request) {
                     return Ok(result);
@@ -2264,6 +2296,66 @@ impl Session {
         Ok((descriptor, render))
     }
 
+    /// Push the commit-selection log for `request` above `caller_id`.
+    ///
+    /// Records the caller and optional continuation so the selection result can
+    /// either copy the commits or write one back to the caller's menu option.
+    fn push_selection(
+        &mut self,
+        caller_id: &str,
+        request: SelectionRequest,
+        continuation: Option<SessionContinuation>,
+        effects: Vec<Effect>,
+    ) -> Result<InvokeResult> {
+        let view = match LogView::new(
+            PathBuf::from(&self.repo_path),
+            request.options,
+            Some(request.settings),
+        ) {
+            Ok(view) => Box::new(view),
+            Err(err) => {
+                if let Some(effect) = Effect::from_error(&err) {
+                    return Ok(InvokeResult {
+                        effects: [effects, vec![effect]].concat(),
+                        ..InvokeResult::empty()
+                    });
+                }
+                return Err(err);
+            }
+        };
+        let (descriptor, mut render) =
+            self.push_view(caller_id, ViewKind::Log, Placement::Main, view)?;
+        if let Some(node) = self.views.get(&descriptor.id).and_then(|view| {
+            view.tree()
+                .nodes
+                .iter()
+                .find(|node| node.kind == NodeKind::Commit)
+        }) {
+            render.cursor = Some(Cursor {
+                line: node.start_line,
+                column: 0,
+            });
+        }
+        self.pending_selections.insert(
+            descriptor.id.clone(),
+            PendingSelection {
+                caller_id: caller_id.to_string(),
+                operation: request.operation,
+                continuation,
+            },
+        );
+        let mut all = effects;
+        all.push(Effect::PushView { descriptor });
+        let keymap = self.keymap_notice(&render.view_id);
+        Ok(InvokeResult {
+            effects: all,
+            render: None,
+            keymap: None,
+            opened: vec![(render, keymap)],
+            commit: None,
+        })
+    }
+
     /// Bind positional input to its exact retained tree, never a newer ack.
     fn run_versioned_command(
         &mut self,
@@ -2653,52 +2745,7 @@ impl Session {
         }
 
         if let Some(request) = outcome.open_selection {
-            let view = match LogView::new(
-                PathBuf::from(&self.repo_path),
-                request.options,
-                Some(request.settings),
-            ) {
-                Ok(view) => Box::new(view),
-                Err(err) => {
-                    if let Some(effect) = Effect::from_error(&err) {
-                        return Ok(InvokeResult {
-                            effects: [effects, vec![effect]].concat(),
-                            ..InvokeResult::empty()
-                        });
-                    }
-                    return Err(err);
-                }
-            };
-            let (descriptor, mut render) =
-                self.push_view(view_id, ViewKind::Log, Placement::Main, view)?;
-            if let Some(node) = self.views.get(&descriptor.id).and_then(|view| {
-                view.tree()
-                    .nodes
-                    .iter()
-                    .find(|node| node.kind == NodeKind::Commit)
-            }) {
-                render.cursor = Some(Cursor {
-                    line: node.start_line,
-                    column: 0,
-                });
-            }
-            self.pending_selections.insert(
-                descriptor.id.clone(),
-                PendingSelection {
-                    caller_id: view_id.to_string(),
-                    operation: request.operation,
-                },
-            );
-            let mut all = effects;
-            all.push(Effect::PushView { descriptor });
-            let keymap = self.keymap_notice(&render.view_id);
-            return Ok(InvokeResult {
-                effects: all,
-                render: None,
-                keymap: None,
-                opened: vec![(render, keymap)],
-                commit: None,
-            });
+            return self.push_selection(view_id, request, None, effects);
         }
 
         if let Some(commits) = outcome.selected_commits {
@@ -2732,7 +2779,9 @@ impl Session {
             };
             if let (Some(pending), Some(valid)) = (self.pending_selections.get(view_id), valid) {
                 let caller = pending.caller_id.clone();
-                if pending.operation == SelectionOperation::CopyCommits {
+                let operation = pending.operation;
+                let continuation = pending.continuation.clone();
+                if operation == SelectionOperation::CopyCommits {
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
                     return Ok(InvokeResult {
@@ -2750,6 +2799,51 @@ impl Session {
                         keymap: self.keymap_notice(&caller),
                         ..InvokeResult::empty()
                     });
+                }
+                if operation == SelectionOperation::PickCommit && valid.len() == 1 {
+                    let Some(SessionContinuation::Option { key, menu, cursor }) = continuation
+                    else {
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Info,
+                                "No valid commits were selected",
+                            )],
+                            ..InvokeResult::empty()
+                        });
+                    };
+                    let oid = valid[0].clone();
+                    self.pending_selections.remove(view_id);
+                    self.views.remove(view_id);
+                    let mut result = InvokeResult {
+                        effects: vec![
+                            Effect::PopView {
+                                view_id: view_id.to_string(),
+                            },
+                            Effect::FocusView {
+                                view_id: caller.clone(),
+                            },
+                        ],
+                        keymap: self.keymap_notice(&caller),
+                        ..InvokeResult::empty()
+                    };
+                    let menu_matches = self
+                        .views
+                        .get(&caller)
+                        .and_then(|view| view.menu())
+                        .is_some_and(|current| current == menu);
+                    if menu_matches {
+                        self.views
+                            .get_mut(&caller)
+                            .and_then(|view| view.menu_mut())
+                            .expect("checked menu")
+                            .set_option(&key, Some(oid));
+                        let rerender = self.menu_rerender(&caller, cursor)?;
+                        result.render = rerender.render;
+                        if rerender.keymap.is_some() {
+                            result.keymap = rerender.keymap;
+                        }
+                    }
+                    return Ok(result);
                 }
             }
             return Ok(InvokeResult {

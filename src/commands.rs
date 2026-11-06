@@ -126,6 +126,8 @@ impl Command {
 pub enum SelectionOperation {
     /// Copy the selected commits' object IDs.
     CopyCommits,
+    /// Pick one commit as the value of the caller's menu option.
+    PickCommit,
 }
 
 /// Request to open a commit-selection view for a typed operation.
