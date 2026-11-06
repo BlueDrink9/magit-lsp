@@ -86,6 +86,10 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.9c3a — Add pick preference configuration.** `PickSettings` with a global `max_items` and per-client `clients`, parsed and layered from `[pick]`; invalid values are rejected with file and line. T008 clause 6.
   - Done: `c7dadc3`.
   - Verified: `make test-rust FILTER="--test config"` @ `c7dadc3` → ok.
+- [x] **T008.9c3b1 — Honour the global pick item preference.** Truncate the staged pick to `pick.max_items` when it is inside the declared limit; when it exceeds the limit, use the document picker and report the reason. T008 clause 6.
+  - Done: `5f3de54`.
+  - Verified: `make test-rust FILTER="--test server_async --test config"` @ `5f3de54` → ok.
+- [ ] **T008.9c3b2 — Allow a per-client pick limit override.** Use `pick.clients[clientInfo.name]` to allow a native pick beyond the declared limit when explicitly configured; otherwise keep the document fallback and message. T008 clause 6.
 - [x] **T008.9d — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9c pick. T008 clause 2.
   - Done: `9f0a70e20eb7a60c6049dc271c860fcd51db4f36`.
   - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `9f0a70e20eb7a60c6049dc271c860fcd51db4f36` → ok.
