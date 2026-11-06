@@ -56,11 +56,14 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.6a1 — Answer choice and multiChoice document prompts.** Add Cancel, choice Submit when allowCustom, toggle-and-re-render semantics, Done and custom/default answers. T008 clause 2.
   - Done: `3223e7d`. `PromptDocument::answer` maps every row to a typed `PromptAction`; choice rows answer ids, the untouched default or the custom text, multi-choice item rows toggle and keep the prompt open, and unknown rows change nothing.
   - Verified: `make test-rust FILTER="--test prompts --test plain_prompt"` @ `3223e7d` → ok: rust.
-- [ ] **T008.6a2 — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks. T008 clause 2.
-- [ ] **T008.6a3 — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field. T008 clause 2.
-- [ ] **T008.7 — Declare the typed pick capability.** Purpose/multi/free text/preselection/item fields/fallbackView; no undeclared shape; client declarations and vectors. T008 clause 3.
+- [x] **T008.7a — Define the typed pick protocol and capability guard.** Pick request/response types (purpose, multi, free text, preselection, item fields, fallbackView); optional rich `pick` declaration; reject every undeclared shape in negotiation tests. T008 clause 3.
+  - Done: `d8b36fd`. Typed pick request/response payloads and the optional rich `pick` capability declaration; negotiation tests reject every undeclared shape.
+  - Verified: `make test-rust FILTER="--test plain_core --test prompts --test quirks"` @ `d8b36fd` → ok: rust.
+- [ ] **T008.7b — Declare pick support in both clients.** Lua static `vim.ui.select` and VSCode `showQuickPick` capability blocks, shared vectors, client tests. T008 clause 3.
 - [ ] **T008.8 — Implement pick rungs and preference limits.** Native → document → code actions; per-client opt-in; Neovim static `vim.ui.select` and long-list cut. T008 clauses 3, 6, 9.
 - [ ] **T008.9 — Implement revision pick semantics.** HEAD-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
+- [ ] **T008.9a — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9 pick. T008 clause 2.
+- [ ] **T008.9b — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9 pick. T008 clause 2.
 - [ ] **T008.10 — Route Plain discard and menu rows through document prompts.** Remove `ConfirmationUnavailable`; menu option rows open prompts. T008 clause 7.
 - [ ] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
 - [ ] **T008.12 — Generate docs/plain-support.md from the command registry.** Recording-Ui matrix, `Unavailable` reasons, maintained target and staleness check. T008 clause 10.
