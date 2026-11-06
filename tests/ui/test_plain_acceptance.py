@@ -91,6 +91,39 @@ class RpcPromptRecoveryTest(unittest.TestCase):
         acknowledge.assert_not_called()
         self.assertEqual(evidence[0]["action"], "none")
 
+    def test_non_timeout_rpc_error_propagates_without_recovery(self) -> None:
+        error = RuntimeError("RPC failed")
+        read = unittest.mock.Mock(side_effect=error)
+        capture = unittest.mock.Mock()
+        acknowledge = unittest.mock.Mock()
+        evidence: list[dict[str, str]] = []
+
+        with self.assertRaises(RuntimeError) as raised:
+            runner["rpc_with_prompt_recovery"](read, capture, acknowledge, evidence)
+
+        self.assertIs(raised.exception, error)
+        read.assert_called_once()
+        capture.assert_not_called()
+        acknowledge.assert_not_called()
+        self.assertEqual(evidence, [])
+
+    def test_persistent_prompts_preserve_final_timeout_without_acknowledging(self) -> None:
+        timeouts = [subprocess.TimeoutExpired("rpc", 2) for _ in range(3)]
+        read = unittest.mock.Mock(side_effect=timeouts)
+        capture = unittest.mock.Mock(return_value="Press ENTER or type command to continue")
+        acknowledge = unittest.mock.Mock()
+        evidence: list[dict[str, str]] = []
+
+        with self.assertRaises(subprocess.TimeoutExpired) as raised:
+            runner["rpc_with_prompt_recovery"](read, capture, acknowledge, evidence, attempts=3)
+
+        self.assertIs(raised.exception, timeouts[-1])
+        self.assertEqual(read.call_count, 3)
+        self.assertEqual(capture.call_count, 3)
+        self.assertEqual(acknowledge.call_args_list, [unittest.mock.call("hit-enter")] * 2)
+        self.assertEqual(len(evidence), 3)
+        self.assertEqual(evidence[-1]["prompt"], "hit-enter")
+
 
 if __name__ == "__main__":
     unittest.main()
