@@ -111,6 +111,7 @@ function M.client_capabilities()
       detail = false,
       group = false,
       preselection = false,
+      maxItems = 100,
       fallbackView = true,
     },
   }

@@ -21,5 +21,10 @@
     {"name":"multi-selection","params":{"promptId":"multi","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"},{"id":"b","label":"B"}]},"response":["a","b"],"answer":{"cancelled":false,"value":{"ids":["a","b"]}}},
     {"name":"multi-empty","params":{"promptId":"multi-empty","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"}]},"response":[],"answer":{"cancelled":false,"value":{"ids":[]}}},
     {"name":"multi-cancel","params":{"promptId":"multi-cancel","kind":"multiChoice","title":"Pick","items":[{"id":"a","label":"A"}]},"response":null,"answer":{"cancelled":true}}
+  ],
+  "picks": [
+    {"name":"single-selected","params":{"pickId":"pick-single","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"},{"id":"main","label":"main"}]},"response":2,"expected":{"cancelled":false,"selected":["main"]}},
+    {"name":"single-cancelled","params":{"pickId":"pick-cancel","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"}]},"response":null,"expected":{"cancelled":true,"selected":[]}},
+    {"name":"two-item-single-select","params":{"pickId":"pick-two","prompt":"Select a revision","items":[{"id":"head","label":"HEAD"},{"id":"main","label":"main"}]},"response":1,"expected":{"cancelled":false,"selected":["head"]}}
   ]
 }

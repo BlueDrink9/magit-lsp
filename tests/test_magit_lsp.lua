@@ -520,6 +520,7 @@ T['declares exact bundled Neovim capabilities'] = function()
       detail = false,
       group = false,
       preselection = false,
+      maxItems = 100,
       fallbackView = true,
     },
   })

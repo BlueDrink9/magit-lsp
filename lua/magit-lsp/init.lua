@@ -13,6 +13,7 @@ local view = require('magit-lsp.view')
 local menu = require('magit-lsp.menu')
 local edit = require('magit-lsp.edit')
 local prompt = require('magit-lsp.prompt')
+local pick = require('magit-lsp.pick')
 local hooks = require('magit-lsp.hooks')
 
 local M = {}
@@ -285,6 +286,9 @@ local function configure()
   end
   vim.lsp.handlers['view/prompt'] = function(_, result, ctx)
     prompt.handle(result, ctx and ctx.client_id)
+  end
+  vim.lsp.handlers['view/pick'] = function(_, result, ctx)
+    pick.handle(result, ctx and ctx.client_id)
   end
   -- Detached Git work (a commit) still has to reach the user after the request
   -- that started it answered, so keep the client that produced it.
