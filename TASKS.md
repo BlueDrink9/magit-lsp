@@ -22,15 +22,36 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
-
-- [ ] **T007.4a — Deliver pending Plain commit editors through LSP.** Route managed edit effects to declared showDocument or readable manual-open instructions. Start the single real-server T007.4 scenario; later children extend that same scenario.
-- [ ] **T007.4b — Render pending manual commit paths as structured rows.** Derive pending draft rows from trusted registry state and refresh their lifecycle without parsing rendered text. Extend the existing T007.4 scenario only.
-- [ ] **T007.4c — Confirm or abort manually attached commit drafts.** Attach the issued URI through didOpen and expose version-bound Confirm/Abort code actions. Extend the same scenario to prove exact Git completion and abort outcomes; no additional test cases.
+- [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
+- [x] **T007.4c — Confirm or abort manually attached commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Attached issued URI through didOpen and exposed Confirm/Abort actions. Exact Confirm body and stale-version rejection landed in `ccf6cbbe055ccb157b59aed525537cdef48f6171`; the existing single scenario enforces both outcomes, terminal retirement and readable guidance.
 - [x] **T007.4n1 — Extend the existing Plain native runner for manual commits.** Add no-showDocument Confirm/Abort flows and structured evidence fields to the maintained runner, without adding test/scenario files. Verify runner helpers; native execution belongs to T007.4n2.
   - Done: `41ff608` (runner foundations: `7e1d814`).
   - Verified: `make ui-unit` @ `41ff608` → ok: ui-unit. Runner check: Confirm and Abort each use the numbered picker, ordinary `:edit`, issued URI/row, attached buffer, selected action and Git-state assertions; no new scenario files or mocked production path.
-- [ ] **T007.4 — Attach manual commit editing without showDocument.** Implement manual COMMIT_EDITMSG instructions/path row, didOpen attachment and Confirm/Abort actions; verify one no-showDocument harness scenario only. Original T007 clause 6.
-- [ ] **T007.5 — Audit Plain capability acceptance.** Close T007 only after its original six clauses and native evidence are demonstrated; retain one authoritative completion record.
+- [x] **T007.4n1a — Disable native showDocument support on the wire.** Done: `c361960`. Explicit support=false survives Neovim's default capability merge; the runner checks both configured and server-effective false. Verified: `make ui-unit` → ok: ui-unit. Prior native failure: `build/test-logs/plain-neovim.UWQ5TW`.
+- [x] **T007.4n1b — Stage native manual-commit input after visibility setup.** Done: `eb56e16`. The runner stages through the native picker after visibility setup, requires a nonempty cached diff, and compares Confirm's tree to that captured tree. Verified: `make ui-unit` → ok: ui-unit; native verification remains T007.4n2.
+- [x] **T007.4n1c — Acknowledge observed native message prompts before state reads.** Keep native LSP handlers unchanged. Bound state-read retries, capture text evidence, and acknowledge only a concrete hit-enter or more prompt; unrelated RPC failures remain failures.
+  - Done: `49cc25f`; recovery follow-up: `82d59c8`.
+  - Verified: `make ui-unit` on `82d59c8` plus the added regression tests → ok: ui-unit. Tests cover unchanged non-timeout RPC errors and final timeout preservation without final acknowledgement; prior observed-prompt and text-evidence checks remain enforced.
+- [x] **T007.4n1d — Normalize native Git scalar output without changing blob evidence.** Done: `78f98eb`. Strip command line endings only from revision, tree and count scalars; preserve blob, body and diff output.
+  - Verified: `make ui-unit` @ `f6a7832` → ok: ui-unit. Subprocess-wrapper tests cover scalar normalization and blob output with either newline form. Earlier native failure: `build/test-logs/plain-neovim.7zVWEw`; fixed before final native gate.
+- [x] **T007.4n1e — Preserve exact native commit-body evidence.** Done: `431af86`. Read raw commit object and preserve body bytes; mismatch reports actual and expected representations.
+  - Verified: `make ui-unit` @ `78f98eb` → ok: ui-unit. Earlier native failure `build/test-logs/plain-neovim.OhJwJd` reached Confirm but stalled at fresh Abort attachment; n1f addresses buffer retirement.
+- [x] **T007.4n1f — Retire the confirmed native draft buffer before reopening.** Done: `9187cae`. Force-wipe only terminal confirmed buffer after exact Git checks and row retirement; assert deletion and fresh Abort attachment.
+  - Verified: `make ui-unit` @ `9187cae` → ok: ui-unit. Source inspection verifies lifecycle order and distinct buffer assertion.
+- [x] **T007.4n1g — Budget synchronization for the added manual native transitions.** Done: `20c7f9c`. Keep 30 applyEdit cap before manual setup; allow 16 for manual flows; retain global request/no-op limits and primary failures.
+  - Verified: `make ui-unit` @ `20c7f9c` → ok: ui-unit. Tests reject both phase overages, request/no-op excess and preserve workflow failures; report records both phase counts.
+- [x] **T007.4n2 — Verify native Plain manual commit editing.** Done: `c407a1d`. Both newline variants passed explicit no-showDocument, URI instructions/rows, ordinary attachment, native Confirm/Abort, exact body/tree/worktree and abort Git invariants, row retirement, no custom notifications and cleanup.
+  - Verified: `make plain-neovim` → ok: plain-neovim. Evidence: `build/ui/plain-render/without-final-newline/native.json`, `build/ui/plain-render/with-final-newline/native.json`. Earlier native failures are recorded above and in prior evidence; final run passed.
+- [x] **T007.4 — Attach manual commit editing without showDocument.** Done: `2fd2683`. The single real-stdio scenario `plain_commit_editor_manual_instructions_cancel_pending_git_run` was expanded; no additional scenario added.
+  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `2fd2683` → ok: rust. Scenario tests absent and declared/rejected showDocument, exact URI row, Confirm body, Abort invariance and terminal retirement.
+- [x] **T007.5 — Audit Plain capability acceptance.** Done: containing commit. All six original T007 clauses map to current source and enforcing tests below; no new test or scenario added.
+  - 1. Code-action-only clients: `src/presentation/mod.rs:244-261`; `plain_actions::code_actions_work_without_execute_command_declaration` and `code_actions_are_unsupported_without_declaration`; `70eca61`.
+  - 2. Neovim `documentChanges` quirk: `src/quirks.rs:78-92`; `quirks::real_server_reports_effective_plain_resolution_and_overrides` and `plain_render::actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file`; quirk resolution and outgoing-format enforcement: `6646086`, `11d1c8b`.
+  - 3. Capability declaration comments: `src/presentation/mod.rs:271-289`; all `from_lsp` reads label feature declarations versus sub-features; `70eca61`.
+  - 4. Missing-echo recovery: `src/server.rs:849-856`, `src/presentation/plain.rs:294`; `plain_render::silent_stale_success_without_echo_recovers_after_watcher_render` and `accepted_unconfirmed_edit_expires_and_repairs_only_on_new_evidence`; `33230ec`, `53483b9`, `5209f6e`.
+  - 5. Standard `workspace/applyEdit`: `tests/test_plain_apply_edit.lua:4-140`; in-process stock handler covers all declaration/version combinations plus a stale second entry; `338b9de`. This is scripted editor evidence, not native evidence.
+  - 6. Manual/declared commit editing: current `src/server.rs`; the single real-stdio `plain_commit_editor_manual_instructions_cancel_pending_git_run` scenario retains no-showDocument and declared paths; `0e9223a`, `c3f5a42`, `2264616`, `ccf6cbb`, `2fd2683`. Native evidence is the two `native.json` files recorded under T007.4n2.
+  - Verified: `make ui-unit` @ `20c7f9c` → ok: ui-unit (reused; source unchanged since). Native verification: `make plain-neovim` @ `c407a1d` → ok: plain-neovim. Both JSON reports show declared/effective `showDocument=false`, exact URI and commit body, successful Confirm/Abort oracles, zero custom notifications, and complete cleanup.
 
 Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [AGENTS.md](./AGENTS.md). Behaviour claims require current source/tests. Project status: early stage; backward compatibility is not a goal.
 
@@ -86,12 +107,12 @@ Its detailed client behavior contract lives in [`docs/CLIENT_SPEC.md`](docs/CLIE
 
 This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md) is an archived scope and provenance document; its detailed ticket specifications remain linked and do not track status. Original scope and Verify text remain recoverable from immutable `d04dfa2:TASKS.md`; provenance is not completion evidence. See [migration ledger](docs/evidence/task-queue-migration.md).
 
-### Feature — Phase 2 (open)
+### Feature — Phase 2 (acceptance complete; final gate pending)
 
 T005 is complete through its authoritative [completed children](#completed-work); full scope and original acceptance: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
 - [x] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
   - Done: containing commit.
-- [ ] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m).
+- [x] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m). Done: containing commit; all six original clauses and native evidence are audited under T007.5. Final Phase 2 gate remains orchestrator-owned.
 
 ### Feature — Phase 3: Plain interaction
 
@@ -352,8 +373,9 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - Done: `0e9223a`.
   - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `0e9223a` → ok: rust. One real Plain scenario stages and opens commit through standard code actions, receives the exact COMMIT_EDITMSG path by window/showMessage, cancels the active progress token, confirms HEAD unchanged and shuts down cleanly.
 - [x] **T007.4a2 — Prove declared Plain editor opening.** Extend that same scenario to prove a correlated standard showDocument request and readable fallback on rejection.
-  - Done: `c3f5a42`.
-  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `f13dbc1` → ok: rust. One real-stdio scenario covers undeclared support, declared success, and declared rejection; checks correlated request/response, exact URI and flags, fallback, cancellation, unchanged HEAD, no custom effects, and bounded shutdown.
+  - Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`.
+  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` passed on the committed implementation diff. The single scenario covers absent support, correlated successful opening, rejected opening with manual fallback, cancellation, unchanged HEAD and bounded shutdown.
+- [x] **T007.4a — Deliver pending Plain commit editors through LSP.** Route managed edit effects to declared showDocument or readable manual-open instructions. Start the single real-server T007.4 scenario; later children extend that same scenario. Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`; enforcing scenario recorded under T007.4a1–T007.4a2.
 - [x] **T007.4b1 — Expose owner-bound pending draft snapshots.** Add a read-only registry snapshot keyed by owner and repository, with stable run/URI identities and deterministic ordering. Extend existing coverage, not the number of test cases.
   - Done: `8dd8bcf`.
   - Verified: `make test-rust FILTER="--test editor_bridge early_commit_cancellation_does_not_kill_repository_discovery"` → ok: rust. `EditRegistry::pending_for` filters owner, canonical repository and nonterminal registry entries, then sorts by run ID; `early_commit_cancellation_does_not_kill_repository_discovery` asserts exact run/issued URI resolution, owner/repository isolation and removal after cancellation.
@@ -362,6 +384,7 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - Verified: `make test-rust FILTER="--test plain_harness plain_commit_editor_manual_instructions_cancel_pending_git_run"` and `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust. `EditRegistry::pending_for` supplies owner/repository-filtered rows; `Tree::append_pending_drafts` sets stable `pending-draft:<run>` identity and exact URI path metadata; `OpenView::render_with_delivery`, `refresh_pending_views` and editor delivery/commit completion refresh the owner’s Plain views without shadow state.
 - [x] **T007.4c1 — Confirm manually attached Plain commit drafts.** Offer synchronized version-bound Confirm on the issued draft URI through standard code actions. Extend the existing scenario to prove exact committed text and row removal.
   - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `cd2d152` → ok: rust. Real LSP didOpen/didChange, stale-version rejection, exact commit body, pending-row removal and terminal action retirement; declared opening/cancellation cases retained.
+- [x] **T007.4b — Render pending manual commit paths as structured rows.** Derive pending draft rows from trusted registry state and refresh their lifecycle without parsing rendered text. Extend the existing T007.4 scenario only. Done: `2264616`; enforcing snapshot and lifecycle checks recorded under T007.4b1–T007.4b2.
 - [x] **Roadmap reconciliation — Restore one authoritative queue.**
   Done: `6d08d85`.
 - [x] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
@@ -547,19 +570,3 @@ Immutable detail and original verification: `d9ea816:TASKS.md`. These records ar
 - [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence — Source-only: `d9ea816:TASKS.md`.
 - [x] [P1] Remove retired fields from the public rich-protocol contract — Source-only: `d9ea816:TASKS.md`.
 - [x] [P2] Pin the bundled Neovim declaration at its producer boundary — Source-only: `d9ea816:TASKS.md`.
-- [x] **T007.4n1a — Disable native showDocument support on the wire.** Neovim deep-merges explicit capability fields over defaults; use `window.showDocument = { support = false }` and require the server's effective value to be false. Done: `c361960`.
-  - Verified: `make ui-unit` @ `c361960` → ok: ui-unit. Source anchor: Neovim `client.lua:437`, `vim.tbl_deep_extend('force', make_client_capabilities(), self.capabilities)`. Prior native failure: both variants timed out before manual draft row in `build/test-logs/plain-neovim.UWQ5TW`; failure JSON showed effective `showDocument=true` despite nil config.
-- [x] **T007.4n1b — Stage native manual-commit input after visibility setup.** Done: `eb56e16`. The runner stages through the native picker after visibility setup, requires a nonempty cached diff, and compares Confirm's tree to that captured tree. Verified: `make ui-unit` → ok: ui-unit; native verification remains T007.4n2.
-- [x] **T007.4n1c — Acknowledge observed native message prompts before state reads.** Keep native LSP handlers unchanged. Bound state-read retries, capture text evidence, and acknowledge only a concrete hit-enter or more prompt; unrelated RPC failures remain failures.
-  - Done: `49cc25f`; recovery follow-up: `82d59c8`.
-  - Verified: `make ui-unit` on `82d59c8` plus the added regression tests → ok: ui-unit. Tests cover unchanged non-timeout RPC errors and final timeout preservation without final acknowledgement; prior observed-prompt and text-evidence checks remain enforced.
-- [x] **T007.4n1d — Normalize native Git scalar output without changing file bytes.** Done: containing commit. Native failure: `build/test-logs/plain-neovim.7zVWEw`.
-  - Verified: `make ui-unit` → ok: ui-unit. Regression coverage exercises scalar IDs/counts and the real raw-output helper with both final-newline variants. Audited every `rev-parse`, `write-tree` and `rev-list --count` call: all use scalar normalization; blob/text reads remain raw.
-- [x] **T007.4n1e — Preserve exact native commit-body evidence.** Done: containing commit. Replaced pretty-format output with raw commit-object body extraction; mismatch diagnostics include actual and expected representations.
-  - Verified: `make ui-unit` @ `78f98eb` → ok: ui-unit. Helper tests retain final LF, blank-separated paragraphs and empty body; native assertion compares exact body and records it.
-- [x] **T007.4n1f — Retire the confirmed native draft buffer before reopening.** Done: containing commit. After Confirm row retirement, force-wipe only the terminal draft buffer, assert it no longer exists, then require a different attached buffer for the newly issued Abort URI.
-  - Verified: `make ui-unit` @ `431af86` → ok: ui-unit. Source inspection confirms wipe occurs after exact Confirm Git/body/tree/worktree checks and row retirement; Abort attachment asserts a fresh buffer and client attachment.
-- [x] **T007.4n1g — Budget synchronization for the added manual native transitions.** Done: containing commit. Retain baseline applyEdit cap, add finite manual-flow budget, and preserve primary failures alongside trace diagnostics.
-  - Verified: `make ui-unit` @ `9187cae` → ok: ui-unit. Tests cover both applyEdit budgets, request/no-op bounds, in-budget traffic and primary-error retention; reports record pre-manual/manual counts.
-- [x] **T007.4n2 — Verify native Plain manual commit editing.** Done: containing commit. Both newline variants proved no-showDocument support, URI instructions/rows, ordinary attachments, picked Confirm/Abort, exact body/tree and Git-state invariants, terminal row retirement, no custom notifications, and clean process teardown.
-  - Verified: `make plain-neovim` → ok: plain-neovim. Evidence: `build/ui/plain-render/without-final-newline/native.json`, `build/ui/plain-render/with-final-newline/native.json`; both cleanup records verified with no remaining owned PIDs or sockets.
