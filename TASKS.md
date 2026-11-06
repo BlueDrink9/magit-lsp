@@ -1,6 +1,7 @@
 # magit-lsp — Roadmap
 
-Last review: 9df2075 (bounded documentation-preservation review; not runtime/full acceptance audit)
+Last review: 9df2075 (bounded docs-only preservation audit; not runtime/native acceptance)
+Documentation cleanup gate: substantial reference relocation and history reduction warrant a bounded preservation review. Runtime implementation changes belong to a concurrent workstream; this documentation gate uses focused documentation checks, not a redundant runtime/native gate.
 
 Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. `Source-only` labels mark provenance, not implementation commits. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only; findings have owners/reasons as recorded in the hygiene allowlist. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk. Documentation reconciliation does not close Phase 2; T007 remains open.
 
@@ -21,14 +22,6 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
-- [x] **Documentation cleanup — Compact capability and recorder completion records.** Done: `408148f`. Complete the two preceding bounded record groups, preserving checked titles and implementation references.
-- [x] **Documentation cleanup — Compact legacy completion records.** Done: `408148f`. Remove obsolete completed-task narratives and dated checkpoints after preserving completion pointers and any forward-relevant constraints. Split into the three preceding bounded record groups.
-- [x] **Documentation cleanup — Condense completed-task records.** Done: `408148f`. Shorten completed ad hoc and roadmap records while retaining completion pointers, open-task prerequisites and evidence limits, then audit the parent cleanup acceptance. Complete after the three preceding compacting slices.
-- [x] **Documentation cleanup — Condense obsolete history and preserve live work.** Done: `408148f`. Remove resolved review/checkpoint narratives and summarize completed-task records. Preserve every unfinished task, acceptance requirement, dependency and authoritative completion pointer; verify the compact queue and documentation links. Complete after the two preceding cleanup slices.
-- [x] **Documentation cleanup — Restore moved completion records.** Repair the incomplete navigation transform from immutable HEAD before committing; retain all checked titles and completion/evidence references.
-  - Done: containing commit.
-  - Verified: `make docs-check` @ `a99e0e8` → ok: docs-check; source comparison: 122/122 checked titles and 102/102 completion/evidence refs preserved, with 0 missing; 9/9 original unchecked titles remain. T007.4a2 and T007.4c1 worktree completions remain external to the HEAD-derived index.
-- [ ] **Documentation cleanup — Finish queue navigation and preservation audit.** Verify the repaired navigation, preserved scope and reference links before recording completion.
 
 - [ ] **T007.4a — Deliver pending Plain commit editors through LSP.** Route managed edit effects to declared showDocument or readable manual-open instructions. Start the single real-server T007.4 scenario; later children extend that same scenario.
 - [ ] **T007.4b — Render pending manual commit paths as structured rows.** Derive pending draft rows from trusted registry state and refresh their lifecycle without parsing rendered text. Extend the existing T007.4 scenario only.
@@ -264,7 +257,7 @@ T001–T004 and T120 are complete and excluded from this unchecked index. A chec
 
 ### Retained gaps
 
-- **A12:** real-dispatch Git-failure handling and removal of `server::mutation`; completed; see the enforcing record above. T103 remains the separate deferred same-session reader-lock redesign.
+- **A12:** real-dispatch Git-failure handling and removal of `server::mutation`; completed; see the enforcing record in Completed work. T103 remains the separate deferred same-session reader-lock redesign.
 - **R-EDIT-REAL:** parent acceptance is not green. T104 is only a subset; last-window exit, dirty shutdown, cross-build, reload, workspace and platform limits remain. Broad fallback review is not comprehensive acceptance.
 - Binary files remain whole-file-only; T093 layout work remains open.
 - The macOS config-directory choice is resolved; only the root config-edit command and runtime config-location verification remain open. Escape caveat remains.
@@ -287,32 +280,21 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 ## Review
 
-- [x] **[P1] Reconcile relocated architecture with the current wire contract** (`docs/ARCHITECTURE.md:156-188`, `Effects`, prompt-kind table; `docs/PROTOCOL.md:23-44`, `Server → client`)
-  - **Problem:** The maintained architecture advertises a `showDocument` effect and a text-prompt `error` field, while `docs/CLIENT_SPEC.md` defines the current effect as `visitFile` and explicitly says no prompt `error` field exists. The protocol's “current contract” table also lists hover, code actions, diagnostics, and completion without separating the narrower currently advertised custom-render providers from Plain target behavior.
-  - **Why it matters:** This is contract drift and a correctness problem. External-client authors can implement retired payload fields or mistake target providers for shipped current capabilities.
-  - **Change:** In `docs/ARCHITECTURE.md`, replace retired `showDocument` effect row with current `visitFile {uri,line,column}` and remove `error?` from text prompts. In `docs/PROTOCOL.md` and `docs/CLIENT_SPEC.md`, distinguish current shared providers, including Plain code actions/commands, from unimplemented Plain provider targets.
-  - **Done when:** The three maintained references describe one current effect/prompt shape, current providers are distinct from Plain targets, and the focused documentation check passes.
-  - **Constraints:** Documentation only. Do not change runtime protocol, add compatibility aliases, claim Plain target providers are implemented, or alter T007 scope/status.
-  - Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/CLIENT_SPEC.md"` @ `ccf6cbb` → ok: docs-check. Source audit: `src/protocol.rs:47-49,419-455`; `src/server.rs:4100-4150`.
-
-- [x] **[P1] Make bare docs-check validate every maintained reference** (`Makefile:26-27`, `docs-check`; `scripts/check_docs.py:44-49`, `main`)
-  - **Problem:** `make docs-check` passes no paths by default, so `check_docs.py` checks only `TASKS.md`; every cleanup verification must repeat a long `DOC_FILES` override to cover the relocated references. A normal gate can therefore pass while links in `AGENTS.md`, `README.md`, `ui-test-plan.md`, or `docs/{ARCHITECTURE,PROTOCOL,KEYMAPS,VIEWS,TESTING,OPEN_QUESTIONS,CLIENT_SPEC}.md` are broken.
-  - **Why it matters:** This weakens test validity and violates DRY. The new maintained navigation has no reliable default gate, and duplicated file lists can drift.
-  - **Change:** Give the `docs-check` target one repository-owned default `DOC_FILES` list containing the maintained files used by this cleanup, including `hygiene-allowlist.md` and `LICENSING.md`. Preserve command-line override support for bounded checks; do not add a second list in Python.
-  - **Done when:** Bare `make docs-check` checks the full maintained set, an explicit `DOC_FILES=...` still narrows it, and breaking a link in a non-`TASKS.md` maintained file makes the bare target fail.
-  - **Constraints:** Do not scan immutable evidence/history recursively, add network checks, or run runtime/native suites.
-  - Done: `0474efc`.
-  - Verified: `make docs-check` with injected broken link in `docs/VIEWS.md` exited 2 and named `docs/VIEWS.md: missing path missing-docs-check-probe.md`; `make docs-check DOC_FILES="AGENTS.md"` → ok: docs-check; restored `docs/VIEWS.md` byte-for-byte; final `make docs-check` → ok: docs-check.
-
-- [x] **[P2] Stop calling the resolved config-directory choice open** (`TASKS.md:518-524`, `Retained gaps`; `docs/OPEN_QUESTIONS.md:5-11`, `Config editing`)
-  - **Problem:** `Retained gaps` still says §9 has an unresolved “config-directory/root-edit,” but §9 now records the macOS `dirs` location as resolved and leaves only the root config-edit command plus runtime verification open.
-  - **Why it matters:** This is a status contradiction that obscures which decision remains actionable.
-  - **Change:** Rewrite the retained-gap summary to name the unresolved config-edit/root-command work and Escape caveat without reopening the resolved directory decision. Preserve the statement that runtime config-location behavior remains unverified.
-  - **Done when:** `TASKS.md`, `docs/OPEN_QUESTIONS.md`, and Architecture §3.18 consistently distinguish the resolved directory choice from open config-edit command/runtime verification work.
-  - **Constraints:** Do not close T047, claim config-location runtime verification, or change the selected macOS directory.
+- [x] **[P1] Reconcile relocated architecture with the current wire contract.** Done: `e666f27`.
+- [x] **[P1] Make bare docs-check validate every maintained reference.** Done: `0474efc`; evidence: `9df2075`.
+- [x] **[P2] Stop calling the resolved config-directory choice open.** Done: containing commit.
 
 ## Completed work
+
+- [x] **Documentation cleanup — Compact capability and recorder completion records.** Done: containing commit.
+- [x] **Documentation cleanup — Compact legacy completion records.** Done: containing commit.
+- [x] **Documentation cleanup — Condense completed-task records.** Done: containing commit.
+- [x] **Documentation cleanup — Condense obsolete history and preserve live work.** Done: containing commit.
+- [x] **Documentation cleanup — Restore moved completion records.** Done: `16f4d11`.
+- [x] **Documentation cleanup — Finish queue navigation and preservation audit.** Done: containing commit.
+  - Bounded audit: commit `16f4d11` compared source titles and references (122/122 checked titles; 102/102 refs; 9/9 original unchecked titles); bounded reviewer confirmed all original pre-cleanup unfinished tasks and requirements remain. T007 worktree-only changes are excluded from staged source comparison.
+  - Scope: queue navigation and owned cleanup/review metadata only; no runtime/native acceptance claim. Final line count: 546.
+  - Verified: `make docs-check` → ok: docs-check.
 
 - [x] **Documentation cleanup — Add focused documentation verification.** Done: `93bb9ab` (Makefile ownership correction `4c83d0d`).
 - [x] **Documentation cleanup — Move decisions and glossary reference.** Done: `3186a69`.
@@ -330,20 +312,11 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 - [x] **Documentation cleanup — Repair older review completion pointers.** Done: `e464429`.
 - [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Done: `3ec4751`; provenance correction: `f13dbc1`, `e464429`.
 - [x] **Documentation cleanup — Compact documentation completion records.** Done: `a45fcde`.
-  - Verification provenance: immutable `e464429:TASKS.md` retains historical check commands; completion refs above identify implementation commits.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` → ok: docs-check.
-
-
-- [x] **Documentation cleanup — Compact T006 and T007 completion records.** Shorten completed prerequisite records without losing live audit evidence, acceptance dependencies or native evidence limits.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `e50d516` → ok: docs-check. Manual preservation audit: compacted checked records through T007.3; verified unchecked blocks unchanged and T007.4 records untouched, including externally updated T007.4a1/a2/a; retained T007.1n native.json paths/timeout risk, T007.5 six-clause native requirement, original clause coverage, model/server and declaration/native evidence limits.
-- [x] **Documentation cleanup — Compact formatter completion records.** Done: containing commit.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `c14eadc` → ok: docs-check. Manual bounded-diff audit: compacted six checked T120 children and reconciliation records; retained titles, recorded hashes, Done/Verified distinctions, live Part Seven sole-queue/scope requirement, T011/T025 ownership, workflow links, unchecked task blocks and external T007.4 changes.
-- [x] **Documentation cleanup — Compact quirk completion records.** Condense checked T005 records and retain completion, verification and evidence limits.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `eb87a14` → ok: docs-check. Manual bounded-diff audit: all twelve checked T005 titles remain one-line records; recorded Done/Verified hashes and live evidence limits retained; no other task block changed.
-- [x] **Documentation cleanup — Compact typed-capability completion records.** Done: containing commit. Bounded audit: checked T004 titles/hashes retained; unchecked and external T007 work unchanged; producer, declaration/native and `multiChoice` limits retained.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` @ `5f5f308` → ok: docs-check.
-- [x] **Documentation cleanup — Compact recorder and migration completion records.** Done: containing commit. Bounded diff audit: only checked policy/T002/T003/T001 records and this item changed; unchecked blocks and external T007 edits preserved. Retained Linux-only evidence/non-Linux CI follow-ups, report-only hygiene, three quirk initialize inputs/no JSONL parser gate, A12 real-dispatch seams vs deferred T103 redesign, R-EDIT-REAL not green/T104 subset, and immutable migration ledger/scope mappings. Removed obsolete resume, review/model-selection and dated checkpoint instructions. Source-only provenance: `3787c66:TASKS.md`.
-  - Verified: `make docs-check DOC_FILES="TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md"` → ok: docs-check.
+- [x] **Documentation cleanup — Compact T006 and T007 completion records.** Done: `bceb82d`.
+- [x] **Documentation cleanup — Compact formatter completion records.** Done: `eb87a14`.
+- [x] **Documentation cleanup — Compact quirk completion records.** Done: `5f5f308`.
+- [x] **Documentation cleanup — Compact typed-capability completion records.** Done: `3787c66`.
+- [x] **Documentation cleanup — Compact recorder and migration completion records.** Done: `408148f`.
 - [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Done `1570ec0`; `make test-rust FILTER="--test plain_harness --test plain_actions"` passed; no real-server didOpen claim.
 - [x] **T006.1b — Prove Plain didOpen applyEdit through the pump.** Done `2e60210`; `make test-rust FILTER="--test plain_harness"` passed; real-server pump regression.
 - [x] **T006.1 — Extract the configurable client pump and dynamic request IDs.** Done `2e60210` (completes `1570ec0`); original clauses 1 and 7.
