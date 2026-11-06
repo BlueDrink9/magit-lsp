@@ -3249,3 +3249,126 @@ fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
 }
+
+#[test]
+fn rich_choice_item_row_enter_answers_the_pick() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!(["editDocument"]), json!(["confirm"])));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &view, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    // `=` prefixes the option; `u` picks the upstream branch and opens a
+    // document prompt because the client declares no pick.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"u","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    let (prompt, version, text) = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] != json!(menu)
+        {
+            let prompt = message["params"]["viewId"].as_str().unwrap().to_owned();
+            let version = message["params"]["version"].as_u64().unwrap();
+            let text: Vec<String> =
+                serde_json::from_value(message["params"]["text"].clone()).unwrap();
+            break (prompt, version, text);
+        }
+    };
+    let item = text
+        .iter()
+        .position(|line| line.strip_prefix("> ").unwrap_or(line).trim_end() == "main")
+        .unwrap_or_else(|| panic!("main item row: {text:?}"));
+
+    // Enter on the prompt title is not a row: the prompt stays active.
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/key",
+        "params":{"viewId":prompt,"version":version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    let non_row = server.response_with_id(6);
+    assert!(
+        !non_row["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView")),
+        "{non_row}"
+    );
+    let refused = invoke_rich(&mut server, 7, &view, "status.stage-all");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pending prompt")),
+        "{refused}"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/key",
+        "params":{"viewId":prompt,"version":version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":item,"column":0}}}));
+    let answered = server.response_with_id(8);
+    assert!(
+        answered["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView") && effect["viewId"] == json!(prompt)),
+        "{answered}"
+    );
+    let after = server.drain_notifications();
+    let menu_reflects = server
+        .notifications
+        .iter()
+        .chain(after.iter())
+        .any(|message| {
+            message["method"] == json!("view/render")
+                && message["params"]["viewId"] == json!(menu)
+                && message["params"]["text"].as_array().is_some_and(|lines| {
+                    lines.iter().any(|line| {
+                        line.as_str()
+                            .is_some_and(|line| line.contains("--set-upstream-to=main"))
+                    })
+                })
+        });
+    assert!(
+        menu_reflects,
+        "menu does not reflect the picked upstream: {:?}",
+        server.notifications
+    );
+    assert!(
+        !server
+            .notifications
+            .iter()
+            .chain(after.iter())
+            .any(|message| message["method"] == json!("view/pick")),
+        "an undeclared pick must not emit view/pick: {:?}",
+        server.notifications
+    );
+    assert!(
+        !server
+            .notifications
+            .iter()
+            .chain(after.iter())
+            .any(|message| message["method"] == json!("view/prompt")),
+        "an undeclared pick must not emit view/prompt: {:?}",
+        server.notifications
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}

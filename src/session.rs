@@ -1525,11 +1525,19 @@ impl Session {
         if node.kind != NodeKind::Line {
             return Ok(None);
         }
-        let prefix = format!("prompt:{prompt_id}:");
-        let Some(row) = node.id.strip_prefix(&prefix) else {
+        let Some((prompt, row)) = node
+            .id
+            .strip_prefix("prompt:")
+            .and_then(|rest| rest.split_once(':'))
+        else {
             return Ok(None);
         };
-        if !matches!(row, "yes" | "no" | "submit" | "cancel") {
+        if prompt != prompt_id {
+            return Ok(None);
+        }
+        if !matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
+            && !row.starts_with("item:")
+        {
             return Ok(None);
         }
         let Some(prompt_view) = open
