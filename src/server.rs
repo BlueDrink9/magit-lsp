@@ -2372,10 +2372,9 @@ fn execute_plain_action(
     if let Some(caps) = caps.as_ref() {
         if crate::dispatch::content_command(&params.command) {
             match caps.content_action(&params.command) {
-                Some(
-                    crate::presentation::PlainContentAction::MissingCapabilities(reason)
-                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason),
-                ) => return plain_unsupported_message(reason),
+                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)) => {
+                    return plain_unsupported_message(reason)
+                }
                 _ => {}
             }
         }
@@ -3636,10 +3635,9 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 .as_ref()
                 .and_then(|caps| caps.content_action(command.id));
             let unavailable = match availability {
-                Some(
-                    crate::presentation::PlainContentAction::MissingCapabilities(reason)
-                    | crate::presentation::PlainContentAction::ConfirmationUnavailable(reason),
-                ) => Some(reason),
+                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)) => {
+                    Some(reason)
+                }
                 Some(crate::presentation::PlainContentAction::Supported) => None,
                 None => continue,
             };

@@ -300,8 +300,6 @@ pub enum PlainContentAction {
     Supported,
     /// The client lacks required standard LSP capabilities.
     MissingCapabilities(&'static str),
-    /// Discard confirmation is not yet backed by a Plain document prompt.
-    ConfirmationUnavailable(&'static str),
 }
 
 impl PlainCapabilities {
@@ -316,11 +314,6 @@ impl PlainCapabilities {
         if !self.apply_edit || !self.code_actions {
             return Some(PlainContentAction::MissingCapabilities(
                 "workspace.applyEdit and textDocument.codeAction are required",
-            ));
-        }
-        if command == "status.discard" {
-            return Some(PlainContentAction::ConfirmationUnavailable(
-                "Discard is unavailable in Plain mode until document-backed confirmation is supported",
             ));
         }
         Some(PlainContentAction::Supported)

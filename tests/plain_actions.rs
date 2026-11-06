@@ -88,41 +88,99 @@ fn open_plain_with_capabilities_and_env(
     (server, editor, uri)
 }
 
+/// The offered `status.discard` argument on the `f.txt` row.
+fn offered_discard(
+    server: &mut stdio::TestServer,
+    editor: &FakeEditor,
+    uri: &str,
+    id: i64,
+) -> Value {
+    let row = editor
+        .text(uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let discard = offered_for_range(
+        server,
+        uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "status.discard",
+        id,
+    );
+    assert!(!discard.is_null(), "no status.discard action offered");
+    discard
+}
+
 #[test]
-fn discard_is_disabled_and_forged_execution_refuses_without_prompt_or_git_changes() {
+fn plain_discard_opens_a_document_confirm_and_cancel_changes_nothing() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
         .modify("f.txt", "changed\n")
         .build();
     let caps = json!({"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},"textDocument":{"codeAction":{"disabledSupport":true}}});
     let (mut server, mut editor, uri) = open_plain_with_capabilities(&repo, caps);
-    let row = editor
-        .text(&uri)
-        .lines()
-        .position(|line| line.contains("f.txt"))
-        .unwrap() as u32;
-    server.send(json!({"jsonrpc":"2.0","id":91,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":row,"character":0},"end":{"line":row,"character":0}},"context":{"diagnostics":[]}}}));
-    let actions = server.response_with_id(91)["result"]
-        .as_array()
-        .unwrap()
-        .clone();
-    let discard = actions
-        .iter()
-        .find(|action| action["data"]["command"] == "status.discard")
-        .expect("disabled discard offer");
-    assert!(discard["disabled"]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("confirmation"));
-    assert!(discard["command"].is_null());
-    let forged = discard["data"].clone();
+
+    let discard = offered_discard(&mut server, &editor, &uri, 91);
     let before = repo_state(&repo);
-    let response = execute_offered(&mut server, &mut editor, forged, 92);
-    assert!(response["result"]["effects"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("confirmation"));
-    assert_eq!(repo_state(&repo), before);
+    let opened = execute_offered(&mut server, &mut editor, discard, 92);
+    assert!(opened["error"].is_null(), "discard offer failed: {opened}");
+
+    let prompt_text = editor.text(&uri).to_owned();
+    assert!(
+        prompt_text.contains("Discard changes to f.txt?"),
+        "discard confirm missing: {prompt_text}"
+    );
+    exact_row(&prompt_text, "Yes");
+    exact_row(&prompt_text, "No");
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/prompt"),
+        "Plain discard must not request a native prompt"
+    );
+    assert_eq!(repo_state(&repo), before, "opening the prompt must not touch Git");
+
+    let no = exact_row(&prompt_text, "No");
+    let answer = offered_prompt_answer(&mut server, &uri, no, 93);
+    let cancelled = execute_offered(&mut server, &mut editor, answer, 94);
+    assert!(
+        cancelled["error"].is_null(),
+        "discard cancel failed: {cancelled}"
+    );
+    let closed = editor.text(&uri).to_owned();
+    assert!(
+        !closed.contains("Discard changes to f.txt?"),
+        "discard prompt stayed open: {closed}"
+    );
+    assert!(
+        closed.lines().any(|line| line.contains("f.txt")),
+        "status document not restored: {closed}"
+    );
+    assert_eq!(repo_state(&repo), before, "cancel must not touch Git");
+
+    let discard = offered_discard(&mut server, &editor, &uri, 95);
+    execute_offered(&mut server, &mut editor, discard, 96);
+    let prompt_text = editor.text(&uri).to_owned();
+    assert!(
+        prompt_text.contains("Discard changes to f.txt?"),
+        "discard confirm missing after cancel: {prompt_text}"
+    );
+    assert_eq!(repo_state(&repo), before, "opening the prompt must not touch Git");
+
+    let yes = exact_row(&prompt_text, "Yes");
+    let answer = offered_prompt_answer(&mut server, &uri, yes, 97);
+    let confirmed = execute_offered(&mut server, &mut editor, answer, 98);
+    assert!(
+        confirmed["error"].is_null(),
+        "discard confirm failed: {confirmed}"
+    );
+    assert_eq!(fixtures::read(&repo.path().join("f.txt")), "one\n");
+    let done = editor.text(&uri).to_owned();
+    assert!(
+        !done.lines().any(|line| line.contains("f.txt")),
+        "status still lists the discarded change: {done}"
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
@@ -147,10 +205,16 @@ fn unavailable_actions_are_omitted_without_disabled_support() {
     assert!(actions
         .iter()
         .any(|action| action["command"]["arguments"][0]["command"] == "status.stage"));
-    assert!(!actions
-        .iter()
-        .any(|action| action["data"]["command"] == "status.discard"
-            || action["command"]["arguments"][0]["command"] == "status.discard"));
+    assert!(
+        actions
+            .iter()
+            .any(|action| action["command"]["arguments"][0]["command"] == "status.discard"),
+        "discard is a normal Plain content action: {response}"
+    );
+    assert!(
+        actions.iter().all(|action| action["data"].is_null()),
+        "unavailable placeholders must be omitted without disabled support: {response}"
+    );
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
