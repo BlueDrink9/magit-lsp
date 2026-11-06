@@ -229,6 +229,15 @@ async function run() {
       v: 1, keys: 'static', modifiers: 'full', layout: ['main'],
       effects: ['visitFile', 'editDocument', 'clipboard'],
       prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+      pick: {
+        multi: true,
+        freeText: false,
+        description: true,
+        detail: true,
+        group: false,
+        preselection: true,
+        fallbackView: true,
+      },
     });
     assert.equal(Object.hasOwn(declaration, 'views'), false);
 

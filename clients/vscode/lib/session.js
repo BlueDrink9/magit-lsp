@@ -51,6 +51,15 @@ function createClient() {
         layout: ['main'],
         effects: ['visitFile', 'editDocument', 'clipboard'],
         prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+        pick: {
+          multi: true,
+          freeText: false,
+          description: true,
+          detail: true,
+          group: false,
+          preselection: true,
+          fallbackView: true,
+        },
       };
     },
     initialize() {},

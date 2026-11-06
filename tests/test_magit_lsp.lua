@@ -513,6 +513,15 @@ T['declares exact bundled Neovim capabilities'] = function()
     layout = { 'main', 'side', 'bottom', 'float' },
     effects = { 'visitFile', 'editDocument', 'clipboard' },
     prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
+    pick = {
+      multi = false,
+      freeText = false,
+      description = false,
+      detail = false,
+      group = false,
+      preselection = false,
+      fallbackView = true,
+    },
   })
 end
 
