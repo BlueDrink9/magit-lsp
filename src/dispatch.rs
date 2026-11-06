@@ -213,6 +213,8 @@ fn mutation_hash(
 
 /// Offer a content target from typed metadata in the exact displayed tree.
 /// Diff lines intentionally target their owning hunk; sections remain bulk.
+/// Confirm and mark commands instead address structured commit nodes by
+/// identity, so their targets never depend on rendered text.
 pub fn offer_target(
     tree: &crate::tree::Tree,
     command: &str,
@@ -220,7 +222,22 @@ pub fn offer_target(
 ) -> Option<ActionTarget> {
     use crate::tree::{MutationContent, NodeKind};
     if !content_command(command) {
-        return None;
+        let node = tree.node(node_id)?;
+        let allowed = match command {
+            "common.confirm" => matches!(node.kind, NodeKind::Commit | NodeKind::Field),
+            "select.toggle-mark" => node.kind == NodeKind::Commit,
+            _ => false,
+        };
+        if !allowed {
+            return None;
+        }
+        use sha2::{Digest, Sha256};
+        let value = serde_json::json!([command, &node.id, &node.commit]);
+        return Some(ActionTarget {
+            node_id: node.id.clone(),
+            mutation_hash: format!("{:x}", Sha256::digest(value.to_string().as_bytes())),
+            selection: None,
+        });
     }
     let mut node = tree.node(node_id)?;
     if node.kind == NodeKind::Section {
@@ -355,6 +372,9 @@ pub fn target_is_current(
     command: &str,
     target: &ActionTarget,
 ) -> Result<bool> {
+    if !content_command(command) {
+        return Ok(offer_target(tree, command, &target.node_id).as_ref() == Some(target));
+    }
     if let Some(intent) = target.selection {
         let Some(expected) =
             offer_selection_target(tree, command, intent.start_line, intent.end_line)

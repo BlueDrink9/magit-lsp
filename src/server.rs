@@ -2243,7 +2243,13 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
                 && crate::dispatch::visibility_command(command).is_none()
                 && !matches!(
                     command,
-                    "open.commit" | "open.branch" | "open.log" | "menu.run-action" | "common.cancel"
+                    "open.commit"
+                        | "open.branch"
+                        | "open.log"
+                        | "menu.run-action"
+                        | "common.cancel"
+                        | "common.confirm"
+                        | "select.toggle-mark"
                 ) =>
         {
             Some("This command requires a Plain client adapter that is not available")
@@ -2610,6 +2616,10 @@ fn execute_plain_action(
             params.target,
             crate::dispatch::PlainActionTarget::Content(_)
         ) && !crate::dispatch::content_command(&params.command)
+            && !matches!(
+                params.command.as_str(),
+                "common.confirm" | "select.toggle-mark"
+            )
         {
             return plain_stale_message();
         }
@@ -3594,6 +3604,15 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             );
         }
     }
+    let selection_multi = shared.session(&repo).is_some_and(|handle| {
+        let session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session
+            .views()
+            .get(&view_id)
+            .filter(|view| view.version() == generation)
+            .and_then(|view| view.commit_selection())
+            .is_some_and(|selection| selection.multi)
+    });
     for command in crate::commands::registry().iter() {
         if !command.applies_to(&scope) {
             continue;
@@ -3692,6 +3711,50 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                     .unwrap_or(Value::Null),
                 );
                 continue;
+            }
+            if (scope == "log.select" && command.id == "common.confirm")
+                || (command.id == "select.toggle-mark" && selection_multi)
+            {
+                // Commit-node offers carry a validated ActionTarget; identity
+                // comes from the structured node, never rendered text.
+                if let Some(target) =
+                    crate::dispatch::offer_target(&tree, command.id, &line_node.id)
+                {
+                    let args = serde_json::json!({
+                        "command": command.id,
+                        "documentUri": uri,
+                        "target": target.clone(),
+                        "viewGeneration": generation,
+                    });
+                    let title = plain_action_title(
+                        style,
+                        command.doc,
+                        keymap
+                            .as_ref()
+                            .and_then(|map| map.command(command.id))
+                            .and_then(|binding| binding.keys.first())
+                            .map(String::as_str),
+                        line_node.path.as_deref(),
+                    );
+                    actions.push(
+                        serde_json::to_value(lsp_types::CodeAction {
+                            title: title.clone(),
+                            kind: None,
+                            diagnostics: None,
+                            is_preferred: None,
+                            disabled: None,
+                            edit: None,
+                            command: Some(lsp_types::Command {
+                                title,
+                                command: "magit.command".into(),
+                                arguments: Some(vec![args]),
+                            }),
+                            data: None,
+                        })
+                        .unwrap_or(Value::Null),
+                    );
+                    continue;
+                }
             }
             let reason = match registry_availability {
                 Some(crate::commands::Availability::Planned(roadmap)) => {

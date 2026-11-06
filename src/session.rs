@@ -109,7 +109,7 @@ impl PublishedViews {
                     version: view.version,
                     lines,
                     tree: view.tree.clone(),
-                    scope: view.descriptor.kind.as_str().to_string(),
+                    scope: view.descriptor.scope.as_str().to_string(),
                     mode: view.mode,
                     pending: view.pending(),
                     menu: view.menu(),
@@ -1105,6 +1105,7 @@ impl Session {
             target.version,
             target.cursor,
             target.selection,
+            request.action_target.is_some(),
             request.args.as_ref(),
             target.key,
             ui,
@@ -2659,6 +2660,7 @@ impl Session {
         version: Option<u64>,
         cursor: Option<Cursor>,
         selection: Option<Selection>,
+        validated_offer: bool,
         args: Option<&Value>,
         key: Option<String>,
         ui: &dyn PromptUi,
@@ -2702,6 +2704,12 @@ impl Session {
         {
             let source = match version {
                 Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
+                Some(v) if validated_offer
+                    && view.acked_version.is_none()
+                    && v == view.version =>
+                {
+                    Some(&view.tree)
+                }
                 Some(version) if !requires_ack && version == view.version => Some(&view.tree),
                 _ => None,
             };

@@ -181,6 +181,101 @@ fn plain_commit_menu_option_renders_the_log_select_document() {
 }
 
 #[test]
+fn plain_log_select_offers_commit_code_actions() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+
+    // A Plain client learns the status view id from the offered actions.
+    server.send(json!({"jsonrpc":"2.0","id":19,"method":"textDocument/codeAction","params":{
+        "textDocument":{"uri":uri},
+        "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+        "context":{"diagnostics":[]}}}));
+    let status_actions = server.response_with_id(19)["result"].as_array().unwrap().clone();
+    let status_view = status_actions
+        .iter()
+        .find_map(|action| action["command"]["arguments"][0]["target"]["viewId"].as_str())
+        .map(str::to_owned)
+        .expect("a view target exposing the status view id");
+    server.send(json!({"jsonrpc":"2.0","id":20,"method":"view/invoke","params":{
+        "viewId":status_view,"command":"log.select-and-copy","args":{"multi":true}}}));
+    let invoked = loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            continue;
+        }
+        if message["id"] == json!(20) {
+            break message;
+        }
+    };
+    assert!(
+        invoked["error"].is_null(),
+        "log.select-and-copy failed: {invoked}"
+    );
+    let pushed = invoked["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap_or_else(|| panic!("log select view not pushed: {invoked}"));
+    assert_eq!(pushed["descriptor"]["scope"], "log.select");
+
+    let text = editor.text(&uri).to_owned();
+    let row = row_containing(&text, "second");
+    let range = json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}});
+    server.send(json!({"jsonrpc":"2.0","id":21,"method":"textDocument/codeAction","params":{
+        "textDocument":{"uri":uri},"range":range,"context":{"diagnostics":[]}}}));
+    let actions = server.response_with_id(21)["result"].as_array().unwrap().clone();
+    let args_for = |command: &str| -> Value {
+        actions
+            .iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == command)
+            .map(|action| action["command"]["arguments"][0].clone())
+            .unwrap_or_else(|| panic!("{command} not offered: {actions:?}"))
+    };
+
+    let confirm = args_for("common.confirm");
+    assert_eq!(
+        confirm["target"]["nodeId"],
+        format!("log:commit:{head}"),
+        "confirm must target the structured commit node"
+    );
+    assert!(
+        !confirm["target"]["mutationHash"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
+        "confirm must carry a mutation hash"
+    );
+    let cancel = args_for("common.cancel");
+    assert!(
+        cancel["target"]["viewId"].is_string(),
+        "cancel must be a view action: {cancel}"
+    );
+    let toggle = args_for("select.toggle-mark");
+    assert_eq!(toggle["target"]["nodeId"], format!("log:commit:{head}"));
+
+    let confirmed = execute_offered(&mut server, &mut editor, confirm, 22);
+    assert!(
+        confirmed["error"].is_null(),
+        "common.confirm failed: {confirmed}"
+    );
+    let clipboard = confirmed["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "clipboard")
+        .unwrap_or_else(|| panic!("no clipboard effect: {confirmed}"));
+    assert_eq!(clipboard["text"], head);
+}
+
+#[test]
 fn plain_already_set_commit_option_clears_and_restores_the_menu() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
