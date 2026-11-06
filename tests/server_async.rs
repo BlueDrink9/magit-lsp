@@ -3070,3 +3070,182 @@ fn disconnect_during_commit_msg_hook_cancels_owned_hook_without_committing() {
     std::fs::remove_file(&hook).unwrap();
     tmp.git(&["commit", "-m", "follow-up"]);
 }
+
+/// Full rich declaration including every native pick shape.
+fn rich_pick_capabilities() -> Value {
+    json!({"experimental":{"magit":{
+        "v":1,"keys":"dynamic","modifiers":"full",
+        "layout":["main"],"effects":[],"prompts":[],
+        "pick":{"multi":false,"freeText":true,"description":true,"detail":true,
+                "group":true,"preselection":true,"fallbackView":true,"maxItems":100}
+    }}})
+}
+
+#[test]
+fn a_declared_native_pick_answers_the_staged_menu_prompt() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(rich_pick_capabilities());
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let status = server.response_with_id(2)["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":status,"command":"open.branch"}}));
+    let opened = server.response_with_id(3);
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+    let version = menu_render["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":menu,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    let prefix = server.response_with_id(4);
+    assert_eq!(prefix["result"]["effects"], json!([]), "{prefix}");
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let pick = loop {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/pick") {
+            break message;
+        }
+    };
+    let params = &pick["params"];
+    assert!(
+        params["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == json!("main")),
+        "{pick}"
+    );
+    assert_eq!(params["allowFreeText"], json!(true), "{pick}");
+    assert_eq!(params["multi"], json!(false), "{pick}");
+    let pick_id = params["pickId"].as_str().unwrap().to_owned();
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/pickRespond",
+        "params":{"pickId":pick_id,"cancelled":false,"selected":["main"]}}));
+
+    let mut saw_key_response = false;
+    let mut saw_update = false;
+    for _ in 0..30 {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["id"] == json!(5) {
+            saw_key_response = true;
+        }
+        if message["method"] == json!("view/render")
+            && message["params"].to_string().contains("--set-upstream-to=main")
+        {
+            saw_update = true;
+        }
+        if saw_key_response && saw_update {
+            break;
+        }
+    }
+    assert!(
+        saw_key_response,
+        "the held view/key response arrives: {:?}",
+        server.notifications
+    );
+    assert!(
+        saw_update,
+        "the menu re-renders the new option: {:?}",
+        server.notifications
+    );
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/prompt")),
+        "a declared pick must not emit a document prompt: {:?}",
+        server.notifications
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!([]), json!([])));
+    server.send(open_view_message(2, &repo_param(tmp.path())));
+    let status = server.response_with_id(2)["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
+        "params":{"viewId":status,"command":"open.branch"}}));
+    let opened = server.response_with_id(3);
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let answer = server.response_with_id(5);
+    let descriptor = answer["result"]["effects"]
+        .as_array()
+        .expect("effects")
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap_or_else(|| panic!("the prompt view: {answer}"))["descriptor"]
+        .clone();
+    assert_eq!(descriptor["kind"], json!("prompt"), "{answer}");
+    let prompt_view = descriptor["id"].as_str().expect("prompt view id").to_owned();
+    let mut rendered = server.notifications.iter().any(|message| {
+        message["method"] == json!("view/render") && message["params"]["viewId"] == json!(prompt_view)
+    });
+    while !rendered {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] == json!(prompt_view)
+        {
+            rendered = true;
+        }
+    }
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/pick")),
+        "an undeclared pick must fall back to the document: {:?}",
+        server.notifications
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}

@@ -163,6 +163,8 @@ struct Shared {
     next_outbound: Arc<AtomicU64>,
     /// The prompt transport, shared with the editor bridge.
     prompts: Arc<PromptBridge>,
+    /// The native pick transport.
+    picks: Arc<PickBridge>,
     /// Running mutations keyed by their progress token, so a client cancel can
     /// kill the child on the blocking worker thread.
     progress: Arc<Mutex<HashMap<String, ProgressRun>>>,
@@ -248,6 +250,7 @@ impl Shared {
             outbound: Arc::new(Mutex::new(HashMap::new())),
             next_outbound: Arc::new(AtomicU64::new(0)),
             prompts: Arc::new(PromptBridge::new(&sender, client)),
+            picks: Arc::new(PickBridge::new(&sender)),
             progress: Arc::new(Mutex::new(HashMap::new())),
             closing: Arc::new(AtomicBool::new(false)),
             progress_changed: Arc::new(Notify::new()),
@@ -612,6 +615,7 @@ impl Shared {
         }
         editor::registry().abort_all();
         self.prompts.close();
+        self.picks.close();
     }
 
     /// Wait until each progress-owning worker has run its terminal release.
@@ -684,6 +688,11 @@ impl Shared {
         value: Option<PromptValue>,
     ) -> Result<()> {
         self.prompts.respond(prompt_id, cancelled, value)
+    }
+
+    /// Deliver a `view/pickRespond` answer to the waiting command.
+    fn respond_pick(&self, params: ViewPickRespondParams) -> Result<()> {
+        self.picks.respond(params)
     }
 
     /// How the client wants keymaps delivered.
@@ -1558,6 +1567,98 @@ impl PromptBridge {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, std_mpsc::Sender<PromptValue>>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn close(&self) {
+        let mut pending = self.lock();
+        self.closed.store(true, Ordering::SeqCst);
+        pending.clear();
+    }
+}
+
+/// The pick transport: a `view/pick` notification and its answer.
+///
+/// Like [`PromptBridge`], it holds a *weak* sender so a pending pick never keeps
+/// the writer channel (and the server process) alive.
+struct PickBridge {
+    closed: AtomicBool,
+    sender: mpsc::WeakUnboundedSender<Message>,
+    /// Picks waiting for an answer, keyed by pick id.
+    pending: Mutex<HashMap<String, std_mpsc::Sender<ViewPickRespondParams>>>,
+    /// Pick-id counter; ids are unique across this server process.
+    next_id: AtomicU64,
+}
+
+impl PickBridge {
+    fn new(sender: &mpsc::UnboundedSender<Message>) -> Self {
+        Self {
+            closed: AtomicBool::new(false),
+            sender: sender.downgrade(),
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(0),
+        }
+    }
+
+    /// Send one pick and block until the client answers it.
+    ///
+    /// `None` means the user cancelled or the notification could not be
+    /// delivered (the writer is gone or the operation was cancelled).
+    fn ask(&self, ui: &CustomRender, pick: &ViewPickParams) -> Option<ViewPickRespondParams> {
+        let pick_id = format!("k{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
+        let params = ViewPickParams {
+            pick_id: pick_id.clone(),
+            ..pick.clone()
+        };
+        let (tx, rx) = std_mpsc::channel();
+        {
+            let mut pending = self.lock();
+            if self.closed.load(Ordering::SeqCst) {
+                return None;
+            }
+            pending.insert(pick_id.clone(), tx);
+        }
+
+        let sent = match self.sender.upgrade() {
+            Some(sender) => sender.send(ui.pick(&params)).is_ok(),
+            None => false,
+        };
+
+        let cancel = runner::current_cancel();
+        let answer = if sent {
+            loop {
+                if cancel.as_ref().is_some_and(|handle| handle.is_cancelled()) {
+                    break None;
+                }
+                match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(answer) => break Some(answer),
+                    Err(std_mpsc::RecvTimeoutError::Disconnected) => break None,
+                    Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            }
+        } else {
+            None
+        };
+
+        self.lock().remove(&pick_id);
+        answer
+    }
+
+    /// Deliver an answer to the waiting pick.
+    fn respond(&self, params: ViewPickRespondParams) -> Result<()> {
+        let sender = self
+            .lock()
+            .remove(&params.pick_id)
+            .ok_or_else(|| Error::new(format!("unknown pick: {}", params.pick_id)))?;
+        let _ = sender.send(params);
+        Ok(())
+    }
+
+    fn lock(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, std_mpsc::Sender<ViewPickRespondParams>>> {
         self.pending
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -3082,6 +3183,11 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             shared.respond_prompt(&p.prompt_id, p.cancelled, p.value)?;
             Ok(Dispatched::value(Value::Null))
         }
+        ViewPickRespondRequest::METHOD => {
+            let p: ViewPickRespondParams = from_params(params)?;
+            shared.respond_pick(p)?;
+            Ok(Dispatched::value(Value::Null))
+        }
         ViewResyncRequest::METHOD => {
             let p: ViewResyncParams = from_params(params)?;
             let repo = shared
@@ -4101,18 +4207,53 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
     loop {
         match step {
             Execution::Done(result) => return Ok(result),
-            Execution::Pick(_) => {
-                let handle = shared
-                    .session(repo)
-                    .ok_or_else(|| Error::new("Prompt session closed"))?;
-                let request = {
-                    let session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                    session
+            Execution::Pick(pick) => {
+                let ui = custom_ui(&shared.client);
+                if ui.allows_pick(&pick) {
+                    let answer = shared.picks.ask(&ui, &pick);
+                    let handle = shared
+                        .session(repo)
+                        .ok_or_else(|| Error::new("Prompt session closed"))?;
+                    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                    let prompt_id = session
                         .pending_prompt_request()
-                        .ok_or_else(|| Error::new("no pick is pending"))?
-                };
-                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                return session.open_document_prompt(&request);
+                        .ok_or_else(|| Error::new("no prompt is pending"))?
+                        .prompt_id;
+                    let value = match answer {
+                        Some(answer) if !answer.cancelled => {
+                            let free = answer
+                                .free_text
+                                .filter(|text| !text.trim().is_empty());
+                            if let Some(custom) = free {
+                                Some(PromptValue::Choice(PromptChoiceAnswer::Custom { custom }))
+                            } else if answer.selected.is_empty() {
+                                None
+                            } else if pick.multi {
+                                Some(PromptValue::Multi {
+                                    ids: answer.selected,
+                                })
+                            } else {
+                                Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                                    id: answer.selected[0].clone(),
+                                }))
+                            }
+                        }
+                        _ => None,
+                    };
+                    step = session.resume_prompt(&prompt_id, value)?;
+                } else {
+                    let handle = shared
+                        .session(repo)
+                        .ok_or_else(|| Error::new("Prompt session closed"))?;
+                    let request = {
+                        let session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                        session
+                            .pending_prompt_request()
+                            .ok_or_else(|| Error::new("no pick is pending"))?
+                    };
+                    let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                    return session.open_document_prompt(&request);
+                }
             }
             Execution::Prompt(request) => {
                 let native = custom_ui(&shared.client).allows_prompt(&request);
@@ -4627,6 +4768,7 @@ fn is_request_method(method: &str) -> bool {
             | ViewKeyRequest::METHOD
             | ViewSetModeRequest::METHOD
             | ViewPromptRespondRequest::METHOD
+            | ViewPickRespondRequest::METHOD
             | ViewResyncRequest::METHOD
             | "window/workDoneProgress/create"
     )

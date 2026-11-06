@@ -116,6 +116,19 @@ impl CustomRender {
         }
     }
 
+    /// Whether the client's declared pick shapes can present this request.
+    pub fn allows_pick(&self, pick: &crate::protocol::ViewPickParams) -> bool {
+        match (self.prompt_support)() {
+            PromptSupport::Rich(caps) => caps.allows_pick(pick),
+            PromptSupport::Plain | PromptSupport::Unnegotiated => false,
+        }
+    }
+
+    /// Build the `view/pick` notification; the caller owns its response lifecycle.
+    pub fn pick(&self, pick: &crate::protocol::ViewPickParams) -> Message {
+        Self::notify(crate::protocol::VIEW_PICK, pick)
+    }
+
     fn notify<T: Serialize>(method: &str, params: &T) -> Message {
         let value = serde_json::to_value(params).expect("protocol params serialize");
         Message::Notification(Notification::new(method.to_owned(), value))
