@@ -102,6 +102,11 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Done: `98a0a4c`. Custom choice clears the item-id default before the text prompt; empty secret answers cancel in both clients.
   - Verified: `make test-lua && make vscode-test && make docs-check` @ `98a0a4c` → ok.
 - [ ] **T008.12 — Generate docs/plain-support.md from the command registry.** Recording-Ui matrix, `Unavailable` reasons, maintained target and staleness check. T008 clause 10.
+- [x] **T008.12a — Type command effect declarations and add plain_availability.** Replace `required_effect` with `effects: &'static [EffectKind]`; one availability function folds the content-action rule and drives both Rich and Plain gating. T008 clause 10.
+  - Done: `f717778`.
+  - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test commands --test editor_bridge --test log_selection"` @ `f717778` → ok.
+- [ ] **T008.12b — Generate and check docs/plain-support.md.** Registry-derived table across minimal/edits/full capability profiles, a maintained update target, and a staleness test. T008 clause 10.
+- [ ] **T008.12c — Enforce declarations and test unsupported effects.** Assert emitted optional effects are declared; exercise each effect-declaring command against RecordingUi with and without the capability, expecting `Unavailable{reason}` or a readable message and clean cancel. T008 clause 10.
 - [ ] **T008.13 — Add the mixed-rung conformance test.** Cancel at each step; no Git/index change; caller returns; view-stack depth unchanged. T008 clause 11.
 
 - [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
