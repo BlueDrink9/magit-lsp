@@ -14,6 +14,7 @@ import tempfile
 import time
 import traceback
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / "build/ui/plain-render"
@@ -61,6 +62,29 @@ def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
     return result
 
 
+def rpc_with_prompt_recovery(
+    read: Callable[[], str], capture_screen: Callable[[], str], acknowledge: Callable[[str], None],
+    evidence: list[dict[str, str]], attempts: int = 4,
+) -> str:
+    """Retry timed-out RPC reads only after observing and acknowledging a native prompt."""
+    for attempt in range(attempts):
+        try:
+            return read()
+        except subprocess.TimeoutExpired:
+            screen = capture_screen()
+            trimmed = screen.rstrip()
+            prompt = (
+                "hit-enter" if trimmed.endswith("Press ENTER or type command to continue")
+                else "more" if trimmed.endswith("-- More --")
+                else ""
+            )
+            evidence.append({"screen": screen, "prompt": prompt, "action": prompt if prompt else "none"})
+            if not prompt or attempt + 1 == attempts:
+                raise
+            acknowledge(prompt)
+    raise AssertionError("bounded RPC prompt recovery exhausted without a read result")
+
+
 def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) -> None:
     """Run native acceptance for one final-newline variant."""
     for executable in ("nvim", "tmux", "git"):
@@ -83,9 +107,22 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
     owned_pids: set[int] = set()
     ownership: dict[str, int | None] = {}
     failure: BaseException | None = None
+    rpc_prompt_evidence: list[dict[str, str]] = report.setdefault("rpc_prompt_recovery", [])
 
     def rpc(expr: str) -> str:
-        return run(["nvim", "--server", socket, "--remote-expr", expr], timeout=8).stdout.strip()
+        def read() -> str:
+            return run(["nvim", "--server", socket, "--remote-expr", expr], timeout=2).stdout.strip()
+
+        def capture_screen() -> str:
+            from ui_lib import driver
+            return run(["tmux", "-L", server_id, "capture-pane", "-pt", driver.SESSION]).stdout
+
+        def acknowledge(prompt: str) -> None:
+            from ui_lib import driver
+            key = "Enter" if prompt == "hit-enter" else "q"
+            run(["tmux", "-L", server_id, "send-keys", "-t", driver.SESSION, key])
+
+        return rpc_with_prompt_recovery(read, capture_screen, acknowledge, rpc_prompt_evidence)
 
     def state() -> dict[str, object]:
         lua = (

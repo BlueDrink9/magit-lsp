@@ -49,5 +49,48 @@ class TmuxCleanupTest(unittest.TestCase):
         )
 
 
+class RpcPromptRecoveryTest(unittest.TestCase):
+    """Require observed native prompts before retrying a timed-out RPC read."""
+
+    def test_observed_hit_enter_prompt_is_acknowledged_before_retry(self) -> None:
+        read = unittest.mock.Mock(side_effect=[subprocess.TimeoutExpired("rpc", 2), "state"])
+        capture = unittest.mock.Mock(return_value="message\nPress ENTER or type command to continue")
+        acknowledge = unittest.mock.Mock()
+        evidence: list[dict[str, str]] = []
+
+        result = runner["rpc_with_prompt_recovery"](read, capture, acknowledge, evidence)
+
+        self.assertEqual(result, "state")
+        acknowledge.assert_called_once_with("hit-enter")
+        self.assertEqual(evidence[0]["prompt"], "hit-enter")
+
+    def test_multiple_observed_prompts_stay_within_retry_bound(self) -> None:
+        timeout = subprocess.TimeoutExpired("rpc", 2)
+        read = unittest.mock.Mock(side_effect=[timeout, timeout, timeout, "state"])
+        capture = unittest.mock.Mock(side_effect=["Press ENTER or type command to continue", "-- More --", "Press ENTER or type command to continue"])
+        acknowledge = unittest.mock.Mock()
+        evidence: list[dict[str, str]] = []
+
+        result = runner["rpc_with_prompt_recovery"](read, capture, acknowledge, evidence, attempts=4)
+
+        self.assertEqual(result, "state")
+        self.assertEqual(read.call_count, 4)
+        self.assertEqual(acknowledge.call_args_list, [unittest.mock.call("hit-enter"), unittest.mock.call("more"), unittest.mock.call("hit-enter")])
+        self.assertEqual(len(evidence), 3)
+
+    def test_timeout_without_observed_prompt_remains_failure(self) -> None:
+        read = unittest.mock.Mock(side_effect=subprocess.TimeoutExpired("rpc", 2))
+        capture = unittest.mock.Mock(return_value="ordinary editor screen")
+        acknowledge = unittest.mock.Mock()
+        evidence: list[dict[str, str]] = []
+
+        with self.assertRaises(subprocess.TimeoutExpired):
+            runner["rpc_with_prompt_recovery"](read, capture, acknowledge, evidence)
+
+        read.assert_called_once()
+        acknowledge.assert_not_called()
+        self.assertEqual(evidence[0]["action"], "none")
+
+
 if __name__ == "__main__":
     unittest.main()
