@@ -1,6 +1,8 @@
 //! Document prompts: tracked one-line fields, stable row ids and exact layout.
 
-use magit_lsp::presentation::prompt::{PromptDocument, PromptView, MAX_FIELD_BYTES};
+use magit_lsp::presentation::prompt::{
+    delivery, PromptDelivery, PromptDocument, PromptView, MAX_FIELD_BYTES,
+};
 use magit_lsp::protocol::ViewPromptParams;
 use magit_lsp::tree::{NodeKind, Tree};
 use magit_lsp::view::{Ctx, Scope, View, ViewKind, ViewMode, Viewport};
@@ -496,4 +498,41 @@ fn prompt_view_document_mut_adopts_reconciled_text() {
     let tree = view.render(&ctx);
     assert_eq!(tree.lines[2], "v2.0");
     assert_eq!(view.document().field_text("prompt:rev:field"), Some("v2.0"));
+}
+
+#[test]
+fn delivery_routes_each_kind_by_native_declaration() {
+    let kinds = [
+        json!({"promptId": "c", "kind": "confirm", "title": "Ok?"}),
+        json!({"promptId": "t", "kind": "text", "title": "Value"}),
+        json!({
+            "promptId": "ch",
+            "kind": "choice",
+            "title": "Pick",
+            "items": [{"id": "a", "label": "A"}]
+        }),
+        json!({
+            "promptId": "m",
+            "kind": "multiChoice",
+            "title": "Pick many",
+            "items": [{"id": "a", "label": "A"}]
+        }),
+    ];
+    for value in kinds {
+        let request = params(value);
+        assert_eq!(delivery(&request, true), PromptDelivery::Native, "{request:?}");
+        assert_eq!(delivery(&request, false), PromptDelivery::Document, "{request:?}");
+    }
+}
+
+#[test]
+fn delivery_refuses_secret_without_native_support_and_keeps_it_native_otherwise() {
+    let request = params(json!({
+        "promptId": "s",
+        "kind": "text",
+        "title": "Password",
+        "secret": true
+    }));
+    assert_eq!(delivery(&request, false), PromptDelivery::RefuseSecret);
+    assert_eq!(delivery(&request, true), PromptDelivery::Native);
 }

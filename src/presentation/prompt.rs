@@ -17,6 +17,36 @@ use std::collections::BTreeSet;
 /// refused rather than truncated, so the server never silently drops input.
 pub const MAX_FIELD_BYTES: usize = 4096;
 
+/// Message shown when a non-native client asks for secret input.
+pub const SECRET_UNAVAILABLE: &str =
+    "This client cannot ask for secret input; the operation was cancelled";
+
+/// How a prompt request reaches a client that did or did not declare support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptDelivery {
+    /// The client declared the prompt kind (and, for secret input, `secret`).
+    Native,
+    /// The client cannot show this prompt natively; render it as document text.
+    Document,
+    /// The client cannot show secret input natively; refuse the operation.
+    RefuseSecret,
+}
+
+/// Choose how `request` reaches a client whose prompt declarations are
+/// `native_declared`.
+///
+/// Secret input is checked first: a client that cannot show it natively never
+/// gets a document fallback, because document text would expose the value.
+pub fn delivery(request: &ViewPromptParams, native_declared: bool) -> PromptDelivery {
+    if request.secret == Some(true) && !native_declared {
+        PromptDelivery::RefuseSecret
+    } else if !native_declared {
+        PromptDelivery::Document
+    } else {
+        PromptDelivery::Native
+    }
+}
+
 /// Outcome of ingesting one client document revision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reconcile {

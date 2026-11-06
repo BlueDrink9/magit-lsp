@@ -13,7 +13,7 @@ use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::log_view::LogView;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
-use crate::presentation::prompt::{PromptDocument, PromptView};
+use crate::presentation::prompt::{self, PromptDelivery, PromptDocument, PromptView};
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
@@ -695,10 +695,21 @@ impl Session {
             .map_or(placement, |caps| caps.placement(placement))
     }
 
-    fn unsupported_prompt(&self, request: &ViewPromptParams) -> bool {
-        self.rich_capabilities
+    fn unsupported_prompt(&self, request: &ViewPromptParams) -> Option<InvokeResult> {
+        let native_declared = self
+            .rich_capabilities
             .as_ref()
-            .is_some_and(|caps| !caps.allows_prompt(request))
+            .is_some_and(|caps| caps.allows_prompt(request));
+        match prompt::delivery(request, native_declared) {
+            PromptDelivery::RefuseSecret => Some(InvokeResult {
+                effects: vec![Effect::message(
+                    MessageLevel::Warn,
+                    prompt::SECRET_UNAVAILABLE.to_string(),
+                )],
+                ..InvokeResult::empty()
+            }),
+            PromptDelivery::Native | PromptDelivery::Document => None,
+        }
     }
 
     /// The shared snapshot handle that answers reads without the session lock.
@@ -1595,8 +1606,8 @@ impl Session {
                 }
 
                 let request = self.option_prompt(&label, &flag, reader);
-                if self.unsupported_prompt(&request) {
-                    return Ok(unsupported_feature("requested prompt"));
+                if let Some(result) = self.unsupported_prompt(&request) {
+                    return Ok(result);
                 }
                 let menu = self
                     .views
@@ -2198,8 +2209,8 @@ impl Session {
         mut outcome: commands::CommandOutcome,
     ) -> Result<InvokeResult> {
         if let Some((request, action)) = outcome.prompt.take() {
-            if self.unsupported_prompt(&request) {
-                return Ok(unsupported_feature("requested prompt"));
+            if let Some(result) = self.unsupported_prompt(&request) {
+                return Ok(result);
             }
             self.prepare_prompt(
                 view_id,

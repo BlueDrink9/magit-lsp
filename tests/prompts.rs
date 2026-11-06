@@ -6,7 +6,9 @@ mod common;
 use common::*;
 use magit_lsp::config::Profile;
 use magit_lsp::menu::Item;
+use magit_lsp::presentation::RichCapabilities;
 use magit_lsp::protocol::{Effect, PromptChoiceAnswer, PromptKind, PromptValue};
+use std::collections::BTreeSet;
 
 fn option_value(test: &TestSession, view: &str, key: &str) -> Option<String> {
     let menu = test.menu(view).expect("a menu view");
@@ -602,4 +604,27 @@ fn closing_the_origin_view_closes_its_prompt_too() {
     assert!(test.session.views().get(&menu.id).is_none());
     assert!(test.session.views().get(&prompt_id).is_none());
     assert_eq!(test.session().views().iter().count(), depth - 1);
+}
+
+#[test]
+fn a_client_with_no_prompt_declarations_stages_the_author_prompt_as_a_document() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _initial) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (menu, _render) = test.open_via_command("open.commit");
+    test.ack();
+    test.session.set_rich_capabilities(Some(RichCapabilities {
+        keys: magit_lsp::protocol::KeymapDelivery::Dynamic,
+        modifiers: magit_lsp::protocol::KeyModifiers::Full,
+        layout: BTreeSet::new(),
+        effects: BTreeSet::new(),
+        prompts: BTreeSet::new(),
+    }));
+
+    let request = stage_author_prompt(&mut test, &menu.id);
+
+    assert_eq!(request.kind, PromptKind::Text);
+    assert!(test.session.has_pending_prompt());
 }
