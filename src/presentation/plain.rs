@@ -164,22 +164,63 @@ impl PlainDocument {
         scope: String,
         menu: Option<crate::menu::Menu>,
     ) -> Option<ApplyEdit> {
-        let text = self.format.serialize(&tree);
-        let hash = hash_text(&text);
-        self.action_snapshots
-            .retain(|snapshot| snapshot.hash != hash);
-        self.action_snapshots.push_back(ActionSnapshot {
-            hash,
-            view_id,
-            generation,
-            scope,
-            tree,
-            menu,
-        });
-        while self.action_snapshots.len() > self.snapshot_limit {
-            self.action_snapshots.pop_front();
-        }
+        let text = self.retain_action(tree, view_id, generation, scope, menu);
         self.render(text)
+    }
+
+    /// Retain a structured snapshot without rendering or starting an edit.
+    ///
+    /// Used when a client edit is adopted as authoritative: the snapshot must
+    /// resolve the edited text while no server render is pending.
+    pub fn retain_actions(
+        &mut self,
+        tree: crate::tree::Tree,
+        view_id: &str,
+        generation: u64,
+        scope: &str,
+        menu: Option<crate::menu::Menu>,
+    ) {
+        let _ = self.retain_action(
+            tree,
+            view_id.to_owned(),
+            generation,
+            scope.to_owned(),
+            menu,
+        );
+    }
+
+    /// Adopt client text as both the observed and authoritative snapshot.
+    ///
+    /// Any pending or rejected edit is discarded and the controller becomes
+    /// ready, so a following `change` reports no divergence.
+    pub fn adopt(&mut self, version: i32, text: String) {
+        let snapshot = self.snapshot_for(text, version);
+        self.authoritative = Some(snapshot.clone());
+        self.client = Some(snapshot);
+        self.in_flight = None;
+        self.rejected = None;
+        self.state = DocumentState::Ready;
+    }
+
+    /// The newest retained action snapshot, for routing client edits by scope.
+    pub fn latest_action_meta(
+        &self,
+    ) -> Option<(
+        &crate::tree::Tree,
+        &str,
+        u64,
+        &str,
+        Option<&crate::menu::Menu>,
+    )> {
+        self.action_snapshots.back().map(|snapshot| {
+            (
+                &snapshot.tree,
+                snapshot.view_id.as_str(),
+                snapshot.generation,
+                snapshot.scope.as_str(),
+                snapshot.menu.as_ref(),
+            )
+        })
     }
 
     /// Find a retained action snapshot only when its exact document text matches.
@@ -314,6 +355,32 @@ impl PlainDocument {
         self.rejected = None;
         self.format_suspended = false;
         self.warning_pending = false;
+    }
+
+    fn retain_action(
+        &mut self,
+        tree: crate::tree::Tree,
+        view_id: String,
+        generation: u64,
+        scope: String,
+        menu: Option<crate::menu::Menu>,
+    ) -> String {
+        let text = self.format.serialize(&tree);
+        let hash = hash_text(&text);
+        self.action_snapshots
+            .retain(|snapshot| snapshot.hash != hash);
+        self.action_snapshots.push_back(ActionSnapshot {
+            hash,
+            view_id,
+            generation,
+            scope,
+            tree,
+            menu,
+        });
+        while self.action_snapshots.len() > self.snapshot_limit {
+            self.action_snapshots.pop_front();
+        }
+        text
     }
 
     fn snapshot_for(&mut self, text: String, version: i32) -> Snapshot {

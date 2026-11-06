@@ -847,3 +847,86 @@ fn a_client_with_no_prompt_declarations_stages_the_author_prompt_as_a_document()
     assert_eq!(request.kind, PromptKind::Text);
     assert!(test.session.has_pending_prompt());
 }
+
+#[test]
+fn reconciling_without_an_open_prompt_returns_none() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+
+    assert!(!test.session.prompt_active());
+    assert!(test
+        .session
+        .reconcile_prompt_document("anything")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn a_field_edit_reconciles_to_the_typed_author_without_a_render() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+
+    let document = prompt_document(&test, &prompt_id, Some("Alice"));
+    let reconciled = test
+        .session
+        .reconcile_prompt_document(&document)
+        .unwrap()
+        .expect("the prompt is open");
+    assert!(!reconciled.repaired);
+    assert!(reconciled.render.is_none());
+
+    test.session
+        .answer_document_prompt(&format!("prompt:{}:submit", request.prompt_id), &document)
+        .unwrap();
+
+    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    assert!(!test.session.prompt_active());
+}
+
+#[test]
+fn a_title_edit_repairs_the_prompt_document_at_a_higher_version() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    let version = test.session.views().get(&prompt_id).unwrap().version();
+    let mut lines = prompt_document(&test, &prompt_id, None)
+        .split('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    lines[0] = "tampered title".to_string();
+    let document = lines.join("\n");
+
+    let reconciled = test
+        .session
+        .reconcile_prompt_document(&document)
+        .unwrap()
+        .expect("the prompt is open");
+
+    assert!(reconciled.repaired);
+    let render = reconciled.render.expect("a repaired document re-renders");
+    assert_eq!(render.view_id, prompt_id);
+    assert_eq!(render.version, version + 1);
+    assert!(test.session.prompt_active());
+    assert_eq!(test.session.prompt_view_id(), Some(prompt_id.as_str()));
+}

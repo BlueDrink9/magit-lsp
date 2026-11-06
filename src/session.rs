@@ -616,6 +616,17 @@ pub struct PromptCompletion {
     pub next: Execution,
 }
 
+/// The result of ingesting an edited Plain prompt document.
+#[derive(Debug)]
+pub struct PromptReconcile {
+    /// The authoritative prompt tree the client text was reconciled against.
+    pub tree: Tree,
+    /// Whether a non-field edit was repaired instead of adopted.
+    pub repaired: bool,
+    /// The re-render to deliver when the document was repaired.
+    pub render: Option<ViewRender>,
+}
+
 struct PendingSelection {
     caller_id: String,
     operation: SelectionOperation,
@@ -1308,6 +1319,73 @@ impl Session {
             opened: vec![(render, self.keymap_notice(&prompt_view))],
             ..InvokeResult::empty()
         })
+    }
+
+    /// Reconcile an edited Plain prompt document against the open prompt view.
+    ///
+    /// Returns `None` when no prompt is open. A document whose non-field lines
+    /// were edited is repaired by re-rendering the prompt view; otherwise the
+    /// edited field values are adopted and the authoritative tree is returned
+    /// with no render.
+    pub fn reconcile_prompt_document(
+        &mut self,
+        document: &str,
+    ) -> Result<Option<PromptReconcile>> {
+        if !self.prompt_active() {
+            return Ok(None);
+        }
+        let view_id = self.prompt_view_id().expect("checked prompt").to_string();
+        let cols = self
+            .views
+            .get(&view_id)
+            .expect("checked prompt")
+            .descriptor()
+            .viewport
+            .cols as usize;
+        let repaired = {
+            let open = self.views.get_mut(&view_id).expect("checked prompt");
+            let prompt_view = open
+                .view_mut()
+                .as_any_mut()
+                .and_then(|any| any.downcast_mut::<PromptView>())
+                .ok_or_else(|| Error::new("no prompt is active"))?;
+            prompt_view
+                .document_mut()
+                .reconcile(document, cols)
+                .map_err(Error::new)?
+                .repaired
+        };
+        if repaired {
+            let render = self
+                .views
+                .get_mut(&view_id)
+                .expect("checked prompt")
+                .render_with_delivery(None, None, RenderDelivery::Acknowledged)?;
+            self.publish();
+            let tree = self
+                .views
+                .get(&view_id)
+                .expect("checked prompt")
+                .tree()
+                .clone();
+            return Ok(Some(PromptReconcile {
+                tree,
+                repaired: true,
+                render: Some(render),
+            }));
+        }
+        let open = self.views.get_mut(&view_id).expect("checked prompt");
+        let prompt_view = open
+            .view_mut()
+            .as_any_mut()
+            .and_then(|any| any.downcast_mut::<PromptView>())
+            .ok_or_else(|| Error::new("no prompt is active"))?;
+        let tree = prompt_view.document().render(cols);
+        Ok(Some(PromptReconcile {
+            tree,
+            repaired: false,
+            render: None,
+        }))
     }
 
     /// Whether a document prompt is the active top view.

@@ -230,3 +230,49 @@ fn changes_use_each_preceding_result_and_cannot_split_line_endings() {
     docs.open("u", "reopened".into(), 1);
     assert!(!docs.get("u").unwrap().repair);
 }
+
+#[test]
+fn adopting_client_text_stops_the_next_change_from_reverting_it() {
+    use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
+
+    let mut doc = PlainDocument::new(
+        "file:///prompt",
+        Encoding::Utf8,
+        true,
+        DocumentFormat::from_text("server\n"),
+    );
+    doc.open(1, "server\n");
+    assert!(doc.render("server\n").is_none());
+    assert!(doc.change(2, "edited\n").is_some());
+
+    doc.adopt(3, "adopted\n".to_string());
+    assert!(doc
+        .change(4, "adopted\n")
+        .is_none());
+}
+
+#[test]
+fn retained_actions_resolve_the_exact_rendered_text() {
+    use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
+    use magit_lsp::tree::Tree;
+
+    let format = DocumentFormat::from_text("alpha\r\nbeta\r\n");
+    let tree = Tree {
+        version: 5,
+        lines: vec!["alpha".into(), "beta".into()],
+        nodes: vec![],
+        line_nodes: vec![],
+        tokens: vec![],
+        symbols: vec![],
+        links: vec![],
+    };
+    let text = format.serialize(&tree);
+    let mut doc = PlainDocument::new("file:///prompt", Encoding::Utf16, true, format);
+    doc.retain_actions(tree, "view", 5, "prompt", None);
+
+    let (retained, view_id, generation, scope, _) =
+        doc.action_snapshot(&text).expect("the exact rendered text");
+    assert_eq!(retained.lines, vec!["alpha", "beta"]);
+    assert_eq!((view_id, generation, scope), ("view", 5, "prompt"));
+    assert!(doc.action_snapshot("alpha\r\nbeta").is_none());
+}

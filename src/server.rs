@@ -7,7 +7,7 @@ use crate::presentation::{negotiate, CustomRender, Presentation, PromptSupport, 
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
-use crate::session::{Execution, InvokeResult, PublishedViews, Session};
+use crate::session::{Execution, InvokeResult, PromptReconcile, PublishedViews, Session};
 use crate::transport;
 use crate::tree::Tree;
 use crate::ui::PromptUi;
@@ -1222,6 +1222,97 @@ fn plain_change(shared: &Shared, uri: &str) {
     let Some(snapshot) = snapshot else {
         return;
     };
+
+    // Route an edit of an open prompt document through the session instead of
+    // the ordinary presentation controller. Never hold this lock across the
+    // session call: the session may publish views that reload this controller.
+    let prompt = {
+        let documents = shared
+            .plain_documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        documents.get(uri).and_then(|entry| {
+            let (_, view_id, generation, scope, _) = entry.controller.latest_action_meta()?;
+            (scope == "prompt").then(|| {
+                (
+                    entry.repo.clone(),
+                    view_id.to_owned(),
+                    generation,
+                    entry.incarnation,
+                )
+            })
+        })
+    };
+
+    if let Some((repo, view_id, generation, incarnation)) = prompt {
+        if let Some(handle) = shared.session(&repo) {
+            let reconciled = {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                session.reconcile_prompt_document(&snapshot.text)
+            };
+            match reconciled {
+                Ok(Some(PromptReconcile {
+                    repaired: true,
+                    tree,
+                    render: Some(_),
+                })) => {
+                    let edit = shared
+                        .plain_documents
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get_mut(uri)
+                        .filter(|entry| entry.incarnation == incarnation)
+                        .and_then(|entry| {
+                            entry.controller.render_actions(
+                                tree,
+                                view_id,
+                                generation,
+                                "prompt".to_owned(),
+                                None,
+                            )
+                        });
+                    if let Some(edit) = edit {
+                        send_plain_edit(shared, uri.to_owned(), incarnation, edit);
+                    }
+                    return;
+                }
+                Ok(Some(PromptReconcile {
+                    repaired: false,
+                    tree,
+                    ..
+                })) => {
+                    let mut documents = shared
+                        .plain_documents
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
+                    if let Some(entry) = documents
+                        .get_mut(uri)
+                        .filter(|entry| entry.incarnation == incarnation)
+                    {
+                        entry.controller.adopt(snapshot.version, snapshot.text.clone());
+                        entry
+                            .controller
+                            .retain_actions(tree, &view_id, generation, "prompt", None);
+                    }
+                    return;
+                }
+                Ok(Some(PromptReconcile {
+                    repaired: true,
+                    render: None,
+                    ..
+                })) => {
+                    tracing::error!("a repaired prompt document produced no render");
+                }
+                Ok(None) => {
+                    tracing::debug!("the prompt ended before the edit; using document sync");
+                }
+                Err(error) => {
+                    tracing::error!(%error, "failed to reconcile an edited prompt document");
+                }
+            }
+        }
+    }
+
     let (request, warning) = shared
         .plain_documents
         .lock()
