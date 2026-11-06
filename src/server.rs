@@ -4052,11 +4052,36 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
-    let step = {
+    let (completion, step): (
+        Option<crate::session::PromptCompletion>,
+        Option<crate::session::Execution>,
+    ) = {
         let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
         session.set_keymaps(keymaps);
-        session.start_key(&p)?
+        let enter = matches!(p.key.as_str(), "\r" | "<CR>" | "Enter");
+        if enter {
+            if let Some((row_id, text)) =
+                session.prompt_key_target(&p.view_id, p.version, p.cursor.line)?
+            {
+                let completion = session.answer_document_prompt(&row_id, &text)?;
+                (Some(completion), None)
+            } else {
+                (None, Some(session.start_key(&p)?))
+            }
+        } else {
+            (None, Some(session.start_key(&p)?))
+        }
     };
+    if let Some(crate::session::PromptCompletion { mut result, next }) = completion {
+        let next = drive_execution(shared, &repo, next)?;
+        result.effects.extend(next.effects);
+        result.opened.extend(next.opened);
+        result.render = next.render.or(result.render);
+        result.keymap = next.keymap.or(result.keymap);
+        result.commit = next.commit.or(result.commit);
+        return dispatched_outcome(shared, &repo, result);
+    }
+    let step = step.expect("a key step was prepared");
     let outcome = drive_execution(shared, &repo, step)?;
     Ok(dispatched_outcome(shared, &repo, outcome)?)
 }

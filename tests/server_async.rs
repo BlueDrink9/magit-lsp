@@ -608,6 +608,195 @@ fn rich_missing_confirm_opens_a_document_prompt_without_mutation() {
 }
 
 #[test]
+fn rich_confirm_row_enter_answers_without_mutation() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!(["editDocument"]), json!([])));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &view, "commit.create");
+    assert!(
+        opened["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("pushView")
+                && effect["descriptor"]["kind"] == json!("prompt")),
+        "{opened}"
+    );
+    let (prompt, version, text) = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] != json!(view)
+        {
+            let prompt = message["params"]["viewId"].as_str().unwrap().to_owned();
+            let version = message["params"]["version"].as_u64().unwrap();
+            let text: Vec<String> =
+                serde_json::from_value(message["params"]["text"].clone()).unwrap();
+            break (prompt, version, text);
+        }
+    };
+    let no_row = text.iter().position(|line| line == "No").expect("No row");
+
+    // Enter on a non-row line is not an answer: the prompt stays active.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":prompt,"version":version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    let non_row = server.response_with_id(4);
+    assert!(
+        !non_row["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView")),
+        "{non_row}"
+    );
+    let refused = invoke_rich(&mut server, 5, &view, "status.stage-all");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pending prompt")),
+        "{refused}"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/key",
+        "params":{"viewId":prompt,"version":version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":no_row,"column":0}}}));
+    let answered = server.response_with_id(6);
+    assert!(
+        answered["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView") && effect["viewId"] == json!(prompt)),
+        "{answered}"
+    );
+    server.drain_notifications();
+    assert!(!server
+        .notifications
+        .iter()
+        .any(|message| message["method"] == json!("view/prompt")));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(read(&tmp.path().join("f.txt")), "changed\n");
+    assert!(!tmp.path().join(".git/index.lock").exists());
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn rich_text_prompt_submit_row_answers_with_the_reconciled_field() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!(["editDocument"]), json!(["confirm"])));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &view, "open.commit");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    // `=` prefixes the option; `A` asks for the author and opens a document
+    // prompt because the client declares no text prompt.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"A","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    let (prompt, uri, initial) = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] != json!(menu)
+        {
+            let view_id = message["params"]["viewId"].as_str().unwrap().to_owned();
+            break (view_id.clone(), format!("magit://prompt/{view_id}"), message);
+        }
+    };
+    let version = initial["params"]["version"].as_u64().unwrap();
+    let mut lines: Vec<String> = initial["params"]["text"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap().to_owned())
+        .collect();
+    let submit = lines
+        .iter()
+        .position(|line| line == "Submit")
+        .expect("Submit row");
+
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen",
+        "params":{"textDocument":{"uri":uri,"languageId":"magit-prompt","version":1,
+            "text":lines.join("\n")}}}));
+    lines[submit - 1] = "Alice".to_owned();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange",
+        "params":{"textDocument":{"uri":uri,"version":2},
+            "contentChanges":[{"text":lines.join("\n")}]}}));
+    let quiet = server.drain_notifications();
+    assert!(
+        !quiet
+            .iter()
+            .any(|message| message["method"] == json!("view/prompt")),
+        "{quiet:?}"
+    );
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/key",
+        "params":{"viewId":prompt,"version":version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":submit,"column":0}}}));
+    let answered = server.response_with_id(6);
+    assert!(
+        answered["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView") && effect["viewId"] == json!(prompt)),
+        "{answered}"
+    );
+    let after = server.drain_notifications();
+    let menu_reflects = server
+        .notifications
+        .iter()
+        .chain(after.iter())
+        .any(|message| {
+            message["method"] == json!("view/render")
+                && message["params"]["viewId"] == json!(menu)
+                && message["params"]["text"].as_array().is_some_and(|lines| {
+                    lines.iter().any(|line| {
+                        line.as_str().is_some_and(|line| {
+                            line.contains("Override the author") && line.contains("Alice")
+                        })
+                    })
+                })
+        });
+    assert!(
+        menu_reflects,
+        "menu does not reflect the author: {:?}",
+        server.notifications
+    );
+    assert!(!server
+        .notifications
+        .iter()
+        .chain(after.iter())
+        .any(|message| message["method"] == json!("view/prompt")));
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
 fn rich_full_caps_delivers_clipboard_and_visit_file() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])

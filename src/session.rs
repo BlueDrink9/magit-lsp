@@ -227,6 +227,11 @@ impl OpenView {
         &self.descriptor
     }
 
+    /// The view behind this entry, for server-owned state the session reads.
+    pub fn view(&self) -> &dyn View {
+        self.view.as_ref()
+    }
+
     /// The view behind this entry, for server-owned state the session drives.
     fn view_mut(&mut self) -> &mut dyn View {
         self.view.as_mut()
@@ -1414,6 +1419,61 @@ impl Session {
         self.pending_prompt
             .as_ref()
             .map(|pending| pending.request.prompt_id.as_str())
+    }
+
+    /// The row a Rich client's Enter key answers, with the prompt's text.
+    ///
+    /// Returns `None` unless the prompt view is active at the client's version
+    /// and `line` resolves to a confirm/text answer row. The text is the
+    /// prompt's current rendered document, so reconciled field edits are used.
+    pub fn prompt_key_target(
+        &self,
+        view_id: &str,
+        version: u64,
+        line: usize,
+    ) -> Result<Option<(String, String)>> {
+        if !self.prompt_active() || self.prompt_view_id() != Some(view_id) {
+            return Ok(None);
+        }
+        let prompt_id = self
+            .pending_prompt
+            .as_ref()
+            .expect("checked prompt")
+            .request
+            .prompt_id
+            .clone();
+        let Some(open) = self.views.get(view_id) else {
+            return Ok(None);
+        };
+        if open.version != version {
+            return Ok(None);
+        }
+        let Some(line_node) = open.tree.line_nodes.get(line) else {
+            return Ok(None);
+        };
+        let Some(node) = open.tree.node(&line_node.node) else {
+            return Ok(None);
+        };
+        if node.kind != NodeKind::Line {
+            return Ok(None);
+        }
+        let prefix = format!("prompt:{prompt_id}:");
+        let Some(row) = node.id.strip_prefix(&prefix) else {
+            return Ok(None);
+        };
+        if !matches!(row, "yes" | "no" | "submit" | "cancel") {
+            return Ok(None);
+        }
+        let Some(prompt_view) = open
+            .view()
+            .as_any()
+            .and_then(|any| any.downcast_ref::<PromptView>())
+        else {
+            return Ok(None);
+        };
+        let cols = open.descriptor().viewport.cols as usize;
+        let text = prompt_view.document().render(cols).lines.join("\n");
+        Ok(Some((node.id.clone(), text)))
     }
 
     /// Answer the open document prompt from a rendered row and document text.

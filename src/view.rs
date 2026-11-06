@@ -216,6 +216,14 @@ pub trait View: Send {
     /// Render the current state. Must not touch the repository; refresh first.
     fn render(&mut self, ctx: &Ctx<'_>) -> Tree;
 
+    /// Shared downcast seam for server-owned view state.
+    ///
+    /// Most views expose nothing to the session beyond this trait. A view the
+    /// session drives directly returns `Some(self)` so it can read that state.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
     /// Downcast seam for server-owned view state.
     ///
     /// Most views expose nothing to the session beyond this trait. A view the
