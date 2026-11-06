@@ -59,7 +59,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.7a — Define the typed pick protocol and capability guard.** Pick request/response types (purpose, multi, free text, preselection, item fields, fallbackView); optional rich `pick` declaration; reject every undeclared shape in negotiation tests. T008 clause 3.
   - Done: `d8b36fd`. Typed pick request/response payloads and the optional rich `pick` capability declaration; negotiation tests reject every undeclared shape.
   - Verified: `make test-rust FILTER="--test plain_core --test prompts --test quirks"` @ `d8b36fd` → ok: rust.
-- [ ] **T008.7b — Declare pick support in both clients.** Lua static `vim.ui.select` and VSCode `showQuickPick` capability blocks, shared vectors, client tests. T008 clause 3.
+- [x] **T008.7b — Declare pick support in both clients.** Lua static `vim.ui.select` and VSCode `showQuickPick` capability blocks plus exact-declaration tests; pick vectors move to T008.8 with the first emitter. T008 clause 3.
+  - Done: `6887df2`. Both rich capability blocks declare `pick`; exact-declaration tests assert it. Native pick-presentation evidence is deferred to T008.8, the first ticket that emits a pick; this ticket changes declarations only.
+  - Verified: `make test-lua && make vscode-test` @ `6887df2` → ok.
 - [ ] **T008.8 — Implement pick rungs and preference limits.** Native → document → code actions; per-client opt-in; Neovim static `vim.ui.select` and long-list cut. T008 clauses 3, 6, 9.
 - [ ] **T008.9 — Implement revision pick semantics.** HEAD-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
 - [ ] **T008.9a — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9 pick. T008 clause 2.
