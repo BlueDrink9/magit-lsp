@@ -22,6 +22,8 @@ pub enum Reader {
     Commit,
     Date,
     Number,
+    /// A configured remote name.
+    Remote,
 }
 
 /// Whether a menu item can run yet.

@@ -50,14 +50,14 @@ pub fn definition() -> MenuDef {
                         "=p",
                         "--set-push-remote=",
                         "Set the push-remote",
-                        Reader::Ref,
+                        Reader::Remote,
                     ),
                     option("=R", "--pull-rebase=", "Set pull.rebase", Reader::Choice),
                     option(
                         "=P",
                         "--push-default=",
                         "Set remote.pushDefault",
-                        Reader::Ref,
+                        Reader::Remote,
                     ),
                     action(
                         "B",

@@ -2139,7 +2139,7 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
                 && crate::dispatch::visibility_command(command).is_none()
                 && !matches!(
                     command,
-                    "open.commit" | "open.log" | "menu.run-action" | "common.cancel"
+                    "open.commit" | "open.branch" | "open.log" | "menu.run-action" | "common.cancel"
                 ) =>
         {
             Some("This command requires a Plain client adapter that is not available")
@@ -2419,7 +2419,7 @@ fn execute_plain_action(
             crate::dispatch::PlainActionTarget::View(target) => {
                 let supported = matches!(
                     params.command.as_str(),
-                    "open.commit" | "open.log" | "common.cancel"
+                    "open.commit" | "open.branch" | "open.log" | "common.cancel"
                 );
                 let applies = crate::commands::registry()
                     .get(&params.command)
@@ -3547,7 +3547,10 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             continue;
         }
         if !crate::dispatch::content_command(command.id) {
-            let semantic = (matches!(command.id, "open.commit" | "open.log")
+            let semantic = (matches!(
+                command.id,
+                "open.commit" | "open.branch" | "open.log"
+            )
                 && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
@@ -4098,6 +4101,19 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
     loop {
         match step {
             Execution::Done(result) => return Ok(result),
+            Execution::Pick(_) => {
+                let handle = shared
+                    .session(repo)
+                    .ok_or_else(|| Error::new("Prompt session closed"))?;
+                let request = {
+                    let session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                    session
+                        .pending_prompt_request()
+                        .ok_or_else(|| Error::new("no pick is pending"))?
+                };
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                return session.open_document_prompt(&request);
+            }
             Execution::Prompt(request) => {
                 let native = custom_ui(&shared.client).allows_prompt(&request);
                 match crate::presentation::prompt::delivery(&request, native) {
@@ -4117,6 +4133,9 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                             Execution::Done(result) => result,
                             Execution::Prompt(_) => {
                                 return Err(Error::new("refused prompt did not finish"))
+                            }
+                            Execution::Pick(_) => {
+                                return Err(Error::new("pick did not finish"))
                             }
                         };
                         result.effects.insert(

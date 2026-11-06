@@ -16,8 +16,9 @@ use crate::menu::{Menu, MenuStatus, MenuView, Reader};
 use crate::presentation::prompt::{self, PromptAction, PromptDelivery, PromptDocument, PromptView};
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
-    Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
-    ViewKeyParams, ViewKeymapParams, ViewPromptParams, ViewRender, ViewSetModeParams,
+    Cursor, Effect, MessageLevel, PickItem, PromptChoiceAnswer, PromptItem, PromptKind, Selection,
+    ViewInvokeParams, ViewKeyParams, ViewKeymapParams, ViewPickParams, ViewPromptParams, ViewRender,
+    ViewSetModeParams,
 };
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
@@ -588,6 +589,8 @@ struct PendingPrompt {
     cursor: Option<Cursor>,
     cancel: Option<crate::runner::CancelHandle>,
     action: SessionContinuation,
+    /// The pick waiting on this prompt, when the prompt came from a pick.
+    pick: Option<ViewPickParams>,
 }
 
 #[derive(Clone)]
@@ -612,6 +615,8 @@ pub enum Execution {
     Done(InvokeResult),
     /// Wait outside session ownership, then resume with this prompt identity.
     Prompt(ViewPromptParams),
+    /// Wait for a pick answer; a document prompt carries the same choice.
+    Pick(ViewPickParams),
 }
 
 /// The result of answering a document prompt.
@@ -1238,17 +1243,70 @@ impl Session {
             cursor,
             action,
             cancel: crate::runner::current_cancel(),
+            pick: None,
         });
+    }
+
+    /// Stage a pick and the derived choice prompt that shows the same items.
+    fn prepare_pick(
+        &mut self,
+        view_id: &str,
+        cursor: Option<Cursor>,
+        mut pick: ViewPickParams,
+        action: SessionContinuation,
+    ) {
+        let items = pick
+            .items
+            .iter()
+            .map(|item| PromptItem {
+                id: item.id.clone(),
+                label: item.label.clone(),
+                description: item.description.clone(),
+                detail: item.detail.clone(),
+            })
+            .collect();
+        let request = ViewPromptParams {
+            prompt_id: String::new(),
+            kind: PromptKind::Choice,
+            title: pick.prompt.clone(),
+            detail: None,
+            yes_label: None,
+            no_label: None,
+            destructive: None,
+            default: None,
+            placeholder: None,
+            secret: None,
+            items: Some(items),
+            allow_custom: Some(pick.allow_free_text),
+            preselected: Some(pick.preselection.clone()),
+            min: None,
+            max: None,
+        };
+        self.prepare_prompt(view_id, cursor, request, action);
+        if let Some(pending) = self.pending_prompt.as_mut() {
+            pick.pick_id = pending.request.prompt_id.clone();
+            pending.pick = Some(pick);
+        }
     }
 
     fn execution(&mut self, result: InvokeResult) -> Execution {
         match &mut self.pending_prompt {
             Some(pending) => {
                 pending.prepared = Some(result);
-                Execution::Prompt(pending.request.clone())
+                match &pending.pick {
+                    Some(pick) => Execution::Pick(pick.clone()),
+                    None => Execution::Prompt(pending.request.clone()),
+                }
             }
             None => Execution::Done(result),
         }
+    }
+
+    /// The staged pick awaiting delivery, if any.
+    pub fn pending_pick_request(&self) -> Option<ViewPickParams> {
+        self.pending_prompt
+            .as_ref()
+            .and_then(|pending| pending.pick.clone())
     }
 
     /// Whether a staged operation currently owns this session's prompt slot.
@@ -1265,6 +1323,12 @@ impl Session {
         loop {
             match step {
                 Execution::Done(result) => return Ok(result),
+                Execution::Pick(_) => {
+                    let Some(request) = self.pending_prompt_request() else {
+                        return Err(Error::new("no pick is pending"));
+                    };
+                    step = Execution::Prompt(request);
+                }
                 Execution::Prompt(request) => {
                     let answer = match crate::ui::answer(ui, &request) {
                         Ok(answer) => answer,
@@ -1895,6 +1959,28 @@ impl Session {
                     );
                 }
 
+                if matches!(reader, Reader::Ref | Reader::Remote) {
+                    let pick = self.option_pick(key, &label, &flag, reader)?;
+                    let menu = self
+                        .views
+                        .get(view_id)
+                        .and_then(|view| view.menu())
+                        .expect("menu option")
+                        .clone();
+                    self.prepare_pick(
+                        view_id,
+                        Some(params.cursor),
+                        pick,
+                        SessionContinuation::Option {
+                            key: key.to_string(),
+                            menu,
+                            cursor: params.cursor,
+                            reader,
+                        },
+                    );
+                    return Ok(InvokeResult::empty());
+                }
+
                 let request = self.option_prompt(&label, &flag, reader);
                 if let Some(result) = self.unsupported_prompt(&request) {
                     return Ok(result);
@@ -1927,6 +2013,41 @@ impl Session {
             }
             None => Ok(unbound(key)),
         }
+    }
+
+    /// Build the pick request for a ref or remote menu option.
+    fn option_pick(
+        &self,
+        key: &str,
+        label: &str,
+        flag: &str,
+        reader: Reader,
+    ) -> Result<ViewPickParams> {
+        let repo = GitRepo::open(&self.repo_path)?;
+        let names = match reader {
+            Reader::Remote => repo.remote_names()?,
+            _ => repo.ref_names()?,
+        };
+        let items = names
+            .into_iter()
+            .map(|name| PickItem {
+                id: name.clone(),
+                label: name,
+                description: None,
+                detail: None,
+                group: None,
+            })
+            .collect();
+        Ok(ViewPickParams {
+            pick_id: String::new(),
+            purpose: format!("option:{key}"),
+            prompt: format!("{label} ({flag})"),
+            multi: false,
+            allow_free_text: true,
+            preselection: Vec::new(),
+            items,
+            fallback_view: None,
+        })
     }
 
     /// Build the prompt a menu option asks for, choosing the kind by `reader`.
@@ -1996,6 +2117,15 @@ impl Session {
                     Ok(())
                 } else {
                     Err(format!("Unknown ref or remote: {value}"))
+                }
+            }
+            Reader::Remote => {
+                let repo = GitRepo::open(&self.repo_path)
+                    .map_err(|_| format!("Unknown remote: {value}"))?;
+                if repo.verify_remote(value) {
+                    Ok(())
+                } else {
+                    Err(format!("Unknown remote: {value}"))
                 }
             }
             _ => Ok(()),
@@ -2228,10 +2358,6 @@ impl Session {
         else {
             return Ok(Execution::Done(unbound(key)));
         };
-        let request = self.option_prompt(&label, &flag, reader);
-        if let Some(result) = self.unsupported_prompt(&request) {
-            return Ok(Execution::Done(result));
-        }
         let menu = self
             .views
             .get(view_id)
@@ -2239,6 +2365,29 @@ impl Session {
             .expect("menu checked above")
             .clone();
         let cursor = Cursor { line: 0, column: 0 };
+        if matches!(reader, Reader::Ref | Reader::Remote) {
+            let pick = self.option_pick(key, &label, &flag, reader)?;
+            self.prepare_pick(
+                view_id,
+                Some(cursor),
+                pick,
+                SessionContinuation::Option {
+                    key: key.to_string(),
+                    menu,
+                    cursor,
+                    reader,
+                },
+            );
+            let pick = self
+                .pending_pick_request()
+                .expect("pick just staged");
+            self.publish();
+            return Ok(Execution::Pick(pick));
+        }
+        let request = self.option_prompt(&label, &flag, reader);
+        if let Some(result) = self.unsupported_prompt(&request) {
+            return Ok(Execution::Done(result));
+        }
         self.prepare_prompt(
             view_id,
             Some(cursor),

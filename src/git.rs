@@ -674,6 +674,34 @@ impl GitRepo {
         self.verify_revision(value) || self.verify_remote(value)
     }
 
+    /// Every local branch, remote-tracking branch and tag name.
+    pub fn ref_names(&self) -> Result<Vec<String>> {
+        let output = self.run(&[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])?;
+        Ok(output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// Every configured remote name.
+    pub fn remote_names(&self) -> Result<Vec<String>> {
+        let output = self.run(&["remote"])?;
+        Ok(output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     /// Compute the full status with every file's diff hunks.
     ///
     /// Views that hide bodies use [`Self::status_listing`] and load hunks only

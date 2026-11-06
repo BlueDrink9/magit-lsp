@@ -1156,7 +1156,7 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         let elapsed = started.elapsed();
         let actions = response["result"].as_array().expect("code actions");
         assert!(!actions.is_empty());
-        assert!(actions.len() <= 8, "bounded offers: {}", actions.len());
+        assert!(actions.len() <= 9, "bounded offers: {}", actions.len());
         let identities: Vec<_> = actions
             .iter()
             .map(|action| {
@@ -1547,6 +1547,88 @@ fn plain_text_prompt_submit_row_answers_with_the_typed_value() {
             .any(|message| message["method"] == "view/prompt"),
         "Plain prompt must not request a native prompt"
     );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn plain_upstream_pick_uses_a_choice_document_and_submits_the_value() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.branch",
+        140,
+    );
+    assert!(!open.is_null(), "open.branch not offered");
+    let opened = execute_offered(&mut server, &mut editor, open, 141);
+
+    let menu_text = editor.text(&uri).to_owned();
+    let option_row = menu_text
+        .lines()
+        .position(|line| line.contains("Set the upstream branch"))
+        .unwrap_or_else(|| panic!("missing upstream row: {menu_text} / opened: {opened}")) as u32;
+    let option = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":option_row,"character":0},"end":{"line":option_row,"character":0}}),
+        "menu.run-option",
+        142,
+    );
+    execute_offered(&mut server, &mut editor, option, 143);
+
+    let prompt_text = editor.text(&uri).to_owned();
+    assert!(
+        prompt_text.contains("Set the upstream branch (--set-upstream-to=)"),
+        "pick prompt missing: {prompt_text}"
+    );
+    assert!(
+        prompt_text.lines().any(|line| line.trim() == "main"),
+        "main item missing: {prompt_text}"
+    );
+    assert!(
+        prompt_text.contains("Submit"),
+        "submit row missing: {prompt_text}"
+    );
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/pick"),
+        "a Plain pick must be a document, not view/pick"
+    );
+
+    let submit = exact_row(&prompt_text, "Submit");
+    let mut lines: Vec<String> = prompt_text.lines().map(str::to_owned).collect();
+    let field = (submit - 1) as usize;
+    lines[field] = "main".into();
+    let edited = lines.join("\n");
+    server.send(editor.edit(&uri, &edited));
+
+    let answer = offered_prompt_answer(&mut server, &uri, submit, 144);
+    let submitted = execute_offered(&mut server, &mut editor, answer, 145);
+    assert!(
+        submitted["error"].is_null(),
+        "pick submit failed: {submitted}"
+    );
+
+    let closed = editor.text(&uri).to_owned();
+    assert!(
+        closed.contains("--set-upstream-to=main"),
+        "menu does not reflect the pick: {closed}"
+    );
+    assert!(!closed.contains("Submit"), "pick stayed open: {closed}");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());

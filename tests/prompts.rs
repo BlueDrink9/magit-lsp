@@ -39,8 +39,12 @@ fn stage_author_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::prot
     request
 }
 
-/// Stage `open.branch`'s `--set-upstream-to` option prompt and return its request.
-fn stage_ref_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+/// Press `=` then `option` on `view_id` and return the derived pick prompt request.
+fn stage_option_pick(
+    test: &mut TestSession,
+    view_id: &str,
+    option: &str,
+) -> magit_lsp::protocol::ViewPromptParams {
     use magit_lsp::keymap::EditorMode;
     use magit_lsp::protocol::{Cursor, ViewKeyParams};
     use magit_lsp::session::Execution;
@@ -53,11 +57,19 @@ fn stage_ref_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protoco
         selection: None,
     };
     test.session.start_key(&key).unwrap();
-    key.key = "u".to_string();
-    let Execution::Prompt(request) = test.session.start_key(&key).unwrap() else {
-        panic!("option prompt");
-    };
-    request
+    key.key = option.to_string();
+    assert!(matches!(
+        test.session.start_key(&key).unwrap(),
+        Execution::Pick(_)
+    ));
+    test.session
+        .pending_prompt_request()
+        .expect("the staged pick prompt")
+}
+
+/// Stage `open.branch`'s `--set-upstream-to` option prompt and return its request.
+fn stage_ref_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+    stage_option_pick(test, view_id, "u")
 }
 
 /// Stage `commit.create`'s staging confirm on an unstaged status view.
@@ -730,6 +742,102 @@ fn a_ref_option_rejects_an_unknown_ref_or_remote() {
     assert_eq!(option_value(&test, &menu.id, "=u"), None);
     assert!(!test.session.prompt_active());
     assert_eq!(test.view_id(), menu.id);
+}
+
+#[test]
+fn a_ref_option_stages_a_pick_with_ref_items() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.branch");
+    let request = stage_option_pick(&mut test, &menu.id, "u");
+
+    let pick = test
+        .session
+        .pending_pick_request()
+        .expect("the staged pick");
+    assert!(
+        pick.items.iter().any(|item| item.id == "main"),
+        "refs: {:?}",
+        pick.items
+    );
+    assert!(pick.allow_free_text);
+    assert!(!pick.pick_id.is_empty());
+    assert_eq!(request.kind, PromptKind::Choice);
+    assert_eq!(request.allow_custom, Some(true));
+    assert!(request
+        .items
+        .as_ref()
+        .expect("the choice items")
+        .iter()
+        .any(|item| item.id == "main"));
+
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    let document = prompt_document(&test, &prompt_id, None);
+    let completion = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:item:main", request.prompt_id), &document)
+        .unwrap();
+    assert!(matches!(completion.next, Execution::Done(_)));
+    assert_eq!(option_value(&test, &menu.id, "=u").as_deref(), Some("main"));
+    assert!(!test.session.prompt_active());
+}
+
+#[test]
+fn a_remote_option_lists_remotes() {
+    use magit_lsp::menu::Reader;
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    tmp.git(&["remote", "add", "origin", "https://example.test/repo.git"]);
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.branch");
+    let request = stage_option_pick(&mut test, &menu.id, "p");
+
+    let pick = test
+        .session
+        .pending_pick_request()
+        .expect("the staged pick");
+    assert!(
+        pick.items.iter().any(|item| item.id == "origin"),
+        "remotes: {:?}",
+        pick.items
+    );
+
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    let document = prompt_document(&test, &prompt_id, None);
+    let completion = test
+        .session
+        .answer_document_prompt(
+            &format!("prompt:{}:item:origin", request.prompt_id),
+            &document,
+        )
+        .unwrap();
+    assert!(matches!(completion.next, Execution::Done(_)));
+    assert_eq!(option_value(&test, &menu.id, "=p").as_deref(), Some("origin"));
+
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Remote, "origin")
+        .is_ok());
+    assert!(test
+        .session()
+        .validate_option_value(Reader::Remote, "nope")
+        .unwrap_err()
+        .contains("Unknown remote"));
 }
 
 #[test]
