@@ -230,6 +230,16 @@ fn staged_repo() -> (RepoFixture, magit_lsp::git::GitRepo) {
         .build()
 }
 
+/// Capabilities of a rich client that edits commit drafts in place.
+fn rich_capabilities() -> Value {
+    json!({"general":{"positionEncodings":["utf-8","utf-16"]},"window":{"workDoneProgress":true},"experimental":{"magit":{
+        "v":1,"keys":"dynamic","modifiers":"full",
+        "layout":["main","side","bottom","float"],
+        "effects":["visitFile","editDocument","clipboard"],
+        "prompts":["confirm","text","choice","multiChoice","secret"]
+    }}})
+}
+
 #[test]
 fn head_operations_real_git_tree_message_date_and_saved_close() {
     for command in ["commit.amend", "commit.extend", "commit.reword"] {
@@ -307,7 +317,7 @@ fn head_operations_real_git_tree_message_date_and_saved_close() {
             } else {
                 &[]
             });
-            server.initialize(json!({}));
+            server.initialize(rich_capabilities());
             let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
             let args = json!({"switches": if reset_author { vec!["-R"] } else if state == "all" { vec!["-a"] }
                 else if command == "commit.extend" && state == "clean" { vec!["-e"] } else { vec![] }, "options": {}});
@@ -677,7 +687,7 @@ fn real_git_saved_file_empty_and_template_semantics() {
         let patch = tmp.git(&["diff", "--cached", "--binary"]);
         let worktree = read(&tmp.path().join("f.txt"));
         let mut server = TestServer::spawn(&[]);
-        server.initialize(json!({}));
+        server.initialize(rich_capabilities());
         let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
         let edit = start_commit(&mut server, &status);
         let initial = edit["text"].as_str().unwrap();
@@ -784,7 +794,7 @@ fn typed_commit_options_reach_real_git_through_the_editor_worker() {
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let author = "Typed ; $(not-a-shell) <typed@example.com>";
     let edit = start_commit_with_args(
@@ -835,7 +845,7 @@ fn real_file_stdio_sync_and_checkpoint_barriers_are_exact_and_recoverable() {
     let head = tmp.git(&["rev-parse", "HEAD"]);
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
     let mut server = TestServer::spawn(&[]);
-    let initialized = server.initialize(json!({}));
+    let initialized = server.initialize(rich_capabilities());
     assert_eq!(
         initialized["result"]["capabilities"]["textDocumentSync"],
         json!({"openClose":true,"change":2,"save":{"includeText":true}})
@@ -953,7 +963,9 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
         let head = tmp.git(&["rev-parse", "HEAD"]);
         let target = tmp.path().join(".git/COMMIT_EDITMSG");
         let mut server = TestServer::spawn(&[]);
-        let initialized = server.initialize(json!({"general":{"positionEncodings":[encoding]}}));
+        let mut capabilities = rich_capabilities();
+        capabilities["general"]["positionEncodings"] = json!([encoding]);
+        let initialized = server.initialize(capabilities);
         assert_eq!(
             initialized["result"]["capabilities"]["positionEncoding"],
             encoding
@@ -1099,7 +1111,7 @@ fn real_file_stdio_failed_write_retains_helper_and_selected_checkpoint() {
     let neighbor = tmp.path().join("neighbor.txt");
     write(&neighbor, "Neighbor must survive\n");
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Recovered checkpoint\n");
@@ -1128,7 +1140,7 @@ fn native_failed_close_re_presents_same_pending_run_and_retries_saved_disk() {
     let target = tmp.path().join(".git/COMMIT_EDITMSG");
     let held = tmp.path().join(".git/held-message");
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Unsaved retained local text\n");
@@ -1185,7 +1197,7 @@ fn real_file_stdio_normal_close_selects_initial_template_without_save() {
     );
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     assert!(edit["text"]
@@ -1215,7 +1227,7 @@ fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
     let first_head = first.git(&["rev-parse", "HEAD"]);
     let second_head = second.git(&["rev-parse", "HEAD"]);
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status_a = open_status(&mut server, 2, &json!(first.path().to_string_lossy()));
     let status_b = open_status(&mut server, 3, &json!(second.path().to_string_lossy()));
     let a = start_commit(&mut server, &status_a);
@@ -1270,7 +1282,7 @@ fn real_file_stdio_multiroot_and_other_connection_cannot_cross_runs() {
 fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
     let (tmp, _) = staged_repo();
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let old = start_commit(&mut server, &status);
     let old_uri = old["uri"].clone();
@@ -1340,7 +1352,7 @@ fn real_file_stdio_linked_worktree_writes_only_actual_gitdir() {
     write(&linked.join("f.txt"), "Linked staged content\n");
     git(&linked, &["add", "f.txt"]);
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(linked.to_string_lossy()));
     let edit = start_commit(&mut server, &status);
     sync_draft(&mut server, &edit, "Linked worktree message\n");
@@ -1378,7 +1390,7 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     write(&hook, "#!/bin/sh\nprintf '%s' \"$MAGIT_LSP_EDIT_ID\" > .git/test-run\nprintf '%s' \"$MAGIT_LSP_HELPER_TOKEN\" > .git/test-token\ntouch .git/test-ready\nwhile ! test -e .git/test-release; do sleep 0.01; done\n");
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
     let socket = server.socket_path();
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
@@ -1453,7 +1465,7 @@ fn a_cancel_creates_no_commit() {
     let repo = json!(tmp.path().to_string_lossy());
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize(rich_capabilities());
     assert!(
         response["result"]["capabilities"].is_object(),
         "initialize response: {response}"
@@ -1526,11 +1538,17 @@ fn a_cancel_creates_no_commit() {
 #[cfg(target_os = "linux")]
 #[test]
 fn terminal_during_editor_cancels_with_absent_false_or_unanswered_progress() {
-    for capabilities in [
-        json!({}),
-        json!({"window":{"workDoneProgress":false}}),
-        json!({"window":{"workDoneProgress":true}}),
-    ] {
+    for work_done_progress in [None, Some(false), Some(true)] {
+        let mut capabilities = rich_capabilities();
+        match work_done_progress {
+            Some(flag) => capabilities["window"]["workDoneProgress"] = json!(flag),
+            None => {
+                capabilities["window"]
+                    .as_object_mut()
+                    .expect("window capabilities")
+                    .remove("workDoneProgress");
+            }
+        }
         for disconnect in [false, true] {
             let (tmp, _) = staged_repo();
             let head = tmp.git(&["rev-parse", "HEAD"]);
@@ -1623,7 +1641,7 @@ fn r_edit_2_progress_cancel_during_editor_releases_once() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     server.auto_respond_to_progress_create();
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &repo);
 
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
@@ -1719,7 +1737,7 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
     server.auto_respond_to_progress_create();
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize(rich_capabilities());
     let status = open_status(&mut server, 2, &repo);
     server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
     let mut token = None;
@@ -1936,7 +1954,7 @@ fn r_edit_2_recorded_commit_wins_finalizing_and_completed_cancellation() {
         }
         let mut server = TestServer::spawn(&[]);
         server.auto_respond_to_progress_create();
-        server.initialize(json!({"window":{"workDoneProgress":true}}));
+        server.initialize(rich_capabilities());
         let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
         server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
         let mut token = None;
@@ -2195,7 +2213,7 @@ fn a_client_disconnect_aborts_the_edit_so_git_never_hangs() {
     let repo = json!(tmp.path().to_string_lossy());
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize(rich_capabilities());
     let socket = server.socket_path();
     assert!(
         response["result"]["capabilities"].is_object(),
