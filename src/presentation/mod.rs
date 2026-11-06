@@ -7,6 +7,7 @@ use std::fmt;
 
 mod custom;
 pub mod plain;
+pub mod prompt;
 pub mod resolve;
 pub use custom::{CustomRender, PromptSupport, Ui};
 

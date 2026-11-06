@@ -96,6 +96,8 @@ pub enum NodeKind {
     Blank,
     /// A selectable Git commit.
     Commit,
+    /// A one-line document-prompt field whose text is a server-owned value.
+    Field,
 }
 
 /// One element of a view tree. Lines are 0-based and inclusive.
