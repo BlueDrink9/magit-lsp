@@ -351,6 +351,11 @@ impl OpenView {
         self.version
     }
 
+    /// Whether a refresh arrived while the view was not rendering.
+    pub fn dirty(&self) -> bool {
+        self.dirty
+    }
+
     /// The last version the client acknowledged.
     pub fn acked_version(&self) -> Option<u64> {
         self.acked_version
@@ -840,13 +845,35 @@ impl Session {
     }
 
     /// Close a view; closing one the client already closed is a no-op.
+    ///
+    /// Closing the prompt view or its origin also clears the staged
+    /// continuation, so a later answer cannot apply to a closed view.
     pub fn close(&mut self, view_id: &str) -> Result<()> {
-        if let Some(pending) = self
-            .pending_prompt
-            .as_mut()
-            .filter(|pending| pending.view_id == view_id)
-        {
-            pending.invalidated = true;
+        let prompt = self.pending_prompt.as_ref().map(|pending| {
+            (
+                pending.request.prompt_id.clone(),
+                pending.view_id.clone(),
+                pending.prompt_view.clone(),
+            )
+        });
+        if let Some((prompt_id, origin, prompt_view)) = prompt {
+            if prompt_view.as_deref() == Some(view_id) {
+                self.views.remove(view_id);
+                self.pending_selections.remove(view_id);
+                self.resume_prompt(&prompt_id, None)?;
+                self.publish();
+                return Ok(());
+            }
+            if origin == view_id {
+                if let Some(prompt_view) = prompt_view {
+                    self.views.remove(&prompt_view);
+                    self.pending_selections.remove(&prompt_view);
+                }
+                if let Some(pending) = self.pending_prompt.as_mut() {
+                    pending.invalidated = true;
+                }
+                self.resume_prompt(&prompt_id, None)?;
+            }
         }
         self.views.remove(view_id);
         self.pending_selections.remove(view_id);
@@ -1300,12 +1327,20 @@ impl Session {
             .prompt_view
             .clone()
             .ok_or_else(|| Error::new("prompt is not open"))?;
+        let origin = pending.view_id.clone();
         if self.views.get(&prompt_view).is_none() {
             return Err(Error::new("prompt is no longer active"));
         }
-        let result = self.pop_view(&prompt_view)?;
+        let mut result = self.pop_view(&prompt_view)?;
         if let Some(pending) = self.pending_prompt.as_mut() {
             pending.prompt_view = None;
+        }
+        if let Some(view) = self.views.get_mut(&origin) {
+            if view.dirty {
+                view.dirty = false;
+                let render = view.refresh_and_render(None)?;
+                result.opened.push((render, self.keymap_notice(&origin)));
+            }
         }
         let next = self.resume_prompt(prompt_id, answer)?;
         Ok(PromptCompletion { result, next })
@@ -2500,8 +2535,9 @@ impl Session {
     /// Re-read the backing state and render, unless the view is in text mode.
     ///
     /// Text mode queues the refresh instead: returning `None` keeps the client's
-    /// edited text in place. The file watcher (R-3.5) and `common.refresh` both
-    /// route through here.
+    /// edited text in place. An active document prompt also queues it, so the
+    /// origin is rendered once the prompt finishes. The file watcher (R-3.5) and
+    /// `common.refresh` both route through here.
     pub fn refresh(&mut self, view_id: &str) -> Result<Option<ViewRender>> {
         let result = self.refresh_view(view_id);
         self.publish();
@@ -2509,10 +2545,15 @@ impl Session {
     }
 
     fn refresh_view(&mut self, view_id: &str) -> Result<Option<ViewRender>> {
+        let prompt_active = self.prompt_active();
         let view = self
             .views
             .get_mut(view_id)
             .ok_or_else(|| Error::new(format!("unknown view: {view_id}")))?;
+        if prompt_active {
+            view.queue_refresh();
+            return Ok(None);
+        }
         if view.mode() == ViewMode::Text {
             view.queue_refresh();
             return Ok(None);

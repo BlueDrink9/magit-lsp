@@ -37,6 +37,25 @@ fn stage_author_prompt(test: &mut TestSession, view_id: &str) -> magit_lsp::prot
     request
 }
 
+/// Stage `commit.create`'s staging confirm on an unstaged status view.
+fn stage_commit_confirm(test: &mut TestSession, view_id: &str) -> magit_lsp::protocol::ViewPromptParams {
+    use magit_lsp::protocol::ViewInvokeParams;
+    use magit_lsp::session::Execution;
+    let params = ViewInvokeParams {
+        view_id: view_id.to_string(),
+        command: "commit.create".to_string(),
+        version: None,
+        args: None,
+        cursor: None,
+        selection: None,
+    };
+    let Execution::Prompt(request) = test.session.start_invoke(&params).unwrap() else {
+        panic!("commit.create confirm prompt");
+    };
+    assert_eq!(request.kind, PromptKind::Confirm);
+    request
+}
+
 #[test]
 fn a_scripted_text_answer_sets_the_menu_option_and_re_renders() {
     let (tmp, _repo) = RepoFixture::new()
@@ -430,4 +449,157 @@ fn finishing_with_a_mismatched_prompt_id_changes_nothing() {
     assert!(unknown.to_string().contains("no longer active"), "{unknown}");
     assert_eq!(test.session().views().iter().count(), depth);
     assert!(test.session.prompt_active());
+}
+
+#[test]
+fn a_refresh_during_a_document_prompt_is_held_for_the_addressed_view() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let origin = test.view_id().to_string();
+    let request = stage_commit_confirm(&mut test, &origin);
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    let origin_version = test.session.views().get(&origin).unwrap().version();
+    let prompt_version = test.session.views().get(&prompt_id).unwrap().version();
+
+    assert!(test.session.refresh(&origin).unwrap().is_none());
+    assert!(test.session.refresh(&prompt_id).unwrap().is_none());
+
+    assert_eq!(
+        test.session.views().get(&origin).unwrap().version(),
+        origin_version
+    );
+    assert_eq!(
+        test.session.views().get(&prompt_id).unwrap().version(),
+        prompt_version
+    );
+    assert!(test.session.views().get(&origin).unwrap().dirty());
+    assert!(test.session.views().get(&prompt_id).unwrap().dirty());
+}
+
+#[test]
+fn finishing_a_document_prompt_renders_a_held_dirty_origin_once() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let origin = test.view_id().to_string();
+    let depth = test.session().views().iter().count();
+    let request = stage_commit_confirm(&mut test, &origin);
+    test.session.open_document_prompt(&request).unwrap();
+    assert_eq!(test.session().views().iter().count(), depth + 1);
+    let version = test.session.views().get(&origin).unwrap().version();
+    assert!(test.session.refresh(&origin).unwrap().is_none());
+    assert!(test.session.views().get(&origin).unwrap().dirty());
+
+    let completion = test
+        .session
+        .finish_document_prompt(&request.prompt_id, Some(PromptValue::Bool(true)))
+        .unwrap();
+
+    assert_eq!(test.session().views().iter().count(), depth);
+    assert!(!test.session.has_pending_prompt());
+    let origin_view = test.session.views().get(&origin).expect("the origin stays open");
+    assert_eq!(origin_view.version(), version + 1);
+    assert!(!origin_view.dirty());
+    assert_eq!(
+        completion.result.opened.len(),
+        1,
+        "the held refresh renders the origin once"
+    );
+    let (render, _keymap) = &completion.result.opened[0];
+    assert_eq!(render.view_id, origin);
+    assert_eq!(render.version, version + 1);
+    assert!(
+        completion.result.effects.iter().any(|effect| matches!(
+            effect,
+            Effect::FocusView { view_id } if view_id == &origin
+        )),
+        "focus returns to the origin: {:?}",
+        completion.result.effects
+    );
+
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let origin = test.view_id().to_string();
+    let depth = test.session().views().iter().count();
+    let request = stage_commit_confirm(&mut test, &origin);
+    test.session.open_document_prompt(&request).unwrap();
+    let version = test.session.views().get(&origin).unwrap().version();
+
+    let completion = test
+        .session
+        .finish_document_prompt(&request.prompt_id, Some(PromptValue::Bool(true)))
+        .unwrap();
+
+    assert_eq!(test.session().views().iter().count(), depth);
+    assert!(
+        completion.result.opened.is_empty(),
+        "a clean origin renders no extra copy"
+    );
+    assert_eq!(test.session.views().get(&origin).unwrap().version(), version);
+}
+
+#[test]
+fn closing_the_prompt_view_clears_the_continuation() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    assert!(test.session.has_pending_prompt());
+
+    test.session.close(&prompt_id).unwrap();
+
+    assert!(!test.session.has_pending_prompt());
+    assert!(!test.session.prompt_active());
+    assert!(test.session.views().get(&prompt_id).is_none());
+    assert!(test.session.views().get(&menu.id).is_some(), "origin stays open");
+    assert_eq!(test.session().views().iter().count(), depth);
+}
+
+#[test]
+fn closing_the_origin_view_closes_its_prompt_too() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+
+    test.session.close(&menu.id).unwrap();
+
+    assert!(!test.session.has_pending_prompt());
+    assert!(test.session.views().get(&menu.id).is_none());
+    assert!(test.session.views().get(&prompt_id).is_none());
+    assert_eq!(test.session().views().iter().count(), depth - 1);
 }
