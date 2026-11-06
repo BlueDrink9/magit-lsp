@@ -3081,6 +3081,16 @@ fn rich_pick_capabilities() -> Value {
     }}})
 }
 
+/// Mixed rung: native picks and document effects declared, native prompts not.
+fn mixed_rung_pick_capabilities() -> Value {
+    json!({"experimental":{"magit":{
+        "v":1,"keys":"dynamic","modifiers":"full",
+        "layout":["main"],"effects":["editDocument"],"prompts":[],
+        "pick":{"multi":false,"freeText":true,"description":true,"detail":true,
+                "group":true,"preselection":true,"fallbackView":true,"maxItems":100}
+    }}})
+}
+
 #[test]
 fn a_declared_native_pick_answers_the_staged_menu_prompt() {
     let (tmp, _repo) = RepoFixture::new()
@@ -3300,6 +3310,185 @@ fn cancelled_native_pick_on_the_mixed_rung_leaves_the_menu_and_repo_unchanged() 
     assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
     assert_eq!(read(&tmp.path().join("f.txt")), worktree);
     assert!(!tmp.path().join(".git/index.lock").exists());
+}
+
+#[test]
+fn cancelled_document_confirm_after_a_native_pick_on_the_mixed_rung_leaves_the_repo_unchanged() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", "initial\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+    let mut server = TestServer::spawn(&[]);
+    // Mixed rung: native pick and editDocument declared, native confirm undeclared.
+    server.initialize(mixed_rung_pick_capabilities());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+    let version = menu_render["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":menu,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let pick = loop {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/pick") {
+            break message;
+        }
+    };
+    let params = &pick["params"];
+    assert!(
+        params["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == json!("main")),
+        "{pick}"
+    );
+    let pick_id = params["pickId"].as_str().unwrap().to_owned();
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/pickRespond",
+        "params":{"pickId":pick_id,"cancelled":false,"selected":["main"]}}));
+
+    let mut key_response = None;
+    let mut respond_response = None;
+    for _ in 0..30 {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        match message["id"].as_i64() {
+            Some(5) => key_response = Some(message),
+            Some(6) => respond_response = Some(message),
+            _ => {}
+        }
+        if key_response.is_some() && respond_response.is_some() {
+            break;
+        }
+    }
+    let key_response = key_response.expect("the held view/key response returns");
+    let respond_response = respond_response.expect("view/pickRespond responds");
+    assert!(respond_response.get("error").is_none(), "{respond_response}");
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/prompt")),
+        "a declared pick must not emit a document prompt: {:?}",
+        server.notifications
+    );
+
+    // The unstaged worktree change makes commit.create open the confirm prompt
+    // as a document because the client does not declare native confirm.
+    let opened = invoke_rich(&mut server, 7, &status, "commit.create");
+    let prompt_effect = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| {
+            effect["type"] == json!("pushView")
+                && effect["descriptor"]["kind"] == json!("prompt")
+        })
+        .expect("commit.create opens the document confirm");
+    let prompt = prompt_effect["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut prompt_render = server
+        .notifications
+        .iter()
+        .rev()
+        .find(|message| {
+            message["method"] == json!("view/render")
+                && message["params"]["viewId"] == json!(prompt)
+        })
+        .cloned();
+    while prompt_render.is_none() {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] == json!(prompt)
+        {
+            prompt_render = Some(message);
+        }
+    }
+    let prompt_render = prompt_render.unwrap();
+    let prompt_version = prompt_render["params"]["version"].as_u64().unwrap();
+    let text: Vec<String> =
+        serde_json::from_value(prompt_render["params"]["text"].clone()).unwrap();
+    let no_row = text.iter().position(|line| line == "No").expect("No row");
+
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/key",
+        "params":{"viewId":prompt,"version":prompt_version,"key":"Enter","editorMode":"normal",
+            "cursor":{"line":no_row,"column":0}}}));
+    let cancelled = server.response_with_id(8);
+    assert!(
+        cancelled["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == json!("popView") && effect["viewId"] == json!(prompt)),
+        "{cancelled}"
+    );
+    for response in [&key_response, &respond_response, &opened, &cancelled] {
+        assert!(
+            !response["result"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects.iter().any(|effect| effect["type"] == json!("editDocument"))
+                }),
+            "cancelling the confirm must not edit the document: {response}"
+        );
+    }
+    server.drain_notifications();
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/prompt")),
+        "an undeclared confirm uses the document prompt: {:?}",
+        server.notifications
+    );
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+    assert!(!tmp.path().join(".git/index.lock").exists());
+
+    // The prompt popped, so the status view is usable instead of refusing
+    // commands while a prompt is pending.
+    let refreshed = invoke_rich(&mut server, 9, &status, "common.refresh");
+    assert!(refreshed.get("error").is_none(), "{refreshed}");
+    let effects = refreshed["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects.iter().all(|effect| effect["type"] != json!("pushView")),
+        "{refreshed}"
+    );
+    assert!(
+        effects.iter().all(|effect| !effect["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pending prompt"))),
+        "{refreshed}"
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
