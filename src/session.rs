@@ -2383,6 +2383,7 @@ impl Session {
             .filter(|menu| menu.id == menu_id)
             .and_then(|menu| menu.item(key).cloned());
         let Some(crate::menu::Item::Option {
+            value,
             reader,
             label,
             flag,
@@ -2399,6 +2400,39 @@ impl Session {
             .expect("menu checked above")
             .clone();
         let cursor = Cursor { line: 0, column: 0 };
+        if value.is_some() {
+            if let Some(menu) = self.views.get_mut(view_id).and_then(|view| view.menu_mut()) {
+                menu.set_option(key, None);
+            }
+            let result = self.menu_rerender(view_id, cursor)?;
+            self.publish();
+            return Ok(Execution::Done(result));
+        }
+        if reader == Reader::Commit {
+            let request = SelectionRequest {
+                options: GitLogOptions::default(),
+                settings: CommitSelection {
+                    purpose: format!("{label} ({flag})"),
+                    prompt: format!("Select a commit for {flag}"),
+                    multi: false,
+                    allow_free_text: true,
+                },
+                operation: SelectionOperation::PickCommit,
+            };
+            let result = self.push_selection(
+                view_id,
+                request,
+                Some(SessionContinuation::Option {
+                    key: key.to_string(),
+                    menu,
+                    cursor,
+                    reader,
+                }),
+                Vec::new(),
+            )?;
+            self.publish();
+            return Ok(Execution::Done(result));
+        }
         if matches!(reader, Reader::Ref | Reader::Remote) {
             let pick = self.option_pick(key, &label, &flag, reader)?;
             self.prepare_pick(
