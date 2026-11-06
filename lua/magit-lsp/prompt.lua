@@ -99,7 +99,11 @@ local function ask_choice(client_id, params)
     if item == nil then
       finish(client_id, params, true)
     elseif item.id == '__custom__' then
-      ask_text(client_id, params, function(text)
+      -- The chosen item's `default` is an item id, not custom text; never
+      -- prefill the custom field with it. `promptId` must remain for the reply.
+      local custom = vim.deepcopy(params)
+      custom.default = nil
+      ask_text(client_id, custom, function(text)
         finish(client_id, params, false, { custom = text })
       end)
     else

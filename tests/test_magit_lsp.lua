@@ -1558,8 +1558,13 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
       scenario.selectAnswers[#scenario.selectAnswers + 1] = '__done__'
     else
       scenario.inputAnswer = vector.response ~= vim.NIL and vector.response or nil
-      scenario.want_input = { prompt = vector.params.title, default = vector.params.default }
-      if vector.params.default == nil then scenario.want_input.default = nil end
+      if vector.params.secret then
+        scenario.secretAnswer = vector.response
+        scenario.want_secret_titles = { vector.params.title }
+      else
+        scenario.want_input = { prompt = vector.params.title, default = vector.params.default }
+        if vector.params.default == nil then scenario.want_input.default = nil end
+      end
     end
     if vector.focus then scenario.want_focus = vector.focus end
     scenarios[#scenarios + 1] = scenario

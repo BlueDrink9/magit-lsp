@@ -54,6 +54,11 @@ function answerFor(params, picked) {
     case 'confirm':
       return { cancelled: false, value: picked.id === 'yes' };
     case 'text':
+      // Neovim's `inputsecret` cannot distinguish Esc from an empty answer,
+      // so an empty secret answer is a cancel in both clients.
+      if (params.secret && picked === '') {
+        return { cancelled: true };
+      }
       return { cancelled: false, value: String(picked) };
     case 'choice':
       if (picked.id === CUSTOM_ID) {

@@ -190,7 +190,9 @@ question, shown prominently, e.g. `"Delete branch feature/x?"`), `detail?`
 **`secret` flag.** When `true`, the typed characters must **not** be echoed
 (masked or hidden), the value must not be written to any history, log or
 completion list, and the server must not log it. Used for Git credential and
-SSH passphrase requests arriving through the askpass helper (§3.10).
+SSH passphrase requests arriving through the askpass helper (§3.10). An empty
+secret answer is a cancel in both clients because Neovim cannot distinguish Esc
+from an empty answer.
 
 Prompt presentation should fit the question and user choice. Native widgets may
 filter server-supplied labels, but clients never parse, resolve or filter Git
