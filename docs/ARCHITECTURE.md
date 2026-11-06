@@ -161,7 +161,7 @@ ordinary linear code. Tests supply a `ScriptedUi`.
 | `pushView` | `descriptor` (id, kind, uri, title, placement, mode, scope, capture) | Create a window/buffer/panel per `placement`, show it, attach the LSP client, and remember the previous view so `popView` returns to it |
 | `popView` | `viewId` | Close that view and focus the previous one |
 | `focusView` | `viewId` | Focus it |
-| `showDocument` | `uri`, `line?`, `column?` | Open a real file (standard `window/showDocument`) |
+| `visitFile` | `uri`, zero-based `line`, zero-based `column` | Visit a real file at the given position |
 | `editDocument` | see §3.10 | Open it for editing in the client's own editor |
 | `clipboard` | `text` | Put the text on the system clipboard |
 | `passThrough` | `key` | Perform the key's normal editor behaviour as if unbound |
@@ -183,7 +183,7 @@ question, shown prominently, e.g. `"Delete branch feature/x?"`), `detail?`
 | `kind` | Question it asks | Extra request fields | Response `value` |
 | --- | --- | --- | --- |
 | `confirm` | Yes or no | `yesLabel?` (default "Yes"), `noLabel?` (default "No"), `destructive: bool` (client should style it as dangerous and make "No" the default focus), `default: bool` (default `false`) | `true` (yes) or `false` (no) |
-| `text` | A free-form single line of text | `placeholder?`, `default?` (prefilled text), `secret: bool`, `error?` (shown when the server re-asks after rejecting the previous value) | the string the user typed (may be empty) |
+| `text` | A free-form single line of text | `placeholder?`, `default?` (prefilled text), `secret?` | the string the user typed (may be empty) |
 | `choice` | Pick exactly one from a list | `items: [{id, label, description?, detail?}]` (`id` is what the server gets back; `label` is shown), `allowCustom: bool` (the user may type something not in the list), `default?` (an item `id`) | `{id: "<item id>"}` or, if custom, `{custom: "<typed text>"}` |
 | `multiChoice` | Pick zero or more from a list | `items` as above, `preselected: [id]`, `min?`, `max?` | `{ids: ["…"]}` |
 

@@ -28,10 +28,20 @@ Initialize selects Plain when `capabilities.experimental.magit` is absent. A dec
 | `view/keymap` (notification) | `{viewId, scope, version, capture, bindings: [{command, keys: [string], modes: ["normal","visual"], label, doc, group, status}], mode, pending?, liveKeys?: [string]}` |
 | `view/effects` (notification) | `{effects: [...]}` for asynchronous effects |
 | `view/prompt` (request) | See [Architecture §3.6](ARCHITECTURE.md#36-prompts-what-each-kind-means) and the [detailed client contract](CLIENT_SPEC.md); returns `{cancelled, value?}` |
-| standard | `window/showDocument`, `window/showMessage`, `$/progress`, semantic tokens, symbols, definition, links, hover, code actions, diagnostics, completion |
+| standard server requests/notifications | `window/showDocument`, `window/showMessage`, `$/progress` |
 
-Plain mode uses standard document synchronization and code actions/commands for
-semantic action dispatch; concrete views/data carry stable identities and are
+Current shared Rich/Plain providers are document symbols, definition, document
+links (no resolve), folding ranges, full semantic tokens, code actions, and the
+`magit.command` execute command; document synchronization is also advertised.
+There are no completion, hover, references, rename, or diagnostics providers.
+Plain code actions/commands dispatch semantic actions over standard LSP; they
+are current behavior, not future targets. Plain completion candidates, Git
+discovery, mutation validation, commit-file paths, and helper lifecycle remain
+provider/workflow targets, not advertised LSP providers. Broader Plain dispatch
+primitives remain target work; see [CLIENT_SPEC](CLIENT_SPEC.md#plain-mode-standard-lsp-clients-target-specification-not-yet-implemented).
+
+Plain mode uses standard document synchronization and implemented code
+actions/commands for semantic action dispatch; concrete views/data carry stable identities and are
 never reconstructed by parsing rendered text. Git-specific discovery,
 mutation validation, commit-file paths, helper lifecycle and completion
 candidates belong to Git backend/workflow providers. Reusable server

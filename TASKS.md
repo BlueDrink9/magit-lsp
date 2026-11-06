@@ -536,3 +536,28 @@ See [Testing strategy](docs/TESTING.md#8-testing-strategy).
 See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 ---
+
+## Review
+
+- [x] **[P1] Reconcile relocated architecture with the current wire contract** (`docs/ARCHITECTURE.md:156-188`, `Effects`, prompt-kind table; `docs/PROTOCOL.md:23-44`, `Server → client`)
+  - **Problem:** The maintained architecture advertises a `showDocument` effect and a text-prompt `error` field, while `docs/CLIENT_SPEC.md` defines the current effect as `visitFile` and explicitly says no prompt `error` field exists. The protocol's “current contract” table also lists hover, code actions, diagnostics, and completion without separating the narrower currently advertised custom-render providers from Plain target behavior.
+  - **Why it matters:** This is contract drift and a correctness problem. External-client authors can implement retired payload fields or mistake target providers for shipped current capabilities.
+  - **Change:** In `docs/ARCHITECTURE.md`, replace retired `showDocument` effect row with current `visitFile {uri,line,column}` and remove `error?` from text prompts. In `docs/PROTOCOL.md` and `docs/CLIENT_SPEC.md`, distinguish current shared providers, including Plain code actions/commands, from unimplemented Plain provider targets.
+  - **Done when:** The three maintained references describe one current effect/prompt shape, current providers are distinct from Plain targets, and the focused documentation check passes.
+  - **Constraints:** Documentation only. Do not change runtime protocol, add compatibility aliases, claim Plain target providers are implemented, or alter T007 scope/status.
+  - Done: containing commit.
+  - Verified: `make docs-check DOC_FILES="TASKS.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/CLIENT_SPEC.md"` @ `ccf6cbb` → ok: docs-check. Source audit: `src/protocol.rs:47-49,419-455`; `src/server.rs:4100-4150`.
+
+- [ ] **[P1] Make bare docs-check validate every maintained reference** (`Makefile:26-27`, `docs-check`; `scripts/check_docs.py:44-49`, `main`)
+  - **Problem:** `make docs-check` passes no paths by default, so `check_docs.py` checks only `TASKS.md`; every cleanup verification must repeat a long `DOC_FILES` override to cover the relocated references. A normal gate can therefore pass while links in `AGENTS.md`, `README.md`, `ui-test-plan.md`, or `docs/{ARCHITECTURE,PROTOCOL,KEYMAPS,VIEWS,TESTING,OPEN_QUESTIONS,CLIENT_SPEC}.md` are broken.
+  - **Why it matters:** This weakens test validity and violates DRY. The new maintained navigation has no reliable default gate, and duplicated file lists can drift.
+  - **Change:** Give the `docs-check` target one repository-owned default `DOC_FILES` list containing the maintained files used by this cleanup, including `hygiene-allowlist.md` and `LICENSING.md`. Preserve command-line override support for bounded checks; do not add a second list in Python.
+  - **Done when:** Bare `make docs-check` checks the full maintained set, an explicit `DOC_FILES=...` still narrows it, and breaking a link in a non-`TASKS.md` maintained file makes the bare target fail.
+  - **Constraints:** Do not scan immutable evidence/history recursively, add network checks, or run runtime/native suites.
+
+- [ ] **[P2] Stop calling the resolved config-directory choice open** (`TASKS.md:518-524`, `Retained gaps`; `docs/OPEN_QUESTIONS.md:5-11`, `Config editing`)
+  - **Problem:** `Retained gaps` still says §9 has an unresolved “config-directory/root-edit,” but §9 now records the macOS `dirs` location as resolved and leaves only the root config-edit command plus runtime verification open.
+  - **Why it matters:** This is a status contradiction that obscures which decision remains actionable.
+  - **Change:** Rewrite the retained-gap summary to name the unresolved config-edit/root-command work and Escape caveat without reopening the resolved directory decision. Preserve the statement that runtime config-location behavior remains unverified.
+  - **Done when:** `TASKS.md`, `docs/OPEN_QUESTIONS.md`, and Architecture §3.18 consistently distinguish the resolved directory choice from open config-edit command/runtime verification work.
+  - **Constraints:** Do not close T047, claim config-location runtime verification, or change the selected macOS directory.
