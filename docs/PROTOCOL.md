@@ -5,7 +5,7 @@ replacements land.
 
 ### 4.1 Client → server (current contract)
 
-Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#ad-hoc).
+Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#completed-work).
 
 | Method | Params | Returns |
 | --- | --- | --- |
