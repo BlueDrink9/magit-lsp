@@ -6,7 +6,7 @@
 //! store. Rows are [`NodeKind::Line`] nodes the client turns into edits or
 //! actions.
 
-use crate::protocol::{PromptKind, ViewPromptParams};
+use crate::protocol::{PromptChoiceAnswer, PromptKind, PromptValue, ViewPromptParams};
 use crate::tree::{LineNode, Node, NodeKind, Tree};
 use crate::view::{Ctx, Scope, View, ViewKind};
 use std::collections::BTreeSet;
@@ -80,6 +80,8 @@ pub struct PromptDocument {
     fields: Vec<Field>,
     selected: BTreeSet<String>,
     default_item: Option<String>,
+    allow_custom: bool,
+    custom_edited: bool,
     row_ids: Vec<String>,
 }
 
@@ -181,14 +183,22 @@ impl PromptDocument {
                 row_id(&prompt_id, "submit"),
                 row_id(&prompt_id, "cancel"),
             ],
-            PromptKind::Choice => items
-                .iter()
-                .map(|item| item_row_id(&prompt_id, &item.id))
-                .collect(),
+            PromptKind::Choice => {
+                let mut ids: Vec<String> = items
+                    .iter()
+                    .map(|item| item_row_id(&prompt_id, &item.id))
+                    .collect();
+                if allow_custom {
+                    ids.push(row_id(&prompt_id, "submit"));
+                }
+                ids.push(row_id(&prompt_id, "cancel"));
+                ids
+            }
             PromptKind::MultiChoice => items
                 .iter()
                 .map(|item| item_row_id(&prompt_id, &item.id))
                 .chain(std::iter::once(row_id(&prompt_id, "done")))
+                .chain(std::iter::once(row_id(&prompt_id, "cancel")))
                 .collect(),
         };
 
@@ -209,6 +219,8 @@ impl PromptDocument {
             fields,
             selected,
             default_item,
+            allow_custom,
+            custom_edited: false,
             row_ids,
         })
     }
@@ -273,13 +285,16 @@ impl PromptDocument {
     /// A value must stay on one line and within [`MAX_FIELD_BYTES`]; oversized
     /// values are refused instead of truncated.
     pub fn set_field_text(&mut self, id: &str, text: &str) -> Result<(), String> {
-        let field = self
+        let index = self
             .fields
-            .iter_mut()
-            .find(|field| field.id == id)
+            .iter()
+            .position(|field| field.id == id)
             .ok_or_else(|| format!("unknown prompt field {id:?}"))?;
-        validate_field(&field.label, text)?;
-        field.value = text.to_string();
+        validate_field(&self.fields[index].label, text)?;
+        if self.fields[index].value != text {
+            self.custom_edited = true;
+        }
+        self.fields[index].value = text.to_string();
         Ok(())
     }
 
@@ -371,6 +386,14 @@ impl PromptDocument {
             validate_field(&field.label, text)?;
             values.push(text.to_string());
         }
+        if self
+            .fields
+            .iter()
+            .zip(values.iter())
+            .any(|(field, value)| &field.value != value)
+        {
+            self.custom_edited = true;
+        }
         for (field, value) in self.fields.iter_mut().zip(values) {
             field.value = value;
         }
@@ -400,6 +423,87 @@ impl PromptDocument {
             }
             _ => Err(format!("{:?} prompts have no item rows", self.kind)),
         }
+    }
+
+    /// The answer a `choice` Submit row produces from the custom field.
+    ///
+    /// Returns `None` when the prompt has no custom field or its text is empty,
+    /// which cancels the prompt. An untouched field with a default item answers
+    /// that item's id instead of its prefilled label.
+    pub fn choice_answer(&self) -> Option<PromptValue> {
+        let field = self.fields.first()?;
+        if !self.custom_edited {
+            if let Some(default) = &self.default_item {
+                return Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+                    id: default.clone(),
+                }));
+            }
+        }
+        if field.value.is_empty() {
+            return None;
+        }
+        Some(PromptValue::Choice(PromptChoiceAnswer::Custom {
+            custom: field.value.clone(),
+        }))
+    }
+
+    /// Map one rendered row id to the action it performs.
+    ///
+    /// Confirm and text rows answer immediately; a choice item row answers its
+    /// id; a multi-choice item row only toggles its state. `Answer(None)`
+    /// cancels the prompt. An unknown or non-row id returns a readable error and
+    /// changes nothing.
+    pub fn answer(&self, row_id: &str) -> Result<PromptAction, String> {
+        if !self.row_ids.iter().any(|id| id == row_id) {
+            return Err(format!("unknown prompt row: {row_id}"));
+        }
+        let prefix = format!("prompt:{}:", self.prompt_id);
+        let row = row_id
+            .strip_prefix(&prefix)
+            .expect("row ids carry the prompt id");
+        let action = match self.kind {
+            PromptKind::Confirm => match row {
+                "yes" => PromptAction::Answer(Some(PromptValue::Bool(true))),
+                "no" => PromptAction::Answer(Some(PromptValue::Bool(false))),
+                _ => return Err(format!("unknown prompt row: {row_id}")),
+            },
+            PromptKind::Text => match row {
+                "submit" => {
+                    let field = self
+                        .fields
+                        .first()
+                        .ok_or_else(|| "the prompt has no field".to_string())?;
+                    PromptAction::Answer(Some(PromptValue::Text(field.value.clone())))
+                }
+                "cancel" => PromptAction::Answer(None),
+                _ => return Err(format!("unknown prompt row: {row_id}")),
+            },
+            PromptKind::Choice => match row {
+                "submit" => PromptAction::Answer(self.choice_answer()),
+                "cancel" => PromptAction::Answer(None),
+                _ => match row.strip_prefix("item:") {
+                    Some(id) => PromptAction::Answer(Some(PromptValue::Choice(
+                        PromptChoiceAnswer::Id { id: id.to_string() },
+                    ))),
+                    None => return Err(format!("unknown prompt row: {row_id}")),
+                },
+            },
+            PromptKind::MultiChoice => match row {
+                "done" => PromptAction::Answer(Some(PromptValue::Multi {
+                    ids: self
+                        .selected_ids()
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                })),
+                "cancel" => PromptAction::Answer(None),
+                _ => match row.strip_prefix("item:") {
+                    Some(id) => PromptAction::Toggle(id.to_string()),
+                    None => return Err(format!("unknown prompt row: {row_id}")),
+                },
+            },
+        };
+        Ok(action)
     }
 
     /// Render the current model at `cols` columns.
@@ -485,6 +589,22 @@ impl PromptDocument {
                     self.push_item(&mut tree, item, marker, line);
                 }
                 self.push_fields(&mut tree);
+                if self.allow_custom {
+                    self.push_row(
+                        &mut tree,
+                        row_id(&self.prompt_id, "submit"),
+                        "Submit",
+                        None,
+                        cols,
+                    );
+                }
+                self.push_row(
+                    &mut tree,
+                    row_id(&self.prompt_id, "cancel"),
+                    "Cancel",
+                    None,
+                    cols,
+                );
             }
             PromptKind::MultiChoice => {
                 for item in &self.items {
@@ -498,6 +618,13 @@ impl PromptDocument {
                     &mut tree,
                     row_id(&self.prompt_id, "done"),
                     "Done",
+                    None,
+                    cols,
+                );
+                self.push_row(
+                    &mut tree,
+                    row_id(&self.prompt_id, "cancel"),
+                    "Cancel",
                     None,
                     cols,
                 );
@@ -612,6 +739,15 @@ impl PromptDocument {
         });
     }
 
+}
+
+/// What one rendered prompt row does when it is answered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PromptAction {
+    /// Finish the prompt with this answer; `None` cancels it.
+    Answer(Option<PromptValue>),
+    /// Toggle one multi-choice item and keep the prompt open.
+    Toggle(String),
 }
 
 /// One prompt rendered as server-owned document text.

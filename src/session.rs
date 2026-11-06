@@ -13,7 +13,7 @@ use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::log_view::LogView;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
-use crate::presentation::prompt::{self, PromptDelivery, PromptDocument, PromptView};
+use crate::presentation::prompt::{self, PromptAction, PromptDelivery, PromptDocument, PromptView};
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
@@ -1479,8 +1479,10 @@ impl Session {
     /// Answer the open document prompt from a rendered row and document text.
     ///
     /// The document is reconciled against the authoritative tree first. A
-    /// document repaired by the client is re-rendered and stays open; otherwise
-    /// `row_id` selects the answer and the prompt finishes normally.
+    /// document repaired by the client is re-rendered and stays open; a
+    /// multi-choice item row toggles the stored selection and re-renders
+    /// without finishing; otherwise `row_id` selects the answer and the prompt
+    /// finishes normally.
     pub fn answer_document_prompt(
         &mut self,
         row_id: &str,
@@ -1519,43 +1521,29 @@ impl Session {
             if reconciled.repaired {
                 (true, None)
             } else {
-                let row_ids = document_state.row_ids();
-                if !row_ids.contains(&row_id) {
-                    return Err(Error::new(format!("unknown prompt row: {row_id}")));
-                }
-                let row = row_id
-                    .strip_prefix(&format!("prompt:{prompt_id}:"))
-                    .expect("row ids carry the prompt id");
-                let answer = match document_state.kind() {
-                    PromptKind::Confirm => match row {
-                        "yes" => Some(crate::protocol::PromptValue::Bool(true)),
-                        "no" => Some(crate::protocol::PromptValue::Bool(false)),
-                        _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
-                    },
-                    PromptKind::Text => match row {
-                        "cancel" => None,
-                        "submit" => {
-                            let field_id = document_state
-                                .field_ids()
-                                .first()
-                                .copied()
-                                .ok_or_else(|| Error::new("the prompt has no field"))?
-                                .to_string();
-                            let value = document_state
-                                .field_text(&field_id)
-                                .ok_or_else(|| Error::new("the prompt has no field"))?
-                                .to_string();
-                            Some(crate::protocol::PromptValue::Text(value))
-                        }
-                        _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
-                    },
-                    _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
+                let action = document_state
+                    .answer(row_id)
+                    .map_err(Error::new)?;
+                let answer = match action {
+                    PromptAction::Toggle(item_id) => {
+                        document_state.toggle_item(&item_id).map_err(Error::new)?;
+                        None
+                    }
+                    PromptAction::Answer(answer) => Some(answer),
                 };
                 (false, answer)
             }
         };
 
-        if repaired {
+        if repaired || answer.is_none() {
+            let effects = if repaired {
+                vec![Effect::message(
+                    MessageLevel::Warn,
+                    crate::errors::STALE_VIEW.to_string(),
+                )]
+            } else {
+                Vec::new()
+            };
             let render = self
                 .views
                 .get_mut(&view_id)
@@ -1564,10 +1552,7 @@ impl Session {
             self.publish();
             return Ok(PromptCompletion {
                 result: InvokeResult {
-                    effects: vec![Effect::message(
-                        MessageLevel::Warn,
-                        crate::errors::STALE_VIEW.to_string(),
-                    )],
+                    effects,
                     render: Some(render),
                     ..InvokeResult::empty()
                 },
@@ -1575,7 +1560,7 @@ impl Session {
             });
         }
 
-        self.finish_document_prompt(&prompt_id, answer)
+        self.finish_document_prompt(&prompt_id, answer.flatten())
     }
 
     /// Pop the active prompt, resume its continuation and return both steps.

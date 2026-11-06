@@ -3,7 +3,7 @@
 use magit_lsp::presentation::prompt::{
     delivery, PromptDelivery, PromptDocument, PromptView, MAX_FIELD_BYTES,
 };
-use magit_lsp::protocol::ViewPromptParams;
+use magit_lsp::protocol::{PromptValue, ViewPromptParams};
 use magit_lsp::tree::{NodeKind, Tree};
 use magit_lsp::view::{Ctx, Scope, View, ViewKind, ViewMode, Viewport};
 use serde_json::{json, Value};
@@ -145,13 +145,15 @@ fn choice_renders_item_rows_a_default_marker_and_a_custom_field_with_the_label()
 
     assert_eq!(
         tree.lines,
-        vec!["Pick a branch", "", "Main", "> Feature x", "Feature x"]
+        vec!["Pick a branch", "", "Main", "> Feature x", "Feature x", "Submit", "Cancel"]
     );
     assert_node(&tree, "prompt:pick:title", NodeKind::Header, "Pick a branch", 0);
     assert_node(&tree, "prompt:pick:blank", NodeKind::Blank, "", 1);
     assert_node(&tree, "prompt:pick:item:main", NodeKind::Line, "Main", 2);
     assert_node(&tree, "prompt:pick:item:feature/x", NodeKind::Line, "Feature x", 3);
     assert_node(&tree, "prompt:pick:custom", NodeKind::Field, "Custom value", 4);
+    assert_node(&tree, "prompt:pick:submit", NodeKind::Line, "Submit", 5);
+    assert_node(&tree, "prompt:pick:cancel", NodeKind::Line, "Cancel", 6);
 
     assert_eq!(
         tree.node("prompt:pick:item:feature/x").unwrap().marker,
@@ -160,7 +162,12 @@ fn choice_renders_item_rows_a_default_marker_and_a_custom_field_with_the_label()
     assert_eq!(tree.node("prompt:pick:item:main").unwrap().marker, None);
     assert_eq!(
         document.row_ids(),
-        vec!["prompt:pick:item:main", "prompt:pick:item:feature/x"]
+        vec![
+            "prompt:pick:item:main",
+            "prompt:pick:item:feature/x",
+            "prompt:pick:submit",
+            "prompt:pick:cancel"
+        ]
     );
     assert_eq!(document.field_ids(), vec!["prompt:pick:custom"]);
     assert_eq!(
@@ -185,13 +192,22 @@ fn multi_choice_renders_toggles_preselection_and_a_done_row() {
     }));
     let tree = document.render(80);
 
-    assert_eq!(tree.lines, vec!["Pick tags", "", "[x] Alpha", "[ ] Beta", "Done"]);
+    assert_eq!(tree.lines, vec!["Pick tags", "", "[x] Alpha", "[ ] Beta", "Done", "Cancel"]);
     assert_node(&tree, "prompt:tags:item:a", NodeKind::Line, "Alpha", 2);
     assert_node(&tree, "prompt:tags:item:b", NodeKind::Line, "Beta", 3);
     assert_node(&tree, "prompt:tags:done", NodeKind::Line, "Done", 4);
+    assert_node(&tree, "prompt:tags:cancel", NodeKind::Line, "Cancel", 5);
     assert_eq!(tree.node("prompt:tags:item:a").unwrap().marker, Some('x'));
     assert_eq!(tree.node("prompt:tags:item:b").unwrap().marker, Some(' '));
-    assert_eq!(document.row_ids(), vec!["prompt:tags:item:a", "prompt:tags:item:b", "prompt:tags:done"]);
+    assert_eq!(
+        document.row_ids(),
+        vec![
+            "prompt:tags:item:a",
+            "prompt:tags:item:b",
+            "prompt:tags:done",
+            "prompt:tags:cancel"
+        ]
+    );
     assert_eq!(document.selected_ids(), vec!["a"]);
 
     assert!(document.toggle_item("b").unwrap());
@@ -205,6 +221,217 @@ fn multi_choice_renders_toggles_preselection_and_a_done_row() {
 }
 
 #[test]
+fn choice_rows_add_cancel_and_submit_only_when_custom_is_allowed() {
+    let plain = document(json!({
+        "promptId": "pick",
+        "kind": "choice",
+        "title": "Pick",
+        "items": [
+            {"id": "main", "label": "Main"},
+            {"id": "next", "label": "Next"}
+        ]
+    }));
+    assert_eq!(plain.render(80).lines, vec!["Pick", "", "Main", "Next", "Cancel"]);
+    assert_eq!(
+        plain.row_ids(),
+        vec![
+            "prompt:pick:item:main",
+            "prompt:pick:item:next",
+            "prompt:pick:cancel"
+        ]
+    );
+
+    let custom = document(json!({
+        "promptId": "pick",
+        "kind": "choice",
+        "title": "Pick",
+        "items": [
+            {"id": "main", "label": "Main"},
+            {"id": "next", "label": "Next"}
+        ],
+        "allowCustom": true
+    }));
+    assert_eq!(
+        custom.render(80).lines,
+        vec!["Pick", "", "Main", "Next", "", "Submit", "Cancel"]
+    );
+    assert_eq!(
+        custom.row_ids(),
+        vec![
+            "prompt:pick:item:main",
+            "prompt:pick:item:next",
+            "prompt:pick:submit",
+            "prompt:pick:cancel"
+        ]
+    );
+}
+
+#[test]
+fn choice_answers_by_item_default_custom_or_cancel() {
+    use magit_lsp::presentation::prompt::PromptAction;
+    use magit_lsp::protocol::PromptChoiceAnswer;
+
+    let mut choice = document(json!({
+        "promptId": "pick",
+        "kind": "choice",
+        "title": "Pick",
+        "items": [
+            {"id": "main", "label": "Main"},
+            {"id": "next", "label": "Next"}
+        ],
+        "default": "next",
+        "allowCustom": true
+    }));
+    let id = |value: &str| {
+        PromptAction::Answer(Some(PromptValue::Choice(PromptChoiceAnswer::Id {
+            id: value.to_string(),
+        })))
+    };
+
+    assert_eq!(choice.answer("prompt:pick:item:main").unwrap(), id("main"));
+    assert_eq!(
+        choice.answer("prompt:pick:submit").unwrap(),
+        id("next"),
+        "an untouched default field answers the item id, not its label"
+    );
+
+    choice.set_field_text("prompt:pick:custom", "topic").unwrap();
+    assert_eq!(
+        choice.answer("prompt:pick:submit").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Choice(PromptChoiceAnswer::Custom {
+            custom: "topic".to_string()
+        })))
+    );
+
+    choice.set_field_text("prompt:pick:custom", "").unwrap();
+    assert_eq!(
+        choice.answer("prompt:pick:submit").unwrap(),
+        PromptAction::Answer(None),
+        "an empty custom value cancels"
+    );
+    assert_eq!(
+        choice.answer("prompt:pick:cancel").unwrap(),
+        PromptAction::Answer(None)
+    );
+
+    let without_default = document(json!({
+        "promptId": "pick",
+        "kind": "choice",
+        "title": "Pick",
+        "items": [{"id": "main", "label": "Main"}],
+        "allowCustom": true
+    }));
+    assert_eq!(
+        without_default.answer("prompt:pick:submit").unwrap(),
+        PromptAction::Answer(None),
+        "an untouched empty field with no default cancels"
+    );
+
+    let before = choice.render(80).lines;
+    for bad in [
+        "prompt:pick:bogus",
+        "prompt:pick:item:missing",
+        "prompt:other:cancel",
+    ] {
+        let error = choice.answer(bad).expect_err(bad);
+        assert!(error.contains("unknown prompt row"), "{bad}: {error}");
+    }
+    assert_eq!(choice.render(80).lines, before, "a bad row changes nothing");
+}
+
+#[test]
+fn multi_choice_items_toggle_and_done_answers_the_selection() {
+    use magit_lsp::presentation::prompt::PromptAction;
+
+    let mut multi = document(json!({
+        "promptId": "tags",
+        "kind": "multiChoice",
+        "title": "Pick tags",
+        "items": [
+            {"id": "a", "label": "Alpha"},
+            {"id": "b", "label": "Beta"}
+        ],
+        "preselected": ["a"]
+    }));
+
+    assert_eq!(
+        multi.answer("prompt:tags:item:b").unwrap(),
+        PromptAction::Toggle("b".to_string())
+    );
+    assert_eq!(
+        multi.answer("prompt:tags:done").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Multi {
+            ids: vec!["a".to_string()]
+        })),
+        "done reports the selection before the toggle is applied"
+    );
+
+    assert!(multi.toggle_item("b").unwrap());
+    assert_eq!(multi.render(80).lines[3], "[x] Beta");
+    assert_eq!(
+        multi.answer("prompt:tags:done").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Multi {
+            ids: vec!["a".to_string(), "b".to_string()]
+        }))
+    );
+    assert_eq!(
+        multi.answer("prompt:tags:cancel").unwrap(),
+        PromptAction::Answer(None)
+    );
+
+    let before = multi.selected_ids();
+    for bad in ["prompt:tags:bogus", "prompt:tags:item:missing"] {
+        let error = multi.answer(bad).expect_err(bad);
+        assert!(error.contains("unknown prompt row"), "{bad}: {error}");
+    }
+    assert_eq!(multi.selected_ids(), before, "a bad row changes nothing");
+}
+
+#[test]
+fn confirm_and_text_rows_map_to_typed_answers() {
+    use magit_lsp::presentation::prompt::PromptAction;
+
+    let confirm = document(json!({
+        "promptId": "ok",
+        "kind": "confirm",
+        "title": "Continue?"
+    }));
+    assert_eq!(
+        confirm.answer("prompt:ok:yes").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Bool(true)))
+    );
+    assert_eq!(
+        confirm.answer("prompt:ok:no").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Bool(false)))
+    );
+
+    let mut text = document(json!({
+        "promptId": "rev",
+        "kind": "text",
+        "title": "Revision",
+        "default": "HEAD"
+    }));
+    assert_eq!(
+        text.answer("prompt:rev:submit").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Text("HEAD".to_string())))
+    );
+    text.set_field_text("prompt:rev:field", "HEAD~1").unwrap();
+    assert_eq!(
+        text.answer("prompt:rev:submit").unwrap(),
+        PromptAction::Answer(Some(PromptValue::Text("HEAD~1".to_string())))
+    );
+    assert_eq!(
+        text.answer("prompt:rev:cancel").unwrap(),
+        PromptAction::Answer(None)
+    );
+
+    for bad in ["prompt:rev:yes", "prompt:rev:item:x"] {
+        let error = text.answer(bad).expect_err(bad);
+        assert!(error.contains("unknown prompt row"), "{bad}: {error}");
+    }
+}
+
+#[test]
 fn rows_render_even_when_the_item_list_is_empty() {
     let multi = document(json!({
         "promptId": "tags",
@@ -212,8 +439,8 @@ fn rows_render_even_when_the_item_list_is_empty() {
         "title": "Pick tags",
         "items": []
     }));
-    assert_eq!(multi.render(80).lines, vec!["Pick tags", "", "Done"]);
-    assert_eq!(multi.row_ids(), vec!["prompt:tags:done"]);
+    assert_eq!(multi.render(80).lines, vec!["Pick tags", "", "Done", "Cancel"]);
+    assert_eq!(multi.row_ids(), vec!["prompt:tags:done", "prompt:tags:cancel"]);
 
     let confirm = document(json!({
         "promptId": "ok",
