@@ -1059,6 +1059,99 @@ fn a_commit_message_option_picks_a_log_commit_into_the_menu_option() {
 }
 
 #[test]
+fn a_stale_commit_option_is_refused_before_dispatch() {
+    use magit_lsp::protocol::Cursor;
+    use magit_lsp::tree::NodeKind;
+    use magit_lsp::view::ViewKind;
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("middle commit", [("f.txt", "middle\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let expected = tmp.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let (menu, _) = test.open_via_command("open.commit");
+    test.ack();
+
+    test.press_ui("=");
+    test.press_ui("C");
+    let log_id = test.view_id().to_string();
+    let log = test
+        .session()
+        .views()
+        .get(&log_id)
+        .expect("the selection log");
+    assert_eq!(log.descriptor().kind, ViewKind::Log);
+    let text = test.text_of(&log_id).join("\n");
+    assert!(
+        text.contains("Select a commit for --reuse-message="),
+        "{text}"
+    );
+    assert!(log
+        .tree()
+        .nodes
+        .iter()
+        .any(|node| node.kind == NodeKind::Commit));
+    assert!(!test.session.prompt_active());
+
+    test.ack();
+    let node = test
+        .session()
+        .views()
+        .get(&log_id)
+        .unwrap()
+        .tree()
+        .nodes
+        .iter()
+        .find(|node| node.commit.as_deref() == Some(&expected))
+        .expect("the HEAD commit row")
+        .start_line;
+    let result = test.invoke_at(
+        "common.confirm",
+        Cursor {
+            line: node,
+            column: 0,
+        },
+    );
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &log_id)),
+        "{:?}",
+        result.effects
+    );
+    assert_eq!(test.view_id(), menu.id);
+    assert_eq!(
+        option_value(&test, &menu.id, "=C").as_deref(),
+        Some(expected.as_str())
+    );
+
+    tmp.git(&["reset", "--hard", "HEAD~1"]);
+    tmp.git(&["reflog", "expire", "--expire=now", "--all"]);
+    tmp.git(&["gc", "--prune=now"]);
+    let head = tmp.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let count = tmp.git(&["rev-list", "--count", "HEAD"]).trim().to_string();
+
+    let result = test.press_ui("c");
+
+    assert_eq!(result.effects.len(), 1, "{:?}", result.effects);
+    let Effect::Message { level, text, .. } = &result.effects[0] else {
+        panic!("expected one warn message, got {:?}", result.effects);
+    };
+    assert_eq!(*level, magit_lsp::protocol::MessageLevel::Warn);
+    assert!(text.contains("is no longer valid"), "{text}");
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { .. })));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), head);
+    assert_eq!(tmp.git(&["rev-list", "--count", "HEAD"]).trim(), count);
+    assert_eq!(test.view_id(), menu.id);
+}
+
+#[test]
 fn cancelling_the_commit_message_log_leaves_the_option_unset() {
     use magit_lsp::view::ViewKind;
     let (tmp, _repo) = RepoFixture::new()
