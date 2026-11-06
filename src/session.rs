@@ -13,6 +13,7 @@ use crate::keymap::Keymap;
 use crate::log_view::CommitSelection;
 use crate::log_view::LogView;
 use crate::menu::{Menu, MenuStatus, MenuView, Reader};
+use crate::presentation::prompt::{PromptDocument, PromptView};
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PromptChoiceAnswer, PromptKind, Selection, ViewInvokeParams,
@@ -568,6 +569,7 @@ struct PendingPrompt {
     prepared: Option<InvokeResult>,
     request: ViewPromptParams,
     view_id: String,
+    prompt_view: Option<String>,
     cursor: Option<Cursor>,
     cancel: Option<crate::runner::CancelHandle>,
     action: SessionContinuation,
@@ -593,6 +595,15 @@ pub enum Execution {
     Done(InvokeResult),
     /// Wait outside session ownership, then resume with this prompt identity.
     Prompt(ViewPromptParams),
+}
+
+/// The result of answering a document prompt.
+#[derive(Debug)]
+pub struct PromptCompletion {
+    /// Pop/focus effects and any render produced while closing the prompt.
+    pub result: InvokeResult,
+    /// The continuation step after the answer; drive it before returning to the client.
+    pub next: Execution,
 }
 
 struct PendingSelection {
@@ -1160,6 +1171,7 @@ impl Session {
             prepared: None,
             request,
             view_id: view_id.to_string(),
+            prompt_view: None,
             cursor,
             action,
             cancel: crate::runner::current_cancel(),
@@ -1215,6 +1227,88 @@ impl Session {
         let step = self.resume_pending(prompt_id, answer);
         self.publish();
         step
+    }
+
+    /// Push the server-rendered prompt for the staged continuation.
+    ///
+    /// The request must match the staged prompt and a prompt view must not
+    /// already be open. The new view is pushed above the staged origin view.
+    pub fn open_document_prompt(&mut self, request: &ViewPromptParams) -> Result<InvokeResult> {
+        let pending = self
+            .pending_prompt
+            .as_ref()
+            .ok_or_else(|| Error::new("no prompt is pending"))?;
+        if pending.request.prompt_id != request.prompt_id {
+            return Err(Error::new(format!(
+                "prompt {} is no longer active",
+                request.prompt_id
+            )));
+        }
+        if pending.prompt_view.is_some() {
+            return Err(Error::new("a prompt view is already open"));
+        }
+        let origin = pending.view_id.clone();
+        let document = PromptDocument::new(request.clone()).map_err(Error::new)?;
+        let (descriptor, render) = self.push_view(
+            &origin,
+            ViewKind::Prompt,
+            Placement::Main,
+            Box::new(PromptView::new(document)),
+        )?;
+        let prompt_view = descriptor.id.clone();
+        if let Some(pending) = self.pending_prompt.as_mut() {
+            pending.prompt_view = Some(prompt_view.clone());
+        }
+        self.publish();
+        Ok(InvokeResult {
+            effects: vec![Effect::PushView { descriptor }],
+            opened: vec![(render, self.keymap_notice(&prompt_view))],
+            ..InvokeResult::empty()
+        })
+    }
+
+    /// Whether a document prompt is the active top view.
+    pub fn prompt_active(&self) -> bool {
+        self.prompt_view_id()
+            .is_some_and(|view_id| self.views.get(view_id).is_some())
+    }
+
+    /// The open document prompt view id, if any.
+    pub fn prompt_view_id(&self) -> Option<&str> {
+        self.pending_prompt
+            .as_ref()
+            .and_then(|pending| pending.prompt_view.as_deref())
+    }
+
+    /// Pop the active prompt, resume its continuation and return both steps.
+    ///
+    /// Validation happens before any mutation, so a mismatched or stale id
+    /// leaves the view stack and the pending prompt unchanged.
+    pub fn finish_document_prompt(
+        &mut self,
+        prompt_id: &str,
+        answer: Option<crate::protocol::PromptValue>,
+    ) -> Result<PromptCompletion> {
+        let pending = self
+            .pending_prompt
+            .as_ref()
+            .ok_or_else(|| Error::new("no prompt is active"))?;
+        if pending.request.prompt_id != prompt_id {
+            return Err(Error::new(format!("prompt {prompt_id} is no longer active")));
+        }
+        let prompt_view = pending
+            .prompt_view
+            .clone()
+            .ok_or_else(|| Error::new("prompt is not open"))?;
+        if self.views.get(&prompt_view).is_none() {
+            return Err(Error::new("prompt is no longer active"));
+        }
+        let result = self.pop_view(&prompt_view)?;
+        if let Some(pending) = self.pending_prompt.as_mut() {
+            pending.prompt_view = None;
+        }
+        let next = self.resume_prompt(prompt_id, answer)?;
+        Ok(PromptCompletion { result, next })
     }
 
     fn resume_pending(
