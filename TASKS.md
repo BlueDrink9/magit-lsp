@@ -49,7 +49,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.5b2c — Activate confirm and text prompt rows from Plain documents.** Done: `5564a03`. Offer and execute `prompt.answer` row actions with stale checks. T008 clauses 1–2, 5.
   - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `5564a03` → ok: rust.
   - Check: a captured `prompt.answer` replayed after a repaired title edit returns the stale message and leaves exactly one prompt.
-- [ ] **T008.5c — Activate confirm and text prompt rows from Rich keys.** Enter on a prompt row, reconciled field edits through `didChange`. T008 clauses 1–2, 5.
+- [x] **T008.5c1 — Reconcile Rich prompt document edits.** Done: `514422d`. Route `didChange` for an open prompt view through `reconcile_prompt_document`; adopt field text without a revert edit and re-render repairs. T008 clauses 1–2, 5.
+  - Verified: `make test-rust FILTER="--test server_async"` @ `514422d` → ok: rust.
+- [ ] **T008.5c2 — Activate confirm and text prompt rows from Rich keys.** Enter on a prompt row answers with the reconciled field text and drives the continuation. T008 clauses 1–2, 5.
 - [ ] **T008.6 — Render choice and multiChoice document prompts.** Rows, allowCustom field with default, preselection, Done; optional field completion. T008 clause 2.
 - [ ] **T008.7 — Declare the typed pick capability.** Purpose/multi/free text/preselection/item fields/fallbackView; no undeclared shape; client declarations and vectors. T008 clause 3.
 - [ ] **T008.8 — Implement pick rungs and preference limits.** Native → document → code actions; per-client opt-in; Neovim static `vim.ui.select` and long-list cut. T008 clauses 3, 6, 9.
