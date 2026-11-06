@@ -291,7 +291,7 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 - [x] **Documentation cleanup — Condense completed-task records.** Done: containing commit.
 - [x] **Documentation cleanup — Condense obsolete history and preserve live work.** Done: containing commit.
 - [x] **Documentation cleanup — Restore moved completion records.** Done: `16f4d11`.
-- [x] **Documentation cleanup — Finish queue navigation and preservation audit.** Done: containing commit.
+- [x] **Documentation cleanup — Finish queue navigation and preservation audit.** Done: `2e051e3`.
   - Bounded audit: commit `16f4d11` compared source titles and references (122/122 checked titles; 102/102 refs; 9/9 original unchecked titles); bounded reviewer confirmed all original pre-cleanup unfinished tasks and requirements remain. T007 worktree-only changes are excluded from staged source comparison.
   - Scope: queue navigation and owned cleanup/review metadata only; no runtime/native acceptance claim. Final line count: 546.
   - Verified: `make docs-check` → ok: docs-check.
