@@ -432,6 +432,49 @@ fn initialization_options_override_user_config() {
 }
 
 #[test]
+fn pick_settings_parse_global_and_per_client_limits() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("config.toml");
+    write(&main, "[pick]\nmax_items = 25\n");
+    let config = load(&main).unwrap();
+    assert_eq!(config.pick.max_items, Some(25));
+    assert!(config.pick.clients.is_empty());
+    let default = load_config(&LoadOptions::default()).unwrap();
+    assert_eq!(default.pick.max_items, None);
+    assert!(default.pick.clients.is_empty());
+
+    write(
+        &main,
+        "[pick]\nmax_items = 25\n[pick.clients]\nneovim = 50\nvscode = 100\n",
+    );
+    let config = load(&main).unwrap();
+    assert_eq!(config.pick.max_items, Some(25));
+    assert_eq!(config.pick.clients.get("neovim"), Some(&50));
+    assert_eq!(config.pick.clients.get("vscode"), Some(&100));
+}
+
+#[test]
+fn invalid_pick_settings_are_rejected() {
+    let dir = TempDir::new().unwrap();
+    let main = dir.path().join("config.toml");
+    write(&main, "[pick]\nmax_items = -1\n");
+    let error = load(&main).unwrap_err();
+    assert!(error.message.contains("pick.max_items"), "{error}");
+    write(&main, "[pick]\nmax_items = \"many\"\n");
+    let error = load(&main).unwrap_err();
+    assert!(error.message.contains("pick.max_items"), "{error}");
+    write(&main, "[pick]\nclients = 3\n");
+    let error = load(&main).unwrap_err();
+    assert!(error.message.contains("pick.clients"), "{error}");
+    write(&main, "[pick.clients]\nneovim = -1\n");
+    let error = load(&main).unwrap_err();
+    assert!(error.message.contains("pick.clients.neovim"), "{error}");
+    write(&main, "[pick]\nmystery = 1\n");
+    let error = load(&main).unwrap_err();
+    assert!(error.message.contains("pick.mystery"), "{error}");
+}
+
+#[test]
 fn plain_section_limit_defaults_and_obeys_configuration_layers() {
     let dir = TempDir::new().unwrap();
     let repo = TempDir::new().unwrap();

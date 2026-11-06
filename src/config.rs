@@ -216,6 +216,15 @@ pub struct PlainSettings {
     pub max_section_lines: u32,
 }
 
+/// Pick preference limits, global or per client name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PickSettings {
+    /// Maximum number of items a pick may offer, regardless of client.
+    pub max_items: Option<usize>,
+    /// Per-client item limits, keyed by `clientInfo.name`.
+    pub clients: BTreeMap<String, usize>,
+}
+
 /// The fully resolved configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -231,6 +240,8 @@ pub struct Config {
     pub actions: ActionsSettings,
     /// Plain presentation settings.
     pub plain: PlainSettings,
+    /// Pick preference limits.
+    pub pick: PickSettings,
     /// File basenames used for the Plain presentation document (default `.magit`).
     pub presentation_files: Vec<String>,
     /// Every file that contributed, for the watcher.
@@ -270,6 +281,7 @@ impl Default for Config {
             plain: PlainSettings {
                 max_section_lines: 400,
             },
+            pick: PickSettings::default(),
             presentation_files: vec![".magit".to_owned()],
             files: Vec::new(),
         }
@@ -468,6 +480,8 @@ struct Layered {
     log_margin: Option<u32>,
     actions_title_style: Option<TitleStyle>,
     plain_max_section_lines: Option<u32>,
+    pick_max_items: Option<usize>,
+    pick_clients: BTreeMap<String, usize>,
     presentation_files: Option<Vec<String>>,
     files: Vec<PathBuf>,
 }
@@ -508,6 +522,10 @@ fn apply_layered(config: &mut Config, layered: Layered) {
     if let Some(max) = layered.plain_max_section_lines {
         config.plain.max_section_lines = max;
     }
+    if let Some(max_items) = layered.pick_max_items {
+        config.pick.max_items = Some(max_items);
+    }
+    config.pick.clients.extend(layered.pick_clients);
     if let Some(names) = layered.presentation_files {
         config.presentation_files = names;
     }
@@ -776,6 +794,39 @@ fn apply_document(
                             layered.plain_max_section_lines = Some(max);
                         }
                         other => return Err(unknown_key(file, line, "plain", other)),
+                    }
+                }
+            }
+            "pick" => {
+                let table = settings_table(item, "pick", file, line)?;
+                for (name, value) in table.iter() {
+                    let line = item_line(source, value);
+                    match name {
+                        "max_items" => {
+                            let max = integer(value, "pick.max_items", file, line)?;
+                            layered.pick_max_items = Some(usize::try_from(max).map_err(|_| {
+                                ConfigError::new(
+                                    "`pick.max_items` must be a non-negative integer",
+                                )
+                                .at_file_line(file, line)
+                            })?);
+                        }
+                        "clients" => {
+                            let clients = settings_table(value, "pick.clients", file, line)?;
+                            for (client, limit) in clients.iter() {
+                                let line = item_line(source, limit);
+                                let what = format!("pick.clients.{client}");
+                                let limit = integer(limit, &what, file, line)?;
+                                let limit = usize::try_from(limit).map_err(|_| {
+                                    ConfigError::new(format!(
+                                        "`{what}` must be a non-negative integer"
+                                    ))
+                                    .at_file_line(file, line)
+                                })?;
+                                layered.pick_clients.insert(client.to_string(), limit);
+                            }
+                        }
+                        other => return Err(unknown_key(file, line, "pick", other)),
                     }
                 }
             }

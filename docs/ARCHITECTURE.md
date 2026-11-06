@@ -731,8 +731,8 @@ add attributes: `staged` / `bold` → `Bold`, `selected` → `Visual`,
   may be supplied in `initializationOptions`. Overrides merge by id across layers.
 - Other settings (non-exhaustive): `[diff] context, whitespace`, `[sections]
   order, default_visibility`, `[log] default_args, margin`, `[ui]
-  confirm_discard = true`. Menu argument persistence semantics must be reviewed
-  before adding any persistence setting.
+  confirm_discard = true`, `[pick] max_items, clients`. Menu argument persistence
+  semantics must be reviewed before adding any persistence setting.
 - Hot reload on file change or `workspace/didChangeConfiguration`; invalid
   config keeps the previous one and shows a `Message` with file and line.
 
