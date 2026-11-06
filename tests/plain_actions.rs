@@ -1635,6 +1635,82 @@ fn plain_upstream_pick_uses_a_choice_document_and_submits_the_value() {
 }
 
 #[test]
+fn plain_choice_item_row_answers_the_pick() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.branch",
+        150,
+    );
+    assert!(!open.is_null(), "open.branch not offered");
+    execute_offered(&mut server, &mut editor, open, 151);
+
+    let menu_text = editor.text(&uri).to_owned();
+    let option_row = menu_text
+        .lines()
+        .position(|line| line.contains("Set the upstream branch"))
+        .unwrap_or_else(|| panic!("missing upstream row: {menu_text}")) as u32;
+    let option = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":option_row,"character":0},"end":{"line":option_row,"character":0}}),
+        "menu.run-option",
+        152,
+    );
+    execute_offered(&mut server, &mut editor, option, 153);
+
+    let prompt_text = editor.text(&uri).to_owned();
+    let item = exact_row(&prompt_text, "main");
+    server.send(json!({"jsonrpc":"2.0","id":154,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":item,"character":0},"end":{"line":item,"character":0}},"context":{"diagnostics":[]}}}));
+    let actions = server.response_with_id(154)["result"].clone();
+    let answers: Vec<&Value> = actions
+        .as_array()
+        .expect("code actions")
+        .iter()
+        .filter(|action| action["command"]["arguments"][0]["command"] == "prompt.answer")
+        .collect();
+    assert_eq!(
+        answers.len(),
+        1,
+        "expected one prompt.answer on the item row: {prompt_text}"
+    );
+    let answer = answers[0]["command"]["arguments"][0].clone();
+    let answered = execute_offered(&mut server, &mut editor, answer, 155);
+    assert!(
+        answered["error"].is_null(),
+        "item answer failed: {answered}"
+    );
+
+    let closed = editor.text(&uri).to_owned();
+    assert!(
+        closed.contains("--set-upstream-to=main"),
+        "menu does not reflect the item pick: {closed}"
+    );
+    assert!(!closed.contains("Submit"), "pick stayed open: {closed}");
+    assert!(
+        !server
+            .sent
+            .iter()
+            .any(|message| message["method"] == "view/pick"),
+        "a Plain pick must be a document, not view/pick"
+    );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
 fn plain_confirm_prompt_cancel_row_closes_without_touching_git() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])

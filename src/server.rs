@@ -2539,12 +2539,7 @@ fn execute_plain_action(
                         && target.view_id == view_id
                         && tree.node(&target.node_id).is_some_and(|node| {
                             node.kind == crate::tree::NodeKind::Line
-                                && node.id.strip_prefix("prompt:").is_some_and(|rest| {
-                                    matches!(
-                                        rest.rsplit(':').next(),
-                                        Some("yes" | "no" | "submit" | "cancel")
-                                    )
-                                })
+                                && prompt_row_id(&node.id)
                         });
                     if !valid {
                         return plain_stale_message();
@@ -3437,12 +3432,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
     };
     if scope == "prompt"
         && line_node.kind == crate::tree::NodeKind::Line
-        && line_node.id.strip_prefix("prompt:").is_some_and(|rest| {
-            matches!(
-                rest.rsplit(':').next(),
-                Some("yes" | "no" | "submit" | "cancel")
-            )
-        })
+        && prompt_row_id(&line_node.id)
     {
         let args = serde_json::json!({
             "command": "prompt.answer",
@@ -3874,6 +3864,21 @@ fn plain_position_valid(text: &str, position: lsp_types::Position, encoding: Enc
         }
     }
     units == position.character
+}
+
+/// Whether `id` is an answerable prompt row rather than a header, field or
+/// detail row.
+///
+/// Row ids are `prompt:<prompt-id>:<row>`; answerable rows are the confirm,
+/// text and choice actions plus any `item:` row for choice and multi-choice
+/// prompts.
+fn prompt_row_id(id: &str) -> bool {
+    id.strip_prefix("prompt:")
+        .and_then(|rest| rest.split_once(':'))
+        .is_some_and(|(_, row)| {
+            matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
+                || row.starts_with("item:")
+        })
 }
 
 fn initialize_workspace_roots(params: &Value) -> Vec<crate::presentation::resolve::Repository> {
