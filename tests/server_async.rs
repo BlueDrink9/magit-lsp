@@ -424,6 +424,143 @@ fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_ef
 }
 
 #[test]
+fn rich_prompt_document_edit_adopts_fields_and_repairs_other_lines() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(limited_rich(json!(["editDocument"]), json!(["confirm"])));
+    let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+
+    let opened = invoke_rich(&mut server, 3, &view, "open.commit");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    // `=` prefixes the option; `A` asks for the author and, because the client
+    // declares no text prompt, opens a document prompt instead.
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"A","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    let mut key_response = None;
+    let (prompt_view, uri, initial) = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] != json!(menu)
+        {
+            assert!(message["params"]["text"].is_array(), "full prompt text");
+            let view_id = message["params"]["viewId"].as_str().unwrap().to_owned();
+            break (view_id.clone(), format!("magit://prompt/{view_id}"), message);
+        }
+        if message["id"] == json!(5) {
+            key_response = Some(message);
+        }
+    };
+    let key_response = key_response.expect("the pushed prompt descriptor");
+    assert!(
+        key_response["result"]["effects"]
+            .as_array()
+            .is_some_and(|effects| effects
+                .iter()
+                .any(|effect| effect["type"] == json!("pushView"))),
+        "{key_response}"
+    );
+    let initial_version = initial["params"]["version"].as_u64().unwrap();
+    assert_eq!(initial["params"]["text"][0], json!("Override the author (--author=)"));
+    assert_eq!(initial["params"]["text"][2], json!(""));
+    assert_eq!(initial["params"]["text"][3], json!("Submit"));
+    assert_eq!(initial["params"]["text"][4], json!("Cancel"));
+
+    let mut lines: Vec<String> = initial["params"]["text"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap().to_owned())
+        .collect();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen",
+        "params":{"textDocument":{"uri":uri,"languageId":"magit-prompt","version":1,
+            "text":lines.join("\n")}}}));
+    lines[2] = "Alice".to_owned();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange",
+        "params":{"textDocument":{"uri":uri,"version":2},
+            "contentChanges":[{"text":lines.join("\n")}]}}));
+
+    // An adopted field needs no revert and produces no client-visible output.
+    let quiet = server.drain_notifications();
+    assert!(
+        !quiet.iter().any(|message| {
+            message["method"] == json!("workspace/applyEdit")
+                || message["method"] == json!("view/prompt")
+                || message["method"] == json!("window/showMessage")
+        }),
+        "a field edit must not be reverted or reported: {quiet:?}"
+    );
+    assert!(
+        !quiet.iter().any(|message| message["params"]["effects"]
+            .as_array()
+            .is_some_and(|effects| effects
+                .iter()
+                .any(|effect| effect["type"] == json!("editDocument")))),
+        "a field edit must not emit a document edit: {quiet:?}"
+    );
+
+    // Editing a non-field line is repaired: the stored title and field survive.
+    lines[0] = "Tampered title".to_owned();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange",
+        "params":{"textDocument":{"uri":uri,"version":3},
+            "contentChanges":[{"text":lines.join("\n")}]}}));
+    let after = server.drain_notifications();
+    let repaired = after
+        .iter()
+        .find(|message| {
+            message["method"] == json!("view/render")
+                && message["params"]["viewId"] == json!(prompt_view)
+                && message["params"]["version"].as_u64() > Some(initial_version)
+        })
+        .unwrap_or_else(|| panic!("a repaired prompt render: {after:?}"));
+    assert_eq!(
+        repaired["params"]["text"][0],
+        json!("Override the author (--author=)")
+    );
+    assert_eq!(repaired["params"]["text"][2], json!("Alice"));
+    assert!(
+        !after.iter().any(|message| {
+            message["method"] == json!("workspace/applyEdit")
+                || message["method"] == json!("view/prompt")
+                || message["method"] == json!("window/showMessage")
+        }),
+        "a repair must not revert, prompt natively or report an error: {after:?}"
+    );
+
+    // The repaired prompt is still the active one.
+    let refused = invoke_rich(&mut server, 6, &view, "status.stage-all");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pending prompt")),
+        "{refused}"
+    );
+
+    assert!(!server.notifications.iter().any(|message| {
+        message["method"] == json!("view/prompt")
+    }));
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
 fn rich_missing_confirm_opens_a_document_prompt_without_mutation() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])

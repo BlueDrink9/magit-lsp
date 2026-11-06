@@ -1339,6 +1339,65 @@ fn plain_change(shared: &Shared, uri: &str) {
     }
 }
 
+/// Reconcile an edited Rich prompt document against the session-owned prompt.
+///
+/// A field edit is adopted without a revert; a non-field edit is repaired by
+/// re-rendering the prompt view. Adopted edits, ended prompts and errors fall
+/// through to ordinary document synchronization.
+fn reconcile_rich_prompt(shared: &Shared, uri: &str, sender: &mpsc::UnboundedSender<Message>) {
+    let rich = matches!(
+        shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation
+            .as_ref(),
+        Some(Presentation::Rich(_))
+    );
+    if !rich {
+        return;
+    }
+    let Some(view_id) = uri.strip_prefix("magit://prompt/") else {
+        return;
+    };
+    let Some(repo) = shared.repo_for_view(view_id) else {
+        return;
+    };
+    let Some(handle) = shared.session(&repo) else {
+        return;
+    };
+    let snapshot = shared
+        .documents
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(uri)
+        .cloned();
+    let Some(snapshot) = snapshot else {
+        return;
+    };
+    let reconciled = {
+        // Never hold the document store across the session call: publishing a
+        // repaired render reloads the store on this same reader lane.
+        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+        session.reconcile_prompt_document(&snapshot.text)
+    };
+    match reconciled {
+        Ok(Some(PromptReconcile {
+            repaired: true,
+            render: Some(render),
+            ..
+        })) => {
+            if let Some(message) = deliver_render(shared, render) {
+                let _ = sender.send(message);
+            }
+        }
+        Ok(Some(_)) | Ok(None) => {}
+        Err(error) => {
+            tracing::debug!(%error, "failed to reconcile a Rich prompt document edit");
+        }
+    }
+}
+
 fn close_plain(shared: &Shared, uri: &str) {
     shared
         .plain_incarnations
@@ -1996,7 +2055,14 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     } else {
                         match notification.method.as_str() {
                             "textDocument/didOpen" => schedule_plain_open(&shared, uri.to_owned()),
-                            "textDocument/didChange" => plain_change(&shared, uri),
+                            "textDocument/didChange" => {
+                                plain_change(&shared, uri);
+                                // Delivery of a repaired Rich prompt render
+                                // re-enters the Plain lifecycle guard, so it
+                                // must not be held across this call.
+                                drop(_plain);
+                                reconcile_rich_prompt(&shared, uri, &sender);
+                            }
                             "textDocument/didClose" => close_plain(&shared, uri),
                             _ => {}
                         }
