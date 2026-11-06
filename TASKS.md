@@ -300,6 +300,8 @@ See [Testing strategy](docs/TESTING.md#8-testing-strategy).
 
 See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
+- [x] **Phase 2 gate — Declare a rich client in editor-bridge commit tests.** `make test` at `eb8bb1e` fails 18/27 `editor_bridge` tests (`log build/test-logs/rust.zuIHJG`) because they initialize with `json!({})` and still expect the `view/effects` `editDocument` frame. Plain clients now intentionally get `window/showMessage` with the exact `COMMIT_EDITMSG` URI plus a pending draft row (T007.4), and Plain delivery is already enforced by `plain_commit_editor_manual_instructions_cancel_pending_git_run`; the editor-bridge suite owns the rich in-place editor contract instead. Give those 18 tests a rich `experimental.magit` declaration (keys, modifiers, layout, `editDocument` effect, prompts) and keep every sync/cancel/checkpoint assertion unchanged. Done: 5da5d86. Verified: make test-rust FILTER="--test editor_bridge" (27 passed).
+
 ---
 
 ## Review
