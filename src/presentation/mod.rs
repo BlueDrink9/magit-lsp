@@ -8,7 +8,7 @@ use std::fmt;
 mod custom;
 pub mod plain;
 pub mod resolve;
-pub use custom::{CustomRender, Ui};
+pub use custom::{CustomRender, PromptSupport, Ui};
 
 /// Presentation selected by `capabilities.experimental.magit` during initialize.
 #[derive(Debug, Clone, PartialEq, Eq)]

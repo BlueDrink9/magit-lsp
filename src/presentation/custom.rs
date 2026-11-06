@@ -9,6 +9,21 @@ use lsp_server::{Message, Notification};
 use serde::Serialize;
 use std::sync::Arc;
 
+/// Negotiated native-prompt support.
+///
+/// Rich clients receive validated capability declarations; Plain clients have
+/// no native prompt transport; a connection that has not declared a
+/// presentation yet keeps the permissive default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptSupport {
+    /// No declaration has been seen; native prompts stay permissive.
+    Unnegotiated,
+    /// A validated rich declaration, including its optional prompt kinds.
+    Rich(RichCapabilities),
+    /// A Plain client with no native prompt transport.
+    Plain,
+}
+
 /// Client-facing typed presentation delivery seam.
 pub trait Ui: Send + Sync {
     /// Build the existing wire notification for one rendered view.
@@ -22,7 +37,7 @@ pub trait Ui: Send + Sync {
 /// Existing rich/custom wire transport, retained as the initial adapter.
 #[derive(Clone)]
 pub struct CustomRender {
-    capabilities: Arc<dyn Fn() -> Option<RichCapabilities> + Send + Sync>,
+    prompt_support: Arc<dyn Fn() -> PromptSupport + Send + Sync>,
 }
 
 impl Default for CustomRender {
@@ -34,15 +49,15 @@ impl Default for CustomRender {
 impl CustomRender {
     /// Construct the custom-protocol adapter.
     pub fn new() -> Self {
-        Self::negotiated(|| None)
+        Self::negotiated(|| PromptSupport::Unnegotiated)
     }
 
-    /// Bind delivery to the connection's current negotiated declaration.
+    /// Bind delivery to the connection's current negotiated prompt support.
     pub fn negotiated(
-        source: impl Fn() -> Option<RichCapabilities> + Send + Sync + 'static,
+        source: impl Fn() -> PromptSupport + Send + Sync + 'static,
     ) -> Self {
         Self {
-            capabilities: Arc::new(source),
+            prompt_support: Arc::new(source),
         }
     }
 
@@ -52,7 +67,7 @@ impl CustomRender {
     /// Production builds replace unsupported optional effects with warnings and
     /// unsupported placements with `main` while preserving descriptor identity.
     pub fn prepare_effects(&self, mut effects: ViewEffectsParams) -> ViewEffectsParams {
-        if let Some(caps) = (self.capabilities)() {
+        if let PromptSupport::Rich(caps) = (self.prompt_support)() {
             for effect in &mut effects.effects {
                 let required = match effect {
                     Effect::VisitFile { .. } => Some("visitFile"),
@@ -94,7 +109,11 @@ impl CustomRender {
     /// Check before registering a waiter or entering an editor-helper transition.
     /// This is a non-panicking preflight probe; strict emission checks run separately.
     pub fn allows_prompt(&self, prompt: &ViewPromptParams) -> bool {
-        (self.capabilities)().is_none_or(|caps| caps.allows_prompt(prompt))
+        match (self.prompt_support)() {
+            PromptSupport::Unnegotiated => true,
+            PromptSupport::Plain => false,
+            PromptSupport::Rich(caps) => caps.allows_prompt(prompt),
+        }
     }
 
     fn notify<T: Serialize>(method: &str, params: &T) -> Message {
@@ -112,8 +131,10 @@ impl Ui for CustomRender {
     }
     fn prompt(&self, prompt: ViewPromptParams) -> Message {
         #[cfg(test)]
-        if (self.capabilities)().is_some_and(|caps| !caps.allows_prompt(&prompt)) {
-            panic!("undeclared prompt emitted: {:?}", prompt.kind);
+        if let PromptSupport::Rich(caps) = (self.prompt_support)() {
+            if !caps.allows_prompt(&prompt) {
+                panic!("undeclared prompt emitted: {:?}", prompt.kind);
+            }
         }
         if !self.allows_prompt(&prompt) {
             return self.effects(ViewEffectsParams {
@@ -204,7 +225,7 @@ mod tests {
 
     #[test]
     fn strict_emitter_rejects_undeclared_effects_prompts_and_placements() {
-        let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+        let ui = CustomRender::negotiated(|| PromptSupport::Rich(caps(&[], &[], &["main"])));
         for effect in [
             Effect::VisitFile {
                 uri: "file:///a".into(),
@@ -235,13 +256,13 @@ mod tests {
             PromptKind::Choice,
             PromptKind::MultiChoice,
         ] {
-            let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+            let ui = CustomRender::negotiated(|| PromptSupport::Rich(caps(&[], &[], &["main"])));
             assert!(!ui.allows_prompt(&prompt(kind)));
             assert_rejected(|| {
                 ui.prompt(prompt(kind));
             });
         }
-        let ui = CustomRender::negotiated(|| Some(caps(&[], &["text", "confirm"], &["main"])));
+        let ui = CustomRender::negotiated(|| PromptSupport::Rich(caps(&[], &["text", "confirm"], &["main"])));
         let mut value = prompt(PromptKind::Text);
         value.secret = Some(true);
         assert!(!ui.allows_prompt(&value));
@@ -253,13 +274,13 @@ mod tests {
         let secret_only_caps = caps(&[], &["secret"], &["main"]);
         assert!(secret_only_caps.supports_prompt("secret"));
         assert!(!secret_only_caps.supports_prompt("text"));
-        let ui = CustomRender::negotiated(move || Some(secret_only_caps.clone()));
+        let ui = CustomRender::negotiated(move || PromptSupport::Rich(secret_only_caps.clone()));
         assert!(!ui.allows_prompt(&secret_only));
         assert_rejected(|| {
             ui.prompt(secret_only);
         });
         for placement in [Placement::Side, Placement::Bottom, Placement::Float] {
-            let ui = CustomRender::negotiated(|| Some(caps(&[], &[], &["main"])));
+            let ui = CustomRender::negotiated(|| PromptSupport::Rich(caps(&[], &[], &["main"])));
             assert_rejected(|| {
                 ui.effects(ViewEffectsParams {
                     effects: vec![Effect::PushView {
@@ -273,7 +294,7 @@ mod tests {
     #[test]
     fn strict_emitter_accepts_declared_and_core_emissions() {
         let ui = CustomRender::negotiated(|| {
-            Some(caps(
+            PromptSupport::Rich(caps(
                 &["visitFile", "editDocument", "clipboard"],
                 &["confirm", "text", "choice", "multiChoice", "secret"],
                 &["main", "side", "bottom", "float"],

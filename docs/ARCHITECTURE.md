@@ -196,6 +196,16 @@ Prompt presentation should fit the question and user choice. Native widgets may
 filter server-supplied labels, but clients never parse, resolve or filter Git
 state. Generic `choice` prompts may use the editor's normal picker behavior.
 
+**Prompt semantics and presentation.** A prompt carries the question's
+semantics; the client chooses how to present it. A client that declares the
+rich protocol and the prompt kind receives the native prompt described above.
+An undeclared or Plain client gets a server-rendered document prompt over
+`view/render` and `applyEdit`: the server owns the document text and the client
+forwards the submitted field values. Document rendering lands in T008.2–T008.5;
+until then Plain warns and cancels. A `secret` prompt is never rendered as
+document text and is refused with a readable message plus a clean cancel,
+because document rendering would expose the value.
+
 **Intended T008 pick (not implemented):** A `pick` request carries purpose,
 prompt, `multi`, and server-supplied `{id,label,description?,detail?}` items.
 The response returns selected IDs or cancellation. Commit picking is not a

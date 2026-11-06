@@ -1,6 +1,7 @@
 use lsp_server::Message;
 use magit_lsp::presentation::{
-    negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, Support, Ui,
+    negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, PromptSupport,
+    Support, Ui,
 };
 use magit_lsp::protocol::*;
 use serde_json::{json, Value};
@@ -17,7 +18,9 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
     };
     let state = std::sync::Arc::new(Mutex::new(caps));
     let source = state.clone();
-    let ui = CustomRender::negotiated(move || Some(source.lock().unwrap().clone()));
+    let ui = CustomRender::negotiated(move || {
+        PromptSupport::Rich(source.lock().unwrap().clone())
+    });
     let effects = || ViewEffectsParams {
         effects: vec![Effect::Clipboard {
             text: "copied".into(),
@@ -67,6 +70,51 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
 }
 
 #[test]
+fn plain_denies_native_prompts_while_undeclared_and_declared_rich_are_unchanged() {
+    let prompt = |kind: &str| -> ViewPromptParams {
+        serde_json::from_value(json!({
+            "promptId": "p", "kind": kind, "title": "Question"
+        }))
+        .unwrap()
+    };
+    let plain = CustomRender::negotiated(|| PromptSupport::Plain);
+    for kind in ["confirm", "text", "choice", "multiChoice"] {
+        assert!(!plain.allows_prompt(&prompt(kind)), "{kind}");
+        let Message::Notification(message) = plain.prompt(prompt(kind)) else {
+            panic!("plain prompt must warn, not emit view/prompt")
+        };
+        assert_eq!(message.method, VIEW_EFFECTS);
+        assert_eq!(message.params["effects"][0]["level"], "warn");
+        assert_eq!(
+            message.params["effects"][0]["text"],
+            "Client does not support this prompt"
+        );
+    }
+    let mut secret = prompt("text");
+    secret.secret = Some(true);
+    assert!(!plain.allows_prompt(&secret));
+
+    let unnegotiated = CustomRender::new();
+    assert!(unnegotiated.allows_prompt(&prompt("multiChoice")));
+    let Message::Notification(message) = unnegotiated.prompt(prompt("confirm")) else {
+        panic!("undeclared client must still receive the native prompt")
+    };
+    assert_eq!(message.method, VIEW_PROMPT);
+
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(rich_block()))).unwrap() else {
+        panic!()
+    };
+    let rich = CustomRender::negotiated(move || PromptSupport::Rich(caps.clone()));
+    assert!(rich.allows_prompt(&prompt("confirm")));
+    assert!(rich.allows_prompt(&prompt("text")));
+    assert!(!rich.allows_prompt(&prompt("choice")));
+    assert!(!rich.allows_prompt(&prompt("multiChoice")));
+    let mut secret = prompt("text");
+    secret.secret = Some(true);
+    assert!(!rich.allows_prompt(&secret));
+}
+
+#[test]
 fn unsupported_view_placement_falls_back_to_main_without_changing_descriptor() {
     let Presentation::Rich(caps) = negotiate(&initialize(Some(json!({
         "v": 1,
@@ -79,7 +127,7 @@ fn unsupported_view_placement_falls_back_to_main_without_changing_descriptor() {
     .unwrap() else {
         panic!()
     };
-    let ui = CustomRender::negotiated(move || Some(caps.clone()));
+    let ui = CustomRender::negotiated(move || PromptSupport::Rich(caps.clone()));
 
     for placement in [
         magit_lsp::view::Placement::Side,

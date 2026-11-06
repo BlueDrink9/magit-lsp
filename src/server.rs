@@ -3,7 +3,7 @@ use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
 use crate::presentation::plain::{ApplyEdit, DocumentFormat, PlainDocument};
-use crate::presentation::{negotiate, CustomRender, Presentation, Ui};
+use crate::presentation::{negotiate, CustomRender, Presentation, PromptSupport, Ui};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -1300,8 +1300,9 @@ fn custom_ui(client: &Arc<Mutex<ClientCaps>>) -> CustomRender {
             .presentation
             .as_ref()
         {
-            Some(Presentation::Rich(rich)) => Some(rich.clone()),
-            _ => None,
+            Some(Presentation::Rich(rich)) => PromptSupport::Rich(rich.clone()),
+            Some(Presentation::Plain(_)) => PromptSupport::Plain,
+            None => PromptSupport::Unnegotiated,
         }
     })
 }
