@@ -53,7 +53,11 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - Verified: `make test-rust FILTER="--test server_async"` @ `514422d` → ok: rust.
 - [x] **T008.5c2 — Activate confirm and text prompt rows from Rich keys.** Done: `8a02a7e`. Enter on a prompt row answers with the reconciled field text and drives the continuation. T008 clauses 1–2, 5.
   - Verified: `make test-rust FILTER="--test server_async --test prompts"` @ `8a02a7e` → ok: rust. `rich_confirm_row_enter_answers_without_mutation` proves Enter on a non-row leaves the prompt active and Enter on `No` pops it with HEAD/index/worktree unchanged and no `view/prompt`; `rich_text_prompt_submit_row_answers_with_the_reconciled_field` proves a `didChange` field of `Alice` plus Enter on `Submit` pops the prompt and re-renders the menu with the author.
-- [ ] **T008.6 — Render choice and multiChoice document prompts.** Rows, allowCustom field with default, preselection, Done; optional field completion. T008 clause 2.
+- [x] **T008.6a1 — Answer choice and multiChoice document prompts.** Add Cancel, choice Submit when allowCustom, toggle-and-re-render semantics, Done and custom/default answers. T008 clause 2.
+  - Done: `3223e7d`. `PromptDocument::answer` maps every row to a typed `PromptAction`; choice rows answer ids, the untouched default or the custom text, multi-choice item rows toggle and keep the prompt open, and unknown rows change nothing.
+  - Verified: `make test-rust FILTER="--test prompts --test plain_prompt"` @ `3223e7d` → ok: rust.
+- [ ] **T008.6a2 — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks. T008 clause 2.
+- [ ] **T008.6a3 — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field. T008 clause 2.
 - [ ] **T008.7 — Declare the typed pick capability.** Purpose/multi/free text/preselection/item fields/fallbackView; no undeclared shape; client declarations and vectors. T008 clause 3.
 - [ ] **T008.8 — Implement pick rungs and preference limits.** Native → document → code actions; per-client opt-in; Neovim static `vim.ui.select` and long-list cut. T008 clauses 3, 6, 9.
 - [ ] **T008.9 — Implement revision pick semantics.** HEAD-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
