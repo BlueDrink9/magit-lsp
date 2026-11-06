@@ -34,7 +34,11 @@ pub fn answer(params: &ViewPromptParams, input: &PromptInput) -> PromptOutcome {
         }
     });
     let response = &input.response;
-    let value = if response.is_null() {
+    let value = if response.is_null()
+        || (params.kind == PromptKind::Text
+            && params.secret == Some(true)
+            && response.as_str() == Some(""))
+    {
         None
     } else {
         Some(match params.kind {
