@@ -105,7 +105,7 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.12a — Type command effect declarations and add plain_availability.** Replace `required_effect` with `effects: &'static [EffectKind]`; one availability function folds the content-action rule and drives both Rich and Plain gating. T008 clause 10.
   - Done: `f717778`.
   - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test commands --test editor_bridge --test log_selection"` @ `f717778` → ok.
-- [ ] **T008.12b — Generate and check docs/plain-support.md.** Registry-derived table across minimal/edits/full capability profiles, a maintained update target, and a staleness test. T008 clause 10.
+- [x] **T008.12b — Generate and check docs/plain-support.md.** Done: `e87a50c0eaabaa35384eb50628aabde5ab8ecc88`. Registry-derived table across minimal/edits/full capability profiles, a maintained update target, and a staleness test. Verified: `make test-rust FILTER="--test plain_support"` @ `e87a50c` → ok. T008 clause 10.
 - [ ] **T008.12c — Enforce declarations and test unsupported effects.** Assert emitted optional effects are declared; exercise each effect-declaring command against RecordingUi with and without the capability, expecting `Unavailable{reason}` or a readable message and clean cancel. T008 clause 10.
 - [ ] **T008.13 — Add the mixed-rung conformance test.** Cancel at each step; no Git/index change; caller returns; view-stack depth unchanged. T008 clause 11.
 
