@@ -23,6 +23,21 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
+- [x] **T008.1 — Normalize prompt negotiation for Plain and Rich.** Done: `6957647`. Plain never receives native `view/prompt`; §3.6 records the prompt presentation principle; wire `prompts` semantics clarified. T008 clause 1.
+  - Verified: `make test-rust FILTER="--test plain_core --test prompts"` @ `6957647` → ok: rust; `make docs-check` @ `6957647` → ok: docs-check. Plain denies every native prompt kind including `secret`, Unnegotiated stays permissive and declared Rich keeps its existing kind/secret matrix; `custom_ui` maps Plain/Rich/pre-initialize to the three negotiated states.
+- [ ] **T008.2 — Add tracked Field nodes and render prompt documents.** Field node + tracked range, rendering over `view/render` and `applyEdit`, one-line size limit. T008 clauses 1–2.
+- [ ] **T008.3 — Ingest document-prompt field edits.** didChange into field values; repair outside fields; diffs preserve field range. T008 clauses 2, 5.
+- [ ] **T008.4 — Hold refreshes and repairs during document prompts.** Prompt view lifecycle ends cleanly, restores view stack, returns caller. T008 clause 5.
+- [ ] **T008.5 — Render confirm and text document prompts.** Replaces warn+cancel fallback; secret refuses with message and clean cancel. T008 clauses 1–2, 5.
+- [ ] **T008.6 — Render choice and multiChoice document prompts.** Rows, allowCustom field with default, preselection, Done; optional field completion. T008 clause 2.
+- [ ] **T008.7 — Declare the typed pick capability.** Purpose/multi/free text/preselection/item fields/fallbackView; no undeclared shape; client declarations and vectors. T008 clause 3.
+- [ ] **T008.8 — Implement pick rungs and preference limits.** Native → document → code actions; per-client opt-in; Neovim static `vim.ui.select` and long-list cut. T008 clauses 3, 6, 9.
+- [ ] **T008.9 — Implement revision pick semantics.** HEAD-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
+- [ ] **T008.10 — Route Plain discard and menu rows through document prompts.** Remove `ConfirmationUnavailable`; menu option rows open prompts. T008 clause 7.
+- [ ] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
+- [ ] **T008.12 — Generate docs/plain-support.md from the command registry.** Recording-Ui matrix, `Unavailable` reasons, maintained target and staleness check. T008 clause 10.
+- [ ] **T008.13 — Add the mixed-rung conformance test.** Cancel at each step; no Git/index change; caller returns; view-stack depth unchanged. T008 clause 11.
+
 - [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
 - [x] **T007.4c — Confirm or abort manually attached commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Attached issued URI through didOpen and exposed Confirm/Abort actions. Exact Confirm body and stale-version rejection landed in `ccf6cbbe055ccb157b59aed525537cdef48f6171`; the existing single scenario enforces both outcomes, terminal retirement and readable guidance.
 - [x] **T007.4n1 — Extend the existing Plain native runner for manual commits.** Add no-showDocument Confirm/Abort flows and structured evidence fields to the maintained runner, without adding test/scenario files. Verify runner helpers; native execution belongs to T007.4n2.
