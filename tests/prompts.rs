@@ -606,6 +606,225 @@ fn closing_the_origin_view_closes_its_prompt_too() {
     assert_eq!(test.session().views().iter().count(), depth - 1);
 }
 
+/// The open prompt view's rendered tree as document text, with an optional
+/// replacement of the single field line.
+fn prompt_document(test: &TestSession, prompt_id: &str, field: Option<&str>) -> String {
+    use magit_lsp::tree::NodeKind;
+    let view = test
+        .session
+        .views()
+        .get(prompt_id)
+        .expect("the open prompt view");
+    let tree = view.tree();
+    let mut lines = tree.lines.clone();
+    if let Some(value) = field {
+        let node = tree
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Field)
+            .expect("a prompt field node");
+        lines[node.start_line] = value.to_string();
+    }
+    lines.join("\n")
+}
+
+#[test]
+fn answering_a_text_document_prompt_submits_the_edited_field() {
+    use magit_lsp::session::Execution;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    assert_eq!(
+        test.session.active_prompt_id(),
+        Some(request.prompt_id.as_str())
+    );
+
+    let document = prompt_document(&test, &prompt_id, Some("Alice"));
+    let completion = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:submit", request.prompt_id), &document)
+        .unwrap();
+
+    assert_eq!(
+        completion.result.effects,
+        vec![
+            Effect::PopView {
+                view_id: prompt_id.clone()
+            },
+            Effect::FocusView {
+                view_id: menu.id.clone()
+            },
+        ]
+    );
+    assert_eq!(test.session().views().iter().count(), depth);
+    assert!(!test.session.prompt_active());
+    assert!(test.session.active_prompt_id().is_none());
+    assert_eq!(option_value(&test, &menu.id, "=A").as_deref(), Some("Alice"));
+    assert!(matches!(completion.next, Execution::Done(_)));
+}
+
+#[test]
+fn cancelling_a_text_document_prompt_leaves_the_option_unset() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+
+    let document = prompt_document(&test, &prompt_id, None);
+    let completion = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:cancel", request.prompt_id), &document)
+        .unwrap();
+
+    assert_eq!(test.session().views().iter().count(), depth);
+    assert!(!test.session.prompt_active());
+    assert_eq!(option_value(&test, &menu.id, "=A"), None);
+    assert!(matches!(completion.next, magit_lsp::session::Execution::Done(_)));
+}
+
+#[test]
+fn answering_a_confirm_document_prompt_yes_applies_and_no_cancels() {
+    use magit_lsp::session::Execution;
+    for (answer, applies) in [("yes", true), ("no", false)] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        test.ack();
+        let origin = test.view_id().to_string();
+        let depth = test.session().views().iter().count();
+        let request = stage_commit_confirm(&mut test, &origin);
+        test.session.open_document_prompt(&request).unwrap();
+        let prompt_id = test
+            .session
+            .prompt_view_id()
+            .expect("the open prompt view id")
+            .to_string();
+
+        let document = prompt_document(&test, &prompt_id, None);
+        let completion = test
+            .session
+            .answer_document_prompt(&format!("prompt:{}:{answer}", request.prompt_id), &document)
+            .unwrap();
+
+        assert_eq!(test.session().views().iter().count(), depth);
+        assert!(!test.session.has_pending_prompt());
+        assert!(!test.session.prompt_active());
+        let Execution::Done(done) = completion.next else {
+            panic!("a confirm answer cannot prompt again");
+        };
+        assert_eq!(done.commit.is_some(), applies, "{answer}: {done:?}");
+        assert_eq!(
+            done.effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Message { text, .. } if text == "Committing…")),
+            applies,
+            "{answer}: {:?}",
+            done.effects
+        );
+    }
+}
+
+#[test]
+fn editing_a_non_field_line_repairs_and_keeps_the_prompt_open() {
+    use magit_lsp::errors::STALE_VIEW;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+    let version = test.session.views().get(&prompt_id).unwrap().version();
+    let mut lines = prompt_document(&test, &prompt_id, None)
+        .split('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    lines[0] = "tampered title".to_string();
+    let document = lines.join("\n");
+
+    let completion = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:submit", request.prompt_id), &document)
+        .unwrap();
+
+    assert_eq!(
+        completion.result.effects,
+        vec![Effect::message(
+            magit_lsp::protocol::MessageLevel::Warn,
+            STALE_VIEW.to_string()
+        )]
+    );
+    let render = completion.result.render.expect("the repaired document re-renders");
+    assert_eq!(render.view_id, prompt_id);
+    assert_eq!(render.version, version + 1);
+    assert!(matches!(
+        completion.next,
+        magit_lsp::session::Execution::Done(_)
+    ));
+    assert_eq!(test.session().views().iter().count(), depth + 1);
+    assert!(test.session.prompt_active());
+    assert_eq!(test.session.prompt_view_id(), Some(prompt_id.as_str()));
+    assert!(test.session.has_pending_prompt());
+    assert_eq!(option_value(&test, &menu.id, "=A"), None);
+}
+
+#[test]
+fn an_unknown_prompt_row_changes_nothing() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    let (menu, _) = test.open_via_command("open.commit");
+    let request = stage_author_prompt(&mut test, &menu.id);
+    let depth = test.session().views().iter().count();
+    test.session.open_document_prompt(&request).unwrap();
+    let prompt_id = test
+        .session
+        .prompt_view_id()
+        .expect("the open prompt view id")
+        .to_string();
+
+    let document = prompt_document(&test, &prompt_id, None);
+    let error = test
+        .session
+        .answer_document_prompt(&format!("prompt:{}:bogus", request.prompt_id), &document)
+        .expect_err("an unknown row must fail");
+    assert!(error.to_string().contains("unknown prompt row"), "{error}");
+
+    assert_eq!(test.session().views().iter().count(), depth + 1);
+    assert!(test.session.prompt_active());
+    assert_eq!(test.session.prompt_view_id(), Some(prompt_id.as_str()));
+    assert!(test.session.has_pending_prompt());
+    assert_eq!(option_value(&test, &menu.id, "=A"), None);
+}
+
 #[test]
 fn a_client_with_no_prompt_declarations_stages_the_author_prompt_as_a_document() {
     let (tmp, _repo) = RepoFixture::new()

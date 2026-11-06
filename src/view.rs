@@ -216,6 +216,14 @@ pub trait View: Send {
     /// Render the current state. Must not touch the repository; refresh first.
     fn render(&mut self, ctx: &Ctx<'_>) -> Tree;
 
+    /// Downcast seam for server-owned view state.
+    ///
+    /// Most views expose nothing to the session beyond this trait. A view the
+    /// session drives directly returns `Some(self)` so it can reach that state.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
     /// Set an optional maximum rendered section size for views that support it.
     fn set_section_line_limit(&mut self, _limit: Option<usize>) -> bool {
         false

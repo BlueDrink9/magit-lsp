@@ -655,6 +655,10 @@ impl View for PromptView {
     fn render(&mut self, ctx: &Ctx<'_>) -> Tree {
         self.document.render(ctx.viewport.cols as usize)
     }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
 }
 
 fn validate_field(label: &str, value: &str) -> Result<(), String> {

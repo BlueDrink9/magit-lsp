@@ -227,6 +227,11 @@ impl OpenView {
         &self.descriptor
     }
 
+    /// The view behind this entry, for server-owned state the session drives.
+    fn view_mut(&mut self) -> &mut dyn View {
+        self.view.as_mut()
+    }
+
     /// The most recently rendered tree.
     pub fn tree(&self) -> &Tree {
         &self.tree
@@ -1316,6 +1321,118 @@ impl Session {
         self.pending_prompt
             .as_ref()
             .and_then(|pending| pending.prompt_view.as_deref())
+    }
+
+    /// The pending request id while a prompt view is open.
+    pub fn active_prompt_id(&self) -> Option<&str> {
+        if !self.prompt_active() {
+            return None;
+        }
+        self.pending_prompt
+            .as_ref()
+            .map(|pending| pending.request.prompt_id.as_str())
+    }
+
+    /// Answer the open document prompt from a rendered row and document text.
+    ///
+    /// The document is reconciled against the authoritative tree first. A
+    /// document repaired by the client is re-rendered and stays open; otherwise
+    /// `row_id` selects the answer and the prompt finishes normally.
+    pub fn answer_document_prompt(
+        &mut self,
+        row_id: &str,
+        document: &str,
+    ) -> Result<PromptCompletion> {
+        if !self.prompt_active() {
+            return Err(Error::new("no prompt is active"));
+        }
+        let view_id = self.prompt_view_id().expect("checked prompt").to_string();
+        let prompt_id = self
+            .pending_prompt
+            .as_ref()
+            .expect("checked prompt")
+            .request
+            .prompt_id
+            .clone();
+        let cols = self
+            .views
+            .get(&view_id)
+            .expect("checked prompt")
+            .descriptor()
+            .viewport
+            .cols as usize;
+
+        let (repaired, answer) = {
+            let open = self.views.get_mut(&view_id).expect("checked prompt");
+            let prompt_view = open
+                .view_mut()
+                .as_any_mut()
+                .and_then(|any| any.downcast_mut::<PromptView>())
+                .ok_or_else(|| Error::new("no prompt is active"))?;
+            let document_state = prompt_view.document_mut();
+            let reconciled = document_state
+                .reconcile(document, cols)
+                .map_err(Error::new)?;
+            if reconciled.repaired {
+                (true, None)
+            } else {
+                let row_ids = document_state.row_ids();
+                if !row_ids.contains(&row_id) {
+                    return Err(Error::new(format!("unknown prompt row: {row_id}")));
+                }
+                let row = row_id
+                    .strip_prefix(&format!("prompt:{prompt_id}:"))
+                    .expect("row ids carry the prompt id");
+                let answer = match document_state.kind() {
+                    PromptKind::Confirm => match row {
+                        "yes" => Some(crate::protocol::PromptValue::Bool(true)),
+                        "no" => Some(crate::protocol::PromptValue::Bool(false)),
+                        _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
+                    },
+                    PromptKind::Text => match row {
+                        "cancel" => None,
+                        "submit" => {
+                            let field_id = document_state
+                                .field_ids()
+                                .first()
+                                .copied()
+                                .ok_or_else(|| Error::new("the prompt has no field"))?
+                                .to_string();
+                            let value = document_state
+                                .field_text(&field_id)
+                                .ok_or_else(|| Error::new("the prompt has no field"))?
+                                .to_string();
+                            Some(crate::protocol::PromptValue::Text(value))
+                        }
+                        _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
+                    },
+                    _ => return Err(Error::new(format!("unknown prompt row: {row_id}"))),
+                };
+                (false, answer)
+            }
+        };
+
+        if repaired {
+            let render = self
+                .views
+                .get_mut(&view_id)
+                .expect("checked prompt")
+                .render_with_delivery(None, None, RenderDelivery::Acknowledged)?;
+            self.publish();
+            return Ok(PromptCompletion {
+                result: InvokeResult {
+                    effects: vec![Effect::message(
+                        MessageLevel::Warn,
+                        crate::errors::STALE_VIEW.to_string(),
+                    )],
+                    render: Some(render),
+                    ..InvokeResult::empty()
+                },
+                next: Execution::Done(InvokeResult::empty()),
+            });
+        }
+
+        self.finish_document_prompt(&prompt_id, answer)
     }
 
     /// Pop the active prompt, resume its continuation and return both steps.
