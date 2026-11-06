@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use magit_lsp::commands::{registry, Command, CommandStatus, Scope};
+use magit_lsp::commands::{registry, Command, CommandStatus, EffectKind, Scope};
 use magit_lsp::config::Profile;
 use magit_lsp::protocol::{Cursor, Effect, MessageLevel};
 
@@ -521,8 +521,8 @@ fn visit_reports_the_server_resolved_worktree_location() {
         }]
     );
     assert_eq!(
-        magit_lsp::commands::required_effect("common.visit"),
-        Some("visitFile")
+        magit_lsp::commands::required_effects("common.visit"),
+        [EffectKind::VisitFile].as_slice()
     );
 }
 
@@ -541,8 +541,8 @@ fn copy_value_emits_registered_clipboard_effect() {
         .iter()
         .any(|effect| matches!(effect, Effect::Clipboard { .. })));
     assert_eq!(
-        magit_lsp::commands::required_effect("common.copy-value"),
-        Some("clipboard")
+        magit_lsp::commands::required_effects("common.copy-value"),
+        [EffectKind::Clipboard].as_slice()
     );
 }
 
@@ -2114,6 +2114,7 @@ fn file_identity_matrix(action: &str, stale: bool, selection: bool) {
                 );
                 result
             }
+            Execution::Pick(pick) => panic!("unexpected pick for {kind}/{action}: {pick:?}"),
         };
         let messages = message_texts(&result.effects);
         assert_eq!(
@@ -2401,6 +2402,7 @@ fn stale_binary_whole_file_selection_validates_all_members_before_mutation() {
                 };
                 result
             }
+            Execution::Pick(pick) => panic!("unexpected pick for {action}: {pick:?}"),
         };
         assert!(
             message_texts(&result.effects)

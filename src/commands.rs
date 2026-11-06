@@ -96,6 +96,28 @@ pub enum CommandStatus {
 /// A synchronous command handler.
 pub type RunFn = fn(&mut CommandCtx<'_>) -> Result<CommandOutcome>;
 
+/// An optional client effect a command may need to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectKind {
+    /// Copy text to the client's clipboard.
+    Clipboard,
+    /// Apply a workspace edit to a document.
+    EditDocument,
+    /// Open a file at a location in the client.
+    VisitFile,
+}
+
+impl EffectKind {
+    /// The wire name clients declare for this effect.
+    pub fn name(self) -> &'static str {
+        match self {
+            EffectKind::Clipboard => "clipboard",
+            EffectKind::EditDocument => "editDocument",
+            EffectKind::VisitFile => "visitFile",
+        }
+    }
+}
+
 /// A named server operation; see §3.5.
 pub struct Command {
     pub id: &'static str,
@@ -103,15 +125,16 @@ pub struct Command {
     pub doc: &'static str,
     pub status: CommandStatus,
     pub run: RunFn,
-    /// Optional effect required before this command can run in rich presentation.
-    pub required_effect: Option<&'static str>,
+    /// Optional effects this command may emit, in declaration order.
+    pub effects: &'static [EffectKind],
 }
 
-/// Return the registered command's optional-effect requirement, if any.
-pub fn required_effect(command: &str) -> Option<&'static str> {
+/// Return the registered command's declared effects; empty when unknown.
+pub fn required_effects(command: &str) -> &'static [EffectKind] {
     registry()
         .get(command)
-        .and_then(|command| command.required_effect)
+        .map(|command| command.effects)
+        .unwrap_or(&[])
 }
 
 impl Command {
@@ -545,7 +568,7 @@ const fn planned(
         doc,
         status: CommandStatus::Planned { roadmap_id },
         run: planned_run,
-        required_effect: None,
+        effects: &[],
     }
 }
 
@@ -557,7 +580,7 @@ const fn menu(id: &'static str, doc: &'static str, run: RunFn) -> Command {
         doc,
         status: CommandStatus::Implemented,
         run,
-        required_effect: None,
+        effects: &[],
     }
 }
 
@@ -574,7 +597,7 @@ fn build() -> Registry {
             doc: "Refresh the view",
             status: CommandStatus::Implemented,
             run: refresh,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.toggle-section",
@@ -582,7 +605,7 @@ fn build() -> Registry {
             doc: "Fold or unfold the section at point",
             status: CommandStatus::Implemented,
             run: toggle_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.show-section",
@@ -590,7 +613,7 @@ fn build() -> Registry {
             doc: "Unfold the section at point",
             status: CommandStatus::Implemented,
             run: show_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.hide-section",
@@ -598,7 +621,7 @@ fn build() -> Registry {
             doc: "Fold the section at point",
             status: CommandStatus::Implemented,
             run: hide_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.show-all",
@@ -606,7 +629,7 @@ fn build() -> Registry {
             doc: "Unfold every section",
             status: CommandStatus::Implemented,
             run: show_all,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.hide-all",
@@ -614,7 +637,7 @@ fn build() -> Registry {
             doc: "Fold every section",
             status: CommandStatus::Implemented,
             run: hide_all,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.more-detail",
@@ -622,7 +645,7 @@ fn build() -> Registry {
             doc: "Show one more level of detail",
             status: CommandStatus::Implemented,
             run: more_detail,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.less-detail",
@@ -630,7 +653,7 @@ fn build() -> Registry {
             doc: "Show one less level of detail",
             status: CommandStatus::Implemented,
             run: less_detail,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.detail-level-1",
@@ -638,7 +661,7 @@ fn build() -> Registry {
             doc: "Show section headers only",
             status: CommandStatus::Implemented,
             run: detail_level_1,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.detail-level-2",
@@ -646,7 +669,7 @@ fn build() -> Registry {
             doc: "Show section and file headers",
             status: CommandStatus::Implemented,
             run: detail_level_2,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.detail-level-3",
@@ -654,7 +677,7 @@ fn build() -> Registry {
             doc: "Show hunk headers",
             status: CommandStatus::Implemented,
             run: detail_level_3,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.detail-level-4",
@@ -662,7 +685,7 @@ fn build() -> Registry {
             doc: "Show hunk bodies",
             status: CommandStatus::Implemented,
             run: detail_level_4,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.next-section",
@@ -670,7 +693,7 @@ fn build() -> Registry {
             doc: "Move to the next section",
             status: CommandStatus::Implemented,
             run: next_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.prev-section",
@@ -678,7 +701,7 @@ fn build() -> Registry {
             doc: "Move to the previous section",
             status: CommandStatus::Implemented,
             run: prev_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.jump",
@@ -686,7 +709,7 @@ fn build() -> Registry {
             doc: "Move to the next or previous visible section, file or hunk",
             status: CommandStatus::Implemented,
             run: jump,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "status.stage",
@@ -694,7 +717,7 @@ fn build() -> Registry {
             doc: "Stage the change at point",
             status: CommandStatus::Implemented,
             run: stage,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "status.unstage",
@@ -702,7 +725,7 @@ fn build() -> Registry {
             doc: "Unstage the change at point",
             status: CommandStatus::Implemented,
             run: unstage,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "status.stage-all",
@@ -710,7 +733,7 @@ fn build() -> Registry {
             doc: "Stage all unstaged changes",
             status: CommandStatus::Implemented,
             run: stage_all,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "status.unstage-all",
@@ -718,7 +741,7 @@ fn build() -> Registry {
             doc: "Unstage all staged changes",
             status: CommandStatus::Implemented,
             run: unstage_all,
-            required_effect: None,
+            effects: &[],
         },
     ];
 
@@ -729,7 +752,7 @@ fn build() -> Registry {
             doc: "Cancel the current operation",
             status: CommandStatus::Implemented,
             run: cancel,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.confirm",
@@ -737,7 +760,7 @@ fn build() -> Registry {
             doc: "Confirm the current selection",
             status: CommandStatus::Implemented,
             run: confirm,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.quit",
@@ -745,7 +768,7 @@ fn build() -> Registry {
             doc: "Close all views",
             status: CommandStatus::Implemented,
             run: quit,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.cycle-visibility",
@@ -753,7 +776,7 @@ fn build() -> Registry {
             doc: "Cycle the visibility of every section",
             status: CommandStatus::Implemented,
             run: cycle_visibility,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.next-sibling",
@@ -761,7 +784,7 @@ fn build() -> Registry {
             doc: "Move to the next sibling",
             status: CommandStatus::Implemented,
             run: next_sibling,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.prev-sibling",
@@ -769,7 +792,7 @@ fn build() -> Registry {
             doc: "Move to the previous sibling",
             status: CommandStatus::Implemented,
             run: prev_sibling,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.parent-section",
@@ -777,7 +800,7 @@ fn build() -> Registry {
             doc: "Move to the parent section",
             status: CommandStatus::Implemented,
             run: parent_section,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.toggle-text-mode",
@@ -785,7 +808,7 @@ fn build() -> Registry {
             doc: "Toggle text mode",
             status: CommandStatus::Implemented,
             run: toggle_text_mode,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "common.copy-value",
@@ -793,7 +816,7 @@ fn build() -> Registry {
             doc: "Copy the value at point",
             status: CommandStatus::Implemented,
             run: copy_value,
-            required_effect: Some("clipboard"),
+            effects: &[EffectKind::Clipboard],
         },
         Command {
             id: "common.visit",
@@ -801,7 +824,7 @@ fn build() -> Registry {
             doc: "Visit the thing at point",
             status: CommandStatus::Implemented,
             run: visit,
-            required_effect: Some("visitFile"),
+            effects: &[EffectKind::VisitFile],
         },
         Command {
             id: "status.discard",
@@ -809,7 +832,7 @@ fn build() -> Registry {
             doc: "Discard the change at point",
             status: CommandStatus::Implemented,
             run: discard,
-            required_effect: None,
+            effects: &[],
         },
         planned(
             "status.reverse",
@@ -829,7 +852,7 @@ fn build() -> Registry {
             doc: "Show the dispatch menu",
             status: CommandStatus::Implemented,
             run: open_dispatch,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "open.commit",
@@ -837,7 +860,7 @@ fn build() -> Registry {
             doc: "Open the commit menu",
             status: CommandStatus::Implemented,
             run: open_commit,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "commit.create",
@@ -845,7 +868,7 @@ fn build() -> Registry {
             doc: "Commit",
             status: CommandStatus::Implemented,
             run: commit_create,
-            required_effect: Some("editDocument"),
+            effects: &[EffectKind::EditDocument],
         },
         Command {
             id: "commit.amend",
@@ -853,7 +876,7 @@ fn build() -> Registry {
             doc: "Amend HEAD",
             status: CommandStatus::Implemented,
             run: commit_amend,
-            required_effect: Some("editDocument"),
+            effects: &[EffectKind::EditDocument],
         },
         Command {
             id: "commit.extend",
@@ -861,7 +884,7 @@ fn build() -> Registry {
             doc: "Extend HEAD without editing its message",
             status: CommandStatus::Implemented,
             run: commit_extend,
-            required_effect: Some("editDocument"),
+            effects: &[EffectKind::EditDocument],
         },
         Command {
             id: "commit.reword",
@@ -869,7 +892,7 @@ fn build() -> Registry {
             doc: "Reword HEAD",
             status: CommandStatus::Implemented,
             run: commit_reword,
-            required_effect: Some("editDocument"),
+            effects: &[EffectKind::EditDocument],
         },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
@@ -879,7 +902,7 @@ fn build() -> Registry {
             doc: "Show the current log",
             status: CommandStatus::Implemented,
             run: open_current_log,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "log.load-more",
@@ -887,7 +910,7 @@ fn build() -> Registry {
             doc: "Load more commits",
             status: CommandStatus::Implemented,
             run: log_load_more,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "log.select-and-copy",
@@ -895,7 +918,7 @@ fn build() -> Registry {
             doc: "Select commits and copy their object IDs",
             status: CommandStatus::Implemented,
             run: select_and_copy,
-            required_effect: Some("clipboard"),
+            effects: &[EffectKind::Clipboard],
         },
         menu("open.diff", "Open the diff menu", open_diff),
         menu("open.fetch", "Open the fetch menu", open_fetch),
@@ -941,7 +964,7 @@ fn build() -> Registry {
             doc: "Open the process log",
             status: CommandStatus::Implemented,
             run: open_process_log,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "process-log.clear",
@@ -949,7 +972,7 @@ fn build() -> Registry {
             doc: "Clear the process log",
             status: CommandStatus::Implemented,
             run: clear_process_log,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "select.toggle-mark",
@@ -957,7 +980,7 @@ fn build() -> Registry {
             doc: "Toggle the mark on the commit at point",
             status: CommandStatus::Implemented,
             run: toggle_commit_mark,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "select.enter-rev",
@@ -965,7 +988,7 @@ fn build() -> Registry {
             doc: "Enter a revision by hand",
             status: CommandStatus::Implemented,
             run: enter_revision,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "menu.save-args",
@@ -973,7 +996,7 @@ fn build() -> Registry {
             doc: "Save the menu arguments",
             status: CommandStatus::Implemented,
             run: save_menu_args,
-            required_effect: None,
+            effects: &[],
         },
         Command {
             id: "menu.reset-args",
@@ -981,7 +1004,7 @@ fn build() -> Registry {
             doc: "Reset the menu arguments",
             status: CommandStatus::Implemented,
             run: reset_menu_args,
-            required_effect: None,
+            effects: &[],
         },
         planned(
             "commit-message.history-prev",

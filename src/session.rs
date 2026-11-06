@@ -2786,7 +2786,7 @@ impl Session {
             .as_ref()
             .and_then(|caps| caps.command_requirement(command_id))
         {
-            return Ok(unsupported_feature(required));
+            return Ok(unsupported_feature(required.name()));
         }
         let Some(command) = commands::registry().get(command_id) else {
             return Err(Error::new(format!("unknown command: {command_id}")));

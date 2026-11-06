@@ -1,8 +1,9 @@
 use lsp_server::Message;
+use magit_lsp::commands::EffectKind;
 use magit_lsp::presentation::prompt::SECRET_UNAVAILABLE;
 use magit_lsp::presentation::{
-    negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, PromptSupport,
-    RichCapabilities, Support, Ui,
+    negotiate, CustomRender, MagitCapabilities, PlainAvailability, PlainCapabilities, Presentation,
+    PromptSupport, RichCapabilities, Support, Ui,
 };
 use magit_lsp::protocol::*;
 use serde_json::{json, Value};
@@ -521,13 +522,13 @@ fn rich_command_requirements_come_from_registry_metadata() {
         panic!("expected rich")
     };
     let required = [
-        ("common.visit", "visitFile"),
-        ("common.copy-value", "clipboard"),
-        ("log.select-and-copy", "clipboard"),
-        ("commit.create", "editDocument"),
-        ("commit.amend", "editDocument"),
-        ("commit.extend", "editDocument"),
-        ("commit.reword", "editDocument"),
+        ("common.visit", EffectKind::VisitFile),
+        ("common.copy-value", EffectKind::Clipboard),
+        ("log.select-and-copy", EffectKind::Clipboard),
+        ("commit.create", EffectKind::EditDocument),
+        ("commit.amend", EffectKind::EditDocument),
+        ("commit.extend", EffectKind::EditDocument),
+        ("commit.reword", EffectKind::EditDocument),
     ];
     for (command, effect) in required {
         assert_eq!(caps.command_requirement(command), Some(effect));
@@ -538,6 +539,123 @@ fn rich_command_requirements_come_from_registry_metadata() {
         panic!("expected rich")
     };
     assert_eq!(declared.command_requirement("common.visit"), None);
+}
+
+#[test]
+fn rich_command_requirement_uses_every_declared_effect() {
+    let mut declared: Vec<EffectKind> = magit_lsp::commands::registry()
+        .iter()
+        .flat_map(|command| command.effects.iter().copied())
+        .collect();
+    declared.sort_by_key(|effect| effect.name());
+    declared.dedup();
+    assert_eq!(
+        declared,
+        [EffectKind::Clipboard, EffectKind::EditDocument, EffectKind::VisitFile]
+    );
+    for effect in declared {
+        let mut block = rich_block();
+        let declared: Vec<&str> = ["clipboard", "editDocument", "visitFile"]
+            .into_iter()
+            .filter(|name| *name != effect.name())
+            .collect();
+        block["effects"] = json!(declared);
+        let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
+            panic!("expected rich")
+        };
+        for command in magit_lsp::commands::registry().iter() {
+            let Some(first) = magit_lsp::commands::required_effects(command.id).first() else {
+                assert_eq!(caps.command_requirement(command.id), None);
+                continue;
+            };
+            let expected = if *first == effect { Some(effect) } else { None };
+            assert_eq!(caps.command_requirement(command.id), expected, "{}", command.id);
+        }
+    }
+}
+
+#[test]
+fn plain_availability_matrix() {
+    let minimal = PlainCapabilities::default();
+    let edits = PlainCapabilities {
+        apply_edit: true,
+        code_actions: true,
+        ..PlainCapabilities::default()
+    };
+    let full = PlainCapabilities {
+        apply_edit: true,
+        code_actions: true,
+        show_document: true,
+        ..PlainCapabilities::default()
+    };
+    let reason = |availability| match availability {
+        PlainAvailability::Unavailable { reason } => reason,
+        PlainAvailability::Available => panic!("expected unavailability"),
+    };
+    let cmd = |id| {
+        magit_lsp::commands::registry()
+            .get(id)
+            .unwrap_or_else(|| panic!("missing command {id}"))
+    };
+    assert_eq!(
+        minimal.plain_availability(cmd("status.stage")),
+        PlainAvailability::Unavailable {
+            reason: "workspace.applyEdit and textDocument.codeAction are required"
+        }
+    );
+    assert_eq!(
+        minimal.plain_availability(cmd("commit.create")),
+        PlainAvailability::Unavailable {
+            reason: "workspace.applyEdit is required"
+        }
+    );
+    assert_eq!(
+        minimal.plain_availability(cmd("common.visit")),
+        PlainAvailability::Unavailable {
+            reason: "window.showDocument.support is required"
+        }
+    );
+    assert_eq!(
+        reason(minimal.plain_availability(cmd("common.copy-value"))),
+        "the clipboard effect is not available in Plain mode"
+    );
+    assert_eq!(
+        minimal.plain_availability(cmd("common.confirm")),
+        PlainAvailability::Available
+    );
+    let apply_edit_only = PlainCapabilities {
+        apply_edit: true,
+        ..PlainCapabilities::default()
+    };
+    assert_eq!(
+        reason(apply_edit_only.plain_availability(cmd("status.stage"))),
+        "workspace.applyEdit and textDocument.codeAction are required"
+    );
+    assert_eq!(
+        apply_edit_only.plain_availability(cmd("commit.create")),
+        PlainAvailability::Available
+    );
+    for command in ["status.stage", "status.unstage", "status.discard"] {
+        assert_eq!(edits.plain_availability(cmd(command)), PlainAvailability::Available);
+        assert_eq!(full.plain_availability(cmd(command)), PlainAvailability::Available);
+    }
+    assert_eq!(
+        edits.plain_availability(cmd("common.visit")),
+        PlainAvailability::Unavailable {
+            reason: "window.showDocument.support is required"
+        }
+    );
+    assert_eq!(
+        full.plain_availability(cmd("common.visit")),
+        PlainAvailability::Available
+    );
+    for command in ["commit.create", "commit.amend", "commit.extend", "commit.reword"] {
+        assert_eq!(full.plain_availability(cmd(command)), PlainAvailability::Available);
+    }
+    assert_eq!(
+        reason(full.plain_availability(cmd("common.copy-value"))),
+        "the clipboard effect is not available in Plain mode"
+    );
 }
 
 #[test]

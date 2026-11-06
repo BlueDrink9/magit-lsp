@@ -2475,11 +2475,12 @@ fn execute_plain_action(
         .clone();
     if let Some(caps) = caps.as_ref() {
         if crate::dispatch::content_command(&params.command) {
-            match caps.content_action(&params.command) {
-                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)) => {
-                    return plain_unsupported_message(reason)
+            if let Some(command) = crate::commands::registry().get(&params.command) {
+                if let crate::presentation::PlainAvailability::Unavailable { reason } =
+                    caps.plain_availability(command)
+                {
+                    return plain_unsupported_message(reason);
                 }
-                _ => {}
             }
         }
     } else {
@@ -3737,14 +3738,12 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             crate::dispatch::offer_target(&tree, command.id, &line_node.id)
         };
         if let Some(target) = target {
-            let availability = capabilities
+            let unavailable = match capabilities
                 .as_ref()
-                .and_then(|caps| caps.content_action(command.id));
-            let unavailable = match availability {
-                Some(crate::presentation::PlainContentAction::MissingCapabilities(reason)) => {
-                    Some(reason)
-                }
-                Some(crate::presentation::PlainContentAction::Supported) => None,
+                .map(|caps| caps.plain_availability(command))
+            {
+                Some(crate::presentation::PlainAvailability::Unavailable { reason }) => Some(reason),
+                Some(crate::presentation::PlainAvailability::Available) => None,
                 None => continue,
             };
             if unavailable.is_some()

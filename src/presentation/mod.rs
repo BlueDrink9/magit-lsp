@@ -176,10 +176,12 @@ pub struct RichCapabilities {
 }
 
 impl RichCapabilities {
-    /// Required optional effect for a command, before any command-side work.
-    pub fn command_requirement(&self, command: &str) -> Option<&'static str> {
-        let required = crate::commands::required_effect(command)?;
-        (!self.supports_effect(required)).then_some(required)
+    /// First declared effect a command needs that this client lacks.
+    pub fn command_requirement(&self, command: &str) -> Option<crate::commands::EffectKind> {
+        crate::commands::required_effects(command)
+            .iter()
+            .copied()
+            .find(|effect| !self.supports_effect(effect.name()))
     }
 
     /// Whether both the prompt kind and any secret-text requirement are declared.
@@ -301,30 +303,52 @@ pub enum Support {
     Missing(&'static str),
 }
 
-/// Availability of a Plain content action, shared by offer and execution paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlainContentAction {
-    /// The action may be offered and dispatched.
-    Supported,
-    /// The client lacks required standard LSP capabilities.
-    MissingCapabilities(&'static str),
+/// Whether a command can run under the Plain presentation, and why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlainAvailability {
+    /// The command may be offered and dispatched.
+    Available,
+    /// The client lacks a capability the command needs.
+    Unavailable {
+        /// Human-readable explanation of the missing capability.
+        reason: &'static str,
+    },
 }
 
 impl PlainCapabilities {
-    /// Decide whether a Plain stage/unstage/discard action can run.
-    pub fn content_action(&self, command: &str) -> Option<PlainContentAction> {
-        if !matches!(
-            command,
+    /// Decide whether a registered command can run in Plain mode.
+    ///
+    /// The caller decides `Planned` status; this only folds declared effects
+    /// and the extra requirement of the status hunk actions.
+    pub fn plain_availability(&self, command: &crate::commands::Command) -> PlainAvailability {
+        use crate::commands::EffectKind;
+        for effect in command.effects {
+            let reason = match effect {
+                EffectKind::Clipboard => {
+                    Some("the clipboard effect is not available in Plain mode")
+                }
+                EffectKind::EditDocument if !self.apply_edit => {
+                    Some("workspace.applyEdit is required")
+                }
+                EffectKind::VisitFile if !self.show_document => {
+                    Some("window.showDocument.support is required")
+                }
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                return PlainAvailability::Unavailable { reason };
+            }
+        }
+        if matches!(
+            command.id,
             "status.stage" | "status.unstage" | "status.discard"
-        ) {
-            return None;
+        ) && (!self.apply_edit || !self.code_actions)
+        {
+            return PlainAvailability::Unavailable {
+                reason: "workspace.applyEdit and textDocument.codeAction are required",
+            };
         }
-        if !self.apply_edit || !self.code_actions {
-            return Some(PlainContentAction::MissingCapabilities(
-                "workspace.applyEdit and textDocument.codeAction are required",
-            ));
-        }
-        Some(PlainContentAction::Supported)
+        PlainAvailability::Available
     }
 
     fn from_lsp(caps: &Value) -> Self {

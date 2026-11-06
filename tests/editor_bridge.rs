@@ -179,8 +179,8 @@ fn start_head_operation(
     args: Value,
 ) -> Value {
     assert_eq!(
-        magit_lsp::commands::required_effect(command),
-        Some("editDocument")
+        magit_lsp::commands::required_effects(command),
+        [magit_lsp::commands::EffectKind::EditDocument].as_slice()
     );
     eprintln!("editor-bridge phase=start-commit/send view={status}");
     server.send(json!({
@@ -577,7 +577,7 @@ fn bridge_directory_is_private_with_permissive_umask() {
     let root = tmp.path().to_string_lossy().into_owned();
     let mut server = TestServer::spawn_with_umask(&[("TMPDIR", &root)], "000");
     server.recv_timeout = Duration::from_secs(20);
-    let initialized = server.initialize(json!({}));
+    let initialized = server.initialize_rich(json!({}));
     assert!(initialized["result"]["capabilities"].is_object());
     let socket = server.socket_path();
     let dir = PathBuf::from(&root).join(format!("magit-lsp-{}", server.pid()));
@@ -2357,7 +2357,7 @@ fn assert_log_kept_the_answer(sink: &str, log: &str, answer: &str) {
 fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
         "the server did not initialize"
@@ -2377,7 +2377,7 @@ fn the_askpass_helper_returns_the_secret_to_whoever_asked_for_it() {
 fn the_askpass_answer_is_never_logged_to_stderr() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
         "the server did not initialize"
@@ -2406,7 +2406,7 @@ fn the_askpass_answer_is_never_logged_to_a_log_file() {
     let log_path_arg = log_path.to_string_lossy().into_owned();
     let mut server = TestServer::spawn(&[(magit_lsp::logging::FILE_ENV, &log_path_arg)]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
         "the server did not initialize"
@@ -2432,7 +2432,7 @@ fn the_askpass_answer_is_never_logged_to_a_log_file() {
 fn a_cancelled_askpass_prompt_makes_the_helper_fail() {
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert!(
         response["result"]["capabilities"].is_object(),
         "initialize response: {response}"
