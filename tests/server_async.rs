@@ -3251,6 +3251,151 @@ fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
 }
 
 #[test]
+fn pick_preference_truncates_native_items() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    tmp.git(&["branch", "b1"]);
+    tmp.git(&["branch", "b2"]);
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "[pick]\nmax_items = 2\n").expect("write config");
+    let config = config_path.to_string_lossy().to_string();
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    server.initialize(rich_pick_capabilities());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+    let version = menu_render["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":menu,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let pick = loop {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/pick") {
+            break message;
+        }
+    };
+    let params = &pick["params"];
+    assert_eq!(
+        params["items"].as_array().unwrap().len(),
+        2,
+        "the preference truncates the native pick: {pick}"
+    );
+    assert_eq!(params["allowFreeText"], json!(true), "{pick}");
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/pickRespond",
+        "params":{"pickId":params["pickId"],"cancelled":true,"selected":[]}}));
+    let _ = server.response_with_id(5);
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn pick_preference_beyond_the_declared_limit_uses_the_document_picker() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    tmp.git(&["branch", "b1"]);
+    tmp.git(&["branch", "b2"]);
+    let config_dir = tempfile::TempDir::new().expect("config tempdir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "[pick]\nmax_items = 10\n").expect("write config");
+    let config = config_path.to_string_lossy().to_string();
+    let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
+    let mut capabilities = rich_pick_capabilities();
+    capabilities["experimental"]["magit"]["pick"]["maxItems"] = json!(2);
+    server.initialize(capabilities);
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(server.recv()["method"], json!("view/render"));
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"=","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":1,"key":"u","editorMode":"normal",
+            "cursor":{"line":0,"column":0}}}));
+
+    let answer = server.response_with_id(5);
+    let effects = answer["result"]["effects"].as_array().expect("effects");
+    let warn = effects
+        .iter()
+        .find(|effect| effect["type"] == json!("message") && effect["level"] == json!("warn"))
+        .unwrap_or_else(|| panic!("the over-limit warning: {answer}"));
+    assert!(
+        warn["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("document picker")),
+        "{warn}"
+    );
+    let prompt_view = effects
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .and_then(|effect| effect["descriptor"]["id"].as_str())
+        .unwrap_or_else(|| panic!("the document prompt: {answer}"))
+        .to_owned();
+
+    let mut prompt_text = None;
+    while prompt_text.is_none() {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/render")
+            && message["params"]["viewId"] == json!(prompt_view)
+        {
+            prompt_text = serde_json::from_value(message["params"]["text"].clone()).ok();
+        }
+    }
+    let prompt_text: Vec<String> = prompt_text.expect("prompt text");
+    assert!(
+        prompt_text
+            .iter()
+            .any(|line| line.contains("Set the upstream branch (--set-upstream-to=)")),
+        "{prompt_text:?}"
+    );
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/pick")),
+        "the over-limit preference must not send a native pick: {:?}",
+        server.notifications
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
 fn rich_choice_item_row_enter_answers_the_pick() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

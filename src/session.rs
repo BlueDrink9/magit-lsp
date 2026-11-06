@@ -1309,6 +1309,32 @@ impl Session {
             .and_then(|pending| pending.pick.clone())
     }
 
+    /// Truncate a pending pick and its prompt request to `limit` items.
+    ///
+    /// Preselected ids whose items were dropped are removed. Returns whether
+    /// any item was removed.
+    pub fn truncate_pending_pick(&mut self, limit: usize) -> bool {
+        let Some(pending) = self.pending_prompt.as_mut() else {
+            return false;
+        };
+        let Some(pick) = pending.pick.as_mut() else {
+            return false;
+        };
+        let removed = pick.items.len() > limit;
+        pick.items.truncate(limit);
+        pick.preselection
+            .retain(|id| pick.items.iter().any(|item| item.id == *id));
+        if let Some(items) = pending.request.items.as_mut() {
+            items.truncate(limit);
+        }
+        if let Some(preselected) = pending.request.preselected.as_mut() {
+            if let Some(items) = pending.request.items.as_ref() {
+                preselected.retain(|id| items.iter().any(|item| item.id == *id));
+            }
+        }
+        removed
+    }
+
     /// Whether a staged operation currently owns this session's prompt slot.
     pub fn has_pending_prompt(&self) -> bool {
         self.pending_prompt.is_some()

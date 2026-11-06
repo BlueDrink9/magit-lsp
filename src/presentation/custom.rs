@@ -124,6 +124,14 @@ impl CustomRender {
         }
     }
 
+    /// The maximum item count this client declared, if any.
+    pub fn pick_limit(&self) -> Option<usize> {
+        match (self.prompt_support)() {
+            PromptSupport::Rich(caps) => caps.pick.and_then(|pick| pick.max_items),
+            PromptSupport::Plain | PromptSupport::Unnegotiated => None,
+        }
+    }
+
     /// Build the `view/pick` notification; the caller owns its response lifecycle.
     pub fn pick(&self, pick: &crate::protocol::ViewPickParams) -> Message {
         Self::notify(crate::protocol::VIEW_PICK, pick)

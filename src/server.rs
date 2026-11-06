@@ -4212,9 +4212,27 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
     loop {
         match step {
             Execution::Done(result) => return Ok(result),
-            Execution::Pick(pick) => {
+            Execution::Pick(mut pick) => {
                 let ui = custom_ui(&shared.client);
-                if ui.allows_pick(&pick) {
+                let declared = ui.pick_limit();
+                let preference = shared.config.config().pick.max_items;
+                let over_limit = matches!(
+                    (preference, declared),
+                    (Some(pref), Some(limit)) if pref > limit
+                );
+                if !over_limit {
+                    if let Some(limit) = preference {
+                        let handle = shared
+                            .session(repo)
+                            .ok_or_else(|| Error::new("Prompt session closed"))?;
+                        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                        session.truncate_pending_pick(limit);
+                        if let Some(updated) = session.pending_pick_request() {
+                            pick = updated;
+                        }
+                    }
+                }
+                if !over_limit && ui.allows_pick(&pick) {
                     let answer = shared.picks.ask(&ui, &pick);
                     let handle = shared
                         .session(repo)
@@ -4257,7 +4275,23 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                             .ok_or_else(|| Error::new("no pick is pending"))?
                     };
                     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                    return session.open_document_prompt(&request);
+                    let mut result = session.open_document_prompt(&request)?;
+                    if let (true, Some(pref), Some(limit)) =
+                        (over_limit, preference, declared)
+                    {
+                        result.effects.insert(
+                            0,
+                            Effect::message(
+                                MessageLevel::Warn,
+                                format!(
+                                    "This client can show at most {limit} picker items; \
+                                     the configured preference is {pref}. Using the document \
+                                     picker."
+                                ),
+                            ),
+                        );
+                    }
+                    return Ok(result);
                 }
             }
             Execution::Prompt(request) => {
