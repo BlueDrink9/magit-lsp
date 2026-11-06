@@ -1,4 +1,5 @@
 use lsp_server::Message;
+use magit_lsp::presentation::prompt::SECRET_UNAVAILABLE;
 use magit_lsp::presentation::{
     negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, PromptSupport,
     Support, Ui,
@@ -61,10 +62,7 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
         );
         if !allowed {
             assert_eq!(message.params["effects"][0]["level"], "warn");
-            assert_eq!(
-                message.params["effects"][0]["text"],
-                "Client does not support this prompt"
-            );
+            assert_eq!(message.params["effects"][0]["text"], SECRET_UNAVAILABLE);
         }
     }
 }
@@ -112,6 +110,26 @@ fn plain_denies_native_prompts_while_undeclared_and_declared_rich_are_unchanged(
     let mut secret = prompt("text");
     secret.secret = Some(true);
     assert!(!rich.allows_prompt(&secret));
+}
+
+#[test]
+fn plain_secret_prompt_refusal_uses_the_readable_constant() {
+    let secret: ViewPromptParams = serde_json::from_value(json!({
+        "promptId": "p", "kind": "text", "title": "Secret",
+        "secret": true
+    }))
+    .unwrap();
+    let plain = CustomRender::negotiated(|| PromptSupport::Plain);
+    assert!(!plain.allows_prompt(&secret));
+    let Message::Notification(message) = plain.prompt(secret) else {
+        panic!("plain secret prompt must warn, not emit view/prompt")
+    };
+    assert_eq!(message.method, VIEW_EFFECTS);
+    assert_eq!(message.params["effects"][0]["level"], "warn");
+    assert_eq!(
+        message.params["effects"][0]["text"],
+        magit_lsp::presentation::prompt::SECRET_UNAVAILABLE
+    );
 }
 
 #[test]

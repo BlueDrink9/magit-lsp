@@ -424,7 +424,7 @@ fn rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_ef
 }
 
 #[test]
-fn rich_missing_confirm_leaves_no_mutation_or_pending_prompt() {
+fn rich_missing_confirm_opens_a_document_prompt_without_mutation() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", "initial\n")])
         .modify("f.txt", "changed\n")
@@ -435,22 +435,17 @@ fn rich_missing_confirm_leaves_no_mutation_or_pending_prompt() {
     server.initialize(limited_rich(json!(["editDocument"]), json!([])));
     let view = open_view(&mut server, 2, &repo_param(tmp.path()));
     let response = invoke_rich(&mut server, 3, &view, "commit.create");
+    let effects = response["result"]["effects"].as_array().unwrap();
+    assert_eq!(effects[0]["type"], "pushView", "{response}");
+    assert_eq!(effects[0]["descriptor"]["kind"], "prompt", "{response}");
+    // The pending document prompt refuses the next command.
+    let refused = invoke_rich(&mut server, 4, &view, "open.commit");
     assert!(
-        response["result"]["effects"][0]["text"]
+        refused["result"]["effects"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("does not support"),
-        "{response}"
-    );
-    // A second semantic command completes normally, not with a pending-prompt refusal.
-    let opened = invoke_rich(&mut server, 4, &view, "open.commit");
-    assert!(
-        opened["result"]["effects"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|effect| effect["type"] == "pushView"),
-        "{opened}"
+            .contains("Answer or cancel the pending prompt"),
+        "{refused}"
     );
     server.shutdown_and_exit();
     let mut observed = server.notifications.clone();
@@ -1808,7 +1803,7 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    let response = server.initialize(limited_rich(json!([]), json!(["text"])));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -2047,7 +2042,7 @@ fn discard_prompt_cancellation_changed_content_and_closed_view_never_mutate() {
             .modify_standard()
             .build();
         let mut server = TestServer::spawn(&[]);
-        server.initialize(json!({}));
+        server.initialize(limited_rich(json!([]), json!(["confirm"])));
         server.send(open_view_message(2, &repo_param(tmp.path())));
         let opened = server.response_with_id(2);
         let view = opened["result"]["id"].as_str().unwrap().to_string();
@@ -2129,7 +2124,10 @@ fn disconnect_and_shutdown_cancel_pending_preflight_without_staging() {
             .modify_standard()
             .build();
         let mut server = TestServer::spawn(&[]);
-        server.initialize(json!({}));
+        server.initialize(limited_rich(
+            json!(["editDocument"]),
+            json!(["confirm"]),
+        ));
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke",
             "params":{"viewId":view,"command":"commit.create"}}));

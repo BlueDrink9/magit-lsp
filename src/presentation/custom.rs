@@ -137,11 +137,13 @@ impl Ui for CustomRender {
             }
         }
         if !self.allows_prompt(&prompt) {
+            let text = if prompt.secret == Some(true) {
+                super::prompt::SECRET_UNAVAILABLE
+            } else {
+                "Client does not support this prompt"
+            };
             return self.effects(ViewEffectsParams {
-                effects: vec![Effect::message(
-                    MessageLevel::Warn,
-                    "Client does not support this prompt",
-                )],
+                effects: vec![Effect::message(MessageLevel::Warn, text)],
             });
         }
         Self::notify(VIEW_PROMPT, &prompt)

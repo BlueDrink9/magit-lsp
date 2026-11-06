@@ -1342,11 +1342,13 @@ impl PromptBridge {
         let ui = custom_ui(&self.client);
         if !ui.allows_prompt(request) {
             if let Some(sender) = self.sender.upgrade() {
+                let text = if request.secret == Some(true) {
+                    crate::presentation::prompt::SECRET_UNAVAILABLE
+                } else {
+                    "Client does not support this prompt"
+                };
                 let _ = sender.send(ui.effects(ViewEffectsParams {
-                    effects: vec![Effect::message(
-                        MessageLevel::Warn,
-                        "Client does not support this prompt",
-                    )],
+                    effects: vec![Effect::message(MessageLevel::Warn, text)],
                 }));
             }
             return None;
@@ -3778,6 +3780,37 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
         match step {
             Execution::Done(result) => return Ok(result),
             Execution::Prompt(request) => {
+                let native = custom_ui(&shared.client).allows_prompt(&request);
+                match crate::presentation::prompt::delivery(&request, native) {
+                    crate::presentation::prompt::PromptDelivery::Document => {
+                        let handle = shared
+                            .session(repo)
+                            .ok_or_else(|| Error::new("Prompt session closed"))?;
+                        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                        return session.open_document_prompt(&request);
+                    }
+                    crate::presentation::prompt::PromptDelivery::RefuseSecret => {
+                        let handle = shared
+                            .session(repo)
+                            .ok_or_else(|| Error::new("Prompt session closed"))?;
+                        let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                        let mut result = match session.resume_prompt(&request.prompt_id, None)? {
+                            Execution::Done(result) => result,
+                            Execution::Prompt(_) => {
+                                return Err(Error::new("refused prompt did not finish"))
+                            }
+                        };
+                        result.effects.insert(
+                            0,
+                            Effect::message(
+                                MessageLevel::Warn,
+                                crate::presentation::prompt::SECRET_UNAVAILABLE.to_string(),
+                            ),
+                        );
+                        return Ok(result);
+                    }
+                    crate::presentation::prompt::PromptDelivery::Native => {}
+                }
                 let answer = crate::ui::answer(&ServerUi::new(shared), &request);
                 let handle = shared
                     .session(repo)
