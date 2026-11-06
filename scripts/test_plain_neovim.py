@@ -94,7 +94,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             "local c=vim.lsp.get_clients(); local names={}; "
             "for _,x in ipairs(c) do names[#names+1]=x.name end; "
             "return vim.json.encode({text=table.concat(vim.api.nvim_buf_get_lines(b,0,-1,false),'\\n'), "
-            "name=vim.api.nvim_buf_get_name(b), modified=vim.bo[b].modified, clients=names, "
+             "name=vim.api.nvim_buf_get_name(b), buffer=b, modified=vim.bo[b].modified, clients=names, "
             "cursor=vim.api.nvim_win_get_cursor(0), "
             "endofline=vim.bo[b].endofline, fixeol=vim.bo[b].fixeol, fileformat=vim.bo[b].fileformat, "
             "rtp=vim.o.runtimepath, version=vim.lsp.util.buf_versions[b], pid=vim.fn.getpid(), "
@@ -416,66 +416,6 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             picker("subsequent-request", f"{staged_row}G0", None)
             assert snapshot() == partial
 
-            def begin_manual_draft(label: str) -> tuple[str, dict[str, object]]:
-                current = state()
-                row = next(i + 1 for i, line in enumerate(current["text"].splitlines())
-                           if "tracked.txt" in line or "abort-draft.txt" in line)
-                picker(f"{label}-open-commit-menu", f"{row}G0", "Open the commit menu")
-                menu = wait_text("git commit")
-                picker(f"{label}-create-commit", "1G0", "Commit")
-                issued = wait_state(f"{label} issued draft row", lambda value:
-                                    ".git/COMMIT_EDITMSG" in value["text"])
-                rows = [line for line in issued["text"].splitlines() if ".git/COMMIT_EDITMSG" in line]
-                assert len(rows) == 1, issued
-                uri = rows[0].strip()
-                path = uri.removeprefix("file://")
-                assert uri == (repo / ".git/COMMIT_EDITMSG").as_uri(), (uri, repo)
-                return path, issued
-
-            confirmed_head = git("rev-parse", "HEAD")
-            confirm_path, confirm_row = begin_manual_draft("manual-confirm")
-            instructions = rpc("luaeval(" + json.dumps("vim.fn.execute('messages')") + ")")
-            assert ("COMMIT_EDITMSG" in instructions and "Confirm" in instructions and "Abort" in instructions
-                    and (repo / ".git/COMMIT_EDITMSG").as_uri() in instructions), instructions
-            report["manual_confirm"] = {"issued_uri": (repo / ".git/COMMIT_EDITMSG").as_uri(),
-                                        "row": confirm_row, "instructions": instructions}
-            run(["nvim", "--server", socket, "--remote-send", f":edit {confirm_path}<CR>"], timeout=8)
-            draft = wait_state("ordinary edit attaches commit draft", lambda value:
-                               value["name"] == confirm_path and "magit-lsp-plain-smoke" in value["clients"])
-            assert draft["name"] == confirm_path
-            exact_message = "Native manual commit\n\nEdited through ordinary Neovim input."
-            run(["nvim", "--server", socket, "--remote-send",
-                 "ggdGiNative manual commit<CR><CR>Edited through ordinary Neovim input.<Esc>"], timeout=8)
-            edited_draft = wait_state("exact manual commit text", lambda value: value["text"] == exact_message)
-            picker("manual-confirm-action", "gg", "Confirm commit")
-            confirmed = wait_state("manual commit row retirement", lambda value:
-                                   ".git/COMMIT_EDITMSG" not in value["text"])
-            assert git("rev-parse", "HEAD") != confirmed_head
-            assert git("log", "-1", "--format=%B") == exact_message + "\n"
-            assert git("status", "--porcelain") == ""
-            report["manual_confirm"].update({"selected_action": actions[-1], "edited_buffer": edited_draft,
-                                             "retired_status": confirmed, "head_before": confirmed_head,
-                                             "head_after": git("rev-parse", "HEAD"), "commit_body": git("log", "-1", "--format=%B")})
-
-            (repo / "abort-draft.txt").write_text("abort fixture\n")
-            git("add", "abort-draft.txt")
-            wait_text("abort-draft.txt")
-            abort_before = {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
-                            "worktree": git("diff", "--binary"), "status": git("status", "--porcelain")}
-            abort_path, abort_row = begin_manual_draft("manual-abort")
-            abort_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
-            run(["nvim", "--server", socket, "--remote-send", f":edit {abort_path}<CR>"], timeout=8)
-            abort_draft = wait_state("ordinary edit attaches abort draft", lambda value: value["name"] == abort_path)
-            picker("manual-abort-action", "gg", "Abort commit")
-            abort_after = {"head": git("rev-parse", "HEAD"), "index": git("write-tree"),
-                           "worktree": git("diff", "--binary"), "status": git("status", "--porcelain")}
-            abort_retired = wait_state("manual abort row retirement", lambda value:
-                                       ".git/COMMIT_EDITMSG" not in value["text"])
-            assert abort_after == abort_before, (abort_before, abort_after)
-            report["manual_abort"] = {"issued_uri": abort_uri, "row": abort_row, "attached_buffer": abort_draft,
-                                      "selected_action": actions[-1], "retired_status": abort_retired,
-                                      "git_before": abort_before, "git_after": abort_after}
-
             # Build an actual oversized unstaged section only after the
             # established menu/stage assertions have completed.
             large_base = "".join(f"base line {i:04d}\n" for i in range(430))
@@ -625,6 +565,91 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             assert full_git_state() == git_after_watcher_setup
             report["visibility"]["after_subsequent_request"] = after_visibility_request
             (run_evidence / "visibility.screen").write_text(shown["text"] + "\n")
+
+            def begin_manual_draft(label: str) -> tuple[str, dict[str, object]]:
+                current = state()
+                row = next(i + 1 for i, line in enumerate(current["text"].splitlines())
+                           if "tracked.txt" in line or "oversized.txt" in line or "watcher-only.txt" in line)
+                picker(f"{label}-open-commit-menu", f"{row}G0", "Open the commit menu")
+                wait_text("git commit")
+                picker(f"{label}-create-commit", "1G0", "Commit")
+                issued_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
+                issued = wait_state(f"{label} issued draft row", lambda value: issued_uri in value["text"])
+                assert issued["text"].splitlines().count(issued_uri) == 1, issued
+                return str(repo / ".git/COMMIT_EDITMSG"), issued
+
+            status_before_draft = state()
+            assert status_before_draft["name"] == initial["name"]
+            status_buffer = status_before_draft["buffer"]
+            confirm_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
+            pre_confirm_head = git("rev-parse", "HEAD")
+            pre_confirm_tree = git("write-tree")
+            pre_confirm_diff = git("diff", "--binary")
+            pre_confirm_worktree = {name: (repo / name).read_bytes().hex()
+                                    for name in ("tracked.txt", "watcher-only.txt", "oversized.txt")}
+            confirm_path, confirm_row = begin_manual_draft("manual-confirm")
+            instructions = rpc("luaeval(" + json.dumps("vim.fn.execute('messages')") + ")")
+            assert (confirm_uri in instructions and "Confirm" in instructions and "Abort" in instructions), instructions
+            report["manual_confirm"] = {"issued_uri": confirm_uri, "row": confirm_row,
+                                        "instructions": instructions, "head_before": pre_confirm_head,
+                                        "index_tree_before": pre_confirm_tree}
+            run(["nvim", "--server", socket, "--remote-send", f":edit {confirm_path}<CR>"], timeout=8)
+            draft = wait_state("ordinary edit attaches commit draft", lambda value: value["name"] == confirm_path)
+            assert "magit-lsp-plain-smoke" in draft["clients"], draft
+            exact_message = "Native manual commit\n\nEdited through ordinary Neovim input."
+            run(["nvim", "--server", socket, "--remote-send",
+                 "ggdGiNative manual commit<CR><CR>Edited through ordinary Neovim input.<Esc>"], timeout=8)
+            edited_draft = wait_state("exact manual commit text", lambda value: value["text"] == exact_message)
+            picker("manual-confirm-action", "gg", "Confirm commit")
+            run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
+            confirmed = wait_state("manual confirm status row retirement", lambda value:
+                                   value["name"] == initial["name"] and confirm_uri not in value["text"])
+            post_confirm_head = git("rev-parse", "HEAD")
+            assert post_confirm_head != pre_confirm_head
+            assert git("rev-list", "--count", f"{pre_confirm_head}..HEAD") == "1"
+            assert git("rev-parse", "HEAD^{tree}") == pre_confirm_tree
+            assert git("log", "-1", "--format=%B") == exact_message + "\n"
+            assert git("diff", "--binary") == pre_confirm_diff
+            post_confirm_worktree = {name: (repo / name).read_bytes().hex()
+                                     for name in pre_confirm_worktree}
+            assert post_confirm_worktree == pre_confirm_worktree
+            report["manual_confirm"].update({"selected_action": actions[-1], "edited_buffer": edited_draft,
+                                             "retired_status": confirmed, "head_after": post_confirm_head,
+                                             "commit_body": git("log", "-1", "--format=%B"),
+                                             "worktree_before_after": [pre_confirm_worktree, post_confirm_worktree],
+                                             "unstaged_diff_before_after": [pre_confirm_diff, git("diff", "--binary")]})
+            confirmed_buffer = draft["buffer"]
+            run(["nvim", "--server", socket, "--remote-send", f":bwipeout {confirmed_buffer}<CR>"], timeout=8)
+
+            (repo / "abort-draft.txt").write_text("abort fixture\n")
+            git("add", "abort-draft.txt")
+            abort_fixture = wait_text("abort-draft.txt")
+            abort_before = {"head": git("rev-parse", "HEAD"), "index_tree": git("write-tree"),
+                            "worktree_diff": git("diff", "--binary"),
+                            "worktree_bytes": {name: (repo / name).read_bytes().hex()
+                                               for name in ("tracked.txt", "watcher-only.txt", "oversized.txt", "abort-draft.txt")},
+                            "status": git("status", "--porcelain")}
+            abort_path, abort_row = begin_manual_draft("manual-abort")
+            abort_uri = (repo / ".git/COMMIT_EDITMSG").as_uri()
+            assert abort_uri in abort_row["text"]
+            run(["nvim", "--server", socket, "--remote-send", f":edit {abort_path}<CR>"], timeout=8)
+            abort_draft = wait_state("ordinary edit attaches abort draft", lambda value: value["name"] == abort_path)
+            assert "magit-lsp-plain-smoke" in abort_draft["clients"], abort_draft
+            picker("manual-abort-action", "gg", "Abort commit")
+            run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
+            abort_retired = wait_state("manual abort status row retirement", lambda value:
+                                       value["name"] == initial["name"] and abort_uri not in value["text"])
+            abort_after = {"head": git("rev-parse", "HEAD"), "index_tree": git("write-tree"),
+                           "worktree_diff": git("diff", "--binary"),
+                           "worktree_bytes": {name: (repo / name).read_bytes().hex()
+                                              for name in ("tracked.txt", "watcher-only.txt", "oversized.txt", "abort-draft.txt")},
+                           "status": git("status", "--porcelain")}
+            assert abort_after == abort_before, (abort_before, abort_after)
+            report["manual_abort"] = {"issued_uri": abort_uri, "row": abort_row,
+                                      "attached_buffer": abort_draft, "selected_action": actions[-1],
+                                      "retired_status": abort_retired, "git_before": abort_before,
+                                      "git_after": abort_after, "fixture_status": abort_fixture}
+
             final = state()
             assert not final["project_modules"] and final["rich_notifications"] == 0
             assert final["rtp"] == initial["rtp"]
