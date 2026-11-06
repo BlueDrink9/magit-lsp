@@ -25,7 +25,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 - [x] **T008.1 — Normalize prompt negotiation for Plain and Rich.** Done: `6957647`. Plain never receives native `view/prompt`; §3.6 records the prompt presentation principle; wire `prompts` semantics clarified. T008 clause 1.
   - Verified: `make test-rust FILTER="--test plain_core --test prompts"` @ `6957647` → ok: rust; `make docs-check` @ `6957647` → ok: docs-check. Plain denies every native prompt kind including `secret`, Unnegotiated stays permissive and declared Rich keeps its existing kind/secret matrix; `custom_ui` maps Plain/Rich/pre-initialize to the three negotiated states.
-- [ ] **T008.2 — Add tracked Field nodes and render prompt documents.** Field node + tracked range, rendering over `view/render` and `applyEdit`, one-line size limit. T008 clauses 1–2.
+- [x] **T008.2 — Add tracked Field nodes and render prompt documents.** Done: `5cde72b`. `NodeKind::Field` is a one-line value node; `PromptDocument` validates prompt shape and renders stable rows/fields for all four kinds with a documented 4096-byte single-line field limit.
+  - Verified: `make test-rust FILTER="--test plain_prompt --test prompts"` @ `5cde72b` → ok: rust. `tests/plain_prompt.rs` covers exact lines/nodes for confirm, text, choice and multiChoice, secret refusal, empty-item rows, single-line field/value equality and the size limit; `field_kind_serializes_as_field` proves `NodeKind::Field` serializes as `"field"`.
 - [ ] **T008.3 — Ingest document-prompt field edits.** didChange into field values; repair outside fields; diffs preserve field range. T008 clauses 2, 5.
 - [ ] **T008.4 — Hold refreshes and repairs during document prompts.** Prompt view lifecycle ends cleanly, restores view stack, returns caller. T008 clause 5.
 - [ ] **T008.5 — Render confirm and text document prompts.** Replaces warn+cancel fallback; secret refuses with message and clean cancel. T008 clauses 1–2, 5.
