@@ -933,6 +933,68 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         );
         let id = client.send(terminal);
         assert!(client.until_response(id)["result"].as_array().unwrap().is_empty());
+
+        std::fs::write(repo.path().join("f.txt"), "abort draft worktree change\n").unwrap();
+        client.until(|c| c.editor.text(&uri).contains("f.txt"));
+        let status = client.editor.text(&uri).to_owned();
+        let file_line = status.lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+        let stage = plain_code_actions(&mut client, &uri, file_line).into_iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == "status.stage")
+            .expect("stage second draft change")["command"]["arguments"][0].clone();
+        assert!(execute_plain_action(&mut client, stage)["error"].is_null());
+        let status = client.editor.text(&uri).to_owned();
+        let file_line = status.lines().position(|line| line.contains("f.txt")).unwrap() as u32;
+        let open_commit = plain_code_actions(&mut client, &uri, file_line).into_iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == "open.commit")
+            .expect("open second commit menu")["command"]["arguments"][0].clone();
+        assert!(execute_plain_action(&mut client, open_commit)["error"].is_null());
+        let menu = client.editor.text(&uri).to_owned();
+        let line = menu.lines().position(|line| line.contains("Commit")).unwrap_or(0) as u32;
+        let create = plain_code_actions(&mut client, &uri, line).into_iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == "menu.run-action")
+            .expect("start abortable commit")["command"]["arguments"][0].clone();
+        assert!(execute_plain_action(&mut client, create)["error"].is_null());
+        client.until(|c| c.editor.text(&uri).contains(&expected_path));
+        let initial = std::fs::read_to_string(&expected_path).unwrap();
+        let did_open = client.editor.open(&expected_uri, &initial);
+        client.send(did_open);
+        let did_change = client.editor.edit(&expected_uri, "Abort this commit draft\n");
+        client.send(did_change);
+        let actions = client.editor.code_action(
+            &expected_uri,
+            json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}}),
+        );
+        let id = client.send(actions);
+        let offered = client.until_response(id)["result"].as_array().unwrap().clone();
+        let abort = offered.iter().find(|action| action["title"] == "Abort commit")
+            .expect("attached draft offers Abort")["command"]["arguments"][0].clone();
+        assert_eq!(abort["command"], "common.cancel");
+        assert_eq!(abort["version"], 2);
+        let abort_head = repo.git(&["rev-parse", "HEAD"]);
+        let abort_tree = repo.git(&["write-tree"]);
+        let abort_status = repo.git(&["status", "--porcelain"]);
+        let mut foreign = abort.clone();
+        foreign["runId"] = json!("foreign-run");
+        assert!(execute_plain_action(&mut client, foreign)["error"].is_object());
+        let mut stale = abort.clone();
+        stale["version"] = json!(1);
+        assert!(execute_plain_action(&mut client, stale)["error"].is_object());
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), abort_head);
+        assert_eq!(repo.git(&["write-tree"]), abort_tree);
+        assert_eq!(repo.git(&["status", "--porcelain"]), abort_status);
+        let aborted = execute_plain_action(&mut client, abort);
+        assert!(aborted["error"].is_null(), "Abort failed: {aborted}");
+        assert_eq!(aborted["result"]["type"], "aborted");
+        client.until(|c| !c.editor.text(&uri).contains(&expected_path));
+        let actions = client.editor.code_action(
+            &expected_uri,
+            json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}}),
+        );
+        let id = client.send(actions);
+        assert!(client.until_response(id)["result"].as_array().unwrap().is_empty());
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), abort_head);
+        assert_eq!(repo.git(&["write-tree"]), abort_tree);
+        assert_eq!(repo.git(&["status", "--porcelain"]), abort_status);
     } else {
         client.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel","params":{"token":token}}));
         client.until(|c| {
@@ -959,6 +1021,8 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         let manual = manual.expect("Plain editor instructions use standard window/showMessage");
         assert!(manual["params"]["message"].as_str().unwrap().contains(&expected_path), "{case}");
         assert!(manual["params"]["message"].as_str().unwrap().contains("Open"), "{case}");
+        assert!(manual["params"]["message"].as_str().unwrap().contains("Confirm"), "{case}");
+        assert!(manual["params"]["message"].as_str().unwrap().contains("Abort"), "{case}");
         if succeeds == Some(false) { assert!(client.server.sent.iter().any(|m| m["method"] == "window/workDoneProgress/cancel"), "cancel after fallback: {case}"); }
     }
     assert!(

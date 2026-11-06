@@ -87,6 +87,20 @@ pub struct EditConfirmParams {
     pub source: EditConfirmSource,
 }
 
+/// Run-aware abort intent for an attached commit draft.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditAbortParams {
+    /// Semantic command; only common.cancel is accepted by this dispatcher.
+    pub command: String,
+    /// Server-issued run identity.
+    pub run_id: String,
+    /// Exact server-issued draft URI.
+    pub uri: String,
+    /// Exact open synchronized document version.
+    pub version: i32,
+}
+
 /// The two intentionally distinct commit confirmation sources.
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -131,6 +145,15 @@ pub enum EditConfirmation {
         uri: String,
         version: i32,
     },
+}
+
+/// Result of aborting a pending editor run, not a commit confirmation.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
+pub enum EditAbortResult {
+    /// The pending editor run was aborted.
+    #[serde(rename = "aborted")]
+    Aborted { run_id: String, uri: String, version: i32 },
 }
 
 impl Effect {

@@ -907,7 +907,7 @@ fn send_manual_edit_instructions(shared: &Shared, uri: &str, title: &str) {
         return;
     }
     let message = format!(
-        "magit-lsp: Open {uri} to edit {title}; save and close the file when done."
+        "magit-lsp: Open {uri} to edit {title}, then use the Confirm commit or Abort commit code action."
     );
     let _ = shared.sender.send(show_message(3, message));
 }
@@ -2372,6 +2372,33 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                     "Expected magit.command with one semantic command",
                 ));
             }
+            if params.arguments[0]["command"] == "common.cancel" {
+                let command: crate::protocol::EditAbortParams =
+                    from_params(params.arguments[0].clone())?;
+                if command.command != "common.cancel"
+                    || editor::registry().run_for_uri(&shared.draft_owner, &command.uri)?
+                        != command.run_id
+                {
+                    return Err(Error::new("Commit draft abort identity is stale or foreign"));
+                }
+                let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
+                if !documents
+                    .get(&command.uri)
+                    .is_some_and(|doc| !doc.repair && doc.version == command.version)
+                {
+                    return Err(Error::new("Wait for the exact synchronized document version"));
+                }
+                drop(documents);
+                if !editor::registry().resolve(&command.run_id, editor::Reply::Abort) {
+                    return Err(Error::new("Commit draft is no longer pending"));
+                }
+                return serde_json::to_value(crate::protocol::EditAbortResult::Aborted {
+                    run_id: command.run_id,
+                    uri: command.uri,
+                    version: command.version,
+                })
+                .map_err(|error| Error::new(error.to_string()));
+            }
             let command: EditConfirmParams = from_params(params.arguments[0].clone())?;
             if command.command != "common.confirm" {
                 return Err(Error::new("Only common.confirm is supported here"));
@@ -2934,10 +2961,16 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 "version": version,
                 "source": "synchronized",
             });
-            return serde_json::json!([{
-                "title": "Confirm commit",
-                "command": {"title": "Confirm commit", "command": "magit.command", "arguments": [args]},
-            }]);
+            let abort = serde_json::json!({
+                "command": "common.cancel",
+                "runId": run_id,
+                "uri": uri,
+                "version": version,
+            });
+            return serde_json::json!([
+                {"title":"Confirm commit","command":{"title":"Confirm commit","command":"magit.command","arguments":[args]}},
+                {"title":"Abort commit","command":{"title":"Abort commit","command":"magit.command","arguments":[abort]}}
+            ]);
         }
         return Value::Array(Vec::new());
     }
