@@ -695,7 +695,8 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                                              "worktree_before_after": [pre_confirm_worktree, post_confirm_worktree],
                                              "unstaged_diff_before_after": [pre_confirm_diff, git("diff", "--binary")]})
             confirmed_buffer = draft["buffer"]
-            run(["nvim", "--server", socket, "--remote-send", f":bwipeout {confirmed_buffer}<CR>"], timeout=8)
+            run(["nvim", "--server", socket, "--remote-send", f":bwipeout! {confirmed_buffer}<CR>"], timeout=8)
+            assert rpc(f"luaeval('vim.fn.bufexists({confirmed_buffer})')") == "0"
 
             (repo / "abort-draft.txt").write_text("abort fixture\n")
             git("add", "abort-draft.txt")
@@ -710,6 +711,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             assert abort_uri in abort_row["text"]
             run(["nvim", "--server", socket, "--remote-send", f":edit {abort_path}<CR>"], timeout=8)
             abort_draft = wait_state("ordinary edit attaches abort draft", lambda value: value["name"] == abort_path)
+            assert abort_draft["buffer"] != confirmed_buffer, (confirmed_buffer, abort_draft)
             assert "magit-lsp-plain-smoke" in abort_draft["clients"], abort_draft
             picker("manual-abort-action", "gg", "Abort commit")
             run(["nvim", "--server", socket, "--remote-send", f":buffer {status_buffer}<CR>"], timeout=8)
