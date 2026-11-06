@@ -274,9 +274,13 @@ be optional. Main-only layout retains the view stack. Optional initialize echo:
 | `textDocument.codeAction.disabledSupport` | Planned/unavailable actions may be returned disabled with a reason. | Omit unavailable actions; do not return a disabled object. |
 | `window.showDocument.support` | `visitFile` and commit navigation may use `showDocument`. | Report `Unavailable`; a `path:line` message is not equivalent support. |
 
-`docs/plain-support.md` is a planned generated artifact keyed by effective
-capabilities and unsupported reasons. If it is not yet generated, record that
-gap in R-PLAIN-PROMPT; do not check in a hand-generated artifact.
+[`docs/plain-support.md`](./plain-support.md) is generated from the command
+registry and `PlainCapabilities::plain_availability`; it lists each command's
+declared effects and availability under the minimal, edits and full capability
+profiles. Regenerate it with
+`UPDATE_PLAIN_SUPPORT=1 make test-rust FILTER="--test plain_support"`; the
+`plain_support` staleness test fails when the checked-in file drifts. Do not
+hand-edit it.
 
 ### Render synchronization and actions
 
