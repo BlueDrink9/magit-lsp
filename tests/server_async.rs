@@ -3183,6 +3183,126 @@ fn a_declared_native_pick_answers_the_staged_menu_prompt() {
 }
 
 #[test]
+fn cancelled_native_pick_on_the_mixed_rung_leaves_the_menu_and_repo_unchanged() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let head = tmp.git(&["rev-parse", "HEAD"]);
+    let index = tmp.git(&["ls-files", "--stage", "-z"]);
+    let worktree = read(&tmp.path().join("f.txt"));
+    let mut server = TestServer::spawn(&[]);
+    // Mixed rung: native pick declared, native prompts (confirm) undeclared.
+    server.initialize(rich_pick_capabilities());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let opened = invoke_rich(&mut server, 3, &status, "open.branch");
+    let menu = opened["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap()["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    assert_eq!(server.recv()["method"], json!("view/keymap"));
+    let version = menu_render["params"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+        "params":{"viewId":menu,"version":version}}));
+
+    server.send(json!({"jsonrpc":"2.0","id":4,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"=","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+    assert_eq!(server.response_with_id(4)["result"]["effects"], json!([]));
+    server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/key",
+        "params":{"viewId":menu,"version":version,"key":"u","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+
+    let pick = loop {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        if message["method"] == json!("view/pick") {
+            break message;
+        }
+    };
+    let params = &pick["params"];
+    assert_eq!(params["multi"], json!(false), "{pick}");
+    assert_eq!(params["allowFreeText"], json!(true), "{pick}");
+    let pick_id = params["pickId"].as_str().unwrap().to_owned();
+
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/pickRespond",
+        "params":{"pickId":pick_id,"cancelled":true,"selected":[]}}));
+
+    let mut key_response = None;
+    let mut respond_response = None;
+    for _ in 0..30 {
+        let message = server.recv();
+        server.notifications.push(message.clone());
+        match message["id"].as_i64() {
+            Some(5) => key_response = Some(message),
+            Some(6) => respond_response = Some(message),
+            _ => {}
+        }
+        if key_response.is_some() && respond_response.is_some() {
+            break;
+        }
+    }
+    let key_response = key_response.expect("the held view/key response returns");
+    let respond_response = respond_response.expect("view/pickRespond responds");
+    assert!(respond_response.get("error").is_none(), "{respond_response}");
+    for response in [&key_response, &respond_response] {
+        assert!(
+            !response["result"]["effects"]
+                .as_array()
+                .is_some_and(|effects| {
+                    effects
+                        .iter()
+                        .any(|effect| effect["type"] == json!("pushView"))
+                }),
+            "cancelling a pick must not push a view: {response}"
+        );
+    }
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| message["method"] != json!("view/prompt")),
+        "a declared pick must not emit a document prompt: {:?}",
+        server.notifications
+    );
+    assert!(
+        server
+            .notifications
+            .iter()
+            .all(|message| !message.to_string().contains("--set-upstream-to=main")),
+        "a cancelled option pick leaves the option unset: {:?}",
+        server.notifications
+    );
+
+    // The menu is still the top view and holds no pending prompt: a command
+    // on it runs instead of being refused.
+    let refreshed = invoke_rich(&mut server, 7, &menu, "common.refresh");
+    assert!(refreshed.get("error").is_none(), "{refreshed}");
+    let effects = refreshed["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects.iter().all(|effect| effect["type"] != json!("pushView")),
+        "{refreshed}"
+    );
+    assert!(
+        effects.iter().all(|effect| !effect["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("pending prompt"))),
+        "{refreshed}"
+    );
+
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+    assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+    assert!(!tmp.path().join(".git/index.lock").exists());
+}
+
+#[test]
 fn a_rich_client_without_a_pick_declaration_gets_the_document_prompt() {
     let (tmp, _repo) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])
