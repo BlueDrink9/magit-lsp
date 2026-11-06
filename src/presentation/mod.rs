@@ -47,6 +47,7 @@ pub fn negotiate(params: &Value) -> Result<Presentation, CapabilityError> {
         layout: declaration.layout,
         effects: declaration.effects,
         prompts: declaration.prompts,
+        pick: declaration.pick,
     }))
 }
 
@@ -70,6 +71,31 @@ pub struct MagitCapabilities {
     /// Supported prompt kinds.
     #[serde(deserialize_with = "deserialize_prompts")]
     pub prompts: BTreeSet<String>,
+    /// Optional native picker shapes the client can present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<PickCapabilities>,
+}
+
+/// Optional native picker shapes a rich client opts into.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct PickCapabilities {
+    /// The client can select more than one item.
+    pub multi: bool,
+    /// The client accepts an answer that is not an item id.
+    pub free_text: bool,
+    /// The client displays item descriptions.
+    pub description: bool,
+    /// The client displays item details.
+    pub detail: bool,
+    /// The client groups items under their group label.
+    pub group: bool,
+    /// The client honours pre-selected item ids.
+    pub preselection: bool,
+    /// The client can open the server-rendered fallback view.
+    pub fallback_view: bool,
+    /// The client can present at most this many items; `None` means no limit.
+    pub max_items: Option<usize>,
 }
 
 fn deserialize_v1<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
@@ -145,6 +171,8 @@ pub struct RichCapabilities {
     pub effects: BTreeSet<String>,
     /// Optional prompt kinds the client can handle.
     pub prompts: BTreeSet<String>,
+    /// Optional native picker shapes the client declared.
+    pub pick: Option<PickCapabilities>,
 }
 
 impl RichCapabilities {
@@ -165,6 +193,42 @@ impl RichCapabilities {
         };
         self.supports_prompt(kind)
             && (prompt.secret != Some(true) || self.supports_prompt("secret"))
+    }
+
+    /// Whether the client's declared pick shapes can present this request.
+    /// A missing declaration, or any requested shape it does not opt into,
+    /// means the client must use the document fallback instead.
+    pub fn allows_pick(&self, pick: &crate::protocol::ViewPickParams) -> bool {
+        let Some(caps) = self.pick.as_ref() else {
+            return false;
+        };
+        if pick.multi && !caps.multi {
+            return false;
+        }
+        if pick.allow_free_text && !caps.free_text {
+            return false;
+        }
+        let needs_item = pick.items.iter().any(|item| {
+            (item.description.is_some() && !caps.description)
+                || (item.detail.is_some() && !caps.detail)
+                || (item.group.is_some() && !caps.group)
+        });
+        if needs_item {
+            return false;
+        }
+        if !pick.preselection.is_empty() && !caps.preselection {
+            return false;
+        }
+        if pick.fallback_view.is_some() && !caps.fallback_view {
+            return false;
+        }
+        if caps
+            .max_items
+            .is_some_and(|max| pick.items.len() > max)
+        {
+            return false;
+        }
+        true
     }
 
     /// Fall back to the mandatory main placement without changing view identity.

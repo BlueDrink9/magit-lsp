@@ -2,7 +2,7 @@ use lsp_server::Message;
 use magit_lsp::presentation::prompt::SECRET_UNAVAILABLE;
 use magit_lsp::presentation::{
     negotiate, CustomRender, MagitCapabilities, PlainCapabilities, Presentation, PromptSupport,
-    Support, Ui,
+    RichCapabilities, Support, Ui,
 };
 use magit_lsp::protocol::*;
 use serde_json::{json, Value};
@@ -331,6 +331,186 @@ fn valid_rich_block_selects_rich_with_optional_features_separate() {
     assert!(!caps.supports_effect("editDocument"));
     assert!(caps.supports_prompt("confirm"));
     assert!(!caps.supports_prompt("choice"));
+}
+
+fn pick_block() -> Value {
+    let mut block = rich_block();
+    block["pick"] = json!({
+        "multi": true, "freeText": true, "description": true, "detail": true,
+        "group": true, "preselection": true, "fallbackView": true, "maxItems": 3
+    });
+    block
+}
+
+fn pick_params() -> ViewPickParams {
+    ViewPickParams {
+        pick_id: "p".into(),
+        purpose: "revision".into(),
+        prompt: "Select a revision".into(),
+        multi: false,
+        allow_free_text: false,
+        preselection: Vec::new(),
+        items: vec![PickItem {
+            id: "a".into(),
+            label: "A".into(),
+            description: None,
+            detail: None,
+            group: None,
+        }],
+        fallback_view: None,
+    }
+}
+
+fn declared_pick(pick: Value) -> RichCapabilities {
+    let mut block = rich_block();
+    block["pick"] = pick;
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(block))).unwrap() else {
+        panic!("expected rich")
+    };
+    caps
+}
+
+#[test]
+fn absent_pick_declaration_negotiates_none() {
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(rich_block()))).unwrap() else {
+        panic!("expected rich")
+    };
+    assert!(caps.pick.is_none());
+    let declaration: MagitCapabilities = serde_json::from_value(rich_block()).unwrap();
+    assert!(declaration.pick.is_none());
+}
+
+#[test]
+fn valid_and_empty_pick_declarations_parse() {
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(pick_block()))).unwrap() else {
+        panic!("expected rich")
+    };
+    let pick = caps.pick.expect("declared pick");
+    assert!(pick.multi && pick.free_text && pick.description && pick.detail);
+    assert!(pick.group && pick.preselection && pick.fallback_view);
+    assert_eq!(pick.max_items, Some(3));
+
+    let empty = declared_pick(json!({})).pick.expect("declared pick");
+    assert!(!empty.multi && !empty.free_text && !empty.description && !empty.detail);
+    assert!(!empty.group && !empty.preselection && !empty.fallback_view);
+    assert_eq!(empty.max_items, None);
+}
+
+#[test]
+fn pick_declaration_rejects_unknown_keys_and_wrong_types() {
+    for pick in [
+        json!({"unknown": true}),
+        json!({"multi": "yes"}),
+        json!({"maxItems": -1}),
+        json!({"maxItems": "3"}),
+    ] {
+        let mut block = rich_block();
+        block["pick"] = pick.clone();
+        assert!(negotiate(&initialize(Some(block))).is_err(), "{pick}");
+    }
+}
+
+#[test]
+fn pick_payloads_serialize_camel_case() {
+    let mut params = pick_params();
+    params.allow_free_text = true;
+    params.preselection = vec!["a".into()];
+    params.items[0].description = Some("short".into());
+    params.items[0].detail = Some("long".into());
+    params.items[0].group = Some("heads".into());
+    params.fallback_view = Some("magit://pick/p".into());
+    let value = serde_json::to_value(&params).unwrap();
+    assert_eq!(value["pickId"], "p");
+    assert_eq!(value["allowFreeText"], true);
+    assert_eq!(value["fallbackView"], "magit://pick/p");
+    assert_eq!(value["preselection"][0], "a");
+    assert_eq!(value["items"][0]["description"], "short");
+    assert_eq!(value["items"][0]["detail"], "long");
+    assert_eq!(value["items"][0]["group"], "heads");
+
+    let bare = PickItem {
+        id: "b".into(),
+        label: "B".into(),
+        description: None,
+        detail: None,
+        group: None,
+    };
+    let value = serde_json::to_value(&bare).unwrap();
+    assert_eq!(value["label"], "B");
+    assert!(value.get("description").is_none());
+
+    let respond = ViewPickRespondParams {
+        pick_id: "p".into(),
+        cancelled: false,
+        selected: vec!["a".into()],
+        free_text: Some("HEAD~1".into()),
+    };
+    let value = serde_json::to_value(&respond).unwrap();
+    assert_eq!(value["pickId"], "p");
+    assert_eq!(value["freeText"], "HEAD~1");
+    assert_eq!(value["selected"][0], "a");
+}
+
+#[test]
+fn allows_pick_rejects_each_undeclared_shape() {
+    let base = pick_params();
+    assert!(declared_pick(json!({})).allows_pick(&base));
+    let Presentation::Rich(no_pick) = negotiate(&initialize(Some(rich_block()))).unwrap() else {
+        panic!("expected rich")
+    };
+    assert!(!no_pick.allows_pick(&base));
+
+    let mut multi = base.clone();
+    multi.multi = true;
+    assert!(!declared_pick(json!({})).allows_pick(&multi));
+    assert!(declared_pick(json!({"multi": true})).allows_pick(&multi));
+
+    let mut free_text = base.clone();
+    free_text.allow_free_text = true;
+    assert!(!declared_pick(json!({})).allows_pick(&free_text));
+    assert!(declared_pick(json!({"freeText": true})).allows_pick(&free_text));
+
+    for (field, flag) in [
+        ("description", "description"),
+        ("detail", "detail"),
+        ("group", "group"),
+    ] {
+        let mut shaped = base.clone();
+        let item = &mut shaped.items[0];
+        match field {
+            "description" => item.description = Some("short".into()),
+            "detail" => item.detail = Some("long".into()),
+            _ => item.group = Some("heads".into()),
+        }
+        assert!(!declared_pick(json!({})).allows_pick(&shaped), "{field}");
+        let mut declared = serde_json::Map::new();
+        declared.insert(flag.into(), json!(true));
+        assert!(
+            declared_pick(Value::Object(declared)).allows_pick(&shaped),
+            "{field}"
+        );
+    }
+
+    let mut preselected = base.clone();
+    preselected.preselection = vec!["a".into()];
+    assert!(!declared_pick(json!({})).allows_pick(&preselected));
+    assert!(declared_pick(json!({"preselection": true})).allows_pick(&preselected));
+
+    let mut fallback = base.clone();
+    fallback.fallback_view = Some("magit://pick/p".into());
+    assert!(!declared_pick(json!({})).allows_pick(&fallback));
+    assert!(declared_pick(json!({"fallbackView": true})).allows_pick(&fallback));
+
+    let mut many = base.clone();
+    many.items.push(PickItem {
+        id: "b".into(),
+        label: "B".into(),
+        description: None,
+        detail: None,
+        group: None,
+    });
+    assert!(!declared_pick(json!({"maxItems": 1})).allows_pick(&many));
+    assert!(declared_pick(json!({"maxItems": 2})).allows_pick(&many));
 }
 
 #[test]

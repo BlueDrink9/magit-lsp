@@ -511,3 +511,63 @@ impl lsp_types::request::Request for ViewPromptRespondRequest {
     type Result = Value;
     const METHOD: &'static str = VIEW_PROMPT_RESPOND;
 }
+
+/// Method name of the server's pick notification.
+pub const VIEW_PICK: &str = "view/pick";
+/// Method name of the client's pick answer request.
+pub const VIEW_PICK_RESPOND: &str = "view/pickRespond";
+
+/// One selectable item of a `view/pick` request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickItem {
+    /// The id the server receives back; the client displays `label`.
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+/// `view/pick`: a typed selection request the server is waiting on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewPickParams {
+    /// The pick this answer refers back to.
+    pub pick_id: String,
+    /// Why the pick exists, used by clients to choose a rung.
+    pub purpose: String,
+    /// The question, shown prominently.
+    pub prompt: String,
+    /// Whether more than one item may be selected.
+    pub multi: bool,
+    /// Whether the user may answer with text that is not an item id.
+    pub allow_free_text: bool,
+    /// Item ids the client should pre-select.
+    pub preselection: Vec<String>,
+    pub items: Vec<PickItem>,
+    /// URI of a server-rendered view that offers the same choice when the
+    /// native picker cannot present the request shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_view: Option<String>,
+}
+
+/// `view/pickRespond`: the client's answer to a pick notification.
+pub enum ViewPickRespondRequest {}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewPickRespondParams {
+    pub pick_id: String,
+    pub cancelled: bool,
+    pub selected: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_text: Option<String>,
+}
+impl lsp_types::request::Request for ViewPickRespondRequest {
+    type Params = ViewPickRespondParams;
+    type Result = Value;
+    const METHOD: &'static str = VIEW_PICK_RESPOND;
+}

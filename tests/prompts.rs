@@ -840,6 +840,7 @@ fn a_client_with_no_prompt_declarations_stages_the_author_prompt_as_a_document()
         layout: BTreeSet::new(),
         effects: BTreeSet::new(),
         prompts: BTreeSet::new(),
+        pick: None,
     }));
 
     let request = stage_author_prompt(&mut test, &menu.id);

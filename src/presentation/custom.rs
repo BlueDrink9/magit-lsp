@@ -167,6 +167,7 @@ mod tests {
                 .collect::<BTreeSet<_>>(),
             effects: effects.iter().map(|value| (*value).to_owned()).collect(),
             prompts: prompts.iter().map(|value| (*value).to_owned()).collect(),
+            pick: None,
         }
     }
 
