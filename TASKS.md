@@ -65,7 +65,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T008.8a — Add the Lua native pick transport.** `view/pick` → `vim.ui.select`, single-select guard, `view/pickRespond`, `maxItems`, shared pick vectors. T008 clauses 3, 9.
   - Done: `d4cfc43`. `view/pick` drives `vim.ui.select` and answers `view/pickRespond`; undeclared multi/free-text/over-100 shapes warn once and cancel; `pick.maxItems = 100` is declared and shared pick vectors cover selection, cancellation and a two-item single select.
   - Verified: `make test-file FILE=tests/test_pick.lua && make test-lua` @ `d4cfc43` → ok: lua.
-- [ ] **T008.8b — Add the VSCode native pick transport.** `showQuickPick` mapping (multi, description/detail, preselection), handler, shared pick vectors. T008 clause 3.
+- [x] **T008.8b — Add the VSCode native pick transport.** `showQuickPick` mapping (multi, description/detail, preselection), handler, shared pick vectors. T008 clause 3.
+  - Done: `6fcf2c5`. `view/pick` drives `showQuickPick` and answers `view/pickRespond` with item ids; undeclared free-text and grouped shapes warn and cancel; shared pick vectors, preselection/description/detail pass-through and both integration responses are covered.
+  - Verified: `make vscode-test` @ `6fcf2c5` → ok: build, vscode, keybindings.
 - [ ] **T008.9 — Implement revision pick semantics.** HEAD-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
 - [ ] **T008.9a — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9 pick. T008 clause 2.
 - [ ] **T008.9b — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9 pick. T008 clause 2.
