@@ -8,6 +8,7 @@
 
 use crate::protocol::{PromptKind, ViewPromptParams};
 use crate::tree::{LineNode, Node, NodeKind, Tree};
+use crate::view::{Ctx, Scope, View, ViewKind};
 use std::collections::BTreeSet;
 
 /// Maximum byte length of one document-prompt field.
@@ -185,6 +186,11 @@ impl PromptDocument {
     /// The prompt id shared by every stable node id of this document.
     pub fn prompt_id(&self) -> &str {
         &self.prompt_id
+    }
+
+    /// The human-readable prompt title.
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     /// The prompt kind this document renders.
@@ -576,6 +582,49 @@ impl PromptDocument {
         });
     }
 
+}
+
+/// One prompt rendered as server-owned document text.
+///
+/// The view owns its [`PromptDocument`] and renders it verbatim; it never parses
+/// the rendered text back into state.
+pub struct PromptView {
+    document: PromptDocument,
+}
+
+impl PromptView {
+    /// Create a view around a validated prompt document.
+    pub fn new(document: PromptDocument) -> Self {
+        Self { document }
+    }
+
+    /// The document this view renders.
+    pub fn document(&self) -> &PromptDocument {
+        &self.document
+    }
+
+    /// The document this view renders, for reconciliation and field updates.
+    pub fn document_mut(&mut self) -> &mut PromptDocument {
+        &mut self.document
+    }
+}
+
+impl View for PromptView {
+    fn kind(&self) -> ViewKind {
+        ViewKind::Prompt
+    }
+
+    fn title(&self) -> String {
+        self.document.title().to_string()
+    }
+
+    fn scope(&self) -> Scope {
+        Scope::new("prompt")
+    }
+
+    fn render(&mut self, ctx: &Ctx<'_>) -> Tree {
+        self.document.render(ctx.viewport.cols as usize)
+    }
 }
 
 fn validate_field(label: &str, value: &str) -> Result<(), String> {

@@ -19,6 +19,8 @@ pub enum ViewKind {
     Log,
     /// The read-only log of finished Git invocations.
     ProcessLog,
+    /// A prompt shown as server-owned document text instead of a native widget.
+    Prompt,
     /// A menu (Magit transient), stored by its wire name, e.g. `menu.commit`.
     Menu(String),
     /// A known-but-unimplemented or future kind, kept verbatim on the wire.
@@ -32,6 +34,7 @@ impl ViewKind {
             ViewKind::Status => "status",
             ViewKind::Log => "log",
             ViewKind::ProcessLog => "process-log",
+            ViewKind::Prompt => "prompt",
             ViewKind::Menu(name) => name,
             ViewKind::Other(name) => name,
         }
@@ -70,6 +73,7 @@ impl<'de> Deserialize<'de> for ViewKind {
             "status" => ViewKind::Status,
             "log" => ViewKind::Log,
             "process-log" => ViewKind::ProcessLog,
+            "prompt" => ViewKind::Prompt,
             other if other.starts_with("menu.") => ViewKind::Menu(other.to_string()),
             _ => ViewKind::Other(name),
         })

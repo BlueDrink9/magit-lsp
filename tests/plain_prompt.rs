@@ -1,8 +1,9 @@
 //! Document prompts: tracked one-line fields, stable row ids and exact layout.
 
-use magit_lsp::presentation::prompt::{PromptDocument, MAX_FIELD_BYTES};
+use magit_lsp::presentation::prompt::{PromptDocument, PromptView, MAX_FIELD_BYTES};
 use magit_lsp::protocol::ViewPromptParams;
 use magit_lsp::tree::{NodeKind, Tree};
+use magit_lsp::view::{Ctx, Scope, View, ViewKind, ViewMode, Viewport};
 use serde_json::{json, Value};
 
 fn params(value: Value) -> ViewPromptParams {
@@ -449,4 +450,50 @@ fn reconciled_field_values_survive_later_renders() {
     assert_eq!(document.render(80).lines[2], "v3");
     assert_eq!(document.render(40).lines[2], "v3");
     assert_eq!(document.field_text("prompt:rev:field"), Some("v3"));
+}
+
+#[test]
+fn prompt_view_kind_is_named_on_the_wire() {
+    assert_eq!(ViewKind::Prompt.as_str(), "prompt");
+    assert_eq!(ViewKind::Prompt.to_string(), "prompt");
+    let serialized = serde_json::to_string(&ViewKind::Prompt).expect("serialized");
+    assert_eq!(serialized, "\"prompt\"");
+    let deserialized: ViewKind = serde_json::from_str("\"prompt\"").expect("deserialized");
+    assert_eq!(deserialized, ViewKind::Prompt);
+}
+
+#[test]
+fn prompt_view_renders_its_document() {
+    let document = text_document();
+    let expected = document.render(80);
+    let mut view = PromptView::new(document);
+    let viewport = Viewport { cols: 80, rows: 24 };
+    let ctx = Ctx {
+        viewport,
+        pending: &[],
+    };
+
+    assert_eq!(view.kind(), ViewKind::Prompt);
+    assert_eq!(view.title(), "Revision");
+    assert_eq!(view.scope(), Scope::new("prompt"));
+    assert_eq!(view.mode(), ViewMode::Interactive);
+    assert_eq!(view.render(&ctx), expected);
+}
+
+#[test]
+fn prompt_view_document_mut_adopts_reconciled_text() {
+    let mut view = PromptView::new(text_document());
+    let reconcile = view
+        .document_mut()
+        .reconcile("Revision\n\nv2.0\nSubmit\nCancel", 80)
+        .expect("document accepted");
+    assert!(!reconcile.repaired);
+
+    let ctx = Ctx {
+        viewport: Viewport { cols: 80, rows: 24 },
+        pending: &[],
+    };
+    let tree = view.render(&ctx);
+    assert_eq!(tree.lines[2], "v2.0");
+    assert_eq!(view.document().field_text("prompt:rev:field"), Some("v2.0"));
 }

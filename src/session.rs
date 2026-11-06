@@ -2536,6 +2536,7 @@ fn create_view(
             )?))
         }
         ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
+        ViewKind::Prompt => Err(Error::new("The `prompt` view is not client-openable.")),
         ViewKind::Menu(name) => {
             let name = name.trim_start_matches("menu.");
             let mut menu = crate::menus::by_name(name, keymaps)
