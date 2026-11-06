@@ -1,9 +1,10 @@
 # magit-lsp — Roadmap
 
-Last review: 9df2075 (bounded docs-only preservation audit; not runtime/native acceptance)
+Last review: ebf9ed1 (Phase 2 end gate; runtime review of 2e29535..ca67ce3 plus review fixes, full `make test` green at this sha)
+Phase 2 end gate: T007 is complete, so this is a named phase end. `git diff --shortstat 2e29535..ca67ce3` covers Plain capability/action gates, the echo watchdog, commit-editor delivery, registry-backed draft rows, draft Confirm/Abort, shared editor models and the maintained native runner: 38 paths, 3075 insertions, 1889 deletions, including wire/protocol and lifecycle changes. Serial gate results at `5da5d86`: `make test` ok (build, rust, lua, vscode, keybindings; no orphan server), `make hygiene` exit 0 with `cargo machete`, `knip` and `luacheck` absent on this host so those linters did not run, `make ui-tour` ok. `make ui-test` reports 44 PASS / 5 FAIL; the same five scenarios (`common-navigation`, `hunk-body-fold`, `log-select`, `log-view`, `process-log`) fail identically in a clean extraction of reviewed baseline `2e29535`, so they are pre-existing UI coverage gaps, not Phase 2 regressions, and are owned by a Bugfix entry. The gate review filed one P1 (Plain draft-sync failures leaked rich `view/effects`) and one P2 (undocumented deadlock-preventing refresh thread); both are fixed and ticked, no P0 was raised, and review fixes do not re-trigger a review. `make test` is green again at `ebf9ed1`. Phase 2 is complete and Phase 3 is not started. Completed-ticket compression is left to the concurrent documentation workstream, which owns TASKS.md history reduction.
 Documentation cleanup gate: substantial reference relocation and history reduction warrant a bounded preservation review. Runtime implementation changes belong to a concurrent workstream; this documentation gate uses focused documentation checks, not a redundant runtime/native gate.
 
-Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. `Source-only` labels mark provenance, not implementation commits. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only; findings have owners/reasons as recorded in the hygiene allowlist. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk. Documentation reconciliation does not close Phase 2; T007 remains open.
+Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. `Source-only` labels mark provenance, not implementation commits. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only; findings have owners/reasons as recorded in the hygiene allowlist. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk. T007 is complete through its audited children; the Phase 2 end gate is in progress and Phase 3 has not started.
 
 ## Contents
 
@@ -300,9 +301,14 @@ See [Testing strategy](docs/TESTING.md#8-testing-strategy).
 
 See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
+---
+
+## Bugfix
+
 - [x] **Phase 2 gate — Declare a rich client in editor-bridge commit tests.** `make test` at `eb8bb1e` fails 18/27 `editor_bridge` tests (`log build/test-logs/rust.zuIHJG`) because they initialize with `json!({})` and still expect the `view/effects` `editDocument` frame. Plain clients now intentionally get `window/showMessage` with the exact `COMMIT_EDITMSG` URI plus a pending draft row (T007.4), and Plain delivery is already enforced by `plain_commit_editor_manual_instructions_cancel_pending_git_run`; the editor-bridge suite owns the rich in-place editor contract instead. Give those 18 tests a rich `experimental.magit` declaration (keys, modifiers, layout, `editDocument` effect, prompts) and keep every sync/cancel/checkpoint assertion unchanged. Done: 5da5d86. Verified: make test-rust FILTER="--test editor_bridge" (27 passed).
 
----
+- [ ] **Repair the five failing UI scenarios (`vim` profile and `process-log`).** `make ui-test` at `5da5d86` reports 44 PASS / 5 FAIL: `common-navigation` and `hunk-body-fold` (vim profile assertions about staged state and hunk bodies), `log-select` and `log-view` (wait for `Log` times out), `process-log` (expects `Staged changes (1)`, screen shows none). A clean extraction of reviewed baseline `2e29535` under `make ui-test` fails the same five scenarios with the same expectations, so this predates the Phase 2 work. Establish whether the `vim` profile setup or the shared fixtures are wrong (a fixture that silently builds an empty or unstageable repository would explain all five), then fix the cause rather than the expectations, or delete a scenario that no longer matches the server-owned contract.
+
 
 ## Review
 
