@@ -137,6 +137,49 @@ pub fn required_effects(command: &str) -> &'static [EffectKind] {
         .unwrap_or(&[])
 }
 
+/// The declaration kind an optional client effect requires, or `None` for
+/// effects that clients always support.
+pub fn effect_kind(effect: &crate::protocol::Effect) -> Option<EffectKind> {
+    match effect {
+        Effect::VisitFile { .. } => Some(EffectKind::VisitFile),
+        Effect::EditDocument { .. } => Some(EffectKind::EditDocument),
+        Effect::Clipboard { .. } => Some(EffectKind::Clipboard),
+        _ => None,
+    }
+}
+
+/// Enforce that every optional effect a command emits was declared by it.
+///
+/// Debug builds panic on an undeclared emission; release builds replace it
+/// with a readable warning. Effects added by delivery after this point are not
+/// subject to the check.
+pub fn enforce_effects(command_id: &str, effects: &mut [crate::protocol::Effect]) {
+    let declared = required_effects(command_id);
+    for effect in effects {
+        let Some(kind) = effect_kind(effect) else {
+            continue;
+        };
+        if declared.contains(&kind) {
+            continue;
+        }
+        #[cfg(debug_assertions)]
+        panic!(
+            "undeclared optional effect {} emitted by {command_id}",
+            kind.name()
+        );
+        #[cfg(not(debug_assertions))]
+        {
+            *effect = Effect::message(
+                MessageLevel::Warn,
+                format!(
+                    "Internal error: {command_id} emitted an undeclared {} effect",
+                    kind.name()
+                ),
+            );
+        }
+    }
+}
+
 impl Command {
     /// Whether this command applies to a view scope, including command-specific exceptions.
     pub fn applies_to(&self, view_scope: &str) -> bool {

@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use magit_lsp::commands::{registry, Command, CommandStatus, EffectKind, Scope};
 use magit_lsp::config::Profile;
-use magit_lsp::protocol::{Cursor, Effect, MessageLevel};
+use magit_lsp::protocol::{Cursor, EditDocumentMode, Effect, MessageLevel};
 
 /// Every command id named in TASKS.md §5.1–§5.5.
 const EXPECTED: &[&str] = &[
@@ -544,6 +544,50 @@ fn copy_value_emits_registered_clipboard_effect() {
         magit_lsp::commands::required_effects("common.copy-value"),
         [EffectKind::Clipboard].as_slice()
     );
+}
+
+#[test]
+fn effect_kinds_cover_optional_effects() {
+    use magit_lsp::commands::effect_kind;
+
+    assert_eq!(
+        effect_kind(&Effect::VisitFile {
+            uri: "file:///x".into(),
+            line: 0,
+            column: 0,
+        }),
+        Some(EffectKind::VisitFile)
+    );
+    assert_eq!(
+        effect_kind(&Effect::EditDocument {
+            run_id: "r".into(),
+            uri: "file:///x".into(),
+            text: String::new(),
+            version: 1,
+            kind: "commit".into(),
+            title: "t".into(),
+            mode: EditDocumentMode::RealFile,
+            scope: String::new(),
+        }),
+        Some(EffectKind::EditDocument)
+    );
+    assert_eq!(
+        effect_kind(&Effect::Clipboard { text: "x".into() }),
+        Some(EffectKind::Clipboard)
+    );
+    assert_eq!(
+        effect_kind(&Effect::message(MessageLevel::Warn, "w")),
+        None
+    );
+    assert_eq!(effect_kind(&Effect::PopView { view_id: "v".into() }), None);
+}
+
+#[test]
+#[should_panic(expected = "undeclared optional effect")]
+fn undeclared_effect_is_rejected() {
+    magit_lsp::commands::enforce_effects("common.cancel", &mut [Effect::Clipboard {
+        text: "x".into(),
+    }]);
 }
 
 /// A section header has no file location, so visiting it must explain instead

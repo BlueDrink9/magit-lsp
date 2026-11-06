@@ -2862,9 +2862,10 @@ impl Session {
         view_id: &str,
         command_id: &str,
         cursor: Option<Cursor>,
-        effects: Vec<Effect>,
+        mut effects: Vec<Effect>,
         mut outcome: commands::CommandOutcome,
     ) -> Result<InvokeResult> {
+        commands::enforce_effects(command_id, &mut effects);
         if let Some((request, action)) = outcome.prompt.take() {
             if let Some(result) = self.unsupported_prompt(&request) {
                 return Ok(result);

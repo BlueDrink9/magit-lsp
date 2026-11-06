@@ -69,6 +69,34 @@ fn custom_delivery_reads_negotiated_state_and_secret_requires_text_too() {
 }
 
 #[test]
+fn runtime_unsupported_effect_is_a_readable_message() {
+    let Presentation::Rich(caps) = negotiate(&initialize(Some(json!({
+        "v": 1,
+        "keys": "dynamic",
+        "modifiers": "full",
+        "layout": ["main"],
+        "effects": ["visitFile"],
+        "prompts": ["confirm"]
+    }))))
+    .unwrap() else {
+        panic!()
+    };
+    let ui = CustomRender::negotiated(move || PromptSupport::Rich(caps.clone()));
+    let prepared = ui.prepare_effects(ViewEffectsParams {
+        effects: vec![Effect::Clipboard {
+            text: "copied".into(),
+        }],
+    });
+    assert_eq!(prepared.effects.len(), 1);
+    let Effect::Message { level, text, .. } = &prepared.effects[0] else {
+        panic!("expected a message effect, got {:?}", prepared.effects[0]);
+    };
+    assert_eq!(*level, MessageLevel::Warn);
+    assert_eq!(text, "Client does not support clipboard");
+    assert!(!text.contains('{'), "raw JSON leaked: {text}");
+}
+
+#[test]
 fn plain_denies_native_prompts_while_undeclared_and_declared_rich_are_unchanged() {
     let prompt = |kind: &str| -> ViewPromptParams {
         serde_json::from_value(json!({
