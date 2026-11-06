@@ -1974,6 +1974,121 @@ fn a_menu_option_prompt_round_trips_over_stdio() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+/// A Plain client gets the prompt as a document view, never over `view/prompt`.
+#[test]
+fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .build();
+    let repo = repo_param(tmp.path());
+    let mut server = TestServer::spawn(&[]);
+    server.initialize(json!({}));
+
+    let view_id = open_view(&mut server, 2, &repo);
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "view/invoke",
+        "params": {"viewId": view_id, "command": "open.commit"},
+    }));
+    let opened = server.response_with_id(3);
+    let menu_id = opened["result"]["effects"]
+        .as_array()
+        .expect("effects")
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .and_then(|effect| effect["descriptor"]["id"].as_str())
+        .expect("the pushed menu")
+        .to_string();
+    let menu_render = server.recv();
+    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
+    let menu_keymap = server.recv();
+    assert_eq!(menu_keymap["method"], json!("view/keymap"), "{menu_keymap}");
+
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "view/key",
+        "params": {
+            "viewId": menu_id,
+            "version": 1,
+            "key": "=",
+            "editorMode": "normal",
+            "cursor": {"line": 0, "column": 0},
+        },
+    }));
+    let prefix = server.response_with_id(4);
+    assert_eq!(prefix["result"]["effects"], json!([]), "{prefix}");
+
+    // A Plain client declares no prompts: the answer must be a pushed document,
+    // and the key request must not block waiting for a native answer.
+    server.send(json!({
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "view/key",
+        "params": {
+            "viewId": menu_id,
+            "version": 1,
+            "key": "A",
+            "editorMode": "normal",
+            "cursor": {"line": 0, "column": 0},
+        },
+    }));
+    let answer = server.response_with_id(5);
+    let descriptor = answer["result"]["effects"]
+        .as_array()
+        .expect("effects")
+        .iter()
+        .find(|effect| effect["type"] == json!("pushView"))
+        .unwrap_or_else(|| panic!("the prompt view: {answer}"))["descriptor"]
+        .clone();
+    assert_eq!(descriptor["kind"], json!("prompt"), "{answer}");
+    let prompt_view = descriptor["id"].as_str().expect("prompt view id").to_string();
+    assert_eq!(
+        descriptor["uri"],
+        json!(format!("magit://prompt/{prompt_view}")),
+        "{answer}"
+    );
+
+    let mut observed = server.notifications.clone();
+    let prompt_render = loop {
+        let message = server.recv();
+        if message["method"] == json!("view/keymap") {
+            observed.push(message);
+            continue;
+        }
+        break message;
+    };
+    assert_eq!(prompt_render["method"], json!("view/render"), "{prompt_render}");
+    assert_eq!(
+        prompt_render["params"]["viewId"],
+        json!(prompt_view),
+        "{prompt_render}"
+    );
+
+    // The pending document prompt refuses the next command without answering it.
+    let refused = invoke_rich(&mut server, 6, &view_id, "status.stage-all");
+    assert!(
+        refused["result"]["effects"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Answer or cancel the pending prompt")),
+        "{refused}"
+    );
+
+    observed.extend(server.notifications.clone());
+    assert!(
+        !observed
+            .iter()
+            .any(|message| message["method"] == json!("view/prompt")),
+        "a Plain client must never receive a native prompt: {observed:?}"
+    );
+
+    shutdown_and_exit(&mut server);
+    let status = server.finish(Duration::from_secs(10));
+    assert!(status.success(), "server exited: {status:?}");
+}
+
 #[test]
 fn a_config_reload_repushes_the_view_keymap() {
     let (tmp, _repo) = RepoFixture::new()
