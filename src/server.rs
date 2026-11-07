@@ -2,8 +2,12 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
-use crate::presentation::plain::{ApplyEdit, DocumentFormat, PlainDocument};
-use crate::presentation::{negotiate, CustomRender, Presentation, PromptSupport, Ui};
+use crate::presentation::plain::{
+    whole_document_edit, ApplyEdit, DocumentFormat, PlainDocument,
+};
+use crate::presentation::{
+    negotiate, CustomRender, PlainCapabilities, Presentation, PromptSupport, Ui,
+};
 use crate::protocol::*;
 use crate::runner::{self, CancelHandle};
 use crate::semantic_tokens;
@@ -878,25 +882,31 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
 /// become `window/showMessage` and an edit document is re-presented through
 /// `window/showDocument` (or manual instructions) as declared.
 fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
-    let show_document = match shared
-        .client
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .presentation
-        .as_ref()
-    {
-        Some(Presentation::Plain(capabilities)) => capabilities.show_document,
-        _ => false,
+    let (capabilities, encoding) = {
+        let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
+        let capabilities = match client.presentation.as_ref() {
+            Some(Presentation::Plain(capabilities)) => capabilities.clone(),
+            _ => PlainCapabilities::default(),
+        };
+        (capabilities, client.encoding)
     };
     for effect in effects {
         match effect {
-            Effect::EditDocument { run_id, uri, title, .. } => {
+            Effect::EditDocument {
+                run_id,
+                uri,
+                text,
+                title,
+                ..
+            } => {
                 send_plain_edit_document(
                     shared.clone(),
                     run_id.clone(),
                     uri,
+                    text,
                     title,
-                    show_document,
+                    capabilities.clone(),
+                    encoding,
                 );
                 let repo = shared
                     .progress
@@ -939,17 +949,45 @@ fn send_plain_edit_document(
     shared: Shared,
     run_id: String,
     uri: String,
+    text: String,
     title: String,
-    show_document: bool,
+    capabilities: PlainCapabilities,
+    encoding: Encoding,
 ) {
     if shared.closing.load(Ordering::SeqCst) {
         editor::registry().resolve(&run_id, editor::Reply::Abort);
         return;
     }
-    if !show_document {
+    if !capabilities.show_document {
         send_manual_edit_instructions(&shared, &uri, &title);
         return;
     }
+    // An already-open buffer is replaced with the new template by a versioned
+    // whole-document edit. The version comes from the document store so the
+    // client can reject the edit if its buffer has moved independently.
+    let apply = if capabilities.apply_edit && capabilities.document_changes {
+        shared
+            .documents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&uri)
+            .map(|document| {
+                whole_document_edit(
+                    &uri,
+                    document.version,
+                    &document.text,
+                    &text,
+                    encoding,
+                )
+            })
+    } else {
+        None
+    }
+    .and_then(|edit| {
+        shared
+            .register_outbound("workspace/applyEdit", serde_json::json!({ "edit": edit }))
+            .ok()
+    });
     let Ok((pending, receiver)) = shared.register_outbound(
         "window/showDocument",
         serde_json::json!({"uri":uri,"external":false,"takeFocus":true}),
@@ -963,6 +1001,12 @@ fn send_plain_edit_document(
         .runtime
         .clone()
         .expect("editor bridge runs inside the server runtime");
+    if let Some((apply_pending, apply_receiver)) = apply {
+        let shared = shared.clone();
+        runtime.spawn(async move {
+            let _ = shared.await_outbound(apply_pending, apply_receiver).await;
+        });
+    }
     runtime.spawn(async move {
         let opened = shared
             .await_outbound(pending, receiver)

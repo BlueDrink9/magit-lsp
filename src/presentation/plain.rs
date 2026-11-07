@@ -514,6 +514,25 @@ pub fn hash_text(text: &str) -> [u8; 32] {
     Sha256::digest(text.as_bytes()).into()
 }
 
+/// Build a versioned `WorkspaceEdit` that replaces a whole document.
+///
+/// `version` is the document's currently synchronized version and `current`
+/// supplies the end position of the existing text. The caller sends the result
+/// as the `edit` parameter of `workspace/applyEdit`.
+pub fn whole_document_edit(
+    uri: &str,
+    version: i32,
+    current: &str,
+    text: &str,
+    encoding: Encoding,
+) -> Value {
+    let end = position(current, current.len(), encoding);
+    json!({"documentChanges":[{
+        "textDocument":{"uri":uri,"version":version},
+        "edits":[{"range":{"start":{"line":0,"character":0},"end":end},"newText":text}]
+    }]})
+}
+
 /// Produce a single minimal valid edit using negotiated LSP position units.
 pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
     if old == new {
