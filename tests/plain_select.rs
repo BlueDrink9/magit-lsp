@@ -130,17 +130,20 @@ fn replace_row(text: &str, row: usize, replacement: &str) -> String {
     edited
 }
 
-/// Open the status view's `log.select-and-copy` with free-text revisions.
-fn open_free_text_log_select(
+/// Open the status view's `log.select-and-copy` with `args`, using `id` for
+/// the code-action request and the following id for the invocation.
+fn open_log_select_with_args(
     server: &mut stdio::TestServer,
     editor: &mut FakeEditor,
     uri: &str,
+    args: Value,
+    id: i64,
 ) -> String {
-    server.send(json!({"jsonrpc":"2.0","id":19,"method":"textDocument/codeAction","params":{
+    server.send(json!({"jsonrpc":"2.0","id":id,"method":"textDocument/codeAction","params":{
         "textDocument":{"uri":uri},
         "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
         "context":{"diagnostics":[]}}}));
-    let status_actions = server.response_with_id(19)["result"]
+    let status_actions = server.response_with_id(id)["result"]
         .as_array()
         .unwrap()
         .clone();
@@ -149,8 +152,8 @@ fn open_free_text_log_select(
         .find_map(|action| action["command"]["arguments"][0]["target"]["viewId"].as_str())
         .map(str::to_owned)
         .expect("a view target exposing the status view id");
-    server.send(json!({"jsonrpc":"2.0","id":20,"method":"view/invoke","params":{
-        "viewId":status_view,"command":"log.select-and-copy","args":{"allowFreeText":true}}}));
+    server.send(json!({"jsonrpc":"2.0","id":id + 1,"method":"view/invoke","params":{
+        "viewId":status_view,"command":"log.select-and-copy","args":args}}));
     let invoked = loop {
         let message = server.recv();
         if message["method"] == "workspace/applyEdit" {
@@ -159,7 +162,7 @@ fn open_free_text_log_select(
             }
             continue;
         }
-        if message["id"] == json!(20) {
+        if message["id"] == json!(id + 1) {
             break message;
         }
     };
@@ -176,6 +179,15 @@ fn open_free_text_log_select(
         .as_str()
         .unwrap()
         .to_string()
+}
+
+/// Open the status view's `log.select-and-copy` with free-text revisions.
+fn open_free_text_log_select(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    uri: &str,
+) -> String {
+    open_log_select_with_args(server, editor, uri, json!({"allowFreeText":true}), 19)
 }
 
 /// Send a full-text `didChange` for `uri`.
@@ -840,4 +852,123 @@ fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
         .find(|effect| effect["type"] == "clipboard")
         .unwrap_or_else(|| panic!("no clipboard effect: {confirmed}"));
     assert_eq!(clipboard["text"], head);
+}
+
+#[test]
+fn plain_log_select_fixup_target_survives_a_cancelled_second_run() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let status_text = editor.text(&uri).to_owned();
+    let repo_before = (
+        repo.git(&["status", "--porcelain"]),
+        repo.git(&["rev-parse", "HEAD"]),
+    );
+
+    // First run: choose the fixup target and copy its object id.
+    let first_view = open_log_select_with_args(
+        &mut server,
+        &mut editor,
+        &uri,
+        json!({"purpose":"fixup","prompt":"Select commit to fixup"}),
+        90,
+    );
+    let text = editor.text(&uri).to_owned();
+    assert!(
+        text.contains("Log — fixup"),
+        "the selection must carry the fixup purpose: {text}"
+    );
+    let commit = row_containing(&text, "second");
+    let confirm = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}}),
+        "common.confirm",
+        92,
+    );
+    assert!(!confirm.is_null(), "confirm not offered on the commit row");
+    let confirmed = execute_offered(&mut server, &mut editor, confirm, 93);
+    assert!(
+        confirmed["error"].is_null(),
+        "common.confirm failed: {confirmed}"
+    );
+    let effects = confirmed["result"]["effects"].as_array().unwrap();
+    let chosen = effects
+        .iter()
+        .find(|effect| effect["type"] == "clipboard")
+        .unwrap_or_else(|| panic!("no clipboard effect: {confirmed}"))["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(chosen, head, "the fixup target must be the chosen commit");
+    assert!(
+        effects.iter().any(|effect| effect["type"] == "popView"
+            && effect["viewId"] == json!(first_view)),
+        "confirm must pop the first run: {confirmed}"
+    );
+    assert_eq!(
+        editor.text(&uri),
+        status_text,
+        "confirm must return the unaffected caller"
+    );
+
+    // Second run: open the same fixup selection and cancel it.
+    let second_view = open_log_select_with_args(
+        &mut server,
+        &mut editor,
+        &uri,
+        json!({"purpose":"fixup","prompt":"Select commit to fixup"}),
+        94,
+    );
+    // A Plain client reuses its single `log.select` document view id.
+    let text = editor.text(&uri).to_owned();
+    assert!(
+        text.contains("Log — fixup"),
+        "the second selection must carry the fixup purpose: {text}"
+    );
+    let header = row_containing(&text, "Log — fixup");
+    let cancel = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":header,"character":0},"end":{"line":header,"character":0}}),
+        "common.cancel",
+        96,
+    );
+    assert!(!cancel.is_null(), "cancel not offered on the selection");
+    let cancelled = execute_offered(&mut server, &mut editor, cancel, 97);
+    assert!(
+        cancelled["error"].is_null(),
+        "common.cancel failed: {cancelled}"
+    );
+    let effects = cancelled["result"]["effects"].as_array().unwrap();
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "clipboard"),
+        "the cancelled second run must not copy: {cancelled}"
+    );
+    assert!(
+        effects.iter().any(|effect| effect["type"] == "popView"
+            && effect["viewId"] == json!(second_view)),
+        "cancel must pop the second run: {cancelled}"
+    );
+    assert_eq!(
+        editor.text(&uri),
+        status_text,
+        "the cancelled second run must leave the caller unchanged"
+    );
+
+    assert_eq!(
+        chosen, head,
+        "the first chosen commit id must stay unchanged"
+    );
+    assert_eq!(
+        (
+            repo.git(&["status", "--porcelain"]),
+            repo.git(&["rev-parse", "HEAD"]),
+        ),
+        repo_before,
+        "the cancelled second run must not mutate HEAD, the index or the worktree"
+    );
 }
