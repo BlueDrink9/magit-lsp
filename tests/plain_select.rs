@@ -417,6 +417,184 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
 }
 
 #[test]
+fn plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let file_row = row_containing(&editor.text(&uri), "f.txt");
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":file_row,"character":0},"end":{"line":file_row,"character":0}}),
+        "open.commit",
+        50,
+    );
+    let opened = execute_offered(&mut server, &mut editor, open, 51);
+    assert!(opened["error"].is_null(), "open.commit failed: {opened}");
+    let reuse = row_containing(&editor.text(&uri), "Reuse commit message");
+    let option = offered_menu_option(&mut server, &uri, reuse, "=C", 52);
+    assert!(!option.is_null(), "menu.run-option =C not offered");
+
+    let staged = execute_offered(&mut server, &mut editor, option, 53);
+    assert!(staged["error"].is_null(), "menu.run-option failed: {staged}");
+    let log_view = staged["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap_or_else(|| panic!("log select view not pushed: {staged}"))["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let text = editor.text(&uri).to_owned();
+    assert!(text.contains("Log — Reuse commit message"), "{text}");
+    let commit_row = row_containing(&text, "second");
+    let confirm = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":commit_row,"character":0},"end":{"line":commit_row,"character":0}}),
+        "common.confirm",
+        54,
+    );
+    assert!(!confirm.is_null(), "confirm not offered on the commit row");
+
+    let confirmed = execute_offered(&mut server, &mut editor, confirm, 55);
+    assert!(
+        confirmed["error"].is_null(),
+        "common.confirm failed: {confirmed}"
+    );
+    let effects = confirmed["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects.iter().any(|effect| effect["type"] == "popView"
+            && effect["viewId"] == json!(log_view)),
+        "confirm must pop the log select: {confirmed}"
+    );
+
+    let text = editor.text(&uri).to_owned();
+    assert!(
+        !text.contains("Log — Reuse commit message"),
+        "no stale log select document remains: {text}"
+    );
+    assert!(
+        text.contains(&format!("--reuse-message={head}")),
+        "the chosen commit must reach the staged continuation: {text}"
+    );
+    let reuse = row_containing(&text, "Reuse commit message");
+    let option = offered_menu_option(&mut server, &uri, reuse, "=C", 56);
+    assert!(
+        !option.is_null(),
+        "the caller menu must be usable after confirm: {text}"
+    );
+}
+
+#[test]
+fn plain_log_select_cancel_returns_the_caller_without_changes() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let file_row = row_containing(&editor.text(&uri), "f.txt");
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":file_row,"character":0},"end":{"line":file_row,"character":0}}),
+        "open.commit",
+        60,
+    );
+    let opened = execute_offered(&mut server, &mut editor, open, 61);
+    assert!(opened["error"].is_null(), "open.commit failed: {opened}");
+    let menu_text = editor.text(&uri).to_owned();
+    let reuse = row_containing(&menu_text, "Reuse commit message");
+    let option = offered_menu_option(&mut server, &uri, reuse, "=C", 62);
+    let staged = execute_offered(&mut server, &mut editor, option, 63);
+    assert!(staged["error"].is_null(), "menu.run-option failed: {staged}");
+    let log_view = staged["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap_or_else(|| panic!("log select view not pushed: {staged}"))["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let status_before = repo.git(&["status", "--porcelain"]);
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+
+    let text = editor.text(&uri).to_owned();
+    let cancel_row = row_containing(&text, "Log — Reuse commit message");
+    let cancel_range =
+        json!({"start":{"line":cancel_row,"character":0},"end":{"line":cancel_row,"character":0}});
+    let cancel = loop {
+        server.send(json!({"jsonrpc":"2.0","id":64,"method":"textDocument/codeAction","params":{
+            "textDocument":{"uri":uri},"range":cancel_range,"context":{"diagnostics":[]}}}));
+        let actions = server.response_with_id(64)["result"].as_array().unwrap().clone();
+        break actions
+            .iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == "common.cancel")
+            .map(|action| action["command"]["arguments"][0].clone())
+            .unwrap_or_else(|| panic!("common.cancel not offered: {actions:?}"));
+    };
+    let cancelled = execute_offered(&mut server, &mut editor, cancel, 65);
+    assert!(
+        cancelled["error"].is_null(),
+        "common.cancel failed: {cancelled}"
+    );
+    let effects = cancelled["result"]["effects"].as_array().unwrap();
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "clipboard"),
+        "cancel must not copy: {cancelled}"
+    );
+    assert!(
+        effects.iter().any(|effect| effect["type"] == "popView"
+            && effect["viewId"] == json!(log_view)),
+        "cancel must pop the log select: {cancelled}"
+    );
+
+    let text = editor.text(&uri).to_owned();
+    assert_eq!(
+        text, menu_text,
+        "cancel must restore the caller menu unchanged"
+    );
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        status_before,
+        "cancel must not mutate the repository"
+    );
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head_before,
+        "cancel must not move HEAD"
+    );
+
+    let reuse = row_containing(&text, "Reuse commit message");
+    let option = offered_menu_option(&mut server, &uri, reuse, "=C", 66);
+    assert!(
+        !option.is_null(),
+        "the caller menu must stay usable after cancel: {text}"
+    );
+    let again = execute_offered(&mut server, &mut editor, option, 67);
+    assert!(again["error"].is_null(), "menu.run-option failed: {again}");
+    assert_eq!(
+        again["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|effect| effect["type"] == "pushView")
+            .unwrap_or_else(|| panic!("log select view not pushed again: {again}"))["descriptor"]
+            ["scope"],
+        "log.select",
+        "the caller menu must open the selection again"
+    );
+}
+
+#[test]
 fn plain_log_select_revision_field_drives_confirm() {
     let (repo, _) = RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
