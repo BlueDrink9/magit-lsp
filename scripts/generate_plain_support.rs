@@ -25,6 +25,7 @@ pub fn render() -> String {
         completion: true,
         folding_range: true,
         position_encodings: vec!["utf-8".to_owned()],
+        commit_draft_expired: false,
     };
     let profiles: [(&str, &PlainCapabilities); 3] =
         [("minimal", &minimal), ("edits", &edits), ("full", &full)];

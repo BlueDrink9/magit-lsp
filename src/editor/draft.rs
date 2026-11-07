@@ -271,6 +271,13 @@ impl Draft {
         self.terminal
     }
 
+    /// Whether the client opened this run's draft document.
+    pub fn opened(&self) -> bool {
+        self.contents
+            .as_ref()
+            .is_some_and(|contents| contents.opened)
+    }
+
     fn validate(&self, context: DraftContext<'_>) -> Result<()> {
         if self.terminal {
             return Err(Error::new("Commit draft run has already finished"));

@@ -271,6 +271,14 @@ impl RichCapabilities {
     }
 }
 
+/// Whether a command starts a commit draft the client must open to proceed.
+pub fn commit_draft_command(id: &str) -> bool {
+    matches!(
+        id,
+        "commit.create" | "commit.amend" | "commit.extend" | "commit.reword"
+    )
+}
+
 /// Standard LSP capability subset relevant to the Plain presentation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlainCapabilities {
@@ -292,6 +300,8 @@ pub struct PlainCapabilities {
     pub folding_range: bool,
     /// Client's advertised position encodings.
     pub position_encodings: Vec<String>,
+    /// The last commit run expired because the client never opened its draft.
+    pub commit_draft_expired: bool,
 }
 
 /// A standard capability with a human-readable absence reason.
@@ -322,6 +332,11 @@ impl PlainCapabilities {
     /// and the extra requirement of the status hunk actions.
     pub fn plain_availability(&self, command: &crate::commands::Command) -> PlainAvailability {
         use crate::commands::EffectKind;
+        if self.commit_draft_expired && commit_draft_command(command.id) {
+            return PlainAvailability::Unavailable {
+                reason: "the commit draft was not opened in time; retry the commit",
+            };
+        }
         for effect in command.effects {
             let reason = match effect {
                 EffectKind::Clipboard => {
@@ -385,6 +400,8 @@ impl PlainCapabilities {
                         .collect()
                 })
                 .unwrap_or_default(),
+            // Runtime state, not a client declaration: no draft has expired yet.
+            commit_draft_expired: false,
         }
     }
 

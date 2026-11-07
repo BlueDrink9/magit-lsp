@@ -2399,7 +2399,7 @@ impl Session {
         let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
             && view.menu().is_some_and(|menu| menu.id == menu_id
                 && matches!(menu.item(key), Some(crate::menu::Item::Action { command, status: MenuStatus::Implemented, .. })
-                    if matches!(command.as_str(), "log.current" | "commit.create"))));
+                    if matches!(command.as_str(), "log.current") || crate::presentation::commit_draft_command(command))));
         if !valid {
             return Ok(unbound(key));
         }

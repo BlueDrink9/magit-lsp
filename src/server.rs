@@ -876,12 +876,71 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
     });
 }
 
+/// Default time a Plain client has to open a commit draft before it is canceled.
+const DRAFT_OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Deadline for the client to open a Plain commit draft.
+///
+/// `MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS` overrides the default so tests can expire a
+/// run deterministically without a production-length wait.
+fn draft_open_timeout() -> std::time::Duration {
+    std::env::var("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(DRAFT_OPEN_TIMEOUT)
+}
+
+/// Cancel a commit draft run the client never opened and disable commit commands.
+///
+/// The wait runs as a runtime task so it never blocks the edit emitter, which
+/// calls `deliver_plain_effects` while the registry lock is held. It holds only a
+/// [`Weak`] handle: a timer that kept [`Shared`] alive past `serve` teardown would
+/// also keep the writer `sender` open and stop the process from exiting. The
+/// upgrade at expiry doubles as the shutdown check.
+fn arm_draft_open_timeout(shared: &Arc<Shared>, run_id: String) {
+    let runtime = shared
+        .runtime
+        .clone()
+        .expect("Plain transport owns a Tokio runtime");
+    let delay = draft_open_timeout();
+    let shared = Arc::downgrade(shared);
+    runtime.spawn(async move {
+        tokio::time::sleep(delay).await;
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        if shared.closing.load(Ordering::SeqCst) || !editor::registry().expire_unopened(&run_id) {
+            return;
+        }
+        set_plain_commit_expired(&shared, true);
+        deliver_plain_effects(
+            &shared,
+            vec![Effect::message(
+                MessageLevel::Warn,
+                "The commit draft was not opened in time; the commit was canceled. Retry to reopen it.",
+            )],
+        );
+    });
+}
+
+/// Record whether Plain commit commands are disabled after a draft expiry.
+fn set_plain_commit_expired(shared: &Shared, expired: bool) {
+    let mut client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(plain) = client.plain.as_mut() {
+        plain.commit_draft_expired = expired;
+    }
+    if let Some(Presentation::Plain(caps)) = client.presentation.as_mut() {
+        caps.commit_draft_expired = expired;
+    }
+}
+
 /// Deliver effects to a Plain client through standard LSP notifications only.
 ///
 /// Plain clients never receive the custom `view/effects` channel: messages
 /// become `window/showMessage` and an edit document is re-presented through
 /// `window/showDocument` (or manual instructions) as declared.
-fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
+fn deliver_plain_effects(shared: &Arc<Shared>, effects: Vec<Effect>) {
     let (capabilities, encoding) = {
         let client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
         let capabilities = match client.presentation.as_ref() {
@@ -897,10 +956,11 @@ fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
                 uri,
                 text,
                 title,
+                kind,
                 ..
             } => {
                 send_plain_edit_document(
-                    shared.clone(),
+                    Shared::clone(shared),
                     run_id.clone(),
                     uri,
                     text,
@@ -908,6 +968,9 @@ fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>) {
                     capabilities.clone(),
                     encoding,
                 );
+                if kind == editor::COMMIT_MESSAGE_KIND {
+                    arm_draft_open_timeout(shared, run_id.clone());
+                }
                 let repo = shared
                     .progress
                     .lock()
@@ -2192,7 +2255,7 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                         // draft is still pending here, or terminal
                                         // cleanup already aborted it and
                                         // `notification_failure` emitted nothing.
-                                        deliver_plain_effects(&shared, effects);
+                                        deliver_plain_effects(&listener_owner, effects);
                                     } else {
                                         let _ = sender.send(
                                             custom_ui(&shared.client)
@@ -2646,7 +2709,10 @@ fn execute_plain_action(
                                     status: crate::menu::MenuStatus::Implemented,
                                     ..
                                 }),
-                            ) => matches!(command.as_str(), "log.current" | "commit.create"),
+                            ) => {
+                                matches!(command.as_str(), "log.current")
+                                    || crate::presentation::commit_draft_command(command)
+                            }
                             (
                                 "menu.run-option",
                                 Some(crate::menu::Item::Option {
@@ -3624,32 +3690,54 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             else {
                 continue;
             };
-            if !matches!(command.as_str(), "log.current" | "commit.create") {
+            if !matches!(command.as_str(), "log.current")
+                && !crate::presentation::commit_draft_command(command)
+            {
+                continue;
+            }
+            let unavailable = crate::commands::registry()
+                .get(command)
+                .and_then(|registered| match capabilities
+                    .as_ref()
+                    .map(|caps| caps.plain_availability(registered))
+                {
+                    Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
+                        Some(reason)
+                    }
+                    _ => None,
+                });
+            if unavailable.is_some()
+                && !capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.disabled_actions)
+            {
                 continue;
             }
             let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
+            let title = if command == "log.current" {
+                format!("Open {label}")
+            } else {
+                label.clone()
+            };
+            // A disabled row keeps the invocation arguments in `data` so the
+            // client can still show the reason and retry after the cause clears.
+            let disabled = unavailable.map(|reason| lsp_types::CodeActionDisabled {
+                reason: format!("Unavailable: {reason}"),
+            });
             actions.push(
                 serde_json::to_value(lsp_types::CodeAction {
-                    title: if command == "log.current" {
-                        format!("Open {label}")
-                    } else {
-                        label.clone()
-                    },
+                    title: title.clone(),
                     kind: None,
                     diagnostics: None,
                     is_preferred: None,
-                    disabled: None,
+                    disabled: disabled.clone(),
                     edit: None,
-                    command: Some(lsp_types::Command {
-                        title: if command == "log.current" {
-                            format!("Open {label}")
-                        } else {
-                            label.clone()
-                        },
+                    command: disabled.is_none().then(|| lsp_types::Command {
+                        title,
                         command: "magit.command".into(),
-                        arguments: Some(vec![args]),
+                        arguments: Some(vec![args.clone()]),
                     }),
-                    data: None,
+                    data: disabled.is_some().then_some(args),
                 })
                 .unwrap_or(Value::Null),
             );
@@ -3807,13 +3895,26 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                     continue;
                 }
             }
+            // The Plain capability layer knows why a command cannot run there
+            // (a commit run whose draft was never opened, or a missing
+            // capability). Prefer that readable reason over the generic adapter
+            // notice; a planned command keeps its roadmap reason.
+            let plain_reason = capabilities.as_ref().and_then(|caps| {
+                match caps.plain_availability(command) {
+                    crate::presentation::PlainAvailability::Unavailable { reason } => {
+                        Some(reason)
+                    }
+                    crate::presentation::PlainAvailability::Available => None,
+                }
+            });
             let reason = match registry_availability {
                 Some(crate::commands::Availability::Planned(roadmap)) => {
                     Some(format!("Planned: roadmap {roadmap}"))
                 }
-                Some(crate::commands::Availability::Implemented) => {
-                    Some("Unavailable: Plain client adapter is not implemented".to_owned())
-                }
+                Some(crate::commands::Availability::Implemented) => Some(match plain_reason {
+                    Some(reason) => format!("Unavailable: {reason}"),
+                    None => "Unavailable: Plain client adapter is not implemented".to_owned(),
+                }),
                 None => continue,
             };
             if !capabilities
@@ -4722,6 +4823,7 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
         return;
     }
     let sender = shared.sender.clone();
+    set_plain_commit_expired(&shared, false);
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
     let edit_id = match editor::registry().create(&repo, &shared.draft_owner) {

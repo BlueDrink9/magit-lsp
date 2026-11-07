@@ -474,6 +474,34 @@ impl EditRegistry {
         }
     }
 
+    /// Expire a pending run the client never opened: drop the entry, keep its
+    /// saved history and release the Git helper with an abort reply.
+    ///
+    /// Return whether this call actually canceled the run. A terminal or already
+    /// opened run is left untouched.
+    #[cfg(unix)]
+    pub fn expire_unopened(&self, edit_id: &str) -> bool {
+        let entry = {
+            let mut entries = self.lock();
+            let Some(entry) = entries.get(edit_id) else {
+                return false;
+            };
+            if entry.draft.is_terminal() || entry.draft.opened() {
+                return false;
+            }
+            entries.remove(edit_id).expect("entry was just read")
+        };
+        self.retain_saved(&entry.draft);
+        let _ = entry.replies.send(Reply::Abort);
+        true
+    }
+
+    /// No managed drafts exist outside Unix, so nothing can expire.
+    #[cfg(not(unix))]
+    pub fn expire_unopened(&self, _edit_id: &str) -> bool {
+        false
+    }
+
     #[cfg(unix)]
     fn retain_saved(&self, draft: &draft::Draft) {
         if let (Some(saved), Some(initial)) = (draft.saved(), draft.initial()) {

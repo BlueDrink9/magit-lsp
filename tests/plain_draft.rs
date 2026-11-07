@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 fn caps(show_document: bool) -> Value {
     let mut capabilities = json!({
         "workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true},"executeCommand":{"dynamicRegistration":true}},
-        "textDocument":{"codeAction":{}},
+        "textDocument":{"codeAction":{"disabledSupport":true}},
         "general":{"positionEncodings":["utf-8","utf-16","utf-32"]}
     });
     if show_document {
@@ -29,8 +29,17 @@ fn open_plain(
     repo: &fixtures::RepoFixture,
     capabilities: Value,
 ) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_with_env(repo, capabilities, &[])
+}
+
+/// Open the repository's `.magit` status document with extra server environment.
+fn open_plain_with_env(
+    repo: &fixtures::RepoFixture,
+    capabilities: Value,
+    extra_env: &[(&str, &str)],
+) -> (stdio::TestServer, FakeEditor, String) {
     let uri = format!("file://{}/.magit", repo.path().display());
-    let mut server = stdio::TestServer::spawn(&[]);
+    let mut server = stdio::TestServer::spawn(extra_env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = capabilities;
     init["params"]["workspaceFolders"] =
@@ -289,6 +298,136 @@ fn manual_plain_commit_instructions_have_no_apply_edit() {
         !seen.iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri),
         "the manual path must not request showDocument: {seen:#?}"
     );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+
+/// Read the status view's code actions for the four commit commands.
+///
+/// Starting a commit run pops the commit menu, so the status view is the
+/// document the Plain client sees while the draft is pending. The commit
+/// commands are offered there and report their availability state.
+fn commit_command_actions(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+    uri: &str,
+) -> Vec<Value> {
+    let text = editor.text(uri).to_owned();
+    let line = text.lines().position(|line| line.contains("Staged")).unwrap_or(0) as u32;
+    code_actions(server, editor, draft_uri, seen, uri, line, 120)
+        .into_iter()
+        .filter(|action| {
+            let command = action["data"]["command"]
+                .as_str()
+                .or_else(|| action["command"]["arguments"][0]["command"].as_str());
+            command.is_some_and(|command| {
+                matches!(
+                    command,
+                    "commit.create" | "commit.amend" | "commit.extend" | "commit.reword"
+                )
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn unopened_plain_commit_draft_expires_and_disables_commit_commands() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let (mut server, mut editor, uri) = open_plain_with_env(
+        &repo,
+        caps(true),
+        &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "300")],
+    );
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_uri = format!("file://{expected_path}");
+
+    let mut seen = Vec::new();
+    let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
+    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+
+    // The client never opens the draft, so the run expires and reports it.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showMessage"
+            && message["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("not opened in time"))
+    }) {
+        assert!(Instant::now() < deadline, "draft expiry timed out: seen {seen:#?}");
+        pump(&mut server, &mut editor, &expected_uri, &mut seen);
+    }
+
+    let actions = commit_command_actions(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
+    assert_eq!(actions.len(), 4, "all commit commands offered: {actions:#?}");
+    for action in &actions {
+        assert!(
+            action["disabled"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("not opened in time")),
+            "commit command must be unavailable: {action:#?}"
+        );
+        assert!(action["command"].is_null(), "disabled rows carry no command: {action:#?}");
+    }
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn opened_plain_commit_draft_is_not_expired() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let (mut server, mut editor, uri) = open_plain_with_env(
+        &repo,
+        caps(true),
+        &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "300")],
+    );
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let expected_uri = format!("file://{expected_path}");
+
+    let mut seen = Vec::new();
+    let create = prepare_commit(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
+    assert!(execute_action(&mut server, &mut editor, &expected_uri, &mut seen, create, 95)["error"].is_null());
+
+    // The client opens the draft, so the run must survive the deadline.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri
+    }) {
+        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        pump(&mut server, &mut editor, &expected_uri, &mut seen);
+    }
+    server.send(editor.open(&expected_uri, &std::fs::read_to_string(&expected_path).unwrap()));
+    std::thread::sleep(Duration::from_millis(800));
+
+    let actions = commit_command_actions(&mut server, &mut editor, &expected_uri, &mut seen, &uri);
+    assert_eq!(actions.len(), 4, "all commit commands offered: {actions:#?}");
+    assert!(
+        !seen.iter().any(|message| {
+            message["method"] == "window/showMessage"
+                && message["params"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("not opened in time"))
+        }),
+        "an opened draft must not expire: {seen:#?}"
+    );
+    for action in &actions {
+        assert!(
+            !action["disabled"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("not opened in time")),
+            "an opened draft keeps the commit commands available: {action:#?}"
+        );
+    }
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
