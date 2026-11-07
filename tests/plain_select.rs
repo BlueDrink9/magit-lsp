@@ -638,6 +638,153 @@ fn plain_log_select_revision_field_drives_confirm() {
 }
 
 #[test]
+fn plain_log_select_stale_generation_is_refused_without_changes() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
+    let status_before = repo.git(&["status", "--porcelain"]);
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+
+    let text = editor.text(&uri).to_owned();
+    let commit = row_containing(&text, "second");
+    let offered = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}}),
+        "common.confirm",
+        70,
+    );
+    assert!(!offered.is_null(), "confirm not offered on the commit row");
+    let generation = offered["viewGeneration"]
+        .as_u64()
+        .expect("an offered action carries its view generation");
+    let mut stale = offered.clone();
+    stale["viewGeneration"] = json!(generation.checked_sub(1).unwrap_or(generation + 1));
+
+    let refused = execute_offered(&mut server, &mut editor, stale, 71);
+    assert!(
+        refused["error"].is_null(),
+        "a stale confirm must not be a JSON-RPC error: {refused}"
+    );
+    let effects = refused["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "message" && effect["level"] == "warn"),
+        "a stale generation must report a readable warning: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "clipboard"),
+        "a stale generation must not copy: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "popView"),
+        "a stale generation must not pop the selection: {refused}"
+    );
+
+    let after = editor.text(&uri).to_owned();
+    assert_eq!(after, text, "the log select document must not change");
+    assert!(
+        after.contains("Select commit(s) to copy"),
+        "the log select must stay displayed: {after}"
+    );
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        status_before,
+        "a stale generation must not mutate the repository"
+    );
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head_before,
+        "a stale generation must not move HEAD"
+    );
+}
+
+#[test]
+fn plain_log_select_tampered_target_is_refused_without_changes() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
+    let status_before = repo.git(&["status", "--porcelain"]);
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+
+    let text = editor.text(&uri).to_owned();
+    let commit = row_containing(&text, "second");
+    let range =
+        json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}});
+    let offered = offered_for_range(&mut server, &uri, range.clone(), "common.confirm", 80);
+    assert!(!offered.is_null(), "confirm not offered on the commit row");
+
+    let mut tampered_hash = offered.clone();
+    tampered_hash["target"]["mutationHash"] = json!("deadbeef");
+    let refused = execute_offered(&mut server, &mut editor, tampered_hash, 81);
+    assert!(
+        refused["error"].is_null(),
+        "a tampered hash must not be a JSON-RPC error: {refused}"
+    );
+    let effects = refused["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "message" && effect["level"] == "warn"),
+        "a tampered mutation hash must report a readable warning: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "clipboard"),
+        "a tampered mutation hash must not copy: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "popView"),
+        "a tampered mutation hash must not pop the selection: {refused}"
+    );
+
+    let mut missing_node = offered.clone();
+    missing_node["target"]["nodeId"] = json!("log:commit:does-not-exist");
+    let refused = execute_offered(&mut server, &mut editor, missing_node, 82);
+    assert!(
+        refused["error"].is_null(),
+        "a missing node must not be a JSON-RPC error: {refused}"
+    );
+    let effects = refused["result"]["effects"].as_array().unwrap();
+    assert!(
+        effects
+            .iter()
+            .any(|effect| effect["type"] == "message" && effect["level"] == "warn"),
+        "a missing node must report a readable warning: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "clipboard"),
+        "a missing node must not copy: {refused}"
+    );
+    assert!(
+        !effects.iter().any(|effect| effect["type"] == "popView"),
+        "a missing node must not pop the selection: {refused}"
+    );
+
+    assert_eq!(
+        editor.text(&uri),
+        text,
+        "a refused target must not change the log select document"
+    );
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        status_before,
+        "a refused target must not mutate the repository"
+    );
+    assert_eq!(
+        repo.git(&["rev-parse", "HEAD"]),
+        head_before,
+        "a refused target must not move HEAD"
+    );
+}
+
+#[test]
 fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
     let (repo, _) = RepoFixture::new()
         .commit("initial", [("f.txt", "one\n")])
