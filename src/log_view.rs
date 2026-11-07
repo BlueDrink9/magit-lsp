@@ -27,6 +27,7 @@ pub struct LogView {
     page: GitLogPage,
     selection: Option<CommitSelection>,
     marked: HashSet<String>,
+    revision: String,
 }
 
 impl LogView {
@@ -44,6 +45,7 @@ impl LogView {
             page,
             selection,
             marked: HashSet::new(),
+            revision: String::new(),
         })
     }
 
@@ -57,7 +59,72 @@ impl LogView {
         self.selection.as_ref()
     }
 
+    /// The free-text revision entered for this selection, if it accepts one.
+    pub fn revision(&self) -> Option<&str> {
+        self.selection
+            .as_ref()
+            .is_some_and(|selection| selection.allow_free_text)
+            .then_some(self.revision.as_str())
+    }
+
+    /// Replace the free-text revision, applying the document field rules.
+    ///
+    /// Fails with a readable message for a view that does not accept free
+    /// text, a multi-line value, or a value over the field byte limit.
+    pub fn set_revision(&mut self, text: &str) -> std::result::Result<(), String> {
+        if self.revision().is_none() {
+            return Err("this log selection does not accept a revision".to_string());
+        }
+        crate::presentation::prompt::validate_field("Revision", text)?;
+        self.revision = text.to_string();
+        Ok(())
+    }
+
+    /// Ingest one client revision of the rendered log-selection document.
+    ///
+    /// Field positions come from the authoritative render; the revision text
+    /// is adopted only when every non-field line and the line count are
+    /// unchanged. Otherwise the stored revision is kept and the result reports
+    /// a repair, so the caller re-renders instead of trusting the client.
+    pub fn reconcile(
+        &mut self,
+        document: &str,
+    ) -> std::result::Result<(crate::presentation::prompt::Reconcile, Tree), String> {
+        let tree = self.selection_tree();
+        let fields = [("log:field:rev", "Revision")];
+        let Some(values) =
+            crate::presentation::prompt::reconcile_fields(&tree, document, &fields)?
+        else {
+            return Ok((
+                crate::presentation::prompt::Reconcile { repaired: true },
+                tree,
+            ));
+        };
+        if let Some(value) = values.into_iter().next() {
+            self.revision = value;
+        }
+        Ok((
+            crate::presentation::prompt::Reconcile { repaired: false },
+            self.selection_tree(),
+        ))
+    }
+
+    /// The authoritative tree for this view's current state.
+    pub fn selection_tree(&self) -> Tree {
+        render(
+            &self.page,
+            self.selection.as_ref(),
+            &self.marked,
+            &self.revision,
+        )
+    }
+
     /// Selected full object IDs in log traversal order.
+    ///
+    /// A marked multi-selection wins, then the cursor commit. Otherwise a
+    /// non-empty free-text revision is returned as entered, so the session can
+    /// resolve it through the Git boundary; it is never parsed from rendered
+    /// text.
     pub fn selected_commits(&self, cursor_oid: Option<&str>) -> Vec<String> {
         if self.selection.as_ref().is_some_and(|s| s.multi) && !self.marked.is_empty() {
             return self
@@ -68,10 +135,18 @@ impl LogView {
                 .map(|c| c.oid.clone())
                 .collect();
         }
-        cursor_oid
-            .filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid))
-            .map(|oid| vec![oid.to_string()])
-            .unwrap_or_default()
+        if let Some(oid) =
+            cursor_oid.filter(|oid| self.page.commits.iter().any(|c| c.oid == *oid))
+        {
+            return vec![oid.to_string()];
+        }
+        if let Some(revision) = self.revision() {
+            let revision = revision.trim();
+            if !revision.is_empty() {
+                return vec![revision.to_string()];
+            }
+        }
+        Vec::new()
     }
 
     /// Toggle a mark by full object ID; returns false for an unloaded commit.
@@ -116,8 +191,14 @@ impl View for LogView {
     fn toggle_commit_mark(&mut self, oid: &str) -> bool {
         self.toggle_mark(oid)
     }
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
     fn render(&mut self, _ctx: &Ctx<'_>) -> Tree {
-        render(&self.page, self.selection.as_ref(), &self.marked)
+        self.selection_tree()
     }
     fn on_refresh(&mut self) -> Result<()> {
         self.page = self.repo.log(&self.options)?;
@@ -146,6 +227,7 @@ fn render(
     page: &GitLogPage,
     selection: Option<&CommitSelection>,
     marked: &HashSet<String>,
+    revision: &str,
 ) -> Tree {
     let mut tree = Tree {
         version: 0,
@@ -181,6 +263,18 @@ fn render(
         tree.line_nodes.push(line("log:prompt", NodeKind::Message));
         tree.nodes
             .push(node("log:prompt", NodeKind::Message, text, None, index));
+        if selection.allow_free_text {
+            let index = tree.lines.len();
+            tree.lines.push(revision.to_string());
+            tree.line_nodes.push(line("log:field:rev", NodeKind::Field));
+            tree.nodes.push(node(
+                "log:field:rev",
+                NodeKind::Field,
+                "Revision",
+                None,
+                index,
+            ));
+        }
     }
     let lookup: std::collections::HashMap<_, _> =
         page.commits.iter().map(|c| (c.oid.as_str(), c)).collect();

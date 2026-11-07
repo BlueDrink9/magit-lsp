@@ -1235,18 +1235,20 @@ fn plain_change(shared: &Shared, uri: &str) {
         return;
     };
 
-    // Route an edit of an open prompt document through the session instead of
-    // the ordinary presentation controller. Never hold this lock across the
-    // session call: the session may publish views that reload this controller.
-    let prompt = {
+    // Route an edit of an open prompt or log-selection document through the
+    // session instead of the ordinary presentation controller. Never hold this
+    // lock across the session call: the session may publish views that reload
+    // this controller.
+    let editable = {
         let documents = shared
             .plain_documents
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         documents.get(uri).and_then(|entry| {
             let (_, view_id, generation, scope, _) = entry.controller.latest_action_meta()?;
-            (scope == "prompt").then(|| {
+            (scope == "prompt" || scope == "log.select").then(|| {
                 (
+                    scope.to_owned(),
                     entry.repo.clone(),
                     view_id.to_owned(),
                     generation,
@@ -1256,17 +1258,21 @@ fn plain_change(shared: &Shared, uri: &str) {
         })
     };
 
-    if let Some((repo, view_id, generation, incarnation)) = prompt {
+    if let Some((scope, repo, view_id, generation, incarnation)) = editable {
         if let Some(handle) = shared.session(&repo) {
             let reconciled = {
                 let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
-                session.reconcile_prompt_document(&snapshot.text)
+                if scope == "prompt" {
+                    session.reconcile_prompt_document(&snapshot.text)
+                } else {
+                    session.reconcile_log_select_document(&view_id, &snapshot.text)
+                }
             };
             match reconciled {
                 Ok(Some(PromptReconcile {
                     repaired: true,
                     tree,
-                    render: Some(_),
+                    render: Some(render),
                 })) => {
                     let edit = shared
                         .plain_documents
@@ -1278,8 +1284,8 @@ fn plain_change(shared: &Shared, uri: &str) {
                             entry.controller.render_actions(
                                 tree,
                                 view_id,
-                                generation,
-                                "prompt".to_owned(),
+                                render.version,
+                                scope.clone(),
                                 None,
                             )
                         });
@@ -1304,7 +1310,7 @@ fn plain_change(shared: &Shared, uri: &str) {
                         entry.controller.adopt(snapshot.version, snapshot.text.clone());
                         entry
                             .controller
-                            .retain_actions(tree, &view_id, generation, "prompt", None);
+                            .retain_actions(tree, &view_id, generation, &scope, None);
                     }
                     return;
                 }
@@ -1313,7 +1319,7 @@ fn plain_change(shared: &Shared, uri: &str) {
                     render: None,
                     ..
                 })) => {
-                    tracing::error!("a repaired prompt document produced no render");
+                    tracing::error!("a repaired editable document produced no render");
                 }
                 Ok(None) => {
                     tracing::debug!("the prompt ended before the edit; using document sync");

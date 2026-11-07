@@ -116,6 +116,75 @@ fn row_containing(text: &str, needle: &str) -> u32 {
         .unwrap_or_else(|| panic!("missing {needle:?} row: {text}")) as u32
 }
 
+/// The document text with one row replaced by `replacement`.
+///
+/// The captured final-terminator convention is preserved, so the edited text
+/// matches the server's serialized field document exactly.
+fn replace_row(text: &str, row: usize, replacement: &str) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    lines[row] = replacement.to_string();
+    let mut edited = lines.join("\n");
+    if text.ends_with('\n') {
+        edited.push('\n');
+    }
+    edited
+}
+
+/// Open the status view's `log.select-and-copy` with free-text revisions.
+fn open_free_text_log_select(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    uri: &str,
+) -> String {
+    server.send(json!({"jsonrpc":"2.0","id":19,"method":"textDocument/codeAction","params":{
+        "textDocument":{"uri":uri},
+        "range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},
+        "context":{"diagnostics":[]}}}));
+    let status_actions = server.response_with_id(19)["result"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let status_view = status_actions
+        .iter()
+        .find_map(|action| action["command"]["arguments"][0]["target"]["viewId"].as_str())
+        .map(str::to_owned)
+        .expect("a view target exposing the status view id");
+    server.send(json!({"jsonrpc":"2.0","id":20,"method":"view/invoke","params":{
+        "viewId":status_view,"command":"log.select-and-copy","args":{"allowFreeText":true}}}));
+    let invoked = loop {
+        let message = server.recv();
+        if message["method"] == "workspace/applyEdit" {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+            continue;
+        }
+        if message["id"] == json!(20) {
+            break message;
+        }
+    };
+    assert!(
+        invoked["error"].is_null(),
+        "log.select-and-copy failed: {invoked}"
+    );
+    invoked["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "pushView")
+        .unwrap_or_else(|| panic!("log select view not pushed: {invoked}"))["descriptor"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Send a full-text `didChange` for `uri`.
+fn send_full_text_change(server: &mut stdio::TestServer, uri: &str, version: i64, text: String) {
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":uri,"version":version},
+        "contentChanges":[{"text":text}]}}));
+}
+
 #[test]
 fn plain_commit_menu_option_renders_the_log_select_document() {
     let (repo, _) = RepoFixture::new()
@@ -345,4 +414,105 @@ fn plain_already_set_commit_option_clears_and_restores_the_menu() {
             .any(|effect| matches!(effect, magit_lsp::protocol::Effect::PushView { .. })),
         "clearing must not push a view"
     );
+}
+
+#[test]
+fn plain_log_select_revision_field_drives_confirm() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .commit("third", [("f.txt", "three\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let parent = repo.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
+
+    let text = editor.text(&uri).to_owned();
+    let field = row_containing(&text, "Select commit(s) to copy") + 1;
+    let field_range = json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
+    let offered = offered_for_range(&mut server, &uri, field_range.clone(), "common.confirm", 30);
+    assert!(!offered.is_null(), "confirm not offered on the revision field");
+    assert_eq!(
+        offered["target"]["nodeId"], "log:field:rev",
+        "the revision must be a structured field node: {offered}"
+    );
+
+    send_full_text_change(&mut server, &uri, 100, replace_row(&text, field as usize, "HEAD~1"));
+    let offered = offered_for_range(&mut server, &uri, field_range, "common.confirm", 31);
+    assert!(!offered.is_null(), "confirm not offered after the field edit");
+    assert_eq!(offered["target"]["nodeId"], "log:field:rev");
+
+    let confirmed = execute_offered(&mut server, &mut editor, offered, 32);
+    assert!(
+        confirmed["error"].is_null(),
+        "common.confirm failed: {confirmed}"
+    );
+    let clipboard = confirmed["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "clipboard")
+        .unwrap_or_else(|| panic!("no clipboard effect: {confirmed}"));
+    assert_eq!(
+        clipboard["text"], parent,
+        "a symbolic revision must resolve to the full commit id"
+    );
+}
+
+#[test]
+fn plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker() {
+    let (repo, _) = RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .commit("second", [("f.txt", "two\n")])
+        .commit("third", [("f.txt", "three\n")])
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let _view = open_free_text_log_select(&mut server, &mut editor, &uri);
+
+    let text = editor.text(&uri).to_owned();
+    let field = row_containing(&text, "Select commit(s) to copy") + 1;
+    send_full_text_change(
+        &mut server,
+        &uri,
+        100,
+        replace_row(&text, field as usize, "no-such-revision"),
+    );
+
+    let field_range = json!({"start":{"line":field,"character":0},"end":{"line":field,"character":0}});
+    let offered = offered_for_range(&mut server, &uri, field_range, "common.confirm", 40);
+    assert!(!offered.is_null(), "confirm not offered on the revision field");
+    let rejected = execute_offered(&mut server, &mut editor, offered, 41);
+    assert!(rejected["error"].is_null(), "confirm failed: {rejected}");
+    assert!(
+        !rejected["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["type"] == "clipboard"),
+        "an invalid revision must not copy: {rejected}"
+    );
+    assert!(
+        rejected.to_string().contains("No valid commits were selected"),
+        "an invalid revision must report a readable message: {rejected}"
+    );
+
+    let text = editor.text(&uri).to_owned();
+    let commit = row_containing(&text, "third");
+    let offered = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":commit,"character":0},"end":{"line":commit,"character":0}}),
+        "common.confirm",
+        42,
+    );
+    assert!(!offered.is_null(), "the picker must stay usable: {text}");
+    let confirmed = execute_offered(&mut server, &mut editor, offered, 43);
+    let clipboard = confirmed["result"]["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|effect| effect["type"] == "clipboard")
+        .unwrap_or_else(|| panic!("no clipboard effect: {confirmed}"));
+    assert_eq!(clipboard["text"], head);
 }

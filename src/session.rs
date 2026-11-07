@@ -1493,6 +1493,61 @@ impl Session {
         }))
     }
 
+    /// Reconcile an edited Plain `log.select` document against its open view.
+    ///
+    /// Returns `None` when `view_id` is not a commit-selection view accepting
+    /// free text, leaving the edit to ordinary document synchronization. A
+    /// document whose non-field lines were edited is repaired by re-rendering
+    /// the log view; otherwise the edited revision is adopted and the
+    /// authoritative tree is returned with no render.
+    pub fn reconcile_log_select_document(
+        &mut self,
+        view_id: &str,
+        document: &str,
+    ) -> Result<Option<PromptReconcile>> {
+        if !self.pending_selections.contains_key(view_id) {
+            return Ok(None);
+        }
+        let (reconcile, tree) = {
+            let open = self.views.get_mut(view_id).expect("checked log select");
+            let Some(log_view) = open
+                .view_mut()
+                .as_any_mut()
+                .and_then(|any| any.downcast_mut::<LogView>())
+            else {
+                return Ok(None);
+            };
+            if log_view.revision().is_none() {
+                return Ok(None);
+            }
+            log_view.reconcile(document).map_err(Error::new)?
+        };
+        if reconcile.repaired {
+            let render = self
+                .views
+                .get_mut(view_id)
+                .expect("checked log select")
+                .render_with_delivery(None, None, RenderDelivery::Acknowledged)?;
+            self.publish();
+            let tree = self
+                .views
+                .get(view_id)
+                .expect("checked log select")
+                .tree()
+                .clone();
+            return Ok(Some(PromptReconcile {
+                tree,
+                repaired: true,
+                render: Some(render),
+            }));
+        }
+        Ok(Some(PromptReconcile {
+            tree,
+            repaired: false,
+            render: None,
+        }))
+    }
+
     /// Whether a document prompt is the active top view.
     pub fn prompt_active(&self) -> bool {
         self.prompt_view_id()
@@ -3071,13 +3126,9 @@ impl Session {
                 let repo = crate::git::GitRepo::open(&self.repo_path)?;
                 let resolved: Result<Vec<String>> =
                     commits.iter().map(|oid| repo.resolve_commit(oid)).collect();
-                resolved.ok().filter(|resolved| {
-                    !resolved.is_empty()
-                        && resolved
-                            .iter()
-                            .zip(&commits)
-                            .all(|(resolved, original)| resolved == original)
-                })
+                resolved
+                    .ok()
+                    .filter(|resolved| !resolved.is_empty() && resolved.iter().all(|oid| !oid.is_empty()))
             } else {
                 None
             };

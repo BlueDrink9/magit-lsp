@@ -57,6 +57,83 @@ pub struct Reconcile {
     pub repaired: bool,
 }
 
+/// Adopt field text from an edited document rendered as `tree`.
+///
+/// `fields` is `(node id, human label)` for each editable field, in document
+/// order. Field positions come from the authoritative tree; text is never
+/// parsed to recover structure. Returns `None` when the document must be
+/// repaired: every non-field line must match the tree, the line count must be
+/// unchanged, and each field must be exactly one single-line `NodeKind::Field`
+/// node. Otherwise it returns the validated values in field order.
+///
+/// LF and CRLF line endings are accepted, with or without a final terminator.
+/// An over-limit value, or a field line that still contains a stray carriage
+/// return, is refused with a readable error and adopts nothing.
+pub fn reconcile_fields(
+    tree: &Tree,
+    document: &str,
+    fields: &[(&str, &str)],
+) -> Result<Option<Vec<String>>, String> {
+    let mut lines: Vec<&str> = document.split('\n').collect();
+    if document.ends_with('\n') {
+        lines.pop();
+    }
+    for line in &mut lines {
+        if let Some(stripped) = line.strip_suffix('\r') {
+            *line = stripped;
+        }
+    }
+
+    let field_node_count = tree
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Field)
+        .count();
+    if field_node_count != fields.len() {
+        return Ok(None);
+    }
+
+    let mut field_lines = Vec::with_capacity(fields.len());
+    for (id, _) in fields {
+        let matches: Vec<&Node> = tree
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Field && node.id == **id)
+            .collect();
+        match matches.as_slice() {
+            [node] if node.start_line == node.end_line && node.start_line < tree.lines.len() => {
+                field_lines.push(node.start_line);
+            }
+            _ => return Ok(None),
+        }
+    }
+    let mut seen_lines = BTreeSet::new();
+    if field_lines.iter().any(|line| !seen_lines.insert(*line)) {
+        return Ok(None);
+    }
+
+    if lines.len() != tree.lines.len() {
+        return Ok(None);
+    }
+
+    for (index, expected) in tree.lines.iter().enumerate() {
+        if field_lines.contains(&index) {
+            continue;
+        }
+        if lines[index] != expected.as_str() {
+            return Ok(None);
+        }
+    }
+
+    let mut values = Vec::with_capacity(fields.len());
+    for ((_, label), line) in fields.iter().zip(field_lines.iter()) {
+        let text = lines[*line];
+        validate_field(label, text)?;
+        values.push(text.to_string());
+    }
+    Ok(Some(values))
+}
+
 /// One editable field of a prompt document.
 struct Field {
     id: String,
@@ -313,79 +390,14 @@ impl PromptDocument {
     /// previous values unchanged.
     pub fn reconcile(&mut self, document: &str, cols: usize) -> Result<Reconcile, String> {
         let tree = self.render(cols);
-
-        let mut lines: Vec<&str> = document.split('\n').collect();
-        if document.ends_with('\n') {
-            lines.pop();
-        }
-        for line in &mut lines {
-            if let Some(stripped) = line.strip_suffix('\r') {
-                *line = stripped;
-            }
-        }
-
-        let mut repaired = false;
-
-        let field_node_count = tree
-            .nodes
+        let fields: Vec<(&str, &str)> = self
+            .fields
             .iter()
-            .filter(|node| node.kind == NodeKind::Field)
-            .count();
-        if field_node_count != self.fields.len() {
-            repaired = true;
-        }
-
-        let mut field_lines = Vec::with_capacity(self.fields.len());
-        for field in &self.fields {
-            let matches: Vec<&Node> = tree
-                .nodes
-                .iter()
-                .filter(|node| node.kind == NodeKind::Field && node.id == field.id)
-                .collect();
-            match matches.as_slice() {
-                [node]
-                    if node.start_line == node.end_line
-                        && node.start_line < tree.lines.len() =>
-                {
-                    field_lines.push(node.start_line);
-                }
-                _ => {
-                    repaired = true;
-                    field_lines.push(0);
-                }
-            }
-        }
-        let mut seen_lines = BTreeSet::new();
-        if field_lines.iter().any(|line| !seen_lines.insert(*line)) {
-            repaired = true;
-        }
-
-        if lines.len() != tree.lines.len() {
-            repaired = true;
-        }
-
-        if !repaired {
-            for (index, expected) in tree.lines.iter().enumerate() {
-                if field_lines.contains(&index) {
-                    continue;
-                }
-                if lines[index] != expected.as_str() {
-                    repaired = true;
-                    break;
-                }
-            }
-        }
-
-        if repaired {
+            .map(|field| (field.id.as_str(), field.label.as_str()))
+            .collect();
+        let Some(values) = reconcile_fields(&tree, document, &fields)? else {
             return Ok(Reconcile { repaired: true });
-        }
-
-        let mut values = Vec::with_capacity(self.fields.len());
-        for (field, line) in self.fields.iter().zip(field_lines.iter()) {
-            let text = lines[*line];
-            validate_field(&field.label, text)?;
-            values.push(text.to_string());
-        }
+        };
         if self
             .fields
             .iter()
@@ -801,7 +813,11 @@ impl View for PromptView {
     }
 }
 
-fn validate_field(label: &str, value: &str) -> Result<(), String> {
+/// Check that `value` is one document line within [`MAX_FIELD_BYTES`].
+///
+/// A value carrying a newline or carriage return is refused rather than
+/// truncated, and the label names the offending field in the error.
+pub fn validate_field(label: &str, value: &str) -> Result<(), String> {
     if value.contains('\n') || value.contains('\r') {
         return Err(format!("{label} must be a single line"));
     }
