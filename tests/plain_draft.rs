@@ -237,6 +237,22 @@ fn wait_for_draft_messages(
     }
 }
 
+/// Poll Git until `HEAD` carries exactly `message`, failing after the deadline.
+fn wait_for_head_message(repo: &fixtures::RepoFixture, message: &str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let last = repo.git(&["log", "-1", "--format=%B"]);
+        if last.trim() == message {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no commit with {message:?}; last message: {last:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn open_plain_commit_buffer_is_replaced_before_show_document() {
     let (repo, _) = fixtures::RepoFixture::new()
@@ -387,6 +403,95 @@ fn close_after_abort_is_ignored() {
         "a close after abort must not report an error: {:#?}",
         &seen[before_close..],
     );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn saved_file_close_commits_the_disk_text() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let path = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .commit_message_path()
+        .expect("commit message path");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    // The client writes the buffer to disk, reports the save, then closes.
+    let saved = "Saved disk body\n";
+    server.send(editor.edit(&draft_uri, saved));
+    std::fs::write(&path, saved).expect("write saved commit message");
+    server.send(editor.save(&draft_uri));
+    server.send(editor.close(&draft_uri));
+
+    wait_for_head_message(&repo, "Saved disk body");
+    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close must commit");
+    assert_eq!(
+        repo.git(&["log", "-1", "--format=%B"]).trim(),
+        "Saved disk body",
+        "the commit message is the saved disk text"
+    );
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes(),
+        "the staged change is committed"
+    );
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2\n");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn dirty_close_commits_the_prior_saved_disk_text() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let path = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .commit_message_path()
+        .expect("commit message path");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    // A saved checkpoint reaches disk, then the buffer becomes dirty again.
+    let saved = "Prior saved body\n";
+    let dirty = "Unsaved dirty body\n";
+    server.send(editor.edit(&draft_uri, saved));
+    std::fs::write(&path, saved).expect("write saved commit message");
+    server.send(editor.save(&draft_uri));
+    server.send(editor.edit(&draft_uri, dirty));
+    assert_eq!(editor.text(&draft_uri), dirty, "the buffer is dirty");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), saved, "the file keeps the saved text");
+    server.send(editor.close(&draft_uri));
+
+    wait_for_head_message(&repo, "Prior saved body");
+    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close must commit");
+    let message = repo.git(&["log", "-1", "--format=%B"]);
+    assert_eq!(message.trim(), "Prior saved body", "the prior saved text is committed");
+    assert!(
+        !message.contains("Unsaved dirty body"),
+        "the dirty buffer must not be committed: {message:?}"
+    );
+    assert_eq!(
+        repo.git(&["show", "HEAD:f.txt"]),
+        fixtures::standard_changes(),
+        "the staged change is committed"
+    );
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2\n");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
