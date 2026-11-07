@@ -252,6 +252,77 @@ fn adopting_client_text_stops_the_next_change_from_reverting_it() {
 }
 
 #[test]
+fn observing_confirms_echoes_and_responses_in_either_order() {
+    use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
+
+    fn controller() -> PlainDocument {
+        let mut doc = PlainDocument::new(
+            "file:///prompt",
+            Encoding::Utf8,
+            true,
+            DocumentFormat::from_text("server\n"),
+        );
+        doc.open(1, "server\n");
+        assert!(doc.render("server\n").is_none());
+        doc
+    }
+
+    // Echo first, then response.
+    let mut doc = controller();
+    let flight = doc.change(2, "edited\n").expect("first repair edit");
+    doc.observe(3, "server\n");
+    assert!(
+        doc.change(4, "server\n").is_none(),
+        "an echoed flight with no response must not prepare an edit"
+    );
+    assert!(
+        doc.response(flight.id, true).is_none(),
+        "a confirmed echo retires silently"
+    );
+    assert!(
+        doc.change(5, "edited\n").is_some(),
+        "a confirmed flight must release the next edit"
+    );
+
+    // Response first, then echo.
+    let mut doc = controller();
+    let flight = doc.change(2, "edited\n").expect("first repair edit");
+    assert!(
+        doc.response(flight.id, true).is_none(),
+        "an unconfirmed response keeps the flight"
+    );
+    doc.observe(3, "server\n");
+    assert!(
+        doc.change(4, "edited\n").is_some(),
+        "a late echo must retire the flight"
+    );
+}
+
+#[test]
+fn observing_a_rejected_edit_does_not_retry_before_a_new_change() {
+    use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
+
+    let mut doc = PlainDocument::new(
+        "file:///prompt",
+        Encoding::Utf8,
+        true,
+        DocumentFormat::from_text("server\n"),
+    );
+    doc.open(1, "server\n");
+    assert!(doc.render("server\n").is_none());
+    let flight = doc.change(2, "edited\n").expect("first repair edit");
+    assert!(
+        doc.response(flight.id, false).is_none(),
+        "a rejected edit is not retried in place"
+    );
+    doc.observe(2, "edited\n");
+    let retry = doc
+        .change(2, "edited\n")
+        .expect("a new observation retries the rejected edit");
+    assert_eq!(retry.id, flight.id + 1);
+}
+
+#[test]
 fn retained_actions_resolve_the_exact_rendered_text() {
     use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
     use magit_lsp::tree::Tree;

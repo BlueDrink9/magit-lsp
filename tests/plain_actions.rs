@@ -1457,6 +1457,102 @@ fn plain_menu_option_row_opens_a_document_prompt() {
     );
 }
 
+#[test]
+fn repaired_plain_prompt_offers_actions_for_the_repaired_generation() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "one\n")])
+        .modify("f.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo);
+    let row = editor
+        .text(&uri)
+        .lines()
+        .position(|line| line.contains("f.txt"))
+        .expect("file row") as u32;
+    let open = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":row,"character":0},"end":{"line":row,"character":0}}),
+        "open.commit",
+        20,
+    );
+    execute_offered(&mut server, &mut editor, open, 21);
+    let menu_text = editor.text(&uri).to_owned();
+    let author = menu_text
+        .lines()
+        .position(|line| line.contains("Override the author"))
+        .expect("author option row") as u32;
+    let option = offered_for_range(
+        &mut server,
+        &uri,
+        json!({"start":{"line":author,"character":0},"end":{"line":author,"character":0}}),
+        "menu.run-option",
+        22,
+    );
+    execute_offered(&mut server, &mut editor, option, 23);
+
+    let prompt_text = editor.text(&uri).to_owned();
+    let cancel = exact_row(&prompt_text, "Cancel");
+    let submit = exact_row(&prompt_text, "Submit");
+    let before_repair = offered_prompt_answer(&mut server, &uri, cancel, 24);
+    let old_generation = before_repair["viewGeneration"]
+        .as_u64()
+        .expect("prompt action generation");
+    let mut lines: Vec<String> = prompt_text.lines().map(str::to_owned).collect();
+    let field = (submit - 1) as usize;
+    lines[field] = "Typed Author <typed@example.com>".into();
+    let accepted = lines.join("\n");
+    server.send(editor.edit(&uri, &accepted));
+    server.send(json!({"jsonrpc":"2.0","id":25,"method":"textDocument/codeAction","params":{"textDocument":{"uri":uri},"range":{"start":{"line":cancel,"character":0},"end":{"line":cancel,"character":0}},"context":{"diagnostics":[]}}}));
+    loop {
+        let message = server.recv();
+        assert_ne!(
+            message["method"], "workspace/applyEdit",
+            "a valid LF field edit must not be repaired: {message}"
+        );
+        if message["id"] == json!(25) {
+            break;
+        }
+    }
+    let damaged = accepted.replacen("Override the author", "Damaged title", 1);
+    let damaged_change = editor.edit(&uri, &damaged);
+    let damaged_version = damaged_change["params"]["textDocument"]["version"].clone();
+    server.send(damaged_change);
+    let repair = next_apply(&mut server);
+    assert_eq!(
+        repair["params"]["edit"]["documentChanges"][0]["textDocument"]["version"],
+        damaged_version,
+        "repair must target the damaged notification's document version: {repair}"
+    );
+    for frame in editor.dispatch(&repair) {
+        server.send(frame);
+    }
+    assert_eq!(editor.text(&uri), accepted, "protected prompt text was not repaired");
+
+    let answer = offered_prompt_answer(&mut server, &uri, cancel, 26);
+    assert_eq!(
+        answer["viewGeneration"],
+        json!(old_generation + 1),
+        "offered generation must match the repaired session render"
+    );
+    let cancelled = execute_offered(&mut server, &mut editor, answer, 27);
+    assert!(
+        cancelled["error"].is_null(),
+        "repaired prompt cancel failed: {cancelled}"
+    );
+    assert!(
+        !editor
+            .text(&uri)
+            .lines()
+            .any(|line| matches!(line.trim(), "Submit" | "Cancel")),
+        "prompt stayed open after repaired action: {}",
+        editor.text(&uri)
+    );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
+    assert!(status.success());
+}
+
 /// The rendered row index of the first line whose trimmed text equals `label`.
 fn exact_row(text: &str, label: &str) -> u32 {
     text.lines()
@@ -1777,4 +1873,3 @@ fn plain_confirm_prompt_cancel_row_closes_without_touching_git() {
     let (status, _) = server.finish_with_messages(std::time::Duration::from_secs(10));
     assert!(status.success());
 }
-

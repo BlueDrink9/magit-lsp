@@ -1281,6 +1281,7 @@ fn plain_change(shared: &Shared, uri: &str) {
                         .get_mut(uri)
                         .filter(|entry| entry.incarnation == incarnation)
                         .and_then(|entry| {
+                            entry.controller.observe(snapshot.version, snapshot.text.clone());
                             entry.controller.render_actions(
                                 tree,
                                 view_id,

@@ -270,8 +270,18 @@ impl PlainDocument {
 
     /// Record an observed didChange snapshot and reconcile an exact applyEdit echo.
     pub fn change(&mut self, version: i32, text: impl Into<String>) -> Option<ApplyEdit> {
+        self.observe(version, text);
+        self.prepare()
+    }
+
+    /// Record an observed didChange snapshot and reconcile an in-flight edit echo.
+    ///
+    /// This is the observation half of [`PlainDocument::change`]: it updates the
+    /// client snapshot and flight bookkeeping but never prepares or returns an
+    /// edit, so a caller can render new authoritative text afterwards.
+    pub fn observe(&mut self, version: i32, text: impl Into<String>) {
         if self.state == DocumentState::Detached {
-            return None;
+            return;
         }
         let text = text.into();
         let observed = self.snapshot_for(text, version);
@@ -285,15 +295,14 @@ impl PlainDocument {
             if flight.response == Some(true) {
                 if flight.format_drift {
                     self.suspend_for_format_drift();
-                    return None;
+                    return;
                 }
                 self.in_flight = None;
                 self.state = DocumentState::Ready;
             }
-            return self.prepare();
+            return;
         }
         self.state = DocumentState::Ready;
-        self.prepare()
     }
 
     /// Resolve an applyEdit result; late responses after close/reopen are ignored.
