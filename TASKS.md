@@ -225,8 +225,8 @@ T005 is complete through its authoritative [completed children](#completed-work)
 
 ### Feature — Phase 3: Plain interaction
 
-- [ ] **T008 — prompts-and-picks.** [Scope](./TASKS_PART_SEVEN.md#t008-prompts-and-picks-l).
-- [ ] **T009 — stable-id-selection.** [Scope](./TASKS_PART_SEVEN.md#t009-stable-id-selection-m).
+- [x] **T008 — prompts-and-picks.** [Scope](./TASKS_PART_SEVEN.md#t008-prompts-and-picks-l). Done: `6957647`..`6179b54` (via T008.1–T008.13b). T008 clauses 1–11.
+- [x] **T009 — stable-id-selection.** [Scope](./TASKS_PART_SEVEN.md#t009-stable-id-selection-m). Done: `8280e85`..`cb8423c` (via T009.1–T009.6). T009 clauses 1–7.
 - [ ] **T010 — plain-commit-editing.** [Scope](./TASKS_PART_SEVEN.md#t010-plain-commit-editing-s).
 
 ### Feature — Phase 4: Specification
