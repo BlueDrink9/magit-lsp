@@ -2908,6 +2908,14 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
             if command.command != "common.confirm" {
                 return Err(Error::new("Only common.confirm is supported here"));
             }
+            if editor::registry()
+                .run_for_uri(&shared.draft_owner, &command.uri)
+                .ok()
+                .as_deref()
+                != Some(command.run_id.as_str())
+            {
+                return Err(Error::new("Commit draft is no longer pending"));
+            }
             let p = DraftFinishParams {
                 run_id: command.run_id,
                 uri: command.uri,
@@ -2946,6 +2954,52 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
     serde_json::to_value(response).map_err(|error| Error::new(error.to_string()))
 }
 
+/// Whether a synchronized document belongs to this Plain connection: a pending
+/// draft run or a server-owned presentation document. Rich clients keep their
+/// own documents, so only Plain applies this ownership check.
+#[cfg(unix)]
+fn draft_document_is_owned(shared: &Shared, uri: &str) -> bool {
+    if editor::registry()
+        .run_for_uri(&shared.draft_owner, uri)
+        .is_ok()
+    {
+        return true;
+    }
+    let plain = matches!(
+        shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation
+            .as_ref(),
+        Some(Presentation::Plain(_))
+    );
+    !plain || is_plain_provider_uri(shared, uri) || is_workspace_commit_message(shared, uri)
+}
+
+/// Whether the URI addresses a workspace repository's commit message file, which
+/// a Plain client may open before a draft run claims it.
+#[cfg(unix)]
+fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
+    let Some(path) = file_uri_path(uri) else {
+        return false;
+    };
+    if !path.file_name().is_some_and(|name| name == "COMMIT_EDITMSG") {
+        return false;
+    }
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .workspace_repositories
+        .iter()
+        .any(|repository| repository.git_dir == dir)
+}
+
 /// Apply synchronized text and forward accepted snapshots to any pending draft.
 #[cfg(unix)]
 fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()> {
@@ -2960,6 +3014,11 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
             let p: DidOpenTextDocumentParams = from_params(notification.params.clone())?;
             let doc = p.text_document;
             let uri = doc.uri.as_str();
+            if !draft_document_is_owned(shared, uri) {
+                return Err(Error::new(
+                    "Commit draft URI is not pending on this connection",
+                ));
+            }
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     draft.did_open(context, doc.version, doc.text.as_bytes())
@@ -2975,6 +3034,11 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
         "textDocument/didChange" => {
             let p: DidChangeTextDocumentParams = from_params(notification.params.clone())?;
             let uri = p.text_document.uri.as_str();
+            if !draft_document_is_owned(shared, uri) {
+                return Err(Error::new(
+                    "Commit draft change is detached, stale or duplicated",
+                ));
+            }
             let encoding = shared
                 .client
                 .lock()
@@ -3021,6 +3085,7 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
         "textDocument/didClose" => {
             let p: DidCloseTextDocumentParams = from_params(notification.params.clone())?;
             let uri = p.text_document.uri.as_str();
+            let owned = draft_document_is_owned(shared, uri);
             shared
                 .documents
                 .lock()
@@ -3030,7 +3095,14 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
                 .run_for_uri(&shared.draft_owner, uri)
                 .is_err()
             {
-                return Ok(());
+                return if owned {
+                    // A close after an abort just detaches the document store.
+                    Ok(())
+                } else {
+                    Err(Error::new(
+                        "Commit draft URI is not pending on this connection",
+                    ))
+                };
             }
             let run = editor::registry().run_for_uri(&shared.draft_owner, uri)?;
             let close_confirms = shared

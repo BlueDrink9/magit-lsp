@@ -173,6 +173,55 @@ fn prepare_commit(
         .clone()
 }
 
+/// Start a commit run, wait for its showDocument and attach the draft document.
+fn start_open_draft(
+    repo: &fixtures::RepoFixture,
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    status_uri: &str,
+    seen: &mut Vec<Value>,
+) -> String {
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let draft_uri = format!("file://{expected_path}");
+    let create = prepare_commit(server, editor, &draft_uri, seen, status_uri);
+    assert!(execute_action(server, editor, &draft_uri, seen, create, 95)["error"].is_null());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
+    }) {
+        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        pump(server, editor, &draft_uri, seen);
+    }
+    let template = std::fs::read_to_string(&expected_path).expect("commit template");
+    server.send(editor.open(&draft_uri, &template));
+    draft_uri
+}
+
+/// Return the semantic arguments of the offered draft action for a command.
+fn draft_action(actions: &[Value], command: &str) -> Value {
+    actions
+        .iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == command)
+        .unwrap_or_else(|| panic!("{command} offered: {actions:#?}"))["command"]["arguments"][0]
+        .clone()
+}
+
+/// Drain frames until the status view replaces the pending draft path.
+fn wait_for_status_view(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+    status_uri: &str,
+    expected_path: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while editor.text(status_uri).contains(expected_path) {
+        assert!(Instant::now() < deadline, "status view timed out: seen {seen:#?}");
+        pump(server, editor, draft_uri, seen);
+    }
+}
+
 fn wait_for_draft_messages(
     server: &mut stdio::TestServer,
     editor: &mut FakeEditor,
@@ -230,6 +279,145 @@ fn open_plain_commit_buffer_is_replaced_before_show_document() {
 
     let show = &seen[show_index];
     assert_eq!(show["params"], json!({"uri":expected_uri,"external":false,"takeFocus":true}));
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn stale_explicit_confirm_is_refused_and_keeps_the_draft_pending() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    server.send(editor.edit(&draft_uri, "Uncommitted body\n"));
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 200);
+    let confirm = draft_action(&offered, "common.confirm");
+    let current = confirm["version"].as_i64().expect("commit version");
+    let mut stale = confirm.clone();
+    stale["version"] = json!(current - 1);
+    let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stale, 201);
+    assert_eq!(
+        refused["error"]["message"],
+        "Wait for the exact synchronized document version; full-text repair may be required",
+    );
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a stale confirm must not commit");
+    let still = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 202);
+    draft_action(&still, "common.confirm");
+    assert_eq!(editor.text(&draft_uri), "Uncommitted body\n", "the draft stays pending");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn explicit_abort_creates_no_commit_and_restores_the_status_view() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    server.send(editor.edit(&draft_uri, "Aborted body\n"));
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 210);
+    let abort = offered
+        .iter()
+        .find(|action| action["title"] == "Abort commit")
+        .expect("attached draft offers Abort")["command"]["arguments"][0]
+        .clone();
+    assert_eq!(abort["command"], "common.cancel");
+    let aborted = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 211);
+    assert!(aborted["error"].is_null(), "Abort failed: {aborted}");
+    assert_eq!(aborted["result"]["type"], "aborted");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "Abort must not commit");
+    assert!(repo.git(&["status", "--porcelain"]).contains("f.txt"), "Abort keeps staged work");
+
+    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    assert!(editor.text(&uri).contains("f.txt"), "the status view is shown again");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn close_after_abort_is_ignored() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 220);
+    let abort = offered
+        .iter()
+        .find(|action| action["title"] == "Abort commit")
+        .expect("attached draft offers Abort")["command"]["arguments"][0]
+        .clone();
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 221)["error"].is_null());
+
+    let before_close = seen.len();
+    server.send(editor.close(&draft_uri));
+    // The server stays responsive and the late close changes nothing.
+    let after = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 222);
+    assert!(after.iter().all(|action| {
+        action["command"]["arguments"][0]["command"] != "common.confirm"
+    }));
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a close after abort must not commit");
+    assert!(
+        !seen[before_close..].iter().any(|message| {
+            message["method"] == "window/showMessage"
+                && message["params"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Commit draft"))
+        }),
+        "a close after abort must not report an error: {:#?}",
+        &seen[before_close..],
+    );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    let edited = "Kept body\n";
+    server.send(editor.edit(&draft_uri, edited));
+
+    let unrelated = format!("file://{}/unrelated.txt", repo.path().display());
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":unrelated,"languageId":"plaintext","version":1,"text":"unrelated\n"}}}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":unrelated,"version":2},"contentChanges":[{"text":"changed\n"}]}}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":unrelated}}}));
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 230);
+    let confirm = draft_action(&offered, "common.confirm");
+    let confirmed = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 231);
+    assert!(confirmed["error"].is_null(), "draft confirm failed: {confirmed}");
+
+    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), format!("{edited}\n"));
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
