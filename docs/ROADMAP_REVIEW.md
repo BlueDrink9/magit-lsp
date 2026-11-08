@@ -12,6 +12,7 @@ Source review only: reviewed `ebe0516..243ff20` (20 commits, 14 paths, +2501/-14
 ## Review record
 
 Verified: `make docs-check` @ `eb3ac8d` → ok. Documentation check only; source observations above are not runtime proof.
+Verified: `make docs-check` after the final queue corrections based on `20b28ba` → exit 0 (`ok: docs-check`). No implementation changes or new runtime verification in this review.
 
 ## Phase 4 — specification
 
