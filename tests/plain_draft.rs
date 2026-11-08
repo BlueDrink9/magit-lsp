@@ -473,6 +473,57 @@ fn saved_file_close_commits_the_disk_text() {
 }
 
 #[test]
+fn empty_saved_message_is_refused_by_git_and_reported() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let path = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .commit_message_path()
+        .expect("commit message path");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    // The client saves and closes an empty message, so Git itself refuses the
+    // commit while the server keeps the staged change.
+    server.send(editor.edit(&draft_uri, ""));
+    std::fs::write(&path, "").expect("write empty commit message");
+    server.send(editor.save(&draft_uri));
+    server.send(editor.close(&draft_uri));
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if seen.iter().any(|message| {
+            message["method"] == "window/showMessage"
+                && message["params"]["type"] == 3
+                && message["params"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("empty message"))
+        }) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no empty-message report: {seen:#?}");
+        pump(&mut server, &mut editor, &draft_uri, &mut seen);
+    }
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "an empty message must not commit");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n", "no commit is created");
+    assert!(
+        repo.git(&["status", "--porcelain"]).contains("f.txt"),
+        "the staged change survives the refusal"
+    );
+
+    // The server stays responsive after the refused commit.
+    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 500);
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
 fn dirty_close_commits_the_prior_saved_disk_text() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "before\n")])
