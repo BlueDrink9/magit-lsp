@@ -139,6 +139,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T010.4a — Cover save-then-close and dirty Discard.** `tests/plain_draft.rs` covers a saved file confirmed by close, and a dirty buffer discarded on close using the prior saved content. T010 clause 5 (save then close; dirty Discard).
   - Done: `saved_file_close_commits_the_disk_text` and `dirty_close_commits_the_prior_saved_disk_text` in `tests/plain_draft.rs`.
   - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `f930ff7` → ok: rust (27 editor_bridge + 11 plain_draft).
+- [x] **T010.4b — Cover dirty Save and dirty Cancel.** `tests/plain_draft.rs` covers a dirty buffer saved without a commit, and a dirty buffer cancelled on close while the buffer stays open. T010 clause 5 (dirty Save; dirty Cancel).
+  - Done: `dirty_save_creates_no_commit_and_keeps_the_draft_pending` and `dirty_cancel_keeps_the_draft_pending_and_the_editor_open` in `tests/plain_draft.rs`.
+  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `829eceb` → ok: rust (27 editor_bridge + 13 plain_draft).
 
 - [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
 - [x] **T007.4c — Confirm or abort manually attached commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Attached issued URI through didOpen and exposed Confirm/Abort actions. Exact Confirm body and stale-version rejection landed in `ccf6cbbe055ccb157b59aed525537cdef48f6171`; the existing single scenario enforces both outcomes, terminal retirement and readable guidance.

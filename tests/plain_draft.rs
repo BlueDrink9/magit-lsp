@@ -38,10 +38,32 @@ fn open_plain_with_env(
     capabilities: Value,
     extra_env: &[(&str, &str)],
 ) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_inner(repo, capabilities, extra_env, None)
+}
+
+/// Open the repository's `.magit` status document identifying as `client_name`.
+fn open_plain_as(
+    repo: &fixtures::RepoFixture,
+    capabilities: Value,
+    client_name: &str,
+) -> (stdio::TestServer, FakeEditor, String) {
+    open_plain_inner(repo, capabilities, &[], Some(client_name))
+}
+
+/// Open the repository's `.magit` status document with optional client identity.
+fn open_plain_inner(
+    repo: &fixtures::RepoFixture,
+    capabilities: Value,
+    extra_env: &[(&str, &str)],
+    client_name: Option<&str>,
+) -> (stdio::TestServer, FakeEditor, String) {
     let uri = format!("file://{}/.magit", repo.path().display());
     let mut server = stdio::TestServer::spawn(extra_env);
     let mut init = stdio::initialize_message();
     init["params"]["capabilities"] = capabilities;
+    if let Some(client_name) = client_name {
+        init["params"]["clientInfo"] = json!({"name":client_name});
+    }
     init["params"]["workspaceFolders"] =
         json!([{"uri":format!("file://{}",repo.path().display()),"name":"repo"}]);
     server.send(init);
@@ -491,6 +513,112 @@ fn dirty_close_commits_the_prior_saved_disk_text() {
     );
     assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2\n");
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
+
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn dirty_save_creates_no_commit_and_keeps_the_draft_pending() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let path = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .commit_message_path()
+        .expect("commit message path");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    // The live text differs from the saved snapshot until the native save
+    // writes it to disk and reports didSave.
+    let dirty = "Dirty saved body\n";
+    server.send(editor.edit(&draft_uri, dirty));
+    std::fs::write(&path, dirty).expect("write saved commit message");
+    server.send(editor.save(&draft_uri));
+
+    // A save checkpoints only: it never commits and never ends the run.
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a save must not commit");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 400);
+    draft_action(&offered, "common.confirm");
+    assert_eq!(editor.text(&draft_uri), dirty, "the saved draft stays editable");
+
+    // Only a later close commits, and it commits the saved text.
+    server.send(editor.close(&draft_uri));
+    wait_for_head_message(&repo, "Dirty saved body");
+    assert_ne!(repo.git(&["rev-parse", "HEAD"]), head, "the close commits the saved text");
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Dirty saved body");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "2\n");
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn dirty_cancel_keeps_the_draft_pending_and_the_editor_open() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let expected_path = magit_lsp::git::GitRepo::open(repo.path())
+        .expect("open repository")
+        .commit_message_path()
+        .expect("commit message path")
+        .to_string_lossy()
+        .to_string();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    // VSCode confirms only its own closed-tab event, so its didClose is
+    // detach-only and never commits.
+    let (mut server, mut editor, uri) = open_plain_as(&repo, caps(true), "Visual Studio Code");
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+
+    let dirty = "Cancelled close body\n";
+    server.send(editor.edit(&draft_uri, dirty));
+
+    // The dirty-close dialog is cancelled, so the editor and run are retained
+    // and Confirm is still offered without a commit.
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 410);
+    draft_action(&offered, "common.confirm");
+    assert_eq!(editor.text(&draft_uri), dirty, "the dirty buffer stays open");
+    assert!(
+        editor.text(&uri).contains("f.txt"),
+        "the status view is still shown: {}",
+        editor.text(&uri)
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a cancelled close must not commit");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
+
+    // The non-confirming close only detaches the transport: no commit, and the
+    // retained run accepts the exact live text again.
+    let version = editor
+        .documents
+        .get(&draft_uri)
+        .expect("open draft document")
+        .version;
+    server.send(editor.close(&draft_uri));
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a non-confirming close must not commit");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":draft_uri,"languageId":"plaintext","version":version,"text":dirty}}}));
+    editor.documents.insert(
+        draft_uri.clone(),
+        fake_editor::Document {
+            text: dirty.into(),
+            version,
+        },
+    );
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 411);
+    draft_action(&offered, "common.confirm");
+    assert_eq!(editor.text(&draft_uri), dirty, "the pending run keeps the buffer open");
+    assert!(
+        !std::path::Path::new(&expected_path).exists() || std::fs::read_to_string(&expected_path).unwrap() != dirty,
+        "a cancelled close must not write the draft"
+    );
 
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
