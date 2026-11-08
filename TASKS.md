@@ -1,6 +1,6 @@
 # magit-lsp — Roadmap
 
-Last review: bfb60d1 (Phase 3 end gate, second pass; P1 fix `bfb60d1` landed after the review at `b4dae94` and was re-verified with `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1`. `git diff --shortstat 6b6a729..b4dae94` covers T010 plain-commit-editing (versioned whole-buffer `applyEdit` before `showDocument`, the no-didOpen expiry, Confirm/Abort at the exact version, and the nine clause-5 conformance cases): 9 commits, 9 paths, 1312 insertions, 41 deletions. Serial gate at `b4dae94`: `make test` ok (build, rust, lua, vscode, keybindings), `make hygiene` exit 0 (report-only; `cargo machete`, `knip`, `luacheck` absent on this host so those linters did not run), `make ui-tour` ok. Review verified the timeout-vs-didOpen race is atomic under the registry lock, the `COMMIT_EDITMSG` ownership check compares canonicalized Git directories, the expiry releases the `entries` lock before taking `history`, and the widened menu filter matches the four real commit-menu actions. One `[P1]` filed: a rejected Plain draft `applyEdit` is discarded, so the server believes a stale template was delivered. No P0. Phase 3 (T008, T009, T010) is complete; Phase 4 (T011) is not started. Dirty concurrent release/tooling work excluded from review.)
+Last review: 243ff20; source review of `ebe0516..243ff20` (20 commits, 14 paths, +2501/-146). Scope and limits: [roadmap review](docs/ROADMAP_REVIEW.md). Findings are source-reviewed, not runtime-proven; reuse recorded Phase 3 gate results. Concurrent dirty release/tooling work excluded.
 Phase 2 end gate: T007 is complete, so this is a named phase end. `git diff --shortstat 2e29535..ca67ce3` covers Plain capability/action gates, the echo watchdog, commit-editor delivery, registry-backed draft rows, draft Confirm/Abort, shared editor models and the maintained native runner: 38 paths, 3075 insertions, 1889 deletions, including wire/protocol and lifecycle changes. Serial gate results at `5da5d86`: `make test` ok (build, rust, lua, vscode, keybindings; no orphan server), `make hygiene` exit 0 with `cargo machete`, `knip` and `luacheck` absent on this host so those linters did not run, `make ui-tour` ok. `make ui-test` reports 44 PASS / 5 FAIL; the same five scenarios (`common-navigation`, `hunk-body-fold`, `log-select`, `log-view`, `process-log`) fail identically in a clean extraction of reviewed baseline `2e29535`, so they are pre-existing UI coverage gaps, not Phase 2 regressions, and are owned by a Bugfix entry. The gate review filed one P1 (Plain draft-sync failures leaked rich `view/effects`) and one P2 (undocumented deadlock-preventing refresh thread); both are fixed and ticked, no P0 was raised, and review fixes do not re-trigger a review. `make test` is green again at `ebf9ed1`. Phase 2 is complete and Phase 3 is not started. Completed-ticket compression is left to the concurrent documentation workstream, which owns TASKS.md history reduction.
 Documentation cleanup gate: substantial reference relocation and history reduction warrant a bounded preservation review. Runtime implementation changes belong to a concurrent workstream; this documentation gate uses focused documentation checks, not a redundant runtime/native gate.
 
@@ -234,14 +234,14 @@ Its detailed client behavior contract lives in [`docs/CLIENT_SPEC.md`](docs/CLIE
 
 This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md) is an archived scope and provenance document; its detailed ticket specifications remain linked and do not track status. Original scope and Verify text remain recoverable from immutable `d04dfa2:TASKS.md`; provenance is not completion evidence. See [migration ledger](docs/evidence/task-queue-migration.md).
 
-### Feature — Phase 2 (acceptance complete; final gate pending)
+### Feature — Phase 2 (acceptance and recorded final gate complete)
 
 T005 is complete through its authoritative [completed children](#completed-work); full scope and original acceptance: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
 - [x] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
   - Done: containing commit.
 - [x] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m). Done: containing commit; all six original clauses and native evidence are audited under T007.5. Final Phase 2 gate remains orchestrator-owned.
 
-### Feature — Phase 3: Plain interaction
+### Feature — Phase 3: Plain interaction (complete; gate recorded)
 
 - [x] **T008 — prompts-and-picks.** [Scope](./TASKS_PART_SEVEN.md#t008-prompts-and-picks-l). Done: `6957647`..`6179b54` (via T008.1–T008.13b). T008 clauses 1–11.
 - [x] **T009 — stable-id-selection.** [Scope](./TASKS_PART_SEVEN.md#t009-stable-id-selection-m). Done: `8280e85`..`cb8423c` (via T009.1–T009.6). T009 clauses 1–7.
