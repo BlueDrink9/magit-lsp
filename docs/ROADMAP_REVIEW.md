@@ -9,6 +9,10 @@ Source review only: reviewed `ebe0516..243ff20` (20 commits, 14 paths, +2501/-14
 3. **Plain draft flake diagnosis, then fix.** Current queue text overstates root cause. One edit targeting v2 normally advances client to v3; that observation proves neither a second stale edit nor a rejection. Retain symptoms and `/tmp/opencode/diag_fail.log` artifact, but mark mechanism unproven. Capture correlated run/URI/incarnation, generation, render creation, prepare suppression/in-flight state, outbound request ID/version, response, `didChange` echo, and expiry. Diagnose before production changes or retry masking. Concurrent dirty harness work stays excluded and uncommitted. Ten consecutive passes are supplementary, not regression proof; add deterministic regression after cause is known.
 4. **Baseline UI debt.** Keep the five baseline scenarios (`common-navigation`, `hunk-body-fold`, `log-select`, `log-view`, `process-log`) explicit as owned debt or documented gate disposition. Existing `make ui-file` scenarios are real native Neovim; use text/structured evidence only.
 
+## Review record
+
+Verified: `make docs-check` @ `eb3ac8d` → ok. Documentation check only; source observations above are not runtime proof.
+
 ## Phase 4 — specification
 
 Execute T011 → T012 → T013. T011 is oversized; split during execution into: method/direction/request-notification and serialization-mode inventory; schema plus Make drift/validation targets; generated TypeScript/Lua plus only shared effects/prompts lists; payload-table generation and fixture checks. Rust serialization is authority; method table remains explicitly maintained. Fixture-cover `Option<Value>`, flatten/custom serialization, and serde-mode hazards. Add new Make targets before invoking them; do not invent target names. Distinguish `PlainActionTarget` wire-shape changes from generator-only changes: update both peers and fixtures atomically, with no compatibility shims.
