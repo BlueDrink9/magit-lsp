@@ -122,6 +122,25 @@ fn pump(
     message
 }
 
+/// Receive one frame, rejecting the draft template edit instead of applying it.
+fn pump_rejecting_draft(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+) -> Value {
+    let message = server.recv();
+    seen.push(message.clone());
+    if message["method"] == "workspace/applyEdit" && draft_edit(&message, draft_uri) {
+        server.send(json!({"jsonrpc":"2.0","id":message["id"],"result":{"applied":false}}));
+    } else if message["method"].is_string() && !message["id"].is_null() {
+        for frame in editor.dispatch(&message) {
+            server.send(frame);
+        }
+    }
+    message
+}
+
 fn code_actions(
     server: &mut stdio::TestServer,
     editor: &mut FakeEditor,
@@ -317,6 +336,57 @@ fn open_plain_commit_buffer_is_replaced_before_show_document() {
 
     let show = &seen[show_index];
     assert_eq!(show["params"], json!({"uri":expected_uri,"external":false,"takeFocus":true}));
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
+fn rejected_draft_template_edit_is_reported_and_cancels_the_run() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let draft_uri = format!("file://{expected_path}");
+    let stale = "Previous commit message\n";
+    // The client opened this buffer before the new run issued its template.
+    server.send(editor.open(&draft_uri, stale));
+
+    let mut seen = Vec::new();
+    let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
+    server.send(json!({"jsonrpc":"2.0","id":95,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[create]}}));
+
+    // The client refuses the replacement, so no template ever reaches the buffer.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showMessage"
+            && message["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("could not be applied"))
+    }) {
+        assert!(Instant::now() < deadline, "rejection report timed out: seen {seen:#?}");
+        pump_rejecting_draft(&mut server, &mut editor, &draft_uri, &mut seen);
+    }
+    assert!(
+        seen.iter().any(|message| message["method"] == "workspace/applyEdit" && draft_edit(message, &draft_uri)),
+        "the rejected template edit was offered: {seen:#?}"
+    );
+    assert_eq!(editor.text(&draft_uri), stale, "the rejection leaves the buffer as it was");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a rejected draft must not commit");
+
+    // The canceled run leaves no pending draft to confirm or abort.
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+    assert!(
+        offered.iter().all(|action| {
+            let command = action["command"]["arguments"][0]["command"].as_str();
+            command != Some("common.confirm") && command != Some("common.cancel")
+        }),
+        "a canceled draft offers no Confirm/Abort: {offered:#?}"
+    );
+
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());

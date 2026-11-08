@@ -1066,8 +1066,29 @@ fn send_plain_edit_document(
         .expect("editor bridge runs inside the server runtime");
     if let Some((apply_pending, apply_receiver)) = apply {
         let shared = shared.clone();
+        let uri = uri.clone();
         runtime.spawn(async move {
-            let _ = shared.await_outbound(apply_pending, apply_receiver).await;
+            let applied = shared
+                .await_outbound(apply_pending, apply_receiver)
+                .await
+                .ok()
+                .and_then(|response| response.response_result.ok())
+                .and_then(|value| value.get("applied").and_then(Value::as_bool))
+                .unwrap_or(false);
+            if applied || shared.closing.load(Ordering::SeqCst) {
+                return;
+            }
+            // A rejected, failed or unanswered template leaves the client's
+            // buffer stale, so its later didOpen would be refused as a version
+            // mismatch. Cancel the run and say why instead of assuming delivery.
+            if editor::registry().resolve(&run_id, editor::Reply::Abort) {
+                let _ = shared.sender.send(show_message(
+                    2,
+                    format!(
+                        "magit-lsp: the commit draft template could not be applied to the open {uri} buffer; close and reopen the draft, then retry the commit."
+                    ),
+                ));
+            }
         });
     }
     runtime.spawn(async move {
