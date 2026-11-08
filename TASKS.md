@@ -145,6 +145,9 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **T010.4c — Cover an empty commit message.** `tests/plain_draft.rs` covers an empty saved message where Git aborts the commit and the server reports it. T010 clause 5 (empty text saved).
   - Done: `empty_saved_message_is_refused_by_git_and_reported` in `tests/plain_draft.rs`.
   - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `aeb7ec7` → ok: rust (27 editor_bridge + 14 plain_draft).
+- [x] **T010.4d — Cover a second session.** `tests/plain_draft.rs` covers a second Plain session getting no draft actions for another session's draft. T010 clause 5 (a second session gets no actions).
+  - Done: `second_session_gets_no_draft_actions_and_cannot_forge_confirm` in `tests/plain_draft.rs`; a second Plain session pointed at the same repository offers no Confirm/Abort for the first session's draft, and a forged Confirm/Abort carrying that run's identity is refused without a commit.
+  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `0345fff` → ok: rust (27 editor_bridge + 15 plain_draft).
 
 - [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
 - [x] **T007.4c — Confirm or abort manually attached commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Attached issued URI through didOpen and exposed Confirm/Abort actions. Exact Confirm body and stale-version rejection landed in `ccf6cbbe055ccb157b59aed525537cdef48f6171`; the existing single scenario enforces both outcomes, terminal retirement and readable guidance.

@@ -904,3 +904,60 @@ fn opened_plain_commit_draft_is_not_expired() {
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
 }
+
+#[test]
+fn second_session_gets_no_draft_actions_and_cannot_forge_confirm() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+
+    // Session A owns the commit draft for the shared repository.
+    let (mut server_a, mut editor_a, uri_a) = open_plain(&repo, caps(true));
+    let mut seen_a = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server_a, &mut editor_a, &uri_a, &mut seen_a);
+    let offered_a = code_actions(&mut server_a, &mut editor_a, &draft_uri, &mut seen_a, &draft_uri, 0, 300);
+    let confirm = draft_action(&offered_a, "common.confirm");
+    let abort = draft_action(&offered_a, "common.cancel");
+
+    // Session B is an independent connection pointed at the same repository.
+    let (mut server_b, mut editor_b, uri_b) = open_plain(&repo, caps(true));
+    assert_eq!(uri_b, uri_a, "both sessions address the same status document");
+    let mut seen_b = Vec::new();
+
+    // A draft run belongs to the connection that created it, so B offers no
+    // Confirm/Abort for A's draft URI.
+    let offered_b = code_actions(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, &draft_uri, 0, 310);
+    assert!(
+        offered_b.iter().all(|action| {
+            let command = action["command"]["arguments"][0]["command"].as_str();
+            command != Some("common.confirm") && command != Some("common.cancel")
+        }),
+        "a foreign session offers no draft actions: {offered_b:#?}"
+    );
+
+    // A forged Confirm/Abort carrying A's exact identity is refused without a
+    // commit, because B's owner has no such pending run.
+    let refused = execute_action(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, confirm, 320);
+    assert_eq!(refused["error"]["message"], "Commit draft is no longer pending");
+    let refused = execute_action(&mut server_b, &mut editor_b, &draft_uri, &mut seen_b, abort, 321);
+    assert_eq!(
+        refused["error"]["message"],
+        "Commit draft URI is not pending on this connection"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "a foreign confirm must not commit");
+    assert_eq!(repo.git(&["rev-list", "--count", "HEAD"]), "1\n");
+
+    // A's own run stays pending and still offers both actions.
+    let still = code_actions(&mut server_a, &mut editor_a, &draft_uri, &mut seen_a, &draft_uri, 0, 330);
+    draft_action(&still, "common.confirm");
+    draft_action(&still, "common.cancel");
+
+    server_a.shutdown_and_exit();
+    let (status_a, _) = server_a.finish_with_messages(Duration::from_secs(10));
+    assert!(status_a.success());
+    server_b.shutdown_and_exit();
+    let (status_b, _) = server_b.finish_with_messages(Duration::from_secs(10));
+    assert!(status_b.success());
+}
