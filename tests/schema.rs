@@ -1708,6 +1708,88 @@ fn client_spec_payload_tables_drift_on_tamper_and_missing_block() {
 }
 
 #[test]
+fn committed_worked_exchanges_match_generation() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join(generate_schema::schema_markdown::DOC_PATH);
+    let committed = std::fs::read_to_string(&path).expect("read client spec");
+    let block = generate_schema::schema_markdown::worked_exchanges_block()
+        .expect("render worked exchanges");
+    assert_eq!(
+        block,
+        generate_schema::schema_markdown::worked_exchanges_block()
+            .expect("render again"),
+        "worked exchanges must render deterministically"
+    );
+    assert!(
+        committed.contains(generate_schema::schema_markdown::EXCHANGES_BLOCK_BEGIN)
+            && committed.contains(generate_schema::schema_markdown::EXCHANGES_BLOCK_END),
+        "client spec must carry the generated worked-exchange markers"
+    );
+    assert_eq!(
+        generate_schema::schema_markdown::apply(&committed).expect("regenerate exchanges"),
+        committed,
+        "client-spec worked exchanges are stale (run make update-schema)"
+    );
+    for name in [
+        "commit-edit-abort.jsonl",
+        "commit-edit-confirm.jsonl",
+        "plain-code-action.jsonl",
+        "plain-document-prompt.jsonl",
+        "plain-open.jsonl",
+        "rich-lifecycle.jsonl",
+    ] {
+        assert!(
+            block.contains(&format!("##### `{name}`")),
+            "worked exchanges must include {name}"
+        );
+    }
+    assert_eq!(
+        block.matches("```jsonl").count(),
+        6,
+        "each example file gets one fenced jsonl block"
+    );
+}
+
+#[test]
+fn client_spec_worked_exchanges_drift_on_tamper_and_missing_block() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let doc = generate_schema::schema_markdown::DOC_PATH;
+    let path = dir.path().join(doc);
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    let provenance = "temporary paths are normalized to `/repo`";
+    assert!(text.contains(provenance), "worked exchanges carry provenance");
+    std::fs::write(&path, text.replace(provenance, "temporary paths are not normalized"))
+        .expect("tamper worked exchanges");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from(doc)],
+        "a modified worked-exchange block is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    let begin = text
+        .find(generate_schema::schema_markdown::EXCHANGES_BLOCK_BEGIN)
+        .expect("begin marker");
+    let end = text
+        .find(generate_schema::schema_markdown::EXCHANGES_BLOCK_END)
+        .expect("end marker")
+        + generate_schema::schema_markdown::EXCHANGES_BLOCK_END.len();
+    std::fs::write(&path, format!("{}{}", &text[..begin], &text[end..]))
+        .expect("remove worked exchanges");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from(doc)],
+        "a missing worked-exchange block is stale"
+    );
+}
+
+#[test]
 fn luals_annotation_drift_is_reported() {
     let dir = tempfile::tempdir().expect("tempdir");
     generate_schema::write_all(dir.path()).expect("write schemas");

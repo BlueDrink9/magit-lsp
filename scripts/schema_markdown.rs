@@ -18,6 +18,12 @@ pub const DOC_PATH: &str = "docs/CLIENT_SPEC.md";
 pub const BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED PAYLOAD TABLES -->";
 /// Marker closing the generated payload-table block.
 pub const BLOCK_END: &str = "<!-- END GENERATED PAYLOAD TABLES -->";
+/// Marker opening the generated worked-exchange block.
+pub const EXCHANGES_BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED WORKED EXCHANGES -->";
+/// Marker closing the generated worked-exchange block.
+pub const EXCHANGES_BLOCK_END: &str = "<!-- END GENERATED WORKED EXCHANGES -->";
+/// Repository-relative directory holding the recorded exchange files.
+pub const EXAMPLES_DIR: &str = "docs/examples";
 
 /// Render the complete marker-delimited payload-table block.
 ///
@@ -70,24 +76,107 @@ pub fn block() -> Result<String, String> {
     Ok(out)
 }
 
-/// Apply the freshly generated block to a committed document.
+/// Render the complete marker-delimited worked-exchange block.
 ///
-/// An existing marker pair is replaced in place. Otherwise the block is
+/// One subsection per JSONL example file in sorted file order; each line's
+/// recorded `message` is rendered as compact JSON without changing any value.
+pub fn worked_exchanges_block() -> Result<String, String> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLES_DIR);
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()))? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("jsonl") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("{}: no JSONL examples found", dir.display()));
+    }
+    let mut out = String::new();
+    out.push_str(EXCHANGES_BLOCK_BEGIN);
+    out.push('\n');
+    out.push_str("#### Worked exchanges\n\n");
+    out.push_str("Recorded end-to-end exchanges from the example files, one subsection per file.\n");
+    for path in &files {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{}: invalid file name", path.display()))?;
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let mut lines = Vec::new();
+        for (index, line) in text.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            lines.push(
+                serde_json::from_str::<Value>(line).map_err(|error| {
+                    format!("{}:{}: {error}", path.display(), index + 1)
+                })?,
+            );
+        }
+        out.push('\n');
+        out.push_str(&format!("##### `{name}`\n\n"));
+        out.push_str(&provenance(&lines));
+        out.push_str("\n\n```jsonl\n");
+        for line in &lines {
+            let message = line
+                .get("message")
+                .ok_or_else(|| format!("{}: frame lacks `message`", path.display()))?;
+            out.push_str(
+                &serde_json::to_string(message)
+                    .map_err(|error| format!("{}: {error}", path.display()))?,
+            );
+            out.push('\n');
+        }
+        out.push_str("```\n");
+    }
+    out.push('\n');
+    out.push_str(EXCHANGES_BLOCK_END);
+    Ok(out)
+}
+
+/// One-sentence provenance derived from a file's recorded `source` labels.
+fn provenance(lines: &[Value]) -> String {
+    let recorded = lines.iter().all(|line| {
+        line.get("source").and_then(Value::as_str) == Some("recorded")
+    });
+    if recorded {
+        "Frames recorded from a real `TestServer` run against a temporary repository; temporary paths are normalized to `/repo`.".to_string()
+    } else {
+        "Frames are hand-written illustrative examples, not recorded server traffic.".to_string()
+    }
+}
+
+/// Apply the freshly generated blocks to a committed document.
+///
+/// Each existing marker pair is replaced in place. Otherwise its block is
 /// appended, which is how a new or block-less document becomes current.
 pub fn apply(committed: &str) -> Result<String, String> {
-    let block = block()?;
-    if let (Some(start), Some(end)) = (committed.find(BLOCK_BEGIN), committed.find(BLOCK_END)) {
-        if start < end {
+    let tables = replace_block(committed, BLOCK_BEGIN, BLOCK_END, &block()?);
+    Ok(replace_block(
+        &tables,
+        EXCHANGES_BLOCK_BEGIN,
+        EXCHANGES_BLOCK_END,
+        &worked_exchanges_block()?,
+    ))
+}
+
+/// Replace one marker-delimited block, appending it when the markers are absent.
+fn replace_block(committed: &str, begin: &str, end: &str, block: &str) -> String {
+    if let (Some(start), Some(end_index)) = (committed.find(begin), committed.find(end)) {
+        if start < end_index {
             let mut out = String::new();
             out.push_str(&committed[..start]);
-            out.push_str(&block);
-            out.push_str(&committed[end + BLOCK_END.len()..]);
-            return Ok(out);
+            out.push_str(block);
+            out.push_str(&committed[end_index + end.len()..]);
+            return out;
         }
     }
     let mut out = committed.to_string();
     if out.is_empty() {
-        out.push_str(&block);
+        out.push_str(block);
         out.push('\n');
     } else {
         if !out.ends_with('\n') {
@@ -96,10 +185,10 @@ pub fn apply(committed: &str) -> Result<String, String> {
         if !out.ends_with("\n\n") {
             out.push('\n');
         }
-        out.push_str(&block);
+        out.push_str(block);
         out.push('\n');
     }
-    Ok(out)
+    out
 }
 
 /// Write the client specification with a fresh generated block.
