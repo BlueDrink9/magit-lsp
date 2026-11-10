@@ -1,13 +1,13 @@
 # External client implementation specification
 
 > **Current implementation below:** the custom `view/*` and real-file commit
-> wire contract is authoritative today. The Plain-mode section at the end is a
-> separate target design; it is not implemented or supported yet. See [Plain
-> mode](#plain-mode-standard-lsp-clients-target-specification-not-yet-implemented).
+> wire contract is the Level 4 rich protocol, used by the bundled clients. The
+> Plain presentation at the end (Levels 0–3) is implemented and tested. See
+> [Client implementation levels](#client-implementation-levels).
 
 This specification and `src/protocol.rs` are Apache-2.0-licensed; see [LICENSE](LICENSE) and the protocol exception in [LICENSING.md](../LICENSING.md).
 
-This guide describes the current Rust wire contract and bundled clients, plus the separate Plain target design at the end. Rust protocol and dispatch are authoritative for current behavior. A client is a thin transport/editor adapter: server-rendered text is displayed verbatim; structure, Git state, actions and navigation remain server-owned. Core status/menu/stage operation is distinct from optional workflows.
+This guide describes the current Rust wire contract, its Plain presentation levels (0–3) and the rich Level 4 protocol used by the bundled clients. Rust protocol and dispatch are authoritative for current behavior. A client is a thin transport/editor adapter: server-rendered text is displayed verbatim; structure, Git state, actions and navigation remain server-owned. Core status/menu/stage operation is distinct from optional workflows.
 
 ## Capability map (`customRender`)
 
@@ -165,7 +165,7 @@ JSON-RPC request IDs; errors must remain readable and must not resurrect termina
 |---|---|
 | Neovim | Dynamic keymaps and buffer-local capture (`lua/magit-lsp/init.lua`, `view.lua`). Modifier declaration is GUI/terminal-specific; do not promise `full` unconditionally. |
 | VS Code | Static contributed bindings plus focus guards (`clients/vscode/lib/session.js`). Presents main/bottom layouts and menus with QuickPick; pass-through replay and placement are limited (`views.js`, `menus.js`, `effects.js`). |
-| Plain (target) | Standard native document/code actions; no clipboard or secret prompt support. Optional declared values are pending implementation, not current support. |
+| Plain | Standard document and code-action client; no clipboard or secret-prompt support. Optional capabilities degrade as documented in [Client implementation levels](#client-implementation-levels). `tests/ui/plain_init.lua` is the minimal reference client. |
 
 These are client-specific, not parity guarantees. Consult the listed sources and `src/session.rs` for actual behavior.
 
@@ -774,156 +774,251 @@ Unresolved/follow-up: define support expectations for external clients' optional
 Quirk resolution applies automatic matches first, then user overrides; explicit user settings win. Echo/hash reconciliation and one-document-at-a-time `workspace/applyEdit` safety are universal and independent of quirks. These entries record bounded evidence and tests, not fresh native execution or general client support claims.
 <!-- END GENERATED KNOWN CLIENT BEHAVIORS -->
 
-## Plain mode: standard-LSP clients (target specification; not yet implemented)
+## Client implementation levels
 
-This section specifies the adopted target standard-LSP presentation, pending
-the implementation spike and subsequent acceptance; it does not change the
-current `customRender` implementation. Do not infer successful implementation,
-harness runs, native traces, support-table generation, or Helix spike results.
+The server selects a presentation at `initialize`: a client that omits
+`capabilities.experimental.magit` gets the Plain presentation, and one that
+sends the strict rich declaration gets the rich protocol. Both presentations are
+implemented and tested. Levels 0–3 are cumulative Plain capabilities; Level 4 is
+the rich protocol used by the bundled clients. Each level lists what the client
+sends and receives, the standard capabilities it declares and the behavior when
+one is absent, its recorded exchange, and the repository identifiers that prove
+it. A client that stops at Level 1 keeps a working read-only status document;
+features above its level are omitted or disabled by the server rather than
+advertised speculatively.
 
-### Selection and bootstrap
+### Level 0 — Connection, initialization and document synchronization
 
-The sole selector is `initialize.params.capabilities.experimental.magit`:
-absent selects Plain; present selects rich. `initializationOptions` continues to carry `profile`; it is not a selector. Current keymap preferences are not negotiation. Bundled clients send the rich block. The illustrative valid JSON above chooses concrete values. The strict rich declaration contains exactly `v` (`1`), `keys` (`dynamic` or `static`), `modifiers` (`full` or `basic`), `layout` entries (`main`, `side`, `bottom`, `float`), `effects` entries (`visitFile`, `editDocument`, `clipboard`), and `prompts` entries (`confirm`, `text`, `choice`, `multiChoice`, `secret`). Unknown fields and unsupported values are rejected. The server MUST NOT emit any undeclared optional effect, prompt kind, or placement.
-`modifiers:"full"` preserves every configured canonical chord. `basic` is deliberately conservative: it retains a chord only when every step has neither explicit `shift` nor `meta`, with one exception: a lone `shift+Tab` step (no `ctrl`, `alt` or `meta`) is retained as the portable terminal backtab. ctrl/alt combinations and unmodified printable/named keys remain. Uppercase and shifted printable characters expressed literally (`S`, `!`, `Plus`) remain; arbitrary shifted or meta chords (`ctrl+shift+Tab`, `g meta+x`) do not. Basic therefore does not imply full modifier support and requires no terminal-identity spoofing. Filtering removes the entire unsupported chord, including its pending prefix, not the command: a binding with no remaining keys is still delivered with `keys:[]` and unchanged status. This affects keymap delivery and captured-key matching only, not command availability to explicit invocation or menus (including uppercase printable menu options).
+Sends: standard `initialize` with the client's supported capabilities, then
+`initialized` and only standard document notifications. Include
+`general.positionEncodings` for the encodings you can apply; the server answers
+with one negotiated `positionEncoding` and every range in both directions uses
+that encoding. Omit it and the server selects `utf-16`. The server advertises
+incremental synchronization (`textDocumentSync.change: 2`, `openClose` and
+`save.includeText`) and accepts ranged or rangeless `didChange` sequences,
+applying each change in order against the preceding result. Versions are opaque;
+do not assume the server's version is your version plus one.
 
-Full snapshots are sent on open, resync, or when no acknowledged diff base is available; acknowledgements advance the provider/command snapshot. Incremental edits are based on the acknowledged immediately preceding version.
+Receives: the standard server capabilities (`documentSymbolProvider`,
+`definitionProvider`, `documentLinkProvider` without resolve,
+`foldingRangeProvider`, full `semanticTokensProvider`, `codeActionProvider`,
+`executeCommandProvider` for `magit.command`, incremental `textDocumentSync` and
+the negotiated `positionEncoding`). No custom method is required at Level 0.
 
-Folding is server-controlled through the view tree; standard `textDocument/foldingRange` ranges describe the acknowledged snapshot. Visibility commands and menu actions operate on server-owned folding state.
-Plain clients
-bootstrap by opening a `.magit` document associated with a workspace/document
-repository context. The backend resolves and canonicalizes repository identity,
-secures paths, and excludes presentation documents from untracked status. If
-multiple repositories are plausible, it serves a choose-repository view; it
-must never guess for a mutation.
+Capabilities and degradation: `general.positionEncodings` absent → `utf-16`; an
+invalid or reversed range is rejected and the server waits for an authoritative
+repair rather than guessing. `textDocument.foldingRange` and
+`textDocument.semanticTokens` only let the client request those providers; they
+gate nothing on the server. Keeping `experimental.magit` absent is what selects
+Plain; `initializationOptions.profile` is not a selector.
 
-Plain derives support only from standard capabilities: `workspace.applyEdit`
-absent means inert with a message; `workspace.workspaceEdit.documentChanges`
-supports versioned/unversioned edits; `textDocument.codeAction` and
-`workspace.executeCommand` enable actions; `disabledSupport` enables disabled
-reasons. `window.showDocument.support` gates visitFile and commit (otherwise
-Unavailable); `window.workDoneProgress`, `textDocument.completion`,
-`textDocument.foldingRange`, and `general.positionEncodings` gate those features.
-Key/title policy is configuration, not capability. Basic modifier filtering is
-pending implementation. Native folds are expanded; server folds are lazy. Full
-renders are still acknowledged. Mandatory effects are message/pushView/
-popView/focusView/passThrough/quit; only listed effects/prompts/placements may
-be optional. Main-only layout retains the view stack. Optional initialize echo:
-`experimental.magit.effective` mode and reasons.
+Worked exchange: [plain-open.jsonl](#plain-openjsonl) records the initialize
+handshake and the first document edit. Conformance checklist:
+`tests/plain_core.rs::absent_selector_selects_plain_and_extracts_standard_capabilities`
+(selector and extracted capabilities), `tests/plain_sync.rs`
+(`stdio_advertises_incremental_sync_and_accepts_document_lifecycle`,
+`stdio_defaults_to_utf16_when_no_supported_encoding_is_offered`,
+`sequential_changes_are_atomic_and_encoding_aware`,
+`invalid_unicode_crlf_and_reversed_ranges_require_authoritative_repair`), and
+`tests/ui/plain_init.lua` (a minimal Plain client using stock Neovim
+capabilities with `window.showDocument.support` disabled).
+
+### Level 1 — Plain read-only
+
+Sends: `textDocument/didOpen` for a presentation file (default name `.magit`,
+configurable through `presentation_files`), an echoing `textDocument/didChange`
+after applying each server edit, and the matching `workspace/applyEdit` response.
+
+Receives: `workspace/applyEdit` carrying the complete status document (head,
+staged/unstaged/untracked sections and hunks) as a standard `WorkspaceEdit`.
+With `workspace.workspaceEdit.documentChanges` the edit uses `documentChanges`
+and your current document version; without it the edit uses the legacy
+unversioned `changes` map. Exactly one apply is in flight per document, and a
+matching didChange echo is recognized by text hash whether it arrives before or
+after the apply response, so it is never mistaken for user input. The server
+also answers the advertised providers for the open document.
+
+Bootstrap: the repository is resolved from the workspace folder or the document's
+parent. Ambiguous candidates produce `window/showMessage` and no render; the
+server never guesses for a mutation. Presentation files are excluded from
+untracked status. Apply each edit and echo it; a rejected or divergent edit is
+retried from authoritative text, and persistent format drift suspends further
+edits with one warning.
 
 | Capability | Present | Missing |
 |---|---|---|
-| `workspace.workspaceEdit.documentChanges` | Use versioned `documentChanges` edits. | Use `changes` with unversioned edits. |
-| `textDocument.codeAction.disabledSupport` | Planned/unavailable actions may be returned disabled with a reason. | Omit unavailable actions; do not return a disabled object. |
-| `window.showDocument.support` | `visitFile` and commit navigation may use `showDocument`. | Report `Unavailable`; a `path:line` message is not equivalent support. |
+| `workspace.applyEdit` | The server sends the status document as a workspace edit. | `window/showMessage` explains that the document cannot be rendered; the session is inert for it. |
+| `workspace.workspaceEdit.documentChanges` | Versioned `documentChanges` edits, refused when your version moved. | Legacy `changes` edits without versions. |
+| `general.positionEncodings` | Ranges use the negotiated `utf-8`, `utf-16` or `utf-32`. | `utf-16` is used; encode non-BMP ranges accordingly. |
+| `textDocument.foldingRange` | You may request the advertised folds; server folding stays authoritative. | No folding requests; the text is unaffected. |
 
-[`docs/plain-support.md`](./plain-support.md) is generated from the command
-registry and `PlainCapabilities::plain_availability`; it lists each command's
-declared effects and availability under the minimal, edits and full capability
-profiles. Regenerate it with
+Worked exchange: [plain-open.jsonl](#plain-openjsonl). Conformance checklist:
+`tests/plain_harness.rs::plain_did_open_apply_edit_is_pumped_and_echoed`,
+`tests/plain_render.rs`
+(`controller_serializes_unicode_last_line_growth_and_shrink_without_eof_retry`,
+`named_workaround_reconciles_silent_stale_success_and_preserves_universal_safety`,
+`binary_profiles_watch_and_repair_divergence_in_both_response_orders`),
+`tests/plain_sync.rs::observing_confirms_echoes_and_responses_in_either_order`,
+`tests/plain_repo.rs::resolves_none_workspace_document_nested_alias_and_linked_worktree_without_guessing`,
+and `tests/plain_vis.rs`
+(`bootstrap_applies_default_and_repository_section_limits_to_plain_snapshots`,
+`plain_provider_ranges_honor_negotiated_encoding_for_unicode_and_reject_invalid_columns`).
+
+### Level 2 — Plain actions
+
+Sends: `textDocument/codeAction` with a half-open range, then
+`workspace/executeCommand` with command `magit.command` and exactly one opaque
+argument `{command,documentUri,target?,viewGeneration}`.
+
+Receives: an array of standard `CodeAction`s. Implemented actions carry a
+`command` whose arguments are opaque; `target` is a tagged union with camelCase
+`kind` (`content`, `view`, `node`, `menuItem`), and a stale `viewGeneration` is
+refused without mutation after a refresh. Unavailable actions carry a disabled
+reason only when `textDocument.codeAction.disabledSupport` is declared;
+otherwise they are omitted. Planned commands stay disabled or omitted with their
+roadmap reason. The server declares `workspace/executeCommand` (it advertises
+`magit.command`); the client does not need to declare the execute-command
+capability for action invocation to work.
+
+Capabilities and degradation: `textDocument/codeAction` absent → no actions are
+returned and Plain status stays read-only. `disabledSupport` present →
+unavailable and planned actions are included with reasons; absent → those entries
+are omitted. `workspace.applyEdit` plus `textDocument/codeAction` are both
+required for `status.stage`, `status.unstage` and `status.discard`; without them
+those actions are unavailable with a readable reason. Selections are LSP
+half-open ranges in the negotiated encoding; the server resolves them against the
+exact snapshot and converts endpoints to its inclusive selection, so never parse
+rendered text for structure.
+
+Worked exchange: [plain-code-action.jsonl](#plain-code-actionjsonl). Conformance
+checklist: `tests/plain_actions.rs`
+(`action_target_uses_strict_camel_case_wire_fields`,
+`plain_discard_opens_a_document_confirm_and_cancel_changes_nothing`,
+`unavailable_actions_are_omitted_without_disabled_support`,
+`code_actions_work_without_execute_command_declaration`,
+`code_actions_are_unsupported_without_declaration`,
+`scoped_planned_and_unavailable_commands_are_disabled_and_forged_requests_are_refused`),
+`tests/plain_select.rs` (`plain_log_select_offers_commit_code_actions`,
+`plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit`), and
+`tests/plain_stack.rs`
+(`commit_menu_and_back_stay_in_plain_document_and_refuse_stale_targets`,
+`plain_menu_switches_use_retained_targets_and_restore_caller`).
+
+### Level 3 — Plain extras
+
+Sends: `textDocument/didChange` for field and prompt edits, and code actions for
+the rendered Submit/Cancel rows. Document prompts (`confirm`, `text`, `choice`,
+`multiChoice`) are rendered as rows and fields in the same Plain document; type
+into a field, then invoke the offered action. The server reconciles the field
+text against its own document and repairs edits outside fields. Secret prompts
+are unsupported: they cancel cleanly with a readable message
+(`tests/plain_core.rs::plain_secret_prompt_refusal_uses_the_readable_constant`),
+and credential-dependent work fails readably.
+
+Capabilities and degradation: prompts need no capability, only the Level 0
+document sync. `window.showDocument.support` present → a commit draft is opened
+through `window/showDocument` after any pre-opened buffer is replaced by a
+versioned apply edit. Absent → the server sends manual instructions naming the
+`COMMIT_EDITMSG` path together with the Confirm and Abort actions; you can still
+open that file yourself, send `didOpen`/`didChange`, and invoke the offered
+Confirm/Abort code actions (the manual path sends neither `applyEdit` nor
+`showDocument`). Saved-file close confirms disk bytes; explicit Abort cancels the
+run and restores the status document. `window.workDoneProgress` present → the
+server runs `window/workDoneProgress/create` and `$/progress` begin/report/end
+for mutations; absent → no progress notifications, the operation still runs and
+outcomes arrive as messages. Completion is not implemented: the server
+advertises no `textDocument/completion` provider and registers no handler;
+`completion` appears only in the `experimental.magit.effective` echo
+(`tests/plain_core.rs::absent_selector_selects_plain_and_extracts_standard_capabilities`),
+and unregistered methods fail with `-32601`
+(`tests/plain_harness.rs::real_binary_lifecycle_and_current_unsupported_methods_are_honest`),
+so do not depend on completion.
+
+Worked exchanges: [plain-document-prompt.jsonl](#plain-document-promptjsonl),
+[commit-edit-confirm.jsonl](#commit-edit-confirmjsonl) and
+[commit-edit-abort.jsonl](#commit-edit-abortjsonl). Conformance checklist:
+`tests/plain_prompt.rs`
+(`confirm_renders_title_detail_blank_and_custom_yes_no_rows`,
+`text_renders_one_prefilled_field_and_submit_cancel_rows`,
+`choice_answers_by_item_default_custom_or_cancel`,
+`multi_choice_items_toggle_and_done_answers_the_selection`),
+`tests/plain_draft.rs`
+(`open_plain_commit_buffer_is_replaced_before_show_document`,
+`manual_plain_commit_instructions_have_no_apply_edit`,
+`saved_file_close_commits_the_disk_text`,
+`stale_explicit_confirm_is_refused_and_keeps_the_draft_pending`,
+`explicit_abort_creates_no_commit_and_restores_the_status_view`),
+`tests/plain_harness.rs`
+(`plain_commit_editor_manual_instructions_cancel_pending_git_run`,
+`live_binary_progress_requests_are_serviced_while_command_runs`), and
+[`docs/plain-support.md`](./plain-support.md) with
+`tests/plain_support.rs::plain_support_document_matches_the_registry` for the
+generated per-command availability. Regenerate the support table with
 `UPDATE_PLAIN_SUPPORT=1 make test-rust FILTER="--test plain_support"`; the
-`plain_support` staleness test fails when the checked-in file drifts. Do not
-hand-edit it.
+staleness test fails when the checked-in file drifts. Do not hand-edit it.
 
-### Render synchronization and actions
+### Level 4 — Rich protocol
 
-The target server advertises incremental sync and accepts ranged and rangeless
-`didChange` sequences, applying each change in order in a URI-keyed document
-store. Use the negotiated UTF-8, UTF-16, or UTF-32 position encoding for every
-range; versions are opaque document versions and need not increment by one.
-Prefer `WorkspaceEdit.documentChanges` with document versions. Neither the
-client nor server assumes a render is version V+1.
+The bundled Neovim and VS Code clients send the strict rich declaration:
+`capabilities.experimental.magit` with `v: 1`, `keys` (`dynamic` or `static`),
+`modifiers` (`full` or `basic`), `layout`, `effects`, `prompts` and the optional
+`pick` block. That presence selects rich instead of Plain; unknown fields and
+unsupported values are rejected. `modifiers:"basic"` filtering is implemented: it
+retains a chord only when every step lacks explicit `shift` or `meta`, except the
+portable lone `shift+Tab` backtab, and removes an unsupported whole chord rather
+than the command. It affects keymap delivery and captured keys only, never
+command availability through menus or direct invocation.
 
-Each document has a one-flight apply pipeline: `Ready` → `Applying` → `Ready`,
-or `Detached` on close/disconnect. While applying, coalesce newer authoritative
-renders. Track bounded submitted text/version/hash metadata. A matching
-`didChange` echo is recognized by text hash whether it arrives before or after
-the apply response; it is not mistaken for user input. On stale apply, obtain a
-fresh snapshot and retry; on divergence, repair from authoritative text. Never
-advance the applied state merely because an edit was submitted.
+Sends/receives: the rich lifecycle (`view/open`, `view/render`, `view/rendered`,
+`view/resync`, `view/close`, `view/invoke`, `view/key`, `view/setMode`,
+`view/resize`, `view/promptRespond` and `view/pickRespond`, plus the
+`view/keymap`, `view/prompt`, `view/pick` and `view/effects` notifications). It
+adds dynamic or static key delivery, captured input, menus, native prompts and
+picks, text mode, and the real-file commit draft. All payloads, ordering rules
+and failure handling are specified earlier in this document; do not duplicate
+them here:
 
-Standard providers and code actions use a matched document/tree snapshot.
-Completion candidates come from typed, provider-supplied sources; each item
-supplies its label, insertion text, and optional detail/kind, with no client Git
-lookup or parsing. The same provider data may populate document symbols,
-definitions, links, folding and semantic tokens where available. Code-action
-discovery is side-effect-free and runs no Git subprocess. Resolve against the
-snapshot whose text hash matches the synced document; if none matches, return no
-actions and null positional providers. Actions have stable command IDs with
-configurable titles. `Planned` and
-`Unavailable` actions are disabled with a reason. Convert LSP half-open ranges
-to inclusive selections explicitly; an end at column zero belongs to the
-previous line. `actions.title_style` has exactly four values: `plain`,
-`mnemonic`, `path`, and `mnemonicPath`.
+- [Capability map (`customRender`)](#capability-map-customrender),
+  [Methods and lifecycle](#methods-and-lifecycle) and
+  [Descriptors, URIs and view lifetime](#descriptors-uris-and-view-lifetime) for
+  the declaration, full message set and view identity.
+- [Input, navigation and presentation](#input-navigation-and-presentation) for
+  keys, modes and folding; [Prompts, effects and drafts](#prompts-effects-and-drafts)
+  for prompt/effect handling and work-done progress.
+- [Current real-file commit editing](#current-real-file-commit-editing) for the
+  draft, confirmation and abort contract.
+- [Feature-to-capability mapping and clients (`customRender`)](#feature-to-capability-mapping-and-clients-customrender)
+  for per-workflow client behavior.
 
-Actions use `workspace/executeCommand` command `magit.command`. The proposed
-argument is exactly one opaque object:
-`arguments=[{command,documentUri,target,viewGeneration}]`. `target` is a
-tagged union whose required camelCase `kind` selects its fields:
-`{kind:"content",nodeId,mutationHash,selection?}`,
-`{kind:"view",viewId}`,
-`{kind:"node",viewId,nodeId}`, or
-`{kind:"menuItem",viewId,menuId,itemKey}`. Untagged legacy targets are
-rejected. IDs and arguments are opaque to clients. The backend revalidates node
-identity and mutation hash against fresh state at execution; stale targets cause
-refresh and no mutation. One semantic dispatcher serves these actions and the
-existing custom input adapter.
+Capabilities and degradation: absent `effects`, `prompts` or `layout` entries
+never receive undeclared optional payloads — the server turns an undeclared
+optional effect or prompt into a readable warning message and an undeclared
+placement into `main`, while `cfg(test)` builds reject the emission outright.
+`keys` controls dynamic versus static delivery; static does not replace key
+capture. A client that omits `editDocument` cannot receive commit drafts and must
+not enable commit commands; one that omits `visitFile` must not route visit
+actions. The core `view/open`, render/ack, and key/invoke traffic has no
+capability fallback: without it the rich presentation is unusable.
 
-### Views, prompts and reusable server interactions
+Worked exchange: [rich-lifecycle.jsonl](#rich-lifecyclejsonl). Conformance
+checklist: `tests/ui/scenarios/status-basics.scn`,
+`tests/ui/scenarios/common-navigation.scn`,
+`tests/ui/scenarios/hunk-body-fold.scn`,
+`tests/ui/scenarios/process-log.scn`, `tests/ui/scenarios/log-select.scn`,
+`tests/ui/scenarios/log-view.scn`, `tests/ui/scenarios/commit-message-editor.scn`,
+`tests/ui/scenarios/commit-confirm.scn`, `tests/ui/scenarios/commit-real-file.scn`,
+`tests/ui/scenarios/option-prompt.scn`, `tests/ui/scenarios/multiple-views.scn`,
+`tests/ui/scenarios/text-mode-roundtrip.scn`,
+`tests/keymap.rs::basic_modifiers_keep_portable_backtab_and_drop_other_shift_or_meta_chords`
+(basic modifier filtering), `tests/plain_harness.rs`
+(`recorded_presets_and_named_profiles_bind_declarations_and_registry_behaviors`,
+`rich_server_render_ack_and_stale_resync_preserve_caller_reply`),
+`tests/plain_core.rs` (`runtime_unsupported_effect_is_a_readable_message`,
+`unsupported_view_placement_falls_back_to_main_without_changing_descriptor`), and
+`tests/examples.rs::plain_examples_replay_against_the_real_binary` (replays every
+recorded exchange, including `rich-lifecycle.jsonl`).
 
-The client displays one server-owned document verbatim. Logical concrete views,
-menus and selection views can replace/stack within it while the server retains
-view identity, menu state and caller restoration. Stable-ID single/multi-select
-operations return to their caller on confirm or cancel. These reusable server
-interactions are parameterized by concrete views/data: they do not imply a
-client picker, invented wire methods, or a broad VCS trait hierarchy.
-
-Prompts are document-backed fields for confirm, text, choice and multiChoice.
-Fields are bounded, tracked, single-line `Field` tree nodes; only user-authored
-field values are read from the document store. Edits outside fields are repaired
-to authoritative text. Completion is supplied by typed providers. Menus and
-prompts offer actions on every line and every non-root view has Back. Views are
-expanded by default; sections over 400 lines are collapsed with an expand action
-(the limit is configurable). The single
-effect/prompt capability mapping is tracked in the [authoritative implementation queue](../TASKS.md);
-it is the planned mapping and is not duplicated here. Secrets and askpass are
-unsupported: cancel cleanly with a message; credential-dependent network work
-fails readably.
-
-### Commit editing: reuse the current real-file workflow
-
-Plain presentation remains a target, but reuses the implemented
-[real-file contract](#current-real-file-commit-editing), not a virtual provider or
-new draft protocol. Future Confirm code actions use its exact-version
-`magit.command` synchronized source; saved-file close remains distinct. Abort
-uses the owning-view `common.cancel` route until broader Plain dispatch exists.
-
-| Signal/workflow | Content source / result |
-|---|---|
-| `textDocument/didClose` | Saved Git file; never unsaved synchronized text |
-| VS Code `onDidChangeTabs` `event.closed` | Saved Git file; confirm only when the last matching draft tab across all tab groups closes; never on focus/switch or a non-last tab |
-| LSP Confirm code action | Latest synchronized, exact-version buffer; validate and write back |
-| VS Code explicit native-close confirmation | Saved file; source is not inferred from ambiguous tab state |
-
-| User action | Required behavior |
-|---|---|
-| Save/close | Save alone does not finish; close confirms saved file |
-| Dirty Save | Save, then close confirms saved content |
-| Dirty Discard | Prior saved content, not dirty buffer |
-| Dirty Cancel | Keep open; no confirmation |
-| Cleared and saved empty | Git's effective-empty validation aborts |
-| Explicit Abort | No commit; atomic cancel |
-
-VS Code opens permanent tabs (`preview:false`) and uses the implemented last-owned-tab
-fallback above, never synthetic didClose. Historical step-0 observations remain in
-[`real-file-client-spike.md`](evidence/real-file-client-spike.md); scoped clean
-close-window/reload/folder-change runs observed no qualifying closed event, not a
-general shutdown guarantee. Never interpret transport shutdown/deactivation as
-confirmation. [Architecture §3.10](ARCHITECTURE.md#310-editor-bridge-open-gits-editor-inside-the-users-editor) records focused production evidence and remaining
-R-EDIT-REAL acceptance, including unchanged-message amend parity and broader
-native/adversarial/full-phase gates.
-
-### Generic Helix reference and conformance
+### Generic Helix reference configuration
 
 Illustrative generic Helix TOML (no editor-specific expansions):
 
@@ -942,8 +1037,7 @@ language-servers = ["magit-lsp"]
 This is a reference configuration, not a support claim or verified smoke test.
 The editor helper is required; repository resolution has no launcher.
 Commit-file LSP attachment and reuse of an existing connection remain unverified
-smoke requirements; this configuration does not claim they work.
-Conformance checklist for the seven harness profiles: `decomposed-changes`,
-`debounced-didchange`, `reorder-echo`, `no-documentChanges`, `no-showDocument`,
-`crlf-normalise`, and `utf16`. All harness runs, native evidence, and Helix
-manual smoke remain pending. The source/runtime cross-check also remains pending.
+smoke requirements; this configuration does not claim they work. No native
+Helix run is claimed here: the recorded Helix initialize capture is exercised by
+`tests/plain_harness.rs::recorded_presets_and_named_profiles_bind_declarations_and_registry_behaviors`.
+For a working minimal Plain client, follow `tests/ui/plain_init.lua`.

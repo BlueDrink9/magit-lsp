@@ -38,7 +38,7 @@ Plain code actions/commands dispatch semantic actions over standard LSP; they
 are current behavior, not future targets. Plain completion candidates, Git
 discovery, mutation validation, commit-file paths, and helper lifecycle remain
 provider/workflow targets, not advertised LSP providers. Broader Plain dispatch
-primitives remain target work; see [CLIENT_SPEC](CLIENT_SPEC.md#plain-mode-standard-lsp-clients-target-specification-not-yet-implemented).
+primitives remain target work; see [CLIENT_SPEC](CLIENT_SPEC.md#client-implementation-levels).
 
 Plain mode uses standard document synchronization and implemented code
 actions/commands for semantic action dispatch; concrete views/data carry stable identities and are
