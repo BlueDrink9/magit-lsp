@@ -225,10 +225,11 @@ async function run() {
     const client = instances.at(-1);
     assert(client, 'the extension started a language client');
     const declaration = client.requests.find((request) => request.method === 'initialize').params.capabilities.experimental.magit;
+    const shared = require('../types/shared-lists');
     assert.deepEqual(declaration, {
       v: 1, keys: 'static', modifiers: 'full', layout: ['main'],
-      effects: ['visitFile', 'editDocument', 'clipboard'],
-      prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+      effects: [...shared.optionalEffects],
+      prompts: [...shared.optionalPromptKinds],
       pick: {
         multi: true,
         freeText: false,

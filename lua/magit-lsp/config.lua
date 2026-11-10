@@ -6,6 +6,8 @@
 
 local M = {}
 
+local shared = require('magit-lsp.shared')
+
 --- The status placements this client implements (R-UI-7).
 M.PLACEMENTS = { 'replace', 'vsplit', 'split', 'tab' }
 
@@ -102,8 +104,8 @@ function M.client_capabilities()
     keys = 'dynamic',
     modifiers = M.key_modifiers(),
     layout = { 'main', 'side', 'bottom', 'float' },
-    effects = { 'visitFile', 'editDocument', 'clipboard' },
-    prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
+    effects = shared.optional_effects,
+    prompts = shared.optional_prompt_kinds,
     pick = {
       multi = false,
       freeText = false,

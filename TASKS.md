@@ -253,6 +253,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
   - [x] **T011.11 — Generate the shared effect and prompt lists from the typed block.** Expose the optional effect and prompt-kind names from the server's capability validation as public constants, and emit them as drift-checked generated artifacts both clients can consume.
++  - [x] **T011.12 — Consume the generated shared lists in both clients.** Emit client-loadable generated files for the shared optional-effect and prompt-kind lists, and replace each client's hardcoded declaration with them.
++    - test: generated client files participate in drift detection, and each client's capability declaration is proven equal to the server constants through its own existing suite (Lua unit and VSCode checks).
++    - check: `make update-schema`, `make schema-check`, `make test-lua` and `make vscode-test` pass. Key translators and token mappings stay hand-maintained per client; runtime behavior and declared capabilities are unchanged.
++      - Verified: make update-schema && make schema-check && make test-lua && make vscode-test; make test-rust FILTER="--test schema" @ 1abac39 → ok
++    - Done: containing commit.
     - test: generated artifacts match the typed constants exactly (visitFile/clipboard/editDocument; confirm/text/choice/multiChoice/secret) and missing or modified output fails drift checks.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Client consumption, key translators and token mappings stay separate follow-ups.
       - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ f33bf3c → ok

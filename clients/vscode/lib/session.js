@@ -9,6 +9,7 @@ const drafts = require('./drafts');
 const effects = require('./effects');
 const requests = require('./requests');
 const semantic = require('./semantic');
+const shared = require('../types/shared-lists');
 const views = require('./views');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
@@ -49,8 +50,8 @@ function createClient() {
         keys: 'static',
         modifiers: 'full',
         layout: ['main'],
-        effects: ['visitFile', 'editDocument', 'clipboard'],
-        prompts: ['confirm', 'text', 'choice', 'multiChoice', 'secret'],
+        effects: [...shared.optionalEffects],
+        prompts: [...shared.optionalPromptKinds],
         pick: {
           multi: true,
           freeText: false,

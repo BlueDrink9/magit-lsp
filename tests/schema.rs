@@ -922,6 +922,89 @@ fn shared_lists_participate_in_drift_detection() {
     );
 }
 
+#[test]
+fn shared_client_lists_are_generated_from_the_typed_constants() {
+    let files = generate_schema::client_list_files();
+    let paths: Vec<&str> = files.iter().map(|file| file.path).collect();
+    assert_eq!(
+        paths,
+        vec![
+            generate_schema::LUA_SHARED_PATH,
+            generate_schema::VSCODE_SHARED_PATH
+        ],
+        "both clients consume a generated shared-list module"
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for file in &files {
+        let committed = std::fs::read_to_string(root.join(file.path))
+            .unwrap_or_else(|error| panic!("read {}: {error}", file.path));
+        assert_eq!(
+            committed, file.text,
+            "{} is stale (run make update-schema)",
+            file.path
+        );
+    }
+
+    let lua = &files[0].text;
+    assert!(
+        lua.contains("local optional_effects = { 'visitFile', 'clipboard', 'editDocument' }"),
+        "the Lua module carries the typed optional effects"
+    );
+    assert!(
+        lua.contains(
+            "local optional_prompt_kinds = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' }"
+        ),
+        "the Lua module carries the typed optional prompt kinds"
+    );
+    let javascript = &files[1].text;
+    assert!(
+        javascript.contains("\"visitFile\",\n  \"clipboard\",\n  \"editDocument\""),
+        "the JavaScript module carries the typed optional effects"
+    );
+    assert!(
+        javascript.contains(
+            "\"confirm\",\n  \"text\",\n  \"choice\",\n  \"multiChoice\",\n  \"secret\""
+        ),
+        "the JavaScript module carries the typed optional prompt kinds"
+    );
+}
+
+#[test]
+fn shared_client_lists_participate_in_drift_detection() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(
+        generate_schema::stale_files(dir.path())
+            .expect("clean check")
+            .is_empty(),
+        "freshly generated client modules are current"
+    );
+
+    for path in [
+        generate_schema::LUA_SHARED_PATH,
+        generate_schema::VSCODE_SHARED_PATH,
+    ] {
+        let file = dir.path().join(path);
+        std::fs::remove_file(&file).expect("remove client module");
+        assert_eq!(
+            generate_schema::stale_files(dir.path()).expect("missing check"),
+            vec![PathBuf::from(path)],
+            "a missing {path} is stale"
+        );
+
+        generate_schema::write_all(dir.path()).expect("rewrite schemas");
+        let text = std::fs::read_to_string(&file).expect("read client module");
+        std::fs::write(&file, text.replace("clipboard", "clipboardLegacy"))
+            .expect("tamper client module");
+        assert_eq!(
+            generate_schema::stale_files(dir.path()).expect("tampered check"),
+            vec![PathBuf::from(path)],
+            "a modified {path} is stale"
+        );
+        generate_schema::write_all(dir.path()).expect("restore schemas");
+    }
+}
+
 fn read_declarations() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(schema_typescript::DECLARATION_PATH);
     std::fs::read_to_string(&path)

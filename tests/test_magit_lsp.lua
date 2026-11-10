@@ -506,13 +506,14 @@ end
 
 T['declares exact bundled Neovim capabilities'] = function()
   local declaration = child.lua_get("require('magit-lsp.config').client_capabilities().experimental.magit")
+  local shared = child.lua_get("require('magit-lsp.shared')")
   MiniTest.expect.equality(declaration, {
     v = 1,
     keys = 'dynamic',
     modifiers = child.lua_get("require('magit-lsp.config').key_modifiers()"),
     layout = { 'main', 'side', 'bottom', 'float' },
-    effects = { 'visitFile', 'editDocument', 'clipboard' },
-    prompts = { 'confirm', 'text', 'choice', 'multiChoice', 'secret' },
+    effects = shared.optional_effects,
+    prompts = shared.optional_prompt_kinds,
     pick = {
       multi = false,
       freeText = false,
