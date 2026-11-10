@@ -1137,21 +1137,21 @@ fn send_manual_edit_instructions(shared: &Shared, uri: &str, title: &str) {
 }
 
 /// Start an asynchronous bootstrap after the didOpen notification is accepted.
-fn schedule_plain_open(shared: &Shared, uri: String) {
+fn schedule_plain_open(shared: &Shared, uri: String) -> Option<(String, InvokeResult)> {
     let format = {
         let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
         let Some(document) = documents.get(&uri) else {
-            return;
+            return None;
         };
         DocumentFormat::from_text(&document.text)
     };
     let Some(path) = file_uri_path(&uri) else {
-        return;
+        return None;
     };
     if !crate::config::is_presentation_file(&path, &shared.config.config().presentation_files) {
-        return;
+        return None;
     }
-    close_plain(shared, &uri);
+    let close = close_plain(shared, &uri);
     let incarnation = shared
         .next_plain_incarnation
         .fetch_add(1, Ordering::Relaxed)
@@ -1165,6 +1165,7 @@ fn schedule_plain_open(shared: &Shared, uri: String) {
     tokio::spawn(async move {
         bootstrap_plain(&shared, uri, incarnation, format).await;
     });
+    close
 }
 
 async fn bootstrap_plain(shared: &Shared, uri: String, incarnation: u64, format: DocumentFormat) {
@@ -1566,7 +1567,7 @@ fn reconcile_rich_prompt(shared: &Shared, uri: &str, sender: &mpsc::UnboundedSen
     }
 }
 
-fn close_plain(shared: &Shared, uri: &str) {
+fn close_plain(shared: &Shared, uri: &str) -> Option<(String, InvokeResult)> {
     shared
         .plain_incarnations
         .lock()
@@ -1578,26 +1579,48 @@ fn close_plain(shared: &Shared, uri: &str) {
         .unwrap_or_else(|p| p.into_inner())
         .remove(uri);
     let Some(mut entry) = entry else {
-        return;
+        return None;
     };
     entry.controller.close();
-    if let Some(session) = shared.session(&entry.repo) {
-        let _ = session
+    let outcome = shared.session(&entry.repo).and_then(|session| {
+        session
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .close(&entry.view_id);
-    }
+            .close(&entry.view_id)
+            .ok()
+            .map(|outcome| (entry.repo.clone(), outcome))
+    });
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .remove(&entry.view_id);
+    let repo = entry.repo;
     let shared = shared.clone();
     let runtime = shared
         .runtime
         .clone()
         .expect("Plain transport owns a Tokio runtime");
-    runtime.spawn_blocking(move || shared.stop_watcher_if_idle(&entry.repo));
+    runtime.spawn_blocking(move || shared.stop_watcher_if_idle(&repo));
+    outcome
+}
+
+/// Deliver the renders and effects a closed Plain view resumed.
+///
+/// Callers must drop `plain_lifecycle` first: routing these notifications
+/// reacquires it.
+fn deliver_plain_close_outcome(shared: &Shared, close: Option<(String, InvokeResult)>) {
+    let Some((repo, outcome)) = close else {
+        return;
+    };
+    match dispatched_outcome(shared, &repo, outcome) {
+        Ok(dispatched) => {
+            for notification in dispatched.notifications {
+                let _ = shared.sender.send(notification);
+            }
+        }
+        Err(error) => tracing::warn!(%error, "failed to deliver a Plain view close outcome"),
+    }
 }
 
 /// Whether the client wants the server to push every view's keymap.
@@ -2310,11 +2333,19 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             tracing::debug!(%error, "rejected document synchronization; repair required");
                         }
                         if notification.method == "textDocument/didClose" {
-                            close_plain(&shared, uri);
+                            let close = close_plain(&shared, uri);
+                            // Routing the resumed renders reacquires the
+                            // lifecycle guard, so release it first.
+                            drop(_plain);
+                            deliver_plain_close_outcome(&shared, close);
                         }
                     } else {
                         match notification.method.as_str() {
-                            "textDocument/didOpen" => schedule_plain_open(&shared, uri.to_owned()),
+                            "textDocument/didOpen" => {
+                                let close = schedule_plain_open(&shared, uri.to_owned());
+                                drop(_plain);
+                                deliver_plain_close_outcome(&shared, close);
+                            }
                             "textDocument/didChange" => {
                                 plain_change(&shared, uri);
                                 // Delivery of a repaired Rich prompt render
@@ -2323,7 +2354,11 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                                 drop(_plain);
                                 reconcile_rich_prompt(&shared, uri, &sender);
                             }
-                            "textDocument/didClose" => close_plain(&shared, uri),
+                            "textDocument/didClose" => {
+                                let close = close_plain(&shared, uri);
+                                drop(_plain);
+                                deliver_plain_close_outcome(&shared, close);
+                            }
                             _ => {}
                         }
                     }
@@ -4449,19 +4484,29 @@ fn close_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         // The client may have closed the view before its own close landed.
         return Ok(Dispatched::value(Value::Null));
     };
-    if let Some(handle) = shared.session(&repo) {
-        handle
+    let Some(handle) = shared.session(&repo) else {
+        shared
+            .view_repos
             .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .close(&p.view_id)?;
-    }
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&p.view_id);
+        shared.stop_watcher_if_idle(&repo);
+        return Ok(Dispatched::value(Value::Null));
+    };
+    let outcome = handle
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .close(&p.view_id)?;
+    // Closing a prompt view or its origin resumes the sibling refreshes it
+    // held. Deliver them, but keep the protocol result null.
+    let dispatched = dispatched_outcome(shared, &repo, outcome)?;
     shared
         .view_repos
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .remove(&p.view_id);
     shared.stop_watcher_if_idle(&repo);
-    Ok(Dispatched::value(Value::Null))
+    Ok(Dispatched::with(Value::Null, dispatched.notifications))
 }
 
 fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
@@ -5247,6 +5292,7 @@ fn from_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T> {
 #[cfg(test)]
 mod commit_tests {
     use super::*;
+    use crate::view::Placement;
 
     fn test_shared() -> (Shared, mpsc::UnboundedReceiver<Message>) {
         let dir = tempfile::tempdir().unwrap();
@@ -5530,5 +5576,157 @@ mod commit_tests {
             "the edit retained its repository config"
         );
         assert!(!editor::registry().resolve(&id, editor::Reply::Ok));
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// A repository with one commit and one unstaged change.
+    fn changed_repository() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        git_in(tmp.path(), &["init", "-q"]);
+        git_in(tmp.path(), &["config", "user.email", "test@example.com"]);
+        git_in(tmp.path(), &["config", "user.name", "Test"]);
+        git_in(tmp.path(), &["config", "commit.gpgsign", "false"]);
+        std::fs::write(tmp.path().join("f.txt"), "initial\n").unwrap();
+        git_in(tmp.path(), &["add", "."]);
+        git_in(tmp.path(), &["commit", "-q", "-m", "init"]);
+        std::fs::write(tmp.path().join("f.txt"), "changed\n").unwrap();
+        tmp
+    }
+
+    #[test]
+    fn closing_a_prompt_view_or_origin_delivers_resumed_sibling_refreshes() {
+        let tmp = changed_repository();
+        let repo = tmp
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        for close_origin in [false, true] {
+            let (shared, _messages) = test_shared();
+            let handle = Arc::new(Mutex::new(Session::new(&repo)));
+            let (status, log, prompt, status_version, log_version) = {
+                let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
+                let (status, _) = session
+                    .open(
+                        "status",
+                        ViewKind::Status,
+                        Placement::Main,
+                        Viewport::default(),
+                    )
+                    .unwrap();
+                let (log, _) = session
+                    .open("log", ViewKind::Log, Placement::Main, Viewport::default())
+                    .unwrap();
+                let step = session
+                    .start_invoke(&ViewInvokeParams {
+                        view_id: status.id.clone(),
+                        command: "commit.create".to_string(),
+                        version: None,
+                        args: None,
+                        cursor: None,
+                        selection: None,
+                    })
+                    .unwrap();
+                let Execution::Prompt(request) = step else {
+                    panic!("commit.create asks before staging");
+                };
+                session.open_document_prompt(&request).unwrap();
+                let prompt = session
+                    .prompt_view_id()
+                    .expect("the document prompt is open")
+                    .to_string();
+                let status_version = session.views().get(&status.id).unwrap().version();
+                let log_version = session.views().get(&log.id).unwrap().version();
+
+                assert!(
+                    session.refresh_all().is_empty(),
+                    "an open prompt holds every refresh"
+                );
+                assert!(session.views().get(&status.id).unwrap().dirty());
+                assert!(session.views().get(&log.id).unwrap().dirty());
+                (status.id, log.id, prompt, status_version, log_version)
+            };
+            shared
+                .sessions
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(repo.clone(), handle.clone());
+            {
+                let mut view_repos = shared
+                    .view_repos
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                for view_id in [&status, &log, &prompt] {
+                    view_repos.insert(view_id.clone(), repo.clone());
+                }
+            }
+
+            let target = if close_origin { &status } else { &prompt };
+            let dispatched = close_view(
+                &shared,
+                serde_json::to_value(ViewCloseParams {
+                    view_id: target.clone(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(dispatched.result, Value::Null, "close answers null");
+
+            let renders: Vec<(String, u64)> = dispatched
+                .notifications
+                .iter()
+                .filter_map(|message| {
+                    let Message::Notification(notification) = message else {
+                        return None;
+                    };
+                    if notification.method != VIEW_RENDER {
+                        return None;
+                    }
+                    Some((
+                        notification.params.get("viewId")?.as_str()?.to_string(),
+                        notification.params.get("version")?.as_u64()?,
+                    ))
+                })
+                .collect();
+            assert!(
+                renders
+                    .iter()
+                    .any(|(view_id, version)| view_id == &log && *version > log_version),
+                "the log view resumes after close_origin={close_origin}: {renders:?}"
+            );
+            if close_origin {
+                assert!(
+                    !renders.iter().any(|(view_id, _)| view_id == &status),
+                    "the closed origin does not render: {renders:?}"
+                );
+            } else {
+                assert!(
+                    renders.iter().any(|(view_id, version)| {
+                        view_id == &status && *version > status_version
+                    }),
+                    "the origin resumes after the prompt closes: {renders:?}"
+                );
+            }
+
+            let session = handle.lock().unwrap_or_else(|p| p.into_inner());
+            assert!(!session.has_pending_prompt());
+            let log_view = session.views().get(&log).unwrap();
+            assert!(log_view.version() > log_version);
+            assert!(!log_view.dirty(), "the resumed log has no refresh left");
+            if !close_origin {
+                let status_view = session.views().get(&status).unwrap();
+                assert!(status_view.version() > status_version);
+                assert!(!status_view.dirty(), "the resumed origin has no refresh left");
+            }
+        }
     }
 }
