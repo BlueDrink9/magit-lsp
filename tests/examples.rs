@@ -10,8 +10,17 @@
 //! responses) get envelope checks only: `jsonrpc`, method presence, the
 //! request/response frame shape and request id correlation. The narrow
 //! validator does not model the official LSP schemas, so a malformed standard
-//! payload would pass here; checking it belongs to the recorded live replay
-//! against the real binary in a later slice.
+//! payload would pass here; that is covered by the live replay below.
+//!
+//! The replay tests drive the real server with the recorded `c2s` frames and
+//! compare every `s2c` frame with its recorded counterpart. Comparison is
+//! exact after the recording's own normalization, documented at
+//! [`replay_example`]: the temporary repository root becomes `/repo`, the
+//! server binary path becomes `/magit-lsp/target/debug/magit-lsp`, outbound
+//! frames gain the `jsonrpc` member the current server omits, outbound
+//! `magit-lsp/outbound/N` ids are substituted in the client's replies, and
+//! opaque commit-run ids become `run-1`. Versions, order and payloads are not
+//! relaxed: an unexpected frame or a divergent expectation fails.
 
 #[path = "common/mod.rs"]
 mod fixtures;
@@ -21,6 +30,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Directory holding the committed example exchanges.
 const EXAMPLES_DIR: &str = "docs/examples";
@@ -845,5 +855,242 @@ fn corrupted_example_lines_fail_validation() {
     assert!(
         error.contains("$.result") && error.contains("missing required property id"),
         "the result schema error must be reported: {error}"
+    );
+}
+
+/// The placeholder the recordings use for the temporary repository root.
+const RECORDED_ROOT: &str = "/repo";
+
+/// The placeholder the recordings use for the running server binary.
+const RECORDED_BINARY: &str = "/magit-lsp/target/debug/magit-lsp";
+
+/// Build the repository state the named example was recorded against.
+///
+/// The fixture names mirror the recorded status renders: `plain-open` starts
+/// from the ten-line file and applies `standard_changes`; the code-action and
+/// prompt examples modify a one-line `f.txt`; the commit examples stage the
+/// standard change before running the Commit menu item.
+fn replay_fixture(name: &str) -> fixtures::RepoFixture {
+    use fixtures::{TEN_LINES, RepoFixture};
+    match name {
+        "plain-open" => RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard(),
+        "plain-code-action" | "plain-document-prompt" => RepoFixture::new()
+            .commit("init", [("f.txt", "one\n")])
+            .modify("f.txt", "changed\n"),
+        "commit-edit-abort" | "commit-edit-confirm" => RepoFixture::new()
+            .commit("initial", [("f.txt", "before\n")])
+            .modify_standard(),
+        other => panic!("no replay fixture for {other}"),
+    }
+}
+
+/// The placeholder the recordings use for a commit run id.
+const RECORDED_RUN_ID: &str = "run-1";
+
+/// Visit every `runId` member in a frame, including nested command arguments.
+fn for_each_run_id(value: &mut Value, apply: &mut dyn FnMut(&mut Value)) {
+    match value {
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                if key == "runId" {
+                    apply(item);
+                } else {
+                    for_each_run_id(item, apply);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                for_each_run_id(item, apply);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The first commit run id in a frame, if it carries one.
+fn observed_run_id(message: &Value) -> Option<String> {
+    let mut found = None;
+    let mut value = message.clone();
+    for_each_run_id(&mut value, &mut |id| {
+        if found.is_none() {
+            if let Some(text) = id.as_str() {
+                found = Some(text.to_owned());
+            }
+        }
+    });
+    found
+}
+
+/// Replace the recorded placeholders with this run's real values in a `c2s`
+/// frame, so the client drives the real temporary repository and answers the
+/// run the server actually started.
+fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Value {
+    let mut value = message.clone();
+    if let Some(run_id) = run_id {
+        for_each_run_id(&mut value, &mut |id| {
+            if id.as_str() == Some(RECORDED_RUN_ID) {
+                *id = Value::String(run_id.to_owned());
+            }
+        });
+    }
+    let text = serde_json::to_string(&value).expect("serialise client frame");
+    let text = text
+        .replace(&format!("file://{RECORDED_ROOT}"), &format!("file://{root}"))
+        .replace(RECORDED_ROOT, root);
+    serde_json::from_str(&text).expect("parse expanded client frame")
+}
+
+/// The recorded comparison form of a frame.
+///
+/// The current server omits `jsonrpc` on outbound frames, recorded runs used a
+/// temporary repository and a checkout-local binary path, and commit run ids are
+/// opaque hashes. The recordings normalized those by adding the member and by
+/// the `/repo`, binary-path and `run-1` placeholders. Versions and every other
+/// value stay exact.
+fn canonical_frame(message: &Value, root: &str, binary: &str) -> Value {
+    let mut value = message.clone();
+    if value.get("jsonrpc").is_none() {
+        value
+            .as_object_mut()
+            .expect("frame is an object")
+            .insert("jsonrpc".to_owned(), Value::String("2.0".to_owned()));
+    }
+    for_each_run_id(&mut value, &mut |id| {
+        if id.is_string() {
+            *id = Value::String(RECORDED_RUN_ID.to_owned());
+        }
+    });
+    let text = serde_json::to_string(&value).expect("serialise observed frame");
+    let text = text
+        .replace(&format!("file://{root}"), &format!("file://{RECORDED_ROOT}"))
+        .replace(root, RECORDED_ROOT)
+        .replace(binary, RECORDED_BINARY);
+    serde_json::from_str(&text).expect("parse canonical frame")
+}
+
+/// Replay one recorded example against the real server.
+///
+/// Every recorded `c2s` line is sent in order after the fixture substitution
+/// above; every recorded `s2c` line is compared with the next frame the server
+/// emits, normalized by [`canonical_frame`]. Replies to the server's own
+/// outbound requests keep the recorded `magit-lsp/outbound/N` identity by
+/// mapping it to the actual request id observed in the same position, so the
+/// reply always answers the real request. No sleeps are used: a phase is over
+/// when its recorded frames have been received.
+fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
+    let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
+    let (repo, _git) = fixture.build();
+    let root = repo.path().to_string_lossy().to_string();
+    let binary = env!("CARGO_BIN_EXE_magit-lsp");
+
+    let mut server = fixtures::stdio::TestServer::spawn(&[]);
+    // Outbound requests observed so far, indexed by their recorded number.
+    let mut outbound: Vec<Value> = Vec::new();
+    // The commit run id this server generated, if the exchange starts one.
+    let mut run_id: Option<String> = None;
+    // The code-action and commit recordings deliberately exclude the server's
+    // dynamic `view/keymap` pushes (client display metadata, not part of the
+    // recorded exchange). Only those files may skip them; a file that does
+    // record one keeps it in strict order.
+    let ignore_keymaps = !lines.iter().any(|line| {
+        line.dir == Dir::ServerToClient
+            && line.message.get("method").and_then(Value::as_str) == Some("view/keymap")
+    });
+
+    for (index, line) in lines.iter().enumerate() {
+        let where_ = format!("{name}:{}", index + 1);
+        match line.dir {
+            Dir::ClientToServer => {
+                let mut message = Value::Object(line.message.clone());
+                if message.get("method").is_none() {
+                    if let Some(recorded) = message.get("id").and_then(Value::as_str) {
+                        if let Some(number) = recorded.strip_prefix("magit-lsp/outbound/") {
+                            let number: usize = number
+                                .parse()
+                                .map_err(|error| format!("{where_}: bad outbound id: {error}"))?;
+                            let actual = outbound.get(number.wrapping_sub(1)).ok_or_else(|| {
+                                format!(
+                                    "{where_}: reply to outbound request {number} has no observed request"
+                                )
+                            })?;
+                            message["id"] = actual.clone();
+                        }
+                    }
+                }
+                server.send(expand_client_frame(&message, &root, run_id.as_deref()));
+            }
+            Dir::ServerToClient => {
+                let mut actual = server.recv();
+                while ignore_keymaps
+                    && actual.get("method").and_then(Value::as_str) == Some("view/keymap")
+                {
+                    actual = server.recv();
+                }
+                if run_id.is_none() {
+                    run_id = observed_run_id(&actual);
+                }
+                if actual.get("method").is_some() && actual.get("id").is_some() {
+                    outbound.push(actual["id"].clone());
+                }
+                let observed = canonical_frame(&actual, &root, binary);
+                let expected = Value::Object(line.message.clone());
+                if observed != expected {
+                    return Err(format!(
+                        "{where_}: recorded s2c frame mismatch\n  expected: {expected}\n  observed: {observed}"
+                    ));
+                }
+            }
+        }
+    }
+
+    let (status, extra) = server.finish_with_messages(Duration::from_secs(10));
+    if !status.success() {
+        return Err(format!("{name}: server exited with {status:?}"));
+    }
+    if !extra.is_empty() {
+        return Err(format!(
+            "{name}: {} unrecorded server frame(s) after exit: {extra:?}",
+            extra.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Replay every Plain example file against a real server and fixture.
+#[test]
+fn plain_examples_replay_against_the_real_binary() {
+    for name in [
+        "plain-open.jsonl",
+        "plain-code-action.jsonl",
+        "plain-document-prompt.jsonl",
+        "commit-edit-abort.jsonl",
+        "commit-edit-confirm.jsonl",
+    ] {
+        let lines = example_lines(name);
+        replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
+    }
+}
+
+/// A deliberately divergent expectation must make the replay fail.
+#[test]
+fn a_divergent_example_expectation_fails_the_replay() {
+    let mut lines = example_lines("plain-code-action.jsonl");
+    let render = lines
+        .iter_mut()
+        .find(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str) == Some("workspace/applyEdit")
+        })
+        .expect("the recorded status render");
+    render.message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"] =
+        Value::String("Head: not the recorded render".to_owned());
+    let error = replay_example("plain-code-action.jsonl", &lines)
+        .expect_err("a divergent recorded frame must fail the replay");
+    assert!(
+        error.contains("recorded s2c frame mismatch") && error.contains("not the recorded render"),
+        "the mismatch must be reported: {error}"
     );
 }
