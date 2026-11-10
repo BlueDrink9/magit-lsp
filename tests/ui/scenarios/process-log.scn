@@ -30,7 +30,14 @@ expect view_stack.count == 1
 keys standard: g
 keys vim: g r
 wait
+# Popping the process log restores the view's identity and focus, not its
+# viewport: the restored status may still be scrolled below the staged
+# header. Name the header explicitly; `goto` fails when the text is absent.
+goto "Staged changes (1)"
 expect screen contains "Staged changes (1)"
+# The screen assertion above only proves the header is rendered; Git is the
+# independent oracle that the staged patch still carries the staged hunk.
+sh: git diff --cached -- f.txt | grep -F -- '+line3 CHANGED'
 keys: c
 wait screen contains "Commit"
 keys: q
