@@ -1634,6 +1634,86 @@ fn luals_annotations_fail_on_unsupported_constructs() {
 }
 
 #[test]
+fn committed_client_spec_payload_tables_are_current() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join(generate_schema::schema_markdown::DOC_PATH);
+    let committed = std::fs::read_to_string(&path).expect("read client spec");
+    let block = generate_schema::schema_markdown::block().expect("render payload tables");
+    assert_eq!(
+        block,
+        generate_schema::schema_markdown::block().expect("render again"),
+        "payload tables must render deterministically"
+    );
+    assert!(
+        committed.contains(generate_schema::schema_markdown::BLOCK_BEGIN)
+            && committed.contains(generate_schema::schema_markdown::BLOCK_END),
+        "client spec must carry the generated payload-table markers"
+    );
+    assert_eq!(
+        generate_schema::schema_markdown::apply(&committed).expect("regenerate tables"),
+        committed,
+        "client-spec payload tables are stale (run make update-schema)"
+    );
+    assert!(
+        block.contains("Literal `\"message\"`"),
+        "literal effect tags must be generated"
+    );
+    assert!(
+        block.contains("One of `\"interactive\"`, `\"text\"`"),
+        "enum definitions must be generated"
+    );
+    assert!(
+        block.contains("Unconstrained JSON"),
+        "unconstrained JSON fields must be marked"
+    );
+    assert!(
+        committed.contains("Presentation differs:"),
+        "hand-written presentation guidance must stay"
+    );
+    assert!(
+        committed.contains("Unresolved/follow-up:"),
+        "hand-written follow-up guidance must stay"
+    );
+}
+
+#[test]
+fn client_spec_payload_tables_drift_on_tamper_and_missing_block() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let doc = generate_schema::schema_markdown::DOC_PATH;
+    let path = dir.path().join(doc);
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    std::fs::write(&path, text.replace("Unconstrained JSON", "Anything goes"))
+        .expect("tamper payload tables");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from(doc)],
+        "a modified payload-table block is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    let begin = text
+        .find(generate_schema::schema_markdown::BLOCK_BEGIN)
+        .expect("begin marker");
+    let end = text
+        .find(generate_schema::schema_markdown::BLOCK_END)
+        .expect("end marker")
+        + generate_schema::schema_markdown::BLOCK_END.len();
+    std::fs::write(&path, format!("{}{}", &text[..begin], &text[end..]))
+        .expect("remove payload tables");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from(doc)],
+        "a missing payload-table block is stale"
+    );
+}
+
+#[test]
 fn luals_annotation_drift_is_reported() {
     let dir = tempfile::tempdir().expect("tempdir");
     generate_schema::write_all(dir.path()).expect("write schemas");

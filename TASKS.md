@@ -264,6 +264,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - [x] **T011.13 — Run schema drift checks in CI.** Add the generated-schema drift target to the maintained CI workflow so committed artifacts cannot silently diverge.
     - check: the tracked CI workflow runs the drift target in the existing test job; the untracked local release workflow and all unrelated user files stay untouched.
       - Verified: make schema-check @ 18c9d4a → ok
+  - [x] **T011.14 — Generate client-spec payload tables from the schemas.** Replace the hand-maintained `Core payload quick reference` prose in `docs/CLIENT_SPEC.md` with generated payload tables derived from the committed directional schemas and method catalog.
+    - test: the generated tables are proven current by a drift test that regenerates them and compares the committed block, and a tampered or missing block fails; existing doc checks keep passing.
+    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Keep hand-written non-payload guidance (lifecycle, presentation, checklists) untouched; only payload field/type/required content is generated.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" && make docs-check @ 395541a → ok
+    - Done: containing commit.
   - [x] **T011.10 — Generate LuaLS wire annotations from directional schemas.** Emit `lua/magit-lsp/types.lua` through the existing schema generation/drift pipeline, with namespaced definitions that preserve input/output contracts.
     - test: generated annotations cover every payload root and retain literal tags, required/optional fields, refs, union/intersection constraints, arrays and unconstrained JSON; missing or modified output fails drift checks.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Do not alter runtime client behavior or merge independent key/token maps.

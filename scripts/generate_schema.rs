@@ -2,6 +2,8 @@
 
 #[path = "schema_luals.rs"]
 pub mod schema_luals;
+#[path = "schema_markdown.rs"]
+pub mod schema_markdown;
 #[path = "schema_typescript.rs"]
 pub mod schema_typescript;
 
@@ -532,6 +534,7 @@ pub fn write_all(root: &Path) -> std::io::Result<()> {
         }
         fs::write(path, file.text)?;
     }
+    schema_markdown::write(root)?;
     Ok(())
 }
 
@@ -569,6 +572,9 @@ pub fn stale_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
         if committed != file.text {
             stale.push(PathBuf::from(file.path));
         }
+    }
+    if schema_markdown::stale(root)? {
+        stale.push(PathBuf::from(schema_markdown::DOC_PATH));
     }
     Ok(stale)
 }
