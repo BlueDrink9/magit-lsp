@@ -394,6 +394,124 @@ fn plain_open_example_records_initialize_and_a_plain_document_open() {
     assert!(lines.iter().all(|line| line.source == "recorded"));
 }
 
+/// Parse one committed example file into its validated line shapes.
+fn example_lines(name: &str) -> Vec<Line> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join(EXAMPLES_DIR).join(name);
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    text.lines()
+        .map(|raw| parse_line(raw).unwrap_or_else(|error| panic!("{error}")))
+        .collect()
+}
+
+/// The `s2c` response answering the first `c2s` request with `method`.
+fn response_to<'a>(lines: &'a [Line], method: &str) -> &'a Line {
+    let request = lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str) == Some(method)
+        })
+        .unwrap_or_else(|| panic!("no {method} request"));
+    let id = &request.message["id"];
+    lines
+        .iter()
+        .find(|line| line.dir == Dir::ServerToClient && line.message.get("id") == Some(id))
+        .unwrap_or_else(|| panic!("no response to {method}"))
+}
+
+#[test]
+fn plain_code_action_example_records_tagged_targets_and_execution() {
+    let lines = example_lines("plain-code-action.jsonl");
+    assert!(lines.iter().all(|line| line.source == "recorded"));
+
+    let response = response_to(&lines, "textDocument/codeAction");
+    let actions = response.message["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("code action result is not an array: {:?}", response.message));
+    let kinds: Vec<&str> = actions
+        .iter()
+        .filter_map(|action| action["command"]["arguments"][0]["target"]["kind"].as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"content"),
+        "a content target must be offered: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"node"),
+        "a semantic node target must be offered: {kinds:?}"
+    );
+
+    let executed = lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("workspace/executeCommand")
+        })
+        .expect("executeCommand request");
+    let arguments = &executed.message["params"]["arguments"][0];
+    assert_eq!(arguments["command"], "status.stage");
+    assert_eq!(arguments["target"]["kind"], "content");
+    assert!(arguments["target"]["mutationHash"].is_string());
+    assert!(arguments["target"]["nodeId"].is_string());
+}
+
+#[test]
+fn plain_document_prompt_example_records_the_prompt_document_exchange() {
+    let lines = example_lines("plain-document-prompt.jsonl");
+    assert!(lines.iter().all(|line| line.source == "recorded"));
+    assert!(
+        !lines.iter().any(|line| {
+            line.message.get("method").and_then(Value::as_str) == Some("view/prompt")
+        }),
+        "Plain prompts must not use the native view/prompt notification"
+    );
+
+    let opened = response_to(&lines, "workspace/executeCommand");
+    let effects = opened.message["result"]["effects"]
+        .as_array()
+        .unwrap_or_else(|| panic!("executeCommand result has no effects: {:?}", opened.message));
+    assert!(
+        effects.iter().any(|effect| effect["descriptor"]["kind"] == "prompt"),
+        "the command must report the pushed prompt view: {effects:?}"
+    );
+
+    let prompt_text = lines
+        .iter()
+        .filter_map(|line| {
+            line.message
+                .get("params")?
+                .get("edit")?
+                .get("documentChanges")?
+                .get(0)?
+                .get("edits")?
+                .get(0)?
+                .get("newText")?
+                .as_str()
+        })
+        .find(|text| text.contains("Discard changes to f.txt?"))
+        .expect("the prompt document is applied as rendered text");
+    assert!(prompt_text.lines().any(|line| line.trim() == "Yes"));
+    assert!(prompt_text.lines().any(|line| line.trim() == "No"));
+
+    let answer = lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("workspace/executeCommand")
+                && line.message["params"]["arguments"][0]["command"] == "prompt.answer"
+        })
+        .expect("prompt.answer request");
+    let target = &answer.message["params"]["arguments"][0]["target"];
+    assert_eq!(target["kind"], "node");
+    assert!(target["nodeId"]
+        .as_str()
+        .is_some_and(|node| node.starts_with("prompt:") && node.ends_with(":no")));
+}
+
 #[test]
 fn corrupted_example_lines_fail_validation() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
