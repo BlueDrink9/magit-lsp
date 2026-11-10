@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.6 — Generate TypeScript wire declarations from directional schemas.** Emit `clients/vscode/types/protocol.d.ts` through the existing schema generator, preserving per-root directional definitions and including the method catalog's params/result mapping.
+    - test: generated declarations preserve required/optional fields, literal tags, unions/intersections, arrays, refs, arbitrary string view kinds and unconstrained JSON; missing or modified declarations fail drift checks.
+    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Wiring `tsc --checkJs` into the client remains the next independently verifiable slice.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 5887917 → ok
+    - Done: containing commit.
   - [x] **T011.5 — Catalog custom protocol methods and their payload schemas.** Add the hand-maintained typed method table and generate its deterministic catalog under `docs/schema/`, referencing the existing directional payload roots.
     - test: cover every custom view request and notification, checking names against protocol trait constants or notification constants, correct directions, payload references and explicit request results. Keep generic `Value` results unconstrained unless the runtime contract proves a narrower shape.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass; the catalog participates in missing/tampered artifact detection. Standard LSP envelopes and `magit.command` variants remain for the fixture-validation slice.
