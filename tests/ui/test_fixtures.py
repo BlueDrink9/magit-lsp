@@ -42,6 +42,7 @@ class FixtureTest(unittest.TestCase):
             {
                 "clean",
                 "modified-two-files",
+                "two-hunk-siblings",
                 "staged-one-file",
                 "staged-and-unstaged",
                 "staged-failing-hook",
@@ -99,6 +100,19 @@ class FixtureTest(unittest.TestCase):
         self.assertTrue(all(" .M " in line for line in changes))
         self.assertTrue(any(line.endswith("f.txt") for line in changes))
         self.assertTrue(any(line.endswith("g.txt") for line in changes))
+
+    def test_two_hunk_siblings(self) -> None:
+        repo, env = self.build("two-hunk-siblings")
+        changes = entries(status(repo, env))
+        self.assertEqual(len(changes), 2)
+        self.assertTrue(any(" .M " in line and line.endswith("f.txt") for line in changes))
+        self.assertTrue(any(" .M " in line and line.endswith("g.txt") for line in changes))
+        diff = fixtures.git(repo, env, "diff", "--", "f.txt").stdout
+        headers = [line[: line.index("@@", 2) + 2] for line in diff.splitlines() if line.startswith("@@")]
+        self.assertEqual(headers, ["@@ -2,7 +2,7 @@", "@@ -32,7 +32,7 @@"])
+        self.assertIn("+line5 CHANGED", diff)
+        self.assertIn("+line35 CHANGED", diff)
+        self.assertIn("+line2 CHANGED", fixtures.git(repo, env, "diff", "--", "g.txt").stdout)
 
     def test_staged_one_file(self) -> None:
         repo, env = self.build("staged-one-file")

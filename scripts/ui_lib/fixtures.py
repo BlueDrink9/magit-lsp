@@ -50,9 +50,17 @@ SECOND_FILE_CHANGES = "".join(
     )
 )
 
+TWO_HUNK_BASE = "".join(f"line{number}\n" for number in range(1, 41))
+
+TWO_HUNK_CHANGES = "".join(
+    f"line{number} CHANGED\n" if number in (5, 35) else f"line{number}\n"
+    for number in range(1, 41)
+)
+
 FIXTURES = (
     "clean",
     "modified-two-files",
+    "two-hunk-siblings",
     "staged-one-file",
     "staged-and-unstaged",
     "staged-failing-hook",
@@ -153,6 +161,18 @@ def _modified_two_files(repo: Path, env: dict[str, str]) -> None:
     write(repo / "g.txt", SECOND_FILE_CHANGES)
 
 
+def _two_hunk_siblings(repo: Path, env: dict[str, str]) -> None:
+    """Two f.txt hunks plus an independently modified g.txt.
+
+    Everything is written before the client starts, so a scenario that only
+    folds and refreshes sees no out-of-band repository mutation (and therefore
+    no watcher refresh) while it presses keys.
+    """
+    commit(repo, env, "two-hunk base", {"f.txt": TWO_HUNK_BASE, "g.txt": TEN_LINES})
+    write(repo / "f.txt", TWO_HUNK_CHANGES)
+    write(repo / "g.txt", SECOND_FILE_CHANGES)
+
+
 def _staged_one_file(repo: Path, env: dict[str, str]) -> None:
     commit(repo, env, "initial", {"f.txt": TEN_LINES})
     write(repo / "f.txt", STANDARD_CHANGES)
@@ -247,6 +267,7 @@ def _log_history(repo: Path, env: dict[str, str]) -> None:
 _BUILDERS = {
     "clean": _clean,
     "modified-two-files": _modified_two_files,
+    "two-hunk-siblings": _two_hunk_siblings,
     "staged-one-file": _staged_one_file,
     "staged-and-unstaged": _staged_and_unstaged,
     "staged-failing-hook": _staged_failing_hook,

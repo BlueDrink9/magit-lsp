@@ -433,6 +433,11 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 ## Bugfix
 
+- [x] **Build two-hunk UI repository before client startup.** Prerequisite for the hunk-body-fold repair. test: the registered `two-hunk-siblings` fixture creates exactly two unstaged hunks in `f.txt` at lines 5 and 35 plus an independent modified `g.txt`, before any client or watcher starts. Verification: `make ui-unit`. Done: containing commit.
+  - Verified: `make ui-unit` @ b888574 → ok; `test_two_hunk_siblings` asserts f.txt hunk headers `@@ -2,7 +2,7 @@` and `@@ -32,7 +32,7 @@` with `+line5 CHANGED`/`+line35 CHANGED` and g.txt `+line2 CHANGED`.
+
+- [ ] **Repair vim hunk-body folding UI regression.** Slice of the five-scenario repair. test: `hunk-body-fold` folds the containing hunk from a body line, preserves its sibling across refresh, and unfolds/refolds from the title at both declared sizes without stale-view messages. check: record the proven cause and native text/structured evidence; do not weaken version validation or add arbitrary sleeps. Verification: `make ui-file FILE=tests/ui/scenarios/hunk-body-fold.scn`.
+
 - [x] **Repair log UI scenarios for current vim bindings and selection behavior.** Prerequisite slice of the five-scenario repair below. test: `log-view` and `log-select` drive the real current keymap in both profiles and assert server-owned log/selection behavior. Diagnose stale `g l` and `Select` expectations against the current contract rather than weakening assertions. Verification: `make ui-file FILE=tests/ui/scenarios/log-view.scn` and `make ui-file FILE=tests/ui/scenarios/log-select.scn`. Done: containing commit.
   - Verified: `make ui-file FILE=tests/ui/scenarios/log-view.scn` @ 16d725e → PASS across `standard` 100x30/80x24 and `vim` 100x30/80x24; `log-header` snapshots show `Log`, `latest decorated subject`, `middle graph subject`, `main` and `v1`, and `log-search` shows `old searchable subject` with `/old searchable subject [1/1]`.
   - Verified: `make ui-file FILE=tests/ui/scenarios/log-select.scn` @ 16d725e → PASS across both profiles and sizes; `select-log` snapshots show `Log — copy commits` and `Select commit(s) to copy`, and the scenario's clipboard assertions confirm `getreg('"')` equals `git rev-parse HEAD~2` for the old searchable subject and stays `sentinel` after `Escape`.
