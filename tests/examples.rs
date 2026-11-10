@@ -18,8 +18,9 @@
 //! [`replay_example`]: the temporary repository root becomes `/repo`, the
 //! server binary path becomes `/magit-lsp/target/debug/magit-lsp`, outbound
 //! frames gain the `jsonrpc` member the current server omits, outbound
-//! `magit-lsp/outbound/N` ids are substituted in the client's replies, and
-//! opaque commit-run ids become `run-1`. Versions, order and payloads are not
+//! `magit-lsp/outbound/N` ids are substituted in the client's replies, opaque
+//! commit-run ids become `run-1`, and standalone 40-hex commit/object hashes
+//! become `hash-N` by first-seen position. Versions, order and payloads are not
 //! relaxed: an unexpected frame or a divergent expectation fails.
 
 #[path = "common/mod.rs"]
@@ -873,7 +874,7 @@ const RECORDED_BINARY: &str = "/magit-lsp/target/debug/magit-lsp";
 fn replay_fixture(name: &str) -> fixtures::RepoFixture {
     use fixtures::{TEN_LINES, RepoFixture};
     match name {
-        "plain-open" => RepoFixture::new()
+        "plain-open" | "rich-lifecycle" => RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
             .modify_standard(),
         "plain-code-action" | "plain-document-prompt" => RepoFixture::new()
@@ -943,14 +944,102 @@ fn expand_client_frame(message: &Value, root: &str, run_id: Option<&str>) -> Val
     serde_json::from_str(&text).expect("parse expanded client frame")
 }
 
+/// Visit every string leaf in a JSON value.
+fn for_each_string(value: &mut Value, apply: &mut dyn FnMut(&mut String)) {
+    match value {
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                for_each_string(item, apply);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                for_each_string(item, apply);
+            }
+        }
+        Value::String(text) => apply(text),
+        _ => {}
+    }
+}
+
+/// Whether a byte is a lowercase hexadecimal digit.
+fn is_lower_hex(byte: u8) -> bool {
+    matches!(byte, b'0'..=b'9' | b'a'..=b'f')
+}
+
+/// Replace each standalone 40-hex hash in `text` with its `hash-N` name.
+///
+/// A hash is a maximal run of lowercase hex digits that is exactly 40 bytes
+/// long; other runs (for example the 64-hex patch content hashes) stay exact.
+fn replace_hashes(text: &str, names: &mut HashMap<String, String>) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if !is_lower_hex(bytes[index]) {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < bytes.len() && is_lower_hex(bytes[index]) {
+            index += 1;
+        }
+        out.push_str(&text[start..run_start]);
+        let run = &text[run_start..index];
+        if run.len() == 40 {
+            let next = names.len() + 1;
+            let name = names
+                .entry(run.to_owned())
+                .or_insert_with(|| format!("hash-{next}"));
+            out.push_str(name);
+        } else {
+            out.push_str(run);
+        }
+        start = index;
+    }
+    out.push_str(&text[start..]);
+    out
+}
+
+/// First-seen hash names for one side of the replay comparison.
+///
+/// The recorded and observed sides each use their own instance, so a hash is
+/// named `hash-N` by its position on that side rather than by any shared map.
+struct HashNormalizer {
+    names: HashMap<String, String>,
+}
+
+impl HashNormalizer {
+    /// An empty map.
+    fn new() -> Self {
+        Self {
+            names: HashMap::new(),
+        }
+    }
+
+    /// Rename every standalone 40-hex hash in a frame.
+    fn normalize_frame(&mut self, value: &mut Value) {
+        for_each_string(value, &mut |text| {
+            *text = replace_hashes(text, &mut self.names);
+        });
+    }
+}
+
 /// The recorded comparison form of a frame.
 ///
 /// The current server omits `jsonrpc` on outbound frames, recorded runs used a
-/// temporary repository and a checkout-local binary path, and commit run ids are
-/// opaque hashes. The recordings normalized those by adding the member and by
-/// the `/repo`, binary-path and `run-1` placeholders. Versions and every other
-/// value stay exact.
-fn canonical_frame(message: &Value, root: &str, binary: &str) -> Value {
+/// temporary repository and a checkout-local binary path, commit run ids are
+/// opaque hashes, and commit/object hashes differ between runs. The recordings
+/// normalized those by adding the member and by the `/repo`, binary-path and
+/// `run-1` placeholders; [`HashNormalizer`] maps 40-hex hashes to `hash-N`.
+/// Versions and every other value stay exact.
+fn canonical_frame(
+    message: &Value,
+    root: &str,
+    binary: &str,
+    hashes: &mut HashNormalizer,
+) -> Value {
     let mut value = message.clone();
     if value.get("jsonrpc").is_none() {
         value
@@ -963,6 +1052,7 @@ fn canonical_frame(message: &Value, root: &str, binary: &str) -> Value {
             *id = Value::String(RECORDED_RUN_ID.to_owned());
         }
     });
+    hashes.normalize_frame(&mut value);
     let text = serde_json::to_string(&value).expect("serialise observed frame");
     let text = text
         .replace(&format!("file://{root}"), &format!("file://{RECORDED_ROOT}"))
@@ -980,6 +1070,11 @@ fn canonical_frame(message: &Value, root: &str, binary: &str) -> Value {
 /// mapping it to the actual request id observed in the same position, so the
 /// reply always answers the real request. No sleeps are used: a phase is over
 /// when its recorded frames have been received.
+///
+/// Frames are compared in strict order. The one pair that could look
+/// independent, `view/render` and `view/keymap` for a newly opened view, is
+/// ordered by the server: `send_outcome` emits every render before its keymap,
+/// so the rich recording keeps that order and needs no phase grouping.
 fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
@@ -991,6 +1086,10 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
     let mut outbound: Vec<Value> = Vec::new();
     // The commit run id this server generated, if the exchange starts one.
     let mut run_id: Option<String> = None;
+    // Recorded and observed frames name commit hashes independently, each by
+    // first-seen position on its own side.
+    let mut recorded_hashes = HashNormalizer::new();
+    let mut observed_hashes = HashNormalizer::new();
     // The code-action and commit recordings deliberately exclude the server's
     // dynamic `view/keymap` pushes (client display metadata, not part of the
     // recorded exchange). Only those files may skip them; a file that does
@@ -1035,8 +1134,13 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                 if actual.get("method").is_some() && actual.get("id").is_some() {
                     outbound.push(actual["id"].clone());
                 }
-                let observed = canonical_frame(&actual, &root, binary);
-                let expected = Value::Object(line.message.clone());
+                let observed = canonical_frame(&actual, &root, binary, &mut observed_hashes);
+                let expected = canonical_frame(
+                    &Value::Object(line.message.clone()),
+                    RECORDED_ROOT,
+                    RECORDED_BINARY,
+                    &mut recorded_hashes,
+                );
                 if observed != expected {
                     return Err(format!(
                         "{where_}: recorded s2c frame mismatch\n  expected: {expected}\n  observed: {observed}"
@@ -1059,11 +1163,12 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
     Ok(())
 }
 
-/// Replay every Plain example file against a real server and fixture.
+/// Replay every example file, Plain and rich, against a real server and fixture.
 #[test]
 fn plain_examples_replay_against_the_real_binary() {
     for name in [
         "plain-open.jsonl",
+        "rich-lifecycle.jsonl",
         "plain-code-action.jsonl",
         "plain-document-prompt.jsonl",
         "commit-edit-abort.jsonl",
@@ -1093,4 +1198,63 @@ fn a_divergent_example_expectation_fails_the_replay() {
         error.contains("recorded s2c frame mismatch") && error.contains("not the recorded render"),
         "the mismatch must be reported: {error}"
     );
+}
+
+/// A divergent rich expectation must make the rich replay fail.
+#[test]
+fn a_divergent_rich_expectation_fails_the_replay() {
+    let mut lines = example_lines("rich-lifecycle.jsonl");
+    let render = lines
+        .iter_mut()
+        .find(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str) == Some("view/render")
+                && line.message["params"]["version"] == 1
+        })
+        .expect("the recorded initial rich render");
+    render.message["params"]["text"][0] = Value::String("Head: not the recorded rich render".to_owned());
+    let error = replay_example("rich-lifecycle.jsonl", &lines)
+        .expect_err("a divergent rich frame must fail the replay");
+    assert!(
+        error.contains("recorded s2c frame mismatch")
+            && error.contains("not the recorded rich render"),
+        "the rich mismatch must be reported: {error}"
+    );
+}
+
+/// Commit/object hashes become `hash-N` by first-seen position on each side;
+/// 64-hex content hashes stay exact.
+#[test]
+fn commit_hashes_normalize_by_first_seen_position() {
+    let first = "1111111111111111111111111111111111111111";
+    let second = "2222222222222222222222222222222222222222";
+    let content = "a".repeat(64);
+    let frame = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "result": {"text": [
+            format!("commit {first}"),
+            format!("parent {second}"),
+            format!("patch {content}"),
+        ]},
+    });
+    let mut recorded = HashNormalizer::new();
+    let mut observed = HashNormalizer::new();
+    let expected = canonical_frame(&frame, RECORDED_ROOT, RECORDED_BINARY, &mut recorded);
+    let actual = canonical_frame(&frame, RECORDED_ROOT, RECORDED_BINARY, &mut observed);
+    assert_eq!(actual, expected);
+    assert_eq!(actual["result"]["text"][0], "commit hash-1");
+    assert_eq!(actual["result"]["text"][1], "parent hash-2");
+    assert_eq!(actual["result"]["text"][2], format!("patch {content}"));
+
+    // The maps are independent: the observed side numbers from `hash-1` even
+    // though the recorded side already saw this hash as `hash-2`.
+    let only_second = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "result": {"text": [format!("parent {second}")]},
+    });
+    let mut other = HashNormalizer::new();
+    let renumbered = canonical_frame(&only_second, RECORDED_ROOT, RECORDED_BINARY, &mut other);
+    assert_eq!(renumbered["result"]["text"][0], "parent hash-1");
 }
