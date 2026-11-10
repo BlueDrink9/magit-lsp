@@ -512,6 +512,152 @@ fn plain_document_prompt_example_records_the_prompt_document_exchange() {
         .is_some_and(|node| node.starts_with("prompt:") && node.ends_with(":no")));
 }
 
+/// Assert the example delivers the Git commit template into the draft buffer.
+fn assert_commit_template_delivered(lines: &[Line]) {
+    let draft_uri = "file:///repo/.git/COMMIT_EDITMSG";
+    let template = lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("workspace/applyEdit")
+                && line.message["params"]["edit"]["documentChanges"][0]["textDocument"]["uri"]
+                    == draft_uri
+        })
+        .expect("the commit template is delivered as a workspace edit");
+    let text = template.message["params"]["edit"]["documentChanges"][0]["edits"][0]["newText"]
+        .as_str()
+        .expect("template text");
+    assert!(
+        text.starts_with("\n# Please enter the commit message"),
+        "the delivered draft text is the Git template: {text:?}"
+    );
+    assert!(
+        lines.iter().any(|line| {
+            line.dir == Dir::ServerToClient
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("window/showDocument")
+                && line.message["params"]["uri"] == draft_uri
+        }),
+        "the draft buffer is shown"
+    );
+}
+
+/// The offered run-bound draft action carrying `command`.
+fn offered_draft_action(lines: &[Line], command: &str) -> Value {
+    lines
+        .iter()
+        .filter(|line| line.dir == Dir::ServerToClient)
+        .find_map(|line| {
+            line.message.get("result")?.as_array()?.iter().find_map(|action| {
+                let arguments = action.get("command")?.get("arguments")?.get(0)?;
+                (arguments.get("command")? == command && arguments.get("runId")?.is_string())
+                    .then(|| arguments.clone())
+            })
+        })
+        .unwrap_or_else(|| panic!("{command} is offered for the draft"))
+}
+
+/// The `c2s` executeCommand request whose semantic command is `command`.
+fn command_request<'a>(lines: &'a [Line], command: &str) -> &'a Line {
+    lines
+        .iter()
+        .find(|line| {
+            line.dir == Dir::ClientToServer
+                && line.message.get("method").and_then(Value::as_str)
+                    == Some("workspace/executeCommand")
+                && line.message["params"]["arguments"][0]["command"] == command
+        })
+        .unwrap_or_else(|| panic!("no executeCommand request for {command}"))
+}
+
+/// The `s2c` response answering `request`.
+fn response_for<'a>(lines: &'a [Line], request: &Line) -> &'a Line {
+    let id = &request.message["id"];
+    lines
+        .iter()
+        .find(|line| line.dir == Dir::ServerToClient && line.message.get("id") == Some(id))
+        .unwrap_or_else(|| panic!("no response to the request with id {id}"))
+}
+
+#[test]
+fn commit_edit_confirm_example_records_the_draft_and_its_confirmation() {
+    let lines = example_lines("commit-edit-confirm.jsonl");
+    assert!(lines.iter().all(|line| line.source == "recorded"));
+    assert_commit_template_delivered(&lines);
+
+    let confirm = offered_draft_action(&lines, "common.confirm");
+    assert_eq!(confirm["source"], "synchronized");
+    assert!(
+        confirm["version"].is_i64(),
+        "the confirm is bound to a synchronized version: {confirm}"
+    );
+    let request = command_request(&lines, "common.confirm");
+    assert_eq!(
+        request.message["params"]["arguments"][0], confirm,
+        "the executed confirm carries exactly the offered arguments"
+    );
+    let response = response_for(&lines, request);
+    assert_eq!(response.message["result"]["type"], "confirmed");
+    assert_eq!(response.message["result"]["version"], confirm["version"]);
+    assert!(
+        lines.iter().any(|line| {
+            line.message.get("method").and_then(Value::as_str) == Some("window/showMessage")
+                && line.message["params"]["message"] == "Committed: Recorded commit body"
+        }),
+        "the completed commit is reported"
+    );
+    assert!(
+        !lines.iter().any(|line| {
+            line.message
+                .get("result")
+                .and_then(|result| result.get("type"))
+                .and_then(Value::as_str)
+                == Some("aborted")
+        }),
+        "the confirm path never reports a cancellation"
+    );
+}
+
+#[test]
+fn commit_edit_abort_example_records_the_cancellation() {
+    let lines = example_lines("commit-edit-abort.jsonl");
+    assert!(lines.iter().all(|line| line.source == "recorded"));
+    assert_commit_template_delivered(&lines);
+
+    let abort = offered_draft_action(&lines, "common.cancel");
+    assert!(
+        abort["version"].is_i64(),
+        "the abort is bound to an open document version: {abort}"
+    );
+    let request = command_request(&lines, "common.cancel");
+    assert_eq!(
+        request.message["params"]["arguments"][0], abort,
+        "the executed abort carries exactly the offered arguments"
+    );
+    let response = response_for(&lines, request);
+    assert_eq!(response.message["result"]["type"], "aborted");
+    assert!(
+        !lines.iter().any(|line| {
+            line.message
+                .get("result")
+                .and_then(|result| result.get("type"))
+                .and_then(Value::as_str)
+                == Some("confirmed")
+        }),
+        "the abort path never reports a confirmation"
+    );
+    assert!(
+        !lines.iter().any(|line| {
+            line.message.get("method").and_then(Value::as_str) == Some("window/showMessage")
+                && line.message["params"]["message"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Committed:"))
+        }),
+        "the abort path never reports a commit"
+    );
+}
+
 #[test]
 fn rich_lifecycle_example_pins_the_progress_and_render_order() {
     let lines = example_lines("rich-lifecycle.jsonl");
