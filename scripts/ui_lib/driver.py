@@ -529,15 +529,23 @@ _KEY_MODIFIER_VALUE = {"c": 4, "s": 1, "ctrl": 4, "control": 4, "shift": 1}
 _MODIFIED_KEY = re.compile(
     r"^(?:(?:[CS]|(?i:ctrl|control|shift))[+-])+(?P<key>[A-Za-z0-9]+)$"
 )
+# A terminal reports shifted Tab as backtab (`ESC [ Z`), and tmux's `BTab` name
+# sends that portable sequence, so route the chord there instead of a modifier
+# encoded form. Ctrl is not a backtab combination and stays on CSI-u.
+_SHIFT_TAB = re.compile(r"^(?:S|(?i:shift))[+-](?i:tab)$")
+_BACKTAB = "BTab"
 
 
 def _csi_u_bytes(token: str) -> list[str] | None:
     """Hex bytes for a modifier+special-key token tmux cannot encode.
 
     Returns one hex string per byte for `send-keys -H`, or `None` when the
-    token carries no modifier, carries alt (kept on tmux named keys), or
-    names a key with no verified CSI-u encoding (single characters, F-keys).
+    token carries no modifier, carries alt (kept on tmux named keys), names a
+    shifted Tab (sent as terminal backtab), or names a key with no verified
+    CSI-u encoding (single characters, F-keys).
     """
+    if _SHIFT_TAB.fullmatch(token):
+        return None
     match = _MODIFIED_KEY.fullmatch(token)
     if match is None:
         return None
@@ -562,9 +570,13 @@ def send_keys(run: Run, tokens: list[str]) -> None:
     """Send each token to the pane, literal text or named key.
 
     Modifier+special-key tokens (such as `C-Enter`) go through raw CSI-u
-    bytes; plain tmux names would drop their modifier.
+    bytes; plain tmux names would drop their modifier. Shifted Tab goes through
+    tmux's backtab name so Neovim sees its `<S-Tab>` mapping.
     """
     for token in tokens:
+        if _SHIFT_TAB.fullmatch(token):
+            _tmux(run, "send-keys", "-t", SESSION, _BACKTAB)
+            continue
         raw = _csi_u_bytes(token)
         if raw is not None:
             _tmux(run, "send-keys", "-t", SESSION, "-H", *raw)

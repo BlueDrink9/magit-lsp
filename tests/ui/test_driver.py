@@ -212,9 +212,16 @@ class CsiUKeyTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertEqual(driver._csi_u_bytes(token), expected)
 
-    def test_shift_tab_becomes_csi_u_bytes(self) -> None:
+    def test_shifted_tab_stays_on_the_terminal_backtab(self) -> None:
+        for token in ("shift+Tab", "S-Tab", "Shift+Tab", "shift+tab"):
+            with self.subTest(token=token):
+                self.assertIsNone(driver._csi_u_bytes(token))
+                self.assertFalse(driver.is_key_name(token))
+
+    def test_ctrl_shift_tab_keeps_csi_u_bytes(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("shift+Tab"), ["1b", "5b", "39", "3b", "32", "75"]
+            driver._csi_u_bytes("C-S-Tab"),
+            ["1b", "5b", "39", "3b", "36", "75"],
         )
 
     def test_ctrl_arrow_uses_the_legacy_form(self) -> None:
@@ -254,6 +261,17 @@ class SendKeysTest(unittest.TestCase):
                 ("send-keys", "-t", "magit", "-H",
                  "1b", "5b", "31", "33", "3b", "35", "75"),
                 ("send-keys", "-t", "magit", "-l", "--", "x"),
+            ],
+        )
+
+    def test_shifted_tab_goes_through_the_backtab_name(self) -> None:
+        with patch.object(driver, "_tmux") as tmux:
+            driver.send_keys(object(), ["shift+Tab", "S-Tab"])
+        self.assertEqual(
+            [call.args[1:] for call in tmux.call_args_list],
+            [
+                ("send-keys", "-t", "magit", "BTab"),
+                ("send-keys", "-t", "magit", "BTab"),
             ],
         )
 
