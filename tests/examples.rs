@@ -513,6 +513,107 @@ fn plain_document_prompt_example_records_the_prompt_document_exchange() {
 }
 
 #[test]
+fn rich_lifecycle_example_pins_the_progress_and_render_order() {
+    let lines = example_lines("rich-lifecycle.jsonl");
+    assert!(lines.iter().all(|line| line.source == "recorded"));
+
+    let method = |line: &Line, name: &str| {
+        line.message.get("method").and_then(Value::as_str) == Some(name)
+    };
+    let phase = |line: &Line, kind: &str| {
+        method(line, "$/progress") && line.message["params"]["value"]["kind"] == kind
+    };
+    let index = |predicate: &dyn Fn(&Line) -> bool| {
+        lines
+            .iter()
+            .position(|line| predicate(line))
+            .unwrap_or_else(|| panic!("no matching line in rich-lifecycle.jsonl"))
+    };
+
+    let initialize = &lines[0];
+    assert_eq!(initialize.dir, Dir::ClientToServer);
+    assert!(method(initialize, "initialize"));
+    let declaration = &initialize.message["params"]["capabilities"]["experimental"]["magit"];
+    assert_eq!(declaration["v"], 1);
+    assert_eq!(declaration["keys"], "dynamic");
+    assert_eq!(declaration["modifiers"], "full");
+
+    let opened = response_to(&lines, "view/open");
+    let view_id = opened.message["result"]["id"]
+        .as_str()
+        .expect("view descriptor id");
+    let initial_render = index(&|line| {
+        line.dir == Dir::ServerToClient
+            && method(line, "view/render")
+            && line.message["params"]["version"] == 1
+    });
+    let initial_ack = index(&|line| {
+        line.dir == Dir::ClientToServer
+            && method(line, "view/rendered")
+            && line.message["params"]["version"] == 1
+    });
+    assert!(
+        initial_render < initial_ack,
+        "the client acknowledges the initial render only after receiving it"
+    );
+    let key = index(&|line| line.dir == Dir::ClientToServer && method(line, "view/key"));
+    assert!(
+        initial_ack < key,
+        "the key is pressed against the acknowledged version"
+    );
+    assert_eq!(
+        lines[key].message["params"]["key"], "S",
+        "the recorded key is status.stage-all, the mutation whose progress the file pins"
+    );
+
+    let create = index(&|line| {
+        line.dir == Dir::ServerToClient && method(line, "window/workDoneProgress/create")
+    });
+    let begin = index(&|line| line.dir == Dir::ServerToClient && phase(line, "begin"));
+    let end = index(&|line| line.dir == Dir::ServerToClient && phase(line, "end"));
+    let key_id = lines[key].message["id"].clone();
+    let key_response = index(&|line| {
+        line.dir == Dir::ServerToClient && line.message.get("id") == Some(&key_id)
+    });
+    let next_render = index(&|line| {
+        line.dir == Dir::ServerToClient && method(line, "view/render") && line.message["params"]["version"] == 2
+    });
+
+    // The recorded ordering, as observed from the real server: create, begin and
+    // end all precede the key response, and the refreshed render follows it.
+    assert!(
+        create < begin && begin < end && end < key_response,
+        "progress create/begin/end must precede the key response: \
+         create {create}, begin {begin}, end {end}, response {key_response}"
+    );
+    assert!(
+        key_response < next_render,
+        "the post-refresh render must follow the key response: \
+         response {key_response}, render {next_render}"
+    );
+
+    let token = |index: usize| {
+        lines[index].message["params"]["token"]
+            .as_str()
+            .expect("progress token")
+            .to_owned()
+    };
+    assert_eq!(token(create), token(begin));
+    assert_eq!(token(begin), token(end));
+    assert_eq!(lines[begin].message["params"]["value"]["title"], "Git");
+    assert_eq!(lines[begin].message["params"]["value"]["message"], "view/key");
+    assert_eq!(
+        lines[begin].message["params"]["value"]["cancellable"],
+        true
+    );
+
+    assert_eq!(
+        lines[next_render].message["params"]["viewId"], view_id,
+        "the refreshed render targets the acknowledged view"
+    );
+}
+
+#[test]
 fn corrupted_example_lines_fail_validation() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let catalog = Catalog::load(root).expect("method catalog");
