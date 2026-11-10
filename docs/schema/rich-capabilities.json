@@ -1,0 +1,159 @@
+{
+  "$defs": {
+    "KeyModifiers": {
+      "description": "How faithfully a client can report key modifiers (§3.8).\n\n`Basic` still resolves the portable terminal backtab, a lone `shift+Tab`;\nit implies no broader modifier support.",
+      "enum": [
+        "full",
+        "basic"
+      ],
+      "type": "string"
+    },
+    "KeymapDelivery": {
+      "description": "How a client wants to receive keymaps (§3.9).",
+      "oneOf": [
+        {
+          "const": "dynamic",
+          "description": "The server pushes `view/keymap` and the client applies it atomically.",
+          "type": "string"
+        },
+        {
+          "const": "static",
+          "description": "The client ships static bindings; no push is needed.",
+          "type": "string"
+        }
+      ]
+    },
+    "PickCapabilities": {
+      "additionalProperties": false,
+      "description": "Optional native picker shapes a rich client opts into.",
+      "properties": {
+        "description": {
+          "default": false,
+          "description": "The client displays item descriptions.",
+          "type": "boolean"
+        },
+        "detail": {
+          "default": false,
+          "description": "The client displays item details.",
+          "type": "boolean"
+        },
+        "fallbackView": {
+          "default": false,
+          "description": "The client can open the server-rendered fallback view.",
+          "type": "boolean"
+        },
+        "freeText": {
+          "default": false,
+          "description": "The client accepts an answer that is not an item id.",
+          "type": "boolean"
+        },
+        "group": {
+          "default": false,
+          "description": "The client groups items under their group label.",
+          "type": "boolean"
+        },
+        "maxItems": {
+          "default": null,
+          "description": "The client can present at most this many items; `None` means no limit.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "multi": {
+          "default": false,
+          "description": "The client can select more than one item.",
+          "type": "boolean"
+        },
+        "preselection": {
+          "default": false,
+          "description": "The client honours pre-selected item ids.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Wire declaration of `capabilities.experimental.magit`, mirrored as the\ngenerated `docs/schema/rich-capabilities.json` artifact.\n\nThis mirrors the fields and validators of [`MagitCapabilities`] and reuses\nthe same typed enums and name constants, so the schema cannot drift from the\nnegotiated contract. Historical initialize captures may carry retired keys,\nso the declaration tolerates additional properties while still constraining\nevery declared field.",
+  "properties": {
+    "effects": {
+      "description": "Supported optional effects.",
+      "items": {
+        "enum": [
+          "visitFile",
+          "clipboard",
+          "editDocument"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "keys": {
+      "$ref": "#/$defs/KeymapDelivery",
+      "description": "Client keymap delivery strategy."
+    },
+    "layout": {
+      "description": "Supported view placements.",
+      "items": {
+        "enum": [
+          "main",
+          "bottom",
+          "side",
+          "float"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "modifiers": {
+      "$ref": "#/$defs/KeyModifiers",
+      "description": "Client key modifier fidelity."
+    },
+    "pick": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PickCapabilities"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional native picker shapes the client can present."
+    },
+    "prompts": {
+      "description": "Supported prompt kinds.",
+      "items": {
+        "enum": [
+          "confirm",
+          "text",
+          "choice",
+          "multiChoice",
+          "secret"
+        ],
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "v": {
+      "const": 1,
+      "description": "Rich protocol version; only version 1 is accepted.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "keys",
+    "modifiers",
+    "layout",
+    "effects",
+    "prompts"
+  ],
+  "title": "RichCapabilityDeclaration",
+  "type": "object"
+}

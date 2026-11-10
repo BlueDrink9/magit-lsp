@@ -327,7 +327,9 @@ impl lsp_types::request::Request for ViewKeyRequest {
 }
 
 /// How a client wants to receive keymaps (§3.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum KeymapDelivery {
     /// The server pushes `view/keymap` and the client applies it atomically.
@@ -341,7 +343,9 @@ pub enum KeymapDelivery {
 ///
 /// `Basic` still resolves the portable terminal backtab, a lone `shift+Tab`;
 /// it implies no broader modifier support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum KeyModifiers {
     #[default]

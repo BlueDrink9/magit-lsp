@@ -264,6 +264,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - [x] **T011.13 — Run schema drift checks in CI.** Add the generated-schema drift target to the maintained CI workflow so committed artifacts cannot silently diverge.
     - check: the tracked CI workflow runs the drift target in the existing test job; the untracked local release workflow and all unrelated user files stay untouched.
       - Verified: make schema-check @ 18c9d4a → ok
+  - [x] **T011.15 — Validate recorded capability fixtures against generated schemas.** Generate a schema for the `capabilities.experimental.magit` declaration and check every recorded fixture carrying one against it.
+    - test: each recorded fixture's `magit` declaration validates against the generated capability schema, and a deliberately corrupted fixture copy fails validation in a test.
+    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Example-file validation remains owned by T012, which creates those files.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ db870f0 → ok
   - [x] **T011.14 — Generate client-spec payload tables from the schemas.** Replace the hand-maintained `Core payload quick reference` prose in `docs/CLIENT_SPEC.md` with generated payload tables derived from the committed directional schemas and method catalog.
     - test: the generated tables are proven current by a drift test that regenerates them and compares the committed block, and a tampered or missing block fails; existing doc checks keep passing.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Keep hand-written non-payload guidance (lifecycle, presentation, checklists) untouched; only payload field/type/required content is generated.

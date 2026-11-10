@@ -497,6 +497,30 @@ pub fn artifacts() -> Vec<Artifact> {
     ]
 }
 
+/// Schema for the `capabilities.experimental.magit` declaration.
+///
+/// The declaration is an initialize capability input rather than a custom
+/// method payload, so it is committed and drift-checked with the payload
+/// artifacts but does not feed the payload-table or client-type generators.
+pub fn capability_artifact() -> Artifact {
+    Artifact {
+        file: "rich-capabilities.json",
+        schema: directional_schema::<magit_lsp::presentation::RichCapabilityDeclaration>(
+            Direction::Input,
+        ),
+    }
+}
+
+/// Every artifact the pipeline writes and drift-checks.
+///
+/// Payload artifacts keep their stable order; the capability declaration is
+/// appended because it is not a payload root consumed by client generators.
+pub fn committed_artifacts() -> Vec<Artifact> {
+    let mut all = artifacts();
+    all.push(capability_artifact());
+    all
+}
+
 /// Render one artifact as deterministic pretty JSON with a trailing newline.
 pub fn render(artifact: &Artifact) -> String {
     let mut out = serde_json::to_string_pretty(&artifact.schema)
@@ -510,7 +534,7 @@ pub fn render(artifact: &Artifact) -> String {
 pub fn write_all(root: &Path) -> std::io::Result<()> {
     let dir = root.join("docs/schema");
     fs::create_dir_all(&dir)?;
-    for artifact in artifacts() {
+    for artifact in committed_artifacts() {
         fs::write(dir.join(artifact.file), render(&artifact))?;
     }
     let declarations = schema_typescript::protocol_declarations()
@@ -544,7 +568,7 @@ pub fn write_all(root: &Path) -> std::io::Result<()> {
 pub fn stale_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     let dir = root.join("docs/schema");
     let mut stale = Vec::new();
-    for artifact in artifacts() {
+    for artifact in committed_artifacts() {
         let path = dir.join(artifact.file);
         let fresh = render(&artifact);
         let committed = fs::read_to_string(&path).unwrap_or_default();

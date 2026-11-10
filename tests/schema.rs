@@ -50,11 +50,11 @@ fn committed_schemas_match_fresh_deterministic_generation() {
         "stale or missing schemas (run make update-schema): {stale:?}"
     );
 
-    let first: Vec<String> = generate_schema::artifacts()
+    let first: Vec<String> = generate_schema::committed_artifacts()
         .iter()
         .map(generate_schema::render)
         .collect();
-    let second: Vec<String> = generate_schema::artifacts()
+    let second: Vec<String> = generate_schema::committed_artifacts()
         .iter()
         .map(generate_schema::render)
         .collect();
@@ -1737,5 +1737,239 @@ fn luals_annotation_drift_is_reported() {
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from(schema_luals::ANNOTATION_PATH)],
         "a modified annotation file is stale"
+    );
+}
+
+/// Whether a JSON value satisfies one JSON Schema `type` name.
+fn matches_type(kind: &str, value: &Value) -> bool {
+    match kind {
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "string" => value.is_string(),
+        "integer" => value
+            .as_f64()
+            .is_some_and(|number| number.fract() == 0.0),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+/// Resolve a local `#/...` JSON Pointer reference.
+fn dereference<'a>(root: &'a Value, reference: &str) -> Option<&'a Value> {
+    root.pointer(reference.strip_prefix('#')?)
+}
+
+/// Narrow JSON Schema check for capability declarations.
+///
+/// The workspace has no JSON Schema validator dependency, so this deliberately
+/// covers only the keywords the generated capability artifact emits: `$ref`,
+/// `anyOf`, `oneOf`, `type`, `const`, `enum`, `required`, `properties`, `items`
+/// and `additionalProperties`. Unknown keywords are ignored, so the
+/// declaration's tolerated extra properties are not rejected.
+fn schema_errors(root: &Value, schema: &Value, value: &Value, path: &str) -> Vec<String> {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        return match dereference(root, reference) {
+            Some(target) => schema_errors(root, target, value, path),
+            None => vec![format!("{path}: unresolved reference {reference}")],
+        };
+    }
+
+    for keyword in ["anyOf", "oneOf"] {
+        let Some(branches) = schema.get(keyword).and_then(Value::as_array) else {
+            continue;
+        };
+        let matches = branches
+            .iter()
+            .filter(|branch| schema_errors(root, branch, value, path).is_empty())
+            .count();
+        let satisfied = if keyword == "oneOf" {
+            matches == 1
+        } else {
+            matches >= 1
+        };
+        if !satisfied {
+            return vec![format!(
+                "{path}: matches {matches} {keyword} branches: {value}"
+            )];
+        }
+        return Vec::new();
+    }
+
+    let mut errors = Vec::new();
+
+    if let Some(kinds) = schema.get("type") {
+        let satisfied = match kinds {
+            Value::String(kind) => matches_type(kind, value),
+            Value::Array(kinds) => kinds
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|kind| matches_type(kind, value)),
+            _ => true,
+        };
+        if !satisfied {
+            errors.push(format!("{path}: expected type {kinds}, found {value}"));
+            return errors;
+        }
+    }
+
+    if let Some(expected) = schema.get("const") {
+        if value != expected {
+            errors.push(format!("{path}: expected const {expected}, found {value}"));
+        }
+    }
+
+    if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
+        if !allowed.contains(value) {
+            errors.push(format!("{path}: {value} is not one of {allowed:?}"));
+        }
+    }
+
+    if let Some(object) = value.as_object() {
+        if let Some(required) = schema.get("required").and_then(Value::as_array) {
+            for name in required.iter().filter_map(Value::as_str) {
+                if !object.contains_key(name) {
+                    errors.push(format!("{path}: missing required property {name}"));
+                }
+            }
+        }
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (key, field) in object {
+                match properties.get(key) {
+                    Some(field_schema) => errors.extend(schema_errors(
+                        root,
+                        field_schema,
+                        field,
+                        &format!("{path}.{key}"),
+                    )),
+                    None => {
+                        if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+                            errors.push(format!("{path}: unexpected property {key}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let (Some(items), Some(array)) = (schema.get("items"), value.as_array()) {
+        for (index, item) in array.iter().enumerate() {
+            errors.extend(schema_errors(
+                root,
+                items,
+                item,
+                &format!("{path}[{index}]"),
+            ));
+        }
+    }
+
+    errors
+}
+
+/// Every recorded fixture `magit` declaration with its source label.
+fn recorded_magit_declarations() -> Vec<(String, Value)> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let rows: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("tests/fixtures/current-client-capabilities.json"))
+            .expect("read current capability fixture"),
+    )
+    .expect("current capability fixture is JSON");
+    let mut declarations = Vec::new();
+    for (index, row) in rows
+        .as_array()
+        .expect("current capability fixture is an array")
+        .iter()
+        .enumerate()
+    {
+        declarations.push((
+            format!("current-client-capabilities.json row {index}"),
+            row["magit"].clone(),
+        ));
+    }
+
+    let traces = root.join("tests/fixtures/lsp_traces");
+    for entry in std::fs::read_dir(&traces).expect("read trace fixtures") {
+        let path = entry.expect("trace entry").path();
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        if !(name.starts_with("initialize-") && name.ends_with(".json")) {
+            continue;
+        }
+        let trace: Value = serde_json::from_str(
+            &std::fs::read_to_string(&path).expect("read initialize trace"),
+        )
+        .expect("initialize trace is JSON");
+        if let Some(declaration) = trace.pointer("/capabilities/experimental/magit") {
+            declarations.push((name.to_string(), declaration.clone()));
+        }
+    }
+    declarations
+}
+
+#[test]
+fn recorded_magit_declarations_validate_against_capability_schema() {
+    let schema = read_schema("rich-capabilities.json");
+    assert_eq!(schema["title"], "RichCapabilityDeclaration");
+    assert_eq!(schema["properties"]["v"]["const"], 1);
+
+    let declarations = recorded_magit_declarations();
+    assert!(
+        declarations.len() >= 3,
+        "expected the two current rows and the bundled initialize trace: {declarations:?}"
+    );
+    for (source, declaration) in declarations {
+        let errors = schema_errors(&schema, &schema, &declaration, "$");
+        assert!(
+            errors.is_empty(),
+            "{source} must validate against the capability schema: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn corrupted_magit_declaration_copy_fails_capability_schema() {
+    let schema = read_schema("rich-capabilities.json");
+    let rows: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/current-client-capabilities.json"),
+        )
+        .expect("read current capability fixture"),
+    )
+    .expect("current capability fixture is JSON");
+    let original = rows[0]["magit"].clone();
+    assert!(
+        schema_errors(&schema, &schema, &original, "$").is_empty(),
+        "the uncorrupted declaration must validate"
+    );
+
+    let mut unknown_effect = original.clone();
+    unknown_effect["effects"] = serde_json::json!(["visitFile", "teleport"]);
+    let errors = schema_errors(&schema, &schema, &unknown_effect, "$");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("$.effects[1]") && error.contains("is not one of")),
+        "an unknown effect must fail the enum check: {errors:?}"
+    );
+
+    let mut unknown_keys = original.clone();
+    unknown_keys["keys"] = serde_json::json!("teleport");
+    let errors = schema_errors(&schema, &schema, &unknown_keys, "$");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("$.keys") && error.contains("oneOf")),
+        "an unknown keymap delivery must fail the oneOf check: {errors:?}"
+    );
+
+    let mut bad_version = original;
+    bad_version["v"] = serde_json::json!(2);
+    let errors = schema_errors(&schema, &schema, &bad_version, "$");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("$.v") && error.contains("const 1")),
+        "an unsupported version must fail the const check: {errors:?}"
     );
 }

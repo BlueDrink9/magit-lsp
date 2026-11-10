@@ -76,8 +76,15 @@ pub struct MagitCapabilities {
     pub pick: Option<PickCapabilities>,
 }
 
+/// Logical view placements a rich client may declare.
+///
+/// Also exported by `scripts/generate_schema.rs` as the `layout` constraint in
+/// the committed `docs/schema/rich-capabilities.json` artifact, so this array is
+/// the single source of truth for the wire names.
+const LAYOUT_PLACEMENTS: &[&str] = &["main", "bottom", "side", "float"];
+
 /// Optional native picker shapes a rich client opts into.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct PickCapabilities {
     /// The client can select more than one item.
@@ -96,6 +103,61 @@ pub struct PickCapabilities {
     pub fallback_view: bool,
     /// The client can present at most this many items; `None` means no limit.
     pub max_items: Option<usize>,
+}
+
+/// Schema for a set field restricted to the provided wire names.
+fn names_schema(allowed: &'static [&'static str]) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "array",
+        "items": { "type": "string", "enum": allowed },
+    })
+}
+
+fn layout_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    names_schema(LAYOUT_PLACEMENTS)
+}
+
+fn effects_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    names_schema(OPTIONAL_EFFECTS)
+}
+
+fn prompts_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    names_schema(OPTIONAL_PROMPT_KINDS)
+}
+
+/// Wire declaration of `capabilities.experimental.magit`, mirrored as the
+/// generated `docs/schema/rich-capabilities.json` artifact.
+///
+/// This mirrors the fields and validators of [`MagitCapabilities`] and reuses
+/// the same typed enums and name constants, so the schema cannot drift from the
+/// negotiated contract. Historical initialize captures may carry retired keys,
+/// so the declaration tolerates additional properties while still constraining
+/// every declared field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RichCapabilityDeclaration {
+    /// Rich protocol version; only version 1 is accepted.
+    #[serde(deserialize_with = "deserialize_v1")]
+    #[schemars(extend("const" = 1))]
+    pub v: u8,
+    /// Client keymap delivery strategy.
+    pub keys: crate::protocol::KeymapDelivery,
+    /// Client key modifier fidelity.
+    pub modifiers: crate::protocol::KeyModifiers,
+    /// Supported view placements.
+    #[serde(deserialize_with = "deserialize_layout")]
+    #[schemars(schema_with = "layout_schema")]
+    pub layout: BTreeSet<String>,
+    /// Supported optional effects.
+    #[serde(deserialize_with = "deserialize_effects")]
+    #[schemars(schema_with = "effects_schema")]
+    pub effects: BTreeSet<String>,
+    /// Supported prompt kinds.
+    #[serde(deserialize_with = "deserialize_prompts")]
+    #[schemars(schema_with = "prompts_schema")]
+    pub prompts: BTreeSet<String>,
+    /// Optional native picker shapes the client can present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<PickCapabilities>,
 }
 
 fn deserialize_v1<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
@@ -136,7 +198,7 @@ fn deserialize_names<'de, D: serde::Deserializer<'de>>(
 fn deserialize_layout<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<BTreeSet<String>, D::Error> {
-    deserialize_names(d, &["main", "bottom", "side", "float"], true)
+    deserialize_names(d, LAYOUT_PLACEMENTS, true)
 }
 /// Optional effects a client may declare in `capabilities.experimental.magit`.
 ///
