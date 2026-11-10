@@ -1,5 +1,8 @@
 //! Directional JSON Schema generation for Plain wire payloads.
 
+#[path = "schema_typescript.rs"]
+pub mod schema_typescript;
+
 use lsp_types::request::Request;
 use magit_lsp::protocol::{
     ViewCloseParams, ViewCloseRequest, ViewEffectsParams, ViewInvokeParams, ViewInvokeRequest,
@@ -377,13 +380,20 @@ pub fn render(artifact: &Artifact) -> String {
     out
 }
 
-/// Write every artifact under `root/docs/schema`.
+/// Write every artifact under `root/docs/schema` plus the TypeScript declarations.
 pub fn write_all(root: &Path) -> std::io::Result<()> {
     let dir = root.join("docs/schema");
     fs::create_dir_all(&dir)?;
     for artifact in artifacts() {
         fs::write(dir.join(artifact.file), render(&artifact))?;
     }
+    let declarations = schema_typescript::protocol_declarations()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let path = root.join(declarations.path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, declarations.text)?;
     Ok(())
 }
 
@@ -400,6 +410,13 @@ pub fn stale_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
         if committed != fresh {
             stale.push(PathBuf::from("docs/schema").join(artifact.file));
         }
+    }
+    let declarations = schema_typescript::protocol_declarations()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let path = root.join(declarations.path);
+    let committed = fs::read_to_string(&path).unwrap_or_default();
+    if committed != declarations.text {
+        stale.push(PathBuf::from(declarations.path));
     }
     Ok(stale)
 }

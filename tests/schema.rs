@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use magit_lsp::keymap::{Binding, EditorMode};
 use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
+use generate_schema::schema_typescript;
 use generate_schema::{Direction, MethodKind, Payload};
 use magit_lsp::protocol::{
     EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewCloseRequest, ViewEffectsParams,
@@ -858,5 +859,225 @@ fn catalog_is_committed_and_participates_in_drift_detection() {
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from("docs/schema/methods.json")],
         "a tampered catalog is stale"
+    );
+}
+
+fn read_declarations() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(schema_typescript::DECLARATION_PATH);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+fn namespace_block<'a>(text: &'a str, name: &str) -> &'a str {
+    let header = format!("export namespace {name} {{");
+    let start = text
+        .find(&header)
+        .unwrap_or_else(|| panic!("declarations lack namespace {name}"));
+    let rest = &text[start..];
+    let end = rest
+        .find("\n}\n")
+        .unwrap_or_else(|| panic!("namespace {name} is unterminated"));
+    &rest[..end]
+}
+
+#[test]
+fn committed_typescript_declarations_match_generation() {
+    let first = schema_typescript::protocol_declarations().expect("generate declarations");
+    let second = schema_typescript::protocol_declarations().expect("regenerate declarations");
+    assert_eq!(first.path, "clients/vscode/types/protocol.d.ts");
+    assert_eq!(
+        first.text, second.text,
+        "declaration generation must be deterministic"
+    );
+    assert_eq!(
+        read_declarations(),
+        first.text,
+        "committed declarations are stale (run make update-schema)"
+    );
+}
+
+#[test]
+fn typescript_declarations_cover_every_payload_root() {
+    let text = read_declarations();
+    for artifact in generate_schema::artifacts() {
+        if artifact.file == "methods.json" {
+            continue;
+        }
+        let title = artifact.schema["title"]
+            .as_str()
+            .expect("artifact has a title");
+        assert!(
+            text.contains(&format!("export namespace {title} {{")),
+            "declarations lack namespace {title} for {}",
+            artifact.file
+        );
+    }
+}
+
+#[test]
+fn typescript_declarations_preserve_directional_contracts() {
+    let text = read_declarations();
+
+    let plain_action = namespace_block(&text, "PlainActionParams");
+    assert!(plain_action.contains("    command: string;\n"));
+    assert!(plain_action.contains("    viewGeneration: number;\n"));
+    assert!(plain_action.contains("    selection?: SelectionIntent | null;\n"));
+    assert!(plain_action.contains("    target: PlainActionTarget;\n"));
+    for tag in ["content", "view", "node", "menuItem"] {
+        assert!(
+            plain_action.contains(&format!("kind: \"{tag}\";")),
+            "PlainActionTarget loses literal tag {tag}: {plain_action}"
+        );
+    }
+
+    let render = namespace_block(&text, "ViewRender");
+    assert!(render.contains("    viewId: string;\n"), "required field");
+    assert!(
+        render.contains("    baseVersion?: number | null;\n"),
+        "optional nullable field"
+    );
+    assert!(render.contains("    edits?: LineEdit[] | null;\n"), "array");
+    assert!(render.contains("    menu?: Menu | null;\n"), "local ref");
+    assert_eq!(
+        render.matches("export type Args = {").count(),
+        1,
+        "same-named local definitions stay inside their namespace"
+    );
+
+    let prompt = namespace_block(&text, "ViewPromptRespondParams");
+    assert!(prompt.contains("    value?: PromptValue | null;\n"));
+    assert!(
+        prompt.contains("  export type PromptValue = boolean\n  | string\n  | PromptChoiceAnswer\n"),
+        "untagged unions stay unions: {prompt}"
+    );
+
+    let open = namespace_block(&text, "ViewOpenParams");
+    assert!(
+        open.contains("    kind: string;\n"),
+        "custom view kinds stay arbitrary strings: {open}"
+    );
+    assert!(open.contains("    args?: unknown;\n"), "unconstrained JSON");
+    assert!(!open.contains("    args?: any;"), "unconstrained JSON is not any");
+
+    let invoke = namespace_block(&text, "ViewInvokeParams");
+    assert!(invoke.contains("    args?: unknown;\n"));
+}
+
+#[test]
+fn typescript_declarations_preserve_all_of_intersections() {
+    let schema = serde_json::json!({
+        "title": "Synthetic",
+        "allOf": [
+            {
+                "type": "object",
+                "properties": { "a": { "type": "string" } },
+                "required": ["a"]
+            },
+            {
+                "type": "object",
+                "properties": { "b": { "type": "number" } },
+                "required": ["b"]
+            }
+        ]
+    });
+    let rendered =
+        schema_typescript::render_root(&schema, "Synthetic").expect("render intersection");
+    assert!(
+        rendered.contains("}\n  & {"),
+        "allOf must become an intersection: {rendered}"
+    );
+    assert!(rendered.contains("a: string;"));
+    assert!(rendered.contains("b: number;"));
+}
+
+#[test]
+fn typescript_declarations_fail_on_unsupported_schema_constructs() {
+    let schemas = [
+        (
+            serde_json::json!({ "title": "Synthetic", "not": { "type": "string" } }),
+            "not",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "type": "object",
+                "patternProperties": { "^a": { "type": "string" } }
+            }),
+            "patternProperties",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "type": "array",
+                "prefixItems": [{ "type": "string" }]
+            }),
+            "prefixItems",
+        ),
+    ];
+    for (schema, keyword) in schemas {
+        let error = schema_typescript::render_root(&schema, "Synthetic")
+            .expect_err("unsupported construct must fail");
+        assert!(
+            error.contains(keyword),
+            "error must name {keyword}: {error}"
+        );
+    }
+}
+
+#[test]
+fn typescript_method_map_mirrors_the_catalog() {
+    let text = read_declarations();
+    assert!(text.contains("export interface MethodMap {\n"));
+    assert!(text.contains("export type MethodName = keyof MethodMap;\n"));
+
+    assert!(text.contains(
+        "  \"view/open\": {\n    kind: \"request\";\n    direction: \"clientToServer\";\n\
+         \x20   params: ViewOpenParams.Root;\n    result: ViewDescriptor.Root;\n  };\n"
+    ));
+    assert!(text.contains(
+        "  \"view/close\": {\n    kind: \"request\";\n    direction: \"clientToServer\";\n\
+         \x20   params: ViewCloseParams.Root;\n    result: unknown;\n  };\n"
+    ));
+    assert!(text.contains(
+        "  \"view/render\": {\n    kind: \"notification\";\n    direction: \"serverToClient\";\n\
+         \x20   params: ViewRender.Root;\n  };\n"
+    ));
+
+    for entry in generate_schema::methods() {
+        assert!(
+            text.contains(&format!("\"{}\": {{", entry.method)),
+            "method map lacks {}",
+            entry.method
+        );
+    }
+}
+
+#[test]
+fn typescript_declaration_drift_is_reported() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let path = dir.path().join(schema_typescript::DECLARATION_PATH);
+    std::fs::remove_file(&path).expect("remove declarations");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from(schema_typescript::DECLARATION_PATH)],
+        "a missing declaration file is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read declarations");
+    std::fs::write(
+        &path,
+        text.replace("export namespace Menu {", "export namespace LegacyMenu {"),
+    )
+    .expect("tamper declarations");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from(schema_typescript::DECLARATION_PATH)],
+        "a modified declaration file is stale"
     );
 }
