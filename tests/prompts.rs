@@ -8,6 +8,7 @@ use magit_lsp::config::Profile;
 use magit_lsp::menu::Item;
 use magit_lsp::presentation::RichCapabilities;
 use magit_lsp::protocol::{Effect, PromptChoiceAnswer, PromptKind, PromptValue};
+use magit_lsp::view::ViewMode;
 use std::collections::BTreeSet;
 
 fn option_value(test: &TestSession, view: &str, key: &str) -> Option<String> {
@@ -587,6 +588,134 @@ fn finishing_a_document_prompt_renders_a_held_dirty_origin_once() {
         "a clean origin renders no extra copy"
     );
     assert_eq!(test.session.views().get(&origin).unwrap().version(), version);
+}
+
+#[test]
+fn finishing_and_cancelling_a_document_prompt_resume_every_held_refresh() {
+    for cancel in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        test.ack();
+        let status = test.view_id().to_string();
+        let (log, _) = test.open_via_command("open.log");
+        test.ack();
+        let log = log.id;
+        let request = stage_commit_confirm(&mut test, &status);
+        test.session.open_document_prompt(&request).unwrap();
+        let status_version = test.session.views().get(&status).unwrap().version();
+        let log_version = test.session.views().get(&log).unwrap().version();
+
+        assert!(
+            test.session.refresh_all().is_empty(),
+            "an open prompt holds every refresh"
+        );
+        assert!(test.session.views().get(&status).unwrap().dirty());
+        assert!(test.session.views().get(&log).unwrap().dirty());
+
+        let answer = (!cancel).then_some(PromptValue::Bool(true));
+        let completion = test
+            .session
+            .finish_document_prompt(&request.prompt_id, answer)
+            .unwrap();
+
+        assert!(!test.session.has_pending_prompt());
+        let resumed: BTreeSet<&str> = completion
+            .result
+            .opened
+            .iter()
+            .map(|(render, _)| render.view_id.as_str())
+            .collect();
+        assert_eq!(
+            resumed,
+            BTreeSet::from([status.as_str(), log.as_str()]),
+            "both repository views resume after cancel={cancel}"
+        );
+        for (view_id, before) in [(&status, status_version), (&log, log_version)] {
+            let view = test.session.views().get(view_id).expect("view stays open");
+            assert!(
+                view.version() > before,
+                "{view_id} resumes its held refresh after cancel={cancel}"
+            );
+            assert!(!view.dirty(), "{view_id} has no queued refresh left");
+        }
+    }
+}
+
+#[test]
+fn a_held_refresh_keeps_text_mode_edits_queued_until_text_mode_ends() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    let status = test.view_id().to_string();
+    let (menu, _) = test.open_via_command("open.commit");
+    test.ack();
+    let menu = menu.id;
+
+    test.focus(&status);
+    test.goto_first_marker('+');
+    test.set_mode(ViewMode::Text);
+    let status_version = test.session.views().get(&status).unwrap().version();
+    let status_text = test.text_of(&status);
+
+    let request = stage_author_prompt(&mut test, &menu);
+    test.session.open_document_prompt(&request).unwrap();
+    assert!(
+        test.session.refresh_all().is_empty(),
+        "an open prompt holds every refresh"
+    );
+    git(tmp.path(), &["add", "f.txt"]);
+
+    let completion = test
+        .session
+        .finish_document_prompt(&request.prompt_id, None)
+        .unwrap();
+
+    assert!(!test.session.has_pending_prompt());
+    let status_view = test
+        .session
+        .views()
+        .get(&status)
+        .expect("the text-mode status stays open");
+    assert_eq!(status_view.mode(), ViewMode::Text);
+    assert_eq!(
+        status_view.version(),
+        status_version,
+        "a text-mode view is not replaced"
+    );
+    assert!(status_view.dirty(), "its queued refresh survives the prompt");
+    assert_eq!(
+        test.text_of(&status),
+        status_text,
+        "text-mode edits stay intact"
+    );
+    assert!(
+        completion
+            .result
+            .opened
+            .iter()
+            .all(|(render, _)| render.view_id == menu),
+        "only the normal-mode menu resumes: {:?}",
+        completion
+            .result
+            .opened
+            .iter()
+            .map(|(render, _)| &render.view_id)
+            .collect::<Vec<_>>()
+    );
+
+    test.focus(&status);
+    test.press("ctrl+t");
+    let lines = test.text();
+    assert!(
+        lines.iter().any(|line| line == "Staged changes (1)"),
+        "ending text mode applies the refresh queued during the prompt: {lines:?}"
+    );
 }
 
 #[test]

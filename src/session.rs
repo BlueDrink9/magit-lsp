@@ -1741,7 +1741,6 @@ impl Session {
             .prompt_view
             .clone()
             .ok_or_else(|| Error::new("prompt is not open"))?;
-        let origin = pending.view_id.clone();
         if self.views.get(&prompt_view).is_none() {
             return Err(Error::new("prompt is no longer active"));
         }
@@ -1749,15 +1748,37 @@ impl Session {
         if let Some(pending) = self.pending_prompt.as_mut() {
             pending.prompt_view = None;
         }
-        if let Some(view) = self.views.get_mut(&origin) {
-            if view.dirty {
-                view.dirty = false;
-                let render = view.refresh_and_render(None)?;
-                result.opened.push((render, self.keymap_notice(&origin)));
-            }
-        }
+        self.resume_deferred_refreshes(&mut result);
         let next = self.resume_prompt(prompt_id, answer)?;
         Ok(PromptCompletion { result, next })
+    }
+
+    /// Apply every refresh queued while the prompt owned the session.
+    ///
+    /// `refresh` and `refresh_all` queue each view instead of rendering while a
+    /// document prompt is active, so finishing or cancelling the prompt resumes
+    /// all of them, not only its origin. Text-mode views keep their queued
+    /// refresh so the user's edits survive; a view whose backing state cannot
+    /// be re-read is skipped, matching `refresh_all`.
+    fn resume_deferred_refreshes(&mut self, result: &mut InvokeResult) {
+        let ids: Vec<String> = self
+            .views
+            .iter()
+            .filter(|view| view.dirty && view.mode() != ViewMode::Text)
+            .map(|view| view.descriptor().id.clone())
+            .collect();
+        for id in ids {
+            let Some(view) = self.views.get_mut(&id) else {
+                continue;
+            };
+            let Ok(render) = view.refresh_and_render(None) else {
+                // Keep `dirty`: a failed re-read must not discard the queue.
+                continue;
+            };
+            view.dirty = false;
+            let keymap = self.keymap_notice(&id);
+            result.opened.push((render, keymap));
+        }
     }
 
     fn resume_pending(
