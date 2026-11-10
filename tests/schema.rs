@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use magit_lsp::keymap::{Binding, EditorMode};
 use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
+use generate_schema::schema_luals;
 use generate_schema::schema_typescript;
 use generate_schema::{Direction, MethodKind, Payload};
 use magit_lsp::protocol::{
@@ -1193,5 +1194,326 @@ fn typescript_declaration_drift_is_reported() {
         generate_schema::stale_files(dir.path()).expect("tampered check"),
         vec![PathBuf::from(schema_typescript::DECLARATION_PATH)],
         "a modified declaration file is stale"
+    );
+}
+
+fn read_annotations() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(schema_luals::ANNOTATION_PATH);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+/// Return the declaration block starting at `header` and ending at the next
+/// blank line, which is how generated LuaLS declarations are separated.
+fn lua_declaration<'a>(text: &'a str, header: &str) -> &'a str {
+    let start = text
+        .find(header)
+        .unwrap_or_else(|| panic!("annotations lack declaration {header}"));
+    let rest = &text[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+#[test]
+fn committed_luals_annotations_match_generation() {
+    let first = schema_luals::protocol_annotations().expect("generate annotations");
+    let second = schema_luals::protocol_annotations().expect("regenerate annotations");
+    assert_eq!(first.path, "lua/magit-lsp/types.lua");
+    assert_eq!(
+        first.text, second.text,
+        "annotation generation must be deterministic"
+    );
+    assert_eq!(
+        read_annotations(),
+        first.text,
+        "committed annotations are stale (run make update-schema)"
+    );
+    assert!(
+        first.text.starts_with("---@meta\n"),
+        "annotations are a LuaLS meta file"
+    );
+}
+
+#[test]
+fn luals_annotations_cover_every_payload_root() {
+    let text = read_annotations();
+    for artifact in generate_schema::artifacts() {
+        if artifact.file == "methods.json" {
+            continue;
+        }
+        let title = artifact.schema["title"]
+            .as_str()
+            .expect("artifact has a title");
+        assert!(
+            text.contains(&format!("---@class {title}.Root\n"))
+                || text.contains(&format!("---@alias {title}.Root ")),
+            "annotations lack root {title} for {}",
+            artifact.file
+        );
+    }
+}
+
+#[test]
+fn luals_annotations_preserve_directional_contracts() {
+    let text = read_annotations();
+
+    let plain_action = lua_declaration(&text, "---@class PlainActionParams.Root");
+    assert!(plain_action.contains("---@field command string"));
+    assert!(plain_action.contains("---@field viewGeneration integer"));
+    assert!(plain_action.contains(
+        "---@field target PlainActionParams.PlainActionTarget"
+    ));
+    let selection_variant = lua_declaration(
+        &text,
+        "---@class PlainActionParams.PlainActionTarget.Variant1",
+    );
+    assert!(
+        selection_variant.contains(
+            "---@field selection? PlainActionParams.SelectionIntent|nil"
+        ),
+        "optional nullable local ref: {selection_variant}"
+    );
+    for (variant, tag) in [
+        ("Variant1", "content"),
+        ("Variant2", "view"),
+        ("Variant3", "node"),
+        ("Variant4", "menuItem"),
+    ] {
+        let block = lua_declaration(
+            &text,
+            &format!("---@class PlainActionParams.PlainActionTarget.{variant}"),
+        );
+        assert!(
+            block.contains(&format!("---@field kind \"{tag}\"")),
+            "target variant {variant} loses literal tag {tag}: {block}"
+        );
+    }
+
+    let render = lua_declaration(&text, "---@class ViewRender.Root");
+    assert!(render.contains("---@field viewId string"), "required field");
+    assert!(
+        render.contains("---@field baseVersion? integer|nil"),
+        "optional nullable field: {render}"
+    );
+    assert!(
+        render.contains("---@field edits? ViewRender.LineEdit[]|nil"),
+        "array of local refs: {render}"
+    );
+    assert!(
+        render.contains("---@field menu? ViewRender.Menu|nil"),
+        "local ref: {render}"
+    );
+    assert_eq!(
+        text.matches("---@class ViewRender.Menu\n").count(),
+        1,
+        "same-named local definitions stay inside their prefix"
+    );
+
+    let prompt = lua_declaration(&text, "---@class ViewPromptRespondParams.Root");
+    assert!(prompt.contains("---@field value? ViewPromptRespondParams.PromptValue|nil"));
+    let prompt_value = lua_declaration(
+        &text,
+        "---@alias ViewPromptRespondParams.PromptValue ",
+    );
+    assert!(
+        prompt_value.contains("boolean|string|ViewPromptRespondParams.PromptChoiceAnswer|"),
+        "untagged unions stay unions: {prompt_value}"
+    );
+    assert!(
+        !prompt_value.contains("&"),
+        "anyOf must not become an intersection: {prompt_value}"
+    );
+
+    let open = lua_declaration(&text, "---@class ViewOpenParams.Root");
+    assert!(
+        open.contains("---@field kind string"),
+        "custom view kinds stay arbitrary strings: {open}"
+    );
+    assert!(
+        open.contains("---@field args? any"),
+        "unconstrained JSON is any: {open}"
+    );
+    assert!(
+        open.contains("---@field placement? ViewOpenParams.Placement|nil"),
+        "nullable ref union: {open}"
+    );
+    assert!(
+        text.contains("---@field items ViewPickParams.PickItem[]"),
+        "arrays of local refs"
+    );
+}
+
+#[test]
+fn luals_annotations_merge_all_of_intersections() {
+    let schema = serde_json::json!({
+        "title": "Synthetic",
+        "allOf": [
+            {
+                "type": "object",
+                "properties": { "a": { "type": "string" } },
+                "required": ["a"]
+            },
+            {
+                "type": "object",
+                "properties": { "b": { "type": "number" } },
+                "required": ["b"]
+            }
+        ]
+    });
+    let rendered = schema_luals::render_root(&schema, "Synthetic").expect("render intersection");
+    assert!(
+        rendered.contains("---@class Synthetic.Root\n"),
+        "object allOf becomes one class: {rendered}"
+    );
+    assert!(rendered.contains("---@field a string"));
+    assert!(rendered.contains("---@field b number"));
+    assert!(
+        !rendered.contains(" & "),
+        "LuaLS has no intersection operator: {rendered}"
+    );
+}
+
+#[test]
+fn luals_annotations_preserve_combinator_siblings() {
+    let schema = serde_json::json!({
+        "title": "Synthetic",
+        "description": "Item with activation steps.",
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": { "kind": { "const": "switch", "type": "string" } },
+                "required": ["kind"]
+            },
+            {
+                "type": "object",
+                "properties": { "kind": { "const": "option", "type": "string" } },
+                "required": ["kind"]
+            }
+        ],
+        "type": "object",
+        "properties": {
+            "activationSteps": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["activationSteps"]
+    });
+    let rendered =
+        schema_luals::render_root(&schema, "Synthetic").expect("render combinator with siblings");
+    assert!(
+        rendered.contains("---@alias Synthetic.Root Synthetic.Root.Variant1|Synthetic.Root.Variant2"),
+        "oneOf stays a union: {rendered}"
+    );
+    for (variant, tag) in [("Variant1", "switch"), ("Variant2", "option")] {
+        let block = lua_declaration(
+            &rendered,
+            &format!("---@class Synthetic.Root.{variant}"),
+        );
+        assert!(
+            block.contains(&format!("---@field kind \"{tag}\"")),
+            "variant tag survives: {block}"
+        );
+        assert!(
+            block.contains("---@field activationSteps string[]"),
+            "sibling constraints are distributed into variants: {block}"
+        );
+        assert!(
+            !block.contains("activationSteps?"),
+            "activationSteps must stay required: {block}"
+        );
+    }
+
+    let any_of = serde_json::json!({
+        "title": "Synthetic",
+        "anyOf": [{ "type": "string" }, { "type": "number" }],
+    });
+    let rendered = schema_luals::render_root(&any_of, "Synthetic").expect("render anyOf");
+    assert!(
+        rendered.contains("---@alias Synthetic.Root string|number"),
+        "anyOf stays an honest union: {rendered}"
+    );
+}
+
+#[test]
+fn luals_annotations_fail_on_unsupported_constructs() {
+    let schemas = [
+        (
+            serde_json::json!({ "title": "Synthetic", "not": { "type": "string" } }),
+            "not",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "type": "object",
+                "patternProperties": { "^a": { "type": "string" } }
+            }),
+            "patternProperties",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "type": "array",
+                "prefixItems": [{ "type": "string" }]
+            }),
+            "prefixItems",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "allOf": [{ "type": "string" }]
+            }),
+            "intersection",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "oneOf": [{ "type": "string" }],
+                "properties": { "note": { "type": "string" } }
+            }),
+            "sibling constraints",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "properties": { "value": {
+                    "$ref": "#/$defs/Args",
+                    "properties": { "note": { "type": "string" } }
+                } }
+            }),
+            "$ref",
+        ),
+    ];
+    for (schema, reason) in schemas {
+        let error = schema_luals::render_root(&schema, "Synthetic")
+            .expect_err("unsupported construct must fail loudly");
+        assert!(
+            error.contains(reason),
+            "error must name {reason}: {error}"
+        );
+    }
+}
+
+#[test]
+fn luals_annotation_drift_is_reported() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let path = dir.path().join(schema_luals::ANNOTATION_PATH);
+    std::fs::remove_file(&path).expect("remove annotations");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from(schema_luals::ANNOTATION_PATH)],
+        "a missing annotation file is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read annotations");
+    std::fs::write(&path, text.replace("---@class Menu.Root", "---@class LegacyMenu.Root"))
+        .expect("tamper annotations");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from(schema_luals::ANNOTATION_PATH)],
+        "a modified annotation file is stale"
     );
 }

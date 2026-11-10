@@ -252,6 +252,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.10 — Generate LuaLS wire annotations from directional schemas.** Emit `lua/magit-lsp/types.lua` through the existing schema generation/drift pipeline, with namespaced definitions that preserve input/output contracts.
+    - test: generated annotations cover every payload root and retain literal tags, required/optional fields, refs, union/intersection constraints, arrays and unconstrained JSON; missing or modified output fails drift checks.
+    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Do not alter runtime client behavior or merge independent key/token maps.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 2b968a6 → ok
   - [x] **T011.9 — Establish checked VSCode wire boundaries.** Commit the production `checkJs` configuration and generated-type annotations as a prerequisite to T011.7's negative fixture and full-suite verification.
     - check: `make vscode-typecheck` passes over all production JavaScript with real Node/VSCode declaration dependencies and generated payload types in handlers; preserve existing runtime semantics, with no new missing-activation fallback or stricter tab-URI rejection.
       - Verified: make vscode-typecheck @ d5573c2 → ok

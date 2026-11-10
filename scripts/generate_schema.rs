@@ -1,5 +1,7 @@
 //! Directional JSON Schema generation for Plain wire payloads.
 
+#[path = "schema_luals.rs"]
+pub mod schema_luals;
 #[path = "schema_typescript.rs"]
 pub mod schema_typescript;
 
@@ -380,7 +382,8 @@ pub fn render(artifact: &Artifact) -> String {
     out
 }
 
-/// Write every artifact under `root/docs/schema` plus the TypeScript declarations.
+/// Write every artifact under `root/docs/schema` plus the generated client
+/// declarations and LuaLS annotations.
 pub fn write_all(root: &Path) -> std::io::Result<()> {
     let dir = root.join("docs/schema");
     fs::create_dir_all(&dir)?;
@@ -394,6 +397,13 @@ pub fn write_all(root: &Path) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, declarations.text)?;
+    let annotations = schema_luals::protocol_annotations()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let path = root.join(annotations.path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, annotations.text)?;
     Ok(())
 }
 
@@ -417,6 +427,13 @@ pub fn stale_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
     let committed = fs::read_to_string(&path).unwrap_or_default();
     if committed != declarations.text {
         stale.push(PathBuf::from(declarations.path));
+    }
+    let annotations = schema_luals::protocol_annotations()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let path = root.join(annotations.path);
+    let committed = fs::read_to_string(&path).unwrap_or_default();
+    if committed != annotations.text {
+        stale.push(PathBuf::from(annotations.path));
     }
     Ok(stale)
 }
