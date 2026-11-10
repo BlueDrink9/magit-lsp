@@ -11,6 +11,7 @@ use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
 use generate_schema::schema_luals;
 use generate_schema::schema_typescript;
 use generate_schema::{Direction, MethodKind, Payload};
+use magit_lsp::presentation::{OPTIONAL_EFFECTS, OPTIONAL_PROMPT_KINDS};
 use magit_lsp::protocol::{
     EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewCloseRequest, ViewEffectsParams,
     ViewInvokeParams, ViewInvokeRequest, ViewInvokeResponse, ViewKeyParams, ViewKeyRequest,
@@ -863,6 +864,64 @@ fn catalog_is_committed_and_participates_in_drift_detection() {
     );
 }
 
+fn names(list: &[&str]) -> Value {
+    Value::Array(list.iter().map(|name| Value::String((*name).into())).collect())
+}
+
+#[test]
+fn shared_capability_lists_match_the_typed_constants() {
+    assert_eq!(
+        names(OPTIONAL_EFFECTS),
+        serde_json::json!(["visitFile", "clipboard", "editDocument"]),
+        "the typed optional effects are the wire contract"
+    );
+    assert_eq!(
+        names(OPTIONAL_PROMPT_KINDS),
+        serde_json::json!(["confirm", "text", "choice", "multiChoice", "secret"]),
+        "the typed optional prompt kinds are the wire contract"
+    );
+
+    let committed = read_schema("shared-lists.json");
+    assert_eq!(committed["optionalEffects"], names(OPTIONAL_EFFECTS));
+    assert_eq!(
+        committed["optionalPromptKinds"],
+        names(OPTIONAL_PROMPT_KINDS)
+    );
+    assert_eq!(committed, generate_schema::shared_lists());
+
+    assert!(
+        artifact_names().iter().any(|file| file == "shared-lists.json"),
+        "the shared lists participate in the generated artifact set"
+    );
+}
+
+#[test]
+fn shared_lists_participate_in_drift_detection() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let path = dir.path().join("docs/schema/shared-lists.json");
+    std::fs::remove_file(&path).expect("remove shared lists");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from("docs/schema/shared-lists.json")],
+        "a missing shared-lists artifact is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read shared lists");
+    std::fs::write(&path, text.replace("\"visitFile\"", "\"openFile\""))
+        .expect("tamper shared lists");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from("docs/schema/shared-lists.json")],
+        "a modified shared-lists artifact is stale"
+    );
+}
+
 fn read_declarations() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(schema_typescript::DECLARATION_PATH);
     std::fs::read_to_string(&path)
@@ -901,7 +960,7 @@ fn committed_typescript_declarations_match_generation() {
 fn typescript_declarations_cover_every_payload_root() {
     let text = read_declarations();
     for artifact in generate_schema::artifacts() {
-        if artifact.file == "methods.json" {
+        if artifact.file == "methods.json" || artifact.file == "shared-lists.json" {
             continue;
         }
         let title = artifact.schema["title"]
@@ -1238,7 +1297,7 @@ fn committed_luals_annotations_match_generation() {
 fn luals_annotations_cover_every_payload_root() {
     let text = read_annotations();
     for artifact in generate_schema::artifacts() {
-        if artifact.file == "methods.json" {
+        if artifact.file == "methods.json" || artifact.file == "shared-lists.json" {
             continue;
         }
         let title = artifact.schema["title"]

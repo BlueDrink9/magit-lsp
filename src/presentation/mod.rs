@@ -138,19 +138,28 @@ fn deserialize_layout<'de, D: serde::Deserializer<'de>>(
 ) -> Result<BTreeSet<String>, D::Error> {
     deserialize_names(d, &["main", "bottom", "side", "float"], true)
 }
+/// Optional effects a client may declare in `capabilities.experimental.magit`.
+///
+/// Also exported by `scripts/generate_schema.rs` as the committed
+/// `docs/schema/shared-lists.json` artifact, so this array is the single source
+/// of truth for the wire names.
+pub const OPTIONAL_EFFECTS: &[&str] = &["visitFile", "clipboard", "editDocument"];
+/// Optional prompt kinds a client may declare in `capabilities.experimental.magit`.
+///
+/// Also exported by `scripts/generate_schema.rs` as the committed
+/// `docs/schema/shared-lists.json` artifact, so this array is the single source
+/// of truth for the wire names.
+pub const OPTIONAL_PROMPT_KINDS: &[&str] = &["confirm", "text", "choice", "multiChoice", "secret"];
+
 fn deserialize_effects<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<BTreeSet<String>, D::Error> {
-    deserialize_names(d, &["visitFile", "clipboard", "editDocument"], false)
+    deserialize_names(d, OPTIONAL_EFFECTS, false)
 }
 fn deserialize_prompts<'de, D: serde::Deserializer<'de>>(
     d: D,
 ) -> Result<BTreeSet<String>, D::Error> {
-    deserialize_names(
-        d,
-        &["confirm", "text", "choice", "multiChoice", "secret"],
-        false,
-    )
+    deserialize_names(d, OPTIONAL_PROMPT_KINDS, false)
 }
 
 fn invalid(message: &str) -> CapabilityError {

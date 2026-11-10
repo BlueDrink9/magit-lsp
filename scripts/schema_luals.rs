@@ -26,12 +26,12 @@ const HEADER: &str = concat!(
 
 /// Generate the complete annotation file from the directional artifacts.
 ///
-/// The custom method catalog is catalog data, not a payload schema, so it is
-/// deliberately excluded.
+/// The custom method catalog and the shared capability lists are catalog data,
+/// not payload schemas, so they are deliberately excluded.
 pub fn protocol_annotations() -> Result<Annotations, String> {
     let mut body = String::new();
     for artifact in super::artifacts() {
-        if artifact.file == "methods.json" {
+        if artifact.file == "methods.json" || artifact.file == "shared-lists.json" {
             continue;
         }
         let name = root_name(&artifact.schema)?;

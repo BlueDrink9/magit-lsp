@@ -30,8 +30,9 @@ pub fn protocol_declarations() -> Result<Declarations, String> {
     let mut roots: BTreeMap<String, String> = BTreeMap::new();
     let mut body = String::new();
     for artifact in super::artifacts() {
-        if artifact.file == "methods.json" {
-            // The method catalog is catalog data, not a payload schema.
+        if artifact.file == "methods.json" || artifact.file == "shared-lists.json" {
+            // The method catalog and shared capability lists are catalog data,
+            // not payload schemas.
             continue;
         }
         let name = root_name(&artifact.schema)?;

@@ -6,6 +6,7 @@ pub mod schema_luals;
 pub mod schema_typescript;
 
 use lsp_types::request::Request;
+use magit_lsp::presentation::{OPTIONAL_EFFECTS, OPTIONAL_PROMPT_KINDS};
 use magit_lsp::protocol::{
     ViewCloseParams, ViewCloseRequest, ViewEffectsParams, ViewInvokeParams, ViewInvokeRequest,
     ViewInvokeResponse, ViewKeyParams, ViewKeyRequest, ViewKeymapParams, ViewOpenParams,
@@ -268,6 +269,19 @@ pub fn methods_catalog() -> Value {
     })
 }
 
+/// Build the deterministic shared capability lists committed as
+/// `shared-lists.json`.
+///
+/// The lists are data, not payload schemas: every client consumes them directly
+/// instead of re-declaring the names.
+pub fn shared_lists() -> Value {
+    serde_json::json!({
+        "$comment": "Generated from src/presentation/mod.rs; do not edit by hand.",
+        "optionalEffects": OPTIONAL_EFFECTS,
+        "optionalPromptKinds": OPTIONAL_PROMPT_KINDS,
+    })
+}
+
 /// Generate every committed artifact in stable file order.
 pub fn artifacts() -> Vec<Artifact> {
     vec![
@@ -370,6 +384,10 @@ pub fn artifacts() -> Vec<Artifact> {
         Artifact {
             file: "methods.json",
             schema: methods_catalog(),
+        },
+        Artifact {
+            file: "shared-lists.json",
+            schema: shared_lists(),
         },
     ]
 }

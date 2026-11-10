@@ -1,0 +1,15 @@
+{
+  "$comment": "Generated from src/presentation/mod.rs; do not edit by hand.",
+  "optionalEffects": [
+    "visitFile",
+    "clipboard",
+    "editDocument"
+  ],
+  "optionalPromptKinds": [
+    "confirm",
+    "text",
+    "choice",
+    "multiChoice",
+    "secret"
+  ]
+}
