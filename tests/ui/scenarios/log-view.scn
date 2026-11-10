@@ -1,11 +1,9 @@
 # Server-owned decorated log; slash search is native Neovim navigation.
 fixture: log-history
 ---
-keys standard: l
-keys vim: g l
+keys: l
 wait screen contains "Log"
-keys standard: l
-keys vim: l
+keys: l
 wait screen contains "latest decorated subject"
 snapshot: log-header
 expect screen contains "latest decorated subject"
