@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`view/rendered`: the client applied a version.",
+  "properties": {
+    "version": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "version"
+  ],
+  "title": "ViewRenderedParams",
+  "type": "object"
+}

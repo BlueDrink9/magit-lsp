@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cancelled": {
+      "type": "boolean"
+    },
+    "freeText": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pickId": {
+      "type": "string"
+    },
+    "selected": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "pickId",
+    "cancelled",
+    "selected"
+  ],
+  "title": "ViewPickRespondParams",
+  "type": "object"
+}

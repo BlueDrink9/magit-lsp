@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "Cursor": {
+      "description": "A cursor position in the rendered view, 0-based.",
+      "properties": {
+        "column": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line",
+        "column"
+      ],
+      "type": "object"
+    },
+    "Selection": {
+      "description": "An inclusive document-line selection, as produced by visual mode.",
+      "properties": {
+        "endLine": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startLine": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startLine",
+        "endLine"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "args": true,
+    "command": {
+      "type": "string"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Cursor"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Selection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "version": {
+      "description": "Displayed render version; required for commands consuming cursor/selection.\nOnly the current or last acknowledged tree is retained. Other versions\n(including an omitted version) produce a readable stale-view refusal.\nCommit selection (`common.confirm` in a selection view and\n`select.toggle-mark`) requires the exact acknowledged version.\nNon-positional commands ignore this field.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "command"
+  ],
+  "title": "ViewInvokeParams",
+  "type": "object"
+}

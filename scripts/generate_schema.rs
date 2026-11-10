@@ -68,6 +68,70 @@ pub fn artifacts() -> Vec<Artifact> {
             file: "view-render.json",
             schema: directional_schema::<magit_lsp::protocol::ViewRender>(Direction::Output),
         },
+        Artifact {
+            file: "view-open-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewOpenParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-descriptor.json",
+            schema: directional_schema::<magit_lsp::view::ViewDescriptor>(Direction::Output),
+        },
+        Artifact {
+            file: "view-close-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewCloseParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-invoke-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewInvokeParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-invoke-response.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewInvokeResponse>(Direction::Output),
+        },
+        Artifact {
+            file: "view-key-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewKeyParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-set-mode-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewSetModeParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-resync-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewResyncParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-rendered-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewRenderedParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-resize-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewResizeParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-effects-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewEffectsParams>(Direction::Output),
+        },
+        Artifact {
+            file: "view-keymap-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewKeymapParams>(Direction::Output),
+        },
+        Artifact {
+            file: "view-prompt-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewPromptParams>(Direction::Output),
+        },
+        Artifact {
+            file: "view-prompt-respond-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewPromptRespondParams>(Direction::Input),
+        },
+        Artifact {
+            file: "view-pick-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewPickParams>(Direction::Output),
+        },
+        Artifact {
+            file: "view-pick-respond-params.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewPickRespondParams>(Direction::Input),
+        },
     ]
 }
 

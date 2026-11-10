@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "Binding": {
+      "description": "One resolved binding: a command, its keys and where it applies.",
+      "properties": {
+        "command": {
+          "description": "Registry command id, e.g. `status.stage`.",
+          "type": "string"
+        },
+        "keys": {
+          "description": "Alternative key chords, canonical strings.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "label": {
+          "description": "Short label for menus and help.",
+          "type": "string"
+        },
+        "modes": {
+          "description": "Editor modes the binding is active in.",
+          "items": {
+            "$ref": "#/$defs/EditorMode"
+          },
+          "type": "array"
+        },
+        "status": {
+          "description": "`implemented`, `planned` or `unavailable`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "keys",
+        "modes",
+        "label",
+        "status"
+      ],
+      "type": "object"
+    },
+    "EditorMode": {
+      "description": "The editor mode a binding is active in.",
+      "enum": [
+        "normal",
+        "visual"
+      ],
+      "type": "string"
+    },
+    "ViewMode": {
+      "description": "Whether the client may edit the view or only display it.",
+      "enum": [
+        "interactive",
+        "text"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`view/keymap`: the complete binding set for one view scope.",
+  "properties": {
+    "bindings": {
+      "items": {
+        "$ref": "#/$defs/Binding"
+      },
+      "type": "array"
+    },
+    "capture": {
+      "type": "boolean"
+    },
+    "liveKeys": {
+      "description": "The keys that do something right now, so clients need no chord logic.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "mode": {
+      "$ref": "#/$defs/ViewMode",
+      "description": "The view mode these bindings belong to (`text` has only the toggle)."
+    },
+    "pending": {
+      "description": "The menu steps typed so far, e.g. `-`; empty for other views.",
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "version": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "scope",
+    "version",
+    "capture",
+    "bindings",
+    "mode"
+  ],
+  "title": "ViewKeymapParams",
+  "type": "object"
+}

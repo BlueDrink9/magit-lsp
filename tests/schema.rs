@@ -6,8 +6,14 @@ mod generate_schema;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+use magit_lsp::keymap::{Binding, EditorMode};
 use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
-use magit_lsp::protocol::{EditDocumentMode, Effect, MessageLevel, ViewRender};
+use magit_lsp::protocol::{
+    EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewEffectsParams, ViewInvokeParams,
+    ViewInvokeResponse, ViewKeyParams, ViewKeymapParams, ViewOpenParams, ViewPickParams,
+    ViewPickRespondParams, ViewPromptParams, ViewPromptRespondParams, ViewRenderedParams,
+    ViewRender, ViewResizeParams, ViewResyncParams, ViewSetModeParams,
+};
 use magit_lsp::view::{Placement, Scope, ViewDescriptor, ViewKind, ViewMode, Viewport};
 
 fn read_schema(name: &str) -> Value {
@@ -416,6 +422,215 @@ fn view_render_schema_describes_the_render_payload() {
         assert!(
             object.contains_key(name),
             "serialized render lacks required key {name}"
+        );
+    }
+}
+
+fn assert_unconstrained_json(schema: &Value) {
+    if let Some(object) = schema.as_object() {
+        for restrictive in ["type", "anyOf", "oneOf", "$ref", "properties", "required"] {
+            assert!(
+                object.get(restrictive).is_none(),
+                "expected unconstrained JSON, found {restrictive}: {schema}"
+            );
+        }
+    }
+}
+
+#[test]
+fn prompt_unions_stay_any_of() {
+    let respond = read_schema("view-prompt-respond-params.json");
+    let prompt_value = &respond["$defs"]["PromptValue"];
+    assert!(
+        prompt_value.get("oneOf").is_none(),
+        "untagged PromptValue must not become oneOf: {prompt_value}"
+    );
+    let variants = prompt_value["anyOf"]
+        .as_array()
+        .expect("untagged PromptValue anyOf variants");
+    assert_eq!(variants.len(), 4, "PromptValue keeps every variant: {variants:?}");
+    assert_eq!(variants[0]["type"], "boolean");
+    assert_eq!(variants[1]["type"], "string");
+
+    let choice = &respond["$defs"]["PromptChoiceAnswer"];
+    assert!(choice.get("oneOf").is_none());
+    let choice_variants = choice["anyOf"]
+        .as_array()
+        .expect("untagged PromptChoiceAnswer anyOf variants");
+    assert_eq!(choice_variants.len(), 2);
+    assert_eq!(choice_variants[0]["properties"]["id"]["type"], "string");
+    assert_eq!(choice_variants[1]["properties"]["custom"]["type"], "string");
+}
+
+#[test]
+fn option_value_fields_stay_unconstrained_json() {
+    let open = read_schema("view-open-params.json");
+    assert_unconstrained_json(&open["properties"]["args"]);
+
+    let invoke = read_schema("view-invoke-params.json");
+    assert_eq!(
+        invoke["properties"]["args"],
+        Value::Bool(true),
+        "Option<Value> args must stay any JSON: {}",
+        invoke["properties"]["args"]
+    );
+
+    let prompt = read_schema("view-prompt-params.json");
+    assert_unconstrained_json(&prompt["properties"]["default"]);
+}
+
+#[test]
+fn custom_view_kinds_stay_strings() {
+    let open = read_schema("view-open-params.json");
+    assert_eq!(open["properties"]["kind"]["type"], "string");
+    assert!(
+        open["properties"]["kind"].get("enum").is_none(),
+        "view/open kind must stay an arbitrary string: {}",
+        open["properties"]["kind"]
+    );
+
+    let descriptor = read_schema("view-descriptor.json");
+    assert_eq!(descriptor["properties"]["kind"]["type"], "string");
+    assert!(
+        descriptor["properties"]["kind"].get("enum").is_none(),
+        "descriptor kind must stay an arbitrary string: {}",
+        descriptor["properties"]["kind"]
+    );
+}
+
+#[test]
+fn every_custom_view_payload_has_a_directional_artifact() {
+    let committed: Vec<String> = generate_schema::artifacts()
+        .iter()
+        .map(|artifact| artifact.file.to_string())
+        .collect();
+
+    let expected: Vec<(&str, Value)> = vec![
+        (
+            "view-open-params.json",
+            generate_schema::directional_schema::<ViewOpenParams>(generate_schema::Direction::Input),
+        ),
+        (
+            "view-descriptor.json",
+            generate_schema::directional_schema::<ViewDescriptor>(
+                generate_schema::Direction::Output,
+            ),
+        ),
+        (
+            "view-close-params.json",
+            generate_schema::directional_schema::<ViewCloseParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-invoke-params.json",
+            generate_schema::directional_schema::<ViewInvokeParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-invoke-response.json",
+            generate_schema::directional_schema::<ViewInvokeResponse>(
+                generate_schema::Direction::Output,
+            ),
+        ),
+        (
+            "view-key-params.json",
+            generate_schema::directional_schema::<ViewKeyParams>(generate_schema::Direction::Input),
+        ),
+        (
+            "view-set-mode-params.json",
+            generate_schema::directional_schema::<ViewSetModeParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-resync-params.json",
+            generate_schema::directional_schema::<ViewResyncParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-rendered-params.json",
+            generate_schema::directional_schema::<ViewRenderedParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-resize-params.json",
+            generate_schema::directional_schema::<ViewResizeParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-effects-params.json",
+            generate_schema::directional_schema::<ViewEffectsParams>(
+                generate_schema::Direction::Output,
+            ),
+        ),
+        (
+            "view-keymap-params.json",
+            generate_schema::directional_schema::<ViewKeymapParams>(
+                generate_schema::Direction::Output,
+            ),
+        ),
+        (
+            "view-prompt-params.json",
+            generate_schema::directional_schema::<ViewPromptParams>(
+                generate_schema::Direction::Output,
+            ),
+        ),
+        (
+            "view-prompt-respond-params.json",
+            generate_schema::directional_schema::<ViewPromptRespondParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+        (
+            "view-pick-params.json",
+            generate_schema::directional_schema::<ViewPickParams>(generate_schema::Direction::Output),
+        ),
+        (
+            "view-pick-respond-params.json",
+            generate_schema::directional_schema::<ViewPickRespondParams>(
+                generate_schema::Direction::Input,
+            ),
+        ),
+    ];
+
+    for (file, fresh) in &expected {
+        assert!(
+            committed.iter().any(|name| name == file),
+            "generator has no artifact for {file}"
+        );
+        assert_eq!(
+            &read_schema(file),
+            fresh,
+            "{file} was not generated with its declared wire direction"
+        );
+    }
+
+    let keymap = read_schema("view-keymap-params.json");
+    assert_eq!(
+        keymap["properties"]["bindings"]["items"]["$ref"],
+        "#/$defs/Binding"
+    );
+    assert_eq!(
+        keymap["$defs"]["Binding"]["properties"]["modes"]["items"]["$ref"],
+        "#/$defs/EditorMode"
+    );
+    let binding = Binding {
+        command: "common.quit".into(),
+        keys: vec!["q".into()],
+        modes: vec![EditorMode::Normal],
+        label: "quit".into(),
+        status: "implemented".into(),
+    };
+    let wire = serde_json::to_value(&binding).expect("serialize binding");
+    for key in wire.as_object().expect("binding object").keys() {
+        assert!(
+            keymap["$defs"]["Binding"]["properties"].get(key).is_some(),
+            "keymap schema lacks binding key {key}"
         );
     }
 }

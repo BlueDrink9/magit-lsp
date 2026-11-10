@@ -1,0 +1,62 @@
+{
+  "$defs": {
+    "Placement": {
+      "description": "Where the server suggests the client put a view.",
+      "enum": [
+        "main",
+        "side",
+        "bottom",
+        "float"
+      ],
+      "type": "string"
+    },
+    "Viewport": {
+      "description": "The client's text area, needed to lay out multi-column views.",
+      "properties": {
+        "cols": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "args": {
+      "description": "Kind-specific arguments. A status view carries `repo_path` here."
+    },
+    "kind": {
+      "type": "string"
+    },
+    "placement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Placement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "viewport": {
+      "$ref": "#/$defs/Viewport"
+    }
+  },
+  "required": [
+    "kind",
+    "viewport"
+  ],
+  "title": "ViewOpenParams",
+  "type": "object"
+}

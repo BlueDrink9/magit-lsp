@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "PromptChoiceAnswer": {
+      "anyOf": [
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "custom": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "custom"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A `choice` answer: one item id, or the text the user typed instead."
+    },
+    "PromptValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/PromptChoiceAnswer"
+        },
+        {
+          "properties": {
+            "ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "ids"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "The value of a prompt answer; its shape follows the prompt kind."
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cancelled": {
+      "type": "boolean"
+    },
+    "promptId": {
+      "type": "string"
+    },
+    "value": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PromptValue"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "promptId",
+    "cancelled"
+  ],
+  "title": "ViewPromptRespondParams",
+  "type": "object"
+}

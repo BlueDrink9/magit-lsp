@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "PromptItem": {
+      "description": "One selectable item of a `choice` or `multiChoice` prompt.",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The id the server receives back; the client displays `label`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "PromptKind": {
+      "description": "The four kinds of question the server can ask (§3.6).",
+      "enum": [
+        "confirm",
+        "text",
+        "choice",
+        "multiChoice"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`view/prompt`: one question the server is waiting on.",
+  "properties": {
+    "allowCustom": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "default": {
+      "description": "Kind-dependent default: a bool, a string or an item id."
+    },
+    "destructive": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "detail": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/PromptItem"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "kind": {
+      "$ref": "#/$defs/PromptKind"
+    },
+    "max": {
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min": {
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "noLabel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "placeholder": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preselected": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "promptId": {
+      "type": "string"
+    },
+    "secret": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "title": {
+      "description": "The question, shown prominently.",
+      "type": "string"
+    },
+    "yesLabel": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "promptId",
+    "kind",
+    "title"
+  ],
+  "title": "ViewPromptParams",
+  "type": "object"
+}

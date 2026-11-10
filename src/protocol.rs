@@ -176,7 +176,7 @@ pub struct Cursor {
 }
 
 /// An inclusive document-line selection, as produced by visual mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Selection {
     pub start_line: usize,
@@ -223,7 +223,7 @@ pub const VIEW_EFFECTS: &str = "view/effects";
 
 /// `view/effects`: effects produced after a request already answered, such as
 /// an `editDocument` from a detached Git process.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewEffectsParams {
     pub effects: Vec<Effect>,
@@ -235,9 +235,10 @@ pub const VIEW_RESIZE: &str = "view/resize";
 
 /// `view/open`: create a view and receive its descriptor.
 pub enum ViewOpenRequest {}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewOpenParams {
+    #[schemars(with = "String")]
     pub kind: ViewKind,
     /// Kind-specific arguments. A status view carries `repo_path` here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,7 +261,7 @@ impl lsp_types::request::Request for ViewOpenRequest {
 
 /// `view/close`: drop a view from its session.
 pub enum ViewCloseRequest {}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewCloseParams {
     pub view_id: String,
@@ -273,7 +274,7 @@ impl lsp_types::request::Request for ViewCloseRequest {
 
 /// `view/invoke`: run a command against a view.
 pub enum ViewInvokeRequest {}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewInvokeParams {
     pub view_id: String,
@@ -293,7 +294,7 @@ pub struct ViewInvokeParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection: Option<Selection>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewInvokeResponse {
     pub effects: Vec<Effect>,
 }
@@ -305,7 +306,7 @@ impl lsp_types::request::Request for ViewInvokeRequest {
 
 /// `view/key`: press one canonical key step in a view.
 pub enum ViewKeyRequest {}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewKeyParams {
     pub view_id: String,
@@ -352,7 +353,7 @@ pub enum KeyModifiers {
 pub const VIEW_KEYMAP: &str = "view/keymap";
 
 /// `view/keymap`: the complete binding set for one view scope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewKeymapParams {
     pub view_id: String,
@@ -372,7 +373,7 @@ pub struct ViewKeymapParams {
 
 /// `view/setMode`: switch a view between interactive and text mode.
 pub enum ViewSetModeRequest {}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewSetModeParams {
     pub view_id: String,
@@ -386,7 +387,7 @@ impl lsp_types::request::Request for ViewSetModeRequest {
 
 /// `view/resync`: return the current full text after a lost update.
 pub enum ViewResyncRequest {}
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewResyncParams {
     pub view_id: String,
@@ -398,7 +399,7 @@ impl lsp_types::request::Request for ViewResyncRequest {
 }
 
 /// `view/rendered`: the client applied a version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewRenderedParams {
     pub view_id: String,
@@ -406,7 +407,7 @@ pub struct ViewRenderedParams {
 }
 
 /// `view/resize`: the client's text area changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewResizeParams {
     pub view_id: String,
@@ -420,7 +421,7 @@ pub const VIEW_PROMPT: &str = "view/prompt";
 pub const VIEW_PROMPT_RESPOND: &str = "view/promptRespond";
 
 /// The four kinds of question the server can ask (§3.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PromptKind {
     Confirm,
@@ -430,7 +431,7 @@ pub enum PromptKind {
 }
 
 /// One selectable item of a `choice` or `multiChoice` prompt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptItem {
     /// The id the server receives back; the client displays `label`.
@@ -443,7 +444,7 @@ pub struct PromptItem {
 }
 
 /// `view/prompt`: one question the server is waiting on.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewPromptParams {
     pub prompt_id: String,
@@ -482,7 +483,7 @@ pub struct ViewPromptParams {
 }
 
 /// A `choice` answer: one item id, or the text the user typed instead.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum PromptChoiceAnswer {
     Id { id: String },
@@ -490,7 +491,7 @@ pub enum PromptChoiceAnswer {
 }
 
 /// The value of a prompt answer; its shape follows the prompt kind.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum PromptValue {
     Bool(bool),
@@ -501,7 +502,7 @@ pub enum PromptValue {
 
 /// `view/promptRespond`: the client's answer to a prompt notification.
 pub enum ViewPromptRespondRequest {}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewPromptRespondParams {
     pub prompt_id: String,
@@ -521,7 +522,7 @@ pub const VIEW_PICK: &str = "view/pick";
 pub const VIEW_PICK_RESPOND: &str = "view/pickRespond";
 
 /// One selectable item of a `view/pick` request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PickItem {
     /// The id the server receives back; the client displays `label`.
@@ -536,7 +537,7 @@ pub struct PickItem {
 }
 
 /// `view/pick`: a typed selection request the server is waiting on.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewPickParams {
     /// The pick this answer refers back to.
@@ -560,7 +561,7 @@ pub struct ViewPickParams {
 
 /// `view/pickRespond`: the client's answer to a pick notification.
 pub enum ViewPickRespondRequest {}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewPickRespondParams {
     pub pick_id: String,

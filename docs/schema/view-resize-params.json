@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`view/resize`: the client's text area changed.",
+  "properties": {
+    "cols": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "rows": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "cols",
+    "rows"
+  ],
+  "title": "ViewResizeParams",
+  "type": "object"
+}

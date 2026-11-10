@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.4 — Schema remaining custom view payloads.** Generate directional schemas for the remaining view request/response/notification payloads, including prompt and pick answers and keymap bindings.
+    - test: Prompt unions remain `anyOf`; `Option<Value>` remains unconstrained JSON; custom view kinds remain strings; every custom method payload has an artifact with the correct direction.
+    - check: Schema drift and focused protocol/prompt/pick/keymap suites pass without changing wire behavior.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema --test server_async --test prompts --test plain_prompt --test keymap" @ 1fcfce5 → ok
+    - Done: containing commit.
   - [x] **T011.3 — Schema server-rendered effects and menus.** Extend generation to `Effect`, `Menu` and `ViewRender`, accounting for string-serialized `ViewKind` and the flattened menu-item `activationSteps` serialization.
     - test: Schemas describe real serialized menu switch/option/action items and effects; arbitrary view-kind strings stay strings; output activation steps are required without imposing them on deserialization input.
     - check: Generated artifact drift and focused existing menu/view suites pass without wire changes.

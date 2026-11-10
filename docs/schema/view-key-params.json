@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "Cursor": {
+      "description": "A cursor position in the rendered view, 0-based.",
+      "properties": {
+        "column": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "line",
+        "column"
+      ],
+      "type": "object"
+    },
+    "EditorMode": {
+      "description": "The editor mode a binding is active in.",
+      "enum": [
+        "normal",
+        "visual"
+      ],
+      "type": "string"
+    },
+    "Selection": {
+      "description": "An inclusive document-line selection, as produced by visual mode.",
+      "properties": {
+        "endLine": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startLine": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startLine",
+        "endLine"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cursor": {
+      "$ref": "#/$defs/Cursor"
+    },
+    "editorMode": {
+      "$ref": "#/$defs/EditorMode"
+    },
+    "key": {
+      "description": "One canonical key step, e.g. `s`, `g`, `ctrl+c` (§3.8).",
+      "type": "string"
+    },
+    "selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Selection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "version": {
+      "description": "Displayed render version for positional commands, with the same retained\ntree policy as `view/invoke`. Non-positional/menu keys ignore it.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "version",
+    "key",
+    "editorMode",
+    "cursor"
+  ],
+  "title": "ViewKeyParams",
+  "type": "object"
+}

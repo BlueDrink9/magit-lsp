@@ -1,0 +1,27 @@
+{
+  "$defs": {
+    "ViewMode": {
+      "description": "Whether the client may edit the view or only display it.",
+      "enum": [
+        "interactive",
+        "text"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/ViewMode"
+    },
+    "viewId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "viewId",
+    "mode"
+  ],
+  "title": "ViewSetModeParams",
+  "type": "object"
+}

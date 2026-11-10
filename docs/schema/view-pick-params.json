@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "PickItem": {
+      "description": "One selectable item of a `view/pick` request.",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "group": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The id the server receives back; the client displays `label`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`view/pick`: a typed selection request the server is waiting on.",
+  "properties": {
+    "allowFreeText": {
+      "description": "Whether the user may answer with text that is not an item id.",
+      "type": "boolean"
+    },
+    "fallbackView": {
+      "description": "URI of a server-rendered view that offers the same choice when the\nnative picker cannot present the request shape.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/PickItem"
+      },
+      "type": "array"
+    },
+    "multi": {
+      "description": "Whether more than one item may be selected.",
+      "type": "boolean"
+    },
+    "pickId": {
+      "description": "The pick this answer refers back to.",
+      "type": "string"
+    },
+    "preselection": {
+      "description": "Item ids the client should pre-select.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prompt": {
+      "description": "The question, shown prominently.",
+      "type": "string"
+    },
+    "purpose": {
+      "description": "Why the pick exists, used by clients to choose a rung.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pickId",
+    "purpose",
+    "prompt",
+    "multi",
+    "allowFreeText",
+    "preselection",
+    "items"
+  ],
+  "title": "ViewPickParams",
+  "type": "object"
+}
