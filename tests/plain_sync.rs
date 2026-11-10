@@ -323,6 +323,81 @@ fn observing_a_rejected_edit_does_not_retry_before_a_new_change() {
 }
 
 #[test]
+fn queued_render_survives_echo_and_response_in_either_order() {
+    use magit_lsp::presentation::plain::{text_edits, DocumentFormat, PlainDocument};
+    use magit_lsp::tree::Tree;
+
+    fn tree(version: u64, row: &str) -> Tree {
+        Tree {
+            version,
+            lines: vec![row.into()],
+            nodes: vec![],
+            line_nodes: vec![],
+            tokens: vec![],
+            symbols: vec![],
+            links: vec![],
+        }
+    }
+
+    // Open on `seed`, start an edit toward the older tree, then queue the newer
+    // authoritative render while that edit is still in flight.
+    fn controller() -> (PlainDocument, u64) {
+        let format = DocumentFormat::from_text("seed\n");
+        let mut doc = PlainDocument::new("file:///prompt", Encoding::Utf16, true, format);
+        doc.open(1, "seed\n");
+        let older = doc
+            .render_actions(tree(1, "alpha"), "view-old".into(), 1, "prompt".into(), None)
+            .expect("the older tree starts a flight");
+        assert!(
+            doc.render_actions(tree(2, "beta"), "view-new".into(), 2, "prompt".into(), None)
+                .is_none(),
+            "a queued render must wait for the in-flight edit"
+        );
+        (doc, older.id)
+    }
+
+    // The queued edit must target the latest observed client version and
+    // replace the echoed older text with the newer authoritative text.
+    fn expected_edit() -> serde_json::Value {
+        json!({"documentChanges":[{
+            "textDocument":{"uri":"file:///prompt","version":2},
+            "edits": text_edits("alpha\n", "beta\n", Encoding::Utf16)
+        }]})
+    }
+
+    fn assert_converged(doc: &PlainDocument) {
+        let (retained, view_id, generation, scope, _) = doc
+            .action_snapshot("beta\n")
+            .expect("the newer rendered text resolves its retained actions");
+        assert_eq!(retained.lines, vec!["beta"]);
+        assert_eq!((view_id, generation, scope), ("view-new", 2, "prompt"));
+    }
+
+    // Echo before response: the confirmed echo releases the queued render.
+    let (mut doc, older_id) = controller();
+    doc.observe(2, "alpha\n");
+    let newer = doc
+        .response(older_id, true)
+        .expect("the confirmed echo releases the queued render");
+    assert_eq!(newer.edit, expected_edit());
+    doc.observe(3, "beta\n");
+    assert_converged(&doc);
+
+    // Response before echo: the late echo releases the queued render.
+    let (mut doc, older_id) = controller();
+    assert!(
+        doc.response(older_id, true).is_none(),
+        "an unconfirmed response keeps the flight"
+    );
+    let newer = doc
+        .change(2, "alpha\n")
+        .expect("the late echo releases the queued render");
+    assert_eq!(newer.edit, expected_edit());
+    doc.change(3, "beta\n");
+    assert_converged(&doc);
+}
+
+#[test]
 fn retained_actions_resolve_the_exact_rendered_text() {
     use magit_lsp::presentation::plain::{DocumentFormat, PlainDocument};
     use magit_lsp::tree::Tree;
