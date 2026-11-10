@@ -1,5 +1,15 @@
 //! Directional JSON Schema generation for Plain wire payloads.
 
+use lsp_types::request::Request;
+use magit_lsp::protocol::{
+    ViewCloseParams, ViewCloseRequest, ViewEffectsParams, ViewInvokeParams, ViewInvokeRequest,
+    ViewInvokeResponse, ViewKeyParams, ViewKeyRequest, ViewKeymapParams, ViewOpenParams,
+    ViewOpenRequest, ViewPickParams, ViewPickRespondParams, ViewPickRespondRequest, ViewPromptParams,
+    ViewPromptRespondParams, ViewPromptRespondRequest, ViewRender, ViewRenderedParams,
+    ViewResizeParams, ViewResyncParams, ViewResyncRequest, ViewSetModeParams, ViewSetModeRequest,
+    VIEW_EFFECTS, VIEW_KEYMAP, VIEW_PICK, VIEW_PROMPT, VIEW_RENDER, VIEW_RENDERED, VIEW_RESIZE,
+};
+use magit_lsp::view::ViewDescriptor;
 use schemars::generate::SchemaSettings;
 use schemars::JsonSchema;
 use serde_json::Value;
@@ -31,6 +41,226 @@ pub fn directional_schema<T: JsonSchema>(direction: Direction) -> Value {
     };
     let schema = settings.into_generator().into_root_schema_for::<T>();
     serde_json::to_value(schema).expect("generated schema must serialize")
+}
+
+/// Whether a cataloged method carries a result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodKind {
+    /// A client-initiated request with an explicit result.
+    Request,
+    /// A one-way notification, which never has a result.
+    Notification,
+}
+
+/// Reference from a catalog entry to a wire payload schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Payload {
+    /// A Rust wire type with its generated artifact under `docs/schema/`.
+    Schema {
+        /// Rust type name carried in the catalog.
+        rust_type: &'static str,
+        /// Artifact file name relative to `docs/schema/`.
+        file: &'static str,
+    },
+    /// `serde_json::Value`: unconstrained JSON with no generated artifact.
+    UnconstrainedJson,
+}
+
+impl Payload {
+    /// Rust type name recorded in the catalog.
+    pub fn rust_type(&self) -> &'static str {
+        match self {
+            Payload::Schema { rust_type, .. } => rust_type,
+            Payload::UnconstrainedJson => "Value",
+        }
+    }
+
+    /// Artifact file name, or `None` for unconstrained JSON.
+    pub fn file(&self) -> Option<&'static str> {
+        match self {
+            Payload::Schema { file, .. } => Some(file),
+            Payload::UnconstrainedJson => None,
+        }
+    }
+}
+
+/// One custom protocol method in the hand-maintained catalog.
+pub struct MethodEntry {
+    /// Wire method or notification name.
+    pub method: &'static str,
+    /// Direction of the initiating message.
+    pub direction: Direction,
+    /// Request or one-way notification.
+    pub kind: MethodKind,
+    /// Payload carried by the initiating message.
+    pub params: Payload,
+    /// Request result schema; `None` for notifications.
+    pub result: Option<Payload>,
+}
+
+/// Reference a generated artifact for a Rust wire type.
+fn schema_payload<T: JsonSchema>(file: &'static str) -> Payload {
+    Payload::Schema {
+        rust_type: std::any::type_name::<T>()
+            .rsplit("::")
+            .next()
+            .expect("type name has a segment"),
+        file,
+    }
+}
+
+/// Hand-maintained catalog of the project's custom protocol methods.
+///
+/// Method names come from the request trait constants and notification
+/// constants in `src/protocol.rs`; payloads reference the directional roots.
+pub fn methods() -> Vec<MethodEntry> {
+    vec![
+        MethodEntry {
+            method: <ViewOpenRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewOpenParams>("view-open-params.json"),
+            result: Some(schema_payload::<ViewDescriptor>("view-descriptor.json")),
+        },
+        MethodEntry {
+            method: <ViewCloseRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewCloseParams>("view-close-params.json"),
+            result: Some(Payload::UnconstrainedJson),
+        },
+        MethodEntry {
+            method: <ViewInvokeRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewInvokeParams>("view-invoke-params.json"),
+            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+        },
+        MethodEntry {
+            method: <ViewKeyRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewKeyParams>("view-key-params.json"),
+            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+        },
+        MethodEntry {
+            method: <ViewSetModeRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewSetModeParams>("view-set-mode-params.json"),
+            result: Some(schema_payload::<ViewInvokeResponse>("view-invoke-response.json")),
+        },
+        MethodEntry {
+            method: <ViewResyncRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewResyncParams>("view-resync-params.json"),
+            result: Some(schema_payload::<ViewRender>("view-render.json")),
+        },
+        MethodEntry {
+            method: <ViewPromptRespondRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewPromptRespondParams>("view-prompt-respond-params.json"),
+            result: Some(Payload::UnconstrainedJson),
+        },
+        MethodEntry {
+            method: <ViewPickRespondRequest as Request>::METHOD,
+            direction: Direction::Input,
+            kind: MethodKind::Request,
+            params: schema_payload::<ViewPickRespondParams>("view-pick-respond-params.json"),
+            result: Some(Payload::UnconstrainedJson),
+        },
+        MethodEntry {
+            method: VIEW_RENDER,
+            direction: Direction::Output,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewRender>("view-render.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_EFFECTS,
+            direction: Direction::Output,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewEffectsParams>("view-effects-params.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_KEYMAP,
+            direction: Direction::Output,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewKeymapParams>("view-keymap-params.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_PROMPT,
+            direction: Direction::Output,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewPromptParams>("view-prompt-params.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_PICK,
+            direction: Direction::Output,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewPickParams>("view-pick-params.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_RENDERED,
+            direction: Direction::Input,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewRenderedParams>("view-rendered-params.json"),
+            result: None,
+        },
+        MethodEntry {
+            method: VIEW_RESIZE,
+            direction: Direction::Input,
+            kind: MethodKind::Notification,
+            params: schema_payload::<ViewResizeParams>("view-resize-params.json"),
+            result: None,
+        },
+    ]
+}
+
+/// Render one payload reference as catalog JSON.
+fn payload_json(payload: &Payload) -> Value {
+    match payload {
+        Payload::Schema { rust_type, file } => serde_json::json!({
+            "type": rust_type,
+            "schema": file,
+        }),
+        Payload::UnconstrainedJson => serde_json::json!({
+            "type": "Value",
+            "unconstrained": true,
+        }),
+    }
+}
+
+/// Build the deterministic custom-method catalog committed as `methods.json`.
+pub fn methods_catalog() -> Value {
+    let methods: Vec<Value> = methods()
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "method": entry.method,
+                "kind": match entry.kind {
+                    MethodKind::Request => "request",
+                    MethodKind::Notification => "notification",
+                },
+                "direction": match entry.direction {
+                    Direction::Input => "clientToServer",
+                    Direction::Output => "serverToClient",
+                },
+                "params": payload_json(&entry.params),
+                "result": entry.result.as_ref().map(payload_json),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "$comment": "Hand-maintained custom protocol method catalog; method names come from src/protocol.rs.",
+        "methods": methods,
+    })
 }
 
 /// Generate every committed artifact in stable file order.
@@ -131,6 +361,10 @@ pub fn artifacts() -> Vec<Artifact> {
         Artifact {
             file: "view-pick-respond-params.json",
             schema: directional_schema::<magit_lsp::protocol::ViewPickRespondParams>(Direction::Input),
+        },
+        Artifact {
+            file: "methods.json",
+            schema: methods_catalog(),
         },
     ]
 }

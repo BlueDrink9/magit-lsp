@@ -1,0 +1,179 @@
+{
+  "$comment": "Hand-maintained custom protocol method catalog; method names come from src/protocol.rs.",
+  "methods": [
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/open",
+      "params": {
+        "schema": "view-open-params.json",
+        "type": "ViewOpenParams"
+      },
+      "result": {
+        "schema": "view-descriptor.json",
+        "type": "ViewDescriptor"
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/close",
+      "params": {
+        "schema": "view-close-params.json",
+        "type": "ViewCloseParams"
+      },
+      "result": {
+        "type": "Value",
+        "unconstrained": true
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/invoke",
+      "params": {
+        "schema": "view-invoke-params.json",
+        "type": "ViewInvokeParams"
+      },
+      "result": {
+        "schema": "view-invoke-response.json",
+        "type": "ViewInvokeResponse"
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/key",
+      "params": {
+        "schema": "view-key-params.json",
+        "type": "ViewKeyParams"
+      },
+      "result": {
+        "schema": "view-invoke-response.json",
+        "type": "ViewInvokeResponse"
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/setMode",
+      "params": {
+        "schema": "view-set-mode-params.json",
+        "type": "ViewSetModeParams"
+      },
+      "result": {
+        "schema": "view-invoke-response.json",
+        "type": "ViewInvokeResponse"
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/resync",
+      "params": {
+        "schema": "view-resync-params.json",
+        "type": "ViewResyncParams"
+      },
+      "result": {
+        "schema": "view-render.json",
+        "type": "ViewRender"
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/promptRespond",
+      "params": {
+        "schema": "view-prompt-respond-params.json",
+        "type": "ViewPromptRespondParams"
+      },
+      "result": {
+        "type": "Value",
+        "unconstrained": true
+      }
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "request",
+      "method": "view/pickRespond",
+      "params": {
+        "schema": "view-pick-respond-params.json",
+        "type": "ViewPickRespondParams"
+      },
+      "result": {
+        "type": "Value",
+        "unconstrained": true
+      }
+    },
+    {
+      "direction": "serverToClient",
+      "kind": "notification",
+      "method": "view/render",
+      "params": {
+        "schema": "view-render.json",
+        "type": "ViewRender"
+      },
+      "result": null
+    },
+    {
+      "direction": "serverToClient",
+      "kind": "notification",
+      "method": "view/effects",
+      "params": {
+        "schema": "view-effects-params.json",
+        "type": "ViewEffectsParams"
+      },
+      "result": null
+    },
+    {
+      "direction": "serverToClient",
+      "kind": "notification",
+      "method": "view/keymap",
+      "params": {
+        "schema": "view-keymap-params.json",
+        "type": "ViewKeymapParams"
+      },
+      "result": null
+    },
+    {
+      "direction": "serverToClient",
+      "kind": "notification",
+      "method": "view/prompt",
+      "params": {
+        "schema": "view-prompt-params.json",
+        "type": "ViewPromptParams"
+      },
+      "result": null
+    },
+    {
+      "direction": "serverToClient",
+      "kind": "notification",
+      "method": "view/pick",
+      "params": {
+        "schema": "view-pick-params.json",
+        "type": "ViewPickParams"
+      },
+      "result": null
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "notification",
+      "method": "view/rendered",
+      "params": {
+        "schema": "view-rendered-params.json",
+        "type": "ViewRenderedParams"
+      },
+      "result": null
+    },
+    {
+      "direction": "clientToServer",
+      "kind": "notification",
+      "method": "view/resize",
+      "params": {
+        "schema": "view-resize-params.json",
+        "type": "ViewResizeParams"
+      },
+      "result": null
+    }
+  ]
+}

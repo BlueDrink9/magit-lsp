@@ -8,11 +8,15 @@ use std::path::{Path, PathBuf};
 
 use magit_lsp::keymap::{Binding, EditorMode};
 use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
+use generate_schema::{Direction, MethodKind, Payload};
 use magit_lsp::protocol::{
-    EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewEffectsParams, ViewInvokeParams,
-    ViewInvokeResponse, ViewKeyParams, ViewKeymapParams, ViewOpenParams, ViewPickParams,
-    ViewPickRespondParams, ViewPromptParams, ViewPromptRespondParams, ViewRenderedParams,
-    ViewRender, ViewResizeParams, ViewResyncParams, ViewSetModeParams,
+    EditDocumentMode, Effect, MessageLevel, ViewCloseParams, ViewCloseRequest, ViewEffectsParams,
+    ViewInvokeParams, ViewInvokeRequest, ViewInvokeResponse, ViewKeyParams, ViewKeyRequest,
+    ViewKeymapParams, ViewOpenParams, ViewOpenRequest, ViewPickParams, ViewPickRespondParams,
+    ViewPickRespondRequest, ViewPromptParams, ViewPromptRespondParams, ViewPromptRespondRequest,
+    ViewRenderedParams, ViewRender, ViewResizeParams, ViewResyncParams, ViewResyncRequest,
+    ViewSetModeParams, ViewSetModeRequest, VIEW_EFFECTS, VIEW_KEYMAP, VIEW_PICK, VIEW_PROMPT,
+    VIEW_RENDER, VIEW_RENDERED, VIEW_RESIZE,
 };
 use magit_lsp::view::{Placement, Scope, ViewDescriptor, ViewKind, ViewMode, Viewport};
 
@@ -633,4 +637,226 @@ fn every_custom_view_payload_has_a_directional_artifact() {
             "keymap schema lacks binding key {key}"
         );
     }
+}
+
+fn method_entry<'a>(
+    methods: &'a [generate_schema::MethodEntry],
+    name: &str,
+) -> &'a generate_schema::MethodEntry {
+    methods
+        .iter()
+        .find(|entry| entry.method == name)
+        .unwrap_or_else(|| panic!("catalog lacks method {name}"))
+}
+
+fn artifact_names() -> Vec<String> {
+    generate_schema::artifacts()
+        .iter()
+        .map(|artifact| artifact.file.to_string())
+        .collect()
+}
+
+#[test]
+fn catalog_covers_every_custom_request_with_directional_payloads() {
+    use lsp_types::request::Request;
+
+    let methods = generate_schema::methods();
+    let artifacts = artifact_names();
+    let requests: [(&str, &str, &str, Option<(&str, &str)>); 8] = [
+        (
+            <ViewOpenRequest as Request>::METHOD,
+            "ViewOpenParams",
+            "view-open-params.json",
+            Some(("ViewDescriptor", "view-descriptor.json")),
+        ),
+        (
+            <ViewCloseRequest as Request>::METHOD,
+            "ViewCloseParams",
+            "view-close-params.json",
+            None,
+        ),
+        (
+            <ViewInvokeRequest as Request>::METHOD,
+            "ViewInvokeParams",
+            "view-invoke-params.json",
+            Some(("ViewInvokeResponse", "view-invoke-response.json")),
+        ),
+        (
+            <ViewKeyRequest as Request>::METHOD,
+            "ViewKeyParams",
+            "view-key-params.json",
+            Some(("ViewInvokeResponse", "view-invoke-response.json")),
+        ),
+        (
+            <ViewSetModeRequest as Request>::METHOD,
+            "ViewSetModeParams",
+            "view-set-mode-params.json",
+            Some(("ViewInvokeResponse", "view-invoke-response.json")),
+        ),
+        (
+            <ViewResyncRequest as Request>::METHOD,
+            "ViewResyncParams",
+            "view-resync-params.json",
+            Some(("ViewRender", "view-render.json")),
+        ),
+        (
+            <ViewPromptRespondRequest as Request>::METHOD,
+            "ViewPromptRespondParams",
+            "view-prompt-respond-params.json",
+            None,
+        ),
+        (
+            <ViewPickRespondRequest as Request>::METHOD,
+            "ViewPickRespondParams",
+            "view-pick-respond-params.json",
+            None,
+        ),
+    ];
+
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|entry| entry.kind == MethodKind::Request)
+            .count(),
+        requests.len(),
+        "catalog must cover every custom request"
+    );
+
+    for (name, params_type, params_file, result) in requests {
+        let entry = method_entry(&methods, name);
+        assert_eq!(entry.kind, MethodKind::Request, "{name} kind");
+        assert_eq!(
+            entry.direction,
+            Direction::Input,
+            "{name} is client-initiated"
+        );
+        assert_eq!(entry.params.rust_type(), params_type, "{name} params type");
+        assert_eq!(entry.params.file(), Some(params_file), "{name} params");
+        assert!(
+            artifacts.iter().any(|file| file == params_file),
+            "{name} params must reference an artifact"
+        );
+
+        match result {
+            Some((result_type, result_file)) => {
+                let payload = entry
+                    .result
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{name} needs an explicit result"));
+                assert_eq!(payload.rust_type(), result_type, "{name} result type");
+                assert_eq!(payload.file(), Some(result_file), "{name} result");
+                assert!(
+                    artifacts.iter().any(|file| file == result_file),
+                    "{name} result must reference an artifact"
+                );
+            }
+            None => assert_eq!(
+                entry.result,
+                Some(Payload::UnconstrainedJson),
+                "{name} Value result must stay unconstrained"
+            ),
+        }
+    }
+}
+
+#[test]
+fn catalog_covers_every_custom_notification_with_its_direction() {
+    let methods = generate_schema::methods();
+    let artifacts = artifact_names();
+    let notifications: [(&str, Direction, &str, &str); 7] = [
+        (VIEW_RENDER, Direction::Output, "ViewRender", "view-render.json"),
+        (
+            VIEW_EFFECTS,
+            Direction::Output,
+            "ViewEffectsParams",
+            "view-effects-params.json",
+        ),
+        (
+            VIEW_KEYMAP,
+            Direction::Output,
+            "ViewKeymapParams",
+            "view-keymap-params.json",
+        ),
+        (
+            VIEW_PROMPT,
+            Direction::Output,
+            "ViewPromptParams",
+            "view-prompt-params.json",
+        ),
+        (
+            VIEW_PICK,
+            Direction::Output,
+            "ViewPickParams",
+            "view-pick-params.json",
+        ),
+        (
+            VIEW_RENDERED,
+            Direction::Input,
+            "ViewRenderedParams",
+            "view-rendered-params.json",
+        ),
+        (
+            VIEW_RESIZE,
+            Direction::Input,
+            "ViewResizeParams",
+            "view-resize-params.json",
+        ),
+    ];
+
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|entry| entry.kind == MethodKind::Notification)
+            .count(),
+        notifications.len(),
+        "catalog must cover every custom notification"
+    );
+
+    for (name, direction, params_type, params_file) in notifications {
+        let entry = method_entry(&methods, name);
+        assert_eq!(entry.kind, MethodKind::Notification, "{name} kind");
+        assert_eq!(entry.direction, direction, "{name} initiating direction");
+        assert_eq!(entry.params.rust_type(), params_type, "{name} params type");
+        assert_eq!(entry.params.file(), Some(params_file), "{name} params");
+        assert!(entry.result.is_none(), "{name} notifications have no result");
+        assert!(
+            artifacts.iter().any(|file| file == params_file),
+            "{name} params must reference an artifact"
+        );
+    }
+
+    assert_eq!(methods.len(), 15, "eight requests and seven notifications");
+    let mut names: Vec<&str> = methods.iter().map(|entry| entry.method).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), methods.len(), "method names must be unique");
+}
+
+#[test]
+fn catalog_is_committed_and_participates_in_drift_detection() {
+    assert_eq!(
+        read_schema("methods.json"),
+        generate_schema::methods_catalog(),
+        "committed catalog must match fresh generation"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    let path = dir.path().join("docs/schema/methods.json");
+    std::fs::remove_file(&path).expect("remove catalog");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from("docs/schema/methods.json")],
+        "a missing catalog is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read catalog");
+    std::fs::write(&path, text.replace("\"view/open\"", "\"view/legacyOpen\""))
+        .expect("tamper catalog");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from("docs/schema/methods.json")],
+        "a tampered catalog is stale"
+    );
 }

@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.5 — Catalog custom protocol methods and their payload schemas.** Add the hand-maintained typed method table and generate its deterministic catalog under `docs/schema/`, referencing the existing directional payload roots.
+    - test: cover every custom view request and notification, checking names against protocol trait constants or notification constants, correct directions, payload references and explicit request results. Keep generic `Value` results unconstrained unless the runtime contract proves a narrower shape.
+    - check: `make update-schema`, `make schema-check` and focused schema tests pass; the catalog participates in missing/tampered artifact detection. Standard LSP envelopes and `magit.command` variants remain for the fixture-validation slice.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ ba42672 → ok
+    - Done: containing commit.
   - [x] **T011.4 — Schema remaining custom view payloads.** Generate directional schemas for the remaining view request/response/notification payloads, including prompt and pick answers and keymap bindings.
     - test: Prompt unions remain `anyOf`; `Option<Value>` remains unconstrained JSON; custom view kinds remain strings; every custom method payload has an artifact with the correct direction.
     - check: Schema drift and focused protocol/prompt/pick/keymap suites pass without changing wire behavior.
