@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Semantic executeCommand confirmation, returned after writeback/helper release.",
+  "oneOf": [
+    {
+      "description": "The selected content source was accepted and the helper released, not\nnecessarily committed: Git still owns hooks and cleanup.",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "confirmed",
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "version": {
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "runId",
+        "uri",
+        "version"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "EditConfirmation"
+}

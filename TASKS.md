@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.2 — Generate directional schemas for Plain command payloads.** Add the typed generator and Make update/drift targets, initially covering `PlainActionParams`, `EditConfirmParams`, `EditAbortParams`, `EditConfirmation` and `EditAbortResult`. This is a schema foundation, not the full method catalog or T011 completion.
+    - Done: containing commit.
+    - test: Deterministic committed JSON Schemas use deserialization contracts for input and serialization contracts for output; required target tags and confirmation names match Rust serde behavior; drift fails without updating artifacts.
+    - check: Update/check targets run through Make; pre-existing Makefile edits remain unstaged and unchanged.
+      - Verified: `make update-schema && make schema-check && make test-rust FILTER="--test schema --test dispatch"` @ `e6db680` → ok: update-schema, schema-check, rust.
   - [x] **T011.1 — Tag Plain action targets explicitly.** Replace the untagged target union with a required camelCase `kind` discriminator (`content`, `view`, `node`, `menuItem`); migrate every offered target and the maintained client contract without accepting legacy shapes.
     - Done: containing commit. `PlainActionTarget` is internally tagged with required `kind`; every offered action and the client spec carry it, and untagged input is rejected.
     - test: Round-trip every variant, reject missing/unknown/mismatched tags, and exercise offered content/view/node/menu actions through existing Plain integration suites.

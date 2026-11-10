@@ -76,3 +76,11 @@ readme-shots:
 
 update-client-behaviors:
 	$(call run,update-client-behaviors,UPDATE_CLIENT_BEHAVIORS=1 cargo test -q --test quirks known_client_appendix_matches_registry)
+
+.PHONY: update-schema schema-check
+
+update-schema:
+	$(call run,update-schema,cargo run -q --bin generate-schema)
+
+schema-check:
+	$(call run,schema-check,cargo run -q --bin generate-schema -- --check)

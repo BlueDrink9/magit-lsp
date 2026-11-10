@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of aborting a pending editor run, not a commit confirmation.",
+  "oneOf": [
+    {
+      "description": "The pending editor run was aborted.",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "type": {
+          "const": "aborted",
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "version": {
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "runId",
+        "uri",
+        "version"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "EditAbortResult"
+}

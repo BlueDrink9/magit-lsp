@@ -72,7 +72,7 @@ pub enum EditDocumentMode {
 }
 
 /// Run-aware semantic confirmation routed through `magit.command`.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditConfirmParams {
     /// Semantic command; only common.confirm is accepted by this dispatcher.
@@ -88,7 +88,7 @@ pub struct EditConfirmParams {
 }
 
 /// Run-aware abort intent for an attached commit draft.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditAbortParams {
     /// Semantic command; only common.cancel is accepted by this dispatcher.
@@ -102,7 +102,7 @@ pub struct EditAbortParams {
 }
 
 /// The two intentionally distinct commit confirmation sources.
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum EditConfirmSource {
     /// Validate the exact live version, then safely write it before completion.
@@ -134,7 +134,7 @@ pub struct DraftFinishParams {
 }
 
 /// Semantic executeCommand confirmation, returned after writeback/helper release.
-#[derive(Serialize)]
+#[derive(Serialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum EditConfirmation {
     /// The selected content source was accepted and the helper released, not
@@ -148,7 +148,7 @@ pub enum EditConfirmation {
 }
 
 /// Result of aborting a pending editor run, not a commit confirmation.
-#[derive(Serialize)]
+#[derive(Serialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum EditAbortResult {
     /// The pending editor run was aborted.

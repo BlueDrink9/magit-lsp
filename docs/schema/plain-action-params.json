@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "PlainActionTarget": {
+      "description": "A content mutation target or a non-mutating logical-view target.\n\nThe wire object always carries a camelCase `kind` discriminator so clients\ncan forward an offered target without inspecting its fields.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Content-addressed target from a status tree.",
+          "properties": {
+            "kind": {
+              "const": "content",
+              "type": "string"
+            },
+            "mutationHash": {
+              "description": "Hash of the exact content the action is permitted to mutate.",
+              "type": "string"
+            },
+            "nodeId": {
+              "description": "Existing path/content-derived tree node identity.",
+              "type": "string"
+            },
+            "selection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SelectionIntent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact inclusive document rows selected in the offered render, when this\naction represents a visual selection rather than a cursor action."
+            }
+          },
+          "required": [
+            "kind",
+            "nodeId",
+            "mutationHash"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Identity of the exact logical view that offered a semantic transition.",
+          "properties": {
+            "kind": {
+              "const": "view",
+              "type": "string"
+            },
+            "viewId": {
+              "description": "Logical view identity in the offering render.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "viewId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact node identity in the retained status view for visibility actions.",
+          "properties": {
+            "kind": {
+              "const": "node",
+              "type": "string"
+            },
+            "nodeId": {
+              "description": "Existing node identity in the offering tree.",
+              "type": "string"
+            },
+            "viewId": {
+              "description": "Logical view identity in the offering render.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "viewId",
+            "nodeId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Exact item identity in the retained structured menu.",
+          "properties": {
+            "itemKey": {
+              "description": "Exact retained menu item key.",
+              "type": "string"
+            },
+            "kind": {
+              "const": "menuItem",
+              "type": "string"
+            },
+            "menuId": {
+              "description": "Structured menu identity in the offering render.",
+              "type": "string"
+            },
+            "viewId": {
+              "description": "Logical view identity in the offering render.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "viewId",
+            "menuId",
+            "itemKey"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SelectionIntent": {
+      "description": "Normalized inclusive row coordinates retained as Plain selection input metadata.",
+      "properties": {
+        "endLine": {
+          "description": "Last selected row in the retained render.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startLine": {
+          "description": "First selected row in the retained render.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startLine",
+        "endLine"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A Plain `workspace/executeCommand` action offered from a retained render.",
+  "properties": {
+    "command": {
+      "description": "Registered command identifier.",
+      "type": "string"
+    },
+    "documentUri": {
+      "description": "Open document URI the action was offered in.",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/PlainActionTarget",
+      "description": "Typed target from the offering render."
+    },
+    "viewGeneration": {
+      "description": "Render generation the action was offered from.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "command",
+    "documentUri",
+    "target",
+    "viewGeneration"
+  ],
+  "title": "PlainActionParams",
+  "type": "object"
+}

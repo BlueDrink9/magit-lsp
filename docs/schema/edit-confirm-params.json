@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "EditConfirmSource": {
+      "description": "The two intentionally distinct commit confirmation sources.",
+      "oneOf": [
+        {
+          "const": "synchronized",
+          "description": "Validate the exact live version, then safely write it before completion.",
+          "type": "string"
+        },
+        {
+          "const": "saved-file",
+          "description": "Read saved disk bytes; never write an unsaved full-sync snapshot.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Run-aware semantic confirmation routed through `magit.command`.",
+  "properties": {
+    "command": {
+      "description": "Semantic command; only common.confirm is accepted by this dispatcher.",
+      "type": "string"
+    },
+    "runId": {
+      "description": "Server-issued run, protecting a reused COMMIT_EDITMSG URI.",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/EditConfirmSource",
+      "description": "Select synchronized writeback versus independently read saved disk text."
+    },
+    "uri": {
+      "description": "Exact server-issued canonical file URI.",
+      "type": "string"
+    },
+    "version": {
+      "description": "Exact synchronized version, or the close event's last observed version.",
+      "format": "int32",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "command",
+    "runId",
+    "uri",
+    "version",
+    "source"
+  ],
+  "title": "EditConfirmParams",
+  "type": "object"
+}
