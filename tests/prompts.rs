@@ -719,6 +719,164 @@ fn a_held_refresh_keeps_text_mode_edits_queued_until_text_mode_ends() {
 }
 
 #[test]
+fn closing_a_document_prompt_returns_every_surviving_refresh() {
+    for close_origin in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        test.ack();
+        let status = test.view_id().to_string();
+        let (log, _) = test.open_via_command("open.log");
+        test.ack();
+        let log = log.id;
+        let request = stage_commit_confirm(&mut test, &status);
+        test.session.open_document_prompt(&request).unwrap();
+        let prompt_id = test
+            .session
+            .prompt_view_id()
+            .expect("the open prompt view id")
+            .to_string();
+        let status_version = test.session.views().get(&status).unwrap().version();
+        let log_version = test.session.views().get(&log).unwrap().version();
+
+        assert!(
+            test.session.refresh_all().is_empty(),
+            "an open prompt holds every refresh"
+        );
+        assert!(test.session.views().get(&status).unwrap().dirty());
+        assert!(test.session.views().get(&log).unwrap().dirty());
+
+        let target = if close_origin {
+            &status
+        } else {
+            &prompt_id
+        };
+        let result = test.session.close(target).unwrap();
+
+        assert!(!test.session.has_pending_prompt());
+        assert!(
+            test.session.views().get(&prompt_id).is_none(),
+            "the prompt view closes after close_origin={close_origin}"
+        );
+        let expected: BTreeSet<&str> = if close_origin {
+            assert!(test.session.views().get(&status).is_none());
+            BTreeSet::from([log.as_str()])
+        } else {
+            BTreeSet::from([status.as_str(), log.as_str()])
+        };
+        let resumed: BTreeSet<&str> = result
+            .opened
+            .iter()
+            .map(|(render, _)| render.view_id.as_str())
+            .collect();
+        assert_eq!(
+            resumed, expected,
+            "close returns every surviving refresh after close_origin={close_origin}"
+        );
+        for (view_id, before) in [(&status, status_version), (&log, log_version)] {
+            let Some(view) = test.session.views().get(view_id) else {
+                assert!(close_origin, "{view_id} survives unless it was the origin");
+                continue;
+            };
+            assert!(
+                view.version() > before,
+                "{view_id} returns a fresh render after close_origin={close_origin}"
+            );
+            assert!(!view.dirty(), "{view_id} has no queued refresh left");
+            assert!(
+                result
+                    .opened
+                    .iter()
+                    .any(|(render, _)| render.view_id == view_id.as_str() && render.version > before),
+                "{view_id} has a close render above its held version"
+            );
+        }
+    }
+}
+
+#[test]
+fn closing_a_document_prompt_keeps_text_mode_refreshes_queued() {
+    for close_origin in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .modify_standard()
+            .build();
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+        test.ack();
+        let status = test.view_id().to_string();
+        let (menu, _) = test.open_via_command("open.commit");
+        test.ack();
+        let menu = menu.id;
+
+        test.focus(&status);
+        test.goto_first_marker('+');
+        test.set_mode(ViewMode::Text);
+        let status_version = test.session.views().get(&status).unwrap().version();
+        let status_text = test.text_of(&status);
+
+        let request = stage_author_prompt(&mut test, &menu);
+        test.session.open_document_prompt(&request).unwrap();
+        let prompt_id = test
+            .session
+            .prompt_view_id()
+            .expect("the open prompt view id")
+            .to_string();
+        assert!(
+            test.session.refresh_all().is_empty(),
+            "an open prompt holds every refresh"
+        );
+        git(tmp.path(), &["add", "f.txt"]);
+
+        let target = if close_origin { &menu } else { &prompt_id };
+        let result = test.session.close(target).unwrap();
+
+        assert!(!test.session.has_pending_prompt());
+        assert!(
+            result
+                .opened
+                .iter()
+                .all(|(render, _)| render.view_id != status),
+            "the text-mode status refresh stays queued after close_origin={close_origin}"
+        );
+        let status_view = test
+            .session
+            .views()
+            .get(&status)
+            .expect("the text-mode status stays open");
+        assert_eq!(status_view.mode(), ViewMode::Text);
+        assert_eq!(
+            status_view.version(),
+            status_version,
+            "a text-mode view is not replaced by close_origin={close_origin}"
+        );
+        assert!(
+            status_view.dirty(),
+            "its queued refresh survives close_origin={close_origin}"
+        );
+        assert_eq!(
+            test.text_of(&status),
+            status_text,
+            "text-mode edits stay intact after close_origin={close_origin}"
+        );
+        if close_origin {
+            assert!(test.session.views().get(&menu).is_none());
+        } else {
+            assert!(test.session.views().get(&menu).is_some(), "origin stays open");
+        }
+
+        test.focus(&status);
+        test.press("ctrl+t");
+        let lines = test.text();
+        assert!(
+            lines.iter().any(|line| line == "Staged changes (1)"),
+            "ending text mode applies the refresh queued through close_origin={close_origin}: {lines:?}"
+        );
+    }
+}
+
+#[test]
 fn closing_the_prompt_view_clears_the_continuation() {
     let (tmp, _) = RepoFixture::new()
         .commit("init", [("f.txt", TEN_LINES)])

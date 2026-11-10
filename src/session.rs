@@ -888,8 +888,10 @@ impl Session {
     /// Close a view; closing one the client already closed is a no-op.
     ///
     /// Closing the prompt view or its origin also clears the staged
-    /// continuation, so a later answer cannot apply to a closed view.
-    pub fn close(&mut self, view_id: &str) -> Result<()> {
+    /// continuation, so a later answer cannot apply to a closed view. Both
+    /// close paths return the resumed continuation and every sibling refresh
+    /// queued while the prompt owned the session, for delivery by the caller.
+    pub fn close(&mut self, view_id: &str) -> Result<InvokeResult> {
         let prompt = self.pending_prompt.as_ref().map(|pending| {
             (
                 pending.request.prompt_id.clone(),
@@ -901,9 +903,9 @@ impl Session {
             if prompt_view.as_deref() == Some(view_id) {
                 self.views.remove(view_id);
                 self.pending_selections.remove(view_id);
-                self.resume_prompt(&prompt_id, None)?;
+                let result = self.resume_closed_prompt(&prompt_id)?;
                 self.publish();
-                return Ok(());
+                return Ok(result);
             }
             if origin == view_id {
                 if let Some(prompt_view) = prompt_view {
@@ -913,7 +915,13 @@ impl Session {
                 if let Some(pending) = self.pending_prompt.as_mut() {
                     pending.invalidated = true;
                 }
-                self.resume_prompt(&prompt_id, None)?;
+                self.views.remove(view_id);
+                self.pending_selections.remove(view_id);
+                self.pending_selections
+                    .retain(|_, pending| pending.caller_id != view_id);
+                let result = self.resume_closed_prompt(&prompt_id)?;
+                self.publish();
+                return Ok(result);
             }
         }
         self.views.remove(view_id);
@@ -921,7 +929,22 @@ impl Session {
         self.pending_selections
             .retain(|_, pending| pending.caller_id != view_id);
         self.publish();
-        Ok(())
+        Ok(InvokeResult::empty())
+    }
+
+    /// Resume a prompt that a close cancelled and drain its queued refreshes.
+    ///
+    /// A continuation that starts another prompt keeps the queue: only the
+    /// surviving normal-mode views of a finished prompt resume now.
+    fn resume_closed_prompt(&mut self, prompt_id: &str) -> Result<InvokeResult> {
+        let mut result = match self.resume_prompt(prompt_id, None)? {
+            Execution::Done(result) => result,
+            Execution::Prompt(_) | Execution::Pick(_) => InvokeResult::empty(),
+        };
+        if self.pending_prompt.is_none() {
+            self.resume_deferred_refreshes(&mut result);
+        }
+        Ok(result)
     }
 
     /// Record the client's ack of `version`.
