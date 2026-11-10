@@ -19,6 +19,13 @@ Two processes talking over LSP (JSON-RPC on stdio):
 The server is designed to do as much as possible so that clients are thin and
 easy to build for any editor. See `AGENTS.md` for the protocol and internals.
 
+A general LSP client can drive the server in Plain mode by following the
+[client implementation levels](docs/CLIENT_SPEC.md#client-implementation-levels):
+omit `capabilities.experimental.magit` and declare the standard capabilities it
+supports. The tested clients are the bundled Neovim client (Lua and UI scenarios,
+`make test`) and the VS Code extension (`make vscode-test`). The Helix TOML in
+the specification is a reference configuration, not a tested client.
+
 ## Features
 
 - **Status buffer**: branch header plus `Staged changes`, `Unstaged changes`,

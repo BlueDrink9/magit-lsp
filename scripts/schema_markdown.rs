@@ -24,6 +24,113 @@ pub const EXCHANGES_BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED WORKED EXCHANGES -
 pub const EXCHANGES_BLOCK_END: &str = "<!-- END GENERATED WORKED EXCHANGES -->";
 /// Repository-relative directory holding the recorded exchange files.
 pub const EXAMPLES_DIR: &str = "docs/examples";
+/// Marker opening the generated capability-to-level block.
+pub const CAPABILITY_BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED CAPABILITY LEVELS -->";
+/// Marker closing the generated capability-to-level block.
+pub const CAPABILITY_BLOCK_END: &str = "<!-- END GENERATED CAPABILITY LEVELS -->";
+
+/// One standard capability row in the generated Plain capability table.
+pub struct CapabilityLevel {
+    /// The `PlainCapabilities` field the row documents.
+    pub field: &'static str,
+    /// JSON pointer the initialize capability is read from.
+    pub pointer: &'static str,
+    /// Rendered initialize capability name.
+    pub capability: &'static str,
+    /// Plain level the capability belongs to.
+    pub level: &'static str,
+    /// Behavior the declaration enables, or its absence.
+    pub effect: &'static str,
+}
+
+/// Plain capability classification in `PlainCapabilities` field order.
+///
+/// The field list is pinned against the implemented struct by
+/// `tests/schema.rs`; a new capability field fails the pin until this table
+/// documents it. `commit_draft_expired` is runtime state, not a client
+/// declaration, so it has no row.
+pub const CAPABILITY_LEVELS: &[CapabilityLevel] = &[
+    CapabilityLevel {
+        field: "apply_edit",
+        pointer: "/workspace/applyEdit",
+        capability: "`workspace.applyEdit`",
+        level: "L1",
+        effect: "Status document delivered as a standard `WorkspaceEdit`; status actions and commit drafts need it.",
+    },
+    CapabilityLevel {
+        field: "document_changes",
+        pointer: "/workspace/workspaceEdit/documentChanges",
+        capability: "`workspace.workspaceEdit.documentChanges`",
+        level: "L1 (versioned sub-capability)",
+        effect: "Versioned `documentChanges` with the client's version; absent uses the legacy unversioned `changes` map.",
+    },
+    CapabilityLevel {
+        field: "code_actions",
+        pointer: "/textDocument/codeAction",
+        capability: "`textDocument/codeAction`",
+        level: "L2",
+        effect: "Code actions are returned; `magit.command` runs them without the client declaring `workspace/executeCommand`.",
+    },
+    CapabilityLevel {
+        field: "disabled_actions",
+        pointer: "/textDocument/codeAction/disabledSupport",
+        capability: "`textDocument/codeAction.disabledSupport`",
+        level: "L2 (sub-capability)",
+        effect: "Unavailable and planned actions carry a disabled reason; absent they are omitted.",
+    },
+    CapabilityLevel {
+        field: "show_document",
+        pointer: "/window/showDocument/support",
+        capability: "`window/showDocument.support`",
+        level: "L3",
+        effect: "Commit drafts open through `window/showDocument`; absent sends manual instructions instead.",
+    },
+    CapabilityLevel {
+        field: "work_done_progress",
+        pointer: "/window/workDoneProgress",
+        capability: "`window/workDoneProgress`",
+        level: "L3",
+        effect: "Mutations run `window/workDoneProgress/create` and `$/progress` begin/report/end; absent still runs with messages.",
+    },
+    CapabilityLevel {
+        field: "completion",
+        pointer: "/textDocument/completion",
+        capability: "`textDocument/completion`",
+        level: "none (not implemented)",
+        effect: "Extracted into the effective-capability echo only; the server advertises no provider and registers no handler.",
+    },
+    CapabilityLevel {
+        field: "folding_range",
+        pointer: "/textDocument/foldingRange",
+        capability: "`textDocument/foldingRange`",
+        level: "L3 (request-only)",
+        effect: "The client may request server-owned folds; declaring it gates no lower level.",
+    },
+    CapabilityLevel {
+        field: "position_encodings",
+        pointer: "/general/positionEncodings",
+        capability: "`general.positionEncodings`",
+        level: "L0",
+        effect: "Negotiates `utf-8`, `utf-16` or `utf-32`; absent defaults to `utf-16`.",
+    },
+];
+
+/// Render the complete marker-delimited capability-to-level block.
+pub fn capability_levels_block() -> String {
+    let mut out = String::new();
+    out.push_str(CAPABILITY_BLOCK_BEGIN);
+    out.push('\n');
+    out.push_str("| `PlainCapabilities` field | Initialize capability | Plain level | Effect |\n");
+    out.push_str("|---|---|---|---|\n");
+    for row in CAPABILITY_LEVELS {
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {} |\n",
+            row.field, row.capability, row.level, row.effect
+        ));
+    }
+    out.push_str(CAPABILITY_BLOCK_END);
+    out
+}
 
 /// Render the complete marker-delimited payload-table block.
 ///
@@ -155,11 +262,17 @@ fn provenance(lines: &[Value]) -> String {
 /// appended, which is how a new or block-less document becomes current.
 pub fn apply(committed: &str) -> Result<String, String> {
     let tables = replace_block(committed, BLOCK_BEGIN, BLOCK_END, &block()?);
-    Ok(replace_block(
+    let exchanges = replace_block(
         &tables,
         EXCHANGES_BLOCK_BEGIN,
         EXCHANGES_BLOCK_END,
         &worked_exchanges_block()?,
+    );
+    Ok(replace_block(
+        &exchanges,
+        CAPABILITY_BLOCK_BEGIN,
+        CAPABILITY_BLOCK_END,
+        &capability_levels_block(),
     ))
 }
 

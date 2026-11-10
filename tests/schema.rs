@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use magit_lsp::keymap::{Binding, EditorMode};
 use magit_lsp::menu::{Args, Group, Item, Menu, MenuStatus, Reader};
+use magit_lsp::presentation::{negotiate, PlainCapabilities, Presentation};
+use magit_lsp::quirks;
 use generate_schema::schema_luals;
 use generate_schema::schema_typescript;
 use generate_schema::{Direction, MethodKind, Payload};
@@ -1787,6 +1789,236 @@ fn client_spec_worked_exchanges_drift_on_tamper_and_missing_block() {
         vec![PathBuf::from(doc)],
         "a missing worked-exchange block is stale"
     );
+}
+
+#[test]
+fn capability_levels_pin_the_plain_capability_fields() {
+    let documented: Vec<&str> = generate_schema::schema_markdown::CAPABILITY_LEVELS
+        .iter()
+        .map(|row| row.field)
+        .collect();
+    let mut implemented = plain_capability_fields();
+    // Runtime state, not a client declaration; the table documents declarations.
+    implemented.retain(|field| field != "commit_draft_expired");
+    assert_eq!(
+        implemented, documented,
+        "capability table must document every PlainCapabilities declaration field exactly"
+    );
+    for row in generate_schema::schema_markdown::CAPABILITY_LEVELS {
+        let mut caps = Value::Object(Default::default());
+        let probe = if row.field == "position_encodings" {
+            serde_json::json!(["utf-8"])
+        } else {
+            Value::Bool(true)
+        };
+        set_json_pointer(&mut caps, row.pointer, probe);
+        let Presentation::Plain(plain) = negotiate(&serde_json::json!({ "capabilities": caps }))
+            .expect("absent selector must negotiate Plain")
+        else {
+            panic!("absent selector must not negotiate rich");
+        };
+        if row.field == "position_encodings" {
+            assert_eq!(
+                plain.position_encodings,
+                vec!["utf-8".to_string()],
+                "{} must populate position_encodings",
+                row.pointer
+            );
+        } else {
+            assert!(
+                plain_flag(&plain, row.field),
+                "{} must set PlainCapabilities::{}",
+                row.pointer,
+                row.field
+            );
+        }
+    }
+}
+
+#[test]
+fn plain_classification_follows_negotiate_and_recorded_traces() {
+    assert_eq!(
+        negotiate(&serde_json::json!({ "capabilities": {} })),
+        Ok(Presentation::Plain(PlainCapabilities::default())),
+        "an absent experimental.magit selects Plain with nothing declared"
+    );
+
+    let Presentation::Plain(neovim) = negotiate(&trace_params("initialize-plain-neovim-0.12.6.json"))
+        .expect("recorded plain Neovim trace negotiates Plain")
+    else {
+        panic!("plain Neovim trace must not negotiate rich");
+    };
+    assert!(neovim.apply_edit);
+    assert!(
+        !neovim.document_changes,
+        "the recorded plain Neovim trace omits documentChanges"
+    );
+    assert!(neovim.show_document);
+    assert!(neovim.work_done_progress);
+    assert!(neovim.folding_range);
+    assert!(neovim.code_actions);
+
+    let Presentation::Plain(helix) = negotiate(&trace_params("initialize-helix-25.07.1.json"))
+        .expect("recorded Helix trace negotiates Plain")
+    else {
+        panic!("Helix trace must not negotiate rich");
+    };
+    assert!(helix.apply_edit);
+    assert!(helix.document_changes);
+    assert!(
+        !helix.show_document,
+        "the recorded Helix trace omits window.showDocument"
+    );
+    assert!(helix.work_done_progress);
+    assert!(
+        !helix.folding_range,
+        "the recorded Helix trace omits textDocument.foldingRange"
+    );
+
+    assert!(
+        matches!(
+            negotiate(&serde_json::json!({
+                "capabilities": { "experimental": { "magit": {} } }
+            })),
+            Err(_)
+        ),
+        "an invalid rich declaration is rejected, never downgraded to Plain"
+    );
+    let neovim_declaration = current_client_magit("Neovim");
+    assert!(
+        matches!(
+            negotiate(&serde_json::json!({
+                "clientInfo": neovim_declaration["client"],
+                "capabilities": { "experimental": { "magit": neovim_declaration["magit"] } }
+            })),
+            Ok(Presentation::Rich(_))
+        ),
+        "the current bundled Neovim declaration selects the rich protocol"
+    );
+
+    let quirk = quirks::REGISTRY
+        .iter()
+        .find(|quirk| quirk.id == "assume-document-changes")
+        .expect("neovim documentChanges quirk is registered");
+    assert_eq!(
+        quirk.model,
+        Some("neovim-accepts-undeclared-documentChanges"),
+        "the quirk names the recorded fake-editor behavior"
+    );
+    let override_ = quirk.capability.expect("quirk carries a capability override");
+    assert_eq!(override_.capability, quirks::Capability::DocumentChanges);
+    assert!(override_.enabled);
+}
+
+#[test]
+fn client_spec_capability_levels_drift_on_tamper_and_missing_block() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    generate_schema::write_all(dir.path()).expect("write schemas");
+    assert!(generate_schema::stale_files(dir.path())
+        .expect("clean check")
+        .is_empty());
+
+    let doc = generate_schema::schema_markdown::DOC_PATH;
+    let path = dir.path().join(doc);
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    let expected = "| `apply_edit` | `workspace.applyEdit` | L1 |";
+    assert!(
+        text.contains(expected),
+        "capability table must carry the generated applyEdit row"
+    );
+    std::fs::write(&path, text.replace(expected, "| `apply_edit` | edit | L9 |"))
+        .expect("tamper capability levels");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("tampered check"),
+        vec![PathBuf::from(doc)],
+        "a modified capability-level block is stale"
+    );
+
+    generate_schema::write_all(dir.path()).expect("rewrite schemas");
+    let text = std::fs::read_to_string(&path).expect("read client spec");
+    let begin = text
+        .find(generate_schema::schema_markdown::CAPABILITY_BLOCK_BEGIN)
+        .expect("begin marker");
+    let end = text
+        .find(generate_schema::schema_markdown::CAPABILITY_BLOCK_END)
+        .expect("end marker")
+        + generate_schema::schema_markdown::CAPABILITY_BLOCK_END.len();
+    std::fs::write(&path, format!("{}{}", &text[..begin], &text[end..]))
+        .expect("remove capability levels");
+    assert_eq!(
+        generate_schema::stale_files(dir.path()).expect("missing check"),
+        vec![PathBuf::from(doc)],
+        "a missing capability-level block is stale"
+    );
+}
+
+/// Parse the field names `PlainCapabilities` Debug output exposes.
+fn plain_capability_fields() -> Vec<String> {
+    let debug = format!("{:?}", PlainCapabilities::default());
+    let inner = debug
+        .strip_prefix("PlainCapabilities { ")
+        .and_then(|rest| rest.strip_suffix(" }"))
+        .expect("PlainCapabilities Debug keeps the struct shape");
+    inner
+        .split(", ")
+        .map(|entry| {
+            entry
+                .split(':')
+                .next()
+                .expect("Debug entry starts with a field name")
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Read one boolean `PlainCapabilities` declaration field by name.
+fn plain_flag(plain: &PlainCapabilities, field: &str) -> bool {
+    match field {
+        "apply_edit" => plain.apply_edit,
+        "document_changes" => plain.document_changes,
+        "code_actions" => plain.code_actions,
+        "disabled_actions" => plain.disabled_actions,
+        "show_document" => plain.show_document,
+        "work_done_progress" => plain.work_done_progress,
+        "completion" => plain.completion,
+        "folding_range" => plain.folding_range,
+        other => panic!("no boolean accessor for PlainCapabilities::{other}"),
+    }
+}
+
+/// Build a nested JSON value at an LSP capability pointer.
+fn set_json_pointer(root: &mut Value, pointer: &str, value: Value) {
+    let mut target = root;
+    for segment in pointer.trim_start_matches('/').split('/') {
+        target = target
+            .as_object_mut()
+            .expect("capability pointer parents are objects")
+            .entry(segment.to_owned())
+            .or_insert_with(|| Value::Object(Default::default()));
+    }
+    *target = value;
+}
+
+/// Load one recorded initialize trace as the params object it records.
+fn trace_params(name: &str) -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/lsp_traces")
+        .join(name);
+    serde_json::from_str(&std::fs::read_to_string(path).expect("read initialize trace"))
+        .expect("parse initialize trace")
+}
+
+/// Load one current client declaration entry by client name.
+fn current_client_magit(name: &str) -> Value {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/current-client-capabilities.json");
+    let entries: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("read current capabilities"))
+            .expect("parse current capabilities");
+    entries
+        .into_iter()
+        .find(|entry| entry["client"]["name"] == name)
+        .unwrap_or_else(|| panic!("current capabilities name {name}"))
 }
 
 #[test]

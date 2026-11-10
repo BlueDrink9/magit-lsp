@@ -787,6 +787,58 @@ it. A client that stops at Level 1 keeps a working read-only status document;
 features above its level are omitted or disabled by the server rather than
 advertised speculatively.
 
+The table below classifies each standard capability the server extracts into
+`PlainCapabilities` (`src/presentation/mod.rs`) by the Plain level it belongs to.
+The rows are generated from the capability field set and are drift-checked by
+`tests/schema.rs` against the implemented struct.
+
+<!-- BEGIN GENERATED CAPABILITY LEVELS -->
+| `PlainCapabilities` field | Initialize capability | Plain level | Effect |
+|---|---|---|---|
+| `apply_edit` | `workspace.applyEdit` | L1 | Status document delivered as a standard `WorkspaceEdit`; status actions and commit drafts need it. |
+| `document_changes` | `workspace.workspaceEdit.documentChanges` | L1 (versioned sub-capability) | Versioned `documentChanges` with the client's version; absent uses the legacy unversioned `changes` map. |
+| `code_actions` | `textDocument/codeAction` | L2 | Code actions are returned; `magit.command` runs them without the client declaring `workspace/executeCommand`. |
+| `disabled_actions` | `textDocument/codeAction.disabledSupport` | L2 (sub-capability) | Unavailable and planned actions carry a disabled reason; absent they are omitted. |
+| `show_document` | `window/showDocument.support` | L3 | Commit drafts open through `window/showDocument`; absent sends manual instructions instead. |
+| `work_done_progress` | `window/workDoneProgress` | L3 | Mutations run `window/workDoneProgress/create` and `$/progress` begin/report/end; absent still runs with messages. |
+| `completion` | `textDocument/completion` | none (not implemented) | Extracted into the effective-capability echo only; the server advertises no provider and registers no handler. |
+| `folding_range` | `textDocument/foldingRange` | L3 (request-only) | The client may request server-owned folds; declaring it gates no lower level. |
+| `position_encodings` | `general.positionEncodings` | L0 | Negotiates `utf-8`, `utf-16` or `utf-32`; absent defaults to `utf-16`. |
+<!-- END GENERATED CAPABILITY LEVELS -->
+
+`textDocument.foldingRange` is request-only: the server answers folds once the
+client declares it, so the capability gates no lower level even though it is
+grouped with the Level 3 extras.
+
+Classification rule: `src/presentation/mod.rs::negotiate` selects
+`Presentation::Plain` exactly when `capabilities.experimental.magit` is absent; a
+present block is strictly validated as rich v1 and selects Level 4. The Plain
+level is derived from the standard capabilities the client actually declares,
+not from its name or version. A client quirk from
+[Known client behaviors](#known-client-behaviors) can correct one recorded
+behavior beyond the declaration: the quirk's capability override is applied to
+the negotiated `PlainCapabilities` before the level is used, so
+`assume-document-changes` adds `workspace.workspaceEdit.documentChanges` for the
+matched Neovim build even though its initialize trace omits it. Actions are
+offered and run through `magit.command` without the client declaring
+`workspace/executeCommand`
+(`tests/plain_actions.rs::code_actions_work_without_execute_command_declaration`).
+`completion` is not implemented: the server advertises no
+`textDocument/completion` provider and registers no handler, so the field appears
+only in the effective-capability echo and unlocks no level.
+
+Recorded Neovim fact:
+`tests/fixtures/lsp_traces/initialize-plain-neovim-0.12.6.json` (Neovim 0.12.6)
+declares `workspace.applyEdit` and omits
+`workspace.workspaceEdit.documentChanges`, but Neovim still applies
+`workspace/applyEdit` edits that use `documentChanges`. The generated known-client
+appendix records this as `assume-document-changes` with the fake-editor model
+`neovim-accepts-undeclared-documentChanges`
+(`tests/common/editor_model/mod.rs`), so the server corrects the declaration. Do
+not generalize from this trace; it is bounded to the matched client version. The
+same trace also matches `apply-result-unreliable` (`silent-stale-apply`), which
+reconciles a silent stale apply result without changing the derived level.
+
 ### Level 0 — Connection, initialization and document synchronization
 
 Sends: standard `initialize` with the client's supported capabilities, then
