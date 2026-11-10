@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.3 — Schema server-rendered effects and menus.** Extend generation to `Effect`, `Menu` and `ViewRender`, accounting for string-serialized `ViewKind` and the flattened menu-item `activationSteps` serialization.
+    - test: Schemas describe real serialized menu switch/option/action items and effects; arbitrary view-kind strings stay strings; output activation steps are required without imposing them on deserialization input.
+    - check: Generated artifact drift and focused existing menu/view suites pass without wire changes.
+      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema --test menu --test menus --test views" @ f5cd1dc → ok
+    - Done: containing commit.
   - [x] **T011.2 — Generate directional schemas for Plain command payloads.** Add the typed generator and Make update/drift targets, initially covering `PlainActionParams`, `EditConfirmParams`, `EditAbortParams`, `EditConfirmation` and `EditAbortResult`. This is a schema foundation, not the full method catalog or T011 completion.
     - Done: containing commit.
     - test: Deterministic committed JSON Schemas use deserialization contracts for input and serialization contracts for output; required target tags and confirmation names match Rust serde behavior; drift fails without updating artifacts.

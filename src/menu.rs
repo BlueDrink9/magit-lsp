@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// How an option's value is collected. Prompts arrive in R-3.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Reader {
     Text,
@@ -27,7 +27,7 @@ pub enum Reader {
 }
 
 /// Whether a menu item can run yet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum MenuStatus {
     Implemented,
@@ -39,7 +39,7 @@ pub enum MenuStatus {
 }
 
 /// One switch, option or action of a menu.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Item {
     /// A boolean flag; its key is `-` plus a letter.
@@ -118,14 +118,17 @@ pub struct Group {
     pub items: Vec<Item>,
 }
 
+/// One menu item as serialized: the item's own fields plus `activationSteps`.
+/// This is both the actual serializer model and the output schema model.
+#[derive(Serialize, schemars::JsonSchema)]
+struct SerializedItem<'a> {
+    #[serde(flatten)]
+    item: &'a Item,
+    #[serde(rename = "activationSteps")]
+    activation_steps: Vec<String>,
+}
+
 fn serialize_items<S: serde::Serializer>(items: &[Item], serializer: S) -> Result<S::Ok, S::Error> {
-    #[derive(Serialize)]
-    struct SerializedItem<'a> {
-        #[serde(flatten)]
-        item: &'a Item,
-        #[serde(rename = "activationSteps")]
-        activation_steps: Vec<String>,
-    }
     items
         .iter()
         .map(|item| SerializedItem {
@@ -134,6 +137,42 @@ fn serialize_items<S: serde::Serializer>(items: &[Item], serializer: S) -> Resul
         })
         .collect::<Vec<_>>()
         .serialize(serializer)
+}
+
+/// Input schema model for [`Group`]: items are the plain `Vec<Item>` a client sends.
+#[derive(schemars::JsonSchema)]
+#[schemars(rename = "Group", inline, description = "A titled group of items.")]
+#[allow(dead_code)]
+struct GroupInput {
+    title: String,
+    items: Vec<Item>,
+}
+
+/// Output schema model for [`Group`]: items carry the computed `activationSteps`.
+#[derive(schemars::JsonSchema)]
+#[schemars(rename = "Group", inline, description = "A titled group of items.")]
+#[allow(dead_code)]
+struct GroupOutput<'a> {
+    title: String,
+    items: Vec<SerializedItem<'a>>,
+}
+
+impl schemars::JsonSchema for Group {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Group".into()
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        concat!(module_path!(), "::Group").into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        if generator.contract().is_deserialize() {
+            <GroupInput as schemars::JsonSchema>::json_schema(generator)
+        } else {
+            <GroupOutput<'static> as schemars::JsonSchema>::json_schema(generator)
+        }
+    }
 }
 
 /// Interpret one validated canonical menu key as the steps clients must send.
@@ -148,7 +187,7 @@ fn menu_key_steps(key: &str) -> Vec<String> {
 }
 
 /// A saved set of switches and option values.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Args {
     /// Keys of the switches that are on, e.g. `-a`.
@@ -158,7 +197,7 @@ pub struct Args {
 }
 
 /// A menu: its definition plus the current switch/option state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Menu {
     pub id: String,

@@ -56,6 +56,18 @@ pub fn artifacts() -> Vec<Artifact> {
             file: "edit-abort-result.json",
             schema: directional_schema::<magit_lsp::protocol::EditAbortResult>(Direction::Output),
         },
+        Artifact {
+            file: "effect.json",
+            schema: directional_schema::<magit_lsp::protocol::Effect>(Direction::Output),
+        },
+        Artifact {
+            file: "menu.json",
+            schema: directional_schema::<magit_lsp::menu::Menu>(Direction::Output),
+        },
+        Artifact {
+            file: "view-render.json",
+            schema: directional_schema::<magit_lsp::protocol::ViewRender>(Direction::Output),
+        },
     ]
 }
 

@@ -1,0 +1,322 @@
+{
+  "$defs": {
+    "EditDocumentMode": {
+      "description": "How an editor-bridge document is edited.",
+      "oneOf": [
+        {
+          "const": "realFile",
+          "description": "Native Git COMMIT_EDITMSG file, synchronized using standard LSP.",
+          "type": "string"
+        }
+      ]
+    },
+    "MessageLevel": {
+      "description": "Severity of a message effect.",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ],
+      "type": "string"
+    },
+    "Placement": {
+      "description": "Where the server suggests the client put a view.",
+      "enum": [
+        "main",
+        "side",
+        "bottom",
+        "float"
+      ],
+      "type": "string"
+    },
+    "Scope": {
+      "description": "A named group of key bindings, e.g. `common` or `status`.",
+      "type": "string"
+    },
+    "ViewDescriptor": {
+      "description": "Everything a client needs to create the buffer for a view.",
+      "properties": {
+        "capture": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "The wire name; schemars models it as an arbitrary string because `ViewKind`\nhas custom serde.",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/ViewMode"
+        },
+        "placement": {
+          "$ref": "#/$defs/Placement"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "title": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "viewport": {
+          "$ref": "#/$defs/Viewport",
+          "description": "keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "uri",
+        "title",
+        "placement",
+        "mode",
+        "scope",
+        "capture",
+        "viewport"
+      ],
+      "type": "object"
+    },
+    "ViewMode": {
+      "description": "Whether the client may edit the view or only display it.",
+      "enum": [
+        "interactive",
+        "text"
+      ],
+      "type": "string"
+    },
+    "Viewport": {
+      "description": "The client's text area, needed to lay out multi-column views.",
+      "properties": {
+        "cols": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A user-facing consequence of a request.",
+  "oneOf": [
+    {
+      "description": "Show a notification; `hint` and `detail` are optional extras.",
+      "properties": {
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/MessageLevel"
+        },
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "const": "message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "level",
+        "text"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The key is not bound here; perform its normal editor behaviour.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "type": {
+          "const": "passThrough",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "key"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Put `text` on the system clipboard.",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "const": "clipboard",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Create a window/buffer/panel and show it, remembering the previous view so `PopView` returns.",
+      "properties": {
+        "descriptor": {
+          "$ref": "#/$defs/ViewDescriptor"
+        },
+        "type": {
+          "const": "pushView",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "descriptor"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Close that view and focus the previous one.",
+      "properties": {
+        "type": {
+          "const": "popView",
+          "type": "string"
+        },
+        "viewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "viewId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Focus an existing view.",
+      "properties": {
+        "type": {
+          "const": "focusView",
+          "type": "string"
+        },
+        "viewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "viewId"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Close every view of the session.",
+      "properties": {
+        "type": {
+          "const": "quit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Open a worktree file at a location the server resolved from its tree.\n`uri` is a `file:` URI; `line` and `column` are 0-based.",
+      "properties": {
+        "column": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "visitFile",
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "uri",
+        "line",
+        "column"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Open Git's real commit-message file, or re-present the same pending run\nafter failed native close. New runs start at version 1; recovery carries\nthe accepted snapshot and must not replace retained client edits/versions.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/EditDocumentMode"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "const": "editDocument",
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "version": {
+          "format": "int32",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "runId",
+        "uri",
+        "text",
+        "version",
+        "kind",
+        "title",
+        "mode",
+        "scope"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Effect"
+}

@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for ViewKind {
 }
 
 /// Where the server suggests the client put a view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Placement {
     Main,
@@ -97,7 +97,7 @@ impl Default for Placement {
 }
 
 /// Whether the client may edit the view or only display it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewMode {
     Interactive,
@@ -111,7 +111,7 @@ impl Default for ViewMode {
 }
 
 /// A named group of key bindings, e.g. `common` or `status`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct Scope(String);
 
@@ -134,7 +134,7 @@ impl fmt::Display for Scope {
 }
 
 /// The client's text area, needed to lay out multi-column views.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Viewport {
     pub cols: u32,
@@ -148,10 +148,13 @@ impl Default for Viewport {
 }
 
 /// Everything a client needs to create the buffer for a view.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewDescriptor {
     pub id: String,
+    /// The wire name; schemars models it as an arbitrary string because `ViewKind`
+    /// has custom serde.
+    #[schemars(with = "String")]
     pub kind: ViewKind,
     pub uri: String,
     pub title: String,

@@ -1,0 +1,255 @@
+{
+  "$defs": {
+    "Args": {
+      "additionalProperties": false,
+      "description": "A saved set of switches and option values.",
+      "properties": {
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Set options, keyed by menu key, e.g. `=A` -> `\"Alice\"`.",
+          "type": "object"
+        },
+        "switches": {
+          "description": "Keys of the switches that are on, e.g. `-a`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "switches",
+        "options"
+      ],
+      "type": "object"
+    },
+    "Group": {
+      "description": "A titled group of items.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SerializedItem"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "items"
+      ],
+      "type": "object"
+    },
+    "MenuStatus": {
+      "description": "Whether a menu item can run yet.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "implemented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Listed but not built yet; the roadmap item it will arrive with.",
+          "properties": {
+            "roadmapId": {
+              "type": "string"
+            },
+            "status": {
+              "const": "planned",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "roadmapId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Reader": {
+      "description": "How an option's value is collected. Prompts arrive in R-3.1.",
+      "oneOf": [
+        {
+          "enum": [
+            "text",
+            "choice",
+            "ref",
+            "commit",
+            "date",
+            "number"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "path",
+          "description": "keep-for: TASKS §3.11 reader schema (Phase-2/R-2.7); metadata retained, not a specialized executor.",
+          "type": "string"
+        },
+        {
+          "const": "remote",
+          "description": "A configured remote name.",
+          "type": "string"
+        }
+      ]
+    },
+    "SerializedItem": {
+      "description": "One menu item as serialized: the item's own fields plus `activationSteps`.\nThis is both the actual serializer model and the output schema model.",
+      "oneOf": [
+        {
+          "description": "A boolean flag; its key is `-` plus a letter.",
+          "properties": {
+            "flag": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "switch",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "status": {
+              "$ref": "#/$defs/MenuStatus"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "flag",
+            "label",
+            "on",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A flag with a value; its key is `=` plus a letter.",
+          "properties": {
+            "flag": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "option",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "reader": {
+              "$ref": "#/$defs/Reader"
+            },
+            "status": {
+              "$ref": "#/$defs/MenuStatus"
+            },
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "flag",
+            "label",
+            "value",
+            "reader",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A single-key operation.",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "action",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/MenuStatus"
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "command",
+            "label",
+            "status"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "activationSteps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "activationSteps"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A menu: its definition plus the current switch/option state.",
+  "properties": {
+    "groups": {
+      "items": {
+        "$ref": "#/$defs/Group"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "savedArgs": {
+      "$ref": "#/$defs/Args",
+      "description": "The arguments `menu.reset-args` restores."
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "groups",
+    "savedArgs"
+  ],
+  "title": "Menu",
+  "type": "object"
+}

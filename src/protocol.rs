@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Severity of a message effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageLevel {
     Info,
@@ -14,7 +14,7 @@ pub enum MessageLevel {
 }
 
 /// A user-facing consequence of a request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Effect {
     /// Show a notification; `hint` and `detail` are optional extras.
@@ -64,7 +64,7 @@ pub enum Effect {
 }
 
 /// How an editor-bridge document is edited.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum EditDocumentMode {
     /// Native Git COMMIT_EDITMSG file, synchronized using standard LSP.
@@ -169,7 +169,7 @@ impl Effect {
 }
 
 /// A cursor position in the rendered view, 0-based.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Cursor {
     pub line: usize,
     pub column: usize,
@@ -184,7 +184,7 @@ pub struct Selection {
 }
 
 /// Replace `start_line..end_line` with `lines` (end exclusive).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LineEdit {
     pub start_line: usize,
@@ -193,7 +193,7 @@ pub struct LineEdit {
 }
 
 /// `view/render`: a full document or a line-range update.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewRender {
     pub view_id: String,
