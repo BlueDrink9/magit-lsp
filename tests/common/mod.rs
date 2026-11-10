@@ -295,6 +295,9 @@ pub fn init_unborn_repo() -> (RepoFixture, GitRepo) {
 /// Real-server stdio transport shared by integration suites.
 pub mod stdio;
 
+/// Narrow JSON Schema validation shared by the schema and example suites.
+pub mod schema;
+
 /// Fake `git` executables (gated and stalling) shared by the real-server suites.
 pub mod fake_git;
 
