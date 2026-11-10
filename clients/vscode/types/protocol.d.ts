@@ -377,7 +377,7 @@ export namespace Menu {
    * One menu item as serialized: the item's own fields plus `activationSteps`.
    * This is both the actual serializer model and the output schema model.
    */
-  export type SerializedItem = {
+  export type SerializedItem = ({
     flag: string;
     key: string;
     kind: "switch";
@@ -400,6 +400,8 @@ export namespace Menu {
     kind: "action";
     label: string;
     status: MenuStatus;
+  }) & {
+    activationSteps: string[];
   };
 }
 
@@ -526,7 +528,7 @@ export namespace ViewRender {
    * One menu item as serialized: the item's own fields plus `activationSteps`.
    * This is both the actual serializer model and the output schema model.
    */
-  export type SerializedItem = {
+  export type SerializedItem = ({
     flag: string;
     key: string;
     kind: "switch";
@@ -549,6 +551,8 @@ export namespace ViewRender {
     kind: "action";
     label: string;
     status: MenuStatus;
+  }) & {
+    activationSteps: string[];
   };
 
   /**

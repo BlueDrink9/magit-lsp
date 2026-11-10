@@ -154,7 +154,27 @@ fn type_expr(schema: &Value, indent: usize) -> Result<String, String> {
             if map.contains_key("$defs") {
                 return Err("nested `$defs` is unsupported".to_string());
             }
+            for key in ["oneOf", "anyOf", "allOf"] {
+                if !map.contains_key(key) {
+                    continue;
+                }
+                for dropped in ["const", "enum"] {
+                    if map.contains_key(dropped) {
+                        return Err(format!(
+                            "`{dropped}` beside `{key}` is unsupported; sibling constraints would be dropped"
+                        ));
+                    }
+                }
+            }
             if let Some(reference) = map.get("$ref") {
+                if let Some(key) = ["oneOf", "anyOf", "allOf"]
+                    .into_iter()
+                    .find(|key| map.contains_key(*key))
+                {
+                    return Err(format!(
+                        "`$ref` beside `{key}` is unsupported; sibling constraints would be dropped"
+                    ));
+                }
                 return reference_type(reference);
             }
             if let Some(value) = map.get("const") {
@@ -192,7 +212,16 @@ fn type_expr(schema: &Value, indent: usize) -> Result<String, String> {
                     rendered.push(type_expr(value, indent)?);
                 }
                 let separator = if *key == "allOf" { " & " } else { " | " };
-                return Ok(join_types(rendered, separator, indent));
+                let combined = join_types(rendered, separator, indent);
+                let Some(sibling) = combinator_siblings(map, key)? else {
+                    return Ok(combined);
+                };
+                let sibling = type_expr(&sibling, indent)?;
+                return Ok(if *key == "allOf" {
+                    format!("{combined} & {sibling}")
+                } else {
+                    format!("{} & {sibling}", parenthesize(&combined))
+                });
             }
             match map.get("type") {
                 Some(Value::String(kind)) => primitive(kind, map, indent),
@@ -221,6 +250,66 @@ fn type_expr(schema: &Value, indent: usize) -> Result<String, String> {
         }
         _ => Err("schema must be an object or a boolean".to_string()),
     }
+}
+
+/// Structural constraints sitting beside a combinator in the same schema node.
+///
+/// JSON Schema applies keywords beside `allOf`, `anyOf` and `oneOf` to the
+/// same instance, so rendering only the combinator would silently drop
+/// constraints such as `SerializedItem.activationSteps`. Returns `None` when
+/// the node carries no sibling constraint.
+fn combinator_siblings(
+    map: &serde_json::Map<String, Value>,
+    combinator: &str,
+) -> Result<Option<Value>, String> {
+    const NON_STRUCTURAL: &[&str] = &[
+        "$schema",
+        "$defs",
+        "title",
+        "description",
+        "examples",
+        "default",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+        "format",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "oneOf",
+        "anyOf",
+        "allOf",
+    ];
+    let mut siblings = serde_json::Map::new();
+    for (key, value) in map {
+        if NON_STRUCTURAL.contains(&key.as_str()) {
+            continue;
+        }
+        if key == "type" {
+            if value == "object" {
+                continue;
+            }
+            return Err(format!(
+                "unsupported `type` {value} beside `{combinator}`"
+            ));
+        }
+        if !matches!(
+            key.as_str(),
+            "properties" | "required" | "additionalProperties"
+        ) {
+            return Err(format!("unsupported `{key}` beside `{combinator}`"));
+        }
+        siblings.insert(key.clone(), value.clone());
+    }
+    if siblings.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Value::Object(siblings)))
 }
 
 /// Render one primitive JSON Schema type, delegating compound shapes.

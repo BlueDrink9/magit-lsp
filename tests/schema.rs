@@ -1025,6 +1025,120 @@ fn typescript_declarations_fail_on_unsupported_schema_constructs() {
 }
 
 #[test]
+fn typescript_declarations_preserve_combinator_siblings() {
+    let schema = serde_json::json!({
+        "title": "Synthetic",
+        "description": "Item with activation steps.",
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "switch", "type": "string" }
+                },
+                "required": ["kind"]
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "option", "type": "string" }
+                },
+                "required": ["kind"]
+            }
+        ],
+        "type": "object",
+        "properties": {
+            "activationSteps": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["activationSteps"]
+    });
+    let rendered = schema_typescript::render_root(&schema, "Synthetic")
+        .expect("render combinator with siblings");
+    assert!(
+        rendered.contains(") & {\n    activationSteps: string[];\n  };"),
+        "oneOf sibling constraints must survive: {rendered}"
+    );
+    assert!(
+        rendered.contains("kind: \"switch\";") && rendered.contains("kind: \"option\";"),
+        "combinator variants must survive: {rendered}"
+    );
+
+    let any_of = serde_json::json!({
+        "title": "Synthetic",
+        "anyOf": [{ "type": "string" }, { "type": "number" }],
+        "properties": { "note": { "type": "string" } },
+        "required": ["note"]
+    });
+    let rendered = schema_typescript::render_root(&any_of, "Synthetic")
+        .expect("anyOf sibling constraints are representable");
+    assert!(
+        rendered.contains("(string | number) & {"),
+        "anyOf stays anyOf and keeps siblings: {rendered}"
+    );
+}
+
+#[test]
+fn menu_item_declarations_require_activation_steps() {
+    let text = read_declarations();
+    let menu = namespace_block(&text, "Menu");
+    let start = menu
+        .find("export type SerializedItem =")
+        .expect("menu declarations define SerializedItem");
+    let declaration = &menu[start..];
+    let declaration = &declaration[..declaration.find("  };").expect("SerializedItem ends")];
+    assert!(
+        declaration.contains("activationSteps: string[];"),
+        "serialized items require activationSteps: {declaration}"
+    );
+    assert!(
+        !declaration.contains("activationSteps?:"),
+        "activationSteps must stay required: {declaration}"
+    );
+    assert!(
+        declaration.contains(") & {"),
+        "menu item declarations keep combinator sibling constraints: {declaration}"
+    );
+}
+
+#[test]
+fn typescript_declarations_fail_on_unsupported_combinator_siblings() {
+    let schemas = [
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "oneOf": [{ "type": "string" }],
+                "type": "array",
+                "items": { "type": "string" }
+            }),
+            "beside `oneOf`",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "oneOf": [{ "type": "string" }],
+                "$ref": "#/$defs/Args"
+            }),
+            "oneOf",
+        ),
+        (
+            serde_json::json!({
+                "title": "Synthetic",
+                "allOf": [{ "type": "string" }],
+                "const": "fixed"
+            }),
+            "const",
+        ),
+    ];
+    for (schema, reason) in schemas {
+        let error = schema_typescript::render_root(&schema, "Synthetic")
+            .expect_err("unsupported sibling must fail loudly");
+        assert!(
+            error.contains(reason),
+            "error must name {reason}: {error}"
+        );
+    }
+}
+
+#[test]
 fn typescript_method_map_mirrors_the_catalog() {
     let text = read_declarations();
     assert!(text.contains("export interface MethodMap {\n"));
