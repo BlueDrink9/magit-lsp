@@ -99,6 +99,11 @@ jobs:
       - name: make test-rust test-lua
         run: make test-rust test-lua
 
+      # Generated client schemas must match their sources; drift fails here
+      # instead of silently diverging from the committed artifacts.
+      - name: make schema-check
+        run: make schema-check
+
   ui-test:
     runs-on: ubuntu-24.04
     steps:
