@@ -43,8 +43,12 @@ hooks-run:
 test: build test-rust test-lua vscode-test
 
 vscode-test: build
+	$(call run,vscode-typecheck,npm --silent --prefix clients/vscode run typecheck)
 	$(call run,vscode,npm --silent --prefix clients/vscode test)
 	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)
+
+vscode-typecheck:
+	$(call run,vscode-typecheck,npm --silent --prefix clients/vscode run typecheck)
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))

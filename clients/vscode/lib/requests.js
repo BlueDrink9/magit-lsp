@@ -16,7 +16,7 @@ const { message } = require('./util');
  *
  * @param {string} viewId
  * @param {string} key
- * @param {{cursor: {line: number, column: number}, selection?: {startLine: number, endLine: number}}} info
+ * @param {{cursor: import('../types/protocol').ViewKeyParams.Cursor, selection?: import('../types/protocol').ViewKeyParams.Selection}} info
  */
 async function press(viewId, key, info) {
   const state = store.views.get(viewId);
@@ -25,6 +25,7 @@ async function press(viewId, key, info) {
     return;
   }
 
+  /** @type {import('../types/protocol').ViewKeyParams.Root} */
   const params = {
     viewId,
     version: state.version || 0,
@@ -38,7 +39,9 @@ async function press(viewId, key, info) {
 
   try {
     await store.clientReady;
-    const response = await client.sendRequest('view/key', params);
+    const response = /** @type {import('../types/protocol').ViewInvokeResponse.Root} */ (
+      await client.sendRequest('view/key', params)
+    );
     await effects.applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/key ${key} failed: ${message(error)}`);
@@ -52,7 +55,7 @@ async function press(viewId, key, info) {
  * @param {string} viewId
  * @param {string} command
  * @param {unknown} args the command args, if any (not the VSCode envelope)
- * @param {{cursor: {line: number, column: number}, selection?: object}} info
+ * @param {{cursor: import('../types/protocol').ViewInvokeParams.Cursor, selection?: import('../types/protocol').ViewInvokeParams.Selection}} info
  */
 async function invoke(viewId, command, args, info) {
   const state = store.views.get(viewId);
@@ -61,6 +64,7 @@ async function invoke(viewId, command, args, info) {
     return;
   }
 
+  /** @type {import('../types/protocol').ViewInvokeParams.Root} */
   const params = {
     viewId,
     command,
@@ -76,7 +80,9 @@ async function invoke(viewId, command, args, info) {
 
   try {
     await store.clientReady;
-    const response = await client.sendRequest('view/invoke', params);
+    const response = /** @type {import('../types/protocol').ViewInvokeResponse.Root} */ (
+      await client.sendRequest('view/invoke', params)
+    );
     await effects.applyEffects(response && response.effects, viewId);
   } catch (error) {
     store.output.appendLine(`view/invoke ${command} failed: ${message(error)}`);
@@ -87,7 +93,7 @@ async function invoke(viewId, command, args, info) {
 /**
  * Apply a `view/render` notification, then acknowledge the version.
  *
- * @param {object} params
+ * @param {import('../types/protocol').ViewRender.Root} params
  */
 function applyRender(params) {
   if (!params || !params.viewId) {
@@ -138,10 +144,12 @@ function applyRender(params) {
   }
   const client = store.client;
   if (client) {
-    client.sendNotification('view/rendered', {
+    /** @type {import('../types/protocol').ViewRenderedParams.Root} */
+    const rendered = {
       viewId: state.id,
       version: params.version,
-    });
+    };
+    client.sendNotification('view/rendered', rendered);
     store.semanticChanged?.fire();
   }
 }
@@ -149,13 +157,14 @@ function applyRender(params) {
 /**
  * Ask the user a server prompt and answer it with `view/promptRespond`.
  *
- * @param {object} params `view/prompt` params
+ * @param {import('../types/protocol').ViewPromptParams.Root} params `view/prompt` params
  */
 async function handlePrompt(params) {
   if (!params || !params.promptId || !store.client) {
     return;
   }
 
+  /** @type {{cancelled: boolean, value?: import('../types/protocol').ViewPromptRespondParams.PromptValue}} */
   let answer = { cancelled: true };
   try {
     answer = await promptFor(params);
@@ -163,6 +172,7 @@ async function handlePrompt(params) {
     store.output.appendLine(`view/prompt "${params.title}" failed: ${message(error)}`);
   }
 
+  /** @type {import('../types/protocol').ViewPromptRespondParams.Root} */
   const request = { promptId: params.promptId, cancelled: answer.cancelled };
   if (!answer.cancelled) {
     request.value = answer.value;
@@ -178,8 +188,8 @@ async function handlePrompt(params) {
 /**
  * Show one prompt with the matching VSCode widget.
  *
- * @param {object} params `view/prompt` params
- * @returns {Promise<{cancelled: boolean, value?: unknown, custom?: boolean}>}
+ * @param {import('../types/protocol').ViewPromptParams.Root} params `view/prompt` params
+ * @returns {Promise<{cancelled: boolean, value?: import('../types/protocol').ViewPromptRespondParams.PromptValue, custom?: boolean}>}
  */
 async function promptFor(params) {
   if (params.kind === 'text') {
@@ -234,13 +244,14 @@ async function promptFor(params) {
 /**
  * Ask the user a server pick and answer it with `view/pickRespond`.
  *
- * @param {object} params `view/pick` params
+ * @param {import('../types/protocol').ViewPickParams.Root} params `view/pick` params
  */
 async function handlePick(params) {
   if (!params || !params.pickId || !store.client) {
     return;
   }
 
+  /** @type {{cancelled: boolean, selected: string[]}} */
   let answer = { cancelled: true, selected: [] };
   try {
     answer = await pickFor(params);
@@ -266,7 +277,7 @@ async function handlePick(params) {
  * Free text and grouped items are not declared client capabilities, so they
  * warn and cancel rather than presenting a shape the server cannot read.
  *
- * @param {object} params `view/pick` params
+ * @param {import('../types/protocol').ViewPickParams.Root} params `view/pick` params
  * @returns {Promise<{cancelled: boolean, selected: string[]}>}
  */
 async function pickFor(params) {
@@ -300,7 +311,9 @@ async function resync(viewId) {
   }
   try {
     await store.clientReady;
-    const result = await client.sendRequest('view/resync', { viewId });
+    const result = /** @type {import('../types/protocol').ViewRender.Root|undefined} */ (
+      await client.sendRequest('view/resync', { viewId })
+    );
     if (result) {
       applyRender(result);
     }

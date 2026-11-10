@@ -10,7 +10,7 @@
 /**
  * The rows a pick offers, in display order, with preselection applied.
  *
- * @param {object} params `view/pick` params
+ * @param {import('../types/protocol').ViewPickParams.Root} params `view/pick` params
  * @returns {{id: string, label: string, description?: string, detail?: string, picked: boolean}[]}
  */
 function pickItems(params) {
@@ -30,8 +30,8 @@ function pickItems(params) {
 /**
  * Shape the answer for one picked row, an array of rows, or a cancel.
  *
- * @param {object} params `view/pick` params
- * @param {unknown} picked one row, an array of rows, or undefined/null on cancel
+ * @param {import('../types/protocol').ViewPickParams.Root} params `view/pick` params
+ * @param {any} picked one row, an array of rows, or undefined/null on cancel (VSCode widget result boundary)
  * @returns {{cancelled: boolean, selected: string[]}}
  */
 function answerFor(params, picked) {

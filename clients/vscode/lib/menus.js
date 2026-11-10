@@ -9,6 +9,17 @@ const { store } = require('./store');
 const { message } = require('./util');
 
 /**
+ * A menu QuickPick row: a VSCode item plus the canonical menu key and steps.
+ *
+ * @typedef {vscode.QuickPickItem & {
+ *   key?: string,
+ *   activationSteps?: string[],
+ *   itemKind?: string,
+ *   status?: string,
+ * }} MenuQuickPickItem
+ */
+
+/**
  * Show a menu view as a QuickPick.
  *
  * Typed characters are forwarded one key step at a time; the server owns the
@@ -25,6 +36,7 @@ function showMenu(state) {
     return;
   }
 
+  /** @type {vscode.QuickPick<MenuQuickPickItem>} */
   const quickPick = vscode.window.createQuickPick();
   quickPick.title = state.menu ? state.menu.title : state.descriptor.title;
   quickPick.placeholder = 'Press a menu key';
@@ -47,7 +59,8 @@ function showMenu(state) {
   quickPick.onDidAccept(() => {
     const picked = quickPick.selectedItems && quickPick.selectedItems[0];
     if (picked && picked.key) {
-      queueSteps(state, picked.activationSteps);
+      // A selectable menu row always carries its activation steps on the wire.
+      queueSteps(state, /** @type {string[]} */ (picked.activationSteps));
     }
   });
 
@@ -81,8 +94,8 @@ function updateQuickPick(state) {
 /**
  * Convert the pure menu rows to VSCode QuickPick items.
  *
- * @param {object|undefined} model
- * @returns {vscode.QuickPickItem[]}
+ * @param {import('../types/protocol').Menu.Root|undefined} model
+ * @returns {MenuQuickPickItem[]}
  */
 function menuItems(model) {
   return menu.quickPickItems(model).map((row) => {

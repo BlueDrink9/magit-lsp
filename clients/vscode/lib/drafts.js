@@ -401,8 +401,7 @@ async function checkpoint(record) {
 async function closeTab(record) {
   const tabs = vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => tab.input && tab.input.uri
-      && tab.input.uri.toString() === record.uri.toString());
+    .filter((tab) => views.tabUri(tab) === record.uri.toString());
   if (tabs.length === 0) {
     return;
   }
@@ -556,7 +555,7 @@ async function cancel(record) {
 /**
  * Open the `editDocument` effect's managed draft in the same window.
  *
- * @param {object} effect
+ * @param {Extract<import('../types/protocol').Effect.Root, {type: 'editDocument'}>} effect
  * @param {string|undefined} originViewId
  */
 async function open(effect, originViewId) {
@@ -626,7 +625,7 @@ async function open(effect, originViewId) {
     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
     record.document = document;
     record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
+      .filter((tab) => views.tabUri(tab) === record.uri.toString()));
   } catch (error) {
     store.output.appendLine(`commit draft document failed: ${message(error)}`);
     seen.delete(record.runId);
@@ -648,14 +647,16 @@ async function open(effect, originViewId) {
  * Route a generated command while a managed draft has focus.
  *
  * @param {unknown} args the `magit.invoke` arguments
- * @returns {boolean} whether the draft owned the command
+ * @returns {Promise<boolean>} whether the draft owned the command
  */
 async function handleInvoke(args) {
   const record = current();
   if (!record) {
     return false;
   }
-  const command = typeof args === 'string' ? args : args && args.command;
+  const command = typeof args === 'string'
+    ? args
+    : args && /** @type {{command?: string}} */ (args).command;
   const action = edit.draftAction(command);
   if (action === 'confirm') {
     await confirm(record);
@@ -687,7 +688,7 @@ function onChanged(event) {
  * Ignore document teardown as confirmation (including language changes).
  *
  * @param {vscode.TextDocument} document
- * @returns {boolean} whether the document belonged to a managed draft
+ * @returns {Promise<boolean>} whether the document belonged to a managed draft
  */
 async function onClosed(document) {
   const runId = store.draftUris.get(document.uri.toString());
@@ -719,16 +720,17 @@ async function onClosed(document) {
  */
 function onTabsChanged(event) {
   if (store.disposing || !event) return;
-  const closed = new Set((event.closed || []).filter((tab) => tab.input?.uri)
-    .map((tab) => tab.input.uri.toString()));
+  const closed = new Set((event.closed || [])
+    .map((tab) => views.tabUri(tab))
+    .filter((uri) => typeof uri === 'string'));
   const open = new Set(vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => tab.input && tab.input.uri)
-    .map((tab) => tab.input.uri.toString()));
+    .map((tab) => views.tabUri(tab))
+    .filter((uri) => typeof uri === 'string'));
   for (const record of store.drafts.values()) {
     const ownedClose = (event.closed || []).some((tab) => record.tabs?.has(tab));
     record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => tab.input?.uri?.toString() === record.uri.toString()));
+      .filter((tab) => views.tabUri(tab) === record.uri.toString()));
     if (!ownedClose || !closed.has(record.uri.toString()) || !record.attached || record.closing
       || record.changingLanguage || record.disconnected) {
       continue;

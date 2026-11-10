@@ -39,7 +39,7 @@ async function replay(key) {
 /**
  * Show a message effect at its level.
  *
- * @param {object} effect
+ * @param {Extract<import('../types/protocol').Effect.Root, {type: 'message'}>} effect
  */
 function showMessage(effect) {
   const text = effect.hint ? `${effect.text}\n${effect.hint}` : effect.text || '';
@@ -58,7 +58,7 @@ function showMessage(effect) {
 /**
  * Apply the effects a request returned.
  *
- * @param {object[]|undefined} effects
+ * @param {import('../types/protocol').Effect.Root[]|undefined} effectList
  */
 async function applyEffects(effectList, originViewId) {
   const origin = originViewId && store.views.get(originViewId);
@@ -110,8 +110,12 @@ async function applyEffects(effectList, originViewId) {
       case 'editDocument':
         await drafts.open(effect, rootId || originViewId);
         break;
-      default:
-        store.output.appendLine(`unknown effect: ${effect.type}`);
+      default: {
+        // The server owns this union; a newer server may send a tag this
+        // client does not know, so read it as a boundary value.
+        const unknownEffect = /** @type {{type?: string}} */ (effect);
+        store.output.appendLine(`unknown effect: ${unknownEffect.type}`);
+      }
     }
   }
 }

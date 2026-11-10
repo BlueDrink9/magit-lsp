@@ -208,6 +208,20 @@ async function closeView(viewId, focusPrevious) {
   activateView(undefined);
 }
 
+/**
+ * The URI string a tab's input represents, at the dynamic editor boundary.
+ *
+ * @param {vscode.Tab} tab
+ * @returns {string|undefined}
+ */
+function tabUri(tab) {
+  const input = tab.input;
+  if (!input || typeof input !== 'object' || !('uri' in input) || !input.uri) {
+    return undefined;
+  }
+  return /** @type {vscode.Uri} */ (input.uri).toString();
+}
+
 /** Close every local view belonging to one server repository session. */
 async function closeRoot(rootId) {
   if (!rootId) return;
@@ -220,9 +234,10 @@ async function closeRoot(rootId) {
     store.pendingRenders.delete(state.id);
     store.documentsChanged.fire(state.uri);
   }
-  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) =>
-    tab.input && tab.input.uri && uris.has(tab.input.uri.toString())
-  );
+  const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
+    const uri = tabUri(tab);
+    return uri !== undefined && uris.has(uri);
+  });
   if (tabs.length) await vscode.window.tabGroups.close(tabs, true);
   if (states.some((state) => state.id === store.activeViewId)) activateView(undefined);
 }
@@ -248,6 +263,7 @@ async function focusView(viewId) {
 exports.stateForUri = stateForUri;
 exports.activeState = activeState;
 exports.isMenuKind = isMenuKind;
+exports.tabUri = tabUri;
 exports.ensureView = ensureView;
 exports.showView = showView;
 exports.showDocument = showDocument;

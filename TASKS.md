@@ -252,6 +252,9 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.9 — Establish checked VSCode wire boundaries.** Commit the production `checkJs` configuration and generated-type annotations as a prerequisite to T011.7's negative fixture and full-suite verification.
+    - check: `make vscode-typecheck` passes over all production JavaScript with real Node/VSCode declaration dependencies and generated payload types in handlers; preserve existing runtime semantics, with no new missing-activation fallback or stricter tab-URI rejection.
+      - Verified: make vscode-typecheck @ d5573c2 → ok
   - [x] **T011.8 — Preserve schema siblings beside TypeScript combinators.** Fix declaration generation so constraints such as `SerializedItem.activationSteps` beside `oneOf`/`anyOf`/`allOf` are not dropped.
     - test: real generated menu-item declarations require `activationSteps`, and combinator sibling constraints remain present; deterministic drift checks still cover the regenerated declarations.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Prerequisite discovered while typing the VSCode consumer; do not fold consumer setup into this fix.

@@ -1,15 +1,43 @@
 'use strict';
 
 /**
+ * A QuickPick separator row built from a menu group title.
+ *
+ * @typedef {{kind: 'separator', label: string}} SeparatorRow
+ */
+
+/**
+ * One selectable menu row with the canonical key the server expects.
+ *
+ * @typedef {{
+ *   kind: 'item',
+ *   label: string,
+ *   description: string,
+ *   key: string,
+ *   itemKind: string,
+ *   status: string,
+ *   roadmapId: string|undefined,
+ *   reason: undefined,
+ *   on: boolean|undefined,
+ *   value: string|null|undefined,
+ *   flag: string|undefined,
+ *   command: string|undefined,
+ *   activationSteps: string[],
+ * }} ItemRow
+ */
+
+/** @typedef {SeparatorRow|ItemRow} QuickPickRow */
+
+/**
  * The one-line description for a QuickPick row.
  *
- * @param {object} item a menu `Item`
- * @param {{kind: string, roadmapId?: string, reason?: string}} status
+ * @param {import('../types/protocol').Menu.SerializedItem} item a menu `Item`
+ * @param {import('../types/protocol').Menu.MenuStatus} status
  * @returns {string}
  */
 function describeItem(item, status) {
   const parts = [];
-  if (item.flag) {
+  if ('flag' in item && item.flag) {
     parts.push(item.flag);
   }
   if (item.kind === 'switch') {
@@ -26,8 +54,8 @@ function describeItem(item, status) {
 /**
  * Map one menu item to a QuickPick row.
  *
- * @param {object} item
- * @returns {object}
+ * @param {import('../types/protocol').Menu.SerializedItem} item
+ * @returns {ItemRow}
  */
 function quickPickItem(item) {
   const status = item.status;
@@ -38,12 +66,12 @@ function quickPickItem(item) {
     key: item.key,
     itemKind: item.kind,
     status: status.status,
-    roadmapId: status.roadmapId,
+    roadmapId: 'roadmapId' in status ? status.roadmapId : undefined,
     reason: undefined,
     on: item.kind === 'switch' ? Boolean(item.on) : undefined,
     value: item.kind === 'option' ? item.value : undefined,
-    flag: item.flag,
-    command: item.command,
+    flag: 'flag' in item ? item.flag : undefined,
+    command: item.kind === 'action' ? item.command : undefined,
     activationSteps: item.activationSteps,
   };
 }
@@ -54,10 +82,11 @@ function quickPickItem(item) {
  * Group titles become separators; every switch, option and action becomes a
  * selectable row whose `key` is the canonical menu key the server expects.
  *
- * @param {object|undefined} menu
- * @returns {object[]}
+ * @param {import('../types/protocol').Menu.Root|undefined} menu
+ * @returns {QuickPickRow[]}
  */
 function quickPickItems(menu) {
+  /** @type {QuickPickRow[]} */
   const rows = [];
   for (const group of (menu && menu.groups) || []) {
     rows.push({ kind: 'separator', label: group.title });

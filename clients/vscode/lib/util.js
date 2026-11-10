@@ -3,7 +3,7 @@
 /**
  * A readable message for an unknown error value.
  *
- * @param {unknown} error
+ * @param {any} error a caught or thrown boundary value
  * @returns {string}
  */
 function message(error) {

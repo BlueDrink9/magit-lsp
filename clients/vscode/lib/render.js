@@ -4,7 +4,7 @@
  * Apply one `LineEdit` to a line array. `endLine` is exclusive.
  *
  * @param {string[]} lines
- * @param {{startLine: number, endLine: number, lines: string[]}} edit
+ * @param {import('../types/protocol').ViewRender.LineEdit} edit
  */
 function applyEdit(lines, edit) {
   const start = Math.max(0, edit.startLine);
@@ -22,7 +22,7 @@ function applyEdit(lines, edit) {
  *
  * @param {string[]|undefined} lines the current document lines
  * @param {number|undefined} version the last acknowledged version
- * @param {object|undefined} render a `ViewRender`
+ * @param {import('../types/protocol').ViewRender.Root|undefined} render a `ViewRender`
  * @returns {{lines: string[], version: number|undefined, mode: string|undefined, status: 'full'|'edits'|'resync'|'none'}}
  */
 function applyRender(lines, version, render) {

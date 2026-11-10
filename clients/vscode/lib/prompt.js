@@ -13,7 +13,7 @@ const CUSTOM_ID = '__custom__';
 /**
  * The rows a prompt offers, in display order.
  *
- * @param {object} params `view/prompt` params
+ * @param {import('../types/protocol').ViewPromptParams.Root} params `view/prompt` params
  * @returns {{id: string, label: string, description?: string, detail?: string}[]}
  */
 function promptItems(params) {
@@ -27,6 +27,7 @@ function promptItems(params) {
     return (params.destructive || params.default === false) ? [no, yes] : [yes, no];
   }
 
+  /** @type {{id: string, label: string, description?: string, detail?: string}[]} */
   const items = (params.items || []).map((item) => ({
     id: item.id,
     label: item.label,
@@ -42,9 +43,9 @@ function promptItems(params) {
 /**
  * Shape the answer for one picked row (or value).
  *
- * @param {object} params `view/prompt` params
- * @param {unknown} picked one row, a string, an array of rows, or undefined
- * @returns {{cancelled: boolean, value?: unknown, custom?: boolean}}
+ * @param {import('../types/protocol').ViewPromptParams.Root} params `view/prompt` params
+ * @param {any} picked one row, a string, an array of rows, or undefined (VSCode widget result boundary)
+ * @returns {{cancelled: boolean, value?: import('../types/protocol').ViewPromptRespondParams.PromptValue, custom?: boolean}}
  */
 function answerFor(params, picked) {
   if (picked === undefined || picked === null) {
@@ -79,7 +80,7 @@ function answerFor(params, picked) {
  * The answer value for a custom choice after the text prompt.
  *
  * @param {string|undefined} text the typed value, or undefined on cancel
- * @returns {{cancelled: boolean, value?: {custom: string}}}
+ * @returns {{cancelled: boolean, value?: import('../types/protocol').ViewPromptRespondParams.PromptChoiceAnswer}}
  */
 function customChoice(text) {
   if (text === undefined || text === null) {
