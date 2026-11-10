@@ -141,6 +141,55 @@ fn pump_rejecting_draft(
     message
 }
 
+/// Receive frames until the draft template edit arrives, leaving it unanswered.
+///
+/// The held request lets a test deliver its outcome after the client has
+/// already acted on the template, or after a replacement delivery.
+fn hold_draft_edit(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+) -> Value {
+    loop {
+        let message = server.recv();
+        seen.push(message.clone());
+        if message["method"] == "workspace/applyEdit" && draft_edit(&message, draft_uri) {
+            return message;
+        }
+        if message["method"].is_string() && !message["id"].is_null() {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+        }
+    }
+}
+
+/// Answer a held draft template edit with the named delivery outcome.
+fn fail_delivery(server: &mut stdio::TestServer, held: &Value, outcome: &str) {
+    let response = match outcome {
+        "rejection" => {
+            json!({"jsonrpc":"2.0","id":held["id"],"result":{"applied":false,"failureReason":"unsupported template"}})
+        }
+        "error" => {
+            json!({"jsonrpc":"2.0","id":held["id"],"error":{"code":-32603,"message":"template delivery failed"}})
+        }
+        "timeout" => return,
+        other => panic!("unknown delivery outcome {other}"),
+    };
+    server.send(response);
+}
+
+/// Whether a readable draft-delivery failure was reported to the client.
+fn reported_delivery_failure(seen: &[Value]) -> bool {
+    seen.iter().any(|message| {
+        message["method"] == "window/showMessage"
+            && message["params"]["message"]
+                .as_str()
+                .is_some_and(|text| text.contains("could not be applied"))
+    })
+}
+
 fn code_actions(
     server: &mut stdio::TestServer,
     editor: &mut FakeEditor,
@@ -1251,3 +1300,92 @@ fn second_session_gets_no_draft_actions_and_cannot_forge_confirm() {
     let (status_b, _) = server_b.finish_with_messages(Duration::from_secs(10));
     assert!(status_b.success());
 }
+
+#[test]
+fn current_unopened_draft_delivery_failure_cancels_for_rejection_error_and_timeout() {
+    for outcome in ["rejection", "error", "timeout"] {
+        let (repo, _) = fixtures::RepoFixture::new()
+            .commit("initial", [("f.txt", "before\n")])
+            .modify_standard()
+            .build();
+        let head = repo.git(&["rev-parse", "HEAD"]);
+        let (mut server, mut editor, uri) = open_plain_with_env(
+            &repo,
+            caps(true),
+            &[("MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS", "300")],
+        );
+        let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+        let draft_uri = format!("file://{expected_path}");
+        server.send(editor.open(&draft_uri, "Previous commit message\n"));
+
+        let mut seen = Vec::new();
+        let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
+        server.send(json!({"jsonrpc":"2.0","id":95,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[create]}}));
+        let held = hold_draft_edit(&mut server, &mut editor, &draft_uri, &mut seen);
+        fail_delivery(&mut server, &held, outcome);
+
+        // The current delivery never reached the buffer, so the run is canceled
+        // with a readable report and Git never commits.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !reported_delivery_failure(&seen) {
+            assert!(Instant::now() < deadline, "{outcome} report timed out: {seen:#?}");
+            pump(&mut server, &mut editor, &draft_uri, &mut seen);
+        }
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head, "{outcome} must not commit");
+        let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+        assert!(
+            offered.iter().all(|action| {
+                let command = action["command"]["arguments"][0]["command"].as_str();
+                command != Some("common.confirm") && command != Some("common.cancel")
+            }),
+            "{outcome} leaves no pending draft: {offered:#?}"
+        );
+
+        server.shutdown_and_exit();
+        let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+        assert!(status.success());
+    }
+}
+
+#[test]
+fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
+    for outcome in ["rejection", "error", "timeout"] {
+        let (repo, _) = fixtures::RepoFixture::new()
+            .commit("initial", [("f.txt", "before\n")])
+            .modify_standard()
+            .build();
+        let (mut server, mut editor, uri) = open_plain_with_env(
+            &repo,
+            caps(true),
+            &[("MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS", "300")],
+        );
+        let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+        let draft_uri = format!("file://{expected_path}");
+        server.send(editor.open(&draft_uri, "Previous commit message\n"));
+
+        let mut seen = Vec::new();
+        let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
+        server.send(json!({"jsonrpc":"2.0","id":95,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[create]}}));
+        let held = hold_draft_edit(&mut server, &mut editor, &draft_uri, &mut seen);
+        let template = fixtures::read(std::path::Path::new(&expected_path));
+
+        // The exact didOpen reaches the server before the delivery result does.
+        server.send(editor.open(&draft_uri, &template));
+        fail_delivery(&mut server, &held, outcome);
+        server.send(editor.edit(&draft_uri, "Late delivery survives\n"));
+
+        // The opened run is still the current one: it confirms and commits.
+        let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
+        assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+        wait_for_head_message(&repo, "Late delivery survives");
+        assert!(
+            !reported_delivery_failure(&seen),
+            "a {outcome} after didOpen must not cancel the run: {seen:#?}"
+        );
+
+        server.shutdown_and_exit();
+        let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+        assert!(status.success());
+    }
+}
+

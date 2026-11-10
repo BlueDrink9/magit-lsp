@@ -134,6 +134,23 @@ mod editor_history_tests {
             .unwrap_or_default()
     }
 
+    fn joined(registry: &EditRegistry, repo: &Path) -> (String, String) {
+        let run = registry.create(repo.to_str().unwrap(), "owner").unwrap();
+        let uri = registry.lock()[&run].draft.uri().to_string();
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                let token = draft.helper_token().to_string();
+                draft.accept_helper(
+                    context,
+                    &token,
+                    COMMIT_MESSAGE_KIND,
+                    &repo.join(".git/COMMIT_EDITMSG"),
+                )
+            })
+            .unwrap();
+        (run, uri)
+    }
+
     #[test]
     fn saved_abort_and_finish_retention_are_repository_and_registry_isolated() {
         let registry = EditRegistry::new();
@@ -246,12 +263,70 @@ mod editor_history_tests {
             .unwrap();
         assert_eq!(retained(&registry, repo.path()), ["native saved\n"]);
     }
+
+    #[test]
+    fn delivery_guard_aborts_only_the_current_unopened_delivery() {
+        let registry = EditRegistry::new();
+        let repo = repository();
+        let (run, _uri) = joined(&registry, repo.path());
+        let waiting = registry.lock().get_mut(&run).unwrap().waiting.take().unwrap();
+
+        let superseded = registry.begin_delivery(&run);
+        let current = registry.begin_delivery(&run);
+        assert!(
+            !registry.abort_unopened_delivery(&run, superseded),
+            "a superseded delivery never cancels"
+        );
+        assert!(
+            registry.abort_unopened_delivery(&run, current),
+            "the current unopened delivery cancels"
+        );
+        assert_eq!(
+            waiting.recv_timeout(std::time::Duration::from_secs(2)),
+            Ok(Reply::Abort),
+            "the helper is released"
+        );
+        assert!(
+            !registry.abort_unopened_delivery(&run, current),
+            "cancellation is once-only"
+        );
+        assert!(
+            !registry.abort_unopened_delivery("missing", 1),
+            "an unknown run never cancels"
+        );
+
+        // An opened draft is never canceled by a late delivery failure, even
+        // when its delivery identity is still the current one: record the
+        // delivery before the exact didOpen so only the opened state can save
+        // the run, not a replacement identity.
+        let (run, uri) = joined(&registry, repo.path());
+        let _waiting = registry.lock().get_mut(&run).unwrap().waiting.take();
+        let delivery = registry.begin_delivery(&run);
+        registry
+            .apply("owner", &run, &uri, |draft, context| {
+                draft.did_open(context, 1, b"initial\n")
+            })
+            .unwrap();
+        assert!(!registry.abort_unopened_delivery(&run, delivery));
+        assert_eq!(
+            registry
+                .pending_for("owner", repo.path().to_str().unwrap())
+                .len(),
+            1,
+            "the opened draft stays pending"
+        );
+        assert!(registry.resolve(&run, Reply::Abort));
+    }
 }
 
 /// The process-global map of edits Git is waiting on.
 pub struct EditRegistry {
     entries: Mutex<HashMap<String, EditEntry>>,
     history: Mutex<HashMap<PathBuf, history::History>>,
+    /// The current Plain edit-document delivery identity per run, in its own
+    /// lock so a delivery can be recorded while the lifecycle lock is held.
+    deliveries: Mutex<HashMap<String, u64>>,
+    next_delivery: std::sync::atomic::AtomicU64,
 }
 
 /// One registry-owned pending draft identity and exact issued URI.
@@ -269,6 +344,8 @@ impl EditRegistry {
         Self {
             entries: Mutex::new(HashMap::new()),
             history: Mutex::new(HashMap::new()),
+            deliveries: Mutex::new(HashMap::new()),
+            next_delivery: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -327,6 +404,7 @@ impl EditRegistry {
         )?;
         if entry.draft.is_terminal() {
             let entry = entries.remove(run_id).unwrap();
+            self.forget_delivery(run_id);
             entry
                 .replies
                 .send(Reply::Ok)
@@ -462,6 +540,7 @@ impl EditRegistry {
             return false;
         }
         let entry = self.lock().remove(edit_id);
+        self.forget_delivery(edit_id);
         match entry {
             Some(entry) => {
                 if reply == Reply::Abort {
@@ -489,11 +568,74 @@ impl EditRegistry {
             if entry.draft.is_terminal() || entry.draft.opened() {
                 return false;
             }
+            self.forget_delivery(edit_id);
             entries.remove(edit_id).expect("entry was just read")
         };
         self.retain_saved(&entry.draft);
         let _ = entry.replies.send(Reply::Abort);
         true
+    }
+
+    /// Record a new Plain edit-document delivery for `edit_id` and return its
+    /// identity.
+    ///
+    /// The lifecycle lock may already be held by the emitter that delivers a
+    /// draft, so this never takes it: a late result compares this identity
+    /// under that lock before it may abort the run.
+    pub fn begin_delivery(&self, edit_id: &str) -> u64 {
+        let delivery = self
+            .next_delivery
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        self.deliveries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(edit_id.to_string(), delivery);
+        delivery
+    }
+
+    /// Abort only the current, unopened, nonterminal delivery of `edit_id` and
+    /// report whether this call canceled the run.
+    ///
+    /// A result for a superseded delivery, an opened draft or a terminal run is
+    /// ignored. The identity check, the draft-state check and the removal all
+    /// happen under the lifecycle lock, so a later `didOpen` or replacement
+    /// delivery can never be canceled by an earlier delivery's late failure.
+    #[cfg(unix)]
+    pub fn abort_unopened_delivery(&self, edit_id: &str, delivery: u64) -> bool {
+        let mut entries = self.lock();
+        let mut deliveries = self
+            .deliveries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Both locks stay held across the identity check and the removal, so a
+        // replacement delivery can never be recorded between them and a run a
+        // `didOpen` just opened can never be canceled by a stale result.
+        if deliveries.get(edit_id).copied() != Some(delivery) {
+            return false;
+        }
+        let canceled = match entries.get(edit_id) {
+            Some(entry) if !entry.draft.is_terminal() && !entry.draft.opened() => {
+                Some(entries.remove(edit_id).expect("entry was just read"))
+            }
+            _ => None,
+        };
+        deliveries.remove(edit_id);
+        drop(deliveries);
+        drop(entries);
+        let Some(entry) = canceled else {
+            return false;
+        };
+        // Same release as expiry: keep saved history, then let Git abort.
+        self.retain_saved(&entry.draft);
+        let _ = entry.replies.send(Reply::Abort);
+        true
+    }
+
+    /// No managed drafts exist outside Unix, so no delivery can be aborted.
+    #[cfg(not(unix))]
+    pub fn abort_unopened_delivery(&self, _edit_id: &str, _delivery: u64) -> bool {
+        false
     }
 
     /// No managed drafts exist outside Unix, so nothing can expire.
@@ -516,6 +658,15 @@ impl EditRegistry {
     /// Forget an edit that finished or will never reach a helper.
     pub fn remove(&self, edit_id: &str) {
         self.lock().remove(edit_id);
+        self.forget_delivery(edit_id);
+    }
+
+    /// Forget the recorded Plain delivery identity of a run whose lifecycle ended.
+    fn forget_delivery(&self, edit_id: &str) {
+        self.deliveries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(edit_id);
     }
 
     /// Abort every pending edit: the client is gone, so Git must never hang.

@@ -879,6 +879,21 @@ fn send_plain_edit(shared: &Shared, uri: String, incarnation: u64, edit: ApplyEd
 /// Default time a Plain client has to open a commit draft before it is canceled.
 const DRAFT_OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Default time a Plain client has to answer a commit draft template edit.
+const DRAFT_DELIVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Deadline for the client to answer a Plain commit draft template edit.
+///
+/// `MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS` overrides the default so tests can
+/// treat an unanswered delivery as failed without a production-length wait.
+fn draft_delivery_timeout() -> std::time::Duration {
+    std::env::var("MAGIT_LSP_DRAFT_DELIVERY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(DRAFT_DELIVERY_TIMEOUT)
+}
+
 /// Deadline for the client to open a Plain commit draft.
 ///
 /// `MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS` overrides the default so tests can expire a
@@ -1064,12 +1079,16 @@ fn send_plain_edit_document(
         .runtime
         .clone()
         .expect("editor bridge runs inside the server runtime");
+    // Every delivered draft document replaces the previous delivery as the one
+    // whose outcome may still act: an older `applyEdit` reply that arrives after
+    // a `didOpen`, a confirmation or a newer delivery is merely stale.
+    let delivery = editor::registry().begin_delivery(&run_id);
     if let Some((apply_pending, apply_receiver)) = apply {
         let shared = shared.clone();
         let uri = uri.clone();
         runtime.spawn(async move {
             let applied = shared
-                .await_outbound(apply_pending, apply_receiver)
+                .await_outbound_for(apply_pending, apply_receiver, draft_delivery_timeout())
                 .await
                 .ok()
                 .and_then(|response| response.response_result.ok())
@@ -1080,8 +1099,10 @@ fn send_plain_edit_document(
             }
             // A rejected, failed or unanswered template leaves the client's
             // buffer stale, so its later didOpen would be refused as a version
-            // mismatch. Cancel the run and say why instead of assuming delivery.
-            if editor::registry().resolve(&run_id, editor::Reply::Abort) {
+            // mismatch. Cancel the run and say why instead of assuming delivery,
+            // but only while this exact delivery is still the current unopened
+            // one: the lifecycle lock owns that decision, never a bare run id.
+            if editor::registry().abort_unopened_delivery(&run_id, delivery) {
                 let _ = shared.sender.send(show_message(
                     2,
                     format!(
