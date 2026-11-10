@@ -259,9 +259,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - test: real generated menu-item declarations require `activationSteps`, and combinator sibling constraints remain present; deterministic drift checks still cover the regenerated declarations.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Prerequisite discovered while typing the VSCode consumer; do not fold consumer setup into this fix.
       - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 66b8f9f → ok
-  - [ ] **T011.7 — Type-check VSCode JavaScript against generated wire declarations.** Add `tsc --checkJs` to `make vscode-test`, including production `extension.js` and `lib/*.js`, with generated payload types at wire boundaries.
+  - [x] **T011.7 — Type-check VSCode JavaScript against generated wire declarations.** Add `tsc --checkJs` to `make vscode-test`, including production `extension.js` and `lib/*.js`, with generated payload types at wire boundaries.
     - test: the maintained client type check accepts valid payloads and rejects a concrete malformed wire payload in a permanent compile-time fixture; generated declarations are consumed by production handlers, not merely checked in isolation.
     - check: `make vscode-test` passes. Keep runtime behavior and declared capabilities unchanged; use explicit boundary types, not blanket suppressions or hand-maintained duplicate wire interfaces.
+      - Verified: make vscode-test @ ff550b0 → ok: build, vscode-typecheck, vscode, keybindings; `clients/vscode/test/types.js` consumes `ViewRender`/`Menu`/`ViewPromptParams` through `lib/render.js`, `lib/menu.js` and `lib/prompt.js`, and `@ts-expect-error` rejects a menu item without `activationSteps` (TS2578 when it becomes accepted) and an invalid `ViewMode`.
+    - Done: containing commit.
   - [x] **T011.6 — Generate TypeScript wire declarations from directional schemas.** Emit `clients/vscode/types/protocol.d.ts` through the existing schema generator, preserving per-root directional definitions and including the method catalog's params/result mapping.
     - test: generated declarations preserve required/optional fields, literal tags, unions/intersections, arrays, refs, arbitrary string view kinds and unconstrained JSON; missing or modified declarations fail drift checks.
     - check: `make update-schema`, `make schema-check` and focused schema tests pass. Wiring `tsc --checkJs` into the client remains the next independently verifiable slice.

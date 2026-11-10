@@ -11,5 +11,5 @@
     "strict": false,
     "skipLibCheck": true
   },
-  "include": ["extension.js", "lib/**/*.js"]
+  "include": ["extension.js", "lib/**/*.js", "test/types.js"]
 }
