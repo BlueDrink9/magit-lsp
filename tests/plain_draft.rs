@@ -176,6 +176,117 @@ fn execute_action(
     }
 }
 
+/// Wait for the status document to offer the commit menu.
+///
+/// Menu actions only exist once the server holds a retained render whose text
+/// matches both the client's document and its own, and the menu render can be
+/// delivered after the `executeCommand` response. Requesting actions for every
+/// rendered line keeps the transport moving until that render is applied, so
+/// the wait never blocks on a frame the server may not push unprompted.
+fn wait_for_commit_menu(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+    uri: &str,
+) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    // Unique request IDs for this wait, clear of the fixed IDs used above.
+    let mut id = 1000;
+    loop {
+        for line in 0..editor.text(uri).lines().count() as u32 {
+            let offered = code_actions(server, editor, draft_uri, seen, uri, line, id);
+            id += 1;
+            let menu: Vec<Value> = offered
+                .into_iter()
+                .filter(|action| {
+                    action["command"]["arguments"][0]["command"] == "menu.run-action"
+                        && action["command"]["arguments"][0]["target"]["itemKey"].is_string()
+                })
+                .collect();
+            if !menu.is_empty() {
+                return menu;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "commit menu was not offered before the deadline; client version={:?}",
+            editor.documents.get(uri).map(|doc| doc.version),
+        );
+    }
+}
+
+/// Drain frames until the offered Confirm carries the client's draft version.
+fn wait_for_draft_confirm(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+    mut id: i64,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let offered = code_actions(server, editor, draft_uri, seen, draft_uri, 0, id);
+        let client = editor
+            .documents
+            .get(draft_uri)
+            .expect("open draft document")
+            .version;
+        let confirm = offered.iter().find_map(|action| {
+            let args = &action["command"]["arguments"][0];
+            (args["command"] == "common.confirm").then(|| args.clone())
+        });
+        if let Some(confirm) = confirm {
+            if confirm["version"].as_i64() == Some(client) {
+                return confirm;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "draft confirm did not catch up with the client: {offered:#?}"
+        );
+        id += 1;
+    }
+}
+
+/// Poll code actions until `command` is offered for the `needle` row.
+///
+/// The status render that follows an `executeCommand` can reach the client
+/// after its response, so one query may still see the previous document.
+/// Polling keeps the transport moving until the synced document and the offered
+/// actions agree, and fails on the deadline instead of looping forever.
+fn wait_for_status_action(
+    server: &mut stdio::TestServer,
+    editor: &mut FakeEditor,
+    draft_uri: &str,
+    seen: &mut Vec<Value>,
+    uri: &str,
+    needle: &str,
+    command: &str,
+    mut id: i64,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let line = editor
+            .text(uri)
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("status view shows {needle}: {}", editor.text(uri))) as u32;
+        let offered = code_actions(server, editor, draft_uri, seen, uri, line, id);
+        id += 1;
+        if let Some(action) = offered
+            .iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == command)
+        {
+            return action["command"]["arguments"][0].clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{command} was not offered for {needle} before the deadline: {offered:#?}"
+        );
+    }
+}
+
 /// Stage `f.txt` and return the offered `menu.run-action` commit creation.
 fn prepare_commit(
     server: &mut stdio::TestServer,
@@ -184,27 +295,14 @@ fn prepare_commit(
     seen: &mut Vec<Value>,
     uri: &str,
 ) -> Value {
-    let text = editor.text(uri).to_owned();
-    let line = text.lines().position(|line| line.contains("f.txt")).unwrap_or(0) as u32;
-    let stage = code_actions(server, editor, draft_uri, seen, uri, line, 90)
-        .into_iter()
-        .find(|action| action["command"]["arguments"][0]["command"] == "status.stage")
-        .expect("status.stage offered")["command"]["arguments"][0]
-        .clone();
+    let stage = wait_for_status_action(server, editor, draft_uri, seen, uri, "f.txt", "status.stage", 90);
     assert!(execute_action(server, editor, draft_uri, seen, stage, 91)["error"].is_null());
 
-    let text = editor.text(uri).to_owned();
-    let line = text.lines().position(|line| line.contains("f.txt")).unwrap_or(0) as u32;
-    let open_commit = code_actions(server, editor, draft_uri, seen, uri, line, 92)
-        .into_iter()
-        .find(|action| action["command"]["arguments"][0]["command"] == "open.commit")
-        .expect("open.commit offered")["command"]["arguments"][0]
-        .clone();
+    let open_commit =
+        wait_for_status_action(server, editor, draft_uri, seen, uri, "f.txt", "open.commit", 92);
     assert!(execute_action(server, editor, draft_uri, seen, open_commit, 93)["error"].is_null());
 
-    let menu = editor.text(uri).to_owned();
-    let line = menu.lines().position(|line| line.contains("Commit")).unwrap_or(0) as u32;
-    code_actions(server, editor, draft_uri, seen, uri, line, 94)
+    wait_for_commit_menu(server, editor, draft_uri, seen, uri)
         .into_iter()
         .find(|action| {
             action["command"]["arguments"][0]["command"] == "menu.run-action"
@@ -289,6 +387,26 @@ fn wait_for_head_message(repo: &fixtures::RepoFixture, message: &str) {
         assert!(
             Instant::now() < deadline,
             "no commit with {message:?}; last message: {last:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Poll Git until `HEAD` moves away from `before`, failing after the deadline.
+///
+/// The server confirms a draft before the helper-driven Git commit runs, so a
+/// status render or an `executeCommand` response is not proof that the commit
+/// exists yet.
+fn wait_for_head_change(repo: &fixtures::RepoFixture, before: &str) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let head = repo.git(&["rev-parse", "HEAD"]);
+        if head != before {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "HEAD did not move past {before:?}; last: {head:?}"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -753,6 +871,7 @@ fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
         .modify_standard()
         .build();
     let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let head = repo.git(&["rev-parse", "HEAD"]);
     let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
     let mut seen = Vec::new();
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
@@ -764,12 +883,12 @@ fn unrelated_document_notifications_are_rejected_without_touching_the_draft() {
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":unrelated,"version":2},"contentChanges":[{"text":"changed\n"}]}}));
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":unrelated}}}));
 
-    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 230);
-    let confirm = draft_action(&offered, "common.confirm");
-    let confirmed = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 231);
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 230);
+    let confirmed = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 240);
     assert!(confirmed["error"].is_null(), "draft confirm failed: {confirmed}");
 
     wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    wait_for_head_change(&repo, &head);
     assert_eq!(repo.git(&["log", "-1", "--format=%B"]), format!("{edited}\n"));
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
@@ -840,6 +959,107 @@ fn manual_plain_commit_instructions_have_no_apply_edit() {
         !seen.iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == expected_uri),
         "the manual path must not request showDocument: {seen:#?}"
     );
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+/// A commit menu queued behind an in-flight status render stays reachable.
+///
+/// The client holds one status `workspace/applyEdit` reply and echo while the
+/// commit run starts. `PlainDocument::prepare` refuses a second in-flight edit,
+/// so the menu render is only delivered after the held render completes. This
+/// is the schedule a single post-response action query misses; the structural
+/// wait must still find the menu, and the resulting commit must be real.
+#[test]
+fn commit_menu_is_offered_after_a_queued_status_render_is_released() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    std::fs::write(repo.path().join("g.txt"), "new file\n").expect("write untracked g.txt");
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    let draft_uri = format!("file://{expected_path}");
+    let mut seen = Vec::new();
+
+    // Stage f.txt and wait until the synced document offers open.commit.
+    let stage_f =
+        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "status.stage", 90);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage_f, 91)["error"].is_null());
+    let open_commit =
+        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "open.commit", 92);
+
+    // Stage the untracked file but keep its reply and echo: one status render
+    // stays in flight when the commit run starts.
+    let stage_g =
+        wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 93);
+    server.send(json!({"jsonrpc":"2.0","id":94,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[stage_g]}}));
+    let held = loop {
+        let message = server.recv();
+        seen.push(message.clone());
+        if message["method"] == "workspace/applyEdit" && !draft_edit(&message, &draft_uri) {
+            break message;
+        }
+        if message["method"].is_string() && !message["id"].is_null() {
+            for frame in editor.dispatch(&message) {
+                server.send(frame);
+            }
+        }
+    };
+
+    // The menu render is retained, not delivered: the pre-release document
+    // offers no menu, which is exactly what the old one-shot query observed.
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open_commit, 95)["error"].is_null());
+    let mut early = Vec::new();
+    for line in 0..editor.text(&uri).lines().count() as u32 {
+        early.extend(code_actions(
+            &mut server,
+            &mut editor,
+            &draft_uri,
+            &mut seen,
+            &uri,
+            line,
+            1000 + i64::from(line),
+        ));
+    }
+    assert!(
+        early
+            .iter()
+            .all(|action| action["command"]["arguments"][0]["command"] != "menu.run-action"),
+        "the menu must wait for the queued render: {early:#?}"
+    );
+
+    // Releasing the held echo and reply delivers the queued menu render.
+    for frame in editor.dispatch(&held) {
+        server.send(frame);
+    }
+    let create = wait_for_commit_menu(&mut server, &mut editor, &draft_uri, &mut seen, &uri)
+        .into_iter()
+        .find(|action| action["command"]["arguments"][0]["target"]["itemKey"].is_string())
+        .expect("commit creation offered")["command"]["arguments"][0]
+        .clone();
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 96)["error"].is_null());
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !seen.iter().any(|message| {
+        message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri
+    }) {
+        assert!(Instant::now() < deadline, "draft delivery timed out: seen {seen:#?}");
+        pump(&mut server, &mut editor, &draft_uri, &mut seen);
+    }
+    let template = std::fs::read_to_string(&expected_path).expect("commit template");
+    server.send(editor.open(&draft_uri, &template));
+    server.send(editor.edit(&draft_uri, "Delayed menu commit\n"));
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+
+    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    wait_for_head_change(&repo, &head);
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Delayed menu commit");
+    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());
