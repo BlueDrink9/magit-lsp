@@ -45,8 +45,11 @@ pub struct PlainActionParams {
 }
 
 /// A content mutation target or a non-mutating logical-view target.
+///
+/// The wire object always carries a camelCase `kind` discriminator so clients
+/// can forward an offered target without inspecting its fields.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PlainActionTarget {
     /// Content-addressed target from a status tree.
     Content(ActionTarget),

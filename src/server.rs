@@ -3721,7 +3721,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         let args = serde_json::json!({
             "command": "prompt.answer",
             "documentUri": uri,
-            "target": { "viewId": view_id, "nodeId": line_node.id },
+            "target": { "kind": "node", "viewId": view_id, "nodeId": line_node.id },
             "viewGeneration": generation,
         });
         let title = line_node.label.clone();
@@ -3762,7 +3762,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let args = serde_json::json!({
                 "command": "menu.toggle-switch",
                 "documentUri": uri,
-                "target": { "viewId": view_id, "menuId": menu.id, "itemKey": key },
+                "target": { "kind": "menuItem", "viewId": view_id, "menuId": menu.id, "itemKey": key },
                 "viewGeneration": generation,
             });
             let title = format!("Toggle {label}");
@@ -3804,7 +3804,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let args = serde_json::json!({
                 "command": "menu.run-option",
                 "documentUri": uri,
-                "target": { "viewId": view_id, "menuId": menu.id, "itemKey": key },
+                "target": { "kind": "menuItem", "viewId": view_id, "menuId": menu.id, "itemKey": key },
                 "viewGeneration": generation,
             });
             let title = format!("Set {label}");
@@ -3862,7 +3862,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             {
                 continue;
             }
-            let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
+            let args = serde_json::json!({"command":"menu.run-action","documentUri":uri,"target":{"kind":"menuItem","viewId":view_id,"menuId":menu.id,"itemKey":key},"viewGeneration":generation});
             let title = if command == "log.current" {
                 format!("Open {label}")
             } else {
@@ -3925,7 +3925,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
-                "target": { "viewId": view_id, "nodeId": line_node.id },
+                "target": { "kind": "node", "viewId": view_id, "nodeId": line_node.id },
                 "viewGeneration": generation,
             });
             let title = plain_action_title(
@@ -3968,7 +3968,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 let args = serde_json::json!({
                     "command": command.id,
                     "documentUri": uri,
-                    "target": { "viewId": view_id },
+                    "target": { "kind": "view", "viewId": view_id },
                     "viewGeneration": generation,
                 });
                 let title = plain_action_title(
@@ -4011,7 +4011,10 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                     let args = serde_json::json!({
                         "command": command.id,
                         "documentUri": uri,
-                        "target": target.clone(),
+                        "target": serde_json::to_value(
+                        crate::dispatch::PlainActionTarget::Content(target.clone()),
+                    )
+                    .unwrap_or(Value::Null),
                         "viewGeneration": generation,
                     });
                     let title = plain_action_title(
@@ -4120,7 +4123,10 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             let args = serde_json::json!({
                 "command": command.id,
                 "documentUri": uri,
-                "target": target.clone(),
+                "target": serde_json::to_value(
+                        crate::dispatch::PlainActionTarget::Content(target.clone()),
+                    )
+                    .unwrap_or(Value::Null),
                 "viewGeneration": generation,
             });
             let title = plain_action_title(

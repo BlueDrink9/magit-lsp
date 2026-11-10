@@ -315,8 +315,13 @@ previous line. `actions.title_style` has exactly four values: `plain`,
 
 Actions use `workspace/executeCommand` command `magit.command`. The proposed
 argument is exactly one opaque object:
-`arguments=[{command,documentUri,target:{node_id,mutation_hash},viewGeneration}]`.
-IDs and arguments are opaque to clients. The backend revalidates node
+`arguments=[{command,documentUri,target,viewGeneration}]`. `target` is a
+tagged union whose required camelCase `kind` selects its fields:
+`{kind:"content",nodeId,mutationHash,selection?}`,
+`{kind:"view",viewId}`,
+`{kind:"node",viewId,nodeId}`, or
+`{kind:"menuItem",viewId,menuId,itemKey}`. Untagged legacy targets are
+rejected. IDs and arguments are opaque to clients. The backend revalidates node
 identity and mutation hash against fresh state at execution; stale targets cause
 refresh and no mutation. One semantic dispatcher serves these actions and the
 existing custom input adapter.

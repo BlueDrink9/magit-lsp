@@ -252,6 +252,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
 ### Feature — Phase 4: Specification
 
 - [ ] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
+  - [x] **T011.1 — Tag Plain action targets explicitly.** Replace the untagged target union with a required camelCase `kind` discriminator (`content`, `view`, `node`, `menuItem`); migrate every offered target and the maintained client contract without accepting legacy shapes.
+    - Done: containing commit. `PlainActionTarget` is internally tagged with required `kind`; every offered action and the client spec carry it, and untagged input is rejected.
+    - test: Round-trip every variant, reject missing/unknown/mismatched tags, and exercise offered content/view/node/menu actions through existing Plain integration suites.
+    - check: Preserve retained-render identity validation and stale/tampered-target refusal; no client reconstruction or compatibility path.
+      - Verified: `make test-rust FILTER="--test dispatch --test plain_actions --test plain_select --test plain_stack --test plain_harness"` @ `86d12d3` → ok: rust. `plain_action_target_roundtrips_each_tagged_variant` asserts the exact content/view/node/menuItem shapes; `plain_action_target_rejects_missing_unknown_and_mismatched_tags` rejects all three failure classes; existing Plain suites exercise offered actions and stale/tampered refusal unchanged.
 - [ ] **T012 — example-files.** [Scope](./TASKS_PART_SEVEN.md#t012-example-files-s).
 - [ ] **T013 — client-spec.** [Scope](./TASKS_PART_SEVEN.md#t013-client-spec-l).
 

@@ -1,7 +1,10 @@
 mod common;
 
 use common::*;
-use magit_lsp::dispatch::{self, Command, LineRange, NodeKind, Resolution};
+use magit_lsp::dispatch::{
+    self, ActionTarget, Command, LineRange, NodeKind, PlainActionTarget, Resolution,
+    SemanticMenuItemTarget, SemanticNodeTarget, SemanticViewTarget,
+};
 use magit_lsp::errors;
 use magit_lsp::patch::{self, FileLayout};
 use magit_lsp::protocol::{Effect, MessageLevel};
@@ -19,6 +22,86 @@ fn semantic_menu_item_target_roundtrips_without_losing_item_identity() {
         serde_json::from_value::<dispatch::SemanticMenuItemTarget>(encoded).unwrap(),
         target
     );
+}
+
+#[test]
+fn plain_action_target_roundtrips_each_tagged_variant() {
+    let cases = [
+        (
+            PlainActionTarget::Content(ActionTarget {
+                node_id: "unstaged/f.txt".into(),
+                mutation_hash: "hash".into(),
+                selection: None,
+            }),
+            serde_json::json!({
+                "kind": "content",
+                "nodeId": "unstaged/f.txt",
+                "mutationHash": "hash",
+            }),
+        ),
+        (
+            PlainActionTarget::View(SemanticViewTarget {
+                view_id: "status".into(),
+            }),
+            serde_json::json!({ "kind": "view", "viewId": "status" }),
+        ),
+        (
+            PlainActionTarget::Node(SemanticNodeTarget {
+                view_id: "status".into(),
+                node_id: "unstaged/f.txt".into(),
+            }),
+            serde_json::json!({
+                "kind": "node",
+                "viewId": "status",
+                "nodeId": "unstaged/f.txt",
+            }),
+        ),
+        (
+            PlainActionTarget::MenuItem(SemanticMenuItemTarget {
+                view_id: "log-menu".into(),
+                menu_id: "log".into(),
+                item_key: "l".into(),
+            }),
+            serde_json::json!({
+                "kind": "menuItem",
+                "viewId": "log-menu",
+                "menuId": "log",
+                "itemKey": "l",
+            }),
+        ),
+    ];
+    for (target, expected) in cases {
+        let encoded = serde_json::to_value(&target).unwrap();
+        assert_eq!(encoded, expected);
+        let decoded = serde_json::from_value::<PlainActionTarget>(expected).unwrap();
+        assert_eq!(decoded, target);
+    }
+}
+
+#[test]
+fn plain_action_target_rejects_missing_unknown_and_mismatched_tags() {
+    for invalid in [
+        // Missing discriminator.
+        serde_json::json!({ "nodeId": "unstaged/f.txt", "mutationHash": "hash" }),
+        // Unknown discriminator.
+        serde_json::json!({ "kind": "bogus", "viewId": "status" }),
+        // Tag does not match the carried fields.
+        serde_json::json!({ "kind": "view", "viewId": "status", "nodeId": "n" }),
+        serde_json::json!({ "kind": "node", "viewId": "status" }),
+        serde_json::json!({ "kind": "content", "nodeId": "unstaged/f.txt" }),
+        serde_json::json!({
+            "kind": "menuItem",
+            "viewId": "log-menu",
+            "menuId": "log",
+            "itemKey": "l",
+            "nodeId": "n",
+        }),
+    ] {
+        assert!(
+            serde_json::from_value::<PlainActionTarget>(invalid.clone()).is_err(),
+            "unexpectedly accepted {invalid}"
+        );
+    }
 }
 
 #[test]
