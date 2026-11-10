@@ -98,7 +98,7 @@ fn basic_modifier_mode_filters_delivery_and_resolution_but_full_keeps_bindings()
 }
 
 #[test]
-fn basic_modifiers_check_every_step_without_removing_commands_or_printable_shift() {
+fn basic_modifiers_keep_portable_backtab_and_drop_other_shift_or_meta_chords() {
     let config = config_with(
         Profile::Standard,
         &[(
@@ -109,6 +109,7 @@ fn basic_modifiers_check_every_step_without_removing_commands_or_printable_shift
                     &[
                         "ctrl+alt+9 meta+x",
                         "shift+Tab",
+                        "ctrl+shift+Tab",
                         "ctrl+alt+x",
                         "S",
                         "!",
@@ -125,14 +126,19 @@ fn basic_modifiers_check_every_step_without_removing_commands_or_printable_shift
         basic.command("status.unstage").unwrap().keys,
         Vec::<String>::new()
     );
-    for key in ["ctrl+alt+9", "ctrl+alt+9 meta+x", "shift+Tab", "meta+u"] {
+    for key in [
+        "ctrl+alt+9",
+        "ctrl+alt+9 meta+x",
+        "ctrl+shift+Tab",
+        "meta+u",
+    ] {
         assert_eq!(
             basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal),
             Match::None,
             "{key}"
         );
     }
-    for key in ["ctrl+alt+x", "S", "!", "Enter"] {
+    for key in ["ctrl+alt+x", "S", "!", "Enter", "shift+Tab"] {
         assert_eq!(
             basic.lookup(KeyChord::parse(key).unwrap().steps(), EditorMode::Normal),
             Match::Exact("status.stage".into()),

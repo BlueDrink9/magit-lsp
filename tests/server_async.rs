@@ -211,7 +211,7 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
             .build();
         let config_dir = tempfile::TempDir::new().unwrap();
         let path = config_dir.path().join("config.toml");
-        std::fs::write(&path, "profile = \"standard\"\n[keys.status]\n\"open.commit\" = [\"meta+c\", \"shift+Tab\", \"k meta+c\"]\n[keys.common]\nrefresh = [\"ctrl+alt+r\", \"K\"]\n").unwrap();
+        std::fs::write(&path, "profile = \"standard\"\n[keys.status]\n\"open.commit\" = [\"meta+c\", \"shift+Tab\", \"ctrl+shift+Tab\", \"k meta+c\"]\n[keys.common]\nrefresh = [\"ctrl+alt+r\", \"K\"]\n").unwrap();
         let config = path.to_string_lossy().into_owned();
         let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", &config)]);
         let mut caps = limited_rich(json!([]), json!(["text"]));
@@ -228,9 +228,14 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
             Some(vec!["K".into(), "ctrl+alt+r".into()])
         );
         let expected = if modifiers == "basic" {
-            vec![]
+            vec!["shift+Tab".into()]
         } else {
-            vec!["k meta+c".into(), "meta+c".into(), "shift+Tab".into()]
+            vec![
+                "ctrl+shift+Tab".into(),
+                "k meta+c".into(),
+                "meta+c".into(),
+                "shift+Tab".into(),
+            ]
         };
         assert_eq!(keymap_keys(&keymap, "open.commit"), Some(expected));
         server.send(
@@ -249,7 +254,7 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
             json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":2}}),
         );
         if modifiers == "basic" {
-            for (id, key) in [(8, "shift+Tab"), (9, "k")] {
+            for (id, key) in [(8, "ctrl+shift+Tab"), (9, "k")] {
                 server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key",
                     "params":{"viewId":view,"version":2,"key":key,"editorMode":"normal","cursor":{"line":0,"column":0}}}));
                 let response = server.response_with_id(id);
@@ -259,6 +264,15 @@ fn rich_basic_keys_filter_delivery_and_matching_without_disabling_explicit_menu_
                     "filtered chords must not leave pending prefixes: {response}"
                 );
             }
+            server.send(json!({"jsonrpc":"2.0","id":10,"method":"view/key",
+                "params":{"viewId":view,"version":2,"key":"shift+Tab","editorMode":"normal","cursor":{"line":0,"column":0}}}));
+            let backtab = server.response_with_id(10);
+            assert_eq!(
+                backtab["result"]["effects"][0]["type"], "pushView",
+                "basic retains terminal backtab: {backtab}"
+            );
+            assert_eq!(server.recv()["method"], "view/render");
+            assert_eq!(server.recv()["method"], "view/keymap");
         }
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/key",
             "params":{"viewId":view,"version":2,"key":"meta+c","editorMode":"normal","cursor":{"line":0,"column":0}}}));

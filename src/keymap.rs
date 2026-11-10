@@ -9,7 +9,7 @@
 
 use crate::commands::{self, Command, CommandStatus};
 use crate::config::{BindingSpec, Config, ConfigError, Origin, Profile, ScopeKeys};
-use crate::keys::{KeyChord, KeyStep};
+use crate::keys::{Key, KeyChord, KeyStep};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -285,7 +285,15 @@ impl Keymap {
 }
 
 fn basic_step(step: &KeyStep) -> bool {
-    !step.meta && !step.shift
+    if step.meta {
+        return false;
+    }
+    if !step.shift {
+        return true;
+    }
+    // Terminal backtab is the one portable shifted key: a bare `shift+Tab`
+    // reaches basic clients as `<S-Tab>`. Anything else shifted is indistinct.
+    !step.ctrl && !step.alt && matches!(&step.key, Key::Named(name) if name == "Tab")
 }
 
 #[derive(Clone)]

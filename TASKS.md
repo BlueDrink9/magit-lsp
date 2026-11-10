@@ -433,6 +433,12 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 ## Bugfix
 
+- [x] **Preserve terminal backtab for basic modifier clients.** Prerequisite for native shifted-Tab delivery. test: `basic` keymap delivery and capture retain exact `shift+Tab` while still omitting arbitrary Shift/Meta chords, including wire-level keymap coverage. Update the capability contract to name terminal backtab explicitly; never claim full modifiers or spoof terminal identity. Verification: `make test-rust FILTER="--test keymap --test server_async"`. Native verification remains in the shifted-Tab harness slice below. Done: containing commit.
+  - Verified: `make test-rust FILTER="--test keymap --test server_async"` @ b02d98f → ok (21 keymap + 47 server_async tests passed); `basic` delivers and captures `shift+Tab`, drops `ctrl+shift+Tab`, `meta+c` and `k meta+c` while `full` keeps them.
+  - Check: `docs/CLIENT_SPEC.md` names the lone portable terminal backtab exception and states basic implies no full modifier support or terminal-identity spoofing. Native Neovim delivery acceptance is delegated to the shifted-Tab harness slice; no VSCode runtime evidence claimed.
+
+- [ ] **Deliver shifted Tab as terminal backtab in native UI harness.** Slice of the five-scenario repair. test: canonical `shift+Tab` reaches the existing `<S-Tab>` mapping via terminal backtab, and `common-navigation` exercises the unchanged visibility sequence at both vim sizes. Keep CSI-u handling for other modified keys intact. check: record native text evidence and process cleanup. Verification: `make ui-unit`; `make ui-file FILE=tests/ui/scenarios/common-navigation.scn`.
+
 - [x] **Build two-hunk UI repository before client startup.** Prerequisite for the hunk-body-fold repair. test: the registered `two-hunk-siblings` fixture creates exactly two unstaged hunks in `f.txt` at lines 5 and 35 plus an independent modified `g.txt`, before any client or watcher starts. Verification: `make ui-unit`. Done: 1fc9fa3.
   - Verified: `make ui-unit` @ b888574 → ok; `test_two_hunk_siblings` asserts f.txt hunk headers `@@ -2,7 +2,7 @@` and `@@ -32,7 +32,7 @@` with `+line5 CHANGED`/`+line35 CHANGED` and g.txt `+line2 CHANGED`.
 

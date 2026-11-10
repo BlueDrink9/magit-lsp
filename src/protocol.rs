@@ -337,6 +337,9 @@ pub enum KeymapDelivery {
 }
 
 /// How faithfully a client can report key modifiers (§3.8).
+///
+/// `Basic` still resolves the portable terminal backtab, a lone `shift+Tab`;
+/// it implies no broader modifier support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum KeyModifiers {
