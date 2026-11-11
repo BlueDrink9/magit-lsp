@@ -31,6 +31,35 @@ fn current_log_opens_and_quit_returns_to_status() {
 }
 
 #[test]
+fn fixup_selection_confirm_commits_staged_change_for_full_selected_oid() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("selected target subject", [("f.txt", "base\n")])
+        .commit("newer HEAD subject", [("f.txt", "head\n")])
+        .staged_file("f.txt", "staged fix\n")
+        .build();
+    let target = git(tmp.path(), &["rev-parse", "HEAD~1"]).trim().to_string();
+    let prior_head = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("commit.fixup");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let log = test.session().views().get(&picker).unwrap();
+    let target_line = log.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&target)).unwrap_or_else(|| panic!("target {target}; nodes {:?}", log.tree().nodes.iter().map(|node| (&node.id, node.kind, &node.commit)).collect::<Vec<_>>())).start_line;
+    test.set_cursor(magit_lsp::protocol::Cursor { line: target_line, column: 0 });
+    test.invoke_here("common.confirm");
+    assert_eq!(test.view_id(), caller);
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    assert_ne!(head, prior_head);
+    assert_eq!(git(tmp.path(), &["show", "-s", "--format=%s", "HEAD"]).trim(), "fixup! selected target subject");
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD^"]).trim(), prior_head);
+    assert_eq!(git(tmp.path(), &["show", "--format=", "--name-only", "HEAD"]).trim(), "f.txt");
+    assert_eq!(git(tmp.path(), &["show", "HEAD:f.txt"]).trim(), "staged fix");
+    assert_eq!(git(tmp.path(), &["show", "--format=%P", "--no-patch", "HEAD"]).trim(), prior_head);
+}
+
+#[test]
 fn log_menu_opens_log_and_q_returns_to_status_in_each_profile() {
     for (profile, opener) in [(Profile::Standard, "l"), (Profile::Vim, "l")] {
         let (tmp, _repo) = RepoFixture::new()
