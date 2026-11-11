@@ -370,20 +370,22 @@ T005 is complete through its authoritative [completed children](#completed-work)
 
 ### Feature — Phase 5: Commit selection and rebase
 
-- [ ] **T014 — selected-commit-continuation.** [Scope](./TASKS_PART_SEVEN.md#t014-selected-commit-continuation-m).
+- [x] **T014 — selected-commit-continuation.** [Scope](./TASKS_PART_SEVEN.md#t014-selected-commit-continuation-m).
+  - Done: c9571c6 (containing commit of the last slice). Delivered across children: the confirm/cancel/stale select-mode continuation contract (T014.1 `84fb4bd`) and the native Neovim commit-select confirm/cancel scenarios (T014.2 `c9571c6`).
   - [x] **T014.1 — Complete and pin the select-mode continuation contract.** Confirm delivers the full selected commit id, the captured operation arguments and the caller to the waiting operation; cancel restores the caller without mutation; a stale selection is refused readably without losing the caller.
     - test: session/command state tests cover confirm, cancel and a stale selection for the select-mode continuation (menu-argument and command-captured paths as they exist); selection identity is asserted as the full structured-node commit id, never rendered text or a row index.
     - check: any missing confirm/cancel/stale handling is implemented; `make test-rust FILTER="--test commands --test log_commands"` passes.
     - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
     - Verified: `make test-rust FILTER="--test commands --test log_commands"` @ `84fb4bd` → ok: rust.
-  - [ ] **T014.2 — Native commit-select scenarios.** Record the select-mode continuation end to end in real Neovim via new `tests/ui/scenarios/commit-select-*.scn` (confirm and cancel at minimum; stale if a deterministic pre-start fixture can produce it).
+  - [x] **T014.2 — Native commit-select scenarios.** Record the select-mode continuation end to end in real Neovim via new `tests/ui/scenarios/commit-select-*.scn` (confirm and cancel at minimum; stale if a deterministic pre-start fixture can produce it).
     - test: scenarios assert the caller view is restored with the captured argument after confirm and untouched after cancel, using text snapshots.
     - check: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn` and the cancel counterpart exit 0; no orphan `magit-lsp` processes remain.
     - Verification: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn && make ui-file FILE=tests/ui/scenarios/commit-select-cancel.scn`.
+    - Verified: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn && make ui-file FILE=tests/ui/scenarios/commit-select-cancel.scn` @ `c9571c6` → ok: ui-file for both. `commit-select-confirm.scn` drives `l` → `c` → search → `Enter`, then asserts the status caller is restored (`Unstaged changes`, `view_stack.count == 1`), the clipboard equals `git rev-parse HEAD~2`, and the tree is clean; `commit-select-cancel.scn` drives `l` → `c` → `Escape` and asserts the status caller restored, the clipboard still `sentinel`, `HEAD` unchanged, and the tree clean. Snapshots `select-picker` and `caller-restored` written for both. `pgrep -af magit-lsp` showed no orphan servers.
 - [ ] **T015 — fixup-action.** [Scope](./TASKS_PART_SEVEN.md#t015-fixup-action-m).
 - [ ] **T016 — editor-helper-kinds.** [Scope](./TASKS_PART_SEVEN.md#t016-editor-helper-kinds-s).
 - [ ] **T017 — rebase-state.** [Scope](./TASKS_PART_SEVEN.md#t017-rebase-state-m).
-- [ ] **T018 — rebase-todo.** [Scope](./TASKS_PART_SEVEN.md#t018-rebase-todo-m).
+- [ ] **T018 — rebase-todo.** [Scope](./TASKS_PART_SEVEN.md#t018-rebase-todo-m). Design (advisor 2026-11-11, fold into children): no dry-run validator exists — `git rebase --edit-todo` mutates in place and leaves a broken file, so the server self-validates a strict closed grammar (reject-by-default) and writes atomically (temp+rename) in `.git/rebase-merge/`. `.git/sequencer/todo` is cherry-pick/revert, NOT rebase — out of scope; every interactive rebase uses `.git/rebase-merge/git-rebase-todo`. Node identity = full SHA via `git cat-file --batch-check` (require `type=commit`, unambiguous, no dupes); subject/command are fields, never the identity. Pre-write checks: first line must not be squash/fixup; emit `drop` rather than delete; SHA set must equal the read set; content-hash stale guard. Reject `exec/break/label/reset/merge/update-ref`. Decide at split: (a) scope edits an already-paused rebase (blocking `GIT_SEQUENCE_EDITOR` at `rebase -i` start is a separate larger ticket); (b) `rebase.updateRefs=true` inserts `update-ref` lines even into linear rebases — accept as an opaque pinned node or document the limitation.
 - [ ] **T019 — interactive-rebase.** [Scope](./TASKS_PART_SEVEN.md#t019-interactive-rebase-l).
 
 ### Feature — Phase 6: Plain acceptance
