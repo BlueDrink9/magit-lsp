@@ -1,6 +1,8 @@
 mod common;
 
 use common::{git, write};
+use common::{message_texts, RepoFixture, TestSession, WIDE_VIEWPORT};
+use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use tempfile::TempDir;
 
@@ -113,4 +115,54 @@ fn rebase_operations_guard_idle_and_handle_conflict_skip_abort_and_continue() {
     assert!(skip_repo.rebase_state().unwrap().unwrap().conflicted);
     skip_repo.rebase_skip().unwrap();
     assert_eq!(skip_repo.rebase_state().unwrap(), None);
+}
+
+#[test]
+fn command_failures_report_messages_preserve_state_and_keep_caller_usable() {
+    use magit_lsp::protocol::Effect;
+
+    let (idle_dir, _) = RepoFixture::new().commit("base", [("file", "base\n")]).build();
+    let idle_head = git(idle_dir.path(), &["rev-parse", "HEAD"]);
+    let idle_index = git(idle_dir.path(), &["write-tree"]);
+    let (mut idle, _) = TestSession::open_status_at(&idle_dir, Profile::Standard, WIDE_VIEWPORT);
+    idle.ack();
+    let caller = idle.view_id().to_string();
+    let result = idle.invoke("rebase.continue");
+    assert!(message_texts(&result.effects).iter().any(|text| text.contains("No rebase operation")));
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { .. })));
+    assert_eq!(git(idle_dir.path(), &["rev-parse", "HEAD"]), idle_head);
+    assert_eq!(git(idle_dir.path(), &["write-tree"]), idle_index);
+    assert_eq!(idle.view_id(), caller);
+    assert!(idle.session().views().get(&caller).is_some());
+
+    let (conflict_dir, _) = RepoFixture::new().commit("base", [("file", "base\n")]).build();
+    git(conflict_dir.path(), &["checkout", "-b", "topic"]);
+    write(&conflict_dir.path().join("file"), "topic\n");
+    git(conflict_dir.path(), &["commit", "-am", "topic"]);
+    git(conflict_dir.path(), &["checkout", "main"]);
+    write(&conflict_dir.path().join("file"), "main\n");
+    git(conflict_dir.path(), &["commit", "-am", "main"]);
+    git(conflict_dir.path(), &["checkout", "topic"]);
+    let topic = git(conflict_dir.path(), &["rev-parse", "topic"]);
+    let main = git(conflict_dir.path(), &["rev-parse", "main"]);
+    failed_git(conflict_dir.path(), &["rebase", "main"]);
+    let head = git(conflict_dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(conflict_dir.path(), &["ls-files", "-u"]);
+    let conflicted = git(conflict_dir.path(), &["status", "--porcelain"]);
+    let (mut test, _) = TestSession::open_status_at(&conflict_dir, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    let result = test.invoke("rebase.continue");
+    assert!(message_texts(&result.effects).iter().any(|text| !text.trim().is_empty()));
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { .. })));
+    assert_eq!(git(conflict_dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(conflict_dir.path(), &["ls-files", "-u"]), index);
+    assert_eq!(git(conflict_dir.path(), &["status", "--porcelain"]), conflicted);
+    assert_eq!(git(conflict_dir.path(), &["rev-parse", "topic"]).trim(), topic.trim());
+    assert_eq!(git(conflict_dir.path(), &["rev-parse", "main"]).trim(), main.trim());
+    assert!(GitRepo::open(conflict_dir.path()).unwrap().rebase_state().unwrap().is_some());
+    assert_eq!(test.view_id(), caller);
+    assert!(test.session().views().get(&caller).is_some());
+    let usable = test.invoke("common.refresh");
+    assert!(!usable.effects.iter().any(|effect| matches!(effect, Effect::Message { .. })));
 }

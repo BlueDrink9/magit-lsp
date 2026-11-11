@@ -423,9 +423,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
       - [x] **T017.2a1 — Rebase execution and menu contracts.** Complete Git execution, command registration, executable menu metadata and exact-state regression fixtures. Done: containing commit.
         - test: independent real conflict fixtures cover continue, skip and abort; registry and menu contracts expose implemented operations.
         - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
-      - [ ] **T017.2a2 — Rebase command error effects.** Exercise unresolved-conflict and no-operation failures through command dispatch.
-        - test: failures emit readable `Effect::Message`, preserve repository state and leave the caller usable.
-        - Verification: `make test-rust FILTER="--test rebase_state"`.
+      - [x] **T017.2a2 — Rebase command error effects.** Exercise unresolved-conflict and no-operation failures through command dispatch. Done: containing commit.
+         - test: failures emit readable `Effect::Message`, preserve repository state and leave the caller usable.
+         - Verification: `make test-rust FILTER="--test rebase_state"`.
+         - Verified: `make test-rust FILTER="--test rebase_state"` @ 1db0220 → ok: rust. SessionTest dispatch covers idle and unresolved continue failures, message effects, unchanged HEAD/index/conflicts and caller usability; parent T017.2, siblings .2/.2b/.3 remain open.
     - [ ] **T017.2b — Structured rebase status.** Render active/conflicted rebase state and operation availability using server-owned tree metadata.
       - test: status state and tree update as operations progress and disappear after abort/completion.
       - Verification: `make test-rust FILTER="--test rebase_state --test status_render"`.
