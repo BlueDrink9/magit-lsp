@@ -1,0 +1,18 @@
+# Cancel the select-mode continuation: the caller is restored without mutation.
+fixture: log-history
+---
+sh: nvim --headless --server ../nvim.sock --remote-expr "setreg('\"','sentinel')"
+sh: git rev-parse HEAD > .git/select-head
+keys: l
+wait screen contains "Log"
+keys: c
+wait screen contains "Select commit(s) to copy"
+snapshot: select-picker
+keys: Escape
+wait
+expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+snapshot: caller-restored
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "getreg('\"')")" = sentinel
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/select-head)"
+sh: test -z "$(git status --porcelain)"
