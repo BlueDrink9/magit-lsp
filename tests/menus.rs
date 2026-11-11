@@ -516,6 +516,16 @@ fn log_argument_statuses_and_select_copy_action_are_exact() {
 }
 
 #[test]
+fn commit_fixup_action_is_implemented() {
+    let menu = magit_lsp::menus::named("commit").expect("commit menu");
+    assert!(matches!(
+        menu.item("f"),
+        Some(Item::Action { command, label, status: MenuStatus::Implemented, .. })
+            if command == "commit.fixup" && label == "Fixup"
+    ));
+}
+
+#[test]
 fn every_menu_renders_all_of_its_action_keys() {
     let mut all: Vec<(String, Menu)> = magit_lsp::menus::all()
         .iter()

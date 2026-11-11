@@ -1,0 +1,15 @@
+# Cancel fixup target selection; preserve HEAD/index and restore status caller.
+fixture: log-history
+---
+sh: printf '\nfixup staged sentinel\n' >> f.txt && git add f.txt && git rev-parse HEAD > .git/fixup-head && git write-tree > .git/fixup-index
+keys: c
+wait screen contains "Fixup"
+keys: f
+wait screen contains "Select commit"
+snapshot: fixup-picker
+keys: Escape
+wait
+expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+snapshot: caller-restored
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/fixup-head)" && test "$(git write-tree)" = "$(cat .git/fixup-index)"

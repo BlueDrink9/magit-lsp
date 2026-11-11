@@ -68,7 +68,7 @@ pub fn definition() -> MenuDef {
             group(
                 "Edit",
                 vec![
-                    action("f", "commit.fixup", "Fixup", "magit-commit-fixup", "R-4.1"),
+                    action("f", "commit.fixup", "Fixup", "magit-commit-fixup", ""),
                     action(
                         "s",
                         "commit.squash",
