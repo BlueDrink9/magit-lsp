@@ -38,6 +38,50 @@ fn parses_supported_actions_and_abbreviated_identity() {
 }
 
 #[test]
+fn subject_starting_with_dash_is_not_treated_as_an_option() {
+    let (_dir, repo, oid) = repo();
+    let parsed = RebaseTodo::parse(&repo, format!("pick {oid} -subject\n").as_bytes()).unwrap();
+    assert_eq!(parsed.entries[0].subject, "-subject");
+}
+
+#[test]
+fn save_reorders_changes_action_and_writes_omissions_as_drop() {
+    let (dir, repo, oid) = repo();
+    let second = git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned();
+    let source = format!("pick {oid} two\npick {second} one\n");
+    let mut todo = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
+    todo.entries.reverse();
+    todo.entries[0].action = TodoAction::Reword;
+    todo.entries.pop();
+    std::fs::create_dir_all(repo.rebase_todo_path().unwrap().parent().unwrap()).unwrap();
+    std::fs::write(repo.rebase_todo_path().unwrap(), &source).unwrap();
+    todo.save(&repo).unwrap();
+    let saved = std::fs::read_to_string(repo.rebase_todo_path().unwrap()).unwrap();
+    assert!(saved.contains(&format!("drop {oid} two")));
+    assert!(saved.contains(&format!("reword {second} one")));
+}
+
+#[test]
+fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
+    let (dir, repo, oid) = repo();
+    let source = format!("pick {oid} two\n");
+    let mut todo = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
+    let path = repo.rebase_todo_path().unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"external edit\n").unwrap();
+    let before = std::fs::read(&path).unwrap();
+    assert!(todo.save(&repo).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+
+    std::fs::write(&path, &source).unwrap();
+    todo.entries[0].oid = "forged".into();
+    let before = std::fs::read(&path).unwrap();
+    assert!(todo.save(&repo).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let _ = dir;
+}
+
+#[test]
 fn rejects_bad_commands_objects_duplicates_and_leading_fold_without_mutation() {
     let (dir, repo, oid) = repo();
     let file_before = std::fs::read(dir.path().join("file")).unwrap();

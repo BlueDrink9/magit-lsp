@@ -569,6 +569,26 @@ impl GitRepo {
         Ok(path.to_path_buf())
     }
 
+    /// Atomically replace the todo of this repository's paused merge-backend rebase.
+    pub fn write_rebase_todo(&self, expected: &[u8], contents: &[u8]) -> Result<()> {
+        if !self.rebase_state()?.is_some() || !self.git_dir.join("rebase-merge").is_dir() {
+            return Err(Error::new("no paused merge-backend rebase owns the todo"));
+        }
+        let path = self.rebase_todo_path()?;
+        let merge_dir = std::fs::canonicalize(self.git_dir.join("rebase-merge"))?;
+        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge_dir.as_path()) {
+            return Err(Error::new("rebase todo path is outside the paused operation"));
+        }
+        if std::fs::read(&path)? != expected { return Err(Error::new("rebase todo changed since it was loaded")); }
+        use std::io::Write;
+        let temporary_path = merge_dir.join(format!(".git-rebase-todo-{}.tmp", std::process::id()));
+        let mut temporary = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary_path)?;
+        if let Err(error) = temporary.write_all(contents) { let _ = std::fs::remove_file(&temporary_path); return Err(error.into()); }
+        drop(temporary);
+        if let Err(error) = std::fs::rename(&temporary_path, &path) { let _ = std::fs::remove_file(&temporary_path); return Err(error.into()); }
+        Ok(())
+    }
+
     /// Read HEAD's committer timestamp for Magit-style metadata-preserving amendments.
     pub fn head_committer_date(&self) -> Result<String> {
         let date = self.run(&["show", "-s", "--format=%cI", "HEAD"])?;

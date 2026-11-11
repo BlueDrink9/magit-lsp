@@ -484,9 +484,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - test: supported actions and abbreviated commit references resolve correctly; invalid grammar, unsupported commands, noncommits, ambiguous/missing objects, duplicate identities and leading squash/fixup are rejected without mutation.
      - Verification: `make test-rust FILTER="--test rebase_todo"`.
     - Verified: `make test-rust FILTER="--test rebase_todo"` @ 2e0cb73 → ok: rust. Cat-file stdin resolution, whitespace parsing, repository no-mutation invariants, and Git-proven bounded four-hex ambiguity covered.
-  - [ ] **T018.2 — Guarded atomic todo persistence.** Preserve the loaded identity set, represent omission as drop and refuse stale source bytes before same-directory atomic replacement.
+   - [x] **T018.2 — Guarded atomic todo persistence.** Preserve the loaded identity set, represent omission as drop and refuse stale source bytes before same-directory atomic replacement.
     - test: valid reorder/action changes preserve exact commit identities; stale/invalid writes leave original todo bytes unchanged.
-    - Verification: `make test-rust FILTER="--test rebase_todo"`.
+     - Verification: `make test-rust FILTER="--test rebase_todo"`.
+     - Verified: `make test-rust FILTER="--test rebase_todo"` @ 4fb018a → ok: rust. Reorder/action, omission-as-drop, dash-prefixed subject, and stale/invalid byte-preservation tests pass.
   - [ ] **T018.3 — Structured todo view and editing actions.** Render server-owned rows; route action changes, reorder, submit and cancel through model and persistence.
     - test: tree metadata and session actions edit only captured identities; submit/cancel and readable validation failures preserve caller and repository invariants.
     - Verification: `make test-rust FILTER="--test rebase_todo"`.

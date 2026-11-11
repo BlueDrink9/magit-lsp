@@ -13,7 +13,7 @@ pub struct TodoEntry { pub action: TodoAction, pub oid: String, pub subject: Str
 
 /// Parsed todo entries with original source bytes retained for stale checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebaseTodo { pub entries: Vec<TodoEntry>, pub source: Vec<u8> }
+pub struct RebaseTodo { pub entries: Vec<TodoEntry>, pub source: Vec<u8>, identities: Vec<String>, original: Vec<TodoEntry> }
 
 impl RebaseTodo {
     /// Parse todo bytes, resolving each reference to a unique commit object.
@@ -31,12 +31,37 @@ impl RebaseTodo {
             let remainder = line.find(reference).map(|at| &line[at + reference.len()..]).unwrap_or("");
             let subject = remainder.trim_start();
             if subject.is_empty() { return Err(Error::new("todo action missing subject")); }
-            if subject.starts_with('-') { return Err(Error::new("todo options are unsupported")); }
             let oid = repo.resolve_todo_commit(reference)?;
             if entries.iter().any(|entry: &TodoEntry| entry.oid == oid) { return Err(Error::new("duplicate todo commit identity")); }
             entries.push(TodoEntry { action, oid, subject: subject.to_owned() });
         }
         if matches!(entries.first().map(|e| e.action), Some(TodoAction::Squash|TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
-        Ok(Self { entries, source: source.to_vec() })
+        let identities = entries.iter().map(|entry| entry.oid.clone()).collect();
+        Ok(Self { entries: entries.clone(), source: source.to_vec(), identities, original: entries })
+    }
+
+    /// Persist edited actions/order only when the captured paused todo remains unchanged.
+    pub fn save(&self, repo: &GitRepo) -> Result<()> {
+        if self.entries.iter().any(|entry| !self.identities.contains(&entry.oid))
+            || self.entries.iter().map(|entry| &entry.oid).collect::<std::collections::HashSet<_>>().len() != self.entries.len()
+            || matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
+            return Err(Error::new("invalid edited rebase todo"));
+        }
+        let mut entries = self.entries.clone();
+        for oid in &self.identities {
+            if !entries.iter().any(|entry| &entry.oid == oid) {
+                let original = self.original.iter().find(|entry| &entry.oid == oid);
+                if let Some(original) = original { entries.push(TodoEntry { action: TodoAction::Drop, ..original.clone() }); }
+            }
+        }
+        if entries.iter().map(|entry| &entry.oid).collect::<std::collections::HashSet<_>>().len() != self.identities.len() {
+            return Err(Error::new("edited rebase todo omits captured commit identities"));
+        }
+        let mut output = String::new();
+        for entry in entries {
+            let action = match entry.action { TodoAction::Pick=>"pick", TodoAction::Reword=>"reword", TodoAction::Edit=>"edit", TodoAction::Squash=>"squash", TodoAction::Fixup=>"fixup", TodoAction::Drop=>"drop" };
+            output.push_str(&format!("{action} {} {}\n", entry.oid, entry.subject));
+        }
+        repo.write_rebase_todo(&self.source, output.as_bytes())
     }
 }
