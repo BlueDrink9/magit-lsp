@@ -3,6 +3,7 @@ mod common;
 use common::{git, write};
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_todo::{RebaseTodo, TodoAction};
+use magit_lsp::rebase_todo_view::RebaseTodoView;
 use tempfile::TempDir;
 
 fn repo() -> (TempDir, GitRepo, String) {
@@ -99,6 +100,30 @@ fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
     todo.entries[0].subject.push_str("\nexec touch injected");
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn todo_view_edits_and_reorders_by_captured_identity() {
+    let (dir, repo) = paused_repo();
+    let mut view = RebaseTodoView::load(repo).unwrap();
+    let initial = view.render();
+    let ids = initial.nodes.iter().map(|node| node.commit.clone().unwrap()).collect::<Vec<_>>();
+    assert_eq!(ids.len(), 2);
+    let second = ids[1].clone();
+    view.set_action(&second, TodoAction::Reword).unwrap();
+    view.move_before(&second, Some(&ids[0])).unwrap();
+    let changed = view.render();
+    assert_eq!(changed.nodes[0].commit.as_deref(), Some(second.as_str()));
+    assert_eq!(changed.nodes[0].status.as_deref(), Some("reword"));
+    assert_eq!(changed.nodes[1].commit.as_deref(), Some(ids[0].as_str()));
+    let path = dir.path().join(".git/rebase-merge/git-rebase-todo");
+    let before = std::fs::read(&path).unwrap();
+    assert!(view.move_before("unknown", None).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    view.save().unwrap();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.starts_with(&format!("reword {second} ")));
     git(dir.path(), &["rebase", "--abort"]);
 }
 

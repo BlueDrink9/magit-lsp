@@ -25,6 +25,7 @@ pub mod presentation;
 pub mod process_log;
 pub mod protocol;
 pub mod rebase_todo;
+pub mod rebase_todo_view;
 pub mod quirks;
 pub mod runner;
 pub mod semantic_tokens;
