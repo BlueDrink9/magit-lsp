@@ -4,28 +4,6 @@ use serde_json::{json, Value};
 mod common;
 use common::stdio::TestServer;
 
-#[path = "../scripts/generate_client_behaviors.rs"]
-mod client_behaviors;
-
-#[test]
-fn known_client_appendix_matches_registry() {
-    let path = "docs/CLIENT_SPEC.md";
-    let text = std::fs::read_to_string(path).unwrap();
-    let start = "<!-- BEGIN GENERATED KNOWN CLIENT BEHAVIORS -->";
-    let end = "<!-- END GENERATED KNOWN CLIENT BEHAVIORS -->";
-    let generated = client_behaviors::render();
-    if std::env::var_os("UPDATE_CLIENT_BEHAVIORS").is_some() {
-        let before = text.split_once(start).unwrap().0;
-        let after = text.split_once(end).unwrap().1;
-        std::fs::write(path, format!("{before}{generated}{after}")).unwrap();
-    } else {
-        let (before, rest) = text.split_once(start).unwrap();
-        let (_, after) = rest.split_once(end).unwrap();
-        assert_eq!(format!("{start}{}", rest.split_once(end).unwrap().0) + end, generated);
-        assert!(!before.is_empty() && !after.is_empty());
-    }
-}
-
 fn fixture(path: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }

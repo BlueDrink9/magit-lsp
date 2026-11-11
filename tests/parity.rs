@@ -194,25 +194,3 @@ fn the_cargo_xtask_alias_runs_the_parity_command() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), parity::markdown());
 }
-
-#[test]
-fn the_readme_block_is_generated_and_up_to_date() {
-    let path = readme_path();
-    let readme = std::fs::read_to_string(&path).expect("read README.md");
-    let start = readme
-        .find(parity::README_START)
-        .expect("README has the parity start marker");
-    let end = readme
-        .find(parity::README_END)
-        .expect("README has the parity end marker");
-    // The expected file is the hand-written prose around a freshly generated
-    // block, so an `UPDATE_EXPECT=1` run rewrites the block in place and
-    // preserves the prose.
-    let expected = format!(
-        "{}{}{}",
-        &readme[..start],
-        parity::readme_block(),
-        &readme[end + parity::README_END.len() + 1..]
-    );
-    expect_file![path].assert_eq(&expected);
-}

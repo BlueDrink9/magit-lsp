@@ -130,13 +130,3 @@ pub fn json() -> String {
     text.push('\n');
     text
 }
-
-/// The README markers that delimit the generated table.
-pub const README_START: &str = "<!-- parity:start -->";
-/// The closing marker.
-pub const README_END: &str = "<!-- parity:end -->";
-
-/// Wrap `markdown` in the README markers.
-pub fn readme_block() -> String {
-    format!("{README_START}\n{}{README_END}\n", markdown())
-}
