@@ -1,6 +1,6 @@
 # Plain presentation command support
 
-This table is generated from command registry metadata (`Command::effects`, `Command::scope` and `Command::status`) and `PlainCapabilities::plain_availability`; it records declarations, not the result of executing each command. The `minimal`, `edits` and `full` columns evaluate three representative capability sets. Effect declarations are enforced when effects are delivered, so an available command still needs the listed capability before an optional effect reaches the client. Do not hand-edit this file; regenerate it with `UPDATE_PLAIN_SUPPORT=1 make test-rust FILTER="--test plain_support"`.
+This table is generated from command registry metadata (`Command::effects`, `Command::scope` and `Command::status`) and `PlainCapabilities::plain_availability`; it records declarations, not the result of executing each command. The `minimal`, `edits` and `full` columns evaluate three representative capability sets. Effect declarations are enforced when effects are delivered, so an available command still needs the listed capability before an optional effect reaches the client. Do not hand-edit this file; regenerate it with `make registry-docs-generate`.
 
 | Command | Scope | Status | Effects | Needs capability | minimal | edits | full | Reason |
 |---|---|---|---|---|---|---|---|---|
@@ -54,7 +54,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `commit.autofixup` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
 | `commit.create` | menu-action | Implemented | editDocument | `workspace.applyEdit` | Unavailable — workspace.applyEdit is required | Available | Available | workspace.applyEdit is required |
 | `commit.extend` | menu-action | Implemented | editDocument | `workspace.applyEdit` | Unavailable — workspace.applyEdit is required | Available | Available | workspace.applyEdit is required |
-| `commit.fixup` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
+| `commit.fixup` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `commit.instant-fixup` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
 | `commit.instant-squash` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
 | `commit.reshelve` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
@@ -188,10 +188,10 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `push.tags` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
 | `push.to-pushremote` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
 | `push.to-upstream` | menu-action | Planned (R-6.2) | — | — | Planned (R-6.2) | Planned (R-6.2) | Planned (R-6.2) | — |
-| `rebase.abort` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.abort` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.autosquash` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.change-dates` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
-| `rebase.continue` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.continue` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.edit-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.elsewhere` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.interactive` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
@@ -199,6 +199,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.onto-upstream` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.remove-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.reword-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.skip` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.subset` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `remote.add` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.configure` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
