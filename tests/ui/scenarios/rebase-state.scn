@@ -1,0 +1,24 @@
+# Failed continue preserves conflict; abort restores exact repository state.
+fixture: in-progress-rebase
+---
+sh: git rev-parse ORIG_HEAD > .git/rebase-head && git rev-parse ORIG_HEAD^{tree} > .git/rebase-tree && git ls-files --stage > .git/rebase-index && git status --porcelain > .git/rebase-status
+wait screen contains "Rebase"
+expect screen contains "conflict"
+keys: r
+wait screen contains "Continue"
+keys: r
+wait
+expect screen contains "git rebase --continue failed:"
+expect screen contains "continue: unavailable (resolve conflicts)"
+expect view_stack.count == 1
+sh: git ls-files --stage > .git/rebase-index-after && test "$(cat .git/rebase-index-after)" = "$(cat .git/rebase-index)" && test "$(git status --porcelain)" = "$(cat .git/rebase-status)"
+keys: Escape
+wait screen contains "Rebase (conflicted)"
+keys: r
+wait screen contains "Continue"
+keys: a
+wait
+expect screen not-contains "Rebase"
+expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/rebase-head)" && test "$(git write-tree)" = "$(cat .git/rebase-tree)" && test ! -d .git/rebase-merge
