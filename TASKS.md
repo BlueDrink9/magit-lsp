@@ -187,6 +187,13 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [AGENTS.md](./AGENTS.md). Behaviour claims require current source/tests. Project status: early stage; backward compatibility is not a goal.
 
 
+## Bugfix
+
+- [x] **Repair Phase 5 recorded example drift.** The substantial-chunk gate at `4e25db9` failed `plain_examples_replay_against_the_real_binary` (`build/test-logs/rust.ZfjZ4r`). Reconcile recorded examples with intentional command registry changes without weakening exact replay validation.
+  - test: recorded examples replay against the real binary with exact normalized frame equality.
+  - Verification: `make test-rust FILTER="--test examples"`.
+  - Verified: `make test-rust FILTER="--test examples"` @ `4e25db9` → ok: rust. Updated intentional code-action ordering and `commit.fixup` title (`Create a fixup commit`) in both fixtures; exact normalized frame equality retained. Mismatch diagnostics report first JSON path.
+
 ## Deferred hygiene follow-ups
 
 Keep this debt open. Run tools through `make hygiene` and focused suites through `make vscode-test`, `make test-rust FILTER="..."`, or `make test-file FILE=...`; a report-only exit is not a clean bill of health. Any additional executable check needs its own Make target before execution.
