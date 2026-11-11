@@ -781,7 +781,7 @@ Classification rule: `src/presentation/mod.rs::negotiate` selects
 present block is strictly validated as rich v1 and selects Level 4. The Plain
 level is derived from the standard capabilities the client actually declares,
 not from its name or version. A client quirk from
-[Known client behaviors](#known-client-behaviors) can correct one recorded
+[Known client behaviors](known-client-behaviors.md#known-client-behaviors) can correct one recorded
 behavior beyond the declaration: the quirk's capability override is applied to
 the negotiated `PlainCapabilities` before the level is used, so
 `assume-document-changes` adds `workspace.workspaceEdit.documentChanges` for the
