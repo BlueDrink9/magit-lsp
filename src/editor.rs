@@ -149,7 +149,7 @@ mod editor_history_tests {
     }
 
     fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
-        let run = registry.create(repo.to_str().unwrap(), "owner").unwrap();
+        let run = registry.create(repo.to_str().unwrap(), "owner", draft::DraftKind::CommitMessage).unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
         registry
             .apply("owner", &run, &uri, |draft, context| {
@@ -176,8 +176,31 @@ mod editor_history_tests {
             .unwrap_or_default()
     }
 
+    #[test]
+    fn todo_registry_runs_never_retain_commit_history() {
+        let registry = EditRegistry::new();
+        let dir = repository();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let target = repo.rebase_todo_path().unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "pick deadbeef subject\n").unwrap();
+        let run = registry.create(dir.path().to_str().unwrap(), "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let uri = registry.lock()[&run].draft.uri().to_string();
+        let token = registry.lock()[&run].draft.helper_token().to_string();
+        assert!(registry.apply("owner", &run, &uri, |draft, context| {
+            assert!(draft.accept_helper(context, &token, COMMIT_MESSAGE_KIND, &target).is_err());
+            assert!(draft.accept_helper(context, &token, REBASE_TODO_KIND, &repo.commit_message_path()?).is_err());
+            draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
+            draft.did_open(context, 1, b"pick deadbeef subject\n")?;
+            draft.did_change(context, 2, b"drop deadbeef subject\n")?;
+            Ok(())
+        }).is_ok());
+        assert!(registry.resolve(&run, Reply::Abort));
+        assert!(retained(&registry, dir.path()).is_empty());
+    }
+
     fn joined(registry: &EditRegistry, repo: &Path) -> (String, String) {
-        let run = registry.create(repo.to_str().unwrap(), "owner").unwrap();
+        let run = registry.create(repo.to_str().unwrap(), "owner", draft::DraftKind::CommitMessage).unwrap();
         let uri = registry.lock()[&run].draft.uri().to_string();
         registry
             .apply("owner", &run, &uri, |draft, context| {
@@ -393,9 +416,9 @@ impl EditRegistry {
 
     /// Allocate a draft before Git, bound to a trusted connection and repository.
     #[cfg(unix)]
-    pub fn create(&self, repo_path: &str, owner: &str) -> Result<String> {
+    pub fn create(&self, repo_path: &str, owner: &str, kind: draft::DraftKind) -> Result<String> {
         let repo = GitRepo::open(repo_path)?;
-        let draft = draft::Draft::new(&repo, owner)?;
+        let draft = draft::Draft::for_kind(&repo, owner, kind)?;
         let edit_id = draft.run_id().to_string();
         let (replies, waiting) = std_mpsc::channel();
         let (completion, completed) = std_mpsc::channel();
@@ -416,7 +439,7 @@ impl EditRegistry {
 
     /// Managed drafts require the Unix helper/validated file-descriptor boundary.
     #[cfg(not(unix))]
-    pub fn create(&self, _repo_path: &str, _owner: &str) -> Result<String> {
+    pub fn create(&self, _repo_path: &str, _owner: &str, _kind: draft::DraftKind) -> Result<String> {
         Err(Error::new("managed commit drafts require Unix"))
     }
 

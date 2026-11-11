@@ -1950,7 +1950,7 @@ fn early_commit_cancellation_does_not_kill_repository_discovery() {
     let before = tmp.git(&["rev-parse", "HEAD"]);
     let cancel = magit_lsp::runner::CancelHandle::new();
     let run = magit_lsp::editor::registry()
-        .create(tmp.path().to_str().unwrap(), "early-test")
+        .create(tmp.path().to_str().unwrap(), "early-test", magit_lsp::editor::draft::DraftKind::CommitMessage)
         .unwrap();
     let registry = magit_lsp::editor::registry();
     let pending = registry.pending_for("early-test", tmp.path().to_str().unwrap());

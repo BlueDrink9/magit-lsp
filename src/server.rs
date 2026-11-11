@@ -4991,7 +4991,7 @@ fn spawn_commit(shared: Shared, repo: String, operation: crate::git::CommitOpera
     set_plain_commit_expired(&shared, false);
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
-    let edit_id = match editor::registry().create(&repo, &shared.draft_owner) {
+    let edit_id = match editor::registry().create(&repo, &shared.draft_owner, editor::draft::DraftKind::CommitMessage) {
         Ok(id) => id,
         Err(error) => {
             let _ = sender.send(show_message(
@@ -5567,7 +5567,7 @@ mod commit_tests {
         );
         let retained = Arc::downgrade(&config);
         let id = editor::registry()
-            .create(tmp.path().to_str().unwrap(), "test-connection")
+            .create(tmp.path().to_str().unwrap(), "test-connection", editor::draft::DraftKind::CommitMessage)
             .unwrap();
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
         let edit = CommitEdit {
