@@ -60,6 +60,57 @@ fn fixup_selection_confirm_commits_staged_change_for_full_selected_oid() {
 }
 
 #[test]
+fn fixup_selection_cancel_preserves_repo_and_restores_caller() {
+    use magit_lsp::protocol::Effect;
+
+    let (tmp, _) = RepoFixture::new()
+        .commit("selected target subject", [("f.txt", "base\n")])
+        .commit("newer HEAD subject", [("f.txt", "head\n")])
+        .staged_file("f.txt", "staged fix\n")
+        .build();
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let index = git(tmp.path(), &["write-tree"]);
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("commit.fixup");
+    let picker = test.view_id().to_string();
+    test.ack();
+
+    let result = test.invoke("common.cancel");
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker)));
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(tmp.path(), &["write-tree"]), index);
+}
+
+#[test]
+fn fixup_git_failure_reports_message_and_restores_usable_caller() {
+    use magit_lsp::protocol::{Effect, MessageLevel};
+
+    let (tmp, _) = RepoFixture::new()
+        .commit("selected target subject", [("f.txt", "base\n")])
+        .build();
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("commit.fixup");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let line = test.session().views().get(&picker).unwrap().tree().nodes.iter()
+        .find(|node| node.kind == magit_lsp::tree::NodeKind::Commit)
+        .expect("commit row").start_line;
+    let result = test.invoke_at("common.confirm", magit_lsp::protocol::Cursor { line, column: 0 });
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Error, text, .. } if text.contains("git commit") && text.contains("failed"))), "{:?}", result.effects);
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert!(test.session().views().get(&caller).is_some());
+    assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
 fn log_menu_opens_log_and_q_returns_to_status_in_each_profile() {
     for (profile, opener) in [(Profile::Standard, "l"), (Profile::Vim, "l")] {
         let (tmp, _repo) = RepoFixture::new()
