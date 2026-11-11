@@ -103,6 +103,13 @@ pub struct Status {
     pub untracked: Vec<FileEntry>,
 }
 
+/// Git operation state relevant to an in-progress rebase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RebaseState {
+    /// Whether Git has stopped for unresolved conflicts.
+    pub conflicted: bool,
+}
+
 /// Filters and presentation options for a Git log query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
@@ -377,6 +384,20 @@ pub struct GitRepo {
 }
 
 impl GitRepo {
+    /// Detect an active merge/apply rebase in this worktree, including conflict state.
+    pub fn rebase_state(&self) -> Result<Option<RebaseState>> {
+        let merge = self.git_dir.join("rebase-merge").is_dir();
+        let apply = self.git_dir.join("rebase-apply").is_dir();
+        if !merge && !apply {
+            return Ok(None);
+        }
+        let status = self.run(&["status", "--porcelain"])?;
+        let conflicted = status.lines().any(|line| {
+            matches!(line.get(..2), Some("UU" | "AA" | "DD" | "AU" | "UA" | "DU" | "UD"))
+        });
+        Ok(Some(RebaseState { conflicted }))
+    }
+
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
         Self::command_in_with_env(
