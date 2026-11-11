@@ -401,6 +401,34 @@ impl GitRepo {
         Ok(Some(RebaseState { conflicted }))
     }
 
+    /// Continue an active rebase without opening an editor for its unchanged message.
+    pub fn rebase_continue(&self) -> Result<()> {
+        self.rebase_operation("--continue", true)
+    }
+
+    /// Skip the current commit in an active rebase.
+    pub fn rebase_skip(&self) -> Result<()> {
+        self.rebase_operation("--skip", false)
+    }
+
+    /// Abort an active rebase.
+    pub fn rebase_abort(&self) -> Result<()> {
+        self.rebase_operation("--abort", false)
+    }
+
+    fn rebase_operation(&self, operation: &str, noninteractive: bool) -> Result<()> {
+        if self.rebase_state()?.is_none() {
+            return Err(Error::new("No rebase operation is in progress."));
+        }
+        let args = ["rebase", operation];
+        if noninteractive {
+            Self::command_in_with_env(&self.root, &args, &[("GIT_EDITOR", "true")])?;
+        } else {
+            self.run(&args)?;
+        }
+        Ok(())
+    }
+
     /// Check an external author-date expression without changing repository state.
     pub fn validate_author_date(&self, date: &str) -> Result<()> {
         Self::command_in_with_env(

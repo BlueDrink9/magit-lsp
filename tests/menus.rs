@@ -156,13 +156,14 @@ fn every_planned_menu_action_reports_its_roadmap_and_changes_nothing() {
         })
         .map(|command| command.id)
         .collect();
+    let mut planned_menu_commands = planned_menu_commands;
+    planned_menu_commands.retain(|id| !matches!(*id, "rebase.continue" | "rebase.skip" | "rebase.abort"));
     let mut pressed_commands: Vec<&str> = pressed
         .iter()
         .map(|(command, _key)| command.as_str())
         .collect();
     pressed_commands.sort_unstable();
     pressed_commands.dedup();
-    let mut planned_menu_commands = planned_menu_commands;
     planned_menu_commands.sort_unstable();
     assert_eq!(
         pressed_commands, planned_menu_commands,
@@ -283,12 +284,6 @@ fn static_menu_actions_match_the_independent_magit_key_audit_both_ways() {
     let expected = definition_actions();
     validate_audit(&expected, &reference).unwrap_or_else(|error| panic!("{error}"));
     let aliases = [
-        (
-            "rebase",
-            "s",
-            "in-progress rebase: Skip",
-            "magit-rebase-skip",
-        ),
         (
             "rebase",
             "e",

@@ -915,6 +915,9 @@ fn build() -> Registry {
             run: commit_create,
             effects: &[EffectKind::EditDocument],
         },
+        Command { id: "rebase.continue", scope: Scope::MenuAction, doc: "Continue rebase", status: CommandStatus::Implemented, run: rebase_continue, effects: &[] },
+        Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
+        Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
         Command {
             id: "commit.amend",
             scope: Scope::MenuAction,
@@ -1111,6 +1114,26 @@ fn refresh(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         refresh: true,
         ..Default::default()
     })
+}
+
+fn rebase_continue(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_action(ctx, |repo| repo.rebase_continue())
+}
+
+fn rebase_skip(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_action(ctx, |repo| repo.rebase_skip())
+}
+
+fn rebase_abort(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    rebase_action(ctx, |repo| repo.rebase_abort())
+}
+
+fn rebase_action(ctx: &mut CommandCtx<'_>, action: impl FnOnce(&GitRepo) -> Result<()>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    if let Err(err) = action(&repo) {
+        ctx.effects.push(Effect::Message { level: MessageLevel::Warn, text: err.to_string(), hint: None, detail: None });
+    }
+    Ok(CommandOutcome { refresh: true, ..Default::default() })
 }
 
 fn log_load_more(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

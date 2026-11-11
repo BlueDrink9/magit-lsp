@@ -80,3 +80,37 @@ fn apply_rebase_detected_and_linked_worktree_state_isolated() {
     assert_eq!(linked_repo.rebase_state().unwrap(), None);
     git(dir.path(), &["rebase", "--abort"]);
 }
+
+#[test]
+fn rebase_operations_guard_idle_and_handle_conflict_skip_abort_and_continue() {
+    let dir = repo();
+    let idle = GitRepo::open(dir.path()).unwrap();
+    assert!(idle.rebase_continue().unwrap_err().to_string().contains("No rebase operation"));
+    assert!(idle.rebase_skip().is_err());
+    assert!(idle.rebase_abort().is_err());
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]).trim(), git(dir.path(), &["rev-parse", "main"]).trim());
+
+    conflicting_history(dir.path());
+    git(dir.path(), &["checkout", "topic"]);
+    failed_git(dir.path(), &["rebase", "main"]);
+    let active = GitRepo::open(dir.path()).unwrap();
+    assert!(active.rebase_continue().is_err());
+    assert!(active.rebase_state().unwrap().is_some());
+    active.rebase_abort().unwrap();
+    assert_eq!(active.rebase_state().unwrap(), None);
+
+    failed_git(dir.path(), &["rebase", "main"]);
+    write(&dir.path().join("file"), "resolved\n");
+    git(dir.path(), &["add", "file"]);
+    active.rebase_continue().unwrap();
+    assert_eq!(active.rebase_state().unwrap(), None);
+
+    let skip_dir = repo();
+    conflicting_history(skip_dir.path());
+    git(skip_dir.path(), &["checkout", "topic"]);
+    failed_git(skip_dir.path(), &["rebase", "main"]);
+    let skip_repo = GitRepo::open(skip_dir.path()).unwrap();
+    assert!(skip_repo.rebase_state().unwrap().unwrap().conflicted);
+    skip_repo.rebase_skip().unwrap();
+    assert_eq!(skip_repo.rebase_state().unwrap(), None);
+}

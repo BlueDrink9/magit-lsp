@@ -417,6 +417,18 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - [ ] **T017.2 — Rebase state actions and status.** Render server-owned operation state and implement continue, skip and abort with readable failures.
     - test: exact repository state and rendered structure cover action success, conflict, and invalid operation attempts.
     - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
+    - [ ] **T017.2a — Rebase operation commands.** Implement continue, skip and abort behind the Git boundary; register executable menu actions.
+      - test: exact repository state covers continue/skip/abort and readable conflict/no-operation outcomes.
+      - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
+      - [x] **T017.2a1 — Rebase execution and menu contracts.** Complete Git execution, command registration, executable menu metadata and exact-state regression fixtures. Done: containing commit.
+        - test: independent real conflict fixtures cover continue, skip and abort; registry and menu contracts expose implemented operations.
+        - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
+      - [ ] **T017.2a2 — Rebase command error effects.** Exercise unresolved-conflict and no-operation failures through command dispatch.
+        - test: failures emit readable `Effect::Message`, preserve repository state and leave the caller usable.
+        - Verification: `make test-rust FILTER="--test rebase_state"`.
+    - [ ] **T017.2b — Structured rebase status.** Render active/conflicted rebase state and operation availability using server-owned tree metadata.
+      - test: status state and tree update as operations progress and disappear after abort/completion.
+      - Verification: `make test-rust FILTER="--test rebase_state --test status_render"`.
   - [ ] **T017.3 — Native rebase state conformance.** Exercise status and operation actions through real Neovim input using text and Git evidence.
     - test: `rebase-state.scn` asserts conflict/status, operation outcomes and usable caller state.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-state.scn`.
