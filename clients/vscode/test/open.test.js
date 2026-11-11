@@ -113,7 +113,7 @@ module.exports = async function testStatusOpenLifecycle() {
       this.handlers = notifications;
       this.features = [];
       this.options = options;
-      this.initializeResult = { capabilities: { semanticTokensProvider: {
+       this.initializeResult = { serverInfo: { version: require('../package.json').version }, capabilities: { semanticTokensProvider: {
         legend: { tokenTypes: ['magit.section'], tokenModifiers: [] },
       } } };
     }
@@ -171,6 +171,7 @@ module.exports = async function testStatusOpenLifecycle() {
   const context = { subscriptions: [] };
   extension.activate(context);
   await commands.get('magit.open')();
+  assert.equal(warnings.length, 0, 'matching server metadata emits no startup warning');
   assert.equal(openCount, 1);
   assert.equal(tabs.length, 1);
   assert.match(tabs[0].uri.path, /Status$/);

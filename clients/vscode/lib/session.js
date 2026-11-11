@@ -1,6 +1,8 @@
 'use strict';
 
 const vscode = require('vscode');
+const fs = require('node:fs');
+const path = require('node:path');
 const { LanguageClient } = require('vscode-languageclient/node');
 
 const commands = require('./commands');
@@ -13,6 +15,8 @@ const shared = require('../types/shared-lists');
 const views = require('./views');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
+const version = require('./version');
+const extensionVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')).version;
 
 /**
  * Create the LSP client with the static key-delivery capabilities.
@@ -115,6 +119,8 @@ function activate(context) {
 
   store.client = createClient();
   const client = store.client;
+  const command = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
+  const executable = version.resolveCommand(command);
   client.onNotification('view/render', requests.applyRender);
    client.onNotification('view/prompt', requests.handlePrompt);
   client.onNotification('view/pick', requests.handlePick);
@@ -127,6 +133,9 @@ function activate(context) {
     void effects.applyEffects(params && params.effects, store.activeViewId);
   });
   store.clientReady = client.start().then(() => {
+    const warning = version.warning(extensionVersion,
+      client.initializeResult?.serverInfo?.version, executable);
+    if (warning) vscode.window.showWarningMessage(warning);
     store.semanticChanged = semantic.register(
       vscode,
       client,

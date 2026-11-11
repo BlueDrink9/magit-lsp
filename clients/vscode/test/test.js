@@ -12,6 +12,7 @@ const edit = require('../lib/edit');
 const promptVectors = require('../../../tests/data/client-contracts.json').prompts;
 const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
+const versions = require('../lib/version');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -465,6 +466,19 @@ test('a multi pick maps every picked row to its id', () => {
 });
 
 // summary ------------------------------------------------------------------
+
+test('startup version warnings distinguish matching, mismatched and missing metadata', () => {
+  assert.equal(versions.warning('1.2.3', '1.2.3', '/bin/magit-lsp'), undefined);
+  assert.match(versions.warning('1.2.3', '2.0.0', '/bin/magit-lsp'), /1\.2\.3.*2\.0\.0.*\/bin\/magit-lsp/);
+  assert.match(versions.warning('1.2.3', undefined, '/bin/magit-lsp'), /1\.2\.3.*unknown.*\/bin\/magit-lsp/);
+});
+
+test('PATH command resolution selects executable and preserves unresolved command', () => {
+  const path = require('node:path');
+  const executable = path.basename(process.execPath);
+  assert.equal(versions.resolveCommand(executable, { PATH: path.dirname(process.execPath) }), process.execPath);
+  assert.equal(versions.resolveCommand('missing-tool', { PATH: '' }), 'missing-tool');
+});
 
 test('executable VSCode e2e paths enforce no-vision policy', noVisionPolicy);
 
