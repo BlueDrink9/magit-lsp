@@ -597,8 +597,6 @@ pub fn stale_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
             stale.push(PathBuf::from(file.path));
         }
     }
-    if schema_markdown::stale(root)? {
-        stale.push(PathBuf::from(schema_markdown::DOC_PATH));
-    }
+    stale.extend(schema_markdown::stale_paths(root)?);
     Ok(stale)
 }

@@ -27,6 +27,12 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
+- [x] **DOC1 — Extract standalone schema references and separate schema behavior tests.** Generate payload tables, worked exchanges and capability levels under `docs/schema/`; link from authored client documentation. Keep semantic and temporary-fixture generator/checker tests; move committed-artifact freshness out of ordinary Rust tests.
+  - Verified: `make test-rust FILTER="--test schema"` @ `3c31d80` → ok: rust. Temporary fixtures check standalone generation plus tamper/missing detection for all three references; capability semantics and type coverage remain. `CLIENT_SPEC.md` links to the standalone refs; committed artifact freshness checks no longer run in the schema integration test.
+- [ ] **DOC2 — Extract registry references and separate registry behavior tests.** Standalone parity and known-client references; explicit generation/check entry points for parity, Plain support and client behaviors. Preserve runtime/renderer tests; remove checkout freshness and non-contractual prose assertions.
+- [ ] **DOC3 — Wire dedicated documentation maintenance and concise agent guidance.** Make generation/check targets and dedicated CI for artifact freshness and Markdown links; document behavior-test boundaries and separate generated-reference commits with causal justification. Preserve unrelated baseline edits.
+- [ ] **DOC4 — Regenerate extracted references in an isolated justified commit.** Generate all reference artifacts through Make targets, verify freshness and links, commit generated outputs separately from code/manual documentation and queue bookkeeping.
+
 - [x] **T008.1 — Normalize prompt negotiation for Plain and Rich.** Done: `6957647`. Plain never receives native `view/prompt`; §3.6 records the prompt presentation principle; wire `prompts` semantics clarified. T008 clause 1.
   - Verified: `make test-rust FILTER="--test plain_core --test prompts"` @ `6957647` → ok: rust; `make docs-check` @ `6957647` → ok: docs-check. Plain denies every native prompt kind including `secret`, Unnegotiated stays permissive and declared Rich keeps its existing kind/secret matrix; `custom_ui` maps Plain/Rich/pre-initialize to the three negotiated states.
 - [x] **T008.2 — Add tracked Field nodes and render prompt documents.** Done: `5cde72b`. `NodeKind::Field` is a one-line value node; `PromptDocument` validates prompt shape and renders stable rows/fields for all four kinds with a documented 4096-byte single-line field limit.

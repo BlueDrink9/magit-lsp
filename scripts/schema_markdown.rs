@@ -8,26 +8,18 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{Direction, MethodKind, Payload};
 
-/// Repository-relative path of the client specification document.
-pub const DOC_PATH: &str = "docs/CLIENT_SPEC.md";
-/// Marker opening the generated payload-table block.
-pub const BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED PAYLOAD TABLES -->";
-/// Marker closing the generated payload-table block.
-pub const BLOCK_END: &str = "<!-- END GENERATED PAYLOAD TABLES -->";
-/// Marker opening the generated worked-exchange block.
-pub const EXCHANGES_BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED WORKED EXCHANGES -->";
-/// Marker closing the generated worked-exchange block.
-pub const EXCHANGES_BLOCK_END: &str = "<!-- END GENERATED WORKED EXCHANGES -->";
+/// Repository-relative path of the generated payload tables.
+pub const DOC_PATH: &str = "docs/schema/payload-tables.md";
+/// Repository-relative path of the generated worked exchanges.
+pub const EXCHANGES_DOC_PATH: &str = "docs/schema/worked-exchanges.md";
+/// Repository-relative path of the generated capability levels.
+pub const CAPABILITY_DOC_PATH: &str = "docs/schema/capability-levels.md";
 /// Repository-relative directory holding the recorded exchange files.
 pub const EXAMPLES_DIR: &str = "docs/examples";
-/// Marker opening the generated capability-to-level block.
-pub const CAPABILITY_BLOCK_BEGIN: &str = "<!-- BEGIN GENERATED CAPABILITY LEVELS -->";
-/// Marker closing the generated capability-to-level block.
-pub const CAPABILITY_BLOCK_END: &str = "<!-- END GENERATED CAPABILITY LEVELS -->";
 
 /// One standard capability row in the generated Plain capability table.
 pub struct CapabilityLevel {
@@ -115,11 +107,9 @@ pub const CAPABILITY_LEVELS: &[CapabilityLevel] = &[
     },
 ];
 
-/// Render the complete marker-delimited capability-to-level block.
+/// Render the complete capability-to-level reference.
 pub fn capability_levels_block() -> String {
     let mut out = String::new();
-    out.push_str(CAPABILITY_BLOCK_BEGIN);
-    out.push('\n');
     out.push_str("| `PlainCapabilities` field | Initialize capability | Plain level | Effect |\n");
     out.push_str("|---|---|---|---|\n");
     for row in CAPABILITY_LEVELS {
@@ -128,19 +118,16 @@ pub fn capability_levels_block() -> String {
             row.field, row.capability, row.level, row.effect
         ));
     }
-    out.push_str(CAPABILITY_BLOCK_END);
     out
 }
 
-/// Render the complete marker-delimited payload-table block.
+/// Render the complete payload-table reference.
 ///
 /// Method rows come from the catalog; payload tables come from every
 /// directional schema root. Catalog and shared-list data are not payloads, so
 /// they are deliberately excluded.
 pub fn block() -> Result<String, String> {
     let mut out = String::new();
-    out.push_str(BLOCK_BEGIN);
-    out.push('\n');
     out.push_str("#### Protocol methods\n\n");
     out.push_str("| Method | Kind | Direction | Params | Result |\n");
     out.push_str("|---|---|---|---|---|\n");
@@ -179,11 +166,10 @@ pub fn block() -> Result<String, String> {
         )?);
     }
     out.push('\n');
-    out.push_str(BLOCK_END);
     Ok(out)
 }
 
-/// Render the complete marker-delimited worked-exchange block.
+/// Render the complete worked-exchange reference.
 ///
 /// One subsection per JSONL example file in sorted file order; each line's
 /// recorded `message` is rendered as compact JSON without changing any value.
@@ -201,8 +187,6 @@ pub fn worked_exchanges_block() -> Result<String, String> {
         return Err(format!("{}: no JSONL examples found", dir.display()));
     }
     let mut out = String::new();
-    out.push_str(EXCHANGES_BLOCK_BEGIN);
-    out.push('\n');
     out.push_str("#### Worked exchanges\n\n");
     out.push_str("Recorded end-to-end exchanges from the example files, one subsection per file.\n");
     for path in &files {
@@ -240,7 +224,6 @@ pub fn worked_exchanges_block() -> Result<String, String> {
         out.push_str("```\n");
     }
     out.push('\n');
-    out.push_str(EXCHANGES_BLOCK_END);
     Ok(out)
 }
 
@@ -256,77 +239,39 @@ fn provenance(lines: &[Value]) -> String {
     }
 }
 
-/// Apply the freshly generated blocks to a committed document.
-///
-/// Each existing marker pair is replaced in place. Otherwise its block is
-/// appended, which is how a new or block-less document becomes current.
-pub fn apply(committed: &str) -> Result<String, String> {
-    let tables = replace_block(committed, BLOCK_BEGIN, BLOCK_END, &block()?);
-    let exchanges = replace_block(
-        &tables,
-        EXCHANGES_BLOCK_BEGIN,
-        EXCHANGES_BLOCK_END,
-        &worked_exchanges_block()?,
-    );
-    Ok(replace_block(
-        &exchanges,
-        CAPABILITY_BLOCK_BEGIN,
-        CAPABILITY_BLOCK_END,
-        &capability_levels_block(),
-    ))
-}
-
-/// Replace one marker-delimited block, appending it when the markers are absent.
-fn replace_block(committed: &str, begin: &str, end: &str, block: &str) -> String {
-    if let (Some(start), Some(end_index)) = (committed.find(begin), committed.find(end)) {
-        if start < end_index {
-            let mut out = String::new();
-            out.push_str(&committed[..start]);
-            out.push_str(block);
-            out.push_str(&committed[end_index + end.len()..]);
-            return out;
-        }
-    }
-    let mut out = committed.to_string();
-    if out.is_empty() {
-        out.push_str(block);
-        out.push('\n');
-    } else {
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
-        if !out.ends_with("\n\n") {
-            out.push('\n');
-        }
-        out.push_str(block);
-        out.push('\n');
-    }
-    out
-}
-
-/// Write the client specification with a fresh generated block.
+/// Write all standalone generated references beneath `root`.
 pub fn write(root: &Path) -> io::Result<()> {
-    let path = root.join(DOC_PATH);
-    let committed = fs::read_to_string(&path).unwrap_or_default();
-    let fresh = apply(&committed).map_err(invalid_data)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    let files = [
+        (DOC_PATH, block().map_err(invalid_data)?),
+        (EXCHANGES_DOC_PATH, worked_exchanges_block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH, capability_levels_block()),
+    ];
+    for (relative, text) in files {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
+        fs::write(path, format!("{text}\n"))?;
     }
-    fs::write(path, fresh)
+    Ok(())
 }
 
-/// Whether the committed document lacks or disagrees with the generated block.
-pub fn stale(root: &Path) -> io::Result<bool> {
-    let path = root.join(DOC_PATH);
-    let committed = fs::read_to_string(&path).unwrap_or_default();
-    let fresh = apply(&committed).map_err(invalid_data)?;
-    Ok(fresh != committed)
+/// Return standalone references that differ from generated content.
+pub fn stale_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
+    let generated = [
+        (DOC_PATH, block().map_err(invalid_data)?),
+        (EXCHANGES_DOC_PATH, worked_exchanges_block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH, capability_levels_block()),
+    ];
+    let mut stale = Vec::new();
+    for (relative, text) in generated {
+        let path = root.join(relative);
+        if fs::read_to_string(path).unwrap_or_default() != format!("{text}\n") {
+            stale.push(PathBuf::from(relative));
+        }
+    }
+    Ok(stale)
 }
 
-/// Convert a rendering error into an I/O error for the shared drift API.
-fn invalid_data(message: String) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
-}
+fn invalid_data(message: String) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
 
 /// Render one payload reference as it appears in the method table.
 fn payload_label(payload: &Payload) -> String {

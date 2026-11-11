@@ -173,11 +173,7 @@ These are client-specific, not parity guarantees. Consult the listed sources and
 
 ### Core payload quick reference
 
-<!-- BEGIN GENERATED PAYLOAD TABLES -->
-#### Protocol methods
-
-| Method | Kind | Direction | Params | Result |
-|---|---|---|---|---|
+See generated [payload tables](schema/payload-tables.md) and [worked exchanges](schema/worked-exchanges.md).
 | `view/open` | request | clientToServer | `ViewOpenParams` (`view-open-params.json`) | `ViewDescriptor` (`view-descriptor.json`) |
 | `view/close` | request | clientToServer | `ViewCloseParams` (`view-close-params.json`) | unconstrained JSON |
 | `view/invoke` | request | clientToServer | `ViewInvokeParams` (`view-invoke-params.json`) | `ViewInvokeResponse` (`view-invoke-response.json`) |
@@ -529,16 +525,12 @@ Everything a client needs to create the buffer for a view.
 | `mode` | ViewMode | required | Whether the client may edit the view or only display it.; One of `"interactive"`, `"text"` |
 | `viewId` | string | required |  |
 
-<!-- END GENERATED PAYLOAD TABLES -->
 
 Treat view and descriptor URIs as opaque. Cursor positions are zero-based, selections inclusive and line ranges half-open (end exclusive). `editorMode` is exactly `normal|visual` and a key is one canonical step. Dynamic edit keymaps identify `runId` as `viewId`, though edits are not ordinary `view/open` views; confirmation uses the semantic executeCommand above. Progress is separate LSP traffic, never an effect. Root view creation uses the `view/open` request and its returned descriptor; `pushView` adds a view to the session stack, and `popView` returns to the prior view. History commands are planned.
 
 Presentation differs: Neovim displays rendered menu buffers; VS Code may present structured menu data via QuickPick. VS Code pass-through replay and placement are limited/concrete client behavior, not universal parity. Buffer render/keymap notifications until the descriptor/effect is registered. Progress notifications may be emitted before the request response; deferred view notifications follow the response and can arrive before client-side view registration. Dynamic keymaps are complete replacements; do not infer new render versions from them.
 
-<!-- BEGIN GENERATED WORKED EXCHANGES -->
-#### Worked exchanges
-
-Recorded end-to-end exchanges from the example files, one subsection per file.
+See generated [worked exchanges](schema/worked-exchanges.md).
 
 ##### `commit-edit-abort.jsonl`
 
@@ -743,7 +735,6 @@ Frames recorded from a real `TestServer` run against a temporary repository; tem
 {"jsonrpc":"2.0","method":"exit","params":null}
 ```
 
-<!-- END GENERATED WORKED EXCHANGES -->
 
 Progress creation and notifications are separate from the key result effects and occur for ordinary key requests. The recorded mutation key (`S`, `status.stage-all`) shows the server asking the client to create a progress token, with create, begin and end all preceding the key response; the server does not wait for the create response, so it may arrive after begin. A fast `g` refresh instead emits create only: the refresh finishes and progress ends before the client's create response marks the run visible, so no visible begin or end is reported. Progress end does not always precede the key response. Payload definitions are grounded in `src/view.rs`, `src/keymap.rs`, `src/protocol.rs`; presentation details in `lua/magit-lsp/view.lua`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/views.js`, `menus.js`, and `effects.js`.
 
@@ -789,22 +780,10 @@ advertised speculatively.
 
 The table below classifies each standard capability the server extracts into
 `PlainCapabilities` (`src/presentation/mod.rs`) by the Plain level it belongs to.
-The rows are generated from the capability field set and are drift-checked by
-`tests/schema.rs` against the implemented struct.
+The rows are generated from the capability field set and are checked against
+the implemented struct by `tests/schema.rs`.
 
-<!-- BEGIN GENERATED CAPABILITY LEVELS -->
-| `PlainCapabilities` field | Initialize capability | Plain level | Effect |
-|---|---|---|---|
-| `apply_edit` | `workspace.applyEdit` | L1 | Status document delivered as a standard `WorkspaceEdit`; status actions and commit drafts need it. |
-| `document_changes` | `workspace.workspaceEdit.documentChanges` | L1 (versioned sub-capability) | Versioned `documentChanges` with the client's version; absent uses the legacy unversioned `changes` map. |
-| `code_actions` | `textDocument/codeAction` | L2 | Code actions are returned; `magit.command` runs them without the client declaring `workspace/executeCommand`. |
-| `disabled_actions` | `textDocument/codeAction.disabledSupport` | L2 (sub-capability) | Unavailable and planned actions carry a disabled reason; absent they are omitted. |
-| `show_document` | `window/showDocument.support` | L3 | Commit drafts open through `window/showDocument`; absent sends manual instructions instead. |
-| `work_done_progress` | `window/workDoneProgress` | L3 | Mutations run `window/workDoneProgress/create` and `$/progress` begin/report/end; absent still runs with messages. |
-| `completion` | `textDocument/completion` | none (not implemented) | Extracted into the effective-capability echo only; the server advertises no provider and registers no handler. |
-| `folding_range` | `textDocument/foldingRange` | L3 (request-only) | The client may request server-owned folds; declaring it gates no lower level. |
-| `position_encodings` | `general.positionEncodings` | L0 | Negotiates `utf-8`, `utf-16` or `utf-32`; absent defaults to `utf-16`. |
-<!-- END GENERATED CAPABILITY LEVELS -->
+See generated [capability levels](schema/capability-levels.md).
 
 `textDocument.foldingRange` is request-only: the server answers folds once the
 client declares it, so the capability gates no lower level even though it is
