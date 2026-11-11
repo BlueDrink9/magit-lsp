@@ -2619,3 +2619,143 @@ fn rich_dispatch_opens_commit_menu_from_log_without_widening_status_scope() {
     let (commit, _) = test.open_via_command("open.commit");
     assert!(test.text_of(&commit.id).join("\n").contains("git commit"));
 }
+
+/// Confirm on a select-and-copy picker delivers the full structured commit id
+/// and restores the caller that started the selection.
+#[test]
+fn select_mode_confirm_copies_the_full_oid_and_restores_the_caller() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let (oid, line) = {
+        let node = test
+            .tree()
+            .nodes
+            .iter()
+            .find(|node| node.kind == magit_lsp::tree::NodeKind::Commit)
+            .expect("a commit row");
+        (
+            node.commit.clone().expect("the full commit id"),
+            node.start_line,
+        )
+    };
+    let result = test.invoke_at("common.confirm", Cursor { line, column: 0 });
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Clipboard { text } if text == &oid)),
+        "expected the full {} oid in {:?}",
+        oid,
+        result.effects
+    );
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert!(!test.view_ids().contains(&picker));
+}
+
+/// Cancel on a select-and-copy picker restores the caller and changes nothing.
+#[test]
+fn select_mode_cancel_restores_the_caller_without_mutation() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_status = tmp.git(&["status", "--porcelain"]);
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let result = test.invoke("common.cancel");
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert!(!test.view_ids().contains(&picker));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), before_status);
+}
+
+/// A commit that vanished from the repository is refused readably: the picker
+/// stays open with the caller intact and nothing is copied.
+#[test]
+fn select_mode_stale_selection_keeps_the_picker_and_refuses() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    // The oldest row: deleting the newest commit shortens the refreshed tree,
+    // so the stale cursor no longer resolves to any loaded commit.
+    let line = test
+        .tree()
+        .nodes
+        .iter()
+        .rev()
+        .find(|node| node.kind == magit_lsp::tree::NodeKind::Commit)
+        .expect("a commit row")
+        .start_line;
+    tmp.git(&["reset", "--hard", "HEAD~1"]);
+    tmp.git(&["reflog", "expire", "--expire=now", "--all"]);
+    tmp.git(&["gc", "--prune=now"]);
+    test.refresh();
+    test.ack();
+    let result = test.invoke_at("common.confirm", Cursor { line, column: 0 });
+    let messages: Vec<_> = result
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Message { level, text, .. } => Some((*level, text.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 1, "{:?}", result.effects);
+    assert_eq!(messages[0].0, MessageLevel::Info, "{:?}", result.effects);
+    assert_eq!(
+        messages[0].1, "Place the cursor on a commit to confirm the selection",
+        "{:?}",
+        result.effects
+    );
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { .. })));
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { .. })));
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Clipboard { .. })));
+    assert_eq!(test.view_id(), picker);
+    assert!(test.view_ids().contains(&picker));
+    assert!(test.view_ids().contains(&caller));
+}

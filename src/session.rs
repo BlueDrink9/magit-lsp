@@ -3176,7 +3176,19 @@ impl Session {
             } else {
                 None
             };
-            if let (Some(pending), Some(valid)) = (self.pending_selections.get(view_id), valid) {
+            let Some(valid) = valid else {
+                // A selection neither the tree nor the Git boundary can
+                // resolve: refuse readably while keeping the caller and picker
+                // intact.
+                return Ok(InvokeResult {
+                    effects: vec![Effect::message(
+                        MessageLevel::Info,
+                        "No valid commits were selected".to_string(),
+                    )],
+                    ..InvokeResult::empty()
+                });
+            };
+            if let Some(pending) = self.pending_selections.get(view_id) {
                 let caller = pending.caller_id.clone();
                 let operation = pending.operation;
                 let continuation = pending.continuation.clone();
@@ -3199,7 +3211,16 @@ impl Session {
                         ..InvokeResult::empty()
                     });
                 }
-                if operation == SelectionOperation::PickCommit && valid.len() == 1 {
+                if operation == SelectionOperation::PickCommit {
+                    let Some(oid) = valid.first().filter(|_| valid.len() == 1).cloned() else {
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Warn,
+                                "Select exactly one commit for this option",
+                            )],
+                            ..InvokeResult::empty()
+                        });
+                    };
                     let Some(SessionContinuation::Option {
                         key,
                         menu,
@@ -3209,16 +3230,37 @@ impl Session {
                     else {
                         return Ok(InvokeResult {
                             effects: vec![Effect::message(
-                                MessageLevel::Info,
-                                "No valid commits were selected",
+                                MessageLevel::Warn,
+                                "No menu option is waiting for this commit",
                             )],
                             ..InvokeResult::empty()
                         });
                     };
-                    let oid = valid[0].clone();
+                    let menu_matches = self
+                        .views
+                        .get(&caller)
+                        .and_then(|view| view.menu())
+                        .is_some_and(|current| current == menu);
+                    if !menu_matches {
+                        // The captured arguments no longer describe the caller,
+                        // so keep the picker open instead of dropping the pick.
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Warn,
+                                "The commit menu changed; the selection was not applied",
+                            )],
+                            ..InvokeResult::empty()
+                        });
+                    }
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
-                    let mut result = InvokeResult {
+                    self.views
+                        .get_mut(&caller)
+                        .and_then(|view| view.menu_mut())
+                        .expect("checked menu")
+                        .set_option(&key, Some(oid));
+                    let rerender = self.menu_rerender(&caller, cursor)?;
+                    return Ok(InvokeResult {
                         effects: vec![
                             Effect::PopView {
                                 view_id: view_id.to_string(),
@@ -3227,36 +3269,13 @@ impl Session {
                                 view_id: caller.clone(),
                             },
                         ],
-                        keymap: self.keymap_notice(&caller),
+                        render: rerender.render,
+                        keymap: rerender.keymap.or_else(|| self.keymap_notice(&caller)),
                         ..InvokeResult::empty()
-                    };
-                    let menu_matches = self
-                        .views
-                        .get(&caller)
-                        .and_then(|view| view.menu())
-                        .is_some_and(|current| current == menu);
-                    if menu_matches {
-                        self.views
-                            .get_mut(&caller)
-                            .and_then(|view| view.menu_mut())
-                            .expect("checked menu")
-                            .set_option(&key, Some(oid));
-                        let rerender = self.menu_rerender(&caller, cursor)?;
-                        result.render = rerender.render;
-                        if rerender.keymap.is_some() {
-                            result.keymap = rerender.keymap;
-                        }
-                    }
-                    return Ok(result);
+                    });
                 }
             }
-            return Ok(InvokeResult {
-                effects: vec![Effect::message(
-                    MessageLevel::Info,
-                    "No valid commits were selected",
-                )],
-                ..InvokeResult::empty()
-            });
+            return Ok(InvokeResult::empty());
         }
 
         if let Some(menu) = outcome.open_menu {
