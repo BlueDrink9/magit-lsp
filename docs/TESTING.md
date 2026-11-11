@@ -80,6 +80,17 @@ manifest-snapshot job; generated VSCode keybindings up to date; run IMM-1 tests
 on the oldest supported git version; a `ui-test` job (tmux + Neovim) that runs
 `make ui-test` and uploads `build/ui/` on failure (R-UI-6).
 
+### Documentation maintenance
+
+Behavior tests cover runtime behavior and generator/checker logic using temporary
+fixtures. Checkout freshness for generated references and authored Markdown links
+are separate maintenance checks: `make docs-artifacts-check` checks committed
+outputs, and `make docs-check` runs checker unit tests plus link validation.
+`make docs-generate` refreshes schema and registry references. Commit generated
+references separately from source or authored documentation, with a commit
+message naming the changed source/contract and generation command; inspect its
+diff before commit. Ordinary `make test` does not regenerate or check artifacts.
+
 ### 8.8 Real-UI tests (L3)
 
 L3 drives a real Neovim inside tmux and asserts on the captured screen. It

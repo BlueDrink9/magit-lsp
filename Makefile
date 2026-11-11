@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format update-client-behaviors docs-check
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format update-client-behaviors docs-check docs-generate docs-artifacts-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -16,7 +16,7 @@ build:
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
 
-DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md
+DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md docs/parity.md docs/plain-support.md docs/known-client-behaviors.md docs/schema/payload-tables.md docs/schema/worked-exchanges.md docs/schema/capability-levels.md
 
 docs-check:
 	$(call run,docs-check,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/docs -p 'test_*.py' && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py $(DOC_FILES))
@@ -97,3 +97,9 @@ registry-docs-generate:
 
 registry-docs-check:
 	$(call run,registry-docs-check,cargo run -q --bin generate-docs -- --check $(if $(ROOT),--output-root $(ROOT)))
+
+.PHONY: docs-generate docs-artifacts-check
+
+docs-generate: update-schema registry-docs-generate
+
+docs-artifacts-check: schema-check registry-docs-check

@@ -105,6 +105,20 @@ Start in these components:
 
 ## Verification
 
+### Generated references
+
+- Keep generated references in standalone files linked from authored documentation.
+  Generate them through Make targets; do not hand-edit them.
+- Ordinary tests cover behavior, protocol semantics and generator/checker logic
+  using temporary fixtures. Committed-artifact freshness and Markdown links belong
+  in explicit documentation checks and the dedicated documentation CI job, not
+  prose assertions in behavior tests.
+- Commit generated-reference changes separately from implementation, authored
+  documentation and queue bookkeeping. Explain why regeneration was necessary
+  in the commit message, naming the source or contract change and generation
+  command. Inspect the generated diff; never refresh output merely to silence a
+  failing behavior test.
+
 ### Phase end and review
 
 - Run `make hygiene` at actual named phase ends and required review checkpoints, not for each ticket. The phase gate applies only when the last unchecked item in that named phase completes; the independent review checkpoint remains after eight completed tasks since `Last review:`.
