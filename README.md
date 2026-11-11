@@ -1,9 +1,37 @@
 # magit-lsp
 
-An LSP-based version control interface. Treats a repository's status as a
-structured document and drives it through a Language Server, with a Neovim
-client that renders a Magit/Neogit-style status buffer. MVP backend is Git;
-MVP client is Neovim.
+An LSP-based Git interface: a server-owned structured status document with
+Neovim and VSCode clients. Features and native workflow limitations are listed
+below; this is not a claim of release or registry readiness.
+
+See [client installation and quickstart](docs/CLIENT_INSTALL.md),
+[native screenshot capture/manual fallback](docs/SCREENSHOTS.md), and the
+[external client specification](docs/CLIENT_SPEC.md). Community clients for
+Helix, Zed and JetBrains are welcome; no first-party implementations are promised.
+
+## Binary release installation (not yet published)
+
+Rust source builds remain the available installation path until the first
+approved assets are published. The reviewed standalone installer is prepared for
+Linux x86_64 GNU (glibc >=2.35); hosted/clean-machine release evidence is pending.
+After assets exist, download the installer from a reviewed repository revision
+without needing a clone, inspect it, then run (Python >=3.9 and curl required):
+
+```sh
+revision=REPLACE_WITH_REVIEWED_COMMIT_SHA
+curl --fail --location --proto '=https' --proto-redir '=https' \
+  "https://raw.githubusercontent.com/BlueDrink9/magit-lsp/$revision/scripts/install.sh" \
+  --output magit-lsp-install.sh
+less magit-lsp-install.sh                          # review before execution
+sh magit-lsp-install.sh                            # latest, ~/.local/bin
+sh magit-lsp-install.sh --version v0.1.0 --install-dir "$HOME/.local/bin"
+```
+
+These examples are conditional, not a claim that v0.1.0 assets are available.
+There is no sudo or source-build fallback. Add the install directory to PATH;
+Git and an editor client are still required, but binary users do not need Rust.
+Checksums over HTTPS check integrity, not independent publisher authenticity.
+See [release contracts, platform limits and approval gates](docs/RELEASING.md).
 
 ## Architecture (brief)
 
@@ -15,9 +43,12 @@ Two processes talking over LSP (JSON-RPC on stdio):
 - **Neovim client (`lua/magit-lsp`).** Starts the server, opens a status view,
   renders the server's `view/render` updates into a `nofile` `magit://status/<repo>`
   buffer, and forwards keys as `view/key` steps against the server's keymap.
+- **VSCode client (`clients/vscode`).** Launches an external server and displays
+  its views; currently available as source, not a published Marketplace/VSIX install.
 
 The server is designed to do as much as possible so that clients are thin and
-easy to build for any editor. See `AGENTS.md` for the protocol and internals.
+easy to build for other editors. See [CLIENT_SPEC](docs/CLIENT_SPEC.md) for the
+wire contract and `AGENTS.md` for the code map.
 
 A general LSP client can drive the server in Plain mode by following the
 [client implementation levels](docs/CLIENT_SPEC.md#client-implementation-levels):
@@ -85,8 +116,10 @@ the specification is a reference configuration, not a tested client.
 
 ## Requirements
 
-- Rust (cargo) — builds the `magit-lsp` LSP server
-- Neovim 0.11+ — runs the client and the tests (`vim.lsp.start`)
+- An external `magit-lsp` server. Rust/cargo is needed only for source builds,
+  not for users of a future approved binary release.
+- Neovim 0.11+ or VSCode 1.85+ for the respective client. Source VSCode setup
+  also uses Node.js 22+ and npm; see the [install guide](docs/CLIENT_INSTALL.md).
 - `git` on `PATH` — all VCS reads/writes shell out to the `git` CLI. Git
   **2.30.8 is the tested recommendation**, not a hard minimum; older versions are not blocked, but some
   operations may fail. Failures on an older Git produce a tracing warning.
@@ -129,7 +162,7 @@ user-visible rendering.
 
 The VSCode extension requires VSCode 1.85 or newer. Running its Node tests also
 requires Node.js and npm; exercising the extension against Git requires `git`
-and a built Rust server (`cargo`). Install the extension's locked dependencies
+and a server binary (the native harness currently expects a local `cargo build`). Install the extension's locked dependencies
 and run its automated tests from the repository root:
 
 ```sh
@@ -252,7 +285,8 @@ The client declares `keymapDelivery = "dynamic"` and `keyModifiers = "basic"`
 in terminals (`"full"` in a GUI), then applies every `view/keymap` the server
 sends atomically: it deletes exactly the maps it applied last time, sets the
 new buffer-local maps and records them in one synchronous call. Keys are
-translated from the canonical notation in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#38-key-notation) (`ctrl+c`, `g r`,
+translated from the canonical notation in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#38-key-notation) (`ctrl+c`, `g r`,
 `shift+Tab`, …) by `lua/magit-lsp/keys.lua`. Nothing is hard-coded: every
 binding comes from the server.
 
@@ -468,7 +502,7 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 | `magit-commit-amend` | `c a` | `commit.amend` | Implemented | commit |
 | `magit-commit-reword` | `c w` | `commit.reword` | Implemented | commit |
 | `magit-commit-reshelve` | `c d` | `commit.reshelve` | Planned R-4.1 | commit |
-| `magit-commit-fixup` | `c f` | `commit.fixup` | Planned R-4.1 | commit |
+| `magit-commit-fixup` | `c f` | `commit.fixup` | Implemented | commit |
 | `magit-commit-squash` | `c s` | `commit.squash` | Planned R-4.1 | commit |
 | `magit-commit-alter` | `c A` | `commit.alter` | Planned R-4.1 | commit |
 | `magit-commit-augment` | `c n` | `commit.augment` | Planned R-4.1 | commit |
@@ -592,8 +626,9 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 | `magit-rebase-remove-commit` | `r k` | `rebase.remove-commit` | Planned R-7.3 | rebase |
 | `magit-rebase-autosquash` | `r f` | `rebase.autosquash` | Planned R-7.3 | rebase |
 | `magit-reshelve-since` | `r t` | `rebase.change-dates` | Planned R-7.3 | rebase |
-| `magit-rebase-continue` | `r r` | `rebase.continue` | Planned R-7.3 | rebase |
-| `magit-rebase-abort` | `r a` | `rebase.abort` | Planned R-7.3 | rebase |
+| `magit-rebase-continue` | `r r` | `rebase.continue` | Implemented | rebase |
+| `magit-rebase-skip` | `r K` | `rebase.skip` | Implemented | rebase |
+| `magit-rebase-abort` | `r a` | `rebase.abort` | Implemented | rebase |
 | `-` | `?` | `open.dispatch` | Implemented | rebase |
 | `-` | `-u` | `-` | Implemented | stash |
 | `-` | `-a` | `-` | Implemented | stash |
@@ -822,3 +857,12 @@ canonical menu notation (`-a` toggles a switch, `=A` sets an option).
 - Like Magit and Neogit, mutations shell out to `git` (e.g. `git apply
   --cached`) rather than using a native git library, so behavior stays on
   parity with the CLI.
+
+## License
+
+The server and other unexcepted project material are GNU GPL-3.0-only. The
+Neovim client, VS Code client, protocol definition, and listed specifications
+are Apache-2.0-licensed; see [LICENSING.md](LICENSING.md) and
+[LICENCES/Apache-2.0](LICENCES/Apache-2.0). Third-party dependencies retain their own licenses.
+
+Inspired by Magit for Emacs. This project is an independent implementation and is not affiliated with the Magit project.

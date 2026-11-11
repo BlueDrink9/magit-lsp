@@ -189,10 +189,10 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
-- [x] **Repair Phase 5 recorded example drift.** The substantial-chunk gate at `4e25db9` failed `plain_examples_replay_against_the_real_binary` (`build/test-logs/rust.ZfjZ4r`). Reconcile recorded examples with intentional command registry changes without weakening exact replay validation.
+- [x] **Repair Phase 5 recorded example drift.** Done: `d34d9ac`, `c21eda6`. The substantial-chunk gate at `4e25db9` failed `plain_examples_replay_against_the_real_binary` (`build/test-logs/rust.ZfjZ4r`). Reconcile recorded examples with intentional command registry changes without weakening exact replay validation.
   - test: recorded examples replay against the real binary with exact normalized frame equality.
   - Verification: `make test-rust FILTER="--test examples"`.
-  - Verified: `make test-rust FILTER="--test examples"` @ `4e25db9` → ok: rust. Updated intentional code-action ordering and `commit.fixup` title (`Create a fixup commit`) in both fixtures; exact normalized frame equality retained. Mismatch diagnostics report first JSON path.
+  - Verified: `make test-rust FILTER="--test examples"` with the changes committed in `d34d9ac`, `c21eda6` → ok: rust. Updated intentional code-action ordering and `commit.fixup` title (`Create a fixup commit`) in both fixtures; exact normalized frame equality retained. Mismatch diagnostics report first JSON path.
 
 ## Deferred hygiene follow-ups
 
