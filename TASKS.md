@@ -413,7 +413,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - [x] **T017.1 — Typed Git rebase state detection.** Detect worktree-aware merge/apply rebase state and conflicts through the Git boundary. Done: containing commit.
     - test: real repositories cover no operation, active rebase and conflict classification without confusing cherry-pick/revert with rebase.
      - Verification: `make test-rust FILTER="--test rebase_state"`.
-     - Verified: `make test-rust FILTER="--test rebase_state"` @ ecc328b → ok: rust. Three real-repository regressions cover idle state, both backend markers and conflict detection; sequencer-only operation does not classify as rebase.
+     - Verified: `make test-rust FILTER="--test rebase_state"` @ `02e5e01` → ok: rust. Real Git operations cover idle, merge/apply rebase conflicts, conflicting cherry-pick/revert exclusions, git am exclusion, and linked-worktree isolation; revert asserts `REVERT_HEAD`.
   - [ ] **T017.2 — Rebase state actions and status.** Render server-owned operation state and implement continue, skip and abort with readable failures.
     - test: exact repository state and rendered structure cover action success, conflict, and invalid operation attempts.
     - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.

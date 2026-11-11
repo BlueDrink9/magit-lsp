@@ -387,7 +387,10 @@ impl GitRepo {
     /// Detect an active merge/apply rebase in this worktree, including conflict state.
     pub fn rebase_state(&self) -> Result<Option<RebaseState>> {
         let merge = self.git_dir.join("rebase-merge").is_dir();
-        let apply = self.git_dir.join("rebase-apply").is_dir();
+        let apply_dir = self.git_dir.join("rebase-apply");
+        let apply = apply_dir.is_dir()
+            && (apply_dir.join("rebasing").exists() || apply_dir.join("applying").exists())
+            && apply_dir.join("rebasing").exists();
         if !merge && !apply {
             return Ok(None);
         }
