@@ -27,6 +27,10 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
+- [ ] **VER1 — Advertise the server product version at initialization.** Include standard LSP `serverInfo` name/version sourced from Cargo package metadata; preserve existing capability negotiation.
+- [ ] **VER2 — Warn Neovim users about client/server version mismatches.** Store the bundled adapter version and compare it with `serverInfo` after initialization; warn without blocking startup and include the selected server executable path.
+- [ ] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence.
+
 - [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
   - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Retain this check: it parses actual config and spike source and fails on missing/absolute executables or personal paths. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
 - [ ] **PORT2 — Audit and sanitize machine-specific documentation paths.** Complete the text audit, replace host-specific historical command paths without losing provenance, and record reviewer-counterchecked retention decisions.
@@ -36,7 +40,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [ ] **DOC2 — Extract registry references and separate registry behavior tests.** Standalone parity and known-client references; explicit generation/check entry points for parity, Plain support and client behaviors. Preserve runtime/renderer tests; remove checkout freshness and non-contractual prose assertions.
   - [x] **DOC2a — Registry generator and behavioral coverage.** Implement standalone registry generator and temporary-root checks; retain runtime tests without checkout freshness.
   - Verified: `make test-rust FILTER="--test parity --test plain_support --test quirks --test docs_generation"` @ `9729f50` → ok: rust. Temporary-root tests generate all three outputs, verify clean checks, and reject tampered or missing files; runtime parity and quirks tests retained; checkout freshness and prose-token assertions removed.
-  - [ ] **DOC2b — Authored links and registry Make targets.** Replace embedded registry references with links and expose generation/check targets, preserving unrelated dirty hunks.
+  - [x] **DOC2b — Authored links and registry Make targets.** Replace embedded registry references with links and expose generation/check targets, preserving unrelated dirty hunks.
+  - Verified: `make registry-docs-generate ROOT=/tmp/opencode/doc2b && make registry-docs-check ROOT=/tmp/opencode/doc2b && make test-rust FILTER="--test docs_generation --test plain_support"` @ `185bc9e` → all passed; after deleting `/tmp/opencode/doc2b/docs/parity.md`, `make registry-docs-check ROOT=/tmp/opencode/doc2b` failed with `stale: /tmp/opencode/doc2b/docs/parity.md` as expected.
 - [ ] **DOC3 — Wire dedicated documentation maintenance and concise agent guidance.** Make generation/check targets and dedicated CI for artifact freshness and Markdown links; document behavior-test boundaries and separate generated-reference commits with causal justification. Preserve unrelated baseline edits.
 - [ ] **DOC4 — Regenerate extracted references in an isolated justified commit.** Generate all reference artifacts through Make targets, verify freshness and links, commit generated outputs separately from code/manual documentation and queue bookkeeping.
 
