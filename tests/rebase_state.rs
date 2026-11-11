@@ -166,3 +166,44 @@ fn command_failures_report_messages_preserve_state_and_keep_caller_usable() {
     let usable = test.invoke("common.refresh");
     assert!(!usable.effects.iter().any(|effect| matches!(effect, Effect::Message { .. })));
 }
+
+#[test]
+fn status_tree_tracks_rebase_operations_and_retires_state() {
+    let dir = repo();
+    conflicting_history(dir.path());
+    git(dir.path(), &["checkout", "topic"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(WIDE_VIEWPORT);
+    assert!(test.tree().node("section:rebase").is_none());
+    failed_git(dir.path(), &["rebase", "main"]);
+    test.refresh();
+    let assert_state = |test: &TestSession, conflicted: bool| {
+        let tree = test.tree();
+        let section = tree.node("section:rebase").expect("rebase section");
+        assert_eq!(section.kind, magit_lsp::tree::NodeKind::Section);
+        assert_eq!(section.section.as_deref(), Some("rebase"));
+        let operation = |name: &str| tree.node(&format!("rebase:{name}")).unwrap();
+        assert_eq!(operation("continue").section.as_deref(), Some(if conflicted { "unavailable" } else { "continue" }));
+        assert_eq!(operation("skip").section.as_deref(), Some("skip"));
+        assert_eq!(operation("abort").section.as_deref(), Some("abort"));
+    };
+    assert_state(&test, true);
+    write(&dir.path().join("file"), "resolved\n");
+    git(dir.path(), &["add", "file"]);
+    test.refresh();
+    assert_state(&test, false);
+    test.invoke("rebase.continue");
+    test.refresh();
+    assert!(test.tree().node("section:rebase").is_none());
+
+    let aborted = repo();
+    conflicting_history(aborted.path());
+    git(aborted.path(), &["checkout", "topic"]);
+    failed_git(aborted.path(), &["rebase", "main"]);
+    let mut abort_test = TestSession::new(aborted.path().to_string_lossy(), Profile::Standard);
+    abort_test.open_status_view(WIDE_VIEWPORT);
+    assert_state(&abort_test, true);
+    abort_test.invoke("rebase.abort");
+    abort_test.refresh();
+    assert!(abort_test.tree().node("section:rebase").is_none());
+}

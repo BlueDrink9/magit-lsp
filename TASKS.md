@@ -414,7 +414,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - test: real repositories cover no operation, active rebase and conflict classification without confusing cherry-pick/revert with rebase.
      - Verification: `make test-rust FILTER="--test rebase_state"`.
      - Verified: `make test-rust FILTER="--test rebase_state"` @ `02e5e01` → ok: rust. Real Git operations cover idle, merge/apply rebase conflicts, conflicting cherry-pick/revert exclusions, git am exclusion, and linked-worktree isolation; revert asserts `REVERT_HEAD`.
-  - [ ] **T017.2 — Rebase state actions and status.** Render server-owned operation state and implement continue, skip and abort with readable failures.
+  - [x] **T017.2 — Rebase state actions and status.** Render server-owned operation state and implement continue, skip and abort with readable failures.
     - test: exact repository state and rendered structure cover action success, conflict, and invalid operation attempts.
     - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
      - [x] **T017.2a — Rebase operation commands.** Implement continue, skip and abort behind the Git boundary; register executable menu actions. Done: `1db0220`, `d31087b`.
@@ -427,9 +427,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
          - test: failures emit readable `Effect::Message`, preserve repository state and leave the caller usable.
          - Verification: `make test-rust FILTER="--test rebase_state"`.
           - Verified: `make test-rust FILTER="--test rebase_state"` @ 1db0220 → ok: rust. SessionTest dispatch covers idle and unresolved continue failures, message effects, unchanged HEAD/index/conflicts and caller usability. T017.2, .2b and .3 remain open.
-    - [ ] **T017.2b — Structured rebase status.** Render active/conflicted rebase state and operation availability using server-owned tree metadata.
+    - [x] **T017.2b — Structured rebase status.** Render active/conflicted rebase state and operation availability using server-owned tree metadata.
       - test: status state and tree update as operations progress and disappear after abort/completion.
       - Verification: `make test-rust FILTER="--test rebase_state --test status_render"`.
+      - Verified: `make test-rust FILTER="--test rebase_state --test status_render"` @ 7be7622 → ok: rust. Live session refresh asserts stable section/operation metadata through idle, conflict, staged resolution, completion and abort.
   - [ ] **T017.3 — Native rebase state conformance.** Exercise status and operation actions through real Neovim input using text and Git evidence.
     - test: `rebase-state.scn` asserts conflict/status, operation outcomes and usable caller state.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-state.scn`.

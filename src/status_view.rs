@@ -3,7 +3,7 @@
 //! The text format is the one the Neovim client has always shown, so clients
 //! only replace buffer lines and never compose the view themselves.
 
-use crate::git::{FileEntry, GitRepo, Status};
+use crate::git::{FileEntry, GitRepo, RebaseState, Status};
 use crate::patch::Hunk;
 use crate::tree::{
     last_nonblank, LineNode, Link, Node, NodeKind, Symbol, Token, Tree, Visibility, VisibilityState,
@@ -24,6 +24,7 @@ pub struct StatusView {
     repo: GitRepo,
     /// The last listing: branch and file entries, without any hunks.
     status: Status,
+    rebase: Option<RebaseState>,
     /// Hunks loaded for visible files this refresh, keyed by `(path, staged)`.
     hunks: HashMap<(String, bool), Vec<Hunk>>,
     /// Per-view visibility, keyed by node id so it survives a refresh.
@@ -39,9 +40,11 @@ impl StatusView {
     pub fn open(repo_path: &str) -> Result<Self> {
         let repo = GitRepo::open(repo_path)?;
         let status = repo.status_listing()?;
+        let rebase = repo.rebase_state()?;
         Ok(Self {
             repo,
             status,
+            rebase,
             hunks: HashMap::new(),
             visibility: Visibility::new(),
             level: LEVEL_DEFAULT,
@@ -81,7 +84,7 @@ impl StatusView {
         let status = &self.status;
         let visibility = &self.visibility;
         let hunks = &mut self.hunks;
-        build_with_limit(
+        let mut tree = build_with_limit(
             status,
             visibility,
             self.section_line_limit,
@@ -93,7 +96,9 @@ impl StatusView {
                 let key = (file.path.clone(), staged);
                 hunks.get(&key).cloned().unwrap_or_default()
             },
-        )
+        );
+        add_rebase(&mut tree, self.rebase);
+        tree
     }
 
     /// All `(section, path)` pairs in the listing, cloned so callers may mutate.
@@ -255,6 +260,7 @@ impl View for StatusView {
 
     fn on_refresh(&mut self) -> Result<()> {
         self.status = self.repo.status_listing()?;
+        self.rebase = self.repo.rebase_state()?;
         // Hunk bodies are reloaded lazily from the fresh listing.
         self.hunks.clear();
         Ok(())
@@ -319,6 +325,33 @@ pub fn build(status: &Status) -> Tree {
             file.hunks.clone()
         }
     })
+}
+
+fn add_rebase(tree: &mut Tree, state: Option<RebaseState>) {
+    let Some(state) = state else { return; };
+    let id = "section:rebase";
+    let line = tree.lines.len();
+    let label = if state.conflicted { "Rebase (conflicted)" } else { "Rebase (active)" };
+    tree.lines.push(label.to_string());
+    tree.line_nodes.push(line_node(id, NodeKind::Section));
+    let mut section = node(id, NodeKind::Section, "Rebase", line);
+    section.section = Some("rebase".to_string());
+    let mut children = Vec::new();
+    for (action, available) in [("continue", !state.conflicted), ("skip", true), ("abort", true)] {
+        let child_id = format!("rebase:{action}");
+        let child_line = tree.lines.len();
+        let text = format!("  {action}: {}", if available { "available" } else { "unavailable (resolve conflicts)" });
+        tree.lines.push(text.clone());
+        tree.line_nodes.push(line_node(&child_id, NodeKind::Message));
+        let mut child = node(&child_id, NodeKind::Message, text, child_line);
+        child.section = Some(if available { action } else { "unavailable" }.to_string());
+        child.status = Some("rebase_operation".to_string());
+        tree.nodes.push(child);
+        children.push(child_id);
+    }
+    section.children = children;
+    section.end_line = tree.lines.len() - 1;
+    tree.nodes.push(section);
 }
 
 /// Build the status view tree, using `visibility` and loading hunks only for
