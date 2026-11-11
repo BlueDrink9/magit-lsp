@@ -20,6 +20,19 @@ fn repo() -> (TempDir, GitRepo, String) {
     (dir, repo, oid)
 }
 
+fn paused_repo() -> (TempDir, GitRepo) {
+    let (dir, _, _) = repo();
+    write(&dir.path().join("file"), "three\n");
+    git(dir.path(), &["commit", "-am", "three"]);
+    write(&dir.path().join("file"), "four\n");
+    git(dir.path(), &["commit", "-am", "four"]);
+    let output = std::process::Command::new("git").args(["rebase", "-i", "HEAD~3"]).current_dir(dir.path())
+        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'").output().unwrap();
+    let repo = GitRepo::open(dir.path()).unwrap();
+    assert!(repo.rebase_state().unwrap().is_some(), "edit rebase must pause: {}", String::from_utf8_lossy(&output.stderr));
+    (dir, repo)
+}
+
 #[test]
 fn parses_supported_actions_and_abbreviated_identity() {
     let (dir, repo, oid) = repo();
@@ -34,7 +47,7 @@ fn parses_supported_actions_and_abbreviated_identity() {
     let parsed = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
     assert_eq!(parsed.entries.iter().map(|entry| entry.action).collect::<Vec<_>>(), vec![TodoAction::Pick, TodoAction::Reword, TodoAction::Edit, TodoAction::Squash, TodoAction::Fixup, TodoAction::Drop]);
     assert_eq!(parsed.entries[0].oid, oid);
-    assert_eq!(parsed.source, source.as_bytes());
+    assert_eq!(parsed.source(), source.as_bytes());
 }
 
 #[test]
@@ -46,39 +59,66 @@ fn subject_starting_with_dash_is_not_treated_as_an_option() {
 
 #[test]
 fn save_reorders_changes_action_and_writes_omissions_as_drop() {
-    let (dir, repo, oid) = repo();
-    let second = git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned();
-    let source = format!("pick {oid} two\npick {second} one\n");
-    let mut todo = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
+    let (dir, repo) = paused_repo();
+    let mut todo = RebaseTodo::load(&repo).unwrap();
+    let identities = todo.entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    assert_eq!(identities.len(), 2);
+    let first = todo.entries[0].clone();
+    let second = todo.entries[1].clone();
     todo.entries.reverse();
     todo.entries[0].action = TodoAction::Reword;
     todo.entries.pop();
-    std::fs::create_dir_all(repo.rebase_todo_path().unwrap().parent().unwrap()).unwrap();
-    std::fs::write(repo.rebase_todo_path().unwrap(), &source).unwrap();
     todo.save(&repo).unwrap();
     let saved = std::fs::read_to_string(repo.rebase_todo_path().unwrap()).unwrap();
-    assert!(saved.contains(&format!("drop {oid} two")));
-    assert!(saved.contains(&format!("reword {second} one")));
+    assert_eq!(saved, format!("reword {} {}\ndrop {} {}\n", second.oid, second.subject, first.oid, first.subject));
+    let mut identities = identities;
+    identities.sort();
+    let mut written = RebaseTodo::parse(&repo, saved.as_bytes()).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+    written.sort();
+    assert_eq!(written, identities);
+    git(dir.path(), &["rebase", "--abort"]);
 }
 
 #[test]
 fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
-    let (dir, repo, oid) = repo();
-    let source = format!("pick {oid} two\n");
-    let mut todo = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
+    let (dir, repo) = paused_repo();
+    let mut todo = RebaseTodo::load(&repo).unwrap();
     let path = repo.rebase_todo_path().unwrap();
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, b"external edit\n").unwrap();
     let before = std::fs::read(&path).unwrap();
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
 
+    let source = todo.source().to_vec();
     std::fs::write(&path, &source).unwrap();
     todo.entries[0].oid = "forged".into();
     let before = std::fs::read(&path).unwrap();
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    let _ = dir;
+    todo.entries[0].oid = RebaseTodo::parse(&repo, &source).unwrap().entries[0].oid.clone();
+    todo.entries[0].subject.push_str("\nexec touch injected");
+    assert!(todo.save(&repo).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn parse_only_and_cross_repository_models_cannot_write() {
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let parsed = RebaseTodo::parse(&repo, &bytes).unwrap();
+    assert!(parsed.save(&repo).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+    let (other_dir, other) = paused_repo();
+    let other_path = other.rebase_todo_path().unwrap();
+    let other_bytes = std::fs::read(&other_path).unwrap();
+    let loaded = RebaseTodo::load(&repo).unwrap();
+    assert!(loaded.save(&other).is_err());
+    assert_eq!(std::fs::read(&other_path).unwrap(), other_bytes);
+    git(dir.path(), &["rebase", "--abort"]);
+    git(other_dir.path(), &["rebase", "--abort"]);
 }
 
 #[test]

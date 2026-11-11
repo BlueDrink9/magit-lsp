@@ -488,7 +488,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
    - [x] **T018.2 — Guarded atomic todo persistence.** Preserve the loaded identity set, represent omission as drop and refuse stale source bytes before same-directory atomic replacement.
     - test: valid reorder/action changes preserve exact commit identities; stale/invalid writes leave original todo bytes unchanged.
      - Verification: `make test-rust FILTER="--test rebase_todo"`.
-     - Verified: `make test-rust FILTER="--test rebase_todo"` @ 4fb018a → ok: rust. Reorder/action, omission-as-drop, dash-prefixed subject, and stale/invalid byte-preservation tests pass.
+     - Verified: `make test-rust FILTER="--test rebase_todo"` @ a3ae47f → ok: rust. Real paused edit-rebase fixture covers reorder/action, omission-as-drop, exact identities, stale/injected-byte preservation, parse-only rejection and cross-repository ownership.
   - [ ] **T018.3 — Structured todo view and editing actions.** Render server-owned rows; route action changes, reorder, submit and cancel through model and persistence.
     - test: tree metadata and session actions edit only captured identities; submit/cancel and readable validation failures preserve caller and repository invariants.
     - Verification: `make test-rust FILTER="--test rebase_todo"`.

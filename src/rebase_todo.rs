@@ -13,9 +13,12 @@ pub struct TodoEntry { pub action: TodoAction, pub oid: String, pub subject: Str
 
 /// Parsed todo entries with original source bytes retained for stale checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebaseTodo { pub entries: Vec<TodoEntry>, pub source: Vec<u8>, identities: Vec<String>, original: Vec<TodoEntry> }
+pub struct RebaseTodo { pub entries: Vec<TodoEntry>, source: Vec<u8>, identities: Vec<String>, original: Vec<TodoEntry>, owner: Option<(std::path::PathBuf, Vec<(String, Vec<u8>)>)> }
 
 impl RebaseTodo {
+    /// Return the immutable todo bytes captured when this model was parsed.
+    pub fn source(&self) -> &[u8] { &self.source }
+
     /// Parse todo bytes, resolving each reference to a unique commit object.
     pub fn parse(repo: &GitRepo, source: &[u8]) -> Result<Self> {
         let text = std::str::from_utf8(source).map_err(|_| Error::new("todo is not UTF-8"))?;
@@ -37,11 +40,24 @@ impl RebaseTodo {
         }
         if matches!(entries.first().map(|e| e.action), Some(TodoAction::Squash|TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
         let identities = entries.iter().map(|entry| entry.oid.clone()).collect();
-        Ok(Self { entries: entries.clone(), source: source.to_vec(), identities, original: entries })
+        Ok(Self { entries: entries.clone(), source: source.to_vec(), identities, original: entries, owner: None })
+    }
+
+    /// Load and parse the todo owned by this repository's paused merge-backend rebase.
+    pub fn load(repo: &GitRepo) -> Result<Self> {
+        let source = repo.read_rebase_todo()?;
+        let mut todo = Self::parse(repo, &source)?;
+        todo.owner = Some(repo.rebase_todo_identity()?);
+        Ok(todo)
     }
 
     /// Persist edited actions/order only when the captured paused todo remains unchanged.
     pub fn save(&self, repo: &GitRepo) -> Result<()> {
+        let owner = self.owner.as_ref().ok_or_else(|| Error::new("parse-only rebase todo cannot be saved"))?;
+        if &repo.rebase_todo_identity()? != owner { return Err(Error::new("rebase todo operation changed since it was loaded")); }
+        if self.entries.iter().any(|entry| self.original.iter().find(|original| original.oid == entry.oid).is_none_or(|original| original.subject != entry.subject)) {
+            return Err(Error::new("edited rebase todo changes a captured subject"));
+        }
         if self.entries.iter().any(|entry| !self.identities.contains(&entry.oid))
             || self.entries.iter().map(|entry| &entry.oid).collect::<std::collections::HashSet<_>>().len() != self.entries.len()
             || matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
@@ -62,6 +78,6 @@ impl RebaseTodo {
             let action = match entry.action { TodoAction::Pick=>"pick", TodoAction::Reword=>"reword", TodoAction::Edit=>"edit", TodoAction::Squash=>"squash", TodoAction::Fixup=>"fixup", TodoAction::Drop=>"drop" };
             output.push_str(&format!("{action} {} {}\n", entry.oid, entry.subject));
         }
-        repo.write_rebase_todo(&self.source, output.as_bytes())
+        repo.write_rebase_todo(owner, &self.source, output.as_bytes())
     }
 }

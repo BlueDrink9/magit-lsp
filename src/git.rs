@@ -569,8 +569,36 @@ impl GitRepo {
         Ok(path.to_path_buf())
     }
 
+    /// Read the todo owned by an active paused merge-backend rebase.
+    pub fn read_rebase_todo(&self) -> Result<Vec<u8>> {
+        if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
+            return Err(Error::new("no paused merge-backend rebase owns the todo"));
+        }
+        let path = self.rebase_todo_path()?;
+        let merge_dir = std::fs::canonicalize(self.git_dir.join("rebase-merge"))?;
+        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge_dir.as_path()) {
+            return Err(Error::new("rebase todo path is outside the paused operation"));
+        }
+        Ok(std::fs::read(path)?)
+    }
+
+    /// Capture stable worktree and merge-backend operation metadata for todo ownership checks.
+    pub fn rebase_todo_identity(&self) -> Result<(PathBuf, Vec<(String, Vec<u8>)>)> {
+        if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
+            return Err(Error::new("no paused merge-backend rebase owns the todo"));
+        }
+        let git_dir = std::fs::canonicalize(&self.git_dir)?;
+        let merge = git_dir.join("rebase-merge");
+        let mut metadata = Vec::new();
+        for name in ["orig-head", "onto", "head-name"] {
+            metadata.push((name.to_owned(), std::fs::read(merge.join(name))?));
+        }
+        Ok((git_dir, metadata))
+    }
+
     /// Atomically replace the todo of this repository's paused merge-backend rebase.
-    pub fn write_rebase_todo(&self, expected: &[u8], contents: &[u8]) -> Result<()> {
+    pub fn write_rebase_todo(&self, identity: &(PathBuf, Vec<(String, Vec<u8>)>), expected: &[u8], contents: &[u8]) -> Result<()> {
+        if &self.rebase_todo_identity()? != identity { return Err(Error::new("rebase todo operation changed since it was loaded")); }
         if !self.rebase_state()?.is_some() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
@@ -580,12 +608,13 @@ impl GitRepo {
             return Err(Error::new("rebase todo path is outside the paused operation"));
         }
         if std::fs::read(&path)? != expected { return Err(Error::new("rebase todo changed since it was loaded")); }
-        use std::io::Write;
-        let temporary_path = merge_dir.join(format!(".git-rebase-todo-{}.tmp", std::process::id()));
-        let mut temporary = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary_path)?;
-        if let Err(error) = temporary.write_all(contents) { let _ = std::fs::remove_file(&temporary_path); return Err(error.into()); }
-        drop(temporary);
-        if let Err(error) = std::fs::rename(&temporary_path, &path) { let _ = std::fs::remove_file(&temporary_path); return Err(error.into()); }
+        let mut temporary = tempfile::NamedTempFile::new_in(&merge_dir)?;
+        std::io::Write::write_all(&mut temporary, contents)?;
+        std::io::Write::flush(&mut temporary)?;
+        if &self.rebase_todo_identity()? != identity || std::fs::read(&path)? != expected {
+            return Err(Error::new("rebase todo changed since it was loaded"));
+        }
+        temporary.persist(&path).map_err(|error| error.error)?;
         Ok(())
     }
 
