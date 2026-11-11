@@ -504,6 +504,19 @@ T['creates a server-named virtual buffer and attaches LSP'] = function()
   MiniTest.expect.equality(attached, true)
 end
 
+T['server version warning only reports mismatch or missing metadata'] = function()
+  child.lua([[WARNINGS = {}; vim.notify = function(message) table.insert(WARNINGS, message) end
+    local version = require('magit-lsp.version')
+    version.check({ version = version.version }, { '/selected/magit-lsp' })
+    version.check({ version = '9.9.9' }, { '/selected/magit-lsp' })
+    version.check({}, { '/selected/magit-lsp' })]])
+  local warnings = child.lua_get('WARNINGS')
+  MiniTest.expect.equality(#warnings, 2)
+  MiniTest.expect.equality(warnings[1]:find('client version 0.1.0, server version 9.9.9', 1, true) ~= nil, true)
+  MiniTest.expect.equality(warnings[1]:find('/selected/magit-lsp', 1, true) ~= nil, true)
+  MiniTest.expect.equality(warnings[2]:find('server version missing', 1, true) ~= nil, true)
+end
+
 T['declares exact bundled Neovim capabilities'] = function()
   local declaration = child.lua_get("require('magit-lsp.config').client_capabilities().experimental.magit")
   local shared = child.lua_get("require('magit-lsp.shared')")

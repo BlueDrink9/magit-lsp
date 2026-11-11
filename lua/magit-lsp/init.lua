@@ -15,6 +15,7 @@ local edit = require('magit-lsp.edit')
 local prompt = require('magit-lsp.prompt')
 local pick = require('magit-lsp.pick')
 local hooks = require('magit-lsp.hooks')
+local version = require('magit-lsp.version')
 
 local M = {}
 
@@ -360,6 +361,7 @@ function M.setup(opts)
       capabilities = config.client_capabilities(),
       init_options = { profile = profile },
       on_init = function(_, result)
+        version.check(result and result.serverInfo, cmd)
         local capabilities = result and result.capabilities
         local provider = capabilities and capabilities.semanticTokensProvider
         highlights.apply_legend(buffer.filetype, provider and provider.legend)

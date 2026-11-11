@@ -1,0 +1,14 @@
+# Startup stays usable while reporting the selected server version.
+fixture: modified-two-files
+---
+wait
+expect screen contains "Unstaged changes"
+expect screen contains "Staged changes"
+keys: ":lua local v = require('magit-lsp.version'); v.version = '9.9.9'; local root = vim.fn.tempname(); vim.fn.mkdir(root, 'p'); assert(vim.fn.system({'git', '-C', root, 'init', '-q'}):find('fatal') == nil); require('magit-lsp').setup({ root_dir = root })" Enter
+wait screen contains "client version 9.9.9"
+expect screen contains "client version 9.9.9"
+expect screen contains "server version"
+expect screen contains "magit-lsp"
+keys: Enter
+wait
+expect screen contains "Working tree clean"
