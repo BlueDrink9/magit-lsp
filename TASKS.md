@@ -27,6 +27,10 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
+- [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: pending.
+  - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Retain this check: it parses actual config and spike source and fails on missing/absolute executables or personal paths. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
+- [ ] **PORT2 — Audit and sanitize machine-specific documentation paths.** Complete the text audit, replace host-specific historical command paths without losing provenance, and record reviewer-counterchecked retention decisions.
+
 - [x] **DOC1 — Extract standalone schema references and separate schema behavior tests.** Generate payload tables, worked exchanges and capability levels under `docs/schema/`; link from authored client documentation. Keep semantic and temporary-fixture generator/checker tests; move committed-artifact freshness out of ordinary Rust tests.
   - Verified: `make test-rust FILTER="--test schema"` @ `3c31d80` → ok: rust. Temporary fixtures check standalone generation plus tamper/missing detection for all three references; capability semantics and type coverage remain. `CLIENT_SPEC.md` links to the standalone refs; committed artifact freshness checks no longer run in the schema integration test.
 - [ ] **DOC2 — Extract registry references and separate registry behavior tests.** Standalone parity and known-client references; explicit generation/check entry points for parity, Plain support and client behaviors. Preserve runtime/renderer tests; remove checkout freshness and non-contractual prose assertions.

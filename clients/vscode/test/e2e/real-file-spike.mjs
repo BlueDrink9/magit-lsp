@@ -23,7 +23,7 @@ if (process.argv.includes('--lifecycle')) {
 
 /** Supervise isolated normal hosts across native exit/restart, retaining durable observations. */
 async function lifecycle() {
-  const editor = process.env.MAGIT_VSCODE_BIN || '/home/william/.nix-profile/bin/codium';
+  const editor = process.env.MAGIT_VSCODE_BIN || 'code';
   const readLines = path => existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
   const wait = (check, label, timeout = 90000) => new Promise((resolve, reject) => {
     const deadline = Date.now() + timeout;
@@ -112,7 +112,7 @@ async function lifecycle() {
     }
   }
 }
-const editor = process.env.MAGIT_VSCODE_BIN || '/home/william/.nix-profile/bin/codium';
+const editor = process.env.MAGIT_VSCODE_BIN || 'code';
 const dir = mkdtempSync('/tmp/opencode/real-file-vscode-');
 const repo = `${dir}/repo`;
 execFileSync('git', ['init', '-q', repo]);
