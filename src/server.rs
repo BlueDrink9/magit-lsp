@@ -3444,7 +3444,10 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
             server_caps["experimental"]["magit"]["effective"] =
                 serde_json::json!({"capabilities":effective_caps,"quirks":enabled});
             Ok(Dispatched::with(
-                serde_json::json!({ "capabilities": server_caps }),
+                serde_json::json!({
+                    "capabilities": server_caps,
+                    "serverInfo": {"name": "magit-lsp", "version": env!("CARGO_PKG_VERSION")}
+                }),
                 notifications,
             ))
         }

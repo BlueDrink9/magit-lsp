@@ -85,6 +85,11 @@ fn rich_server_folds_and_acknowledged_provider_across_visibility_and_refresh() {
         .build();
     let mut server = TestServer::spawn(&[]);
     let initialized = server.initialize(limited_rich(json!([]), json!([])));
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "magit-lsp");
+    assert_eq!(
+        initialized["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
     assert_eq!(
         initialized["result"]["capabilities"]["foldingRangeProvider"],
         true

@@ -27,7 +27,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
-- [ ] **VER1 — Advertise the server product version at initialization.** Include standard LSP `serverInfo` name/version sourced from Cargo package metadata; preserve existing capability negotiation.
+- [x] **VER1 — Advertise the server product version at initialization.** Include standard LSP `serverInfo` name/version sourced from Cargo package metadata; preserve existing capability negotiation. Done: containing commit.
+  - Verified: `make test-rust FILTER="--test server_async"` @ `001aa40` → ok: rust. Real initialize exchange asserts `serverInfo.name` and exact `CARGO_PKG_VERSION`; existing folding capability assertion remains. Version uses `env!("CARGO_PKG_VERSION")`.
 - [ ] **VER2 — Warn Neovim users about client/server version mismatches.** Store the bundled adapter version and compare it with `serverInfo` after initialization; warn without blocking startup and include the selected server executable path.
 - [ ] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence.
 
