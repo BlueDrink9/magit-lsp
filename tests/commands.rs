@@ -369,6 +369,10 @@ fn the_registry_lists_every_named_command_once() {
                 let registered = registry()
                     .get(command)
                     .unwrap_or_else(|| panic!("{command} is registered"));
+                if *command == "commit.fixup" {
+                    assert_eq!(registered.status, CommandStatus::Implemented);
+                    continue;
+                }
                 assert_eq!(registered.scope, Scope::MenuAction, "{command}");
                 assert_eq!(
                     registered.status,

@@ -3274,6 +3274,25 @@ impl Session {
                         ..InvokeResult::empty()
                     });
                 }
+                if operation == SelectionOperation::FixupCommit {
+                    let Some(oid) = valid.first().filter(|_| valid.len() == 1).cloned() else {
+                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one commit to fix up")], ..InvokeResult::empty() });
+                    };
+                    let repo = crate::git::GitRepo::open(&self.repo_path)?;
+                    let subject = match repo.commit_subject(&oid) {
+                        Ok(subject) => subject,
+                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::from_error(&error).unwrap_or_else(|| Effect::message(MessageLevel::Error, error.to_string()))], ..InvokeResult::empty() }),
+                    };
+                    let result = repo.commit(&["--fixup", &oid], &[]);
+                    self.pending_selections.remove(view_id);
+                    self.views.remove(view_id);
+                    let mut effects = vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }];
+                    match result {
+                        Ok(_) => effects.push(Effect::message(MessageLevel::Info, format!("Created fixup! {subject}"))),
+                        Err(error) => effects.push(Effect::from_error(&error).unwrap_or_else(|| Effect::message(MessageLevel::Error, error.to_string()))),
+                    }
+                    return Ok(InvokeResult { effects, keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
+                }
             }
             return Ok(InvokeResult::empty());
         }

@@ -658,6 +658,12 @@ impl GitRepo {
         Ok(value.trim().to_string())
     }
 
+    /// Read the subject belonging to a validated commit object ID.
+    pub fn commit_subject(&self, oid: &str) -> Result<String> {
+        self.run(&["show", "-s", "--format=%s", oid])
+            .map(|subject| subject.trim_end().to_string())
+    }
+
     /// Whether `value` resolves to a revision in this repository.
     pub fn verify_revision(&self, value: &str) -> bool {
         self.run(&["rev-parse", "--verify", "--end-of-options", value])

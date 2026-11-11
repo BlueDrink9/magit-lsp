@@ -387,7 +387,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - [ ] **T015.1 — Fixup selection handler and repository-state tests.** Implement `commit.fixup` through the server-owned log-select continuation, preserving caller and arguments.
     - test: confirm creates `fixup! <selected subject>` from staged content on the prior HEAD, restores the caller, and targets the full structured commit id; cancel leaves repository state unchanged and restores the caller; failures are readable.
     - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
-    - [x] **T015.1a — Fixup handler and confirm regression.** Done: `37a4e57`. Implement the selected-fixup path and one exact-repository-state confirm test.
+    - [x] **T015.1a — Fixup handler and confirm regression.** Done: `37a4e57` (regression); implementation included in this commit. Implement the selected-fixup path and one exact-repository-state confirm test.
       - test: confirm commits staged content with `fixup! <selected subject>`, prior HEAD as parent, full structured target identity and restored caller.
       - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
       - Verified: `make test-rust FILTER="--test commands --test log_commands"` @ `f9c6fc2` → ok: rust.

@@ -194,6 +194,8 @@ pub enum SelectionOperation {
     CopyCommits,
     /// Pick one commit as the value of the caller's menu option.
     PickCommit,
+    /// Create a fixup commit for one selected commit.
+    FixupCommit,
 }
 
 /// Request to open a commit-selection view for a typed operation.
@@ -937,6 +939,14 @@ fn build() -> Registry {
             run: commit_reword,
             effects: &[EffectKind::EditDocument],
         },
+        Command {
+            id: "commit.fixup",
+            scope: Scope::MenuAction,
+            doc: "Create a fixup commit",
+            status: CommandStatus::Implemented,
+            run: commit_fixup,
+            effects: &[],
+        },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
         Command {
@@ -1147,6 +1157,27 @@ fn commit_extend(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 fn commit_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     commit_operation(ctx, crate::git::CommitKind::Reword)
+}
+
+fn commit_fixup(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    if repo.status_listing()?.head.is_none() {
+        ctx.info("Cannot create a fixup commit in a repository with no commits");
+        return Ok(CommandOutcome::default());
+    }
+    Ok(CommandOutcome {
+        open_selection: Some(SelectionRequest {
+            options: crate::session::log_options_from_args(None)?,
+            settings: CommitSelection {
+                purpose: "fixup commit".into(),
+                prompt: "Select commit to fix up".into(),
+                multi: false,
+                allow_free_text: false,
+            },
+            operation: SelectionOperation::FixupCommit,
+        }),
+        ..Default::default()
+    })
 }
 
 fn commit_operation(
