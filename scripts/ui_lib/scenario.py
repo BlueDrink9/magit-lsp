@@ -665,6 +665,15 @@ def format_expectation(expectation: Expectation) -> str:
     return f"expect {expectation.path} == {_format_value(expectation.value)}"
 
 
+def expectation_needs_snapshot(expectation: Expectation) -> bool:
+    """Return whether expectation evaluation needs structured editor state."""
+    return expectation.kind not in {
+        "screen-contains",
+        "screen-not-contains",
+        "screen-matches",
+    }
+
+
 def check_document_unchanged(
     name: str, document: str | None, documents: dict[str, str]
 ) -> tuple[bool, str]:
@@ -952,7 +961,11 @@ def _run_combo(
                         expectation,
                         screen=driver.capture(run),
                         ansi=driver.capture(run, ansi=True),
-                        snapshot=driver.snapshot(run),
+                        snapshot=(
+                            driver.snapshot(run)
+                            if expectation_needs_snapshot(expectation)
+                            else {}
+                        ),
                         events=driver.read_trace(run),
                         document=(
                             driver.document(run)

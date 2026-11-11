@@ -362,6 +362,28 @@ class ScreenPredicateTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("yes", actual)
 
+    def test_snapshot_needed_only_for_state_expectations(self) -> None:
+        for line in (
+            'expect screen contains "yes"',
+            'expect screen not-contains "no"',
+            'expect screen matches /yes/',
+        ):
+            with self.subTest(line=line):
+                expectation = scenario.parse_expectation(line)
+                with patch.object(driver, "snapshot", side_effect=AssertionError):
+                    self.assertFalse(scenario.expectation_needs_snapshot(expectation))
+                    self.assertTrue(
+                        scenario.evaluate(
+                            expectation,
+                            screen="yes",
+                            ansi="",
+                            snapshot={},
+                            events=[],
+                        )[0]
+                    )
+        state = scenario.parse_expectation('expect cursor on "yes"')
+        self.assertTrue(scenario.expectation_needs_snapshot(state))
+
 
 class PathPredicateTest(unittest.TestCase):
     def test_aggregate_paths(self) -> None:

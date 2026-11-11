@@ -32,6 +32,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [x] **VER1 — Advertise the server product version at initialization.** Include standard LSP `serverInfo` name/version sourced from Cargo package metadata; preserve existing capability negotiation. Done: containing commit.
   - Verified: `make test-rust FILTER="--test server_async"` @ `001aa40` → ok: rust. Real initialize exchange asserts `serverInfo.name` and exact `CARGO_PKG_VERSION`; existing folding capability assertion remains. Version uses `env!("CARGO_PKG_VERSION")`.
 - [ ] **VER2 — Warn Neovim users about client/server version mismatches.** Store the bundled adapter version and compare it with `serverInfo` after initialization; warn without blocking startup and include the selected server executable path.
+  - [x] **VER2h — Keep native screen assertions independent of editor RPC.** Screen-only scenario expectations must remain usable while Neovim shows a hit-enter prompt; retain structured-state requests for expectations that need them. Done: containing commit.
+    - Verified: `make ui-unit` @ `efad539` → ok: ui-unit. Screen-only expectation kinds skip structured snapshots; state-dependent cursor expectation retains snapshot requirement.
 - [ ] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence.
 
 - [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
