@@ -483,7 +483,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
    - [x] **T018.1 — Typed linear todo model and commit identities.** Parse the closed linear grammar and resolve unique canonical commit identities behind the Git boundary; no file mutation yet.
     - test: supported actions and abbreviated commit references resolve correctly; invalid grammar, unsupported commands, noncommits, ambiguous/missing objects, duplicate identities and leading squash/fixup are rejected without mutation.
      - Verification: `make test-rust FILTER="--test rebase_todo"`.
-     - Verified: `make test-rust FILTER="--test rebase_todo"` @ b33a7a6 → ok: rust. Supported action variants, abbreviated OID, invalid commands and objects, duplicate IDs, leading squash/fixup and ambiguity rejection covered.
+    - Verified: `make test-rust FILTER="--test rebase_todo"` @ 2e0cb73 → ok: rust. Cat-file stdin resolution, whitespace parsing, repository no-mutation invariants, and Git-proven bounded four-hex ambiguity covered.
   - [ ] **T018.2 — Guarded atomic todo persistence.** Preserve the loaded identity set, represent omission as drop and refuse stale source bytes before same-directory atomic replacement.
     - test: valid reorder/action changes preserve exact commit identities; stale/invalid writes leave original todo bytes unchanged.
     - Verification: `make test-rust FILTER="--test rebase_todo"`.

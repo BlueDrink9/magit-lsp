@@ -23,13 +23,16 @@ impl RebaseTodo {
         for (line_no, line) in text.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') { continue; }
-            let mut fields = line.splitn(3, char::is_whitespace).filter(|s| !s.is_empty());
+            let line = line.trim_start();
+            let mut fields = line.split_whitespace();
             let command = fields.next().unwrap_or("");
             let action = match command { "p"|"pick"=>TodoAction::Pick, "r"|"reword"=>TodoAction::Reword, "e"|"edit"=>TodoAction::Edit, "s"|"squash"=>TodoAction::Squash, "f"|"fixup"=>TodoAction::Fixup, "d"|"drop"=>TodoAction::Drop, _=>return Err(Error::new(format!("unsupported todo command on line {}", line_no+1))) };
             let reference = fields.next().ok_or_else(|| Error::new("todo action missing commit"))?;
-            let subject = fields.next().ok_or_else(|| Error::new("todo action missing subject"))?;
+            let remainder = line.find(reference).map(|at| &line[at + reference.len()..]).unwrap_or("");
+            let subject = remainder.trim_start();
+            if subject.is_empty() { return Err(Error::new("todo action missing subject")); }
             if subject.starts_with('-') { return Err(Error::new("todo options are unsupported")); }
-            let oid = repo.resolve_commit(reference)?;
+            let oid = repo.resolve_todo_commit(reference)?;
             if entries.iter().any(|entry: &TodoEntry| entry.oid == oid) { return Err(Error::new("duplicate todo commit identity")); }
             entries.push(TodoEntry { action, oid, subject: subject.to_owned() });
         }

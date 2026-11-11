@@ -731,6 +731,24 @@ impl GitRepo {
         Ok(value.trim().to_string())
     }
 
+    /// Resolve a hexadecimal todo token to its unique full commit object ID.
+    pub fn resolve_todo_commit(&self, token: &str) -> Result<String> {
+        if token.len() < 4 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(Error::new("todo commit identity must be hexadecimal"));
+        }
+        let output = self.command_with_input(
+            &["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+            format!("{token}\n").as_bytes(),
+        )?;
+        let mut fields = output.split_whitespace();
+        let oid = fields.next().ok_or_else(|| Error::new("missing todo commit object"))?;
+        let kind = fields.next().unwrap_or("");
+        if kind != "commit" || fields.next().is_some() {
+            return Err(Error::new("todo identity is not a commit"));
+        }
+        Ok(oid.to_owned())
+    }
+
     /// Read the subject belonging to a validated commit object ID.
     pub fn commit_subject(&self, oid: &str) -> Result<String> {
         self.run(&["show", "-s", "--format=%s", oid])
@@ -1507,6 +1525,28 @@ impl GitRepo {
 
     fn run(&self, args: &[&str]) -> Result<String> {
         Self::command_in(&self.root, args)
+    }
+
+    fn command_with_input(&self, args: &[&str], input: &[u8]) -> Result<String> {
+        let started = Instant::now();
+        tracing::debug!(cwd = %self.root.display(), args = ?args, "git");
+        let mut command = git_command(&self.root, args, Stdio::piped(), &[]);
+        let out = runner::run_owned(&mut command, Some(input))
+            .map_err(|e| Error::new(format!("failed to run git: {e}")))?;
+        let Some(status) = out.status else {
+            return Err(Error::new("git command was cancelled; process reap is incomplete"));
+        };
+        log_finished(&self.root, args, status, started.elapsed(), &out.stdout, &out.stderr);
+        if !status.success() {
+            return Err(Error::git(GitFailure::from_output(args, status, &out.stderr)));
+        }
+        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+            return Err(Error::new("git command completed with incomplete output"));
+        }
+        if out.outcome.stdin_error {
+            return Err(Error::new("git command stdin write failed"));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
     fn command_in(cwd: &Path, args: &[&str]) -> Result<String> {

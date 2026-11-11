@@ -30,7 +30,7 @@ fn parses_supported_actions_and_abbreviated_identity() {
         git(dir.path(), &["commit", "-am", &format!("extra-{index}")]);
         ids.push(git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned());
     }
-    let source = format!("# comment\n\np {prefix} two\nreword {} one\ne {} two\ns {} three\nfixup {} four\ndrop {} five\n", ids[1], ids[2], ids[3], ids[4], ids[5]);
+    let source = format!("# comment\n\np   {prefix}\ttwo\nreword {} one\ne {} two\ns {} three\nfixup {} four\ndrop {} five\n", ids[1], ids[2], ids[3], ids[4], ids[5]);
     let parsed = RebaseTodo::parse(&repo, source.as_bytes()).unwrap();
     assert_eq!(parsed.entries.iter().map(|entry| entry.action).collect::<Vec<_>>(), vec![TodoAction::Pick, TodoAction::Reword, TodoAction::Edit, TodoAction::Squash, TodoAction::Fixup, TodoAction::Drop]);
     assert_eq!(parsed.entries[0].oid, oid);
@@ -40,6 +40,9 @@ fn parses_supported_actions_and_abbreviated_identity() {
 #[test]
 fn rejects_bad_commands_objects_duplicates_and_leading_fold_without_mutation() {
     let (dir, repo, oid) = repo();
+    let file_before = std::fs::read(dir.path().join("file")).unwrap();
+    let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index_before = git(dir.path(), &["write-tree"]);
     let one = git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned();
     for invalid in [
         format!("exec echo bad {oid}\n"), format!("pick {oid}\n"),
@@ -49,32 +52,29 @@ fn rejects_bad_commands_objects_duplicates_and_leading_fold_without_mutation() {
         format!("pick {} tree\n", git(dir.path(), &["rev-parse", "HEAD:file"]).trim()),
     ] {
         assert!(RebaseTodo::parse(&repo, invalid.as_bytes()).is_err(), "accepted {invalid:?}");
-        assert_eq!(invalid.as_bytes(), invalid.as_bytes());
+        assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
+        assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(git(dir.path(), &["write-tree"]), index_before);
     }
 }
 
 #[test]
 fn rejects_ambiguous_abbreviation() {
-    let (dir, repo, oid) = repo();
-    // Two distinct commits sharing a one-character prefix always exist among generated objects only probabilistically;
-    // an ambiguous revision is constructed using Git's minimum abbreviation collision search.
-    let mut refs = vec![oid, git(dir.path(), &["rev-parse", "HEAD^"]).trim().to_owned()];
+    let (dir, repo, _) = repo();
+    let mut prefixes = std::collections::HashMap::<String, usize>::new();
     let mut ambiguous = None;
-    for a in 1..refs[0].len() {
-        if refs.iter().any(|other| other != &refs[0] && other.starts_with(&refs[0][..a])) {
-            ambiguous = Some(refs[0][..a].to_owned()); break;
-        }
+    for index in 0..5000 {
+        let data = format!("fixture-{index}");
+        let path = dir.path().join(format!("fixture-{index}"));
+        write(&path, &data);
+        let oid = git(dir.path(), &["hash-object", "-w", path.to_str().unwrap()]).trim().to_owned();
+        let prefix = oid[..4].to_owned();
+        let count = prefixes.entry(prefix.clone()).or_default();
+        *count += 1;
+        if *count > 1 { ambiguous = Some(prefix); break; }
     }
-    // If commits do not collide, add commits until their leading character matches.
-    while ambiguous.is_none() {
-        write(&dir.path().join("file"), &format!("{}\n", refs.len()));
-        git(dir.path(), &["commit", "-am", "extra"]);
-        let next = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
-        if refs.iter().any(|old| old.starts_with(&next[..1]) || next.starts_with(&old[..1])) {
-            let old = refs.iter().find(|old| old.starts_with(&next[..1]) || next.starts_with(&old[..1])).unwrap();
-            ambiguous = Some(if next.starts_with(&old[..1]) { next[..1].to_owned() } else { old[..1].to_owned() });
-        }
-        refs.push(next);
-    }
-    assert!(RebaseTodo::parse(&repo, format!("pick {} ambiguous\n", ambiguous.unwrap()).as_bytes()).is_err());
+    let prefix = ambiguous.expect("bounded fixture must produce 4-hex collision");
+    let matching = git(dir.path(), &["rev-parse", &format!("--disambiguate={prefix}")]);
+    assert!(matching.lines().count() > 1, "Git must prove ambiguity");
+    assert!(RebaseTodo::parse(&repo, format!("pick {prefix} ambiguous\n").as_bytes()).is_err());
 }
