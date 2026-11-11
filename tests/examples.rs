@@ -1061,6 +1061,38 @@ fn canonical_frame(
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
+/// Return first JSON path whose values differ.
+fn first_differing_json_path(expected: &Value, observed: &Value) -> Option<String> {
+    fn walk(expected: &Value, observed: &Value, path: &str) -> Option<String> {
+        match (expected, observed) {
+            (Value::Object(a), Value::Object(b)) => {
+                for key in a.keys().chain(b.keys()) {
+                    if a.get(key) != b.get(key) {
+                        let child = format!("{path}.{}", key);
+                        if a.get(key).is_none() || b.get(key).is_none() {
+                            return Some(child);
+                        }
+                        if let Some(found) = walk(&a[key], &b[key], &child) { return Some(found); }
+                    }
+                }
+                None
+            }
+            (Value::Array(a), Value::Array(b)) => {
+                for index in 0..a.len().max(b.len()) {
+                    if a.get(index) != b.get(index) {
+                        let child = format!("{path}[{index}]");
+                        if index >= a.len() || index >= b.len() { return Some(child); }
+                        if let Some(found) = walk(&a[index], &b[index], &child) { return Some(found); }
+                    }
+                }
+                None
+            }
+            _ => Some(if path.is_empty() { "$".to_owned() } else { path.to_owned() }),
+        }
+    }
+    walk(expected, observed, "$")
+}
+
 /// Replay one recorded example against the real server.
 ///
 /// Every recorded `c2s` line is sent in order after the fixture substitution
@@ -1143,7 +1175,8 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                 );
                 if observed != expected {
                     return Err(format!(
-                        "{where_}: recorded s2c frame mismatch\n  expected: {expected}\n  observed: {observed}"
+                        "{where_}: recorded s2c frame mismatch at {}\n  expected: {expected}\n  observed: {observed}",
+                        first_differing_json_path(&expected, &observed).unwrap_or_else(|| "<unknown>".to_owned())
                     ));
                 }
             }
