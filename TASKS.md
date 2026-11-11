@@ -221,6 +221,11 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Refresh worked exchanges for initialize identity.** VER1 (`4e7521a`) and the recorded initialize-frame correction (`efad539`) add `serverInfo`; the resumed docs gate reports `docs/schema/worked-exchanges.md` stale. Done: `f393248`.
+  - check: regenerate through Make; inspect causal initialize identity diff and commit generated references alone with source/command justification. Record queue completion separately.
+  - Verification: `make update-schema && make docs-artifacts-check && make docs-check`.
+  - Verified: `make update-schema && make docs-artifacts-check && make docs-check` @ `ebe9ac6` → all passed; initialize responses now include `serverInfo` name `magit-lsp`, version `0.1.0`; generated artifact committed alone in `f393248`.
+
 - [x] **Repair initialize serverInfo replay fixtures.** The resumed gate at `6d626a5` fails three examples tests at `$.result.serverInfo` after VER1 (`4e7521a`) added package identity to initialize responses. Update six recorded initialize frames without relaxing exact replay or divergence assertions. Done: containing commit.
   - test: all recorded examples replay exactly after normalization; both intentional divergence tests reach their intended altered frame.
   - Verification: `make test-rust FILTER="--test examples"`.
