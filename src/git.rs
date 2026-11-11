@@ -496,6 +496,27 @@ impl GitRepo {
         Ok(std::fs::canonicalize(path)?.join("COMMIT_EDITMSG"))
     }
 
+    /// Resolve Git's worktree-specific interactive rebase todo path.
+    pub fn rebase_todo_path(&self) -> Result<PathBuf> {
+        let args = ["rev-parse", "--path-format=absolute", "--git-path", "rebase-merge/git-rebase-todo"];
+        let mut command = git_command(&self.root, &args, Stdio::null(), &[]);
+        let out = runner::run_owned(&mut command, None)
+            .map_err(|error| Error::new(format!("Cannot resolve rebase todo: {error}")))?;
+        let status = out.status.ok_or_else(|| Error::new("Rebase todo lookup was cancelled"))?;
+        if !status.success() {
+            return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr)));
+        }
+        if out.outcome.stdout_truncated || out.outcome.stderr_truncated || out.outcome.drain_incomplete {
+            return Err(Error::new("Rebase todo lookup returned incomplete output"));
+        }
+        let output = std::str::from_utf8(&out.stdout).map_err(|_| Error::new("Git rebase todo path is not UTF-8"))?;
+        let path = output.strip_suffix('\n').filter(|path| !path.is_empty() && !path.contains(['\n', '\r', '\0']))
+            .ok_or_else(|| Error::new("Git returned an invalid rebase todo path"))?;
+        let path = Path::new(path);
+        if !path.is_absolute() { return Err(Error::new("Git returned a relative rebase todo path")); }
+        Ok(path.to_path_buf())
+    }
+
     /// Read HEAD's committer timestamp for Magit-style metadata-preserving amendments.
     pub fn head_committer_date(&self) -> Result<String> {
         let date = self.run(&["show", "-s", "--format=%cI", "HEAD"])?;

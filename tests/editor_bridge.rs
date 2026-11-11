@@ -12,6 +12,54 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[test]
+fn helper_draft_kind_checks_exact_target_and_todo_requires_explicit_intent() {
+    use magit_lsp::editor::{draft::{Draft, DraftContext, DraftKind}, COMMIT_MESSAGE_KIND, REBASE_TODO_KIND};
+    use magit_lsp::protocol::DraftFinishReason;
+    use magit_lsp::editor::Reply;
+
+    let dir = TempDir::new().unwrap();
+    assert!(Command::new("git").args(["init", "-q"]).arg(dir.path()).status().unwrap().success());
+    std::fs::write(dir.path().join(".git/COMMIT_EDITMSG"), "message\n").unwrap();
+    let repo = magit_lsp::git::GitRepo::open(dir.path()).unwrap();
+    let todo = repo.rebase_todo_path().unwrap();
+    std::fs::create_dir_all(todo.parent().unwrap()).unwrap();
+    std::fs::write(&todo, "pick deadbeef subject\n").unwrap();
+    let message = repo.commit_message_path().unwrap();
+    let wrong = dir.path().join("wrong");
+    std::fs::write(&wrong, "wrong\n").unwrap();
+
+    for (kind, target, wrong_kind, expected_kind) in [
+        (DraftKind::CommitMessage, message.as_path(), REBASE_TODO_KIND, COMMIT_MESSAGE_KIND),
+        (DraftKind::RebaseTodo, todo.as_path(), COMMIT_MESSAGE_KIND, REBASE_TODO_KIND),
+    ] {
+        let mut draft = Draft::for_kind(&repo, "owner", kind).unwrap();
+        let run = draft.run_id().to_owned();
+        let uri = draft.uri().to_owned();
+        let repository = draft.repository().to_owned();
+        let context = DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
+        let token = draft.helper_token().to_owned();
+        assert!(draft.accept_helper(context, &token, wrong_kind, target).is_err());
+        assert!(draft.accept_helper(context, &token, expected_kind, &wrong).is_err());
+        assert!(draft.accept_helper(context, &token, expected_kind, target).is_ok());
+        if kind == DraftKind::RebaseTodo {
+            draft.did_open(context, 1, b"pick deadbeef subject\n").unwrap();
+            assert!(draft.finish(context, 1, DraftFinishReason::NormalClose).is_err());
+            assert_eq!(std::fs::read_to_string(&todo).unwrap(), "pick deadbeef subject\n");
+            draft.did_change(context, 2, b"drop deadbeef subject\n").unwrap();
+            assert_eq!(draft.finish(context, 2, DraftFinishReason::Confirm).unwrap(), Reply::Ok);
+            assert_eq!(std::fs::read_to_string(&todo).unwrap(), "drop deadbeef subject\n");
+        }
+    }
+    let mut cancel = Draft::for_kind(&repo, "owner", DraftKind::RebaseTodo).unwrap();
+    let run = cancel.run_id().to_owned();
+    let uri = cancel.uri().to_owned();
+    let repository = cancel.repository().to_owned();
+    let context = DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
+    assert_eq!(cancel.abort(context).unwrap(), Reply::Abort);
+}
+
 /// The answer the askpass tests type when Git asks for a secret.
 const ASKPASS_ANSWER: &str = "s3cret";
 /// The question Git asks in the askpass tests.

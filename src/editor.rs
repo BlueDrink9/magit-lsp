@@ -34,6 +34,8 @@ pub const EDIT_ID_ENV: &str = "MAGIT_LSP_EDIT_ID";
 pub const HELPER_TOKEN_ENV: &str = "MAGIT_LSP_HELPER_TOKEN";
 /// The kind the helper reports for Git's commit message file.
 pub const COMMIT_MESSAGE_KIND: &str = "commit-message";
+/// The helper kind Git uses for an interactive rebase todo file.
+pub const REBASE_TODO_KIND: &str = "rebase-todo";
 
 /// The helper's hello: one JSON line naming the file Git wants edited.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +106,46 @@ mod editor_history_tests {
             .success());
         std::fs::write(dir.path().join(".git/COMMIT_EDITMSG"), "initial\n").unwrap();
         dir
+    }
+
+    #[test]
+    fn draft_kinds_bind_helper_kind_and_exact_target_and_todo_requires_explicit_intent() {
+        let dir = repository();
+        let repo = GitRepo::open(dir.path()).unwrap();
+        let todo = repo.rebase_todo_path().unwrap();
+        std::fs::create_dir_all(todo.parent().unwrap()).unwrap();
+        std::fs::write(&todo, "pick deadbeef subject\n").unwrap();
+        let commit = repo.commit_message_path().unwrap();
+        let other = dir.path().join("other");
+        std::fs::write(&other, "other\n").unwrap();
+
+        for (kind, target, wrong_kind, right_kind) in [
+            (draft::DraftKind::CommitMessage, commit.as_path(), REBASE_TODO_KIND, COMMIT_MESSAGE_KIND),
+            (draft::DraftKind::RebaseTodo, todo.as_path(), COMMIT_MESSAGE_KIND, REBASE_TODO_KIND),
+        ] {
+            let mut draft = draft::Draft::for_kind(&repo, "owner", kind).unwrap();
+            let run = draft.run_id().to_string();
+            let uri = draft.uri().to_string();
+            let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: draft.repository() };
+            let token = draft.helper_token().to_string();
+            assert!(draft.accept_helper(context, &token, wrong_kind, target).is_err());
+            assert!(draft.accept_helper(context, &token, right_kind, &other).is_err());
+            assert!(draft.accept_helper(context, &token, right_kind, target).is_ok());
+            if kind == draft::DraftKind::RebaseTodo {
+                draft.did_open(context, 1, b"pick deadbeef subject\n").unwrap();
+                assert!(draft.finish(context, 1, DraftFinishReason::NormalClose).is_err());
+                assert_eq!(std::fs::read_to_string(&todo).unwrap(), "pick deadbeef subject\n");
+                draft.did_change(context, 2, b"drop deadbeef subject\n").unwrap();
+                assert_eq!(draft.finish(context, 2, DraftFinishReason::Confirm).unwrap(), Reply::Ok);
+                assert_eq!(std::fs::read_to_string(&todo).unwrap(), "drop deadbeef subject\n");
+            }
+        }
+
+        let mut draft = draft::Draft::for_kind(&repo, "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let run = draft.run_id().to_string();
+        let uri = draft.uri().to_string();
+        let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: draft.repository() };
+        assert_eq!(draft.abort(context).unwrap(), Reply::Abort);
     }
 
     fn opened(registry: &EditRegistry, repo: &Path) -> (String, String) {
@@ -514,6 +556,7 @@ impl EditRegistry {
     ) -> Result<Option<String>> {
         self.apply(owner, &p.run_id, &p.uri, |draft, context| {
             draft.finish(context, p.version, p.reason)?;
+            if draft.kind() != draft::DraftKind::CommitMessage { return Ok(None); }
             let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
             Ok(histories
                 .entry(context.repository.to_path_buf())

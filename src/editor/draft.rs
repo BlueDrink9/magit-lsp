@@ -19,6 +19,25 @@ use std::path::{Path, PathBuf};
 /// Independent UTF-8 byte limit for the initial, live and saved snapshots.
 pub const MAX_DRAFT_BYTES: usize = 1024 * 1024;
 
+/// Helper document kind and its independent completion policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftKind {
+    /// Git commit message file, with saved-file close support.
+    CommitMessage,
+    /// Interactive rebase todo file, resolved only by explicit intent.
+    RebaseTodo,
+}
+
+impl DraftKind {
+    /// Wire name reported by the editor helper.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Self::CommitMessage => COMMIT_MESSAGE_KIND,
+            Self::RebaseTodo => super::REBASE_TODO_KIND,
+        }
+    }
+}
+
 /// Trusted dispatch identity; the owner/repository must not come from client JSON.
 #[derive(Clone, Copy)]
 pub struct DraftContext<'a> {
@@ -69,6 +88,7 @@ pub struct Draft {
     uri: String,
     helper_token: String,
     expected: PathBuf,
+    kind: DraftKind,
     contents: Option<Contents>,
     terminal: bool,
 }
@@ -77,14 +97,21 @@ impl Draft {
     /// Allocate opaque run/URI and one-shot helper credentials before spawning Git.
     /// Reading the initial template waits until the validated helper joins.
     pub fn new(repo: &GitRepo, owner: impl Into<String>) -> Result<Self> {
+        Self::for_kind(repo, owner, DraftKind::CommitMessage)
+    }
+
+    /// Allocate a draft targeting the Git-owned file for this helper kind.
+    pub fn for_kind(repo: &GitRepo, owner: impl Into<String>, kind: DraftKind) -> Result<Self> {
+        let expected = match kind { DraftKind::CommitMessage => repo.commit_message_path()?, DraftKind::RebaseTodo => repo.rebase_todo_path()? };
         let run_id = opaque_id()?;
         Ok(Self {
             owner: owner.into(),
             repository: std::fs::canonicalize(repo.root())?,
-            uri: file_uri(&repo.commit_message_path()?),
+            uri: file_uri(&expected),
             run_id,
             helper_token: opaque_id()?,
-            expected: repo.commit_message_path()?,
+            expected,
+            kind,
             contents: None,
             terminal: false,
         })
@@ -110,7 +137,12 @@ impl Draft {
         &self.repository
     }
 
-    /// Accept exactly one valid commit-message helper and its bounded UTF-8 template.
+    /// Kind controlling target validation and finish policy.
+    pub fn kind(&self) -> DraftKind {
+        self.kind
+    }
+
+    /// Accept exactly one matching helper and its bounded UTF-8 template.
     /// Failed validation consumes nothing, allowing recovery with the same helper.
     pub fn accept_helper(
         &mut self,
@@ -120,9 +152,9 @@ impl Draft {
         path: &Path,
     ) -> Result<()> {
         self.validate(context)?;
-        if token != self.helper_token || kind != COMMIT_MESSAGE_KIND {
+        if token != self.helper_token || kind != self.kind.wire_name() {
             return Err(Error::new(
-                "Commit draft helper credentials or kind do not match",
+                "Draft helper credentials or kind do not match",
             ));
         }
         if self.contents.is_some() {
@@ -224,7 +256,11 @@ impl Draft {
         version: i32,
         reason: DraftFinishReason,
     ) -> Result<Reply> {
+        let kind = self.kind;
         let contents = self.pending(context)?;
+        if kind == DraftKind::RebaseTodo && reason != DraftFinishReason::Confirm {
+            return Err(Error::new("Rebase todo requires explicit submit or cancel"));
+        }
         if reason == DraftFinishReason::Confirm && version != contents.live.version {
             return Err(Error::new(
                 "Confirm must name the exact synchronized commit message version",
@@ -344,14 +380,15 @@ impl Target {
     fn open(expected: &Path, supplied: &Path) -> Result<Self> {
         if supplied != expected || std::fs::canonicalize(supplied)? != expected {
             return Err(Error::new(
-                "Helper target is not this repository's COMMIT_EDITMSG",
+                "Helper target is not the expected Git draft file",
             ));
         }
         let directory = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
             .open(expected.parent().unwrap())?;
-        let file = open_message(&directory, false)?;
+        let name = expected.file_name().ok_or_else(|| Error::new("Draft target has no filename"))?;
+        let file = open_message(&directory, name, false)?;
         regular_unlinked(&file)?;
         Ok(Self {
             path: expected.to_path_buf(),
@@ -369,7 +406,7 @@ impl Target {
                 "Commit draft Git directory changed; retry after recovery",
             ));
         }
-        let file = open_message(&self.directory, write)?;
+        let file = open_message(&self.directory, self.path.file_name().unwrap(), write)?;
         regular_unlinked(&file)?;
         if file.metadata()?.uid() != self.file.metadata()?.uid() {
             return Err(Error::new(
@@ -397,17 +434,19 @@ impl Target {
     }
 }
 
-fn open_message(directory: &File, write: bool) -> Result<File> {
+fn open_message(directory: &File, name: &std::ffi::OsStr, write: bool) -> Result<File> {
     let flags = if write {
         libc::O_WRONLY
     } else {
         libc::O_RDONLY
     };
-    // SAFETY: the directory is owned/live, and the fixed filename is NUL-terminated.
+    let name = std::ffi::CString::new(name.as_encoded_bytes())
+        .map_err(|_| Error::new("Draft target filename is invalid"))?;
+    // SAFETY: the directory is owned/live, and name is NUL-terminated.
     let fd = unsafe {
         libc::openat(
             directory.as_raw_fd(),
-            c"COMMIT_EDITMSG".as_ptr(),
+            name.as_ptr(),
             flags | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
         )
     };
