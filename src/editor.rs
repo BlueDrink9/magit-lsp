@@ -124,9 +124,10 @@ mod editor_history_tests {
             (draft::DraftKind::RebaseTodo, todo.as_path(), COMMIT_MESSAGE_KIND, REBASE_TODO_KIND),
         ] {
             let mut draft = draft::Draft::for_kind(&repo, "owner", kind).unwrap();
+            let repository = draft.repository().to_path_buf();
             let run = draft.run_id().to_string();
             let uri = draft.uri().to_string();
-            let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: draft.repository() };
+            let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
             let token = draft.helper_token().to_string();
             assert!(draft.accept_helper(context, &token, wrong_kind, target).is_err());
             assert!(draft.accept_helper(context, &token, right_kind, &other).is_err());
@@ -142,9 +143,10 @@ mod editor_history_tests {
         }
 
         let mut draft = draft::Draft::for_kind(&repo, "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let repository = draft.repository().to_path_buf();
         let run = draft.run_id().to_string();
         let uri = draft.uri().to_string();
-        let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: draft.repository() };
+        let context = draft::DraftContext { owner: "owner", run_id: &run, uri: &uri, repository: &repository };
         assert_eq!(draft.abort(context).unwrap(), Reply::Abort);
     }
 
@@ -181,6 +183,15 @@ mod editor_history_tests {
         let registry = EditRegistry::new();
         let dir = repository();
         let repo = GitRepo::open(dir.path()).unwrap();
+        let (commit_run, commit_uri) = opened(&registry, dir.path());
+        registry.apply("owner", &commit_run, &commit_uri, |draft, context| {
+            draft.did_change(context, 2, b"existing commit history\n")?;
+            draft.save(context, 2)?;
+            Ok(())
+        }).unwrap();
+        assert!(registry.resolve(&commit_run, Reply::Abort));
+        let existing_history = retained(&registry, dir.path());
+        assert!(!existing_history.is_empty());
         let target = repo.rebase_todo_path().unwrap();
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         std::fs::write(&target, "pick deadbeef subject\n").unwrap();
@@ -193,10 +204,30 @@ mod editor_history_tests {
             draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
             draft.did_open(context, 1, b"pick deadbeef subject\n")?;
             draft.did_change(context, 2, b"drop deadbeef subject\n")?;
+            draft.save(context, 2)?;
             Ok(())
         }).is_ok());
         assert!(registry.resolve(&run, Reply::Abort));
-        assert!(retained(&registry, dir.path()).is_empty());
+        assert_eq!(retained(&registry, dir.path()), existing_history);
+
+        let confirm = registry.create(dir.path().to_str().unwrap(), "owner", draft::DraftKind::RebaseTodo).unwrap();
+        let confirm_uri = registry.lock()[&confirm].draft.uri().to_string();
+        registry.apply("owner", &confirm, &confirm_uri, |draft, context| {
+            let token = draft.helper_token().to_string();
+            draft.accept_helper(context, &token, REBASE_TODO_KIND, &target)?;
+            draft.did_open(context, 1, b"pick deadbeef subject\n")?;
+            draft.did_change(context, 2, b"drop deadbeef subject\n")?;
+            draft.save(context, 2)?;
+            Ok(())
+        }).unwrap();
+        registry.lock()[&confirm].completion.send(true).unwrap();
+        registry.finish("owner", &DraftFinishParams {
+            run_id: confirm,
+            uri: confirm_uri,
+            version: 2,
+            reason: DraftFinishReason::Confirm,
+        }).unwrap();
+        assert_eq!(retained(&registry, dir.path()), existing_history);
     }
 
     fn joined(registry: &EditRegistry, repo: &Path) -> (String, String) {
@@ -712,6 +743,9 @@ impl EditRegistry {
 
     #[cfg(unix)]
     fn retain_saved(&self, draft: &draft::Draft) {
+        if draft.kind() != draft::DraftKind::CommitMessage {
+            return;
+        }
         if let (Some(saved), Some(initial)) = (draft.saved(), draft.initial()) {
             let mut histories = self.history.lock().unwrap_or_else(|p| p.into_inner());
             let _ = histories
