@@ -27,7 +27,7 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 
 ## Ad hoc
 
-- [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: pending.
+- [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
   - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Retain this check: it parses actual config and spike source and fails on missing/absolute executables or personal paths. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
 - [ ] **PORT2 — Audit and sanitize machine-specific documentation paths.** Complete the text audit, replace host-specific historical command paths without losing provenance, and record reviewer-counterchecked retention decisions.
 
