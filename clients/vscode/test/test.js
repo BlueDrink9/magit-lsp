@@ -480,6 +480,36 @@ test('PATH command resolution selects executable and preserves unresolved comman
   assert.equal(versions.resolveCommand('missing-tool', { PATH: '' }), 'missing-tool');
 });
 
+test('Unix PATH resolution skips non-executables and returns absolute paths', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-version-'));
+  try {
+    const first = path.join(root, 'first');
+    const second = path.join(root, 'second');
+    fs.mkdirSync(first); fs.mkdirSync(second);
+    fs.writeFileSync(path.join(first, 'tool'), '');
+    fs.writeFileSync(path.join(second, 'tool'), '');
+    fs.chmodSync(path.join(second, 'tool'), 0o755);
+    assert.equal(versions.resolveCommand('tool', { PATH: `${first}:${second}` }, 'linux'), path.join(second, 'tool'));
+    assert.equal(versions.resolveCommand('tool', { PATH: path.relative(process.cwd(), second) }, 'linux'), path.join(second, 'tool'));
+    assert.equal(versions.resolveCommand(path.join(first, 'tool'), { PATH: '' }, 'linux'), path.join(first, 'tool'));
+    assert.equal(versions.resolveCommand('unknown', { PATH: '' }, 'linux'), 'unknown');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Windows PATH resolution does not duplicate an existing PATHEXT suffix', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magit-version-win-'));
+  try {
+    fs.writeFileSync(path.join(root, 'node.exe'), '');
+    assert.equal(versions.resolveCommand('node.EXE', { PATH: root, PATHEXT: '.EXE;.CMD' }, 'win32'), path.join(root, 'node.exe'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('executable VSCode e2e paths enforce no-vision policy', noVisionPolicy);
 
 if (failures.length > 0) {

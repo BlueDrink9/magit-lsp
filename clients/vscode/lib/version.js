@@ -3,15 +3,27 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-/** Resolve a command through PATH without changing the command used to launch it. */
-function resolveCommand(command, env = process.env) {
+/** Resolve a diagnostic command through PATH without changing the launch command. */
+function resolveCommand(command, env = process.env, platform = process.platform) {
   if (command.includes('/') || command.includes('\\')) return command;
-  const extensions = process.platform === 'win32'
-    ? (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';') : [''];
-  for (const directory of (env.PATH || '').split(path.delimiter)) {
+  const windows = platform === 'win32';
+  const delimiter = windows ? ';' : path.delimiter;
+  const pathext = (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';');
+  const hasSuffix = windows && pathext.some(ext => command.toLowerCase().endsWith(ext.toLowerCase()));
+  const extensions = windows ? (hasSuffix ? [''] : pathext) : [''];
+  for (const directory of (env.PATH || '').split(delimiter)) {
     for (const extension of extensions) {
-      const candidate = path.join(directory || '.', command + extension);
-      try { if (fs.statSync(candidate).isFile()) return candidate; } catch {}
+      let candidate = path.resolve(directory || '.', command + extension);
+      if (windows) {
+        try {
+          const match = fs.readdirSync(path.dirname(candidate)).find(name => name.toLowerCase() === path.basename(candidate).toLowerCase());
+          if (match) candidate = path.join(path.dirname(candidate), match);
+        } catch {}
+      }
+      try {
+        const stat = fs.statSync(candidate);
+        if (stat.isFile() && (windows || (stat.mode & 0o111) !== 0)) return candidate;
+      } catch {}
     }
   }
   return command;

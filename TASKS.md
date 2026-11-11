@@ -38,7 +38,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [ ] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence.
   - [x] **VER3a — Implement VSCode startup version warnings.** Compare the package and initialized server versions, resolve the selected server command for diagnostics, and cover matching, mismatched and missing versions in existing client tests. Done: containing commit.
     - Verified: `make vscode-test` @ `64b721e` → ok: build, vscode-typecheck, vscode, keybindings. Unit assertions cover matching/mismatch/missing metadata and PATH selection; open lifecycle confirms matching metadata leaves status usable.
-  - [ ] **VER3c — Match VSCode diagnostic executable resolution to process discovery.** Ignore non-executable PATH files on Unix, return absolute selected paths, and handle Windows commands that already contain a PATHEXT suffix.
+  - [x] **VER3c — Match VSCode diagnostic executable resolution to process discovery.** Ignore non-executable PATH files on Unix, return absolute selected paths, and handle Windows commands that already contain a PATHEXT suffix.
+    - Verified: `make vscode-unit` @ `473b1de` → ok: vscode-typecheck, vscode-unit. Prior broader `make vscode-test` had unrelated integration timeouts; not counted as passing here.
   - [ ] **VER3b — Verify version warnings in the native VSCode host.** Expose focused native verification through Make, fail on missing prerequisites, and record text-only warning plus usable-view evidence.
 
 - [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.

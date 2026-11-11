@@ -103,3 +103,12 @@ registry-docs-check:
 docs-generate: update-schema registry-docs-generate
 
 docs-artifacts-check: schema-check registry-docs-check
+
+ui-tour: build
+	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
+
+color-spike: build
+	$(call run,color-spike,nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua)
+
+readme-shots:
+	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
