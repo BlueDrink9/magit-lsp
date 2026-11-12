@@ -11,6 +11,8 @@ import { resolveCommand } from '../../lib/version.js';
  * binary or display is available, so `make vscode-test` stays portable.
  */
 const root = resolve(import.meta.dirname, '../../../..');
+const require = createRequire(import.meta.url);
+const { selectSuiteMode, withSuiteMode } = require('./focused-mode.js');
 // This subprocess observes the isolated renderer; it never sets context keys or
 // dispatches commands. Image capture methods are explicitly forbidden.
 if (process.argv[2] === '--cdp') {
@@ -43,25 +45,29 @@ if (process.argv[2] === '--select-editor') {
   console.log(editor || '');
   process.exit(editor ? 0 : 1);
 }
-const focusedEdit = process.env.MAGIT_VSCODE_EDIT_ONLY === '1';
-const focusedHead = process.env.MAGIT_VSCODE_HEAD_ONLY === '1';
+const suiteMode = selectSuiteMode(process.env);
+const focusedEdit = suiteMode === 'edit';
+const focusedHead = suiteMode === 'head';
+const focusedVersion = suiteMode === 'version';
+const strictFocused = focusedEdit || focusedHead || focusedVersion
+  || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
+  process.exit(strictFocused ? 1 : 0);
 }
 if (!process.env.DISPLAY) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: DISPLAY is required for the real-editor keyboard checks`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: DISPLAY is required for the real-editor keyboard checks`);
+  process.exit(strictFocused ? 1 : 0);
 }
 if (!existsSync(`${root}/target/debug/magit-lsp`)) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+  console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
+  process.exit(strictFocused ? 1 : 0);
 }
 
 // Launch an isolated real editor; never reuse or close the user's instance.
 const directory = mkdtempSync('/tmp/opencode/vscode-review-');
 const repo = `${directory}/repo`;
-const mirror = createRequire(import.meta.url)('../../lib/foldkeys.js').mapFoldKeys([
+const mirror = require('../../lib/foldkeys.js').mapFoldKeys([
   { key: 'ctrl+alt+]', command: 'editor.toggleFold' },
 ]);
 mkdirSync(`${directory}/user/User`, { recursive: true });
@@ -98,6 +104,7 @@ if (process.env.MAGIT_VSCODE_A29_ONLY === '1') env.MAGIT_VSCODE_A29_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A33_ONLY === '1') env.MAGIT_VSCODE_A33_ONLY = '1';
 if (process.env.MAGIT_VSCODE_A34_ONLY === '1') env.MAGIT_VSCODE_A34_ONLY = '1';
 if (focusedEdit) env.MAGIT_VSCODE_EDIT_ONLY = '1';
+Object.assign(env, withSuiteMode(process.env));
 env.MAGIT_VSCODE_EVIDENCE = directory;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
@@ -132,7 +139,12 @@ function stopOwned(base) {
 
 // Extension test hosts suppress native dirty-close dialogs. A tiny normal-host
 // launcher runs the same production suite without extensionTestsPath instead.
-if (focusedEdit || focusedHead) {
+let versionFixture;
+if (focusedVersion) {
+  versionFixture = require('./version-fixture.js').createVersionFixture(directory);
+  env.MAGIT_VSCODE_VERSION_FIXTURE = versionFixture.extensionPath;
+}
+if (focusedEdit || focusedHead || focusedVersion) {
   mkdirSync(`${directory}/launcher`);
   writeFileSync(`${directory}/launcher/package.json`, JSON.stringify({
     publisher: 'test', name: 'native-edit-launcher', version: '1.0.0',
@@ -141,6 +153,9 @@ if (focusedEdit || focusedHead) {
   writeFileSync(`${directory}/launcher/launcher.js`, `
     /** Run production acceptance in a normal extension host. */
     exports.activate = function () {
+      process.env.MAGIT_VSCODE_SUITE_MODE = ${JSON.stringify(suiteMode)};
+      process.env.MAGIT_VSCODE_VERSION_ONLY = ${JSON.stringify(focusedVersion ? '1' : '')};
+      process.env.MAGIT_VSCODE_VERSION_FIXTURE = ${JSON.stringify(versionFixture?.extensionPath || '')};
       setImmediate(async () => {
         let status = 0;
         try { await require(${JSON.stringify(`${root}/clients/vscode/test/e2e/suite.js`)}).run(); }
@@ -151,17 +166,19 @@ if (focusedEdit || focusedHead) {
   `);
 }
 if (focusedHead) env.MAGIT_VSCODE_HEAD_ONLY = '1';
+if (focusedVersion) env.MAGIT_VSCODE_VERSION_ONLY = '1';
 const args = [
   '--wait', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
   `--remote-debugging-port=${env.MAGIT_VSCODE_CDP_PORT}`,
   '--disable-workspace-trust', '--user-data-dir', `${directory}/user`,
   '--extensions-dir', `${directory}/extensions`,
   `--extensionDevelopmentPath=${root}/clients/vscode`,
-  ...(focusedEdit || focusedHead ? [`--extensionDevelopmentPath=${directory}/launcher`]
+  ...(focusedVersion ? [`--extensionDevelopmentPath=${versionFixture.extensionPath}`] : []),
+   ...(focusedEdit || focusedHead || focusedVersion ? [`--extensionDevelopmentPath=${directory}/launcher`]
     : [`--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`]), repo,
 ];
 let result;
-if (focusedEdit || focusedHead) {
+if (focusedEdit || focusedHead || focusedVersion) {
   const child = spawn(editor, args, { env, stdio: 'inherit' });
   let launchError;
   child.on('error', (error) => { launchError = error; });
@@ -179,6 +196,7 @@ if (focusedEdit || focusedHead) {
   result = spawnSync(editor, args, { env, stdio: 'inherit', timeout: 180000 });
 }
 stopOwned(directory);
+versionFixture?.cleanup();
 console.log(`VSCode text evidence: ${directory}`);
 if (result.error) console.error(result.error);
 if (existsSync(`${directory}/failure.txt`)) {
@@ -188,7 +206,8 @@ if (existsSync(`${directory}/failure.txt`)) {
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
 const headEvidence = focusedHead && existsSync(`${directory}/head-operations-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/head-operations-evidence.json`, 'utf8')) : null;
-const evidenceReady = focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
+const evidenceReady = focusedVersion ? existsSync(`${directory}/version-startup-evidence.json`)
+  : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
   : process.env.MAGIT_VSCODE_A34_ONLY === '1'
   ? existsSync(`${directory}/a34-evidence.json`)
@@ -205,7 +224,7 @@ const evidenceReady = focusedHead ? headEvidence?.status === 'pass' && headEvide
     && existsSync(`${directory}/a06-evidence.json`);
 if (!evidenceReady) {
   console.error(
-    focusedHead
+      focusedHead
       ? 'Missing complete native HEAD operations evidence; see the isolated evidence directory above.'
       : focusedEdit
       ? 'Missing production real-file native evidence; see the isolated evidence directory above.'

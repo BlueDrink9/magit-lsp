@@ -5,6 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const vscode = require('vscode');
 const { LanguageClient } = require('vscode-languageclient/node');
+const { selectSuiteMode } = require('./focused-mode');
 
 /** Requests this test records as evidence; notifications are not captured. */
 const WATCHED = new Set(['view/close', 'view/invoke', 'view/key', 'view/open',
@@ -60,6 +61,7 @@ function workspaceFiles(root) {
 
 /** Verify first-open/reopen/refresh plus foreign-widget isolation and status keys. */
 async function run() {
+  const suiteMode = selectSuiteMode(process.env);
   const evidence = process.env.MAGIT_VSCODE_EVIDENCE;
   assert(evidence, 'MAGIT_VSCODE_EVIDENCE must name the isolated evidence directory');
   const extension = vscode.extensions.getExtension('magit-lsp.magit-lsp');
@@ -306,6 +308,26 @@ async function run() {
     assert.equal(openedViews.length, 1, 'first open did not return one descriptor');
     assert.equal(openedViews[0].id, uri.authority, 'status URI is not the opened view id');
     assert.equal(openedViews[0].kind, 'status');
+    if (suiteMode === 'version') {
+      const { store } = require(`${extension.extensionPath}/lib/store`);
+      await waitFor(() => store.clientReady && store.client?.initializeResult?.serverInfo?.version,
+        'version fixture server initialization');
+      assert(store.clientReady, 'version fixture extension did not become ready');
+      assert.match(editor.document.getText(), /tracked\.txt/, 'version fixture status is unusable');
+      const serverPath = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
+      const executable = require(`${extension.extensionPath}/lib/version`).resolveCommand(serverPath);
+      const evidencePath = `${evidence}/version-startup-evidence.json`;
+      fs.writeFileSync(evidencePath, JSON.stringify({
+        fixtureVersion: extension.packageJSON.version,
+        serverVersion: store.client.initializeResult.serverInfo.version,
+        executable,
+        initialized: Boolean(store.clientReady),
+        statusText: editor.document.getText(),
+        evidencePath,
+      }, null, 2));
+      console.log(`PASS native version startup: ${evidencePath}`);
+      return;
+    }
     const statusTabs = () => vscode.window.tabGroups.all.flatMap((group) => group.tabs)
       .filter((tab) => tab.input?.uri?.scheme === 'magit');
     assert.equal(statusTabs().length, 1, 'first open did not create exactly one status tab');

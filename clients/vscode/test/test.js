@@ -18,6 +18,7 @@ const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
 const versions = require('../lib/version');
 const { createVersionFixture } = require('./e2e/version-fixture');
+const { selectSuiteMode, withSuiteMode } = require('./e2e/focused-mode');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -74,6 +75,13 @@ test('focused version runner fails when native prerequisites are missing', () =>
   });
   assert.equal(result.status, 1);
   assert.match(result.stdout, /^FAIL e2e: no `code`\/`codium` binary found/m);
+});
+
+test('version-only launch selects the version suite branch instead of generic evidence', () => {
+  const launchEnvironment = withSuiteMode({ MAGIT_VSCODE_VERSION_ONLY: '1' });
+  assert.equal(launchEnvironment.MAGIT_VSCODE_SUITE_MODE, 'version');
+  assert.equal(selectSuiteMode(launchEnvironment), 'version');
+  assert.notEqual(selectSuiteMode(launchEnvironment), 'generic');
 });
 
 test('mismatched extension fixture isolates manifest version, runtime and cleanup', () => {
