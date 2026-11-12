@@ -520,6 +520,14 @@ T005 is complete through its authoritative [completed children](#completed-work)
        - [ ] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
          - test: session command/key dispatch edits the captured identities, saves exact todo order/actions and restores caller; invalid/stale submission remains readable and leaves disk unchanged.
          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
+         - Attempts: Default worker reached two checkpoints; dispatch implementation is unverified, with profile command resolution failing. Split at dispatched success versus safety regression boundaries.
+          - [x] **T018.3b2a — Valid dispatched todo edits and submission.** Complete command registration and bindings; prove identity-addressed action/reorder and successful submit restores caller with exact saved todo and unchanged HEAD/index. Document bindings.
+            - test: dispatched success path preserves full-OID identities and writes exact requested order/actions.
+            - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
+            - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `4a3eb72` → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` dispatches identity-addressed edits and submits via `ctrl+s`; keymap suite validates profile binding.
+         - [ ] **T018.3b2b — Dispatched todo safety regressions.** Prove invalid/stale submit remains readable and usable without disk replacement, and cancel after edits restores caller with exact todo/HEAD/index unchanged.
+           - test: dispatched invalid/stale submission and edited cancellation preserve repository and caller invariants.
+           - Verification: `make test-rust FILTER="--test rebase_todo"`.
    - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.

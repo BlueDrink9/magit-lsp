@@ -919,6 +919,9 @@ fn build() -> Registry {
         Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
         Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
         Command { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
+        Command { id: "rebase.todo-set-action", scope: Scope::MenuAction, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
+        Command { id: "rebase.todo-move-before", scope: Scope::MenuAction, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
+        Command { id: "rebase.todo-submit", scope: Scope::MenuAction, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
         Command {
             id: "commit.amend",
             scope: Scope::MenuAction,
@@ -1136,6 +1139,34 @@ fn rebase_edit_todo(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         return Ok(CommandOutcome::default());
     }
     Ok(CommandOutcome { open_view: Some((ViewKind::RebaseTodo, Placement::Main)), ..Default::default() })
+}
+
+fn rebase_todo_set_action(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
+    let action = ctx.args.and_then(|args| args.get("action")).and_then(serde_json::Value::as_str).unwrap_or("");
+    let action = match action { "pick" => crate::rebase_todo::TodoAction::Pick, "reword" => crate::rebase_todo::TodoAction::Reword, "edit" => crate::rebase_todo::TodoAction::Edit, "squash" => crate::rebase_todo::TodoAction::Squash, "fixup" => crate::rebase_todo::TodoAction::Fixup, "drop" => crate::rebase_todo::TodoAction::Drop, _ => { ctx.effects.push(Effect::message(MessageLevel::Warn, "Invalid rebase todo action")); return Ok(CommandOutcome::default()); } };
+    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
+    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.set_action(&oid, action) {
+        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
+        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+    }
+}
+
+fn rebase_todo_move_before(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
+    let before = ctx.args.and_then(|args| args.get("before")).and_then(serde_json::Value::as_str).map(str::to_owned);
+    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
+    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.move_before(&oid, before.as_deref()) {
+        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
+        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+    }
+}
+
+fn rebase_todo_submit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.save() {
+        Ok(()) => Ok(CommandOutcome { pop: true, ..Default::default() }),
+        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome { refresh: true, ..Default::default() }) }
+    }
 }
 
 fn rebase_action(ctx: &mut CommandCtx<'_>, action: impl FnOnce(&GitRepo) -> Result<()>) -> Result<CommandOutcome> {

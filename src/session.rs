@@ -233,6 +233,11 @@ impl OpenView {
         self.view.as_ref()
     }
 
+    /// Mutate the paused rebase todo owned by this view.
+    pub fn rebase_todo_mut(&mut self) -> Option<&mut crate::rebase_todo_view::RebaseTodoView> {
+        self.view_mut().as_any_mut()?.downcast_mut()
+    }
+
     /// The view behind this entry, for server-owned state the session drives.
     fn view_mut(&mut self) -> &mut dyn View {
         self.view.as_mut()

@@ -93,6 +93,7 @@ reset-args = ["ctrl+r"]
 
 [keys.rebase-todo]
 cancel = ["Escape", "ctrl+c"]
+"rebase.todo-submit" = ["ctrl+s"]
 
 [keys.commit-message]
 confirm = ["ctrl+Enter"]

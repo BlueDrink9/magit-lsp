@@ -136,9 +136,10 @@ support is not emitted yet, and `rebase-todo` has no implemented edit scope.
 
 | Command | `standard` | `vim` |
 | --- | --- | --- |
-| `rebase.pick/reword/edit/squash/fixup/drop` | `p`/`r`/`e`/`s`/`f`/`Delete` | `p`/`r`/`e`/`s`/`f`/`x` |
-| `rebase.move-up` / `move-down` | `alt+ArrowUp` / `alt+ArrowDown` | `ctrl+k` / `ctrl+j` |
-| `common.confirm` / `common.cancel` | `ctrl+Enter` / `Escape` (prompts if changed) | `Z Z` / `Z Q` |
+| `rebase.todo-submit` | `ctrl+s` | `ctrl+s` |
+| `rebase.todo-set-action` | `view/invoke` with `{"action":"pick|reword|edit|squash|fixup|drop"}` at selected commit | same |
+| `rebase.todo-move-before` | `view/invoke` with `{"before":"<full OID>"}` at selected commit; null moves to end | same |
+| `common.cancel` | `Escape` / `ctrl+c` | `Escape` / `ctrl+c` |
 
 (Other views define their bindings when implemented; they must follow R1–R6.)
 

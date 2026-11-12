@@ -155,6 +155,60 @@ fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
 }
 
 #[test]
+fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
+    let (dir, repo) = paused_repo();
+    let todo_path = repo.rebase_todo_path().unwrap();
+    let original = RebaseTodo::load(&repo).unwrap().entries;
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(dir.path(), &["write-tree"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let first_cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
+    let second_cursor = magit_lsp::protocol::Cursor { line: 1, column: 0 };
+    let second_oid = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).nth(1).unwrap().to_owned();
+    let first_oid = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).next().unwrap().to_owned();
+    let changed = test.invoke_at_args("rebase.todo-set-action", Some(first_cursor), serde_json::json!({"action":"reword"}));
+    assert!(message_texts(&changed.effects).is_empty());
+    let moved = test.invoke_at_args("rebase.todo-move-before", Some(second_cursor), serde_json::json!({"before":first_oid}));
+    assert!(message_texts(&moved.effects).is_empty());
+    let ordered = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>();
+    assert_eq!(ordered, vec![second_oid.as_str(), first_oid.as_str()]);
+    test.press("ctrl+s");
+    assert_eq!(test.view_id(), "v1");
+    let saved = std::fs::read_to_string(&todo_path).unwrap();
+    assert!(saved.starts_with(&format!("pick {second_oid} ")));
+    assert!(saved.contains(&format!("reword {first_oid} ")));
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["write-tree"]), index);
+
+    git(dir.path(), &["rebase", "--abort"]);
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(dir.path(), &["write-tree"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let todo_view_id = test.view_id().to_owned();
+    let cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
+    let invalid = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"unsupported"}));
+    assert!(message_texts(&invalid.effects).iter().any(|message| message.contains("Invalid rebase todo action")));
+    std::fs::write(&path, b"external stale edit\n").unwrap();
+    let stale = test.invoke("rebase.todo-submit");
+    assert!(message_texts(&stale.effects).iter().any(|message| message.contains("changed")));
+    assert_eq!(test.view_id(), todo_view_id);
+    assert_eq!(std::fs::read(&path).unwrap(), b"external stale edit\n");
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["write-tree"]), index);
+    let _ = bytes;
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
 fn idle_rebase_todo_opener_reports_error_and_keeps_caller_usable() {
     let (dir, _repo, _) = repo();
     let head_before = git(dir.path(), &["rev-parse", "HEAD"]);

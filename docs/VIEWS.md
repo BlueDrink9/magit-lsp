@@ -16,7 +16,7 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 | **Refs** | `magit-show-refs` | Local branches, remotes, tags with ahead/behind vs a base; also select mode | checkout, create, delete, rename, reset, merge, rebase onto, log | R-5.3 |
 | **Cherry** | `magit-cherry` | `git cherry` between two refs | cherry-pick, show | R-7.2 |
 | **Stash list / show** | `magit-stash-list` | Stashes; show = diff view of a stash | apply, pop, drop, branch | R-6.5 |
-| **Rebase todo** | `git-rebase-mode` | Planned structured interactive todo: pick/reword/edit/squash/fixup/drop/exec/label/merge lines with commit summaries; reorder | move up/down, set action, show commit, confirm, abort | R-TODO / R-7.3 |
+| **Rebase todo** | `git-rebase-mode` | Structured paused todo with pick/reword/edit/squash/fixup/drop and full-OID commit rows | `view/invoke` set-action/move-before; `ctrl+s` submits; `Escape` cancels | R-TODO / R-7.3 |
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | R-OP-STATE / R-7.3 |
 
 The paused merge-backend todo editor rejects `update-ref` commands; repositories using `rebase.updateRefs=true` cannot use it.
