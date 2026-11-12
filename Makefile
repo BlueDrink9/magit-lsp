@@ -1,4 +1,4 @@
-.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
 .PHONY: vscode-unit
 
 .SILENT:
@@ -20,6 +20,9 @@ endef
 
 build:
 	$(call run,build,cargo build -q)
+
+release:
+	$(call run,release,cargo build --release -q)
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py

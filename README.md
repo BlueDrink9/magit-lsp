@@ -257,8 +257,10 @@ Manual smoke checklist:
 
    If Neovim reports `capabilities.experimental.magit render is required and
    must be a string`, its Lua client and server binaries are from different
-   protocol versions. Rebuild the current server, then explicitly select it for
-   the Neovim invocation (replace `/path/to/repo` with your repository):
+   protocol versions. Refresh the preferred checkout release binary with
+   `make release` (this builds locally; it does not install or publish). Or
+   explicitly select the debug binary for this invocation (replace
+   `/path/to/repo` with your repository):
 
    ```sh
    make build
@@ -266,10 +268,11 @@ Manual smoke checklist:
    ```
 
    Server discovery prefers `target/release/magit-lsp` over
-   `target/debug/magit-lsp`; an older release binary can therefore shadow the
-   newly rebuilt debug binary when `MAGIT_LSP_BIN` is unset. Keep the Lua client
-   and selected server from the same checkout/version. Do not restore the retired
-   `render` capability.
+   `target/debug/magit-lsp`; `make release` refreshes that preferred checkout
+   binary. An older release binary can therefore shadow the newly rebuilt debug
+   binary when `MAGIT_LSP_BIN` is unset. Keep the Lua client and selected server
+   from the same checkout/version. Do not restore the retired `render`
+   capability.
 
 The status buffer is a `nofile` buffer named `magit://status/<repo>`, shown in
 the current window by replacing its buffer. It is a read-only view: native
