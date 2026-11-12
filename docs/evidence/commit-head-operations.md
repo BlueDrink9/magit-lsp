@@ -186,7 +186,8 @@ remaining phase gates are still required. No full `make test` success is claimed
 
 ## Native VS Code HEAD-only slice (2026-10-29)
 
-The exact ticket command exited 0:
+The displayed command is a normalized form of the historical passing command;
+it was not rerun. Historical exit status was 0:
 
 ```sh
 MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
@@ -305,7 +306,8 @@ gate were not weakened or modified.
 
 ### Final retained pass
 
-The exact ticket command exited **0**:
+The displayed command is a normalized form of the historical passing command;
+it was not rerun. Historical exit status was **0**:
 
 ```sh
 cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
