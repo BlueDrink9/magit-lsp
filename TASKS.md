@@ -755,12 +755,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not rewrite `a3ae47f` or `7ac0630`. Do not discard, stage, reformat, or partially restore the externally owned Makefile delta. Do not touch `.opencode`, `AGENTS.md`, release files, or concurrent rebase work.
   - Verified: `make -n vscode-unit` @ `2b68dda` → ok: prints typecheck and unit-test recipes. Index matches scoped historical base plus target minus retired checker; worktree Makefile unchanged; external delta remains unstaged.
 
-- [ ] **[P1] Check Unix executable access instead of any execute bit** (`clients/vscode/lib/version.js:7-29`, `resolveCommand`; `clients/vscode/test/test.js:483-501`, `Unix PATH resolution skips non-executables and returns absolute paths`)
+- [x] **[P1] Check Unix executable access instead of any execute bit** (`clients/vscode/lib/version.js:7-29`, `resolveCommand`; `clients/vscode/test/test.js:483-501`, `Unix PATH resolution skips non-executables and returns absolute paths`)
   - **Problem:** `resolveCommand` accepts a Unix candidate when any `0o111` bit is set. That can select a file the current process cannot execute, such as a current-user-owned file with only the group execute bit, so the warning can name a PATH entry process launch would skip or reject.
   - **Why it matters:** Correctness — VER3c claims diagnostic resolution matches process discovery, but permission ownership is ignored and the new test covers only `0644` versus `0755`.
   - **Change:** Keep the regular-file check, then use `fs.accessSync(candidate, fs.constants.X_OK)` for non-Windows candidates before returning them. Extend the existing Unix test with a first PATH candidate owned by the test process but executable only for a non-owner class, followed by a genuinely executable candidate; assert the latter is selected. Preserve Windows PATHEXT and case-insensitive behavior.
   - **Done when:** Unix resolution skips candidates inaccessible to the current user, still returns an absolute accessible candidate, and `make vscode-unit` passes.
   - **Constraints:** Do not change launch commands, explicit path handling, warning text, Windows resolution, or add a second resolver.
+  - Verified: `make vscode-unit` @ `89979d8` → ok: vscode-typecheck, vscode-unit; Unix regression skips owner-inaccessible `0010` candidate, selects accessible `0755` candidate, and retains the `0644` skip.
 
 - [ ] **[P1] Record truthful VER3c completion evidence** (`TASKS.md:38-43`, `VER3`, `VER3c`, `VER3b`)
   - **Problem:** VER3c is checked with “`make vscode-unit` @ `473b1de`,” but that commit has neither the `vscode-unit` target nor the resolver/test changes; both first appear later in `a3ae47f`/`7ac0630`. The cited verification therefore cannot be reproduced from the named revision.

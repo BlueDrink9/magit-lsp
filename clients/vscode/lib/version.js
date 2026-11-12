@@ -22,7 +22,11 @@ function resolveCommand(command, env = process.env, platform = process.platform)
       }
       try {
         const stat = fs.statSync(candidate);
-        if (stat.isFile() && (windows || (stat.mode & 0o111) !== 0)) return candidate;
+        if (stat.isFile()) {
+          if (windows) return candidate;
+          fs.accessSync(candidate, fs.constants.X_OK);
+          return candidate;
+        }
       } catch {}
     }
   }

@@ -524,6 +524,7 @@ test('Unix PATH resolution skips non-executables and returns absolute paths', ()
     fs.mkdirSync(first); fs.mkdirSync(second);
     fs.writeFileSync(path.join(first, 'tool'), '');
     fs.writeFileSync(path.join(second, 'tool'), '');
+    fs.chmodSync(path.join(first, 'tool'), 0o010);
     fs.chmodSync(path.join(second, 'tool'), 0o755);
     assert.equal(versions.resolveCommand('tool', { PATH: `${first}:${second}` }, 'linux'), path.join(second, 'tool'));
     assert.equal(versions.resolveCommand('tool', { PATH: path.relative(process.cwd(), second) }, 'linux'), path.join(second, 'tool'));
