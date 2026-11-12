@@ -2241,6 +2241,405 @@
           ]
         },
         {
+          "scope": "rebase-todo",
+          "bindings": [
+            {
+              "command": "common.refresh",
+              "keys": [
+                "F5",
+                "g"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Refresh the view",
+              "status": "implemented"
+            },
+            {
+              "command": "common.toggle-section",
+              "keys": [
+                "Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold or unfold the section at point",
+              "status": "implemented"
+            },
+            {
+              "command": "common.show-section",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold the section at point",
+              "status": "implemented"
+            },
+            {
+              "command": "common.hide-section",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold the section at point",
+              "status": "implemented"
+            },
+            {
+              "command": "common.show-all",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Unfold every section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.hide-all",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Fold every section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.more-detail",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one more level of detail",
+              "status": "implemented"
+            },
+            {
+              "command": "common.less-detail",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show one less level of detail",
+              "status": "implemented"
+            },
+            {
+              "command": "common.detail-level-1",
+              "keys": [
+                "alt+1"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section headers only",
+              "status": "implemented"
+            },
+            {
+              "command": "common.detail-level-2",
+              "keys": [
+                "alt+2"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show section and file headers",
+              "status": "implemented"
+            },
+            {
+              "command": "common.detail-level-3",
+              "keys": [
+                "alt+3"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk headers",
+              "status": "implemented"
+            },
+            {
+              "command": "common.detail-level-4",
+              "keys": [
+                "alt+4"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show hunk bodies",
+              "status": "implemented"
+            },
+            {
+              "command": "common.next-section",
+              "keys": [
+                "n"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.prev-section",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.jump",
+              "keys": [],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next or previous visible section, file or hunk",
+              "status": "implemented"
+            },
+            {
+              "command": "common.cancel",
+              "keys": [
+                "Escape",
+                "ctrl+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cancel the current operation",
+              "status": "implemented"
+            },
+            {
+              "command": "common.confirm",
+              "keys": [
+                "Enter"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Confirm the current selection",
+              "status": "implemented"
+            },
+            {
+              "command": "common.quit",
+              "keys": [
+                "q"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Close all views",
+              "status": "implemented"
+            },
+            {
+              "command": "common.cycle-visibility",
+              "keys": [
+                "shift+Tab"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Cycle the visibility of every section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.next-sibling",
+              "keys": [
+                "alt+ArrowDown"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the next sibling",
+              "status": "implemented"
+            },
+            {
+              "command": "common.prev-sibling",
+              "keys": [
+                "alt+ArrowUp"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the previous sibling",
+              "status": "implemented"
+            },
+            {
+              "command": "common.parent-section",
+              "keys": [
+                "alt+ArrowLeft"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move to the parent section",
+              "status": "implemented"
+            },
+            {
+              "command": "common.toggle-text-mode",
+              "keys": [
+                "ctrl+t"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Toggle text mode",
+              "status": "implemented"
+            },
+            {
+              "command": "common.copy-value",
+              "keys": [
+                "ctrl+shift+c"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Copy the value at point",
+              "status": "implemented"
+            },
+            {
+              "command": "open.dispatch",
+              "keys": [
+                "?"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Show the dispatch menu",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-submit",
+              "keys": [
+                "ctrl+s"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Submit rebase todo",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-pick",
+              "keys": [
+                "p"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit pick",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-reword",
+              "keys": [
+                "r"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit reword",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-edit",
+              "keys": [
+                "e"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit edit",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-squash",
+              "keys": [
+                "s"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit squash",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-fixup",
+              "keys": [
+                "f"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit fixup",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-drop",
+              "keys": [
+                "d"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Mark todo commit drop",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-up",
+              "keys": [
+                "K"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move todo commit up",
+              "status": "implemented"
+            },
+            {
+              "command": "rebase.todo-down",
+              "keys": [
+                "J"
+              ],
+              "modes": [
+                "normal",
+                "visual"
+              ],
+              "label": "Move todo commit down",
+              "status": "implemented"
+            }
+          ]
+        },
+        {
           "scope": "commit-message",
           "bindings": [
             {

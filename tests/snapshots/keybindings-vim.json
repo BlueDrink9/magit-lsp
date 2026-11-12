@@ -1437,6 +1437,262 @@
     "args": {
       "command": "common.refresh"
     },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "tab",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.toggle-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z a",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.toggle-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z o",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.show-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z c",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.hide-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z shift+r",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.show-all"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z shift+m",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.hide-all"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z r",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.more-detail"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "z m",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.less-detail"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "] ]",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.next-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "[ [",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.prev-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "escape",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.cancel"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+c",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.cancel"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "enter",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.confirm"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "q",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.quit"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "shift+tab",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.cycle-visibility"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "g j",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.next-sibling"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "g k",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.prev-sibling"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "g u",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.parent-section"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+t",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.toggle-text-mode"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+t",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.toggle-text-mode"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && magit.textMode"
+  },
+  {
+    "key": "y y",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.copy-value"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "g shift+/",
+    "command": "magit.invoke",
+    "args": {
+      "command": "open.dispatch"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "ctrl+s",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-submit"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "p",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-pick"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "r",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-reword"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "e",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-edit"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "s",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-squash"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "f",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-fixup"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "d",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-drop"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "shift+k",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-up"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "shift+j",
+    "command": "magit.invoke",
+    "args": {
+      "command": "rebase.todo-down"
+    },
+    "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'rebase-todo' && !magit.textMode"
+  },
+  {
+    "key": "g r",
+    "command": "magit.invoke",
+    "args": {
+      "command": "common.refresh"
+    },
     "when": "magit.active && editorTextFocus && !quickInputVisible && !suggestWidgetVisible && !findWidgetVisible && !renameInputVisible && magit.scope == 'commit-message' && !magit.textMode"
   },
   {
