@@ -195,7 +195,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.edit-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.edit-todo` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.elsewhere` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
-| `rebase.interactive` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.interactive` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.onto-pushremote` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.onto-upstream` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.remove-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |

@@ -133,7 +133,7 @@
 | `magit-rebase-onto-pushremote` | `r p` | `rebase.onto-pushremote` | Planned R-7.3 | rebase |
 | `magit-rebase-onto-upstream` | `r u` | `rebase.onto-upstream` | Planned R-7.3 | rebase |
 | `magit-rebase-branch` | `r e` | `rebase.elsewhere` | Planned R-7.3 | rebase |
-| `magit-rebase-interactive` | `r i` | `rebase.interactive` | Planned R-7.3 | rebase |
+| `magit-rebase-interactive` | `r i` | `rebase.interactive` | Implemented | rebase |
 | `magit-rebase-subset` | `r s` | `rebase.subset` | Planned R-7.3 | rebase |
 | `magit-rebase-edit-commit` | `r m` | `rebase.edit-commit` | Planned R-7.3 | rebase |
 | `magit-rebase-reword-commit` | `r w` | `rebase.reword-commit` | Planned R-7.3 | rebase |
