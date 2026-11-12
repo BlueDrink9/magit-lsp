@@ -22,7 +22,7 @@
   "scripts": {
     "gen:keybindings": "node scripts/gen-keybindings.mjs",
     "test": "node test/test.js && node test/integration.js",
-    "typecheck": "tsc -p jsconfig.json",
+    "typecheck": "node_modules/.bin/tsc -p jsconfig.json",
     "test:unit": "node test/test.js",
     "test:integration": "node test/integration.js",
     "test:e2e": "node test/e2e/run.mjs"
