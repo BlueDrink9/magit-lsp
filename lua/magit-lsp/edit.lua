@@ -138,12 +138,15 @@ end
 ---@param key string
 function M.cancel(key)
   local record = view.views[key]
-  if not live(record) then return end
-  if record.base and view.views[record.base] then
-    view.invoke('common.cancel', { args = { runId = record.id } }, record.base)
-  end
-  view.close(record.key, false)
-  view.focus(record.base)
+  if not live(record) or record.busy or record.disconnected then return end
+  record.busy = true
+  vim.bo[record.buf].modifiable = false
+  local payload = params(record)
+  payload.command = 'common.cancel'
+  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'aborted', function()
+    view.close(record.key, false)
+    view.focus(record.base)
+  end)
 end
 
 --- Ordinary buffer teardown confirms saved disk text by the accepted LSP assumption.
@@ -252,6 +255,9 @@ function M.open(effect, source)
       existing.generation = (existing.generation or 0) + 1
       existing.busy = false
       existing.sync_error = 'saved-file close failed'
+      notify(existing, 'textDocument/didOpen', { textDocument = {
+        uri = existing.uri, languageId = 'gitcommit', version = existing.version, text = existing.text,
+      } })
       attach(existing)
       view.apply_keymap(existing.keymap, existing.client_id)
     end

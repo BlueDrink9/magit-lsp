@@ -127,7 +127,8 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 | `commit-message.history-prev` / `next` | `alt+ArrowUp` / `alt+ArrowDown` | `[ m` / `] m` (normal mode) |
 | `commit-message.add-signoff` | `ctrl+alt+s` | `g s` |
 
-Closing the buffer is always cancel (§3.10). `ctrl+c` is **not** cancel here
+Closing the buffer confirms the saved disk text; it does not cancel (§3.10).
+Use the mapped `common.cancel` key to cancel. `ctrl+c` is **not** cancel here
 because it is copy in non-modal editors.
 The current bridge emits this scope for commit messages; merge/tag message
 support is not emitted yet.

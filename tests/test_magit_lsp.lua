@@ -2487,9 +2487,17 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     FAILED_FINISH = VIEW.current() == DOC and DOC.sync_error == 'finish write rejected'
       and vim.bo[DOC.buf].modifiable and DOC.text == 'recover β'
     EDIT.cancel(DOC.key)
+    local cancel = BARRIERS[3]
+    assert(cancel, 'expected registered cancellation request')
+    local cancel_payload = cancel.payload.arguments[1]
+    CANCEL_PENDING = VIEW.current() == DOC and cancel.method == 'workspace/executeCommand'
+      and cancel.payload.command == 'magit.command' and cancel_payload.command == 'common.cancel'
+      and cancel_payload.runId == DOC.id and cancel_payload.uri == DOC.uri
+      and cancel_payload.version == DOC.version
+    ACK(3, 'aborted')
     CHECK_WINDOW(false)
 
-    BARRIERS = {}
+    BARRIERS, SYNCS = {}, {}
     DOC = OPEN_DRAFT('rejected-sync', 'before')
     vim.api.nvim_buf_set_lines(DOC.buf, 0, -1, false, { 'newer local text' })
     EDIT.flush(DOC)
@@ -2502,10 +2510,20 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     vim.api.nvim_buf_delete(DOC.buf, { force = true })
     AMBIGUOUS_CANCEL = SYNCS[#SYNCS][1] == 'textDocument/didClose'
     EDIT.open(effect, VIEW.views[DOC.base])
+    local closed, reopened = SYNCS[#SYNCS - 1], SYNCS[#SYNCS]
+    REOPENED_AUTHORITY = closed[1] == 'textDocument/didClose'
+      and closed[2].textDocument.uri == DOC.uri
+      and reopened[1] == 'textDocument/didOpen'
+      and reopened[2].textDocument.uri == DOC.uri
+      and reopened[2].textDocument.version == version
+      and reopened[2].textDocument.text == 'newer local text'
     BLOCKED_FINISH = BLOCKED_FINISH and vim.api.nvim_buf_is_valid(DOC.buf)
       and DOC.text == 'newer local text' and DOC.version == version
       and vim.bo[DOC.buf].modifiable and DOC.sync_error ~= nil
     EDIT.cancel(DOC.key)
+    REOPENED_AUTHORITY = REOPENED_AUTHORITY
+      and BARRIERS[1].payload.arguments[1].version == version
+    ACK(1, 'aborted')
     BLOCKED_FINISH = BLOCKED_FINISH and EDIT.open(effect, VIEW.views[DOC.base]) == nil
   ]])
   child.lua([[CHECK_WINDOW(false)]])
@@ -2517,8 +2535,8 @@ T['commit files own full sync, exact bytes and native saves without auto attachm
     DISCONNECTED = VIEW.current() == DOC and DOC.disconnected and vim.bo[DOC.buf].modifiable
       and vim.bo[DOC.buf].modified and #BARRIERS == count
   ]])
-  MiniTest.expect.equality(child.lua_get('FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH'), true)
-  MiniTest.expect.equality(child.lua_get('BLOCKED_FINISH and AMBIGUOUS_CANCEL'), true)
+  MiniTest.expect.equality(child.lua_get('FAILED_SAVE and RETRIED_SAVE and FAILED_FINISH and CANCEL_PENDING'), true)
+  MiniTest.expect.equality(child.lua_get('BLOCKED_FINISH and AMBIGUOUS_CANCEL and REOPENED_AUTHORITY'), true)
   MiniTest.expect.equality(child.lua_get('DISCONNECTED'), true)
 end
 
@@ -2551,7 +2569,9 @@ T['native commit buffer close refuses dirty text and recovers a rejected saved c
     assert(vim.uv.fs_unlink(PATH))
     assert(vim.uv.fs_rename(PATH .. '.original', PATH))
     EDIT.cancel(DOC.key)
-    assert(vim.wait(5000, function() return require('magit-lsp.debug').idle() end, 10))
+    local idle = vim.wait(5000, function() return require('magit-lsp.debug').idle() end, 10)
+    assert(idle, vim.inspect({ current = VIEW.current(), doc = DOC,
+      messages = vim.fn.execute('messages'), progress = require('magit-lsp.debug').state.progress }))
     assert(vim.api.nvim_get_current_buf() == STATUS.buf)
   ]])
   MiniTest.expect.equality(git_out({ 'log', '-1', '--format=%s' }), 'init\n')
