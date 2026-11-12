@@ -1,0 +1,31 @@
+# Fold staged content into selected non-root commit through native instant fixup.
+fixture: instant-rebase-history
+---
+sh: git rev-parse HEAD~3 > .git/base && git rev-parse HEAD~2 > .git/one && git rev-parse HEAD~1 > .git/target && git rev-parse HEAD > .git/head-before && git write-tree > .git/index-before && git branch --show-current > .git/branch-before
+keys: c
+wait screen contains "Fixup"
+keys: F
+wait screen contains "Select commit"
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),cursor=vim.api.nvim_win_get_cursor(0)})')" > .git/selector-state && grep -q 'magit://log/v1:log' .git/selector-state && grep -q '"mode":"n"' .git/selector-state
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 3 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'three'
+keys: Down
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 4 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'two'
+keys: Enter
+wait screen contains "Staged changes (0)"
+expect view_stack.count == 1
+sh: git log --format=%s --reverse "$(cat .git/base)..HEAD" > .git/history && printf 'one\ntwo\nthree\n' > .git/history-expected && cmp .git/history-expected .git/history
+sh: test "$(git rev-parse HEAD~3)" = "$(cat .git/base)"
+sh: test "$(git rev-parse HEAD~2)" = "$(cat .git/one)" && test "$(git rev-parse HEAD~1)" != "$(cat .git/target)" && test "$(git rev-parse HEAD)" != "$(cat .git/head-before)"
+sh: test "$(git show -s --format=%s HEAD~2)" = "one" && test "$(git show -s --format=%s HEAD~1)" = "two" && test "$(git show -s --format=%s HEAD)" = "three"
+sh: test "$(git show HEAD~1:two)" = "$(printf 'two\nstaged sentinel')" && test "$(git show HEAD:two)" = "$(printf 'two\nstaged sentinel')"
+sh: test "$(git write-tree)" = "$(cat .git/index-before)" && test "$(git write-tree)" = "$(git rev-parse HEAD^{tree})" && test -z "$(git status --porcelain)" && test "$(git branch --show-current)" = "$(cat .git/branch-before)"
+sh: test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+sh: git rev-parse HEAD > .git/after-head && git write-tree > .git/after-index && git branch --show-current > .git/after-branch && git log --format='%H %s' -3 > .git/after-history
+keys: r
+wait
+expect view_stack.menus == 1
+keys: Escape
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/after-head)" && test "$(git write-tree)" = "$(cat .git/after-index)" && test "$(git branch --show-current)" = "$(cat .git/after-branch)" && git log --format='%H %s' -3 > .git/after-history-check && cmp .git/after-history .git/after-history-check && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply

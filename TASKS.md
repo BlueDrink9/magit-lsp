@@ -792,6 +792,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - [x] **T019.5e2b — Cancel dispatched squash editing without false rollback.** test: Normal registered-editor cancellation retains actual Git state, closes worker/editor/progress ownership and permits a subsequent normal operation.
           - Verified: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"` @ `4da5eb0` → `ok: rust`; `instant_squash_registered_editor_abort_retains_marker_and_releases_worker` drives real `S`, full-OID selection and registered edit cancellation, then asserts progress end, retained marker/HEAD/index/worktree/rebase state, stale-run refusal, explicit abort and usable caller refresh.
     - [ ] **T019.5f — Native instant operation conformance.** test: Real native inputs and text/Git evidence prove selected-target execution, registered message editing and usable recovery/caller.
+      - [ ] **T019.5f1 — Native instant fixup execution.** test: Native F selection folds staged changes into the selected target, preserves its message, and restores a usable caller with exact Git-state evidence.
+        - [x] **T019.5f1a — Native fixup completion and exact history.** test: Assert actual worker completion and exact selected-target rewrite, content, index and cleared operation state.
+          - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `32b951e` → `ok: ui-file`; native `c`/`F` selection waits for the completed clean caller render, then asserts the selected target and descendant were rewritten, exact messages/history/content/index/branch, clean status and cleared rebase state.
+        - [ ] **T019.5f1b — Native fixup caller reuse.** test: Interact with the caller after verified completion and preserve its resulting repository state.
+      - [ ] **T019.5f2 — Native instant squash editing and recovery.** test: Native S selection uses registered message editing and explicit cancellation/recovery; exact resulting Git state and caller usability are asserted.
 
 ### Feature — Phase 6: Plain acceptance
 

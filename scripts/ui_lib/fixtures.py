@@ -265,6 +265,12 @@ def _linear_rebase_history(repo: Path, env: dict[str, str]) -> None:
         commit(repo, env, message, {name: f"{message}\n"})
 
 
+def _instant_rebase_history(repo: Path, env: dict[str, str]) -> None:
+    _linear_rebase_history(repo, env)
+    write(repo / "two", "two\nstaged sentinel\n")
+    git(repo, env, "add", "two")
+
+
 def _in_progress_cherry_pick(repo: Path, env: dict[str, str]) -> None:
     commit(repo, env, "initial", {"f.txt": "one\ntwo\nthree\n"})
     git(repo, env, "checkout", "-q", "-b", "side")
@@ -300,6 +306,7 @@ _BUILDERS = {
     "in-progress-rebase": _in_progress_rebase,
     "paused-linear-rebase-todo": _paused_linear_rebase_todo,
     "linear-rebase-history": _linear_rebase_history,
+    "instant-rebase-history": _instant_rebase_history,
     "in-progress-cherry-pick": _in_progress_cherry_pick,
     "log-history": _log_history,
 }
