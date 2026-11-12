@@ -1,17 +1,10 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build test test-rust test-lua test-file ui-unit ui-test ui-tour plain-neovim color-spike vscode-deps vscode-test vscode-keybindings-generate vscode-typecheck vscode-unit vscode-version-startup readme-shots hygiene format-check hooks-install hooks-remove hooks-run format update-client-behaviors docs-check docs-generate docs-artifacts-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
 export CARGO_TERM_COLOR=never
 export CARGO_TERM_PROGRESS_WHEN=never
-LOG_TAIL ?= 60
-# Always test the freshly built debug server, never a stale release binary.
-# (Confirm scripts/ui and clients/vscode read MAGIT_LSP_BIN.)
-export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
-# Optional: isolate tests from your Git config. Fixtures may then need
-# explicit GIT_AUTHOR_*/GIT_COMMITTER_* env, and private git deps may break.
-# export GIT_CONFIG_GLOBAL := /dev/null
-# export GIT_CONFIG_NOSYSTEM := 1
+LOG_TAIL ?= 150
 
 define run
 @if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)\n'; rm -f "$$log"; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
@@ -19,9 +12,6 @@ endef
 
 build:
 	$(call run,build,cargo build -q)
-
-release:
-	$(call run,release,cargo build --release -q)
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
@@ -52,8 +42,26 @@ hooks-run:
 # user-visible rendering.
 test: build test-rust test-lua vscode-test
 
+vscode-deps:
+	$(call run,vscode-deps,pnpm --dir clients/vscode install --frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
+
+vscode-test: build vscode-deps
+	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
+	$(call run,vscode,pnpm --dir clients/vscode test)
+	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)
+
 vscode-keybindings-generate:
 	$(call run,vscode-keybindings-generate,node clients/vscode/scripts/gen-keybindings.mjs)
+
+vscode-typecheck: vscode-deps
+	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
+
+vscode-unit: vscode-deps
+	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
+	$(call run,vscode-unit,node clients/vscode/test/test.js)
+
+vscode-version-startup: build vscode-deps
+	MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
@@ -74,34 +82,19 @@ plain-neovim: build
 ui-test: build
 	$(call run,ui-test,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/scenarios/*.scn tests/ui/smoke.scn)
 
-ui-file: build
-	$(call run,ui-file,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) $(FILE))
+ui-tour: build
+	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
 
-update-snapshots:
-	$(call run,update-snapshots,UPDATE_EXPECT=1 cargo test -q --test manifest --test parity --test menu --test menus)
+color-spike: build
+	$(call run,color-spike,nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua)
+
+readme-shots:
+	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
+
+update-client-behaviors:
+	$(call run,update-client-behaviors,UPDATE_CLIENT_BEHAVIORS=1 cargo test -q --test quirks known_client_appendix_matches_registry)
 
 .PHONY: update-schema schema-check
-
-vscode-deps:
-	$(call run,vscode-deps,pnpm --dir clients/vscode install --frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
-
-vscode-test: build vscode-deps
-	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
-	$(call run,vscode,pnpm --dir clients/vscode test)
-	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)
-
-vscode-typecheck: vscode-deps
-	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
-
-vscode-unit: vscode-deps
-	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
-	$(call run,vscode-unit,node clients/vscode/test/test.js)
-
-vscode-version-startup: build vscode-deps
-	MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs
-
-vscode-version-warning: build vscode-deps
-	MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs
 
 update-schema:
 	$(call run,update-schema,cargo run -q --bin generate-schema)
@@ -120,12 +113,3 @@ registry-docs-check:
 docs-generate: update-schema registry-docs-generate
 
 docs-artifacts-check: schema-check registry-docs-check
-
-ui-tour: build
-	$(call run,ui-tour,PYTHONDONTWRITEBYTECODE=1 python3 scripts/ui run $(if $(V),-v) tests/ui/tour.scn tests/ui/tour-clean.scn tests/ui/tour-error.scn --markdown build/ui/tour.md)
-
-color-spike: build
-	$(call run,color-spike,nvim --headless --noplugin -u ./scripts/minimal_init.lua -l ./scripts/color_spike.lua)
-
-readme-shots:
-	@printf '%s\n' 'Human-only README image guidance: docs/SCREENSHOTS.md'
