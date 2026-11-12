@@ -495,14 +495,14 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - test: valid reorder/action changes preserve exact commit identities; stale/invalid writes leave original todo bytes unchanged.
      - Verification: `make test-rust FILTER="--test rebase_todo"`.
      - Verified: `make test-rust FILTER="--test rebase_todo"` @ a3ae47f → ok: rust. Real paused edit-rebase fixture covers reorder/action, omission-as-drop, exact identities, stale/injected-byte preservation, parse-only rejection and cross-repository ownership.
-  - [ ] **T018.3 — Structured todo view and editing actions.** Render server-owned rows; route action changes, reorder, submit and cancel through model and persistence.
+   - [x] **T018.3 — Structured todo view and editing actions.** Render server-owned rows; route action changes, reorder, submit and cancel through model and persistence.
     - test: tree metadata and session actions edit only captured identities; submit/cancel and readable validation failures preserve caller and repository invariants.
      - Verification: `make test-rust FILTER="--test rebase_todo"`.
       - [x] **T018.3a — Todo tree and identity-based edit model.** Add a standalone server-owned todo view model, structured commit rows and identity-addressed action/reorder/save methods; session wiring follows separately. Done: containing commit.
         - test: tree rows preserve full commit identities across action edits and reorder; valid save changes only the paused todo and invalid edits leave it unchanged.
         - Verification: `make test-rust FILTER="--test rebase_todo"`.
         - Verified: `make test-rust FILTER="--test rebase_todo"` @ a1c141e → ok: rust. Paused-rebase fixture covers structured full-OID identity, action/reorder, guarded save and invalid move preservation.
-      - [x] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
+       - [x] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
        - test: session-dispatched open/edit/reorder/submit/cancel operates on captured tree identities and preserves repository/caller invariants.
        - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
         - [x] **T018.3b1 — Open and cancel paused todo views.** Add the view kind, session factory and rebase menu opener; cancel restores the caller without mutation.
@@ -517,7 +517,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - Verified: `make test-rust FILTER="--test rebase_todo"` @ `ef318e1` → ok: rust. `idle_rebase_todo_opener_reports_error_and_keeps_caller_usable` asserts readable `Effect::Message`, caller remains sole focused view and processes refresh, HEAD/index unchanged.
          - test: idle opener produces readable effects without changing repository or caller state.
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
-       - [ ] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
+        - [x] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
          - test: session command/key dispatch edits the captured identities, saves exact todo order/actions and restores caller; invalid/stale submission remains readable and leaves disk unchanged.
          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
          - Attempts: Default worker reached two checkpoints; dispatch implementation is unverified, with profile command resolution failing. Split at dispatched success versus safety regression boundaries.
@@ -525,9 +525,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
             - test: dispatched success path preserves full-OID identities and writes exact requested order/actions.
             - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
             - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `4a3eb72` → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` dispatches identity-addressed edits and submits via `ctrl+s`; keymap suite validates profile binding.
-         - [ ] **T018.3b2b — Dispatched todo safety regressions.** Prove invalid/stale submit remains readable and usable without disk replacement, and cancel after edits restores caller with exact todo/HEAD/index unchanged.
-           - test: dispatched invalid/stale submission and edited cancellation preserve repository and caller invariants.
-           - Verification: `make test-rust FILTER="--test rebase_todo"`.
+          - [x] **T018.3b2b — Dispatched todo safety regressions.** Prove invalid/stale submit remains readable and usable without disk replacement, and cancel after edits restores caller with exact todo/HEAD/index unchanged.
+            - test: dispatched invalid/stale submission and edited cancellation preserve repository and caller invariants.
+            - Verification: `make test-rust FILTER="--test rebase_todo"`.
+            - Verified: `make test-rust FILTER="--test rebase_todo"` @ 7893c2b → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` covers invalid edit rejection without todo replacement and continued editor dispatch, stale external todo preservation and readable refusal; `dispatched_todo_cancel_after_edits_preserves_repository_and_restores_caller` covers an action edit then cancel with exact todo/HEAD/index preservation.
    - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.

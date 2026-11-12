@@ -193,18 +193,47 @@ fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     test.press("r T");
     let todo_view_id = test.view_id().to_owned();
     let cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
+    let invalid_bytes = std::fs::read(&path).unwrap();
     let invalid = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"unsupported"}));
     assert!(message_texts(&invalid.effects).iter().any(|message| message.contains("Invalid rebase todo action")));
+    assert_eq!(std::fs::read(&path).unwrap(), invalid_bytes);
+    let valid = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"reword"}));
+    assert!(message_texts(&valid.effects).is_empty());
+    assert_eq!(test.view_id(), todo_view_id);
     std::fs::write(&path, b"external stale edit\n").unwrap();
     let stale = test.invoke("rebase.todo-submit");
     assert!(message_texts(&stale.effects).iter().any(|message| message.contains("changed")));
     assert_eq!(test.view_id(), todo_view_id);
     assert_eq!(std::fs::read(&path).unwrap(), b"external stale edit\n");
+    let usable = test.invoke("rebase.todo-set-action");
+    assert!(message_texts(&usable.effects).iter().any(|message| !message.trim().is_empty()));
+    assert_eq!(test.view_id(), todo_view_id);
     test.press("Escape");
     assert_eq!(test.view_id(), "v1");
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
     assert_eq!(git(dir.path(), &["write-tree"]), index);
     let _ = bytes;
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn dispatched_todo_cancel_after_edits_preserves_repository_and_restores_caller() {
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let todo_before = std::fs::read(&path).unwrap();
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(dir.path(), &["write-tree"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let cursor = magit_lsp::protocol::Cursor { line: 0, column: 0 };
+    let edit = test.invoke_at_args("rebase.todo-set-action", Some(cursor), serde_json::json!({"action":"reword"}));
+    assert!(message_texts(&edit.effects).is_empty());
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(std::fs::read(&path).unwrap(), todo_before);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["write-tree"]), index);
     git(dir.path(), &["rebase", "--abort"]);
 }
 
