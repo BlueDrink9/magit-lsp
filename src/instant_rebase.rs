@@ -5,9 +5,9 @@ use crate::rebase_sequence_editor::SequenceEditorPolicy;
 use crate::{Error, Result};
 use std::path::Path;
 
-/// Phase reached while executing a captured instant fixup.
+/// Phase reached while executing a captured instant autosquash.
 #[derive(Debug, PartialEq, Eq)]
-pub enum InstantFixupOutcome {
+pub enum InstantRebaseOutcome {
     /// Captured authority became stale before any mutation.
     Refused(String),
     /// Git failed to create the marker commit.
@@ -40,29 +40,30 @@ pub struct InstantRebaseAuthority {
 }
 
 impl InstantRebaseAuthority {
-    /// Execute a captured fixup, retaining every mutation after execution starts.
-    pub fn execute_fixup(&self, repo: &GitRepo, executable: &Path) -> InstantFixupOutcome {
-        if self.kind != InstantAutosquashKind::Fixup {
-            return InstantFixupOutcome::Refused("instant squash execution is not supported".into());
-        }
+    /// Execute a captured autosquash, retaining every mutation after execution starts.
+    pub fn execute(&self, repo: &GitRepo, executable: &Path, editor_env: &[(&str, &str)]) -> InstantRebaseOutcome {
         if let Err(error) = self.validate(repo) {
-            return InstantFixupOutcome::Refused(error.to_string());
+            return InstantRebaseOutcome::Refused(error.to_string());
         }
         let target = self.target.clone();
-        let commit = match repo.commit(&["--fixup", &target, "--no-edit"], &[]) {
+        let marker_arg = match self.kind {
+            InstantAutosquashKind::Fixup => "--fixup",
+            InstantAutosquashKind::Squash => "--squash",
+        };
+        let commit = match repo.commit(&[marker_arg, &target, "--no-edit"], &[]) {
             Ok(outcome) => outcome,
-            Err(error) => return InstantFixupOutcome::MarkerFailed(error.to_string()),
+            Err(error) => return InstantRebaseOutcome::MarkerFailed(error.to_string()),
         };
         let marker = match repo.head_identity() {
             Ok((head, _)) => head,
-            Err(error) => return InstantFixupOutcome::RebaseStopped { marker: String::new(), phase: "marker verification".into(), error: error.to_string() },
+            Err(error) => return InstantRebaseOutcome::RebaseStopped { marker: String::new(), phase: "marker verification".into(), error: error.to_string() },
         };
-        if let Err(error) = repo.verify_fixup_marker(&marker, &self.target, &self.head) {
-            return InstantFixupOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
+        if let Err(error) = repo.verify_autosquash_marker(&marker, &self.target, &self.head, marker_arg) {
+            return InstantRebaseOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
         }
-        match repo.launch_interactive_rebase(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable) {
-            Ok(()) => InstantFixupOutcome::Completed { marker, warning: commit.warning },
-            Err(error) => InstantFixupOutcome::RebaseStopped { marker, phase: "autosquash".into(), error: error.to_string() },
+        match repo.launch_interactive_rebase_with_env(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable, editor_env) {
+            Ok(()) => InstantRebaseOutcome::Completed { marker, warning: commit.warning },
+            Err(error) => InstantRebaseOutcome::RebaseStopped { marker, phase: "autosquash".into(), error: error.to_string() },
         }
     }
 

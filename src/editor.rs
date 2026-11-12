@@ -433,7 +433,13 @@ pub struct EditRegistry {
     scopes: Mutex<HashMap<String, EditScopeState>>,
 }
 
-struct EditScopeState { owner: String, repo_path: String, active: bool }
+struct EditScopeState {
+    owner: String,
+    repo_path: String,
+    active: bool,
+    on_admit: Arc<dyn Fn(&str) + Send + Sync>,
+    on_release: Arc<dyn Fn(&str) + Send + Sync>,
+}
 
 /// Admission credential for sequential fresh editor runs; revoke on operation exit.
 /// This reusable bearer credential admits helpers only and never confirms drafts.
@@ -456,11 +462,13 @@ struct ScopeInvocation {
 
 impl Drop for ScopeInvocation {
     fn drop(&mut self) {
-        if let Some(scope) = registry().scopes.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&self.token) {
+        let on_release = registry().scopes.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&self.token).map(|scope| {
             scope.active = false;
-        }
+            scope.on_release.clone()
+        });
         if let Some(run_id) = self.run_id.take() {
             registry().resolve(&run_id, Reply::Abort);
+            if let Some(on_release) = on_release { on_release(&run_id); }
         }
     }
 }
@@ -468,6 +476,9 @@ impl Drop for ScopeInvocation {
 impl EditScope {
     /// Credential for inherited helper environment; admission only, never confirmation.
     pub fn credential(&self) -> &str { &self.token }
+
+    /// Close admission and abort any active editor run immediately.
+    pub fn revoke(&self) { registry().revoke_scope(&self.token); }
 }
 
 /// One registry-owned pending draft identity and exact issued URI.
@@ -494,10 +505,23 @@ impl EditRegistry {
     /// Create an admission-only scope bound to one owner and canonical repository.
     #[cfg(unix)]
     pub fn scope(&self, repo_path: &str, owner: &str) -> Result<EditScope> {
+        self.scope_with_lifecycle(repo_path, owner, Arc::new(|_| {}), Arc::new(|_| {}))
+    }
+
+    /// Create a scope whose fresh runs notify worker-owned configuration lifecycle hooks.
+    #[cfg(unix)]
+    pub fn scope_with_lifecycle(
+        &self,
+        repo_path: &str,
+        owner: &str,
+        on_admit: Arc<dyn Fn(&str) + Send + Sync>,
+        on_release: Arc<dyn Fn(&str) + Send + Sync>,
+    ) -> Result<EditScope> {
         let repo = GitRepo::open(repo_path)?;
         let token = opaque_scope_id()?;
         self.scopes.lock().unwrap_or_else(|p| p.into_inner()).insert(token.clone(), EditScopeState {
             owner: owner.to_string(), repo_path: repo.root().to_string_lossy().into_owned(), active: false,
+            on_admit, on_release,
         });
         Ok(EditScope { token })
     }
@@ -913,17 +937,45 @@ pub fn execute_operation(
     operation: &crate::git::RepositoryOperation,
     executable: &Path,
 ) -> Result<crate::git::RepositoryOperationOutcome> {
+    execute_operation_scoped(repo_path, edit_id, socket, operation, executable, None)
+}
+
+/// Execute a typed repository operation with optional bounded fresh-editor admission.
+pub fn execute_operation_scoped(
+    repo_path: &str,
+    edit_id: &str,
+    socket: &Path,
+    operation: &crate::git::RepositoryOperation,
+    executable: &Path,
+    scope: Option<&EditScope>,
+) -> Result<crate::git::RepositoryOperationOutcome> {
     match operation {
         crate::git::RepositoryOperation::Commit(operation) => {
             commit(repo_path, edit_id, socket, operation).map(crate::git::RepositoryOperationOutcome::Commit)
         }
-        crate::git::RepositoryOperation::InstantFixup(authority) => {
+        crate::git::RepositoryOperation::InstantRebase(authority) => {
             let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
-            Ok(crate::git::RepositoryOperationOutcome::InstantFixup(
-                authority.execute_fixup(&repo, executable),
+            let env = match scope {
+                Some(scope) => scoped_editor_environment(scope, socket, executable),
+                None => Vec::new(),
+            };
+            let env = env.iter().map(|(key, value)| (*key, value.as_str())).collect::<Vec<_>>();
+            Ok(crate::git::RepositoryOperationOutcome::InstantRebase(
+                authority.execute(&repo, executable, &env),
             ))
         }
     }
+}
+
+fn scoped_editor_environment(scope: &EditScope, socket: &Path, executable: &Path) -> Vec<(&'static str, String)> {
+    let editor = format!("{} --editor-helper", shell_quote(&executable.to_string_lossy()));
+    vec![
+        ("GIT_EDITOR", editor.clone()),
+        ("EDITOR", editor.clone()),
+        ("VISUAL", editor),
+        (SOCKET_ENV, socket.to_string_lossy().into_owned()),
+        (EDIT_SCOPE_ENV, scope.credential().to_string()),
+    ]
 }
 
 fn registered_editor_environment(
@@ -1218,11 +1270,11 @@ fn handle_edit(
 ) -> Result<()> {
     let mut admission = None;
     if let Some(scope_token) = hello.scope.take() {
-        let (owner, repo_path) = {
+        let (owner, repo_path, on_admit) = {
             let scopes = registry().scopes.lock().unwrap_or_else(|p| p.into_inner());
             let Some(scope) = scopes.get(&scope_token) else { return write_reply(stream, false, None); };
             if scope.active { return write_reply(stream, false, None); }
-            (scope.owner.clone(), scope.repo_path.clone())
+            (scope.owner.clone(), scope.repo_path.clone(), scope.on_admit.clone())
         };
         let repo = GitRepo::open(&repo_path)?;
         let draft = draft::Draft::for_kind(&repo, owner.clone(), draft::DraftKind::CommitMessage)?;
@@ -1240,6 +1292,7 @@ fn handle_edit(
             repo_path, replies, waiting: Some(waiting), draft, owner, completed, completion,
             scope_token: Some(scope_token.clone()),
         });
+        on_admit(&hello.edit_id);
         admission = Some(ScopeInvocation { token: scope_token, run_id: Some(hello.edit_id.clone()) });
     }
     let (replies, completion) = {

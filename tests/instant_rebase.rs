@@ -2,7 +2,7 @@ mod common;
 
 use common::{git, write};
 use magit_lsp::git::GitRepo;
-use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantFixupOutcome, InstantRebaseAuthority};
+use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome};
 use magit_lsp::rebase_sequence_editor::SequenceEditorPolicy;
 use std::path::Path;
 use tempfile::TempDir;
@@ -44,13 +44,13 @@ fn captured_fixup_executes_marker_and_real_autosquash() {
     git(dir.path(), &["add", "fixup-only"]);
     let repo = GitRepo::open(dir.path()).unwrap();
     let authority = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();
-    let operation = magit_lsp::git::RepositoryOperation::InstantFixup(authority);
+    let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
     let result = magit_lsp::editor::execute_operation(
         &dir.path().to_string_lossy(), "instant-fixup", Path::new("unused-socket"),
         &operation, Path::new(env!("CARGO_BIN_EXE_magit-lsp")),
     ).unwrap();
     let marker = match result {
-        magit_lsp::git::RepositoryOperationOutcome::InstantFixup(InstantFixupOutcome::Completed { marker, warning: None }) => marker,
+        magit_lsp::git::RepositoryOperationOutcome::InstantRebase(InstantRebaseOutcome::Completed { marker, warning: None }) => marker,
         other => panic!("unexpected outcome: {other:?}"),
     };
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD^^" ]).trim(), ids[1]);
@@ -69,7 +69,7 @@ fn stale_refusal_and_post_marker_launch_failure_preserve_real_state() {
     let stale = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();
     write(&dir.path().join("file"), "changed\n");
     let before = state(dir.path());
-    assert!(matches!(stale.execute_fixup(&repo, Path::new(env!("CARGO_BIN_EXE_magit-lsp"))), InstantFixupOutcome::Refused(_)));
+    assert!(matches!(stale.execute(&repo, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), &[]), InstantRebaseOutcome::Refused(_)));
     assert_eq!(state(dir.path()), before);
 
     git(dir.path(), &["reset", "--hard", "HEAD"]);
@@ -78,14 +78,14 @@ fn stale_refusal_and_post_marker_launch_failure_preserve_real_state() {
     let repo = GitRepo::open(dir.path()).unwrap();
     let authority = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();
     let missing_helper = dir.path().join("missing-helper");
-    let operation = magit_lsp::git::RepositoryOperation::InstantFixup(authority);
+    let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
     let outcome = magit_lsp::editor::execute_operation(
         &dir.path().to_string_lossy(), "instant-fixup", Path::new("unused-socket"),
         &operation, &missing_helper,
     ).unwrap();
     let marker = match outcome {
-        magit_lsp::git::RepositoryOperationOutcome::InstantFixup(
-            InstantFixupOutcome::RebaseStopped { marker, phase, .. },
+        magit_lsp::git::RepositoryOperationOutcome::InstantRebase(
+            InstantRebaseOutcome::RebaseStopped { marker, phase, .. },
         ) => { assert_eq!(phase, "autosquash"); marker },
         other => panic!("unexpected outcome: {other:?}"),
     };

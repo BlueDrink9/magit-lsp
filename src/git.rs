@@ -210,8 +210,8 @@ pub enum CommitOperation {
 pub enum RepositoryOperation {
     /// Run a commit operation through the registered editor bridge.
     Commit(CommitOperation),
-    /// Create a fixup marker and run Git's autosquash rebase.
-    InstantFixup(crate::instant_rebase::InstantRebaseAuthority),
+    /// Create a typed marker and run Git's autosquash rebase.
+    InstantRebase(crate::instant_rebase::InstantRebaseAuthority),
 }
 
 /// Result from executing a deferred repository operation.
@@ -219,8 +219,8 @@ pub enum RepositoryOperation {
 pub enum RepositoryOperationOutcome {
     /// Commit-specific result.
     Commit(CommitOutcome),
-    /// Instant fixup phase result.
-    InstantFixup(crate::instant_rebase::InstantFixupOutcome),
+    /// Instant autosquash phase result.
+    InstantRebase(crate::instant_rebase::InstantRebaseOutcome),
 }
 
 /// Typed commit action selected from the commit menu.
@@ -905,6 +905,11 @@ impl GitRepo {
     /// Launch Git's interactive rebase using a validated external todo plan.
     /// Launch interactive rebase with either an exact prepared todo or Git-preserved autosquash todo.
     pub fn launch_interactive_rebase(&self, base: &str, plan: Option<&[u8]>, policy: crate::rebase_sequence_editor::SequenceEditorPolicy, executable: &Path) -> Result<()> {
+        self.launch_interactive_rebase_with_env(base, plan, policy, executable, &[])
+    }
+
+    /// Launch interactive rebase with editor variables inherited by Git's replay callbacks.
+    pub fn launch_interactive_rebase_with_env(&self, base: &str, plan: Option<&[u8]>, policy: crate::rebase_sequence_editor::SequenceEditorPolicy, executable: &Path, editor_env: &[(&str, &str)]) -> Result<()> {
         let directory = tempfile::Builder::new().prefix("magit-lsp-rebase-").tempdir()?;
         let plan_path = if let Some(plan) = plan { let path = directory.path().join("todo plan"); std::fs::write(&path, plan)?; Some(path) } else { None };
         let editor = crate::rebase_sequence_editor::command_for(executable, policy);
@@ -914,6 +919,7 @@ impl GitRepo {
         command_args.push(base);
         let args = command_args;
         let mut env = vec![("GIT_SEQUENCE_EDITOR", editor.as_str())];
+        env.extend_from_slice(editor_env);
         if let Some(path) = plan_path.as_deref() { env.push((crate::rebase_sequence_editor::PLAN_FILE_ENV, path)); }
         let started = Instant::now();
         let mut command = git_command(&self.root, &args, Stdio::null(), &env);
@@ -924,13 +930,18 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Verify marker identity and its expected captured HEAD parent.
-    pub fn verify_fixup_marker(&self, marker: &str, target: &str, expected_parent: &str) -> Result<()> {
+    /// Verify autosquash marker identity, kind, and expected captured HEAD parent.
+    pub fn verify_autosquash_marker(&self, marker: &str, target: &str, expected_parent: &str, marker_arg: &str) -> Result<()> {
         let head = self.run(&["rev-parse", "HEAD"])?;
         let parent = self.run(&["rev-parse", &format!("{marker}^")])?;
         let subject = self.run(&["show", "-s", "--format=%s", marker])?;
-        if head.trim() != marker || parent.trim() != expected_parent || !subject.starts_with(&format!("fixup! {}", self.commit_subject(target)?)) {
-            return Err(Error::new("created fixup marker does not match captured target and HEAD"));
+        let prefix = match marker_arg {
+            "--fixup" => "fixup! ",
+            "--squash" => "squash! ",
+            _ => return Err(Error::new("unsupported instant autosquash marker kind")),
+        };
+        if head.trim() != marker || parent.trim() != expected_parent || !subject.starts_with(&format!("{prefix}{}", self.commit_subject(target)?)) {
+            return Err(Error::new("created autosquash marker does not match captured target and HEAD"));
         }
         Ok(())
     }

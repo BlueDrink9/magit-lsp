@@ -196,6 +196,7 @@ struct PlainEntry {
 struct ProgressRun {
     cancel: CancelHandle,
     edit_id: Option<String>,
+    edit_scope: Option<Arc<editor::EditScope>>,
     cancellation_requested: bool,
     repo: Option<String>,
     visible: bool,
@@ -501,6 +502,18 @@ impl Shared {
         edit_id: Option<String>,
         repo: Option<&str>,
     ) -> (String, CancelHandle) {
+        self.begin_progress_with_scope(sender, command, edit_id, repo, None)
+    }
+
+    /// Announce progress whose cancellation also closes scoped editor admission.
+    fn begin_progress_with_scope(
+        &self,
+        sender: &mpsc::UnboundedSender<Message>,
+        command: &str,
+        edit_id: Option<String>,
+        repo: Option<&str>,
+        edit_scope: Option<Arc<editor::EditScope>>,
+    ) -> (String, CancelHandle) {
         let next = self.next_progress.fetch_add(1, Ordering::Relaxed) + 1;
         let token = format!("magit-lsp/mutation/{next}");
         let handle = CancelHandle::new();
@@ -514,6 +527,7 @@ impl Shared {
             ProgressRun {
                 cancel: handle.clone(),
                 edit_id: edit_id.clone(),
+                edit_scope: edit_scope.clone(),
                 cancellation_requested: false,
                 repo: repo.map(str::to_string),
                 visible: false,
@@ -525,6 +539,7 @@ impl Shared {
             if let Some(edit_id) = edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
+            if let Some(scope) = edit_scope { scope.revoke(); }
         }
         let enabled = self
             .client
@@ -619,6 +634,7 @@ impl Shared {
             if let Some(edit_id) = run.edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
+            if let Some(scope) = run.edit_scope { scope.revoke(); }
         }
         editor::registry().abort_all();
         self.prompts.close();
@@ -675,6 +691,7 @@ impl Shared {
             if let Some(edit_id) = &run.edit_id {
                 editor::registry().resolve(edit_id, editor::Reply::Abort);
             }
+            if let Some(scope) = &run.edit_scope { scope.revoke(); }
         }
     }
 
@@ -4962,6 +4979,18 @@ impl Drop for CommitEdit {
     }
 }
 
+/// Worker-owned editor resources for one typed repository operation.
+struct RepositoryEdit {
+    _commit: Option<CommitEdit>,
+    scope: Option<Arc<editor::EditScope>>,
+}
+
+impl Drop for RepositoryEdit {
+    fn drop(&mut self) {
+        if let Some(scope) = &self.scope { scope.revoke(); }
+    }
+}
+
 /// Run `git commit` on a detached worker and refresh the views afterwards.
 ///
 /// The worker owns the editor wait, so neither the sessions mutex nor the repo
@@ -4998,29 +5027,47 @@ fn spawn_repository_operation(
     set_plain_commit_expired(&shared, false);
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
-    let edit_id = match editor::registry().create(&repo, &shared.draft_owner, editor::draft::DraftKind::CommitMessage) {
-        Ok(id) => id,
-        Err(error) => {
-            let _ = sender.send(show_message(
-                1,
-                format!("Cannot open commit draft: {error}"),
-            ));
-            return;
+    let (edit, edit_id, edit_scope) = match &operation {
+        crate::git::RepositoryOperation::Commit(_) => {
+            let edit_id = match editor::registry().create(&repo, &shared.draft_owner, editor::draft::DraftKind::CommitMessage) {
+                Ok(id) => id,
+                Err(error) => {
+                    let _ = sender.send(show_message(1, format!("Cannot open commit draft: {error}")));
+                    return;
+                }
+            };
+            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
+                edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
+            );
+            let commit = CommitEdit { id: edit_id.clone(), configs: shared.edit_configs.clone() };
+            (RepositoryEdit { _commit: Some(commit), scope: None }, Some(edit_id), None)
+        }
+        crate::git::RepositoryOperation::InstantRebase(_) => {
+            let config = shared.config.for_repository(std::path::Path::new(&repo));
+            let admit_configs = shared.edit_configs.clone();
+            let release_configs = shared.edit_configs.clone();
+            let scope = match editor::registry().scope_with_lifecycle(
+                &repo,
+                &shared.draft_owner,
+                Arc::new(move |run_id| {
+                    admit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(run_id.to_string(), config.clone());
+                }),
+                Arc::new(move |run_id| {
+                    release_configs.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
+                }),
+            ) {
+                Ok(scope) => Arc::new(scope),
+                Err(error) => {
+                    let _ = sender.send(show_message(1, format!("Cannot open instant autosquash draft scope: {error}")));
+                    return;
+                }
+            };
+            (RepositoryEdit { _commit: None, scope: Some(scope.clone()) }, None, Some(scope))
         }
     };
-    shared
-        .edit_configs
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .insert(
-            edit_id.clone(),
-            shared.config.for_repository(std::path::Path::new(&repo)),
-        );
-    let edit = CommitEdit {
-        id: edit_id.clone(),
-        configs: shared.edit_configs.clone(),
-    };
-    let (token, cancel) = shared.begin_progress(&sender, "commit", Some(edit_id), Some(&repo));
+    let (token, cancel) = shared.begin_progress_with_scope(
+        &sender, "commit", edit_id.clone(), Some(&repo), edit_scope.clone(),
+    );
     let progress = ProgressEnd {
         shared: shared.clone(),
         token,
@@ -5033,7 +5080,14 @@ fn spawn_repository_operation(
                 Some(socket) => {
                     let executable = std::env::current_exe()
                         .map_err(|error| Error::new(format!("cannot locate server executable: {error}")))?;
-                    editor::execute_operation(&repo, &edit.id, socket, &operation, &executable)
+                    editor::execute_operation_scoped(
+                        &repo,
+                        edit_id.as_deref().unwrap_or(""),
+                        socket,
+                        &operation,
+                        &executable,
+                        edit.scope.as_deref(),
+                    )
                 },
                 None => Err(Error::new("the editor bridge is not running")),
             });
@@ -5086,7 +5140,7 @@ fn spawn_repository_operation(
                     }
                     messages.extend(effect_notifications(&shared.client, effects));
                 }
-                Ok(crate::git::RepositoryOperationOutcome::InstantFixup(outcome)) => {
+                Ok(crate::git::RepositoryOperationOutcome::InstantRebase(outcome)) => {
                     if !shared.closing.load(Ordering::SeqCst) {
                         match refresh_pending_views(&shared, &repo) {
                             Ok(renders) => for render in renders {
@@ -5098,17 +5152,17 @@ fn spawn_repository_operation(
                         }
                     }
                     let (level, text) = match outcome {
-                        crate::instant_rebase::InstantFixupOutcome::Refused(error) =>
-                            (MessageLevel::Warn, format!("Instant fixup refused: {error}")),
-                        crate::instant_rebase::InstantFixupOutcome::MarkerFailed(error) =>
-                            (MessageLevel::Error, format!("Instant fixup marker failed: {error}")),
-                        crate::instant_rebase::InstantFixupOutcome::RebaseStopped { marker, phase, error } =>
-                            (MessageLevel::Error, format!("Instant fixup stopped during {phase}; marker {marker} retained: {error}")),
-                        crate::instant_rebase::InstantFixupOutcome::Completed { marker, warning } => {
+                        crate::instant_rebase::InstantRebaseOutcome::Refused(error) =>
+                            (MessageLevel::Warn, format!("Instant autosquash refused: {error}")),
+                        crate::instant_rebase::InstantRebaseOutcome::MarkerFailed(error) =>
+                            (MessageLevel::Error, format!("Instant autosquash marker failed: {error}")),
+                        crate::instant_rebase::InstantRebaseOutcome::RebaseStopped { marker, phase, error } =>
+                            (MessageLevel::Error, format!("Instant autosquash stopped during {phase}; marker {marker} retained: {error}")),
+                        crate::instant_rebase::InstantRebaseOutcome::Completed { marker, warning } => {
                             if let Some(warning) = warning {
                                 messages.extend(effect_notifications(&shared.client, vec![Effect::message(MessageLevel::Warn, warning)]));
                             }
-                            (MessageLevel::Info, format!("Instant fixup completed; marker {marker} autosquashed"))
+                            (MessageLevel::Info, format!("Instant autosquash completed; marker {marker} autosquashed"))
                         }
                     };
                     messages.extend(effect_notifications(&shared.client, vec![Effect::message(level, text)]));

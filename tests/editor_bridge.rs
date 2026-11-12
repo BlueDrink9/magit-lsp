@@ -1566,6 +1566,129 @@ fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
     assert_ne!(runs[0], runs[1], "each admitted helper gets a fresh run");
     drop(scope);
     assert_scoped_helper_denials_and_cleanup(socket, &effects_rx);
+    assert_real_scoped_squash_edits_and_cancel(socket, &effects_rx);
+}
+
+#[cfg(unix)]
+fn squash_repo() -> (TempDir, String, String, String) {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    write(&dir.path().join("base"), "base\n");
+    git(dir.path(), &["add", "base"]);
+    git(dir.path(), &["commit", "-m", "base"]);
+    let base = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    write(&dir.path().join("alpha"), "alpha\n");
+    git(dir.path(), &["add", "alpha"]);
+    git(dir.path(), &["commit", "-m", "alpha"]);
+    let alpha = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    write(&dir.path().join("beta"), "beta\n");
+    git(dir.path(), &["add", "beta"]);
+    git(dir.path(), &["commit", "-m", "beta"]);
+    let beta = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    write(&dir.path().join("beta-extra"), "beta-extra\n");
+    git(dir.path(), &["add", "beta-extra"]);
+    git(dir.path(), &["commit", "--squash", &beta, "--no-edit"]);
+    write(&dir.path().join("tail"), "tail\n");
+    git(dir.path(), &["add", "tail"]);
+    git(dir.path(), &["commit", "-m", "tail"]);
+    (dir, base, alpha, beta)
+}
+
+#[cfg(unix)]
+fn assert_real_scoped_squash_edits_and_cancel(
+    socket: &'static Path,
+    effects_rx: &std::sync::mpsc::Receiver<Vec<magit_lsp::protocol::Effect>>,
+) {
+    use magit_lsp::editor::registry;
+    use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome};
+    use magit_lsp::protocol::{DraftFinishReason, Effect};
+    use std::sync::Arc;
+
+    let owner = "real-scoped-squash";
+    let (dir, base, alpha, _) = squash_repo();
+    write(&dir.path().join("instant"), "instant\n");
+    git(dir.path(), &["add", "instant"]);
+    let repo = magit_lsp::git::GitRepo::open(dir.path()).unwrap();
+    let authority = InstantRebaseAuthority::prepare(&repo, &alpha, InstantAutosquashKind::Squash).unwrap();
+    let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
+    let scope = Arc::new(registry().scope(dir.path().to_str().unwrap(), owner).unwrap());
+    let worker_scope = scope.clone();
+    let repo_path = dir.path().to_string_lossy().into_owned();
+    let worker = thread::spawn(move || magit_lsp::editor::execute_operation_scoped(
+        &repo_path, "", socket, &operation, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), Some(&worker_scope),
+    ).unwrap());
+    let mut runs = Vec::new();
+    for _ in 0..2 {
+        let effects = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (run_id, uri, text) = effects.into_iter().find_map(|effect| match effect {
+            Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
+            _ => None,
+        }).expect("real squash message edit");
+        let message = if text.contains("alpha") { "Final alpha message\n" } else if text.contains("beta") {
+            "Final beta message\n"
+        } else { panic!("unexpected squash message template: {text}") };
+        registry().apply(owner, &run_id, &uri, |draft, context| {
+            draft.did_open(context, 1, text.as_bytes())?;
+            draft.did_change(context, 2, message.as_bytes())?;
+            draft.finish(context, 2, DraftFinishReason::Confirm)?;
+            Ok(())
+        }).unwrap();
+        runs.push(run_id);
+    }
+    let marker = match worker.join().unwrap() {
+        magit_lsp::git::RepositoryOperationOutcome::InstantRebase(
+            InstantRebaseOutcome::Completed { marker, warning: None },
+        ) => marker,
+        outcome => panic!("unexpected squash outcome: {outcome:?}"),
+    };
+    assert_ne!(runs[0], runs[1], "Git's two message editors receive fresh runs");
+    assert_eq!(git(dir.path(), &["log", "--format=%s", &format!("{base}..HEAD")]), "tail\nFinal beta message\nFinal alpha message\n");
+    let alpha_commit = git(dir.path(), &["cat-file", "commit", "HEAD~2"]);
+    let beta_commit = git(dir.path(), &["cat-file", "commit", "HEAD~1"]);
+    assert_eq!(alpha_commit.split_once("\n\n").unwrap().1, "Final alpha message\n");
+    assert_eq!(beta_commit.split_once("\n\n").unwrap().1, "Final beta message\n");
+    for path in ["alpha", "beta", "beta-extra", "tail", "instant"] {
+        assert_eq!(read(&dir.path().join(path)), format!("{path}\n"));
+    }
+    assert!(!git(dir.path(), &["rev-list", "--all"]).lines().any(|oid| oid == marker));
+    assert!(git(dir.path(), &["status", "--porcelain"]).is_empty());
+    assert!(!dir.path().join(".git/rebase-merge").exists());
+    drop(scope);
+
+    let (cancel_dir, _, cancel_target, _) = squash_repo();
+    write(&cancel_dir.path().join("instant"), "instant\n");
+    git(cancel_dir.path(), &["add", "instant"]);
+    let repo = magit_lsp::git::GitRepo::open(cancel_dir.path()).unwrap();
+    let authority = InstantRebaseAuthority::prepare(&repo, &cancel_target, InstantAutosquashKind::Squash).unwrap();
+    let original_head = git(cancel_dir.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let operation = magit_lsp::git::RepositoryOperation::InstantRebase(authority);
+    let cancel_scope = Arc::new(registry().scope(cancel_dir.path().to_str().unwrap(), owner).unwrap());
+    let worker_scope = cancel_scope.clone();
+    let repo_path = cancel_dir.path().to_string_lossy().into_owned();
+    let worker = thread::spawn(move || magit_lsp::editor::execute_operation_scoped(
+        &repo_path, "", socket, &operation, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), Some(&worker_scope),
+    ).unwrap());
+    let effects = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let run = effects.into_iter().find_map(|effect| match effect {
+        Effect::EditDocument { run_id, .. } => Some(run_id),
+        _ => None,
+    }).expect("post-marker squash edit");
+    cancel_scope.revoke();
+    let marker = match worker.join().unwrap() {
+        magit_lsp::git::RepositoryOperationOutcome::InstantRebase(
+            InstantRebaseOutcome::RebaseStopped { marker, phase, .. },
+        ) => { assert_eq!(phase, "autosquash"); marker }
+        outcome => panic!("unexpected cancelled squash outcome: {outcome:?}"),
+    };
+    assert!(!registry().resolve(&run, magit_lsp::editor::Reply::Abort));
+    assert_eq!(git(cancel_dir.path(), &["rev-parse", "refs/heads/main"]).trim(), marker);
+    assert_eq!(git(cancel_dir.path(), &["rev-parse", &format!("{marker}^")]).trim(), original_head);
+    assert_ne!(git(cancel_dir.path(), &["rev-parse", "HEAD"]).trim(), marker);
+    assert!(cancel_dir.path().join(".git/rebase-merge").exists());
+    assert_eq!(read(&cancel_dir.path().join("instant")), "instant\n");
+    assert!(!git(cancel_dir.path(), &["diff", "--cached", "--name-only"]).is_empty());
 }
 
 #[cfg(unix)]
