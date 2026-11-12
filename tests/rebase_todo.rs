@@ -1,6 +1,6 @@
 mod common;
 
-use common::{git, write, TestSession, STATUS_VIEWPORT};
+use common::{git, message_texts, write, TestSession, STATUS_VIEWPORT};
 use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_todo::{RebaseTodo, TodoAction};
@@ -152,6 +152,29 @@ fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
     assert_eq!(git(dir.path(), &["write-tree"]), index_before);
     git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn idle_rebase_todo_opener_reports_error_and_keeps_caller_usable() {
+    let (dir, _repo, _) = repo();
+    let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index_before = git(dir.path(), &["write-tree"]);
+
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    let result = test.press("r T");
+    let messages = message_texts(&result.effects);
+    assert!(!messages.is_empty(), "idle opener must emit a readable message");
+    assert!(messages.iter().any(|text| !text.trim().is_empty()));
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(test.view_ids(), vec!["v1"]);
+
+    let refresh = test.invoke("common.refresh");
+    let _ = refresh;
+    assert_eq!(test.view_id(), "v1");
+    assert!(!test.text().is_empty());
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+    assert_eq!(git(dir.path(), &["write-tree"]), index_before);
 }
 
 #[test]

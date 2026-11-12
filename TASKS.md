@@ -502,10 +502,10 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - test: tree rows preserve full commit identities across action edits and reorder; valid save changes only the paused todo and invalid edits leave it unchanged.
         - Verification: `make test-rust FILTER="--test rebase_todo"`.
         - Verified: `make test-rust FILTER="--test rebase_todo"` @ a1c141e → ok: rust. Paused-rebase fixture covers structured full-OID identity, action/reorder, guarded save and invalid move preservation.
-     - [ ] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
+      - [x] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
        - test: session-dispatched open/edit/reorder/submit/cancel operates on captured tree identities and preserves repository/caller invariants.
        - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
-       - [ ] **T018.3b1 — Open and cancel paused todo views.** Add the view kind, session factory and rebase menu opener; cancel restores the caller without mutation.
+        - [x] **T018.3b1 — Open and cancel paused todo views.** Add the view kind, session factory and rebase menu opener; cancel restores the caller without mutation.
          - test: real paused-rebase session opens structured todo rows through the menu, cancels to its caller with unchanged todo/HEAD/index, and reports idle-open failure readably.
          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
         - [x] **T018.3b1a — Paused todo menu open and cancel regression.** Finish the view/menu implementation with real-session identity and no-mutation cancellation coverage.
@@ -513,7 +513,8 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - test: paused-rebase menu dispatch opens full-OID structured rows; cancel restores its caller and preserves todo, HEAD and index.
           - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
           - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `3141c6b` → ok: rust. `paused_rebase_menu_opens_todo_and_cancel_preserves_repository` asserts menu open, full 40-character OIDs, caller restoration, and exact todo/HEAD/index preservation; effective `common.cancel` binding resolved for `rebase-todo`.
-       - [ ] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
+        - [ ] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
+          - Verified: `make test-rust FILTER="--test rebase_todo"` @ `ef318e1` → ok: rust. `idle_rebase_todo_opener_reports_error_and_keeps_caller_usable` asserts readable `Effect::Message`, caller remains sole focused view and processes refresh, HEAD/index unchanged.
          - test: idle opener produces readable effects without changing repository or caller state.
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
        - [ ] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
