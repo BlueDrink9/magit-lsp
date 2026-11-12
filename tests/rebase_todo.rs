@@ -155,6 +155,32 @@ fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
 }
 
 #[test]
+fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
+    let (dir, repo) = paused_repo();
+    let expected = RebaseTodo::load(&repo).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let first = magit_lsp::protocol::Cursor { line: 0, column: 0 };
+    test.set_cursor(first);
+    test.press("r");
+    assert_eq!(test.tree().nodes[0].status.as_deref(), Some("reword"));
+    test.press("J");
+    let rows = test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>();
+    assert_eq!(rows, vec![expected[1].as_str(), expected[0].as_str()]);
+    assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&expected[0])).unwrap().status.as_deref(), Some("reword"));
+    test.press("J");
+    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), expected.iter().map(String::as_str).collect::<Vec<_>>());
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 1, column: 0 });
+    test.press("K");
+    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), vec![expected[1].as_str(), expected[0].as_str()]);
+    test.press("K");
+    assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_deref()).collect::<Vec<_>>(), expected.iter().map(String::as_str).collect::<Vec<_>>());
+    test.press("Escape");
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
 fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     let (dir, repo) = paused_repo();
     let todo_path = repo.rebase_todo_path().unwrap();

@@ -130,13 +130,16 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 Closing the buffer is always cancel (§3.10). `ctrl+c` is **not** cancel here
 because it is copy in non-modal editors.
 The current bridge emits this scope for commit messages; merge/tag message
-support is not emitted yet, and `rebase-todo` has no implemented edit scope.
+support is not emitted yet.
 
 ### 5.6 Rebase todo (structured view)
 
 | Command | `standard` | `vim` |
 | --- | --- | --- |
 | `rebase.todo-submit` | `ctrl+s` | `ctrl+s` |
+| `rebase.todo-pick` / `rebase.todo-reword` / `rebase.todo-edit` | `p` / `r` / `e` | `p` / `r` / `e` |
+| `rebase.todo-squash` / `rebase.todo-fixup` / `rebase.todo-drop` | `s` / `f` / `d` | `s` / `f` / `d` |
+| `rebase.todo-up` / `rebase.todo-down` | `K` / `J` | `K` / `J` |
 | `rebase.todo-set-action` | `view/invoke` with `{"action":"pick|reword|edit|squash|fixup|drop"}` at selected commit | same |
 | `rebase.todo-move-before` | `view/invoke` with `{"before":"<full OID>"}` at selected commit; null moves to end | same |
 | `common.cancel` | `Escape` / `ctrl+c` | `Escape` / `ctrl+c` |

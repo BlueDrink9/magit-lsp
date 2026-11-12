@@ -61,6 +61,15 @@ impl RebaseTodoView {
         Ok(())
     }
 
+    /// Move selected full commit identity one position up or down.
+    pub fn move_relative(&mut self, oid: &str, up: bool) -> Result<()> {
+        let index = self.todo.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
+        let target = if up { index.checked_sub(1) } else if index + 1 < self.todo.entries.len() { Some(index + 1) } else { None };
+        let Some(target) = target else { return Ok(()); };
+        let before = if target < index { Some(self.todo.entries[target].oid.clone()) } else { self.todo.entries.get(target + 1).map(|entry| entry.oid.clone()) };
+        self.move_before(oid, before.as_deref())
+    }
+
     /// Save through guarded paused-todo persistence.
     pub fn save(&self) -> Result<()> { self.todo.save(&self.repo) }
 }

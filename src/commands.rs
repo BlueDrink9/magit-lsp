@@ -922,6 +922,14 @@ fn build() -> Registry {
         Command { id: "rebase.todo-set-action", scope: Scope::MenuAction, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
         Command { id: "rebase.todo-move-before", scope: Scope::MenuAction, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
         Command { id: "rebase.todo-submit", scope: Scope::MenuAction, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
+        Command { id: "rebase.todo-pick", scope: Scope::MenuAction, doc: "Mark todo commit pick", status: CommandStatus::Implemented, run: rebase_todo_pick, effects: &[] },
+        Command { id: "rebase.todo-reword", scope: Scope::MenuAction, doc: "Mark todo commit reword", status: CommandStatus::Implemented, run: rebase_todo_reword, effects: &[] },
+        Command { id: "rebase.todo-edit", scope: Scope::MenuAction, doc: "Mark todo commit edit", status: CommandStatus::Implemented, run: rebase_todo_edit, effects: &[] },
+        Command { id: "rebase.todo-squash", scope: Scope::MenuAction, doc: "Mark todo commit squash", status: CommandStatus::Implemented, run: rebase_todo_squash, effects: &[] },
+        Command { id: "rebase.todo-fixup", scope: Scope::MenuAction, doc: "Mark todo commit fixup", status: CommandStatus::Implemented, run: rebase_todo_fixup, effects: &[] },
+        Command { id: "rebase.todo-drop", scope: Scope::MenuAction, doc: "Mark todo commit drop", status: CommandStatus::Implemented, run: rebase_todo_drop, effects: &[] },
+        Command { id: "rebase.todo-up", scope: Scope::MenuAction, doc: "Move todo commit up", status: CommandStatus::Implemented, run: rebase_todo_up, effects: &[] },
+        Command { id: "rebase.todo-down", scope: Scope::MenuAction, doc: "Move todo commit down", status: CommandStatus::Implemented, run: rebase_todo_down, effects: &[] },
         Command {
             id: "commit.amend",
             scope: Scope::MenuAction,
@@ -1166,6 +1174,35 @@ fn rebase_todo_submit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.save() {
         Ok(()) => Ok(CommandOutcome { pop: true, ..Default::default() }),
         Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome { refresh: true, ..Default::default() }) }
+    }
+}
+
+fn rebase_todo_pick(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Pick) }
+fn rebase_todo_reword(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Reword) }
+fn rebase_todo_edit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Edit) }
+fn rebase_todo_squash(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Squash) }
+fn rebase_todo_fixup(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Fixup) }
+fn rebase_todo_drop(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_action_key(ctx, crate::rebase_todo::TodoAction::Drop) }
+
+fn rebase_todo_action_key(ctx: &mut CommandCtx<'_>, action: crate::rebase_todo::TodoAction) -> Result<CommandOutcome> {
+    let oid = ctx.cursor.and_then(|cursor| ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree()).navigation_node(cursor.line)).and_then(|node| node.commit.clone());
+    let Some(oid) = oid else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
+    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.set_action(&oid, action) {
+        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
+        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
+    }
+}
+
+fn rebase_todo_up(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_move_key(ctx, true) }
+fn rebase_todo_down(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> { rebase_todo_move_key(ctx, false) }
+fn rebase_todo_move_key(ctx: &mut CommandCtx<'_>, up: bool) -> Result<CommandOutcome> {
+    let tree = ctx.view.command_source_tree().unwrap_or_else(|| ctx.view.tree());
+    let selected = ctx.cursor.and_then(|cursor| tree.navigation_node(cursor.line)).and_then(|node| node.commit.clone());
+    let Some(selected) = selected else { ctx.effects.push(Effect::message(MessageLevel::Warn, "Select a todo commit first")); return Ok(CommandOutcome::default()); };
+    let view = ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?;
+    match view.move_relative(&selected, up) {
+        Ok(()) => Ok(CommandOutcome { refresh: true, ..Default::default() }),
+        Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome::default()) }
     }
 }
 
