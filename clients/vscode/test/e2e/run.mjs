@@ -3,6 +3,7 @@ import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
+import { resolveCommand } from '../../lib/version.js';
 
 /**
  * Optional real-editor suite: launch a unique Extension Development Host and
@@ -10,9 +11,13 @@ import { createServer } from 'node:net';
  * binary or display is available, so `make vscode-test` stays portable.
  */
 const root = resolve(import.meta.dirname, '../../../..');
-const candidates = [process.env.MAGIT_VSCODE_BIN, '/usr/bin/codium', '/usr/bin/code']
-  .filter(Boolean);
+const candidates = [process.env.MAGIT_VSCODE_BIN,
+  resolveCommand('codium'), resolveCommand('code')].filter(Boolean);
 const editor = candidates.find((candidate) => existsSync(candidate));
+if (process.argv[2] === '--select-editor') {
+  console.log(editor || '');
+  process.exit(editor ? 0 : 1);
+}
 const focusedEdit = process.env.MAGIT_VSCODE_EDIT_ONLY === '1';
 const focusedHead = process.env.MAGIT_VSCODE_HEAD_ONLY === '1';
 if (!editor) {

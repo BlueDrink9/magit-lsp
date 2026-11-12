@@ -1,6 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const context = require('../lib/context');
 const render = require('../lib/render');
@@ -32,6 +36,35 @@ function test(name, body) {
     failures.push({ name, error });
   }
 }
+
+test('optional VSCode runner selects explicit and PATH editors in precedence order', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-editor-selection-'));
+  const bin = path.join(directory, 'bin');
+  fs.mkdirSync(bin);
+  const codium = path.join(bin, 'codium');
+  const code = path.join(bin, 'code');
+  const explicit = path.join(directory, 'explicit-editor');
+  for (const file of [codium, code, explicit]) {
+    fs.writeFileSync(file, '');
+    fs.chmodSync(file, 0o755);
+  }
+  const runner = path.join(__dirname, 'e2e', 'run.mjs');
+  const select = (extra = {}) => spawnSync(process.execPath, [runner, '--select-editor'], {
+    encoding: 'utf8', env: { ...process.env, PATH: bin, MAGIT_VSCODE_BIN: '', ...extra },
+  });
+  try {
+    assert.equal(select({ MAGIT_VSCODE_BIN: explicit }).stdout.trim(), explicit);
+    assert.equal(select().stdout.trim(), codium);
+    fs.unlinkSync(codium);
+    assert.equal(select().stdout.trim(), code);
+    fs.unlinkSync(code);
+    const absent = select();
+    assert.equal(absent.status, 1);
+    assert.equal(absent.stdout.trim(), '');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 // lib/context.js -----------------------------------------------------------
 
