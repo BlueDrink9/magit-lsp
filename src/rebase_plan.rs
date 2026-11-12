@@ -70,6 +70,9 @@ impl PreparedRebase {
 
     /// Recheck launch inputs without changing the edited plan or repository.
     pub fn validate_launch(&self, repo: &GitRepo) -> Result<()> {
+        if self.entries.iter().any(|entry| matches!(entry.action, TodoAction::Reword | TodoAction::Squash)) {
+            return Err(Error::new("prepared rebase message editing is not supported yet (reword and squash)"));
+        }
         if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
         if repo.repository_identity()? != self.repository { return Err(Error::new("repository identity changed since rebase plan preparation")); }
         let (head, reference) = repo.head_identity()?;

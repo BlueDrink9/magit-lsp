@@ -85,11 +85,28 @@ fn exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only() {
     assert_eq!(plan.entries().len(), 3);
     assert!(plan.entries().iter().all(|entry| entry.oid.len() == 40));
     let chosen = plan.entries()[1].oid.clone();
-    plan.set_action(&chosen, TodoAction::Reword).unwrap();
+    plan.set_action(&chosen, TodoAction::Edit).unwrap();
     plan.move_before(&chosen, None).unwrap();
     plan.validate_launch(&repo).unwrap();
     drop(plan);
     assert_eq!(state(dir.path()), before);
+}
+
+#[test]
+fn prepared_message_actions_refuse_before_launch_without_mutation() {
+    let (dir, repo, base) = repo();
+    let baseline = state(dir.path());
+    for action in [TodoAction::Reword, TodoAction::Squash] {
+        let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
+        let chosen = plan.entries()[1].oid.clone();
+        plan.set_action(&chosen, action).unwrap();
+        let entries = plan.entries().to_vec();
+        assert!(plan.validate_launch(&repo).unwrap_err().to_string().contains("prepared rebase message editing is not supported yet"));
+        let error = plan.launch_outcome(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap_err();
+        assert!(error.to_string().contains("prepared rebase message editing is not supported yet"));
+        assert_eq!(plan.entries(), entries);
+        assert_eq!(state(dir.path()), baseline);
+    }
 }
 
 #[test]
@@ -355,7 +372,7 @@ fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     assert!(PreparedRebase::prepare(&repo, "not-a-revision").is_err());
     let mut head_plan = PreparedRebase::prepare(&repo, &base).unwrap();
     let head_edit = head_plan.entries()[0].oid.clone();
-    head_plan.set_action(&head_edit, TodoAction::Reword).unwrap();
+    head_plan.set_action(&head_edit, TodoAction::Edit).unwrap();
     write(&dir.path().join("file"), "head-change\n");
     git(dir.path(), &["commit", "-am", "head-change"]);
     let head_instructions = head_plan.entries().to_vec();
@@ -368,7 +385,7 @@ fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     git(dir.path(), &["reset", "--hard", "HEAD~1"]);
     let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
     let chosen = plan.entries()[0].oid.clone();
-    plan.set_action(&chosen, TodoAction::Reword).unwrap();
+    plan.set_action(&chosen, TodoAction::Edit).unwrap();
     write(&dir.path().join("file"), "external\n");
     let edited = plan.entries().to_vec();
     assert!(plan.validate_launch(&repo).unwrap_err().to_string().contains("changes"));
