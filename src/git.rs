@@ -823,6 +823,13 @@ impl GitRepo {
         Ok(format!("{}\0{}", std::fs::canonicalize(&self.root)?.display(), std::fs::canonicalize(&self.git_dir)?.display()))
     }
 
+    /// Identify HEAD by its resolved commit and exact symbolic ref, or detached state.
+    pub fn head_identity(&self) -> Result<(String, Option<String>)> {
+        let commit = self.resolve_commit("HEAD")?;
+        let reference = self.run(&["symbolic-ref", "--quiet", "HEAD"]).ok().map(|value| value.trim().to_owned());
+        Ok((commit, reference))
+    }
+
     /// Capture exact index bytes and require a clean, operation-free worktree.
     pub fn rebase_launch_preconditions(&self) -> Result<(String, String)> {
         if self.rebase_state()?.is_some() { return Err(Error::new("cannot prepare rebase while a Git operation is in progress")); }

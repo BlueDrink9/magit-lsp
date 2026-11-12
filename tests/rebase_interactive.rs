@@ -120,6 +120,29 @@ fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
     assert!(!dir.path().join("two").exists());
 }
 
+#[test]
+fn prepared_plan_refuses_same_oid_branch_switch_and_detach() {
+    for detach in [false, true] {
+        let (dir, repo, base) = repo();
+        let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
+        let oid = plan.entries()[1].oid.clone();
+        plan.set_action(&oid, TodoAction::Drop).unwrap();
+        let head = git(dir.path(), &["rev-parse", "HEAD"]);
+        if detach {
+            git(dir.path(), &["checkout", "--detach", "HEAD"]);
+        } else {
+            git(dir.path(), &["branch", "side", head.trim()]);
+            git(dir.path(), &["checkout", "side"]);
+        }
+        let before = state(dir.path());
+        let entries = plan.entries().to_vec();
+        let error = plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap_err();
+        assert!(error.to_string().contains("HEAD attachment changed"));
+        assert_eq!(plan.entries(), entries);
+        assert_eq!(state(dir.path()), before);
+    }
+}
+
 fn conflicting_plan() -> (TempDir, GitRepo, String, PreparedRebase) {
     let dir = TempDir::new().unwrap();
     git(dir.path(), &["init", "-b", "main"]);

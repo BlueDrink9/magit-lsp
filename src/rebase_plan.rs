@@ -9,6 +9,7 @@ use crate::{Error, Result};
 pub struct PreparedRebase {
     base: String,
     head: String,
+    head_reference: Option<String>,
     entries: Vec<crate::rebase_todo::TodoEntry>,
     membership: Vec<String>,
     index: String,
@@ -24,14 +25,14 @@ impl PreparedRebase {
     /// Prepare commits after exclusive `base` through current `HEAD` for replay.
     pub fn prepare(repo: &GitRepo, base: &str) -> Result<Self> {
         let repository = repo.repository_identity()?;
-        let head = repo.resolve_commit("HEAD")?;
+        let (head, head_reference) = repo.head_identity()?;
         let base = repo.resolve_commit(base)?;
         let (index, worktree) = repo.rebase_launch_preconditions()?;
         let oids = repo.linear_replay_membership(&base, &head)?;
         if oids.is_empty() { return Err(Error::new("selected base has no commits to replay")); }
         let source = oids.iter().map(|oid| format!("pick {oid} {}\n", repo.commit_subject(oid).unwrap_or_else(|_| "(no subject)".into()))).collect::<String>();
         let todo = RebaseTodo::parse(repo, source.as_bytes())?;
-        Ok(Self { base, head, entries: todo.entries, membership: oids, index, worktree, repository })
+        Ok(Self { base, head, head_reference, entries: todo.entries, membership: oids, index, worktree, repository })
     }
 
     /// Current editable ordered instructions; edits remain in memory only.
@@ -71,7 +72,9 @@ impl PreparedRebase {
     /// Recheck launch inputs without changing the edited plan or repository.
     pub fn validate_launch(&self, repo: &GitRepo) -> Result<()> {
         if repo.repository_identity()? != self.repository { return Err(Error::new("repository identity changed since rebase plan preparation")); }
-        if repo.resolve_commit("HEAD")? != self.head { return Err(Error::new("HEAD changed since rebase plan preparation")); }
+        let (head, reference) = repo.head_identity()?;
+        if head != self.head { return Err(Error::new("HEAD changed since rebase plan preparation")); }
+        if reference != self.head_reference { return Err(Error::new("HEAD attachment changed since rebase plan preparation")); }
         let (index, worktree) = repo.rebase_launch_preconditions()?;
         if index != self.index { return Err(Error::new("index changed since rebase plan preparation")); }
         if worktree != self.worktree { return Err(Error::new("worktree changed since rebase plan preparation")); }
