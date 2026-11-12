@@ -513,7 +513,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - test: paused-rebase menu dispatch opens full-OID structured rows; cancel restores its caller and preserves todo, HEAD and index.
           - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
           - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `3141c6b` → ok: rust. `paused_rebase_menu_opens_todo_and_cancel_preserves_repository` asserts menu open, full 40-character OIDs, caller restoration, and exact todo/HEAD/index preservation; effective `common.cancel` binding resolved for `rebase-todo`.
-        - [ ] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
+        - [x] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
           - Verified: `make test-rust FILTER="--test rebase_todo"` @ `ef318e1` → ok: rust. `idle_rebase_todo_opener_reports_error_and_keeps_caller_usable` asserts readable `Effect::Message`, caller remains sole focused view and processes refresh, HEAD/index unchanged.
          - test: idle opener produces readable effects without changing repository or caller state.
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
