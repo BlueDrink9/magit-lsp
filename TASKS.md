@@ -679,7 +679,8 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - [x] **T019.3a — Sequence-editor helper transport.** Add a portable early CLI helper that copies the validated external plan into Git's supplied todo path and fails closed on transport errors. UTF-8 CLI paths follow existing CLI limits; non-Linux behavior remains unverified.
       - test: Exact bytes, paths containing spaces/apostrophes, missing inputs and no server startup; Git shell quoting follows the existing executable-command boundary.
       - Verified: `make test-rust FILTER="--lib --test rebase_interactive"` @ `a72aaed` → exit 0; binary helper exact-byte test (including NUL), missing env/source/destination and invalid argc fail-closed test, and shell-quoting test all pass.
-    - [ ] **T019.3b — Launch the validated initial plan.** Revalidate prepared ownership and launch actual interactive Git with explicit no-autosquash; prove exclusive-base edited-history results and stale-plan refusal.
+    - [x] **T019.3b — Launch the validated initial plan.**
+      - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `8701ed8` → exit 0; edited-plan real Git launch and stale-HEAD refusal pass. Revalidate prepared ownership and launch actual interactive Git with explicit no-autosquash; prove exclusive-base edited-history results and stale-plan refusal.
       - test: Real Git success and stale refusal retain exact intended instructions/state.
     - [ ] **T019.3c — Dispatch launch and paused outcomes.** Prepared submit launches instead of saving a paused file; conflicts remain real Git state with readable effects and continue/abort support.
       - test: Key-driven submit, usable caller, conflict/continue/abort and exact repository state.

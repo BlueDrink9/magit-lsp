@@ -838,6 +838,27 @@ impl GitRepo {
         Ok((index, worktree))
     }
 
+    /// Launch Git's interactive rebase using a validated external todo plan.
+    pub(crate) fn launch_interactive_rebase(&self, base: &str, plan: &[u8], executable: &Path) -> Result<()> {
+        let directory = tempfile::Builder::new().prefix("magit-lsp-rebase-").tempdir()?;
+        let plan_path = directory.path().join("todo plan");
+        std::fs::write(&plan_path, plan)?;
+        let editor = crate::rebase_sequence_editor::command_for(executable);
+        let plan_path = plan_path.to_string_lossy().into_owned();
+        let env = [
+            (crate::rebase_sequence_editor::PLAN_FILE_ENV, plan_path.as_str()),
+            ("GIT_SEQUENCE_EDITOR", editor.as_str()),
+        ];
+        let args = ["-c", "rebase.autoSquash=false", "rebase", "--interactive", "--no-autosquash", base];
+        let started = Instant::now();
+        let mut command = git_command(&self.root, &args, Stdio::null(), &env);
+        let out = runner::run_owned(&mut command, None).map_err(|error| Error::new(format!("failed to run git: {error}")))?;
+        let status = out.status.ok_or_else(|| Error::new("git command was cancelled; process reap is incomplete"))?;
+        log_finished(&self.root, &args, status, started.elapsed(), &out.stdout, &out.stderr);
+        if !status.success() { return Err(Error::git(GitFailure::from_output(&args, status, &out.stderr))); }
+        Ok(())
+    }
+
     /// Return full commit IDs after an exclusive base, rejecting non-linear history.
     pub fn linear_replay_membership(&self, base: &str, head: &str) -> Result<Vec<String>> {
         let ancestry = self.run(&["merge-base", "--is-ancestor", base, head]);

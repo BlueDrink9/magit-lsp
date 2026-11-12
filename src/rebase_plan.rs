@@ -81,4 +81,15 @@ impl PreparedRebase {
         }
         Ok(())
     }
+
+    /// Revalidate captured repository state, then launch this exact edited plan.
+    pub fn launch(&self, repo: &GitRepo, executable: &std::path::Path) -> Result<()> {
+        self.validate_launch(repo)?;
+        let mut todo = String::new();
+        for entry in &self.entries {
+            let action = match entry.action { TodoAction::Pick => "pick", TodoAction::Reword => "reword", TodoAction::Edit => "edit", TodoAction::Squash => "squash", TodoAction::Fixup => "fixup", TodoAction::Drop => "drop" };
+            todo.push_str(&format!("{action} {} {}\n", entry.oid, entry.subject));
+        }
+        repo.launch_interactive_rebase(&self.base, todo.as_bytes(), executable)
+    }
 }

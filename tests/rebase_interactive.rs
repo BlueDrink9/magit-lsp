@@ -93,6 +93,34 @@ fn exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only() {
 }
 
 #[test]
+fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    write(&dir.path().join("base"), "base\n");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "base"]);
+    let base = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    for (name, value) in [("one", "1"), ("two", "2"), ("three", "3")] {
+        write(&dir.path().join(name), value);
+        git(dir.path(), &["add", name]);
+        git(dir.path(), &["commit", "-m", name]);
+    }
+    let repo = GitRepo::open(dir.path()).unwrap();
+    git(dir.path(), &["config", "rebase.autoSquash", "true"]);
+    let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
+    let oids = plan.entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    plan.set_action(&oids[1], TodoAction::Drop).unwrap();
+    plan.move_before(&oids[2], Some(&oids[0])).unwrap();
+    plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap();
+    assert_eq!(git(dir.path(), &["rev-list", "--reverse", &format!("{base}..HEAD")]).lines().count(), 2);
+    assert_eq!(git(dir.path(), &["show", "HEAD:three"]).trim(), "3");
+    assert_eq!(git(dir.path(), &["log", "-3", "--format=%s", "--reverse"]).lines().collect::<Vec<_>>(), vec!["base", "three", "one"]);
+    assert!(!dir.path().join("two").exists());
+}
+
+#[test]
 fn prepared_todo_view_edits_in_memory_and_cannot_save_paused_file() {
     let (dir, repo, base) = repo();
     let before = state(dir.path());
@@ -218,6 +246,10 @@ fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     let head_instructions = head_plan.entries().to_vec();
     assert!(head_plan.validate_launch(&repo).unwrap_err().to_string().contains("HEAD changed"));
     assert_eq!(head_plan.entries(), head_instructions);
+    let stale_state = state(dir.path());
+    assert!(head_plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap_err().to_string().contains("HEAD changed"));
+    assert_eq!(head_plan.entries(), head_instructions);
+    assert_eq!(state(dir.path()), stale_state);
     git(dir.path(), &["reset", "--hard", "HEAD~1"]);
     let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
     let chosen = plan.entries()[0].oid.clone();
