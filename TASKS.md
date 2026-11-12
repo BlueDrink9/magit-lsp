@@ -646,29 +646,32 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - test: Real-repository preparation/edit/cancel changes no repository state; unsupported topology and stale launch inputs are rejected with readable errors while edited instructions remain intact.
     - Verification: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"`.
     - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → ok: rust, run with parent `73cdbcd` and dirty working tree (protected unrelated edits present; not a clean checkout claim). `exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only` checks OID membership and unchanged HEAD/index/worktree/refs/operation state; stale, invalid-base, nonlinear and active-operation refusals covered by `invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository`, `nonlinear_replay_range_is_rejected` and `merge_base_and_active_operation_are_rejected_readably`. Existing paused ownership remains separate: `parse_only_and_cross_repository_models_cannot_write` in `tests/rebase_todo.rs`.
-  - [ ] **T019.2 — Select and edit an initial rebase plan.** Connect server-owned base selection and structured todo editing to prepared ownership; cancel restores a usable caller without launching Git.
+   - [x] **T019.2 — Select and edit an initial rebase plan.** Connect server-owned base selection and structured todo editing to prepared ownership; cancel restores a usable caller without launching Git.
     - test: Dispatched selection, full-OID action/reorder and cancel preserve repository state and existing paused-editor behavior.
     - Attempts: Two default orientation-only PARTIALs; split editor ownership from selection dispatch at separate Rust-test boundaries.
     - [x] **T019.2a — Prepared todo editor ownership.** Reuse structured rendering and action/reorder operations for an in-memory prepared plan, retaining distinct paused save authority.
       - test: Prepared editor renders exact full-OID membership, edits/reorders safely and cannot write a paused todo; existing paused editor regressions pass.
       - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `97b361e` → `ok: rust`.
-    - [ ] **T019.2b — Initial base selection and editor dispatch.** Connect the rebase command, validated single-base selection and prepared editor; cancellation restores a usable caller without repository mutation.
+     - [x] **T019.2b — Initial base selection and editor dispatch.** Connect the rebase command, validated single-base selection and prepared editor; cancellation restores a usable caller without repository mutation.
       - test: Menu/selection/key dispatch, invalid selection/factory failure and edited cancellation preserve exact repository state and paused behavior.
       - Attempts: Two default PARTIALs; selector-request edits exist, confirmation and direct tests remain. Split valid dispatch from cancellation/failure regression coverage. Promote the existing `rebase.interactive` action, not a parallel command or key.
       - [x] **T019.2b1 — Open the prepared editor from base selection.** Confirm the existing interactive-rebase action's structured single-base selector and open exact prepared rows.
         - test: Real menu, selector confirmation and full-OID prepared-row membership; registry/menu/keymap suites remain valid.
         - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test commands --test menus --test keymap"` @ `817e314` → `ok: rust`.
-      - [ ] **T019.2b2 — Initial editor cancellation and failure safety.** Exercise edited key cancellation, invalid selection and preparation failure, with exact repository and usable-caller checks.
+       - [x] **T019.2b2 — Initial editor cancellation and failure safety.** Exercise edited key cancellation, invalid selection and preparation failure, with exact repository and usable-caller checks.
         - test: Preserve HEAD/index/worktree/refs/operation state; paused editor regressions pass unchanged.
         - Attempts: Two default PARTIALs; cancellation coverage added, preparation-error assertion still fails. Split cancellation from failure-path verification.
-        - [x] **T019.2b2a — Verify initial selection and edited cancellation.** Assert selector and edited-plan cancellation preserve exact repository state and restore a usable caller.
-          - test: Key-driven cancellation, HEAD/index/worktree/refs/operation state and caller refresh.
+         - [x] **T019.2b2a — Verify initial selection and edited cancellation.** Assert selector and edited-plan cancellation preserve exact repository state and restore a usable caller.
+           - test: Key-driven cancellation, HEAD/index/worktree/refs/operation state and caller refresh.
+           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `632dc68` → `ok: rust`.
         - [ ] **T019.2b2b — Verify initial preparation failure safety.** Assert invalid selection and changed preparation preconditions report readable effects, retain usable caller and preserve repository state.
           - test: Direct failing selection/preparation dispatch and paused-editor regressions.
           - Attempts: Two default PARTIALs identified preparation errors escaping as `Err`; split invalid-selection coverage from the production readable-error correction.
           - [x] **T019.2b2b1 — Reject invalid initial selection safely.** Direct invalid-selection regression preserves repository state and usable caller.
             - test: Readable invalid-selection effect and exact unchanged state.
-            - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → exit 0; `ok: rust`.
+           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → exit 0; `ok: rust`.
+           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `cf051cb` → `ok: rust`; run with dirty working tree (protected unrelated edits present; not a clean checkout claim).
+           - Done: `cf051cb`.
           - [x] **T019.2b2b2 — Surface failed initial preparation readably.** Convert actual preparation failure into a readable effect while restoring a usable caller.
             - test: Changed preconditions after selection opens; exact pre-dispatch repository state preserved, no editor leaked.
   - [ ] **T019.3 — Execute the edited initial rebase plan.** Add the verified launch adapter, submission revalidation and readable execution/conflict handling.
