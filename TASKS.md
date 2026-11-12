@@ -932,13 +932,15 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Done when:** Deleting any of the nine user-facing todo bindings makes coverage fail, the two argument-only commands remain intentionally unbound, and `make test-rust FILTER="--test commands --test keymap --test manifest"` passes.
   - **Constraints:** Do not bind the argument-only commands, duplicate exception lists in profiles/tests, or change generated keybinding output.
   - Verified: `make test-rust FILTER="--test commands --test keymap --test manifest"` @ `0a98afe` → ok: rust.
+  - Recorded coverage follow-up: `make test-rust FILTER="--lib --test commands --test keymap --test manifest"` @ `dfd6415` passed; nine deletion unit cases and argument-only absence case.
 
-- [ ] **[P2] Pin the VSCode adapter version to the server package version** (`tests/client_versions.rs:1-16`, `bundled_lua_version_matches_cargo_package_version`; `clients/vscode/package.json:1-7`, `version`; `clients/vscode/lib/session.js:15-18`, `extensionVersion`)
+- [x] **[P2] Pin the VSCode adapter version to the server package version** (`tests/client_versions.rs:1-16`, `bundled_adapter_versions_match_cargo_package_version`; `clients/vscode/package.json:1-7`, `version`; `clients/vscode/lib/session.js:15-18`, `extensionVersion`)
   - **Problem:** The drift test compares Cargo only with the Lua adapter. VSCode reads its own package version for startup negotiation, so an independent package-version edit can make every bundled VSCode checkout report a mismatch without failing any consistency check.
   - **Why it matters:** Test validity/cohesion — both bundled clients implement the same version contract, but only one is tied to the server release identity.
   - **Change:** Extend `tests/client_versions.rs` to parse `clients/vscode/package.json` with `serde_json` and assert its `version` equals `CARGO_PKG_VERSION` alongside the Lua assertion; rename the test to cover both adapters and retain failure messages naming the drifting file.
   - **Done when:** Changing either bundled adapter version alone fails the focused test, matching versions pass, and `make test-rust FILTER="--test client_versions"` passes.
   - **Constraints:** Do not introduce a generated version file, runtime fallback, compatibility shim, or change warning behavior.
+  - Verified: `make test-rust FILTER="--test client_versions"` @ `dfd6415` → ok: rust.
 
 - [ ] **[P2] Make the portability audit claims self-consistent** (`docs/PORTABILITY_AUDIT.md:3-30`, `TASKS.md:47-48`, `PORT2`; `docs/evidence/commit-head-operations.md:188-192,307-311`)
   - **Problem:** The audit and PORT2 completion note each claim that no literal personal checkout prefix remains while quoting that same literal. The historical evidence also calls two normalized, explicitly unrerun command lines the “exact ticket command,” contradicting its normalization notice.
