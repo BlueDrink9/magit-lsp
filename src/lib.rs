@@ -26,6 +26,7 @@ pub mod process_log;
 pub mod protocol;
 pub mod rebase_todo;
 pub mod rebase_plan;
+pub mod rebase_sequence_editor;
 pub mod rebase_todo_view;
 pub mod quirks;
 pub mod runner;

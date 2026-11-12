@@ -4,9 +4,57 @@ use common::{git, write, TestSession, STATUS_VIEWPORT};
 use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_plan::PreparedRebase;
+use magit_lsp::rebase_sequence_editor::{command_for, PLAN_FILE_ENV};
 use magit_lsp::rebase_todo::TodoAction;
 use magit_lsp::rebase_todo_view::RebaseTodoView;
 use tempfile::TempDir;
+use std::process::Command;
+
+#[test]
+fn sequence_editor_helper_copies_exact_bytes_for_paths_with_quotes() {
+    let dir = TempDir::new().unwrap();
+    let source = dir.path().join("plan ' source");
+    let destination = dir.path().join("todo ' destination");
+    let bytes = b"pick abc\0def\n";
+    std::fs::write(&source, bytes).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+        .arg("--sequence-editor-helper").arg(&destination)
+        .env(PLAN_FILE_ENV, &source).status().unwrap();
+    assert!(status.success());
+    assert_eq!(std::fs::read(destination).unwrap(), bytes);
+}
+
+#[test]
+fn sequence_editor_helper_fails_closed_on_missing_inputs_and_bad_arguments() {
+    let dir = TempDir::new().unwrap();
+    let destination = dir.path().join("todo");
+    std::fs::write(&destination, b"unrelated").unwrap();
+    let binary = env!("CARGO_BIN_EXE_magit-lsp");
+    for (args, source) in [
+        (vec!["--sequence-editor-helper"], Some(dir.path().join("source"))),
+        (vec!["--sequence-editor-helper", "one", "extra"], Some(dir.path().join("source"))),
+        (vec!["--sequence-editor-helper", "todo"], None),
+        (vec!["--sequence-editor-helper", "todo"], Some(dir.path().join("missing-source"))),
+    ] {
+        let mut command = Command::new(binary);
+        command.args(args);
+        if let Some(source) = source { command.env(PLAN_FILE_ENV, source); }
+        else { command.env_remove(PLAN_FILE_ENV); }
+        assert!(!command.current_dir(dir.path()).status().unwrap().success());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"unrelated");
+    }
+    let source = dir.path().join("source");
+    std::fs::write(&source, b"plan").unwrap();
+    assert!(!Command::new(binary).args(["--sequence-editor-helper", "missing/todo"])
+        .env(PLAN_FILE_ENV, source).current_dir(dir.path()).status().unwrap().success());
+    assert_eq!(std::fs::read(&destination).unwrap(), b"unrelated");
+}
+
+#[test]
+fn sequence_editor_command_quotes_spaces_and_apostrophes() {
+    assert_eq!(command_for(std::path::Path::new("/tmp/a path/it's magit-lsp")),
+        "'/tmp/a path/it'\\''s magit-lsp' --sequence-editor-helper");
+}
 
 fn repo() -> (TempDir, GitRepo, String) {
     let dir = TempDir::new().unwrap();
