@@ -256,6 +256,9 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Refresh instant-autosquash generated references.** check: T019 closure gate `make docs-artifacts-check` failed stale `docs/schema/worked-exchanges.md` at `63c8bd3` (`build/test-logs/schema-check.64UYhw`). Regenerated causal schema/registry references through `make docs-generate`, inspected diffs, committed generated files separately, then passed `make docs-artifacts-check && make docs-check`. Full `make test`, `make ui-test`, and `make ui-tour` passed at `63c8bd3`; hygiene ran but missing checkers and deferred debt prevent a clean claim.
+  - Verified: `make docs-generate && make docs-artifacts-check && make docs-check` @ 63c8bd3 → `ok: update-schema`, `ok: registry-docs-generate`, `ok: schema-check`, `ok: registry-docs-check`, `ok: docs-check`; generated reference commit: `f2f7cd0`.
+
 - [x] **Refresh instant-autosquash recorded registry responses.** check: Repair only causal observed command-response changes after F/S promotion in existing commit-edit recordings. T019 closure gate fails `plain_examples_replay_against_the_real_binary` at `commit-edit-abort.jsonl:9`, `$.result[36].command` (`build/test-logs/rust.dGy3vS`). Preserve exact replay assertions and unrelated frames. Verification: `make test-rust FILTER="--test examples"`.
   - [x] **Refresh instant abort recording.** check: Exact abort replay advances to confirm recording; frames 9/16 copied from observed responses without unrelated changes.
     - Verified: `make test-rust FILTER="--test examples"` @ f3767f3 → `ok: rust`; exact abort and confirm recordings replay with unchanged assertions; abort frames 9/16 and confirm frames 9/16 use observed registry responses with recorded request IDs retained.
@@ -342,6 +345,15 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 ## Deferred hygiene follow-ups
 
 Keep this debt open. Run tools through `make hygiene` and focused suites through `make vscode-test`, `make test-rust FILTER="..."`, or `make test-file FILE=...`; a report-only exit is not a clean bill of health. Any additional executable check needs its own Make target before execution.
+
+T019 closure disposition: `make hygiene` at `63c8bd3` exited 0 but did not establish clean dependency/export/Lua checks: `cargo machete` was unavailable, as were `knip` and `luacheck`. Existing findings remain owned below; additional size/suppression/tooling findings have explicit owners. No checker was installed or substituted. Report: `/tmp/opencode/make-hygiene.log`; it has no embedded revision stamp, so this records the gate invocation rather than an independently revision-stamped report.
+
+- [ ] **Provision reproducible hygiene checkers** — check: Arrange user-approved provisioning/pinning for cargo-machete, Knip and Luacheck through the supported environment; `make hygiene` must execute all three, not report missing binaries. Installation needs human approval; do not claim the current report is clean.
+- [ ] **Split client specification below hygiene limit** — check: Reduce `docs/CLIENT_SPEC.md` below 100000 bytes without losing contract detail; verify `make docs-check` and `make hygiene`.
+- [ ] **Split session implementation below hygiene limit** — check: Reduce `src/session.rs` below 100000 bytes, preserving behavior; verify focused Rust suites and `make hygiene`.
+- [ ] **Split confirm recording below hygiene limit** — check: Reduce `docs/examples/commit-edit-confirm.jsonl` below 100000 bytes without weakening exact replay; verify `make test-rust FILTER="--test examples"` and `make hygiene`.
+- [ ] **Split abort recording below hygiene limit** — check: Reduce `docs/examples/commit-edit-abort.jsonl` below 100000 bytes without weakening exact replay; verify `make test-rust FILTER="--test examples"` and `make hygiene`.
+- [ ] **Disposition newly reported dead-code suppressions** — check: Audit `src/menu.rs:145,154` and `tests/examples.rs:150` `#[allow(dead_code)]`; remove unused code or record concrete retained-use rationale; verify relevant Rust suites and `make hygiene`.
 
 - [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
 - [ ] **Audit unused VSCode exports: commands and context** — `clients/vscode/lib/commands.js` (`openStatus`, `viewport`, `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`); `context.js` (`deriveContext`, `inactiveContext`, `staticScope`). Verify focused VSCode tests and Knip.
