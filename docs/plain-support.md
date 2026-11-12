@@ -193,6 +193,7 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.change-dates` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.continue` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.edit-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.edit-todo` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.elsewhere` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.interactive` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.onto-pushremote` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
@@ -201,6 +202,17 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `rebase.reword-commit` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
 | `rebase.skip` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `rebase.subset` | menu-action | Planned (R-7.3) | — | — | Planned (R-7.3) | Planned (R-7.3) | Planned (R-7.3) | — |
+| `rebase.todo-down` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-drop` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-edit` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-fixup` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-move-before` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-pick` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-reword` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-set-action` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-squash` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-submit` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
+| `rebase.todo-up` | rebase-todo | Implemented | — | — | Available | Available | Available | — |
 | `remote.add` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.configure` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |
 | `remote.prune` | menu-action | Planned (R-6.3) | — | — | Planned (R-6.3) | Planned (R-6.3) | Planned (R-6.3) | — |

@@ -140,6 +140,7 @@
 | `magit-rebase-remove-commit` | `r k` | `rebase.remove-commit` | Planned R-7.3 | rebase |
 | `magit-rebase-autosquash` | `r f` | `rebase.autosquash` | Planned R-7.3 | rebase |
 | `magit-reshelve-since` | `r t` | `rebase.change-dates` | Planned R-7.3 | rebase |
+| `magit-rebase-edit-todo` | `r T` | `rebase.edit-todo` | Implemented | rebase |
 | `magit-rebase-continue` | `r r` | `rebase.continue` | Implemented | rebase |
 | `magit-rebase-skip` | `r K` | `rebase.skip` | Implemented | rebase |
 | `magit-rebase-abort` | `r a` | `rebase.abort` | Implemented | rebase |
