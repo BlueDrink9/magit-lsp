@@ -240,6 +240,111 @@ fn instant_fixup_selection_autosquashes_through_real_server_and_restores_caller(
 }
 
 #[test]
+fn instant_squash_selection_edits_message_through_registered_server_callback() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("root subject", [("root.txt", "root\n")])
+        .commit("base subject", [("base.txt", "base\n")])
+        .commit("selected target subject", [("target.txt", "base\n")])
+        .commit("newer head subject", [("newer.txt", "head\n")])
+        .staged_file("fix.txt", "fixed\n")
+        .build();
+    let target = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let mut server = TestServer::spawn(&[]);
+    assert!(server.initialize_rich(json!({})) ["error"].is_null());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{
+            "viewId":view,"version":1,"key":key,"editorMode":"normal",
+            "cursor":{"line":line,"column":0}}}));
+        server.response_with_id(id)
+    };
+    let pushed = |response: &Value| response["result"]["effects"].as_array().unwrap()
+        .iter().find(|effect| effect["type"] == "pushView").expect("pushView")
+        ["descriptor"]["id"].as_str().unwrap().to_owned();
+    let opened = |server: &mut TestServer, view: &str| {
+        let mut render = false;
+        let mut keymap = false;
+        let mut version = None;
+        while !render || !keymap {
+            let message = server.recv();
+            if message["params"]["viewId"] == view {
+                if message["method"] == "view/render" {
+                    render = true;
+                    version = message["params"]["version"].as_u64();
+                }
+                keymap |= message["method"] == "view/keymap";
+            }
+        }
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{
+            "viewId":view,"version":version.unwrap()}}));
+    };
+    let menu = pushed(&press(&mut server, 3, &status, "c", 0));
+    opened(&mut server, &menu);
+    let selector = pushed(&press(&mut server, 4, &menu, "S", 0));
+    opened(&mut server, &selector);
+    let mut target_line = None;
+    for line in 0..100 {
+        server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{
+            "viewId":selector,"command":"common.copy-value","version":1,
+            "cursor":{"line":line,"column":0}}}));
+        if server.response_with_id(5)["result"]["effects"].as_array().unwrap().iter()
+            .any(|effect| effect["type"] == "clipboard" && effect["text"] == target)
+        {
+            target_line = Some(line);
+            break;
+        }
+    }
+    let target_line = target_line.expect("structured full-OID squash target");
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{
+        "viewId":selector,"command":"common.confirm","version":1,
+        "cursor":{"line":target_line,"column":0}}}));
+    assert!(server.response_with_id(6)["error"].is_null());
+    let edit = loop {
+        let message = server.recv();
+        if message["method"] == "view/effects" {
+            if let Some(edit) = message["params"]["effects"].as_array().unwrap().iter()
+                .find(|effect| effect["type"] == "editDocument")
+            {
+                break edit.clone();
+            }
+        }
+    };
+    let edited = "selected target subject\n\nnew squash paragraph\n";
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}));
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":edit["uri"],"version":2},"contentChanges":[{"text":edited}]}}));
+    server.send(json!({"jsonrpc":"2.0","id":7,"method":"workspace/executeCommand","params":{
+        "command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],
+            "uri":edit["uri"],"version":2,"source":"synchronized"}]}}));
+    let confirmed = server.response_with_id(7);
+    assert!(confirmed["error"].is_null(), "{confirmed}");
+    let mut caller_rendered = false;
+    while !caller_rendered {
+        let message = server.recv();
+        if message["method"] == "view/render" && message["params"]["viewId"] == status {
+            server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{
+                "viewId":status,"version":message["params"]["version"]}}));
+            caller_rendered = true;
+        }
+    }
+    assert_eq!(tmp.git(&["log", "--format=%s", "--reverse"]),
+        "root subject\nbase subject\nselected target subject\nnewer head subject\n");
+    assert_eq!(tmp.git(&["show", "-s", "--format=%B", "HEAD~1"]),
+        "selected target subject\n\nnew squash paragraph\n\n");
+    assert_eq!(tmp.git(&["show", "HEAD:target.txt"]), "base\n");
+    assert_eq!(tmp.git(&["show", "HEAD:fix.txt"]), "fixed\n");
+    assert_eq!(tmp.git(&["write-tree"]), tmp.git(&["rev-parse", "HEAD^{tree}"]));
+    assert!(!tmp.path().join(".git/rebase-merge").exists());
+    assert!(!tmp.path().join(".git/rebase-apply").exists());
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/invoke","params":{
+        "viewId":status,"command":"common.refresh"}}));
+    assert!(server.response_with_id(8)["error"].is_null());
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
 fn prepared_rebase_message_actions_refuse_through_real_server_submit() {
     for (key, label) in [("r", "reword"), ("s", "squash")] {
         let (tmp, _) = RepoFixture::new().commit("base", [("base", "base\n")])
