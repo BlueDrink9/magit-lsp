@@ -67,7 +67,7 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
         .commit("three", [("three", "3\n")])
         .build();
     let base = tmp.git(&["rev-parse", "HEAD~3"]).trim().to_owned();
-    let mut server = TestServer::spawn(&[("GIT_EDITOR", "true")]);
+    let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
 
@@ -125,8 +125,6 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
     let (todo, _) = pushed(&server.response_with_id(6));
     opened(&mut server, &todo);
 
-    assert!(press(&mut server, 7, &todo, "r", 0)["result"]["effects"].as_array().unwrap().is_empty());
-    assert_eq!(server.recv()["method"], "view/render");
     assert!(press(&mut server, 8, &todo, "J", 0)["result"]["effects"].as_array().unwrap().is_empty());
     assert_eq!(server.recv()["method"], "view/render");
     assert!(press(&mut server, 9, &todo, "d", 2)["result"]["effects"].as_array().unwrap().is_empty());
@@ -146,6 +144,53 @@ fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
     assert!(refreshed["result"]["effects"].as_array().unwrap().is_empty(), "{refreshed}");
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn prepared_rebase_message_actions_refuse_through_real_server_submit() {
+    for (key, label) in [("r", "reword"), ("s", "squash")] {
+        let (tmp, _) = RepoFixture::new().commit("base", [("base", "base\n")])
+            .commit("one", [("one", "1\n")]).commit("two", [("two", "2\n")]).build();
+        let base = tmp.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
+        let mut server = TestServer::spawn(&[]);
+        assert!(server.initialize_rich(json!({}))["error"].is_null());
+        let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+        let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+            server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+            server.response_with_id(id)
+        };
+        let pushed = |response: &Value| response["result"]["effects"].as_array().unwrap().iter()
+            .find(|effect| effect["type"] == "pushView").unwrap()["descriptor"]["id"].as_str().unwrap().to_owned();
+        let opened = |server: &mut TestServer, view: &str| {
+            let mut render = false; let mut keymap = false; let mut version = None;
+            while !render || !keymap { let message = server.recv(); if message["params"]["viewId"] == view {
+                if message["method"] == "view/render" { render = true; version = message["params"]["version"].as_u64(); }
+                keymap |= message["method"] == "view/keymap";
+            }}
+            server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version.unwrap()}}));
+        };
+        let menu = pushed(&press(&mut server, 3, &status, "r", 0)); opened(&mut server, &menu);
+        let selector = pushed(&press(&mut server, 4, &menu, "i", 0)); opened(&mut server, &selector);
+        let mut base_line = None;
+        for line in 0..100 { server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":selector,"command":"common.copy-value","version":1,"cursor":{"line":line,"column":0}}}));
+            if server.response_with_id(5)["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "clipboard" && e["text"] == base) { base_line = Some(line); break; }
+        }
+        server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":1,"cursor":{"line":base_line.unwrap(),"column":0}}}));
+        let todo = pushed(&server.response_with_id(6)); opened(&mut server, &todo);
+        let action_line = u64::from(label == "squash");
+        let changed = press(&mut server, 7, &todo, key, action_line);
+        assert!(changed["result"]["effects"].as_array().unwrap().is_empty(), "{changed}");
+        server.recv();
+        let before = (tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["for-each-ref", "--format=%(refname) %(objectname)"]), std::fs::read(tmp.path().join(".git/index")).unwrap(), std::fs::read(tmp.path().join("one")).ok(), std::fs::read(tmp.path().join("two")).ok(), tmp.path().join(".git/rebase-merge").exists(), tmp.path().join(".git/rebase-apply").exists());
+        let submitted = press(&mut server, 8, &todo, "ctrl+s", 0);
+        assert!(submitted["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "message" && e["text"].as_str().unwrap().contains("prepared rebase message editing is not supported yet")), "{submitted}");
+        assert_eq!((tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["for-each-ref", "--format=%(refname) %(objectname)"]), std::fs::read(tmp.path().join(".git/index")).unwrap(), std::fs::read(tmp.path().join("one")).ok(), std::fs::read(tmp.path().join("two")).ok(), tmp.path().join(".git/rebase-merge").exists(), tmp.path().join(".git/rebase-apply").exists()), before);
+        let retained = server.recv();
+        assert_eq!(retained["method"], "view/render"); assert_eq!(retained["params"]["viewId"], todo);
+        assert!(retained["params"]["text"][action_line as usize].as_str().unwrap().contains(label), "{retained}");
+        assert!(retained["params"]["text"][1 - action_line as usize].as_str().unwrap().contains("pick"), "{retained}");
+        shutdown_and_exit(&mut server); assert!(server.finish(Duration::from_secs(10)).success());
+    }
 }
 
 #[test]
@@ -255,7 +300,7 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
         .commit("two", [("two", "2\n")])
         .build();
     let base = tmp.git(&["rev-parse", "HEAD~2"]).trim().to_owned();
-    let mut server = TestServer::spawn(&[("GIT_EDITOR", "true")]);
+    let mut server = TestServer::spawn(&[]);
     assert!(server.initialize_rich(json!({}))["error"].is_null());
     let status = open_view(&mut server, 2, &repo_param(tmp.path()));
     let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
@@ -283,7 +328,7 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
     }
     server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":1,"cursor":{"line":base_line.unwrap(),"column":0}}}));
     let todo = pushed(&server.response_with_id(6)); opened(&mut server, &todo);
-    press(&mut server, 7, &todo, "r", 0); server.recv();
+    press(&mut server, 7, &todo, "e", 0); server.recv();
     press(&mut server, 8, &todo, "J", 0); server.recv();
     press(&mut server, 9, &todo, "d", 2); server.recv();
     tmp.git(&["commit", "--allow-empty", "-m", "external"]);
@@ -297,7 +342,7 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
     assert_eq!(retained["method"], "view/render");
     assert_eq!(retained["params"]["viewId"], todo);
     assert_eq!(retained["params"]["text"].as_array().unwrap().len(), 2, "{retained}");
-    assert!(retained["params"]["text"][1].as_str().unwrap().contains("reword"), "{retained}");
+    assert!(retained["params"]["text"][1].as_str().unwrap().contains("edit"), "{retained}");
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":todo,"version":retained["params"]["version"]}}));
     for (line, revision) in [(0, "HEAD~1"), (1, "HEAD~2")] {
         let id = 20 + line as i64;
