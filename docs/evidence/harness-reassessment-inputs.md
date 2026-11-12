@@ -1,6 +1,7 @@
 # Harness and client-abstraction evidence (A–E)
 
 > Historical evidence only. Prior visual reports quoted below are not current acceptance. Current evidence policy: [AGENTS.md no-vision policy](../../AGENTS.md#working-conventions).
+> Historical command paths are normalized below; evidence was not rerun.
 
 Scope: read-only source/evidence inventory. Paths and line numbers refer to this
 checkout. “Implemented” below means present in source, not proof of a particular

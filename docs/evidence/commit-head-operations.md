@@ -1,6 +1,7 @@
 # Magit HEAD-edit operations: source evidence
 
 > Historical evidence only. Prior visual reports below are not current acceptance. Current evidence policy: [AGENTS.md no-vision policy](../../AGENTS.md#working-conventions).
+> Historical command paths are normalized below; evidence was not rerun.
 
 Source checked 2026-10-29 against Magit
 [`4031049049b23785268497ff49eed0690f1ce85f`](https://github.com/magit/magit/commit/4031049049b23785268497ff49eed0690f1ce85f),
@@ -188,7 +189,7 @@ remaining phase gates are still required. No full `make test` success is claimed
 The exact ticket command exited 0:
 
 ```sh
-MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
+MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
 ```
 
 Retained evidence: `/tmp/opencode/vscode-review-tAX9dE/`, especially
@@ -307,7 +308,7 @@ gate were not weakened or modified.
 The exact ticket command exited **0**:
 
 ```sh
-cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
+cargo build --release && scripts/ui run tests/ui/scenarios/commit-head-operations.scn && MAGIT_VSCODE_BIN=$(command -v codium) MAGIT_VSCODE_HEAD_ONLY=1 npm --prefix clients/vscode run test:e2e && git diff --check
 ```
 
 Neovim reported `1 PASS, 0 XFAIL, 0 FAIL` across standard/vim and 100x30/80x24.

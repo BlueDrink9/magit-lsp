@@ -1,6 +1,7 @@
 # R-EDIT-REAL step-0 native client spike — 2026-10-29
 
 > Historical evidence only. Visual observations below are prior reports, not current text-based acceptance. Current evidence policy: [AGENTS.md no-vision policy](../../AGENTS.md#working-conventions).
+> Historical command paths are normalized below; evidence was not rerun.
 
 ## Current verdict: scoped lifecycle observations PASS; parent acceptance incomplete
 
@@ -19,7 +20,7 @@ idempotency and parent acceptance remain pending.
 Executed successfully (exit 0):
 
 ```sh
-MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs --lifecycle && git diff --check
+MAGIT_VSCODE_BIN=$(command -v codium) node clients/vscode/test/e2e/real-file-spike.mjs --lifecycle && git diff --check
 ```
 
 Codium `1.140.06880`, commit `807ba2d6075c29587f884698cd7370c81ab0724c`,
@@ -85,7 +86,7 @@ gate: failing `didClose` alone does not block the optional VSCode tab observer.
 Executed successfully (exit 0, including diff check):
 
 ```sh
-MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
+MAGIT_VSCODE_BIN=$(command -v codium) node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
 ```
 
 Retained verified extension-test host: `/tmp/opencode/real-file-vscode-XSt31I/`.
@@ -164,7 +165,7 @@ LuaJIT `2.1.1785763465`; tmux `3.8`; Python `3.14.8`; Node `v24.21.0`;
 Git `2.56.0`. Project `vscode-languageclient` `9.0.1` is loaded by absolute module path.
 
 ```sh
-MAGIT_VSCODE_BIN=/home/william/.nix-profile/bin/codium node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
+MAGIT_VSCODE_BIN=$(command -v codium) node clients/vscode/test/e2e/real-file-spike.mjs && git diff --check
 python3 tests/spikes/run_real_file_nvim.py
 git diff --check
 ```
@@ -185,7 +186,7 @@ phase. The second phase intentionally omits only the test path to allow native
 dialogs. Neovim is launched by an owned 100x30 tmux server with:
 
 ```sh
-nvim -u /home/william/src/magit-lsp/tests/spikes/real_file_nvim.lua --listen <unique-evidence-dir>/nvim.sock
+nvim -u tests/spikes/real_file_nvim.lua --listen <unique-evidence-dir>/nvim.sock
 ```
 
 Environment supplies the fixture path, evidence directory and project root.
