@@ -11,6 +11,7 @@ pub mod docstore;
 pub mod editor;
 pub mod errors;
 pub mod git;
+pub mod instant_rebase;
 pub mod keyhandler;
 pub mod keymap;
 pub mod keys;

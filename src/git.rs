@@ -403,6 +403,12 @@ pub struct GitRepo {
     common_dir: PathBuf,
 }
 
+/// Exact staged state owned by a prepared instant autosquash operation.
+pub(crate) struct InstantRebaseState {
+    pub index: String,
+    pub staged_patch: String,
+}
+
 /// Own and remove one create-new rebase todo lock.
 struct RebaseTodoLock { path: PathBuf, file: std::fs::File }
 
@@ -850,6 +856,39 @@ impl GitRepo {
         let index = format!("{:x}", Sha256::digest(&bytes));
         let worktree = self.run(&["diff", "--binary", "HEAD", "--"])?;
         Ok((index, worktree))
+    }
+
+    /// Capture exact staged state after refusing repository state an instant rebase cannot own.
+    pub(crate) fn instant_rebase_preconditions(&self) -> Result<InstantRebaseState> {
+        if self.git_dir.join("rebase-merge").exists()
+            || self.git_dir.join("rebase-apply").exists()
+            || self.git_dir.join("sequencer").exists()
+            || ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
+                .iter()
+                .any(|name| self.git_dir.join(name).exists())
+        {
+            return Err(Error::new("cannot prepare instant autosquash while a Git operation is in progress"));
+        }
+        let status = self.status_listing()?;
+        if !status.untracked.is_empty() {
+            return Err(Error::new("cannot prepare instant autosquash with untracked files"));
+        }
+        if !status.unstaged.is_empty() {
+            return Err(Error::new("cannot prepare instant autosquash with tracked unstaged changes"));
+        }
+        if status.staged.is_empty() {
+            return Err(Error::new("instant autosquash requires a staged change"));
+        }
+        let staged_patch = self.run(&["diff", "--cached", "--binary", "HEAD", "--"])?;
+        if staged_patch.is_empty() {
+            return Err(Error::new("instant autosquash requires a staged change"));
+        }
+        let index = self.run(&["rev-parse", "--git-path", "index"])?;
+        let path = PathBuf::from(index.trim());
+        let path = if path.is_absolute() { path } else { self.root.join(path) };
+        use sha2::{Digest, Sha256};
+        let index = format!("{:x}", Sha256::digest(std::fs::read(path)?));
+        Ok(InstantRebaseState { index, staged_patch })
     }
 
     /// Launch Git's interactive rebase using a validated external todo plan.

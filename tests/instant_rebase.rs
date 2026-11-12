@@ -1,0 +1,148 @@
+mod common;
+
+use common::{git, write};
+use magit_lsp::git::GitRepo;
+use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority};
+use std::path::Path;
+use tempfile::TempDir;
+
+fn repo() -> (TempDir, GitRepo, Vec<String>) {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    let mut ids = Vec::new();
+    for value in ["zero\n", "one\n", "two\n", "three\n"] {
+        write(&dir.path().join("file"), value);
+        git(dir.path(), &["add", "file"]);
+        git(dir.path(), &["commit", "-m", value.trim()]);
+        ids.push(git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned());
+    }
+    write(&dir.path().join("file"), "three\nstaged\n");
+    git(dir.path(), &["add", "file"]);
+    let repo = GitRepo::open(dir.path()).unwrap();
+    (dir, repo, ids)
+}
+
+fn state(path: &Path) -> (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>) {
+    (
+        git(path, &["rev-parse", "HEAD"]),
+        git(path, &["show-ref"]),
+        git(path, &["status", "--porcelain=v1", "--untracked-files=all"]),
+        std::fs::read(path.join(".git/HEAD")).unwrap(),
+        std::fs::read(path.join(".git/index")).unwrap(),
+        std::fs::read(path.join("file")).unwrap(),
+    )
+}
+
+#[test]
+fn captures_typed_full_oid_authority_and_prepare_validate_discard_are_read_only() {
+    for kind in [InstantAutosquashKind::Fixup, InstantAutosquashKind::Squash] {
+        let (dir, repo, ids) = repo();
+        let before = state(dir.path());
+        let authority = InstantRebaseAuthority::prepare(&repo, &ids[1][..8], kind).unwrap();
+        assert_eq!(authority.kind(), kind);
+        assert_eq!(authority.target(), ids[1]);
+        assert_eq!(authority.base(), ids[0]);
+        assert_eq!(authority.membership(), &ids[1..]);
+        assert!(authority.membership().iter().all(|oid| oid.len() == 40));
+        authority.validate(&repo).unwrap();
+        assert_eq!(state(dir.path()), before);
+        authority.discard();
+        assert_eq!(state(dir.path()), before);
+    }
+}
+
+#[test]
+fn validation_rejects_a_different_repository_without_mutation() {
+    let (other_dir, other_repo, _) = repo();
+    let (dir, primary_repo, ids) = repo();
+    let authority = InstantRebaseAuthority::prepare(&primary_repo, &ids[1], InstantAutosquashKind::Fixup).unwrap();
+    let before = state(dir.path());
+    let other_before = state(other_dir.path());
+    assert!(authority.validate(&other_repo).unwrap_err().to_string().contains("repository identity changed"));
+    assert_eq!(state(dir.path()), before);
+    assert_eq!(state(other_dir.path()), other_before);
+}
+
+#[test]
+fn validation_rejects_stale_head_attachment_index_and_worktree_without_mutation() {
+    for stale in ["head", "attachment", "index", "worktree"] {
+        let (dir, repo, ids) = repo();
+        let authority = InstantRebaseAuthority::prepare(&repo, &ids[1], InstantAutosquashKind::Fixup).unwrap();
+        match stale {
+            "head" => {
+                git(dir.path(), &["commit", "-m", "stale head"]);
+            }
+            "attachment" => {
+                git(dir.path(), &["branch", "side", "HEAD"]);
+                git(dir.path(), &["symbolic-ref", "HEAD", "refs/heads/side"]);
+            }
+            "index" => {
+                write(&dir.path().join("file"), "three\ndifferent staged\n");
+                git(dir.path(), &["add", "file"]);
+            }
+            "worktree" => write(&dir.path().join("file"), "three\nstaged\nunstaged\n"),
+            _ => unreachable!(),
+        }
+        let before = state(dir.path());
+        let error = authority.validate(&repo).unwrap_err().to_string();
+        assert!(error.contains(match stale {
+            "head" => "HEAD changed",
+            "attachment" => "HEAD attachment changed",
+            "index" => "index changed",
+            "worktree" => "tracked unstaged changes",
+            _ => unreachable!(),
+        }), "{error}");
+        assert_eq!(state(dir.path()), before);
+    }
+}
+
+#[test]
+fn preparation_refuses_active_operation_and_empty_staged_change_without_mutation() {
+    for refusal in ["operation", "empty"] {
+        let (dir, repo, ids) = repo();
+        if refusal == "operation" {
+            std::fs::write(dir.path().join(".git/MERGE_HEAD"), format!("{}\n", ids[0])).unwrap();
+        } else {
+            git(dir.path(), &["reset", "--hard", "HEAD"]);
+        }
+        let before = state(dir.path());
+        let error = InstantRebaseAuthority::prepare(&repo, &ids[1], InstantAutosquashKind::Fixup)
+            .unwrap_err().to_string();
+        assert!(error.contains(if refusal == "operation" { "operation is in progress" } else { "requires a staged change" }), "{error}");
+        assert_eq!(state(dir.path()), before);
+    }
+}
+
+#[test]
+fn preparation_refuses_root_nonancestor_and_merge_topology_without_mutation() {
+    let (dir, repo, ids) = repo();
+    let before = state(dir.path());
+    assert!(InstantRebaseAuthority::prepare(&repo, &ids[0], InstantAutosquashKind::Fixup)
+        .unwrap_err().to_string().contains("must have a parent"));
+    assert_eq!(state(dir.path()), before);
+
+    git(dir.path(), &["reset", "--hard", "HEAD"]);
+    git(dir.path(), &["checkout", "-b", "side", &ids[0]]);
+    write(&dir.path().join("side"), "side\n");
+    git(dir.path(), &["add", "side"]);
+    git(dir.path(), &["commit", "-m", "side"]);
+    let side = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    git(dir.path(), &["checkout", "main"]);
+    write(&dir.path().join("file"), "three\nstaged\n");
+    git(dir.path(), &["add", "file"]);
+    let before = state(dir.path());
+    assert!(InstantRebaseAuthority::prepare(&repo, &side, InstantAutosquashKind::Fixup)
+        .unwrap_err().to_string().contains("not an ancestor"));
+    assert_eq!(state(dir.path()), before);
+
+    git(dir.path(), &["reset", "--hard", "HEAD"]);
+    git(dir.path(), &["merge", "--no-ff", "side", "-m", "merge"]);
+    write(&dir.path().join("file"), "three\nmerge staged\n");
+    git(dir.path(), &["add", "file"]);
+    let before = state(dir.path());
+    assert!(InstantRebaseAuthority::prepare(&repo, &ids[1], InstantAutosquashKind::Squash)
+        .unwrap_err().to_string().contains("supported linear history"));
+    assert_eq!(state(dir.path()), before);
+}

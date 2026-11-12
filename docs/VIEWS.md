@@ -22,6 +22,11 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 The paused merge-backend todo editor rejects `update-ref` commands; repositories using `rebase.updateRefs=true` cannot use it. A prepared initial todo is removed after execution starts, including when `edit` pauses Git or replay conflicts; the caller remains usable for refresh, conflict resolution and explicit `rebase.continue` or abort. A started execution failure reports its readable Git effect without restoring the prepared editor or automatically aborting the real operation.
 
 Prepared initial todos may display `reword` and `squash`, but launch rejects those actions: prepared message editing is not supported yet.
+
+Instant fixup/squash preparation supports only a non-root target in the linear
+ancestry of `HEAD`, with staged changes and no tracked unstaged changes,
+untracked files, or active Git operation. Preparation is read-only and binds
+the repository, full target-to-`HEAD` membership, `HEAD` attachment, and exact index.
 | **Merge / conflicts** | `magit-merge` + unmerged | Unmerged section; per-conflict actions | take ours/theirs, mark resolved, open merge tool (client effect `openMergeTool`), continue, abort | R-7.1 |
 | **Sequencer** | `A`, `V` | In-progress cherry-pick/revert | continue, skip, abort | 7 |
 | **Commit message** | with-editor buffer | Native real Git file; companion staged diff, history recall (R-EDIT-HISTORY), trailers and lint remain roadmap | confirm, cancel; planned history prev/next, add trailer | R-EDIT |
