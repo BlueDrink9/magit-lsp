@@ -75,7 +75,7 @@ pub fn definition() -> MenuDef {
                         "rebase.interactive",
                         "interactively",
                         "magit-rebase-interactive",
-                        "R-7.3",
+                        "",
                     ),
                     action(
                         "s",

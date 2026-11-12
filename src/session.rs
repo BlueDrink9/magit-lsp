@@ -3298,6 +3298,18 @@ impl Session {
                     }
                     return Ok(InvokeResult { effects, keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
                 }
+                if operation == SelectionOperation::InitialRebase {
+                    let Some(base) = valid.first().filter(|_| valid.len() == 1).cloned() else {
+                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one rebase base")], ..InvokeResult::empty() });
+                    };
+                    let repo = GitRepo::open(&self.repo_path)?;
+                    let plan = crate::rebase_plan::PreparedRebase::prepare(&repo, &base)?;
+                    self.pending_selections.remove(view_id);
+                    self.views.remove(view_id);
+                    let (descriptor, render) = self.push_view(&caller, ViewKind::RebaseTodo, Placement::Main, Box::new(crate::rebase_todo_view::RebaseTodoView::prepared(repo, plan)))?;
+                    let prepared_id = descriptor.id.clone();
+                    return Ok(InvokeResult { effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::PushView { descriptor }, Effect::FocusView { view_id: prepared_id.clone() }], render: Some(render), keymap: self.keymap_notice(&prepared_id), ..InvokeResult::empty() });
+                }
             }
             return Ok(InvokeResult::empty());
         }

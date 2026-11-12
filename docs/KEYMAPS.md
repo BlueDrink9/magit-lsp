@@ -134,6 +134,9 @@ support is not emitted yet.
 
 ### 5.6 Rebase todo (structured view)
 
+The rebase menu's `i` action (`rebase.interactive`) opens a single-base
+selector; confirming a base opens the prepared initial todo. It does not run Git.
+
 | Command | `standard` | `vim` |
 | --- | --- | --- |
 | `rebase.todo-submit` | `ctrl+s` | `ctrl+s` |

@@ -654,6 +654,12 @@ T005 is complete through its authoritative [completed children](#completed-work)
       - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `97b361e` → `ok: rust`.
     - [ ] **T019.2b — Initial base selection and editor dispatch.** Connect the rebase command, validated single-base selection and prepared editor; cancellation restores a usable caller without repository mutation.
       - test: Menu/selection/key dispatch, invalid selection/factory failure and edited cancellation preserve exact repository state and paused behavior.
+      - Attempts: Two default PARTIALs; selector-request edits exist, confirmation and direct tests remain. Split valid dispatch from cancellation/failure regression coverage. Promote the existing `rebase.interactive` action, not a parallel command or key.
+      - [x] **T019.2b1 — Open the prepared editor from base selection.** Confirm the existing interactive-rebase action's structured single-base selector and open exact prepared rows.
+        - test: Real menu, selector confirmation and full-OID prepared-row membership; registry/menu/keymap suites remain valid.
+        - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test commands --test menus --test keymap"` @ `817e314` → `ok: rust`.
+      - [ ] **T019.2b2 — Initial editor cancellation and failure safety.** Exercise edited key cancellation, invalid selection and preparation failure, with exact repository and usable-caller checks.
+        - test: Preserve HEAD/index/worktree/refs/operation state; paused editor regressions pass unchanged.
   - [ ] **T019.3 — Execute the edited initial rebase plan.** Add the verified launch adapter, submission revalidation and readable execution/conflict handling.
     - test: Exact repository histories prove exclusive-base execution, edited order/actions, conflict, continue and abort; stale submission preserves editor and repository.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.

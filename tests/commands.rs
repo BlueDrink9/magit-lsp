@@ -369,7 +369,7 @@ fn the_registry_lists_every_named_command_once() {
                 let registered = registry()
                     .get(command)
                     .unwrap_or_else(|| panic!("{command} is registered"));
-                if matches!(*command, "commit.fixup" | "rebase.continue" | "rebase.skip" | "rebase.abort") {
+                if matches!(*command, "commit.fixup" | "rebase.continue" | "rebase.skip" | "rebase.abort" | "rebase.interactive") {
                     assert_eq!(registered.status, CommandStatus::Implemented);
                     continue;
                 }

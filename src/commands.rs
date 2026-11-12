@@ -206,6 +206,8 @@ pub enum SelectionOperation {
     PickCommit,
     /// Create a fixup commit for one selected commit.
     FixupCommit,
+    /// Use one selected commit as the exclusive base for an initial rebase.
+    InitialRebase,
 }
 
 /// Request to open a commit-selection view for a typed operation.
@@ -929,6 +931,7 @@ fn build() -> Registry {
         Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
         Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
         Command { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
+        Command { id: "rebase.interactive", scope: Scope::MenuAction, doc: "Select base and edit initial rebase plan", status: CommandStatus::Implemented, run: rebase_initial, effects: &[] },
         Command { id: "rebase.todo-set-action", scope: Scope::RebaseTodo, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
         Command { id: "rebase.todo-move-before", scope: Scope::RebaseTodo, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
         Command { id: "rebase.todo-submit", scope: Scope::RebaseTodo, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
@@ -1152,6 +1155,22 @@ fn rebase_abort(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 fn rebase_edit_todo(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome { open_view: Some((ViewKind::RebaseTodo, Placement::Main)), ..Default::default() })
+}
+
+fn rebase_initial(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        open_selection: Some(SelectionRequest {
+            options: crate::git::GitLogOptions::default(),
+            settings: CommitSelection {
+                purpose: "initial rebase base".to_string(),
+                prompt: "Select the exclusive rebase base".to_string(),
+                multi: false,
+                allow_free_text: false,
+            },
+            operation: SelectionOperation::InitialRebase,
+        }),
+        ..Default::default()
+    })
 }
 
 fn rebase_todo_set_action(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {

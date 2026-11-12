@@ -1,6 +1,7 @@
 mod common;
 
-use common::{git, write};
+use common::{git, write, TestSession, STATUS_VIEWPORT};
+use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_plan::PreparedRebase;
 use magit_lsp::rebase_todo::TodoAction;
@@ -58,6 +59,26 @@ fn prepared_todo_view_edits_in_memory_and_cannot_save_paused_file() {
     assert!(view.save().unwrap_err().to_string().contains("cannot be saved"));
     drop(view);
     assert_eq!(state(dir.path()), before);
+}
+
+#[test]
+fn interactive_rebase_confirmation_opens_prepared_rows_for_selected_base() {
+    let (dir, repo, base) = repo();
+    let expected = PreparedRebase::prepare(&repo, &base).unwrap().entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r");
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Menu("menu.rebase".to_string()));
+    let selected = test.press("i");
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Log, "effects: {:?}", selected.effects);
+    test.ack();
+    let selected_base = test.tree().line_nodes.iter().position(|line| test.tree().node(&line.node).is_some_and(|node| node.kind == magit_lsp::tree::NodeKind::Commit && node.commit.as_deref() == Some(base.as_str()))).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line: selected_base, column: 0 });
+    let confirmed = test.invoke_here("common.confirm");
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::RebaseTodo, "effects: {:?}", confirmed.effects);
+    let rows = test.tree().nodes.iter().filter_map(|node| node.commit.clone()).collect::<Vec<_>>();
+    assert_eq!(rows, expected);
+    assert!(rows.iter().all(|oid| oid.len() == 40));
 }
 
 #[test]
