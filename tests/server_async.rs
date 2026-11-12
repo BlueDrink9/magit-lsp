@@ -14,6 +14,50 @@ fn repo_param(path: &std::path::Path) -> Value {
     json!(path.to_string_lossy())
 }
 
+#[test]
+fn opening_multirow_rebase_todo_batches_object_resolution_once() {
+    for rows in [2, 5] {
+        let mut fixture = RepoFixture::new().commit("root", [("f.txt", "0\n")]);
+        for index in 1..=rows + 1 {
+            fixture = fixture.commit(&format!("commit-{index}"), [("f.txt", format!("{index}\n"))]);
+        }
+        let (tmp, _) = fixture.build();
+        let pause = Command::new("git")
+            .args(["rebase", "-i", &format!("HEAD~{}", rows + 1)])
+            .current_dir(tmp.path())
+            .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'")
+            .output()
+            .unwrap();
+        assert!(pause.status.success(), "{}", String::from_utf8_lossy(&pause.stderr));
+        let trace = tmp.path().join("trace.jsonl");
+        let trace_path = trace.to_str().unwrap();
+        let mut server = TestServer::spawn(&[("GIT_TRACE2_EVENT", trace_path)]);
+        assert!(server.initialize(json!({})) ["error"].is_null());
+        server.send(json!({"jsonrpc":"2.0","id":2,"method":"view/open",
+            "params":{"kind":"rebase-todo","args":{"repo_path":repo_param(tmp.path())},
+            "viewport":{"cols":80,"rows":24}}}));
+        let opened = server.response_with_id(2);
+        assert!(opened["error"].is_null(), "{opened}");
+        let render = server.recv();
+        assert_eq!(render["method"], "view/render");
+        server.recv();
+        server.shutdown_and_exit();
+        assert!(server.finish(Duration::from_secs(10)).success());
+        let events = read(&trace);
+        let starts = events.lines().filter_map(|line| {
+            let event: Value = serde_json::from_str(line).unwrap();
+            (event["event"] == "start").then_some(event)
+        });
+        let count = starts.filter(|event| {
+            event["argv"].as_array().is_some_and(|argv| {
+                argv.iter().any(|arg| arg == "cat-file")
+                    && argv.iter().any(|arg| arg.as_str().is_some_and(|arg| arg.starts_with("--batch-check")))
+            })
+        }).count();
+        assert_eq!(count, 1, "{rows} rows: {events}");
+    }
+}
+
 fn limited_rich(effects: Value, prompts: Value) -> Value {
     json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full",
