@@ -266,22 +266,72 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
             if message["method"] == "view/render" { render = true; version = message["params"]["version"].as_u64(); }
             keymap |= message["method"] == "view/keymap";
         }}
-        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version.unwrap()}}));
+        let version = version.unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version}}));
+        version
     };
     let menu = pushed(&press(&mut server, 3, &status, "c", 0)); opened(&mut server, &menu);
-    let selector = pushed(&press(&mut server, 4, &menu, "F", 0)); opened(&mut server, &selector);
+    let selector = pushed(&press(&mut server, 4, &menu, "F", 0));
+    let selector_version = opened(&mut server, &selector);
     let mut target_line = None;
     for line in 0..100 { server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":selector,"command":"common.copy-value","version":1,"cursor":{"line":line,"column":0}}}));
         if server.response_with_id(5)["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "clipboard" && e["text"] == target) { target_line = Some(line); break; }
     }
-    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":1,"cursor":{"line":target_line.expect("target oid"),"column":0}}}));
-    assert!(server.response_with_id(6)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":selector_version,"cursor":{"line":target_line.expect("target oid"),"column":0}}}));
+    let selected = server.response_with_id(6);
+    assert!(selected["error"].is_null(), "{selected}");
+    assert_eq!(selected["result"]["effects"], json!([
+        {"type":"popView","viewId":selector},
+        {"type":"focusView","viewId":status}
+    ]), "{selected}");
+    let mut pending = std::mem::take(&mut server.notifications).into_iter();
+    let mut caller = None;
+    let mut stopped = None;
     let deadline = Instant::now() + Duration::from_secs(20);
-    while tmp.git(&["status", "--porcelain"]) != "UU file\n" {
-        assert!(Instant::now() < deadline, "instant rebase did not stop in bounded wait");
-        thread::sleep(Duration::from_millis(10));
+    let mut actual = Vec::new();
+    let mut render_versions = Vec::new();
+    let readiness_diagnostics = |actual: &[Value], render_versions: &[u64]| format!(
+        "confirm={selected}; selected_oid={target}; selector_ack_version={selector_version}; actual={actual:?}; render_versions={render_versions:?}; HEAD={}; status={}; unmerged={}; rebase_merge={}; rebase_apply={}",
+        tmp.git(&["rev-parse", "HEAD"]).trim(),
+        tmp.git(&["status", "--porcelain"]),
+        tmp.git(&["diff", "--name-only", "--diff-filter=U"]),
+        tmp.path().join(".git/rebase-merge").exists(),
+        tmp.path().join(".git/rebase-apply").exists(),
+    );
+    while caller.is_none() || stopped.is_none() {
+        assert!(Instant::now() < deadline, "{}", readiness_diagnostics(&actual, &render_versions));
+        let message = if let Some(message) = pending.next() {
+            message
+        } else {
+            server.recv_timeout = deadline.saturating_duration_since(Instant::now());
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv()))
+                .unwrap_or_else(|_| panic!("{}", readiness_diagnostics(&actual, &render_versions)))
+        };
+        actual.push(message.clone());
+        if message["method"] == "view/render" {
+            if let Some(version) = message["params"]["version"].as_u64() { render_versions.push(version); }
+        }
+        if message["method"] == "view/render"
+            && message["params"]["viewId"] == status
+        {
+            caller = Some(message.clone());
+        }
+        if message["method"] == "view/effects"
+            && message["params"]["effects"].as_array().is_some_and(|effects| effects.iter().any(|effect|
+                effect["type"] == "message"
+                    && effect["text"].as_str().is_some_and(|text| text.starts_with("Instant autosquash stopped during autosquash; marker "))))
+        {
+            stopped = Some(message);
+        }
     }
+    let caller = caller.unwrap();
+    let stopped = stopped.unwrap();
+    assert!(stopped["params"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["level"] == "error"), "{stopped}");
     let marker = tmp.git(&["rev-parse", "refs/heads/main"]).trim().to_owned();
+    let stopped_text = stopped["params"]["effects"].as_array().unwrap().iter()
+        .find(|effect| effect["type"] == "message" && effect["level"] == "error").unwrap()["text"].as_str().unwrap();
+    assert!(stopped_text.starts_with(&format!("Instant autosquash stopped during autosquash; marker {marker} retained: ")), "{stopped_text}");
     let marker_tree = tmp.git(&["rev-parse", &format!("{marker}^{{tree}}")]).trim().to_owned();
     assert_eq!(tmp.git(&["rev-parse", &format!("{marker}^")]).trim(), marker_parent);
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), target);
@@ -289,7 +339,6 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     assert!(std::fs::read_to_string(tmp.path().join("file")).unwrap().contains("<<<<<<<"));
     assert_eq!(tmp.git(&["rebase", "--show-current-patch"]).contains("fixup! selected target"), true);
     assert_ne!(marker, prior_head);
-    let caller = loop { let message = server.recv(); if message["method"] == "view/render" && message["params"]["viewId"] == status { break message; } };
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":status,"version":caller["params"]["version"]}}));
     server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/invoke","params":{"viewId":status,"command":"rebase.abort","version":caller["params"]["version"]}}));
     let aborted = server.response_with_id(7);
@@ -494,6 +543,88 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
     assert!(server.response_with_id(8)["error"].is_null());
     shutdown_and_exit(&mut server);
     assert!(server.finish(Duration::from_secs(10)).success());
+}
+
+#[test]
+fn instant_squash_registered_editor_abort_retains_marker_and_releases_worker() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("root subject", [("root.txt", "root\n")])
+        .commit("base subject", [("base.txt", "base\n")])
+        .commit("selected target subject", [("target.txt", "base\n")])
+        .commit("newer head subject", [("newer.txt", "head\n")])
+        .staged_file("fix.txt", "fixed\n")
+        .build();
+    let target = tmp.git(&["rev-parse", "HEAD~1"]).trim().to_owned();
+    let original_head = tmp.git(&["rev-parse", "HEAD"]);
+    let mut server = TestServer::spawn(&[]);
+    server.auto_respond_to_progress_create();
+    assert!(server.initialize_rich(json!({"window":{"workDoneProgress":true}}))["error"].is_null());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+    let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{"viewId":view,"version":1,"key":key,"editorMode":"normal","cursor":{"line":line,"column":0}}}));
+        server.response_with_id(id)
+    };
+    let pushed = |response: &Value| response["result"]["effects"].as_array().unwrap().iter()
+        .find(|effect| effect["type"] == "pushView").unwrap()["descriptor"]["id"].as_str().unwrap().to_owned();
+    let opened = |server: &mut TestServer, view: &str| {
+        let mut rendered = false; let mut keymap = false; let mut version = None;
+        while !rendered || !keymap { let message = server.recv(); if message["params"]["viewId"] == view {
+            if message["method"] == "view/render" { rendered = true; version = message["params"]["version"].as_u64(); }
+            keymap |= message["method"] == "view/keymap";
+        }}
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":view,"version":version.unwrap()}}));
+    };
+    let menu = pushed(&press(&mut server, 3, &status, "c", 0)); opened(&mut server, &menu);
+    let selector = pushed(&press(&mut server, 4, &menu, "S", 0)); opened(&mut server, &selector);
+    let mut line = None;
+    for candidate in 0..100 { server.send(json!({"jsonrpc":"2.0","id":5,"method":"view/invoke","params":{"viewId":selector,"command":"common.copy-value","version":1,"cursor":{"line":candidate,"column":0}}}));
+        if server.response_with_id(5)["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "clipboard" && e["text"] == target) { line = Some(candidate); break; }
+    }
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{"viewId":selector,"command":"common.confirm","version":1,"cursor":{"line":line.expect("selected target"),"column":0}}}));
+    assert!(server.response_with_id(6)["error"].is_null());
+    let edit = loop {
+        let message = server.recv();
+        if message["method"] == "view/effects" {
+            if let Some(edit) = message["params"]["effects"].as_array().unwrap().iter().find(|e| e["type"] == "editDocument") {
+                break edit.clone();
+            }
+        }
+    };
+    let marker = tmp.git(&["rev-parse", "refs/heads/main"]);
+    let stopped_head = tmp.git(&["rev-parse", "HEAD"]);
+    let stopped_index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}));
+    server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/invoke","params":{"viewId":status,"command":"common.cancel","args":{"runId":edit["runId"]}}}));
+    let mut saw_end = false;
+    let mut cancel_response = None;
+    let mut stopped_effect = None;
+    while cancel_response.is_none() || stopped_effect.is_none() {
+        let message = server.recv();
+        if message["method"] == "$/progress" && message["params"]["value"]["kind"] == "end" { saw_end = true; }
+        if message["id"] == 7 { cancel_response = Some(message.clone()); }
+        if message["method"] == "view/effects" { stopped_effect = Some(message); }
+    }
+    assert!(cancel_response.unwrap()["result"]["effects"].as_array().unwrap().is_empty());
+    assert!(stopped_effect.unwrap()["params"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "message"));
+    while !saw_end {
+        let message = server.recv();
+        if message["method"] == "$/progress" && message["params"]["value"]["kind"] == "end" { saw_end = true; }
+    }
+    assert!(saw_end, "progress ended after registered editor abort");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), stopped_head);
+    assert_eq!(tmp.git(&["rev-parse", "refs/heads/main"]).trim(), marker.trim());
+    assert_eq!(tmp.git(&["rev-parse", &format!("{}^", marker.trim())]).trim(), original_head.trim());
+    assert!(tmp.path().join(".git/rebase-merge").exists());
+    assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), stopped_index);
+    assert_eq!(std::fs::read_to_string(tmp.path().join("fix.txt")).unwrap(), "fixed\n");
+    server.send(json!({"jsonrpc":"2.0","id":9,"method":"workspace/executeCommand","params":{"command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],"uri":edit["uri"],"version":1,"source":"synchronized"}]}}));
+    assert!(server.response_with_id(9)["error"].is_object(), "aborted editor run cannot complete");
+    server.send(json!({"jsonrpc":"2.0","id":10,"method":"view/invoke","params":{"viewId":status,"command":"rebase.abort"}}));
+    assert!(server.response_with_id(10)["error"].is_null(), "normal rebase abort works after editor cancellation");
+    assert!(!tmp.path().join(".git/rebase-merge").exists());
+    server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/invoke","params":{"viewId":status,"command":"common.refresh"}}));
+    assert!(server.response_with_id(8)["error"].is_null(), "caller refresh after cancellation and abort");
+    shutdown_and_exit(&mut server); assert!(server.finish(Duration::from_secs(10)).success());
 }
 
 #[test]
