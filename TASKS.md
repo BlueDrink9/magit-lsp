@@ -227,9 +227,10 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
   - Verification: `make test-rust FILTER="--test examples"`.
   - Verified: `make test-rust FILTER="--test examples"` @ `e30a080` → passed; real-server replay matches both recorded examples and status frames omit the 11 `rebase.todo-*` actions while retaining `rebase.edit-todo`.
 
-- [ ] **Refresh snapshots after todo scope correction.** Regenerate intentional manifest/keybinding changes caused by `e30a080` and inspect only causal scope changes.
+- [x] **Refresh snapshots after todo scope correction.** Regenerate intentional manifest/keybinding changes caused by `e30a080` and inspect only causal scope changes.
   - check: generated snapshots accurately represent editor-scoped todo commands; manifest/parity checks pass unchanged.
   - Verification: `make update-snapshots && make test-rust FILTER="--test manifest --test parity"`.
+  - Verified: `make update-snapshots && make test-rust FILTER="--test manifest --test parity"` @ `30ba485` → ok: update-snapshots; ok: rust. Regeneration produced no snapshot diff; generated files already match corrected scopes. No generated-snapshot commit needed.
 
 - [x] **Reconcile todo keymap manifests and shortcut policy.** The resumed gate at `8b9f2f6` fails manifest/keybinding snapshots and reports `rebase-todo` `ctrl+s` / `rebase.todo-submit` shadowing a workbench shortcut without an allow entry. Preserve intentional scoped native submit behavior and reconcile the explicit shortcut policy and generated snapshots without weakening checks. Done: containing commit.
   - test: shipped profiles pass shortcut policy and exact manifest/keybinding snapshot assertions with the todo bindings present.
