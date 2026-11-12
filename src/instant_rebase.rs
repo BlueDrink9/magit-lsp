@@ -1,7 +1,22 @@
 //! Captured, read-only authority for a future instant autosquash operation.
 
 use crate::git::GitRepo;
+use crate::rebase_sequence_editor::SequenceEditorPolicy;
 use crate::{Error, Result};
+use std::path::Path;
+
+/// Phase reached while executing a captured instant fixup.
+#[derive(Debug)]
+pub enum InstantFixupOutcome {
+    /// Captured authority became stale before any mutation.
+    Refused(String),
+    /// Git failed to create the marker commit.
+    MarkerFailed(String),
+    /// Marker exists, but autosquash launch or completion failed.
+    RebaseStopped { marker: String, phase: String, error: String },
+    /// Autosquash completed; Git's commit machinery may report a warning.
+    Completed { marker: String, warning: Option<String> },
+}
 
 /// Autosquash operation selected before repository execution begins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +40,32 @@ pub struct InstantRebaseAuthority {
 }
 
 impl InstantRebaseAuthority {
+    /// Execute a captured fixup, retaining every mutation after execution starts.
+    pub fn execute_fixup(&self, repo: &GitRepo, executable: &Path) -> InstantFixupOutcome {
+        if self.kind != InstantAutosquashKind::Fixup {
+            return InstantFixupOutcome::Refused("instant squash execution is not supported".into());
+        }
+        if let Err(error) = self.validate(repo) {
+            return InstantFixupOutcome::Refused(error.to_string());
+        }
+        let target = self.target.clone();
+        let commit = match repo.commit(&["--fixup", &target, "--no-edit"], &[]) {
+            Ok(outcome) => outcome,
+            Err(error) => return InstantFixupOutcome::MarkerFailed(error.to_string()),
+        };
+        let marker = match repo.head_identity() {
+            Ok((head, _)) => head,
+            Err(error) => return InstantFixupOutcome::RebaseStopped { marker: String::new(), phase: "marker verification".into(), error: error.to_string() },
+        };
+        if let Err(error) = repo.verify_fixup_marker(&marker, &self.target, &self.head) {
+            return InstantFixupOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
+        }
+        match repo.launch_interactive_rebase(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable) {
+            Ok(()) => InstantFixupOutcome::Completed { marker, warning: commit.warning },
+            Err(error) => InstantFixupOutcome::RebaseStopped { marker, phase: "autosquash".into(), error: error.to_string() },
+        }
+    }
+
     /// Capture a full-OID target and exact staged repository state without mutation.
     pub fn prepare(repo: &GitRepo, target: &str, kind: InstantAutosquashKind) -> Result<Self> {
         let repository = repo.repository_identity()?;

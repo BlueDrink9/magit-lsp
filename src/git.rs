@@ -913,6 +913,17 @@ impl GitRepo {
         Ok(())
     }
 
+    /// Verify marker identity and its expected captured HEAD parent.
+    pub fn verify_fixup_marker(&self, marker: &str, target: &str, expected_parent: &str) -> Result<()> {
+        let head = self.run(&["rev-parse", "HEAD"])?;
+        let parent = self.run(&["rev-parse", &format!("{marker}^")])?;
+        let subject = self.run(&["show", "-s", "--format=%s", marker])?;
+        if head.trim() != marker || parent.trim() != expected_parent || !subject.starts_with(&format!("fixup! {}", self.commit_subject(target)?)) {
+            return Err(Error::new("created fixup marker does not match captured target and HEAD"));
+        }
+        Ok(())
+    }
+
     /// Return full commit IDs after an exclusive base, rejecting non-linear history.
     pub fn linear_replay_membership(&self, base: &str, head: &str) -> Result<Vec<String>> {
         let ancestry = self.run(&["merge-base", "--is-ancestor", base, head]);
