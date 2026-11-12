@@ -137,7 +137,9 @@ fn commit_arguments_are_typed_and_invalid_input_never_stages() {
             "options": {"=D": "2001-02-03T04:05:06+00:00", "=S": "", "=c": "HEAD"}
         }),
     );
-    let CommitOperation::Create(options) = result.commit.expect("typed operation") else {
+    let magit_lsp::git::RepositoryOperation::Commit(CommitOperation::Create(options)) =
+        result.commit.expect("typed operation")
+    else {
         panic!("expected create operation")
     };
     assert!(
@@ -190,6 +192,9 @@ fn captured_reuse_and_reedit_options_have_real_git_effects() {
         let operation = test.invoke_args("commit.create", json!({
             "switches": if reset { vec!["-e", "-R"] } else { vec!["-e"] }, "options": {(key): "HEAD"}
         })).commit.expect("allow-empty bypasses clean guard");
+        let magit_lsp::git::RepositoryOperation::Commit(operation) = operation else {
+            panic!("expected commit operation")
+        };
         let argv = operation.argv();
         let repo = magit_lsp::git::GitRepo::open(tmp.path()).unwrap();
         repo.commit(
@@ -369,7 +374,7 @@ fn the_registry_lists_every_named_command_once() {
                 let registered = registry()
                     .get(command)
                     .unwrap_or_else(|| panic!("{command} is registered"));
-                if matches!(*command, "commit.fixup" | "rebase.continue" | "rebase.skip" | "rebase.abort" | "rebase.interactive") {
+                if matches!(*command, "commit.fixup" | "commit.instant-fixup" | "commit.instant-squash" | "rebase.continue" | "rebase.skip" | "rebase.abort" | "rebase.interactive") {
                     assert_eq!(registered.status, CommandStatus::Implemented);
                     continue;
                 }

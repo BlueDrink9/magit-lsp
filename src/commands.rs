@@ -206,6 +206,8 @@ pub enum SelectionOperation {
     PickCommit,
     /// Create a fixup commit for one selected commit.
     FixupCommit,
+    /// Run an instant autosquash for one selected commit.
+    InstantAutosquash(crate::instant_rebase::InstantAutosquashKind),
     /// Use one selected commit as the exclusive base for an initial rebase.
     InitialRebase,
 }
@@ -974,6 +976,22 @@ fn build() -> Registry {
             run: commit_fixup,
             effects: &[],
         },
+        Command {
+            id: "commit.instant-fixup",
+            scope: Scope::MenuAction,
+            doc: "Instantly fix up a selected commit",
+            status: CommandStatus::Implemented,
+            run: commit_instant_fixup,
+            effects: &[],
+        },
+        Command {
+            id: "commit.instant-squash",
+            scope: Scope::MenuAction,
+            doc: "Instantly squash into a selected commit",
+            status: CommandStatus::Implemented,
+            run: commit_instant_squash,
+            effects: &[],
+        },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
         Command {
@@ -1301,6 +1319,36 @@ fn commit_fixup(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
                 allow_free_text: false,
             },
             operation: SelectionOperation::FixupCommit,
+        }),
+        ..Default::default()
+    })
+}
+
+fn commit_instant_fixup(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_instant_autosquash(crate::instant_rebase::InstantAutosquashKind::Fixup)
+}
+
+fn commit_instant_squash(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    commit_instant_autosquash(crate::instant_rebase::InstantAutosquashKind::Squash)
+}
+
+fn commit_instant_autosquash(
+    kind: crate::instant_rebase::InstantAutosquashKind,
+) -> Result<CommandOutcome> {
+    let purpose = match kind {
+        crate::instant_rebase::InstantAutosquashKind::Fixup => "instant fixup",
+        crate::instant_rebase::InstantAutosquashKind::Squash => "instant squash",
+    };
+    Ok(CommandOutcome {
+        open_selection: Some(SelectionRequest {
+            options: crate::session::log_options_from_args(None)?,
+            settings: CommitSelection {
+                purpose: purpose.into(),
+                prompt: format!("Select commit for {purpose}"),
+                multi: false,
+                allow_free_text: false,
+            },
+            operation: SelectionOperation::InstantAutosquash(kind),
         }),
         ..Default::default()
     })

@@ -101,14 +101,14 @@ pub fn definition() -> MenuDef {
                         "commit.instant-fixup",
                         "Instant fixup",
                         "magit-commit-instant-fixup",
-                        "R-4.1",
+                        "",
                     ),
                     action(
                         "S",
                         "commit.instant-squash",
                         "Instant squash",
                         "magit-commit-instant-squash",
-                        "R-4.1",
+                        "",
                     ),
                     action(
                         "R",

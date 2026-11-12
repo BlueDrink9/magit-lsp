@@ -87,7 +87,9 @@ fn head_actions_route_from_both_profile_menus_with_captured_options() {
                 |effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu.id)
             ));
             let RepositoryOperation::Commit(operation) =
-                result.commit.expect("typed HEAD action");
+                result.commit.expect("typed HEAD action") else {
+                panic!("expected commit operation")
+            };
             assert_eq!(operation.argv(), flags);
             assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), TEN_LINES);
             assert_eq!(tmp.git(&["show", ":f.txt"]), "staged\n");

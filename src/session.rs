@@ -3298,6 +3298,24 @@ impl Session {
                     }
                     return Ok(InvokeResult { effects, keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
                 }
+                if let SelectionOperation::InstantAutosquash(kind) = operation {
+                    let Some(oid) = valid.first().filter(|_| valid.len() == 1).cloned() else {
+                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one commit for instant autosquash")], ..InvokeResult::empty() });
+                    };
+                    let repo = GitRepo::open(&self.repo_path)?;
+                    let authority = match crate::instant_rebase::InstantRebaseAuthority::prepare(&repo, &oid, kind) {
+                        Ok(authority) => authority,
+                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Error, error.to_string())], ..InvokeResult::empty() }),
+                    };
+                    self.pending_selections.remove(view_id);
+                    self.views.remove(view_id);
+                    return Ok(InvokeResult {
+                        effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }],
+                        keymap: self.keymap_notice(&caller),
+                        commit: Some(crate::git::RepositoryOperation::InstantRebase(authority)),
+                        ..InvokeResult::empty()
+                    });
+                }
                 if operation == SelectionOperation::InitialRebase {
                     let Some(base) = valid.first().filter(|_| valid.len() == 1).cloned() else {
                         return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one rebase base")], ..InvokeResult::empty() });
