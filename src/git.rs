@@ -205,6 +205,13 @@ pub enum CommitOperation {
     Reword(CommitOptions),
 }
 
+/// A captured repository operation ready for deferred execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepositoryOperation {
+    /// Run a commit operation through the registered editor bridge.
+    Commit(CommitOperation),
+}
+
 /// Typed commit action selected from the commit menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommitKind {

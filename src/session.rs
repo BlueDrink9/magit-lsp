@@ -660,8 +660,8 @@ pub struct InvokeResult {
     pub keymap: Option<ViewKeymapParams>,
     /// Initial renders and keymaps for views the effects pushed or opened.
     pub opened: Vec<(ViewRender, Option<ViewKeymapParams>)>,
-    /// Captured operation to run on the repository's detached commit worker.
-    pub commit: Option<crate::git::CommitOperation>,
+    /// Captured operation to run on the repository's detached worker.
+    pub commit: Option<crate::git::RepositoryOperation>,
 }
 
 impl InvokeResult {

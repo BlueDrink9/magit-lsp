@@ -9,7 +9,7 @@ mod common;
 
 use common::*;
 use magit_lsp::config::Profile;
-use magit_lsp::git::{CommitOperation, CommitOptions};
+use magit_lsp::git::{CommitOperation, CommitOptions, RepositoryOperation};
 use magit_lsp::protocol::{Effect, MessageLevel, PromptKind};
 use magit_lsp::session::InvokeResult;
 
@@ -86,6 +86,12 @@ fn message_effects(outcome: &InvokeResult) -> Vec<(&MessageLevel, &str, Option<&
         .collect()
 }
 
+fn commit_operation(outcome: InvokeResult) -> Option<CommitOperation> {
+    outcome.commit.map(|operation| match operation {
+        RepositoryOperation::Commit(operation) => operation,
+    })
+}
+
 #[test]
 fn a_clean_tree_reports_nothing_to_commit_without_git() {
     let (tmp, _repo) = init_repo();
@@ -136,7 +142,9 @@ fn unstaged_changes_prompt_then_stage_and_commit() {
     );
     assert_eq!(
         outcome.commit,
-        Some(CommitOperation::Create(CommitOptions::default())),
+        Some(RepositoryOperation::Commit(CommitOperation::Create(
+            CommitOptions::default(),
+        ))),
         "the commit continues after staging"
     );
     assert_eq!(
@@ -201,7 +209,9 @@ fn staged_changes_commit_without_a_prompt() {
     );
     assert_eq!(
         outcome.commit,
-        Some(CommitOperation::Create(CommitOptions::default())),
+        Some(RepositoryOperation::Commit(CommitOperation::Create(
+            CommitOptions::default(),
+        ))),
         "the commit worker is started"
     );
 }
@@ -279,7 +289,7 @@ fn reset_author_head_edits_start_without_staging_or_a_prompt() {
                 "commit.extend" => vec!["--amend", "--no-edit", "--reset-author"],
                 _ => vec!["--amend", "--only", "--allow-empty", "--reset-author"],
             };
-            assert_eq!(result.commit.expect(command).argv(), flags);
+            assert_eq!(commit_operation(result).expect(command).argv(), flags);
             assert!(test.ui().requests().is_empty(), "{command}/{unstaged}");
             assert_eq!(tmp.git(&["ls-files", "--stage"]), index);
             assert_eq!(tmp.git(&["status", "--porcelain"]), status);
@@ -351,7 +361,7 @@ fn published_head_confirmation_captures_options_and_revalidates_state() {
                 panic!("completed");
             };
             if change == "accept" {
-                let operation = result.commit.expect("accepted captured operation");
+                let operation = commit_operation(result).expect("accepted captured operation");
                 let mut expected = match command {
                     "commit.amend" => vec!["--amend"],
                     "commit.extend" => vec!["--amend", "--no-edit"],
@@ -424,7 +434,7 @@ fn extend_clean_guard_and_tracked_all_prompt_never_stage_implicitly() {
         };
         if change == "accept" {
             assert_eq!(
-                result.commit.unwrap().argv(),
+                commit_operation(result).unwrap().argv(),
                 ["--amend", "--no-edit", "--all"]
             );
         } else {

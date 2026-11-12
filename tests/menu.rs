@@ -22,7 +22,7 @@ fn menu_switch(test: &TestSession, view: &str, key: &str) -> bool {
 
 #[test]
 fn commit_options_survive_menu_pop_and_staging_prompt() {
-    use magit_lsp::git::CommitOperation;
+    use magit_lsp::git::{CommitOperation, RepositoryOperation};
     for staged in [false, true] {
         let (tmp, _) = RepoFixture::new()
             .commit("init", [("f.txt", TEN_LINES)])
@@ -47,7 +47,7 @@ fn commit_options_survive_menu_pop_and_staging_prompt() {
             .effects
             .iter()
             .any(|effect| matches!(effect, Effect::PopView {view_id} if view_id == &menu.id)));
-        let CommitOperation::Create(options) = result
+        let RepositoryOperation::Commit(CommitOperation::Create(options)) = result
             .commit
             .expect("operation survives ancestor routing and prompt")
         else {
@@ -65,6 +65,7 @@ fn commit_options_survive_menu_pop_and_staging_prompt() {
 
 #[test]
 fn head_actions_route_from_both_profile_menus_with_captured_options() {
+    use magit_lsp::git::RepositoryOperation;
     for profile in [Profile::Vim, Profile::Standard] {
         for (key, flags) in [
             ("a", vec!["--amend", "--no-verify"]),
@@ -85,7 +86,9 @@ fn head_actions_route_from_both_profile_menus_with_captured_options() {
             assert!(result.effects.iter().any(
                 |effect| matches!(effect, Effect::PopView { view_id } if view_id == &menu.id)
             ));
-            assert_eq!(result.commit.expect("typed HEAD action").argv(), flags);
+            let RepositoryOperation::Commit(operation) =
+                result.commit.expect("typed HEAD action");
+            assert_eq!(operation.argv(), flags);
             assert_eq!(tmp.git(&["show", "HEAD:f.txt"]), TEN_LINES);
             assert_eq!(tmp.git(&["show", ":f.txt"]), "staged\n");
         }

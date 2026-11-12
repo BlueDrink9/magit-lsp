@@ -246,9 +246,8 @@ pub struct CommandOutcome {
     pub selected_commits: Option<Vec<String>>,
     /// Close the current view and return to the previous one.
     pub pop: bool,
-    /// Spawn `git commit` on a detached worker once this command returns; the
-    /// editor bridge keeps Git waiting until the client confirms.
-    pub commit: Option<crate::git::CommitOperation>,
+    /// Run a repository operation on a detached worker once this command returns.
+    pub commit: Option<crate::git::RepositoryOperation>,
 }
 
 /// A prepared operation resumed exactly once after the user answers.
@@ -383,7 +382,7 @@ pub fn resume_prompt(
             }
             ctx.info("Committing…");
             Ok(CommandOutcome {
-                commit: Some(operation),
+                commit: Some(crate::git::RepositoryOperation::Commit(operation)),
                 ..Default::default()
             })
         }
@@ -412,7 +411,7 @@ pub fn resume_prompt(
             }
             ctx.info("Committing…");
             Ok(CommandOutcome {
-                commit: Some(operation),
+                commit: Some(crate::git::RepositoryOperation::Commit(operation)),
                 ..Default::default()
             })
         }
@@ -1412,7 +1411,7 @@ fn commit_operation(
     }
     ctx.info("Committing…");
     Ok(CommandOutcome {
-        commit: Some(operation),
+        commit: Some(crate::git::RepositoryOperation::Commit(operation)),
         ..Default::default()
     })
 }
@@ -1459,7 +1458,7 @@ fn prepare_head_commit(
     }
     ctx.info("Committing…");
     Ok(CommandOutcome {
-        commit: Some(operation),
+        commit: Some(crate::git::RepositoryOperation::Commit(operation)),
         ..Default::default()
     })
 }
