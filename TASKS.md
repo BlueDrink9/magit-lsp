@@ -669,7 +669,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - [x] **T019.2b2b1 — Reject invalid initial selection safely.** Direct invalid-selection regression preserves repository state and usable caller.
             - test: Readable invalid-selection effect and exact unchanged state.
             - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → exit 0; `ok: rust`.
-          - [ ] **T019.2b2b2 — Surface failed initial preparation readably.** Convert actual preparation failure into a readable effect while restoring a usable caller.
+          - [x] **T019.2b2b2 — Surface failed initial preparation readably.** Convert actual preparation failure into a readable effect while restoring a usable caller.
             - test: Changed preconditions after selection opens; exact pre-dispatch repository state preserved, no editor leaked.
   - [ ] **T019.3 — Execute the edited initial rebase plan.** Add the verified launch adapter, submission revalidation and readable execution/conflict handling.
     - test: Exact repository histories prove exclusive-base execution, edited order/actions, conflict, continue and abort; stale submission preserves editor and repository.

@@ -140,6 +140,25 @@ fn initial_rebase_invalid_selection_keeps_caller_usable() {
 }
 
 #[test]
+fn initial_rebase_preparation_failure_keeps_caller_usable() {
+    let (dir, _, base) = repo();
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r");
+    test.press("i");
+    test.ack();
+    write(&dir.path().join("file"), "changed after selector opened\n");
+    let before = state(dir.path());
+    let selected_base = test.tree().line_nodes.iter().position(|line| test.tree().node(&line.node).is_some_and(|node| node.kind == magit_lsp::tree::NodeKind::Commit && node.commit.as_deref() == Some(base.as_str()))).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line: selected_base, column: 0 });
+    let result = test.invoke_here("common.confirm");
+    assert!(common::message_texts(&result.effects).iter().any(|message| message.contains("cannot prepare rebase")), "effects: {:?}", result.effects);
+    assert_eq!(state(dir.path()), before);
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Log);
+    assert!(common::message_texts(&test.invoke("common.refresh").effects).is_empty());
+}
+
+#[test]
 fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     let (dir, repo, base) = repo();
     assert!(PreparedRebase::prepare(&repo, "not-a-revision").is_err());

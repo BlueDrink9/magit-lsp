@@ -3303,7 +3303,10 @@ impl Session {
                         return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one rebase base")], ..InvokeResult::empty() });
                     };
                     let repo = GitRepo::open(&self.repo_path)?;
-                    let plan = crate::rebase_plan::PreparedRebase::prepare(&repo, &base)?;
+                    let plan = match crate::rebase_plan::PreparedRebase::prepare(&repo, &base) {
+                        Ok(plan) => plan,
+                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Error, error.to_string())], ..InvokeResult::empty() }),
+                    };
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
                     let (descriptor, render) = self.push_view(&caller, ViewKind::RebaseTodo, Placement::Main, Box::new(crate::rebase_todo_view::RebaseTodoView::prepared(repo, plan)))?;
