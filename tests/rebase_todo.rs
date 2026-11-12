@@ -1,6 +1,7 @@
 mod common;
 
-use common::{git, write};
+use common::{git, write, TestSession, STATUS_VIEWPORT};
+use magit_lsp::config::Profile;
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_todo::{RebaseTodo, TodoAction};
 use magit_lsp::rebase_todo_view::RebaseTodoView;
@@ -124,6 +125,32 @@ fn todo_view_edits_and_reorders_by_captured_identity() {
     view.save().unwrap();
     let saved = std::fs::read_to_string(&path).unwrap();
     assert!(saved.starts_with(&format!("reword {second} ")));
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
+    let (dir, repo) = paused_repo();
+    let todo_path = repo.rebase_todo_path().unwrap();
+    let todo_before = std::fs::read(&todo_path).unwrap();
+    let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index_before = git(dir.path(), &["write-tree"]);
+    let expected = RebaseTodo::load(&repo).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();
+
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::RebaseTodo);
+    let tree = test.tree();
+    let rows = tree.nodes.iter().filter_map(|node| node.commit.clone()).collect::<Vec<_>>();
+    assert_eq!(rows, expected);
+    assert!(rows.iter().all(|oid| oid.len() == 40));
+
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(std::fs::read(todo_path).unwrap(), todo_before);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+    assert_eq!(git(dir.path(), &["write-tree"]), index_before);
     git(dir.path(), &["rebase", "--abort"]);
 }
 

@@ -3521,6 +3521,7 @@ fn create_view(
                 None,
             )?))
         }
+        ViewKind::RebaseTodo => Ok(Box::new(crate::rebase_todo_view::RebaseTodoView::load(GitRepo::open(repo_path)?)?)),
         ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
         ViewKind::Prompt => Err(Error::new("The `prompt` view is not client-openable.")),
         ViewKind::Menu(name) => {

@@ -918,6 +918,7 @@ fn build() -> Registry {
         Command { id: "rebase.continue", scope: Scope::MenuAction, doc: "Continue rebase", status: CommandStatus::Implemented, run: rebase_continue, effects: &[] },
         Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
         Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
+        Command { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
         Command {
             id: "commit.amend",
             scope: Scope::MenuAction,
@@ -1126,6 +1127,15 @@ fn rebase_skip(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 fn rebase_abort(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     rebase_action(ctx, |repo| repo.rebase_abort())
+}
+
+fn rebase_edit_todo(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    let repo = GitRepo::open(ctx.repo_path)?;
+    if let Err(err) = crate::rebase_todo::RebaseTodo::load(&repo) {
+        ctx.effects.push(Effect::Message { level: MessageLevel::Warn, text: err.to_string(), hint: None, detail: None });
+        return Ok(CommandOutcome::default());
+    }
+    Ok(CommandOutcome { open_view: Some((ViewKind::RebaseTodo, Placement::Main)), ..Default::default() })
 }
 
 fn rebase_action(ctx: &mut CommandCtx<'_>, action: impl FnOnce(&GitRepo) -> Result<()>) -> Result<CommandOutcome> {
@@ -1734,7 +1744,7 @@ fn cancel(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
             ..Default::default()
         });
     }
-    if ctx.view.commit_selection().is_some() {
+    if ctx.view.commit_selection().is_some() || *ctx.view.kind() == crate::view::ViewKind::RebaseTodo {
         return Ok(CommandOutcome {
             pop: true,
             ..Default::default()

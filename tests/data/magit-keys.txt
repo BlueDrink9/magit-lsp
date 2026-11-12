@@ -78,6 +78,7 @@ rebase	t	magit-reshelve-since	rebase.change-dates
 rebase	r	magit-rebase-continue	rebase.continue
 rebase	K	magit-rebase-skip	rebase.skip
 rebase	a	magit-rebase-abort	rebase.abort
+rebase	T	magit-rebase-edit-todo	rebase.edit-todo
 stash	z	magit-stash-both	stash.both
 stash	i	magit-stash-index	stash.index
 stash	w	magit-stash-worktree	stash.worktree

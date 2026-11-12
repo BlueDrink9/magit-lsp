@@ -17,6 +17,8 @@ pub enum ViewKind {
     Status,
     /// The server-rendered Git commit history.
     Log,
+    /// Editable todo for a paused interactive rebase.
+    RebaseTodo,
     /// The read-only log of finished Git invocations.
     ProcessLog,
     /// A prompt shown as server-owned document text instead of a native widget.
@@ -33,6 +35,7 @@ impl ViewKind {
         match self {
             ViewKind::Status => "status",
             ViewKind::Log => "log",
+            ViewKind::RebaseTodo => "rebase-todo",
             ViewKind::ProcessLog => "process-log",
             ViewKind::Prompt => "prompt",
             ViewKind::Menu(name) => name,
@@ -72,6 +75,7 @@ impl<'de> Deserialize<'de> for ViewKind {
         Ok(match name.as_str() {
             "status" => ViewKind::Status,
             "log" => ViewKind::Log,
+            "rebase-todo" => ViewKind::RebaseTodo,
             "process-log" => ViewKind::ProcessLog,
             "prompt" => ViewKind::Prompt,
             other if other.starts_with("menu.") => ViewKind::Menu(other.to_string()),

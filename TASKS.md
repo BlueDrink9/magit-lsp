@@ -509,6 +509,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
          - test: real paused-rebase session opens structured todo rows through the menu, cancels to its caller with unchanged todo/HEAD/index, and reports idle-open failure readably.
          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
        - [ ] **T018.3b1a — Paused todo menu open and cancel regression.** Finish the view/menu implementation with real-session identity and no-mutation cancellation coverage.
+         - Handoff checkpoint: view/menu opening and full-OID rows work; Escape does not restore the caller. Keep unchecked. See [HANDOFF.md](./HANDOFF.md) for the failing regression, scoped changes and protected baseline.
          - test: paused-rebase menu dispatch opens full-OID structured rows; cancel restores its caller and preserves todo, HEAD and index.
          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
        - [ ] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.

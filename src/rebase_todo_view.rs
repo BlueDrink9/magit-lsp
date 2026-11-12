@@ -3,6 +3,7 @@
 use crate::git::GitRepo;
 use crate::rebase_todo::{RebaseTodo, TodoAction};
 use crate::tree::{LineNode, Node, NodeKind, Tree};
+use crate::view::{Ctx, Scope, View, ViewKind};
 use crate::{Error, Result};
 
 /// Editable paused-rebase todo with its owning repository.
@@ -62,6 +63,16 @@ impl RebaseTodoView {
 
     /// Save through guarded paused-todo persistence.
     pub fn save(&self) -> Result<()> { self.todo.save(&self.repo) }
+}
+
+impl View for RebaseTodoView {
+    fn kind(&self) -> ViewKind { ViewKind::RebaseTodo }
+    fn title(&self) -> String { "Rebase Todo".to_string() }
+    fn scope(&self) -> Scope { Scope::new("rebase-todo") }
+    fn capture(&self) -> bool { true }
+    fn render(&mut self, _ctx: &Ctx<'_>) -> Tree { RebaseTodoView::render(self) }
+    fn as_any(&self) -> Option<&dyn std::any::Any> { Some(self) }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> { Some(self) }
 }
 
 fn action_text(action: TodoAction) -> &'static str {
