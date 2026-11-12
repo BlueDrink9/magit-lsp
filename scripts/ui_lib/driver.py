@@ -561,6 +561,8 @@ def _csi_u_bytes(token: str) -> list[str] | None:
         sequence = f"\x1b[1;{value}{_CSI_U_FINAL[key]}"
     elif key in _CSI_U_TILDE:
         sequence = f"\x1b[{_CSI_U_TILDE[key]};{value}~"
+    elif value == 6 and len(key) == 1 and key.isascii() and key.isalnum():
+        sequence = f"\x1b[{ord(key)};{value}u"
     else:
         return None
     return [f"{byte:02x}" for byte in sequence.encode("ascii")]

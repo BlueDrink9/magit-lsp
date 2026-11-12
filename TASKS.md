@@ -801,6 +801,9 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - [x] **T019.5f2a — Native squash message confirmation.** test: Native S and registered message confirmation produce the exact selected-target message, history and content.
           - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `26b5801` → `ok: ui-file`; native S selection and registered real-file confirmation assert exact target message, full history, selected-target ancestry, fixture-derived content including its blank line, clean index/worktree, and cleared rebase operation. No orphan `magit-lsp` process (`pgrep -af magit-lsp` matched only its own shell command).
         - [ ] **T019.5f2b — Native squash cancellation and recovery.** test: Native registered-editor cancellation retains actual post-marker state, followed by explicit native recovery and a usable caller.
+          - [x] **T019.5f2b1 — Modified-letter terminal transport.** test: Driver unit tests assert ctrl+shift+x CSI-u bytes and real tmux hex delivery; no native-cancellation claim until f2b2.
+            - Verified: `make ui-unit` @ `ae1f998` → ok: ui-unit (reused; driver/tests unchanged since latest pass).
+          - [ ] **T019.5f2b2 — Native cancellation lifecycle and recovery.** test: Actual native registered-editor cancel stops Git, preserves exact post-marker state, and permits explicit rebase abort and caller reuse.
 
 ### Feature — Phase 6: Plain acceptance
 

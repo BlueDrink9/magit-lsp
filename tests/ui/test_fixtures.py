@@ -52,6 +52,8 @@ class FixtureTest(unittest.TestCase):
                 "in-progress-rebase",
                 "in-progress-cherry-pick",
                 "log-history",
+                "paused-linear-rebase-todo",
+                "linear-rebase-history",
             },
         )
 

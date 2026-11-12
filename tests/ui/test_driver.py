@@ -200,6 +200,12 @@ class KeyNameTest(unittest.TestCase):
 
 
 class CsiUKeyTest(unittest.TestCase):
+    def test_ctrl_shift_character_becomes_csi_u_bytes(self) -> None:
+        self.assertEqual(
+            driver._csi_u_bytes("C-S-x"),
+            ["1b", "5b", "31", "32", "30", "3b", "36", "75"],
+        )
+
     def test_ctrl_enter_becomes_csi_u_bytes(self) -> None:
         self.assertEqual(
             driver._csi_u_bytes("C-Enter"),
@@ -252,6 +258,14 @@ class CsiUKeyTest(unittest.TestCase):
 
 
 class SendKeysTest(unittest.TestCase):
+    def test_ctrl_shift_character_goes_through_hex_mode(self) -> None:
+        with patch.object(driver, "_tmux") as tmux:
+            driver.send_keys(object(), ["C-S-x"])
+        self.assertEqual(
+            [call.args[1:] for call in tmux.call_args_list],
+            [("send-keys", "-t", "magit", "-H", "1b", "5b", "31", "32", "30", "3b", "36", "75")],
+        )
+
     def test_modified_special_keys_go_through_hex_mode(self) -> None:
         with patch.object(driver, "_tmux") as tmux:
             driver.send_keys(object(), ["C-Enter", "x"])
