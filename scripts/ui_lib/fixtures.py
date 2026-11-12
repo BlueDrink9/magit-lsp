@@ -69,6 +69,7 @@ FIXTURES = (
     "unborn",
     "in-progress-rebase",
     "paused-linear-rebase-todo",
+    "linear-rebase-history",
     "in-progress-cherry-pick",
     "log-history",
 )
@@ -258,6 +259,12 @@ def _paused_linear_rebase_todo(repo: Path, env: dict[str, str]) -> None:
         raise RuntimeError(f"paused linear rebase fixture did not retain pending todo: {contents!r}")
 
 
+def _linear_rebase_history(repo: Path, env: dict[str, str]) -> None:
+    commit(repo, env, "base", {"base": "base\n"})
+    for message, name in (("one", "one"), ("two", "two"), ("three", "three")):
+        commit(repo, env, message, {name: f"{message}\n"})
+
+
 def _in_progress_cherry_pick(repo: Path, env: dict[str, str]) -> None:
     commit(repo, env, "initial", {"f.txt": "one\ntwo\nthree\n"})
     git(repo, env, "checkout", "-q", "-b", "side")
@@ -292,6 +299,7 @@ _BUILDERS = {
     "unborn": _unborn,
     "in-progress-rebase": _in_progress_rebase,
     "paused-linear-rebase-todo": _paused_linear_rebase_todo,
+    "linear-rebase-history": _linear_rebase_history,
     "in-progress-cherry-pick": _in_progress_cherry_pick,
     "log-history": _log_history,
 }

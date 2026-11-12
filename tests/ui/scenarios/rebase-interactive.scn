@@ -1,0 +1,34 @@
+# Select an exclusive initial-rebase base, inspect the prepared plan, then discard it.
+fixture: linear-rebase-history
+---
+sh: git rev-parse HEAD > .git/initial-head && git rev-parse HEAD~3 > .git/initial-base && git branch --show-current > .git/initial-branch && git ls-files --stage > .git/initial-index && git show-ref > .git/initial-refs && git diff --binary HEAD > .git/initial-worktree && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+keys: r
+wait
+expect view_stack.menus == 1
+keys: i
+wait screen contains "Log — initial rebase base"
+expect view_stack.count == 2
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 3 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'three'
+sh: nvim --headless --server ../nvim.sock --remote-expr "luaeval('vim.json.encode({mode=vim.api.nvim_get_mode().mode,name=vim.api.nvim_buf_get_name(0),cursor=vim.api.nvim_win_get_cursor(0),down=vim.fn.maparg(\"<Down>\",\"n\",false,true),render=require(\"magit-lsp.debug\").snapshot().render})')" > .git/native-selector-state && grep -q '"mode":"n"' .git/native-selector-state && grep -q 'magit://log/v1:log' .git/native-selector-state && grep -q '"down":{}' .git/native-selector-state
+keys: Down
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 4 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'two'
+keys: Down
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 5 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'one'
+keys: Down
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 6 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'base'
+keys: Enter
+wait screen contains "magit://rebase-todo/v1:rebase-todo"
+expect view_stack.count == 2
+sh: printf 'pick %s one\npick %s two\npick %s three\n' "$(git rev-parse --short=12 HEAD~2)" "$(git rev-parse --short=12 HEAD~1)" "$(git rev-parse --short=12 HEAD)" > .git/prepared-expected && nvim --headless --server ../nvim.sock --remote-expr "writefile(getline(1,'$'), '.git/prepared-actual')" >/dev/null && cmp .git/prepared-expected .git/prepared-actual && ! grep -Ev '^[a-z]+ [0-9a-f]{12} (one|two|three)$' .git/prepared-actual
+keys: Escape
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/initial-head)" && test "$(git branch --show-current)" = "$(cat .git/initial-branch)" && git show-ref > .git/initial-refs-after && cmp .git/initial-refs .git/initial-refs-after && git ls-files --stage > .git/initial-index-after && cmp .git/initial-index .git/initial-index-after && git diff --binary HEAD > .git/initial-worktree-after && cmp .git/initial-worktree .git/initial-worktree-after && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+keys: r
+wait
+expect view_stack.menus == 1
+keys: Escape
+wait screen contains "Unstaged changes"

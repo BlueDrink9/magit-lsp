@@ -708,6 +708,15 @@ T005 is complete through its authoritative [completed children](#completed-work)
             - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `d13b123` → `ok: rust`; `prepared_rebase_conflict_can_be_resolved_and_continued_from_caller` checks key submit conflict, stopped HEAD, unmerged index, conflict bytes and live operation, then resolved `rebase.continue`, exact final history/content/index tree and cleared operation. Suite also passes `prepared_rebase_edit_pause_is_abortable_from_usable_caller`, `stale_prepared_rebase_submit_retains_editor_and_edits`, `prepared_todo_view_edits_in_memory_and_cannot_save_paused_file`, and `paused_todo_view_save_does_not_rewrite_git_state`.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
+    - [ ] **T019.4a — Native selected-base edit and submission.** Real menu/selector, full-OID edited rows and exact launched history, with usable caller.
+      - test: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` verifies actual edited submission.
+      - [x] **T019.4a1 — Native base selection reaches prepared editor.** Real selector navigation/confirmation opens exact expected membership/order in the intentionally abbreviated display; discard leaves repository unchanged.
+        - test: Native scenario verifies selected base and prepared membership without launching.
+        - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `186931a` → `ok: ui-file`; exact selector-title and per-key cursor barriers drive native selection/confirmation, compare ordered 12-character display rows derived from fixture OIDs, prove exact repository preservation and reopen the caller menu. Full-OID structured ownership remains covered by `exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only` and `todo_key_input_changes_action_and_reorders_full_oid_rows`.
+      - [ ] **T019.4a2 — Native prepared submission rewrites expected history.** Extend verified selection path with native edit/reorder/drop/submit and exact Git/caller assertions.
+        - test: Same native scenario proves actual edited launch.
+    - [ ] **T019.4b — Native edited preflight cancellation.** Real editor edits then cancellation preserve exact repository state and caller usability.
+      - test: Extend the same scenario with exact cancel invariants.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
     - test: Exact success and conflict state; standalone fixup behavior remains distinct.
 
