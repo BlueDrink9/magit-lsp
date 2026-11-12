@@ -256,13 +256,14 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
-- [ ] **Repair initial-rebase command replay fixtures.** Substantial-chunk gate at `cea53d3` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.Yt68Il`). Refresh only causally changed recorded code-action frames from real-server output; preserve exact replay assertions and unrelated frames.
+- [x] **Repair initial-rebase command replay fixtures.** Done: `3ebfadc`. Substantial-chunk gate at `cea53d3` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.Yt68Il`). Refresh only causally changed recorded code-action frames from real-server output; preserve exact replay assertions and unrelated frames.
   - check: `make test-rust FILTER="--test examples"` passes with inspected fixture-only causal diff. Generated standalone references remain separate.
   - Attempts: Two default orientation checkpoints, no edits; observed enabled `rebase.interactive` moves within code-action ordering. Split first causal recording repair from complete replay.
   - [x] **Repair initial-rebase abort recording.** Update causally changed abort code-action frames from exact observed server output; check: replay advances beyond this fixture (a later fixture failure is recorded, not mistaken for this item failing).
     - Verified: `make test-rust FILTER="--test examples"` @ `cea53d3` → exit 2 after abort replay passed; later expected mismatch at `commit-edit-confirm.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.5RfXtK`).
-  - [x] **Complete initial-rebase recording replay.** Refresh remaining causally changed frames; check: full `make test-rust FILTER="--test examples"` passes with exact assertions unchanged.
-    - Verified: `make test-rust FILTER="--test examples"` @ `0b7b970` → passed; `commit-edit-confirm.jsonl:16` refreshed from exact observed response in `build/test-logs/rust.dTxiHZ`.
+  - [x] **Complete initial-rebase recording replay.** Done: `3ebfadc`. Refresh remaining causally changed frames; check: full `make test-rust FILTER="--test examples"` passes with exact assertions unchanged.
+    - Reopened: Full gate at `23bbd5f` fails the unchanged confirm frame 9 (`build/test-logs/rust.imGsLe`); prior narrow pass predates the worker's restoration of frame 9 and does not verify committed state. Update both causal frames, then verify after the final edit.
+    - Verified: `make test-rust FILTER="--test examples"` @ `3ebfadc` → passed; `commit-edit-confirm.jsonl:9` re-recorded from exact observed response in `build/test-logs/rust.imGsLe` (promotion action precedes amend); `:16` retains context-specific request id 4, as refreshed from `build/test-logs/rust.dTxiHZ`.
 
 - [x] **Refresh generated references for scoped todo commands.** Done: `8beb859`. The substantial-chunk gate at `46dc360` fails `schema-check` on `docs/schema/worked-exchanges.md` after registry recording changes; check registry reference freshness too. Regenerated via Make; causal todo command/keymap/exchange deltas inspected.
   - check: `make docs-generate && make docs-artifacts-check && make docs-check` passes; generated diff is causal and committed separately with source/command rationale.
