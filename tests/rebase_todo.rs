@@ -86,10 +86,12 @@ fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
     let (dir, repo) = paused_repo();
     let mut todo = RebaseTodo::load(&repo).unwrap();
     let path = repo.rebase_todo_path().unwrap();
+    let lock_path = path.parent().unwrap().join("git-rebase-todo.lock");
     std::fs::write(&path, b"external edit\n").unwrap();
     let before = std::fs::read(&path).unwrap();
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!lock_path.exists());
 
     let source = todo.source().to_vec();
     std::fs::write(&path, &source).unwrap();
@@ -97,10 +99,22 @@ fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
     let before = std::fs::read(&path).unwrap();
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!lock_path.exists());
     todo.entries[0].oid = RebaseTodo::parse(&repo, &source).unwrap().entries[0].oid.clone();
     todo.entries[0].subject.push_str("\nexec touch injected");
     assert!(todo.save(&repo).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    todo.entries[0].subject = RebaseTodo::parse(&repo, &source).unwrap().entries[0].subject.clone();
+    todo.entries[0].action = TodoAction::Reword;
+    let foreign_lock = b"foreign lock bytes\n";
+    std::fs::write(&lock_path, foreign_lock).unwrap();
+    assert!(todo.save(&repo).unwrap_err().to_string().contains("locked by another process"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(&lock_path).unwrap(), foreign_lock);
+    std::fs::remove_file(&lock_path).unwrap();
+    todo.save(&repo).unwrap();
+    assert!(!lock_path.exists());
+    assert_ne!(std::fs::read(&path).unwrap(), before);
     git(dir.path(), &["rebase", "--abort"]);
 }
 

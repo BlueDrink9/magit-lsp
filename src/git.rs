@@ -396,6 +396,16 @@ pub struct GitRepo {
     common_dir: PathBuf,
 }
 
+/// Own and remove one create-new rebase todo lock.
+struct RebaseTodoLock { path: PathBuf, file: std::fs::File }
+
+impl Drop for RebaseTodoLock {
+    fn drop(&mut self) {
+        let _ = &self.file;
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 impl GitRepo {
     /// Detect an active merge/apply rebase in this worktree, including conflict state.
     pub fn rebase_state(&self) -> Result<Option<RebaseState>> {
@@ -622,7 +632,6 @@ impl GitRepo {
 
     /// Atomically replace the todo of this repository's paused merge-backend rebase.
     pub(crate) fn write_rebase_todo(&self, identity: &RebaseTodoOwner, expected: &[u8], contents: &[u8]) -> Result<()> {
-        if &self.rebase_todo_identity()? != identity { return Err(Error::new("rebase todo operation changed since it was loaded")); }
         if !self.rebase_state()?.is_some() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
@@ -631,6 +640,11 @@ impl GitRepo {
         if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge_dir.as_path()) {
             return Err(Error::new("rebase todo path is outside the paused operation"));
         }
+        let lock_path = merge_dir.join("git-rebase-todo.lock");
+        let lock_file = std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path)
+            .map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists { Error::new("rebase todo is locked by another process") } else { Error::from(error) })?;
+        let _lock = RebaseTodoLock { path: lock_path, file: lock_file };
+        if &self.rebase_todo_identity()? != identity { return Err(Error::new("rebase todo operation changed since it was loaded")); }
         if std::fs::read(&path)? != expected { return Err(Error::new("rebase todo changed since it was loaded")); }
         let mut temporary = tempfile::NamedTempFile::new_in(&merge_dir)?;
         std::io::Write::write_all(&mut temporary, contents)?;
