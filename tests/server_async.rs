@@ -189,17 +189,32 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
     press(&mut server, 9, &todo, "d", 2); server.recv();
     tmp.git(&["commit", "--allow-empty", "-m", "external"]);
     let external = tmp.git(&["rev-parse", "HEAD"]);
-    let pre_dispatch = (tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["status", "--porcelain=v2"]), std::fs::read(tmp.path().join(".git/index")).unwrap());
+    let pre_dispatch = (tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["status", "--porcelain=v2"]), std::fs::read(tmp.path().join(".git/index")).unwrap(), tmp.git(&["for-each-ref", "--format=%(refname) %(objectname)"]), ["base", "one", "two"].map(|name| std::fs::read(tmp.path().join(name)).ok()), tmp.path().join(".git/rebase-merge").exists(), tmp.path().join(".git/rebase-apply").exists());
     let stale = press(&mut server, 10, &todo, "ctrl+s", 0);
     assert!(stale["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "message" && e["text"].as_str().unwrap().contains("HEAD changed")), "{stale}");
-    assert_eq!((tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["status", "--porcelain=v2"]), std::fs::read(tmp.path().join(".git/index")).unwrap()), pre_dispatch);
+    assert_eq!((tmp.git(&["rev-parse", "HEAD"]), tmp.git(&["status", "--porcelain=v2"]), std::fs::read(tmp.path().join(".git/index")).unwrap(), tmp.git(&["for-each-ref", "--format=%(refname) %(objectname)"]), ["base", "one", "two"].map(|name| std::fs::read(tmp.path().join(name)).ok()), tmp.path().join(".git/rebase-merge").exists(), tmp.path().join(".git/rebase-apply").exists()), pre_dispatch);
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]), external);
     let retained = server.recv();
     assert_eq!(retained["method"], "view/render");
     assert_eq!(retained["params"]["viewId"], todo);
+    assert_eq!(retained["params"]["text"].as_array().unwrap().len(), 2, "{retained}");
+    server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":todo,"version":retained["params"]["version"]}}));
+    for (line, revision) in [(0, "HEAD~1"), (1, "HEAD~2")] {
+        let id = 20 + line as i64;
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke","params":{"viewId":todo,"command":"common.copy-value","version":5,"cursor":{"line":line,"column":0}}}));
+        let copied = server.response_with_id(id);
+        let oid = tmp.git(&["rev-parse", revision]);
+        assert!(copied["result"]["effects"].as_array().unwrap().iter().any(|effect| effect["type"] == "clipboard" && effect["text"] == oid.trim()), "{copied}");
+    }
     let cancel = press(&mut server, 11, &todo, "q", 0);
     assert!(cancel["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "popView"));
     assert!(cancel["result"]["effects"].as_array().unwrap().iter().any(|e| e["type"] == "focusView" && e["viewId"] == status));
+    server.send(json!({"jsonrpc":"2.0","id":12,"method":"view/invoke","params":{"viewId":status,"command":"common.refresh"}}));
+    let refreshed = server.response_with_id(12);
+    assert!(refreshed["result"]["effects"].as_array().unwrap().is_empty(), "{refreshed}");
+    let caller_render = server.recv();
+    assert_eq!(caller_render["method"], "view/render");
+    assert_eq!(caller_render["params"]["viewId"], status);
     shutdown_and_exit(&mut server); assert!(server.finish(Duration::from_secs(10)).success());
 }
 
