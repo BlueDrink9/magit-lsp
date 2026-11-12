@@ -33,6 +33,16 @@ impl PreparedRebase {
     /// Current editable ordered instructions; edits remain in memory only.
     pub fn entries(&self) -> &[crate::rebase_todo::TodoEntry] { &self.entries }
 
+    /// Replace the plan entries after validating the captured membership and todo constraints.
+    pub(crate) fn replace_entries(&mut self, entries: Vec<crate::rebase_todo::TodoEntry>) -> Result<()> {
+        if entries.len() != self.membership.len() || entries.iter().any(|entry| !self.membership.contains(&entry.oid)) || entries.iter().map(|entry| &entry.oid).collect::<std::collections::HashSet<_>>().len() != entries.len() {
+            return Err(Error::new("edited rebase plan membership changed"));
+        }
+        if matches!(entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
+        self.entries = entries;
+        Ok(())
+    }
+
     /// Change an entry action by full commit object ID.
     pub fn set_action(&mut self, oid: &str, action: TodoAction) -> Result<()> {
         let index = self.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;

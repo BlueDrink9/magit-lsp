@@ -4,6 +4,7 @@ use common::{git, write};
 use magit_lsp::git::GitRepo;
 use magit_lsp::rebase_plan::PreparedRebase;
 use magit_lsp::rebase_todo::TodoAction;
+use magit_lsp::rebase_todo_view::RebaseTodoView;
 use tempfile::TempDir;
 
 fn repo() -> (TempDir, GitRepo, String) {
@@ -39,6 +40,23 @@ fn exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only() {
     plan.move_before(&chosen, None).unwrap();
     plan.validate_launch(&repo).unwrap();
     drop(plan);
+    assert_eq!(state(dir.path()), before);
+}
+
+#[test]
+fn prepared_todo_view_edits_in_memory_and_cannot_save_paused_file() {
+    let (dir, repo, base) = repo();
+    let before = state(dir.path());
+    let plan = PreparedRebase::prepare(&repo, &base).unwrap();
+    let membership = plan.entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let mut view = RebaseTodoView::prepared(repo, plan);
+    let tree = view.render();
+    assert_eq!(tree.nodes.iter().map(|node| node.commit.clone().unwrap()).collect::<Vec<_>>(), membership);
+    view.set_action(&membership[1], TodoAction::Reword).unwrap();
+    view.move_before(&membership[2], Some(&membership[0])).unwrap();
+    assert_eq!(view.render().nodes.iter().map(|node| node.commit.clone().unwrap()).collect::<Vec<_>>(), vec![membership[2].clone(), membership[0].clone(), membership[1].clone()]);
+    assert!(view.save().unwrap_err().to_string().contains("cannot be saved"));
+    drop(view);
     assert_eq!(state(dir.path()), before);
 }
 

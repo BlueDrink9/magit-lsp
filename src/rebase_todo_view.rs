@@ -2,27 +2,41 @@
 
 use crate::git::GitRepo;
 use crate::rebase_todo::{RebaseTodo, TodoAction};
+use crate::rebase_plan::PreparedRebase;
 use crate::tree::{LineNode, Node, NodeKind, Tree};
 use crate::view::{Ctx, Scope, View, ViewKind};
 use crate::{Error, Result};
 
 /// Editable paused-rebase todo with its owning repository.
 pub struct RebaseTodoView {
-    repo: GitRepo,
-    todo: RebaseTodo,
+    owner: TodoOwner,
 }
+
+enum TodoOwner { Paused(GitRepo, RebaseTodo), Prepared(GitRepo, PreparedRebase) }
 
 impl RebaseTodoView {
     /// Load the current paused todo from `repo`.
     pub fn load(repo: GitRepo) -> Result<Self> {
         let todo = RebaseTodo::load(&repo)?;
-        Ok(Self { repo, todo })
+        Ok(Self { owner: TodoOwner::Paused(repo, todo) })
+    }
+
+    /// Create an in-memory editor for a prepared initial rebase plan.
+    pub fn prepared(repo: GitRepo, plan: PreparedRebase) -> Self { Self { owner: TodoOwner::Prepared(repo, plan) } }
+
+    fn entries(&self) -> &[crate::rebase_todo::TodoEntry] { match &self.owner { TodoOwner::Paused(_, todo) => &todo.entries, TodoOwner::Prepared(_, plan) => plan.entries() } }
+
+    fn edit_entries(&mut self, edit: impl FnOnce(&mut Vec<crate::rebase_todo::TodoEntry>) -> Result<()>) -> Result<()> {
+        match &mut self.owner {
+            TodoOwner::Paused(_, todo) => { let previous = todo.entries.clone(); let result = edit(&mut todo.entries); if result.is_err() { todo.entries = previous; } result },
+            TodoOwner::Prepared(_, plan) => { let mut entries = plan.entries().to_vec(); edit(&mut entries)?; plan.replace_entries(entries) }
+        }
     }
 
     /// Render todo entries as structured commit rows.
     pub fn render(&self) -> Tree {
         let mut tree = Tree { version: 0, lines: Vec::new(), nodes: Vec::new(), line_nodes: Vec::new(), tokens: Vec::new(), symbols: Vec::new(), links: Vec::new() };
-        for entry in &self.todo.entries {
+        for entry in self.entries() {
             let line = tree.lines.len();
             let id = format!("rebase-todo:{}", entry.oid);
             let action = action_text(entry.action);
@@ -35,43 +49,33 @@ impl RebaseTodoView {
 
     /// Set action for the captured full commit identity, rejecting unknown identities.
     pub fn set_action(&mut self, oid: &str, action: TodoAction) -> Result<()> {
-        let index = self.todo.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
-        let previous = self.todo.entries[index].action;
-        self.todo.entries[index].action = action;
-        if matches!(self.todo.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
-            self.todo.entries[index].action = previous;
-            return Err(Error::new("first todo action cannot squash or fixup"));
-        }
-        Ok(())
+        self.edit_entries(|entries| { let index = entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?; entries[index].action = action; if matches!(entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); } Ok(()) })
     }
 
     /// Move captured commit identity before another identity, or to the end when `before` is absent.
     pub fn move_before(&mut self, oid: &str, before: Option<&str>) -> Result<()> {
         if oid == before.unwrap_or("") { return Err(Error::new("invalid todo move")); }
-        let from = self.todo.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
-        let target = before.map(|id| self.todo.entries.iter().position(|entry| entry.oid == id).ok_or_else(|| Error::new("todo commit identity not found"))).transpose()?;
-        let previous = self.todo.entries.clone();
-        let entry = self.todo.entries.remove(from);
-        let to = target.map(|index| if index > from { index - 1 } else { index }).unwrap_or(self.todo.entries.len());
-        self.todo.entries.insert(to, entry);
-        if matches!(self.todo.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
-            self.todo.entries = previous;
-            return Err(Error::new("first todo action cannot squash or fixup"));
-        }
-        Ok(())
+        self.edit_entries(|entries| {
+        let from = entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
+        let target = before.map(|id| entries.iter().position(|entry| entry.oid == id).ok_or_else(|| Error::new("todo commit identity not found"))).transpose()?;
+        let previous = entries.clone(); let entry = entries.remove(from);
+        let to = target.map(|index| if index > from { index - 1 } else { index }).unwrap_or(entries.len()); entries.insert(to, entry);
+        if matches!(entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { *entries = previous; return Err(Error::new("first todo action cannot squash or fixup")); } Ok(())
+        })
     }
 
     /// Move selected full commit identity one position up or down.
     pub fn move_relative(&mut self, oid: &str, up: bool) -> Result<()> {
-        let index = self.todo.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
-        let target = if up { index.checked_sub(1) } else if index + 1 < self.todo.entries.len() { Some(index + 1) } else { None };
+        let entries = self.entries();
+        let index = entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("todo commit identity not found"))?;
+        let target = if up { index.checked_sub(1) } else if index + 1 < entries.len() { Some(index + 1) } else { None };
         let Some(target) = target else { return Ok(()); };
-        let before = if target < index { Some(self.todo.entries[target].oid.clone()) } else { self.todo.entries.get(target + 1).map(|entry| entry.oid.clone()) };
+        let before = if target < index { Some(entries[target].oid.clone()) } else { entries.get(target + 1).map(|entry| entry.oid.clone()) };
         self.move_before(oid, before.as_deref())
     }
 
     /// Save through guarded paused-todo persistence.
-    pub fn save(&self) -> Result<()> { self.todo.save(&self.repo) }
+    pub fn save(&self) -> Result<()> { match &self.owner { TodoOwner::Paused(repo, todo) => todo.save(repo), TodoOwner::Prepared(_, _) => Err(Error::new("prepared rebase todo cannot be saved as a paused todo")) } }
 }
 
 impl View for RebaseTodoView {
