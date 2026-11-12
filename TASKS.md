@@ -222,6 +222,15 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Align recorded actions with todo editor scope.** The gate at `e30a080` fails `commit-edit-abort.jsonl:9` at `$.result[31].data.command` after correcting contextual todo command scope. Update only causally affected code-action frames; retain exact replay checks.
+  - check: real-server replay passes and recorded status actions no longer advertise editor-only todo commands.
+  - Verification: `make test-rust FILTER="--test examples"`.
+  - Verified: `make test-rust FILTER="--test examples"` @ `e30a080` → passed; real-server replay matches both recorded examples and status frames omit the 11 `rebase.todo-*` actions while retaining `rebase.edit-todo`.
+
+- [ ] **Refresh snapshots after todo scope correction.** Regenerate intentional manifest/keybinding changes caused by `e30a080` and inspect only causal scope changes.
+  - check: generated snapshots accurately represent editor-scoped todo commands; manifest/parity checks pass unchanged.
+  - Verification: `make update-snapshots && make test-rust FILTER="--test manifest --test parity"`.
+
 - [x] **Reconcile todo keymap manifests and shortcut policy.** The resumed gate at `8b9f2f6` fails manifest/keybinding snapshots and reports `rebase-todo` `ctrl+s` / `rebase.todo-submit` shadowing a workbench shortcut without an allow entry. Preserve intentional scoped native submit behavior and reconcile the explicit shortcut policy and generated snapshots without weakening checks. Done: containing commit.
   - test: shipped profiles pass shortcut policy and exact manifest/keybinding snapshot assertions with the todo bindings present.
   - check: inspect regenerated snapshot changes for causal todo bindings only.
