@@ -120,6 +120,75 @@ fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
     assert!(!dir.path().join("two").exists());
 }
 
+fn conflicting_plan() -> (TempDir, GitRepo, String, PreparedRebase) {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    write(&dir.path().join("file"), "base\n");
+    git(dir.path(), &["add", "file"]);
+    git(dir.path(), &["commit", "-m", "base"]);
+    let base = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    for (content, message) in [("first\n", "first"), ("second\n", "second")] {
+        write(&dir.path().join("file"), content);
+        git(dir.path(), &["commit", "-am", message]);
+    }
+    let repo = GitRepo::open(dir.path()).unwrap();
+    let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
+    let entries = plan.entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    plan.move_before(&entries[1], Some(&entries[0])).unwrap();
+    (dir, repo, base, plan)
+}
+
+#[test]
+fn edited_plan_conflict_survives_resolution_and_continue() {
+    let (dir, repo, _base, plan) = conflicting_plan();
+    let error = plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap_err();
+    assert!(!error.to_string().trim().is_empty());
+    assert_eq!(git(dir.path(), &["show", "-s", "--format=%s", "HEAD"]).trim(), "base");
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]).trim(), "UU file");
+    let conflicted = String::from_utf8(std::fs::read(dir.path().join("file")).unwrap()).unwrap();
+    assert!(conflicted.starts_with("<<<<<<< HEAD\nbase\n=======\nsecond\n>>>>>>> "));
+    assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, true);
+    while repo.rebase_state().unwrap().is_some() {
+        write(&dir.path().join("file"), "resolved\n");
+        git(dir.path(), &["add", "file"]);
+        repo.rebase_continue().unwrap_or_else(|error| {
+            assert!(repo.rebase_state().unwrap().unwrap().conflicted, "{error}");
+        });
+    }
+    assert_eq!(git(dir.path(), &["show", "HEAD:file"]).trim(), "resolved");
+    assert_eq!(git(dir.path(), &["log", "-3", "--format=%s", "--reverse"]).lines().collect::<Vec<_>>(), vec!["base", "second"]);
+    assert_eq!(repo.rebase_state().unwrap(), None);
+}
+
+#[test]
+fn edited_plan_conflict_abort_restores_original_repository() {
+    let (dir, repo, _, plan) = conflicting_plan();
+    let before = state(dir.path());
+    assert!(plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).is_err());
+    assert!(repo.rebase_state().unwrap().is_some());
+    repo.rebase_abort().unwrap();
+    assert_eq!(state(dir.path()), before);
+    assert_eq!(repo.rebase_state().unwrap(), None);
+}
+
+#[test]
+fn intentional_edit_pause_abort_restores_original_repository() {
+    let (dir, repo, _, mut plan) = conflicting_plan();
+    let entries = plan.entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    plan.move_before(&entries[1], Some(&entries[0])).unwrap();
+    let first = plan.entries()[0].oid.clone();
+    plan.set_action(&first, TodoAction::Edit).unwrap();
+    let before = state(dir.path());
+    plan.launch(&repo, std::path::Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap();
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
+    assert_eq!(repo.rebase_state().unwrap().unwrap().conflicted, false);
+    repo.rebase_abort().unwrap();
+    assert_eq!(state(dir.path()), before);
+    assert_eq!(repo.rebase_state().unwrap(), None);
+}
+
 #[test]
 fn prepared_todo_view_edits_in_memory_and_cannot_save_paused_file() {
     let (dir, repo, base) = repo();

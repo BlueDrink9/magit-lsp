@@ -694,6 +694,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - Verified: `make test-rust FILTER="--test server_async stale_prepared_rebase_submit_retains_editor_and_edits"` @ `7312e65` → `ok: rust`. Stale render includes `reword` at known edited row; full-OID row identities, unchanged refs/worktree/index/operation state, and caller refresh asserted.
       - [ ] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
         - test: Exact conflict, resolved continue and abort histories/state.
+        - [x] **T019.3c2a — Verify launch conflict, continue and abort at Git boundary.** Exact replay-conflict state, resolved continuation and abort restoration from edited prepared plans.
+          - test: Real Git paused/conflict histories, index/worktree and operation-state lifecycle.
+          - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `d7b4563` → `ok: rust`; real conflict resolution/continue, conflict abort and intentional edit-pause abort pass.
+        - [ ] **T019.3c2b — Present execution outcomes through server dispatch.** Distinguish stale preflight refusal from execution that actually started; expose real operation state and usable caller/actions without automatic abort or retaining a misleading preflight editor.
+          - test: Genuine-server key submit into edit pause and conflict, readable effects, actual state and usable continue/abort dispatch.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
