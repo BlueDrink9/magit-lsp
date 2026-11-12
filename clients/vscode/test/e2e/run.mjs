@@ -11,28 +11,6 @@ import { resolveCommand } from '../../lib/version.js';
  * binary or display is available, so `make vscode-test` stays portable.
  */
 const root = resolve(import.meta.dirname, '../../../..');
-const candidates = [process.env.MAGIT_VSCODE_BIN,
-  resolveCommand('codium'), resolveCommand('code')].filter(Boolean);
-const editor = candidates.find((candidate) => existsSync(candidate));
-if (process.argv[2] === '--select-editor') {
-  console.log(editor || '');
-  process.exit(editor ? 0 : 1);
-}
-const focusedEdit = process.env.MAGIT_VSCODE_EDIT_ONLY === '1';
-const focusedHead = process.env.MAGIT_VSCODE_HEAD_ONLY === '1';
-if (!editor) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
-}
-if (!process.env.DISPLAY) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: DISPLAY is required for the real-editor keyboard checks`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
-}
-if (!existsSync(`${root}/target/debug/magit-lsp`)) {
-  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
-  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
-}
-
 // This subprocess observes the isolated renderer; it never sets context keys or
 // dispatches commands. Image capture methods are explicitly forbidden.
 if (process.argv[2] === '--cdp') {
@@ -57,6 +35,27 @@ if (process.argv[2] === '--cdp') {
     (error) => error ? reject(error) : resolve()));
   socket.close();
   process.exit(0);
+}
+const candidates = [process.env.MAGIT_VSCODE_BIN,
+  resolveCommand('codium'), resolveCommand('code')].filter(Boolean);
+const editor = candidates.find((candidate) => existsSync(candidate));
+if (process.argv[2] === '--select-editor') {
+  console.log(editor || '');
+  process.exit(editor ? 0 : 1);
+}
+const focusedEdit = process.env.MAGIT_VSCODE_EDIT_ONLY === '1';
+const focusedHead = process.env.MAGIT_VSCODE_HEAD_ONLY === '1';
+if (!editor) {
+  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
+  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+}
+if (!process.env.DISPLAY) {
+  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: DISPLAY is required for the real-editor keyboard checks`);
+  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
+}
+if (!existsSync(`${root}/target/debug/magit-lsp`)) {
+  console.log(`${focusedHead ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
+  process.exit(focusedEdit || focusedHead || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1') ? 1 : 0);
 }
 
 // Launch an isolated real editor; never reuse or close the user's instance.

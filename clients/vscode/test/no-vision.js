@@ -22,7 +22,9 @@ module.exports = function noVisionPolicy() {
     assert(!/import\s*\(\s*['"](?:sharp|canvas|playwright)['"]/.test(source), `${file} imports an image capture tool`);
   }
   for (const method of ['Page.captureScreenshot', 'Page.snapshotRect', 'DOMSnapshot.captureSnapshot']) {
-    const refused = spawnSync(process.execPath, [path.join(root, 'run.mjs'), '--cdp', '1', method, '{}'], { encoding: 'utf8' });
+    const env = { ...process.env, PATH: '', MAGIT_VSCODE_BIN: '' };
+    delete env.DISPLAY;
+    const refused = spawnSync(process.execPath, [path.join(root, 'run.mjs'), '--cdp', '1', method, '{}'], { encoding: 'utf8', env });
     assert.notEqual(refused.status, 0, `${method} unexpectedly succeeded`);
     assert.match(refused.stderr, /Image-related CDP method is forbidden/, `${method} was not refused by policy before connection`);
   }
