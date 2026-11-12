@@ -82,6 +82,47 @@ fn interactive_rebase_confirmation_opens_prepared_rows_for_selected_base() {
 }
 
 #[test]
+fn edited_initial_rebase_cancel_preserves_repository_and_restores_caller() {
+    let (dir, _repo, base) = repo();
+    let before = state(dir.path());
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r");
+    test.press("i");
+    test.ack();
+    let selected_base = test.tree().line_nodes.iter().position(|line| test.tree().node(&line.node).is_some_and(|node| node.kind == magit_lsp::tree::NodeKind::Commit && node.commit.as_deref() == Some(base.as_str()))).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line: selected_base, column: 0 });
+    test.invoke_here("common.confirm");
+    let first = test.tree().nodes.iter().find(|node| node.commit.is_some()).unwrap().commit.clone().unwrap();
+    let row = test.tree().line_nodes.iter().position(|line| test.tree().node(&line.node).is_some_and(|node| node.commit.as_deref() == Some(first.as_str()))).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line: row, column: 0 });
+    test.press("r");
+    assert!(test.tree().nodes.iter().any(|node| node.commit.as_deref() == Some(first.as_str()) && node.status.as_deref() == Some("reword")));
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(state(dir.path()), before);
+    let refresh = test.invoke("common.refresh");
+    assert!(common::message_texts(&refresh.effects).is_empty());
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Status);
+}
+
+#[test]
+fn initial_rebase_selector_cancel_and_stale_preparation_keep_caller_usable() {
+    let (dir, _, _) = repo();
+    let before = state(dir.path());
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r");
+    test.press("i");
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(state(dir.path()), before);
+    let refresh = test.invoke("common.refresh");
+    assert!(common::message_texts(&refresh.effects).is_empty());
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Status);
+}
+
+#[test]
 fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     let (dir, repo, base) = repo();
     assert!(PreparedRebase::prepare(&repo, "not-a-revision").is_err());
