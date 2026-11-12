@@ -16,6 +16,10 @@ pub struct PreparedRebase {
     repository: String,
 }
 
+/// Result after launch validation, distinguishing refusal from an attempted Git operation.
+#[derive(Debug)]
+pub enum LaunchOutcome { Started(Result<()>) }
+
 impl PreparedRebase {
     /// Prepare commits after exclusive `base` through current `HEAD` for replay.
     pub fn prepare(repo: &GitRepo, base: &str) -> Result<Self> {
@@ -84,12 +88,17 @@ impl PreparedRebase {
 
     /// Revalidate captured repository state, then launch this exact edited plan.
     pub fn launch(&self, repo: &GitRepo, executable: &std::path::Path) -> Result<()> {
+        match self.launch_outcome(repo, executable)? { LaunchOutcome::Started(result) => result }
+    }
+
+    /// Revalidate, then distinguish a preflight refusal from a started Git operation.
+    pub fn launch_outcome(&self, repo: &GitRepo, executable: &std::path::Path) -> Result<LaunchOutcome> {
         self.validate_launch(repo)?;
         let mut todo = String::new();
         for entry in &self.entries {
             let action = match entry.action { TodoAction::Pick => "pick", TodoAction::Reword => "reword", TodoAction::Edit => "edit", TodoAction::Squash => "squash", TodoAction::Fixup => "fixup", TodoAction::Drop => "drop" };
             todo.push_str(&format!("{action} {} {}\n", entry.oid, entry.subject));
         }
-        repo.launch_interactive_rebase(&self.base, todo.as_bytes(), executable)
+        Ok(LaunchOutcome::Started(repo.launch_interactive_rebase(&self.base, todo.as_bytes(), executable)))
     }
 }

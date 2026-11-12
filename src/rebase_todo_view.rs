@@ -14,6 +14,9 @@ pub struct RebaseTodoView {
 
 enum TodoOwner { Paused(GitRepo, RebaseTodo), Prepared(GitRepo, PreparedRebase) }
 
+/// Outcome of submitting a paused todo or prepared initial rebase.
+pub enum SubmitOutcome { Saved, Started(Result<()>) }
+
 impl RebaseTodoView {
     /// Load the current paused todo from `repo`.
     pub fn load(repo: GitRepo) -> Result<Self> {
@@ -78,7 +81,7 @@ impl RebaseTodoView {
     pub fn save(&self) -> Result<()> { match &self.owner { TodoOwner::Paused(repo, todo) => todo.save(repo), TodoOwner::Prepared(_, _) => Err(Error::new("prepared rebase todo cannot be saved as a paused todo")) } }
 
     /// Submit a paused todo by saving it, or launch a prepared initial rebase.
-    pub fn submit(&self) -> Result<()> { match &self.owner { TodoOwner::Paused(repo, todo) => todo.save(repo), TodoOwner::Prepared(repo, plan) => plan.launch(repo, &std::env::current_exe()?) } }
+    pub fn submit(&self) -> Result<SubmitOutcome> { match &self.owner { TodoOwner::Paused(repo, todo) => { todo.save(repo)?; Ok(SubmitOutcome::Saved) }, TodoOwner::Prepared(repo, plan) => match plan.launch_outcome(repo, &std::env::current_exe()?)? { crate::rebase_plan::LaunchOutcome::Started(result) => Ok(SubmitOutcome::Started(result)) } } }
 }
 
 impl View for RebaseTodoView {

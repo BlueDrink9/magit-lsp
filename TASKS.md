@@ -699,6 +699,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `d7b4563` → `ok: rust`; real conflict resolution/continue, conflict abort and intentional edit-pause abort pass.
         - [ ] **T019.3c2b — Present execution outcomes through server dispatch.** Distinguish stale preflight refusal from execution that actually started; expose real operation state and usable caller/actions without automatic abort or retaining a misleading preflight editor.
           - test: Genuine-server key submit into edit pause and conflict, readable effects, actual state and usable continue/abort dispatch.
+          - [x] **T019.3c2b1 — Dispatch started execution and edit pause.** Typed preflight/started outcomes; real-server edit pause, caller usability and explicit abort restoration, with existing stale/paused-save invariants.
+            - test: Genuine-server edit-pause submit and explicit abort; stale-submit and paused-save regressions.
+            - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `e3a2bab` → `ok: rust`; genuine-server edit pause pops the prepared todo, leaves the caller refreshable, and `rebase.abort` restores HEAD, refs, index tree and worktree; stale-submit and paused-save suites pass.
+          - [ ] **T019.3c2b2 — Dispatch conflict and resolved continuation.** Actual conflict state and readable effect after key submit, usable caller and explicit resolved continue to exact final history.
+            - test: Genuine-server conflict/continue lifecycle and exact repository-state assertions.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
