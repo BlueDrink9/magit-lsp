@@ -105,6 +105,29 @@ fn stale_or_invalid_save_leaves_todo_bytes_unchanged() {
 }
 
 #[test]
+fn old_todo_model_cannot_save_into_identical_restarted_rebase() {
+    let (dir, repo) = paused_repo();
+    let old = RebaseTodo::load(&repo).unwrap();
+    let path = repo.rebase_todo_path().unwrap();
+    let source = std::fs::read(&path).unwrap();
+    let metadata = ["orig-head", "onto", "head-name"].map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap());
+    git(dir.path(), &["rebase", "--abort"]);
+    let output = std::process::Command::new("git").args(["rebase", "-i", "HEAD~3"]).current_dir(dir.path())
+        .env("GIT_SEQUENCE_EDITOR", "sed -i '1s/^pick /edit /'").output().unwrap();
+    assert!(output.status.success(), "restart paused rebase: {}", String::from_utf8_lossy(&output.stderr));
+    let restarted = std::fs::read(&path).unwrap();
+    assert_eq!(restarted, source);
+    assert_eq!(["orig-head", "onto", "head-name"].map(|name| std::fs::read(dir.path().join(".git/rebase-merge").join(name)).unwrap()), metadata);
+    assert!(old.save(&repo).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), source);
+    let mut current = RebaseTodo::load(&repo).unwrap();
+    current.entries[0].action = TodoAction::Reword;
+    current.save(&repo).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), format!("reword {} {}\npick {} {}\n", current.entries[0].oid, current.entries[0].subject, current.entries[1].oid, current.entries[1].subject).as_bytes());
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
 fn todo_view_edits_and_reorders_by_captured_identity() {
     let (dir, repo) = paused_repo();
     let mut view = RebaseTodoView::load(repo).unwrap();

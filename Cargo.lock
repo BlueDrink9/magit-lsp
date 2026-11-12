@@ -421,6 +421,7 @@ dependencies = [
  "notify",
  "proptest",
  "rstest",
+ "same-file",
  "schemars",
  "serde",
  "serde_json",

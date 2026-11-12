@@ -377,6 +377,19 @@ impl std::fmt::Display for GitFailure {
 }
 
 /// A Git repository driven through the `git` CLI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RebaseTodoOwner {
+    git_dir: PathBuf,
+    metadata: Vec<(String, Vec<u8>)>,
+    merge_identity: std::sync::Arc<same_file::Handle>,
+}
+
+/// A coherent todo source and owning rebase operation snapshot.
+pub(crate) struct RebaseTodoSnapshot {
+    pub source: Vec<u8>,
+    pub owner: RebaseTodoOwner,
+}
+
 pub struct GitRepo {
     root: PathBuf,
     git_dir: PathBuf,
@@ -570,34 +583,45 @@ impl GitRepo {
     }
 
     /// Read the todo owned by an active paused merge-backend rebase.
-    pub fn read_rebase_todo(&self) -> Result<Vec<u8>> {
-        if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
-            return Err(Error::new("no paused merge-backend rebase owns the todo"));
-        }
-        let path = self.rebase_todo_path()?;
-        let merge_dir = std::fs::canonicalize(self.git_dir.join("rebase-merge"))?;
-        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge_dir.as_path()) {
-            return Err(Error::new("rebase todo path is outside the paused operation"));
-        }
-        Ok(std::fs::read(path)?)
-    }
-
-    /// Capture stable worktree and merge-backend operation metadata for todo ownership checks.
-    pub fn rebase_todo_identity(&self) -> Result<(PathBuf, Vec<(String, Vec<u8>)>)> {
+    /// Capture todo bytes, metadata, and directory identity as one validated snapshot.
+    pub(crate) fn read_rebase_todo_snapshot(&self) -> Result<RebaseTodoSnapshot> {
         if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));
         }
         let git_dir = std::fs::canonicalize(&self.git_dir)?;
         let merge = git_dir.join("rebase-merge");
+        let merge_identity = std::sync::Arc::new(same_file::Handle::from_path(&merge)?);
         let mut metadata = Vec::new();
         for name in ["orig-head", "onto", "head-name"] {
             metadata.push((name.to_owned(), std::fs::read(merge.join(name))?));
         }
-        Ok((git_dir, metadata))
+        let path = self.rebase_todo_path()?;
+        if path.parent().and_then(|parent| std::fs::canonicalize(parent).ok()).as_deref() != Some(merge.as_path()) {
+            return Err(Error::new("rebase todo path is outside the paused operation"));
+        }
+        let source = std::fs::read(path)?;
+        let owner = RebaseTodoOwner { git_dir, metadata, merge_identity };
+        if self.rebase_todo_identity()? != owner || std::fs::read(self.rebase_todo_path()?)? != source {
+            return Err(Error::new("rebase todo operation changed while it was loaded"));
+        }
+        Ok(RebaseTodoSnapshot { source, owner })
+    }
+
+    /// Capture the active operation identity, including the merge directory instance.
+    pub(crate) fn rebase_todo_identity(&self) -> Result<RebaseTodoOwner> {
+        if self.rebase_state()?.is_none() || !self.git_dir.join("rebase-merge").is_dir() {
+            return Err(Error::new("no paused merge-backend rebase owns the todo"));
+        }
+        let git_dir = std::fs::canonicalize(&self.git_dir)?;
+        let merge = git_dir.join("rebase-merge");
+        let merge_identity = std::sync::Arc::new(same_file::Handle::from_path(&merge)?);
+        let mut metadata = Vec::new();
+        for name in ["orig-head", "onto", "head-name"] { metadata.push((name.to_owned(), std::fs::read(merge.join(name))?)); }
+        Ok(RebaseTodoOwner { git_dir, metadata, merge_identity })
     }
 
     /// Atomically replace the todo of this repository's paused merge-backend rebase.
-    pub fn write_rebase_todo(&self, identity: &(PathBuf, Vec<(String, Vec<u8>)>), expected: &[u8], contents: &[u8]) -> Result<()> {
+    pub(crate) fn write_rebase_todo(&self, identity: &RebaseTodoOwner, expected: &[u8], contents: &[u8]) -> Result<()> {
         if &self.rebase_todo_identity()? != identity { return Err(Error::new("rebase todo operation changed since it was loaded")); }
         if !self.rebase_state()?.is_some() || !self.git_dir.join("rebase-merge").is_dir() {
             return Err(Error::new("no paused merge-backend rebase owns the todo"));

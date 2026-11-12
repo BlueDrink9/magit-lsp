@@ -1,6 +1,6 @@
 //! Typed parser for the supported linear interactive-rebase todo grammar.
 
-use crate::git::GitRepo;
+use crate::git::{GitRepo, RebaseTodoOwner};
 use crate::{Error, Result};
 
 /// Supported operation for one rebase todo entry.
@@ -13,7 +13,7 @@ pub struct TodoEntry { pub action: TodoAction, pub oid: String, pub subject: Str
 
 /// Parsed todo entries with original source bytes retained for stale checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebaseTodo { pub entries: Vec<TodoEntry>, source: Vec<u8>, identities: Vec<String>, original: Vec<TodoEntry>, owner: Option<(std::path::PathBuf, Vec<(String, Vec<u8>)>)> }
+pub struct RebaseTodo { pub entries: Vec<TodoEntry>, source: Vec<u8>, identities: Vec<String>, original: Vec<TodoEntry>, owner: Option<RebaseTodoOwner> }
 
 impl RebaseTodo {
     /// Return the immutable todo bytes captured when this model was parsed.
@@ -45,9 +45,9 @@ impl RebaseTodo {
 
     /// Load and parse the todo owned by this repository's paused merge-backend rebase.
     pub fn load(repo: &GitRepo) -> Result<Self> {
-        let source = repo.read_rebase_todo()?;
-        let mut todo = Self::parse(repo, &source)?;
-        todo.owner = Some(repo.rebase_todo_identity()?);
+        let snapshot = repo.read_rebase_todo_snapshot()?;
+        let mut todo = Self::parse(repo, &snapshot.source)?;
+        todo.owner = Some(snapshot.owner);
         Ok(todo)
     }
 
