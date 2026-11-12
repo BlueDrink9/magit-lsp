@@ -198,6 +198,7 @@ fn stale_prepared_rebase_submit_retains_editor_and_edits() {
     assert_eq!(retained["method"], "view/render");
     assert_eq!(retained["params"]["viewId"], todo);
     assert_eq!(retained["params"]["text"].as_array().unwrap().len(), 2, "{retained}");
+    assert!(retained["params"]["text"][1].as_str().unwrap().contains("reword"), "{retained}");
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":todo,"version":retained["params"]["version"]}}));
     for (line, revision) in [(0, "HEAD~1"), (1, "HEAD~2")] {
         let id = 20 + line as i64;
