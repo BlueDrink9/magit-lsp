@@ -6,7 +6,7 @@ use crate::{Error, Result};
 use std::path::Path;
 
 /// Phase reached while executing a captured instant fixup.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InstantFixupOutcome {
     /// Captured authority became stale before any mutation.
     Refused(String),
@@ -26,7 +26,7 @@ pub enum InstantAutosquashKind {
 }
 
 /// Exact repository authority captured for one future instant autosquash operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstantRebaseAuthority {
     kind: InstantAutosquashKind,
     target: String,

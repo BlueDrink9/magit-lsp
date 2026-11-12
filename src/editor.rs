@@ -842,10 +842,17 @@ pub fn execute_operation(
     edit_id: &str,
     socket: &Path,
     operation: &crate::git::RepositoryOperation,
-) -> Result<crate::git::CommitOutcome> {
+    executable: &Path,
+) -> Result<crate::git::RepositoryOperationOutcome> {
     match operation {
         crate::git::RepositoryOperation::Commit(operation) => {
-            commit(repo_path, edit_id, socket, operation)
+            commit(repo_path, edit_id, socket, operation).map(crate::git::RepositoryOperationOutcome::Commit)
+        }
+        crate::git::RepositoryOperation::InstantFixup(authority) => {
+            let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
+            Ok(crate::git::RepositoryOperationOutcome::InstantFixup(
+                authority.execute_fixup(&repo, executable),
+            ))
         }
     }
 }

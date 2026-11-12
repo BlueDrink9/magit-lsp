@@ -5030,7 +5030,11 @@ fn spawn_repository_operation(
         .spawn(move || {
             let _progress = progress;
             let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
-                Some(socket) => editor::execute_operation(&repo, &edit.id, socket, &operation),
+                Some(socket) => {
+                    let executable = std::env::current_exe()
+                        .map_err(|error| Error::new(format!("cannot locate server executable: {error}")))?;
+                    editor::execute_operation(&repo, &edit.id, socket, &operation, &executable)
+                },
                 None => Err(Error::new("the editor bridge is not running")),
             });
             // Release both resources before any outcome or progress-end reaches
@@ -5039,7 +5043,7 @@ fn spawn_repository_operation(
 
             let mut messages = Vec::new();
             match result {
-                Ok(outcome) => {
+                Ok(crate::git::RepositoryOperationOutcome::Commit(outcome)) => {
                     let renders: Vec<ViewRender> = if shared.closing.load(Ordering::SeqCst) {
                         Vec::new()
                     } else {
@@ -5081,6 +5085,33 @@ fn spawn_repository_operation(
                         effects.push(Effect::message(MessageLevel::Warn, warning));
                     }
                     messages.extend(effect_notifications(&shared.client, effects));
+                }
+                Ok(crate::git::RepositoryOperationOutcome::InstantFixup(outcome)) => {
+                    if !shared.closing.load(Ordering::SeqCst) {
+                        match refresh_pending_views(&shared, &repo) {
+                            Ok(renders) => for render in renders {
+                                if let Some(message) = deliver_render(&shared, render) {
+                                    messages.push(message);
+                                }
+                            },
+                            Err(refresh_error) => report_pending_refresh_error(&shared, refresh_error),
+                        }
+                    }
+                    let (level, text) = match outcome {
+                        crate::instant_rebase::InstantFixupOutcome::Refused(error) =>
+                            (MessageLevel::Warn, format!("Instant fixup refused: {error}")),
+                        crate::instant_rebase::InstantFixupOutcome::MarkerFailed(error) =>
+                            (MessageLevel::Error, format!("Instant fixup marker failed: {error}")),
+                        crate::instant_rebase::InstantFixupOutcome::RebaseStopped { marker, phase, error } =>
+                            (MessageLevel::Error, format!("Instant fixup stopped during {phase}; marker {marker} retained: {error}")),
+                        crate::instant_rebase::InstantFixupOutcome::Completed { marker, warning } => {
+                            if let Some(warning) = warning {
+                                messages.extend(effect_notifications(&shared.client, vec![Effect::message(MessageLevel::Warn, warning)]));
+                            }
+                            (MessageLevel::Info, format!("Instant fixup completed; marker {marker} autosquashed"))
+                        }
+                    };
+                    messages.extend(effect_notifications(&shared.client, vec![Effect::message(level, text)]));
                 }
                 Err(error) => {
                     if !shared.closing.load(Ordering::SeqCst) {

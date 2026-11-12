@@ -210,6 +210,17 @@ pub enum CommitOperation {
 pub enum RepositoryOperation {
     /// Run a commit operation through the registered editor bridge.
     Commit(CommitOperation),
+    /// Create a fixup marker and run Git's autosquash rebase.
+    InstantFixup(crate::instant_rebase::InstantRebaseAuthority),
+}
+
+/// Result from executing a deferred repository operation.
+#[derive(Debug)]
+pub enum RepositoryOperationOutcome {
+    /// Commit-specific result.
+    Commit(CommitOutcome),
+    /// Instant fixup phase result.
+    InstantFixup(crate::instant_rebase::InstantFixupOutcome),
 }
 
 /// Typed commit action selected from the commit menu.

@@ -89,6 +89,7 @@ fn message_effects(outcome: &InvokeResult) -> Vec<(&MessageLevel, &str, Option<&
 fn commit_operation(outcome: InvokeResult) -> Option<CommitOperation> {
     outcome.commit.map(|operation| match operation {
         RepositoryOperation::Commit(operation) => operation,
+        RepositoryOperation::InstantFixup(_) => panic!("unexpected instant fixup operation"),
     })
 }
 
