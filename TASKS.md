@@ -715,6 +715,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `186931a` → `ok: ui-file`; exact selector-title and per-key cursor barriers drive native selection/confirmation, compare ordered 12-character display rows derived from fixture OIDs, prove exact repository preservation and reopen the caller menu. Full-OID structured ownership remains covered by `exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only` and `todo_key_input_changes_action_and_reorders_full_oid_rows`.
       - [ ] **T019.4a2 — Native prepared submission rewrites expected history.** Extend verified selection path with native edit/reorder/drop/submit and exact Git/caller assertions.
         - test: Same native scenario proves actual edited launch.
+        - Attempts: Two default checkpoints; second selection reaches prepared editor, but guessed cursor-row assertion fails before edits. Split native editing from execution evidence.
+        - [x] **T019.4a2a — Native prepared keys produce edited plan.** Verify native reorder/drop against exact expected prepared display, then discard without mutation.
+          - test: Same scenario directly asserts native edited plan and unchanged repository on discard.
+        - [ ] **T019.4a2b — Native edited plan executes.** Extend the verified native edited plan with submit and exact history, content and usable caller assertions.
+          - test: Same scenario proves actual edited execution.
     - [ ] **T019.4b — Native edited preflight cancellation.** Real editor edits then cancellation preserve exact repository state and caller usability.
       - test: Extend the same scenario with exact cancel invariants.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
