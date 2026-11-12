@@ -210,7 +210,7 @@ if (existsSync(`${directory}/failure.txt`)) {
 // R-VS-2, R-VS-3, R-VS-4 and R-VS-5 gates must all have written their evidence.
 const headEvidence = focusedHead && existsSync(`${directory}/head-operations-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/head-operations-evidence.json`, 'utf8')) : null;
-const evidenceReady = focusedVersion ? existsSync(`${directory}/version-startup-evidence.json`)
+const evidenceReady = focusedVersion ? existsSync(`${directory}/version-warning-evidence.json`)
   : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
   : process.env.MAGIT_VSCODE_A34_ONLY === '1'
@@ -240,6 +240,8 @@ if (!evidenceReady) {
       ? 'Missing A29 evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A06_ONLY === '1'
       ? 'Missing A06 evidence; see the isolated evidence directory above.'
+      : focusedVersion
+      ? 'Missing native version-warning evidence; see the isolated evidence directory above.'
       : 'Missing R-VS-2/R-VS-3/R-VS-4/R-VS-5/A06 evidence; see the isolated evidence directory above.'
   );
 }

@@ -159,7 +159,7 @@ async function run() {
   const matrix = [];
   const interactions = [];
   const cdp = (method, params) => JSON.parse(execFileSync('node', ['--experimental-websocket',
-    `${extension.extensionPath}/test/e2e/run.mjs`, '--cdp',
+    `${__dirname}/run.mjs`, '--cdp',
     process.env.MAGIT_VSCODE_CDP_PORT, method, JSON.stringify(params),
   ], { timeout: 10000, maxBuffer: 16 * 1024 * 1024 }).toString());
   const observe = () => cdp('Runtime.evaluate', {
@@ -309,27 +309,36 @@ async function run() {
     assert.equal(openedViews[0].id, uri.authority, 'status URI is not the opened view id');
     assert.equal(openedViews[0].kind, 'status');
     if (suiteMode === 'version') {
-      const { store } = require(`${extension.extensionPath}/lib/store`);
+      const { store } = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/store`);
+      const fixtureManifest = JSON.parse(fs.readFileSync(
+        path.join(process.env.MAGIT_VSCODE_VERSION_FIXTURE, 'package.json'), 'utf8'));
       await waitFor(() => store.clientReady && store.client?.initializeResult?.serverInfo?.version,
         'version fixture server initialization');
       assert(store.clientReady, 'version fixture extension did not become ready');
       assert.match(editor.document.getText(), /tracked\.txt/, 'version fixture status is unusable');
       const serverPath = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
-      const executable = require(`${extension.extensionPath}/lib/version`).resolveCommand(serverPath);
-      const warningText = await waitFor(() => {
+      const executable = require(`${process.env.MAGIT_VSCODE_VERSION_FIXTURE}/lib/version`).resolveCommand(serverPath);
+      let warningText;
+      await waitFor(() => {
         const text = cdp('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('.notifications-toasts .notification-toast')).filter((element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; }).map((element) => element.innerText).join(' ')`, returnByValue: true }).result.value;
-        return text.includes('magit-lsp version mismatch') ? text : false;
+        if (!text.includes('magit-lsp version mismatch')) return false;
+        warningText = text;
+        return true;
       }, 'rendered native version mismatch warning');
-      assert(warningText.includes(extension.packageJSON.version), 'rendered warning omitted extension version');
+      assert(warningText.includes(fixtureManifest.version), 'rendered warning omitted extension version');
       assert(warningText.includes(store.client.initializeResult.serverInfo.version), 'rendered warning omitted server version');
       assert(warningText.includes(executable), 'rendered warning omitted selected executable');
+      await vscode.commands.executeCommand('magit.invoke', { command: 'common.refresh' });
+      assert(invoked('common.refresh'), 'version fixture status did not accept refresh interaction');
+      assert.match(editor.document.getText(), /tracked\.txt/, 'refreshed version fixture status is unusable');
       const evidencePath = `${evidence}/version-warning-evidence.json`;
       fs.writeFileSync(evidencePath, JSON.stringify({
-        fixtureVersion: extension.packageJSON.version,
+        fixtureVersion: fixtureManifest.version,
         serverVersion: store.client.initializeResult.serverInfo.version,
         executable,
         initialized: Boolean(store.clientReady),
         statusText: editor.document.getText(),
+        usableInteraction: 'common.refresh',
         renderedWarningText: warningText,
         warningSource: 'visible native notification DOM text via CDP Runtime.evaluate',
         cleanup: 'isolated editor stopped by native runner',

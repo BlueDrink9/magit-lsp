@@ -100,6 +100,13 @@ isolated extension fixture with version `9999.0.0`. Its
 version, selected executable and usable status text. This verifies startup, not
 version-warning visibility; that requires `make vscode-version-warning`.
 
+`make vscode-version-warning` additionally asserts the visible native
+notification text against the isolated fixture version, initialized server
+version and selected executable, then records usable status text in
+`version-warning-evidence.json`. Evidence records rendered notification DOM text
+through text-only CDP `Runtime.evaluate`; artifact from a successful focused run
+is retained under its printed `/tmp/opencode/vscode-review-*` directory.
+
 ### 8.8 Real-UI tests (L3)
 
 L3 drives a real Neovim inside tmux and asserts on the captured screen. It
