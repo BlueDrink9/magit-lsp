@@ -1,0 +1,74 @@
+//! Prepared, in-memory authority for an initial linear interactive rebase.
+
+use crate::git::GitRepo;
+use crate::rebase_todo::{RebaseTodo, TodoAction};
+use crate::{Error, Result};
+
+/// An initial rebase plan, bound to the exact clean repository state it captured.
+#[derive(Debug, Clone)]
+pub struct PreparedRebase {
+    base: String,
+    head: String,
+    entries: Vec<crate::rebase_todo::TodoEntry>,
+    membership: Vec<String>,
+    index: String,
+    worktree: String,
+    repository: String,
+}
+
+impl PreparedRebase {
+    /// Prepare commits after exclusive `base` through current `HEAD` for replay.
+    pub fn prepare(repo: &GitRepo, base: &str) -> Result<Self> {
+        let repository = repo.repository_identity()?;
+        let head = repo.resolve_commit("HEAD")?;
+        let base = repo.resolve_commit(base)?;
+        let (index, worktree) = repo.rebase_launch_preconditions()?;
+        let oids = repo.linear_replay_membership(&base, &head)?;
+        if oids.is_empty() { return Err(Error::new("selected base has no commits to replay")); }
+        let source = oids.iter().map(|oid| format!("pick {oid} {}\n", repo.commit_subject(oid).unwrap_or_else(|_| "(no subject)".into()))).collect::<String>();
+        let todo = RebaseTodo::parse(repo, source.as_bytes())?;
+        Ok(Self { base, head, entries: todo.entries, membership: oids, index, worktree, repository })
+    }
+
+    /// Current editable ordered instructions; edits remain in memory only.
+    pub fn entries(&self) -> &[crate::rebase_todo::TodoEntry] { &self.entries }
+
+    /// Change an entry action by full commit object ID.
+    pub fn set_action(&mut self, oid: &str, action: TodoAction) -> Result<()> {
+        let index = self.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
+        self.entries[index].action = action;
+        if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
+            self.entries[index].action = TodoAction::Pick;
+            return Err(Error::new("first todo action cannot squash or fixup"));
+        }
+        Ok(())
+    }
+
+    /// Move an existing commit before another, or to the end when `before` is absent.
+    pub fn move_before(&mut self, oid: &str, before: Option<&str>) -> Result<()> {
+        let from = self.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
+        let entry = self.entries.remove(from);
+        let to = match before { Some(id) => self.entries.iter().position(|candidate| candidate.oid == id).ok_or_else(|| Error::new("target is not in the prepared rebase plan"))?, None => self.entries.len() };
+        self.entries.insert(to, entry);
+        if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
+        Ok(())
+    }
+
+    /// Recheck launch inputs without changing the edited plan or repository.
+    pub fn validate_launch(&self, repo: &GitRepo) -> Result<()> {
+        if repo.repository_identity()? != self.repository { return Err(Error::new("repository identity changed since rebase plan preparation")); }
+        if repo.resolve_commit("HEAD")? != self.head { return Err(Error::new("HEAD changed since rebase plan preparation")); }
+        let (index, worktree) = repo.rebase_launch_preconditions()?;
+        if index != self.index { return Err(Error::new("index changed since rebase plan preparation")); }
+        if worktree != self.worktree { return Err(Error::new("worktree changed since rebase plan preparation")); }
+        let current = repo.linear_replay_membership(&self.base, &self.head)?;
+        let mut planned = self.entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+        planned.sort();
+        let mut captured = self.membership.clone();
+        captured.sort();
+        if current != self.membership || planned != captured {
+            return Err(Error::new("edited rebase plan membership changed"));
+        }
+        Ok(())
+    }
+}

@@ -818,6 +818,43 @@ impl GitRepo {
         Ok(value.trim().to_string())
     }
 
+    /// Stable identity for the selected worktree and Git directory.
+    pub fn repository_identity(&self) -> Result<String> {
+        Ok(format!("{}\0{}", std::fs::canonicalize(&self.root)?.display(), std::fs::canonicalize(&self.git_dir)?.display()))
+    }
+
+    /// Capture exact index bytes and require a clean, operation-free worktree.
+    pub fn rebase_launch_preconditions(&self) -> Result<(String, String)> {
+        if self.rebase_state()?.is_some() { return Err(Error::new("cannot prepare rebase while a Git operation is in progress")); }
+        let status = self.run(&["status", "--porcelain", "--untracked-files=all"])?;
+        if !status.is_empty() { return Err(Error::new("cannot prepare rebase with staged, unstaged, or untracked changes")); }
+        let index = self.run(&["rev-parse", "--git-path", "index"])?;
+        let path = PathBuf::from(index.trim());
+        let path = if path.is_absolute() { path } else { self.root.join(path) };
+        let bytes = std::fs::read(path)?;
+        use sha2::{Digest, Sha256};
+        let index = format!("{:x}", Sha256::digest(&bytes));
+        let worktree = self.run(&["diff", "--binary", "HEAD", "--"])?;
+        Ok((index, worktree))
+    }
+
+    /// Return full commit IDs after an exclusive base, rejecting non-linear history.
+    pub fn linear_replay_membership(&self, base: &str, head: &str) -> Result<Vec<String>> {
+        let ancestry = self.run(&["merge-base", "--is-ancestor", base, head]);
+        if ancestry.is_err() { return Err(Error::new("selected base is not an ancestor of HEAD")); }
+        let output = self.run(&["rev-list", "--reverse", "--topo-order", "--parents", &format!("{base}..{head}")])?;
+        let mut result = Vec::new();
+        let mut expected_parent = base;
+        for line in output.lines() {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 2 || fields[1] != expected_parent { return Err(Error::new("selected range is not a supported linear history")); }
+            result.push(fields[0].to_owned());
+            expected_parent = fields[0];
+        }
+        if expected_parent != head { return Err(Error::new("selected range does not end at captured HEAD")); }
+        Ok(result)
+    }
+
     /// Resolve ordered hexadecimal todo tokens in one batch to per-token outcomes.
     pub fn resolve_todo_commits(&self, tokens: &[String]) -> Result<Vec<Result<String>>> {
         for (index, token) in tokens.iter().enumerate() {
