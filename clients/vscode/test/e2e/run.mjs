@@ -13,6 +13,7 @@ import { resolveCommand } from '../../lib/version.js';
 const root = resolve(import.meta.dirname, '../../../..');
 const require = createRequire(import.meta.url);
 const { selectSuiteMode, withSuiteMode } = require('./focused-mode.js');
+const { failureText } = require('./launcher-result.js');
 // This subprocess observes the isolated renderer; it never sets context keys or
 // dispatches commands. Image capture methods are explicitly forbidden.
 if (process.argv[2] === '--cdp') {
@@ -157,10 +158,10 @@ if (focusedEdit || focusedHead || focusedVersion) {
       process.env.MAGIT_VSCODE_VERSION_ONLY = ${JSON.stringify(focusedVersion ? '1' : '')};
       process.env.MAGIT_VSCODE_VERSION_FIXTURE = ${JSON.stringify(versionFixture?.extensionPath || '')};
       setImmediate(async () => {
-        let status = 0;
-        try { await require(${JSON.stringify(`${root}/clients/vscode/test/e2e/suite.js`)}).run(); }
-        catch (error) { status = 1; console.error(error); }
-        require('node:fs').writeFileSync(${JSON.stringify(`${directory}/native-complete.json`)}, JSON.stringify({ status }));
+        let result;
+        try { await require(${JSON.stringify(`${root}/clients/vscode/test/e2e/suite.js`)}).run(); result = { status: 0, error: null }; }
+        catch (error) { result = require(${JSON.stringify(`${root}/clients/vscode/test/e2e/launcher-result.js`)}).suiteResult(error); }
+        require('node:fs').writeFileSync(${JSON.stringify(`${directory}/native-complete.json`)}, JSON.stringify(result));
       });
     };
   `);
@@ -191,6 +192,8 @@ if (focusedEdit || focusedHead || focusedVersion) {
   });
   result = { status: existsSync(`${directory}/native-complete.json`)
     ? JSON.parse((await import('node:fs')).readFileSync(`${directory}/native-complete.json`)).status : 1,
+  suiteError: existsSync(`${directory}/native-complete.json`)
+    ? JSON.parse((await import('node:fs')).readFileSync(`${directory}/native-complete.json`)).error : null,
   error: launchError };
 } else {
   result = spawnSync(editor, args, { env, stdio: 'inherit', timeout: 180000 });
@@ -199,6 +202,7 @@ stopOwned(directory);
 versionFixture?.cleanup();
 console.log(`VSCode text evidence: ${directory}`);
 if (result.error) console.error(result.error);
+if (result.suiteError) console.error(failureText({ error: result.suiteError }));
 if (existsSync(`${directory}/failure.txt`)) {
   console.error(await (await import('node:fs/promises')).readFile(`${directory}/failure.txt`, 'utf8'));
 }

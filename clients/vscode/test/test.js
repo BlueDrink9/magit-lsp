@@ -19,6 +19,7 @@ const noVisionPolicy = require('./no-vision');
 const versions = require('../lib/version');
 const { createVersionFixture } = require('./e2e/version-fixture');
 const { selectSuiteMode, withSuiteMode } = require('./e2e/focused-mode');
+const launcherResult = require('./e2e/launcher-result');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -82,6 +83,16 @@ test('version-only launch selects the version suite branch instead of generic ev
   assert.equal(launchEnvironment.MAGIT_VSCODE_SUITE_MODE, 'version');
   assert.equal(selectSuiteMode(launchEnvironment), 'version');
   assert.notEqual(selectSuiteMode(launchEnvironment), 'generic');
+});
+
+test('native launcher preserves suite exception and reports original failure details', () => {
+  const error = new Error('suite exploded');
+  const result = launcherResult.suiteResult(error);
+  assert.equal(result.status, 1);
+  assert.equal(result.error.message, 'suite exploded');
+  assert.match(result.error.stack, /suite exploded/);
+  assert.match(launcherResult.failureText(result), /suite exploded/);
+  assert.match(launcherResult.failureText(result), /Error: suite exploded/);
 });
 
 test('mismatched extension fixture isolates manifest version, runtime and cleanup', () => {
