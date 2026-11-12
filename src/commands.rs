@@ -34,6 +34,8 @@ pub enum Scope {
     CommitMessage,
     /// The read-only process log.
     ProcessLog,
+    /// Commands available only inside the paused rebase todo editor.
+    RebaseTodo,
     /// A command run from inside a menu. It is bound by the menu item, not by
     /// a profile, so it has no profile-scope keymap of its own.
     MenuAction,
@@ -51,6 +53,7 @@ impl Scope {
             Scope::Menu => "menu",
             Scope::CommitMessage => "commit-message",
             Scope::ProcessLog => "process-log",
+            Scope::RebaseTodo => "rebase-todo",
             Scope::MenuAction => "menu-action",
         }
     }
@@ -69,6 +72,7 @@ impl Scope {
             Scope::Select if view_scope == "log.select" => true,
             Scope::LogSelect if view_scope == "log.select" => true,
             Scope::MenuAction => !view_scope.starts_with("menu"),
+            Scope::RebaseTodo => view_scope == "rebase-todo",
             other => other.as_str() == view_scope,
         }
     }
@@ -919,17 +923,17 @@ fn build() -> Registry {
         Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
         Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
         Command { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
-        Command { id: "rebase.todo-set-action", scope: Scope::MenuAction, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
-        Command { id: "rebase.todo-move-before", scope: Scope::MenuAction, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
-        Command { id: "rebase.todo-submit", scope: Scope::MenuAction, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
-        Command { id: "rebase.todo-pick", scope: Scope::MenuAction, doc: "Mark todo commit pick", status: CommandStatus::Implemented, run: rebase_todo_pick, effects: &[] },
-        Command { id: "rebase.todo-reword", scope: Scope::MenuAction, doc: "Mark todo commit reword", status: CommandStatus::Implemented, run: rebase_todo_reword, effects: &[] },
-        Command { id: "rebase.todo-edit", scope: Scope::MenuAction, doc: "Mark todo commit edit", status: CommandStatus::Implemented, run: rebase_todo_edit, effects: &[] },
-        Command { id: "rebase.todo-squash", scope: Scope::MenuAction, doc: "Mark todo commit squash", status: CommandStatus::Implemented, run: rebase_todo_squash, effects: &[] },
-        Command { id: "rebase.todo-fixup", scope: Scope::MenuAction, doc: "Mark todo commit fixup", status: CommandStatus::Implemented, run: rebase_todo_fixup, effects: &[] },
-        Command { id: "rebase.todo-drop", scope: Scope::MenuAction, doc: "Mark todo commit drop", status: CommandStatus::Implemented, run: rebase_todo_drop, effects: &[] },
-        Command { id: "rebase.todo-up", scope: Scope::MenuAction, doc: "Move todo commit up", status: CommandStatus::Implemented, run: rebase_todo_up, effects: &[] },
-        Command { id: "rebase.todo-down", scope: Scope::MenuAction, doc: "Move todo commit down", status: CommandStatus::Implemented, run: rebase_todo_down, effects: &[] },
+        Command { id: "rebase.todo-set-action", scope: Scope::RebaseTodo, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
+        Command { id: "rebase.todo-move-before", scope: Scope::RebaseTodo, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
+        Command { id: "rebase.todo-submit", scope: Scope::RebaseTodo, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
+        Command { id: "rebase.todo-pick", scope: Scope::RebaseTodo, doc: "Mark todo commit pick", status: CommandStatus::Implemented, run: rebase_todo_pick, effects: &[] },
+        Command { id: "rebase.todo-reword", scope: Scope::RebaseTodo, doc: "Mark todo commit reword", status: CommandStatus::Implemented, run: rebase_todo_reword, effects: &[] },
+        Command { id: "rebase.todo-edit", scope: Scope::RebaseTodo, doc: "Mark todo commit edit", status: CommandStatus::Implemented, run: rebase_todo_edit, effects: &[] },
+        Command { id: "rebase.todo-squash", scope: Scope::RebaseTodo, doc: "Mark todo commit squash", status: CommandStatus::Implemented, run: rebase_todo_squash, effects: &[] },
+        Command { id: "rebase.todo-fixup", scope: Scope::RebaseTodo, doc: "Mark todo commit fixup", status: CommandStatus::Implemented, run: rebase_todo_fixup, effects: &[] },
+        Command { id: "rebase.todo-drop", scope: Scope::RebaseTodo, doc: "Mark todo commit drop", status: CommandStatus::Implemented, run: rebase_todo_drop, effects: &[] },
+        Command { id: "rebase.todo-up", scope: Scope::RebaseTodo, doc: "Move todo commit up", status: CommandStatus::Implemented, run: rebase_todo_up, effects: &[] },
+        Command { id: "rebase.todo-down", scope: Scope::RebaseTodo, doc: "Move todo commit down", status: CommandStatus::Implemented, run: rebase_todo_down, effects: &[] },
         Command {
             id: "commit.amend",
             scope: Scope::MenuAction,

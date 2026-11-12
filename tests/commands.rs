@@ -396,6 +396,7 @@ fn the_registry_lists_every_named_command_once() {
         Scope::CommitMessage,
         Scope::ProcessLog,
         Scope::MenuAction,
+        Scope::RebaseTodo,
     ]
     .iter()
     .map(|&scope| registry().by_scope(scope).count())
@@ -412,6 +413,25 @@ fn the_registry_lists_every_named_command_once() {
         assert_eq!(command.scope, Scope::MenuAction, "{id}");
         assert_eq!(command.status, CommandStatus::Implemented, "{id}");
     }
+    for id in [
+        "rebase.todo-set-action",
+        "rebase.todo-move-before",
+        "rebase.todo-submit",
+        "rebase.todo-pick",
+        "rebase.todo-reword",
+        "rebase.todo-edit",
+        "rebase.todo-squash",
+        "rebase.todo-fixup",
+        "rebase.todo-drop",
+        "rebase.todo-up",
+        "rebase.todo-down",
+    ] {
+        let command = registry().get(id).expect("registered");
+        assert_eq!(command.scope, Scope::RebaseTodo, "{id}");
+        assert!(command.applies_to("rebase-todo"), "{id}");
+        assert!(!command.applies_to("status"), "{id}");
+    }
+    assert_eq!(registry().get("rebase.edit-todo").unwrap().scope, Scope::MenuAction);
     for id in ["commit-message.history-prev", "commit-message.history-next"] {
         let command = registry().get(id).expect("registered");
         assert_eq!(command.scope, Scope::CommitMessage);

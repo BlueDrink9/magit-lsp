@@ -46,7 +46,7 @@ fn every_profile_parses_and_covers_every_command() {
         }
         for command in commands::registry().iter() {
             // Menu actions are bound by their menu item, not by a profile.
-            if command.scope == commands::Scope::MenuAction {
+            if matches!(command.scope, commands::Scope::MenuAction | commands::Scope::RebaseTodo) {
                 continue;
             }
             assert!(
