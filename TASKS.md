@@ -720,6 +720,12 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - test: Same scenario directly asserts native edited plan and unchanged repository on discard.
         - [ ] **T019.4a2b — Native edited plan executes.** Extend the verified native edited plan with submit and exact history, content and usable caller assertions.
           - test: Same scenario proves actual edited execution.
+          - Attempts: Two default checkpoints; native `C-s` now submits and caller shows clean status. Compound post-submit Git assertion still fails. Split exact Git outcome from caller usability confirmation.
+          - [x] **T019.4a2b1 — Native launch has exact Git outcome.** Diagnose the post-submit oracle and prove exact edited history/content and clean operation state.
+            - test: Same scenario directly verifies actual Git outcome.
+            - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `67b81ba` → `ok: ui-file`; native `C-s` launch produces exact `two`, `one` history above the exclusive base, exact fixture-derived file contents with `three` absent, clean index/worktree, and no rebase operation or orphan server.
+          - [ ] **T019.4a2b2 — Native launched caller remains usable.** Confirm meaningful caller interaction after verified launch and consolidate native cancellation evidence.
+            - check: Passing native scenario and direct caller/cancellation assertions recorded with completed ancestor ticks.
     - [ ] **T019.4b — Native edited preflight cancellation.** Real editor edits then cancellation preserve exact repository state and caller usability.
       - test: Extend the same scenario with exact cancel invariants.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.

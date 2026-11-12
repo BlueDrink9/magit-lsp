@@ -60,9 +60,49 @@ wait
 expect view_stack.menus == 1
 keys: Escape
 wait screen contains "Unstaged changes"
+keys: r
+wait
+expect view_stack.menus == 1
+keys: i
+wait screen contains "Log — initial rebase base"
+expect view_stack.count == 2
+keys: Down
+wait
+keys: Down
+wait
+keys: Down
+wait
+sh: test "$(nvim --headless --server ../nvim.sock --remote-expr "line('.')")" = 6 && nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'base'
+keys: Enter
+wait screen contains "magit://rebase-todo/v1:rebase-todo"
+expect view_stack.count == 2
+keys: J
+wait
+sh: nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'one'
+keys: Down
+wait
+sh: nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q 'three'
+keys: d
+wait
+sh: printf 'pick %s two\npick %s one\ndrop %s three\n' "$(git rev-parse --short=12 HEAD~1)" "$(git rev-parse --short=12 HEAD~2)" "$(git rev-parse --short=12 HEAD)" > .git/prepared-submit-expected && nvim --headless --server ../nvim.sock --remote-expr "writefile(getline(1,'$'), '.git/prepared-submit-actual')" >/dev/null && cmp .git/prepared-submit-expected .git/prepared-submit-actual
+keys: C-s
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: git log --format=%s --reverse "$(cat .git/initial-base)..HEAD" > .git/actual-history && printf 'two\none\n' > .git/expected-history && cmp .git/expected-history .git/actual-history
+sh: test "$(git show HEAD:one)" = "one" && test "$(git show HEAD~1:two)" = "two" && ! git cat-file -e HEAD:three
+sh: test -z "$(git status --porcelain)"
+sh: test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+sh: test "$(git rev-parse HEAD~2)" = "$(cat .git/initial-base)"
+sh: git rev-parse HEAD > .git/launched-head && git branch --show-current > .git/launched-branch && git show-ref > .git/launched-refs && git ls-files --stage > .git/launched-index && git diff --binary HEAD > .git/launched-worktree
+keys: r
+wait
+expect view_stack.menus == 1
+keys: Escape
+wait screen contains "Unstaged changes"
 expect view_stack.count == 1
 expect view_stack.count == 1
-sh: test "$(git rev-parse HEAD)" = "$(cat .git/initial-head)" && test "$(git branch --show-current)" = "$(cat .git/initial-branch)" && git show-ref > .git/initial-refs-after && cmp .git/initial-refs .git/initial-refs-after && git ls-files --stage > .git/initial-index-after && cmp .git/initial-index .git/initial-index-after && git diff --binary HEAD > .git/initial-worktree-after && cmp .git/initial-worktree .git/initial-worktree-after && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+expect view_stack.count == 1
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/launched-head)" && test "$(git branch --show-current)" = "$(cat .git/launched-branch)" && git show-ref > .git/launched-refs-after && cmp .git/launched-refs .git/launched-refs-after && git ls-files --stage > .git/launched-index-after && cmp .git/launched-index .git/launched-index-after && git diff --binary HEAD > .git/launched-worktree-after && cmp .git/launched-worktree .git/launched-worktree-after && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
 keys: r
 wait
 expect view_stack.menus == 1
