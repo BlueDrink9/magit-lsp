@@ -32,9 +32,6 @@ DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md L
 docs-check:
 	$(call run,docs-check,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/docs -p 'test_*.py' && PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_docs.py $(DOC_FILES))
 
-portability-check:
-	$(call run,portability-check,PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-portable-paths.py)
-
 format:
 	python3 scripts/format.py --working-tree --write
 

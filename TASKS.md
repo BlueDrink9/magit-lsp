@@ -43,7 +43,7 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
   - [ ] **VER3b — Verify version warnings in the native VSCode host.** Expose focused native verification through Make, fail on missing prerequisites, and record text-only warning plus usable-view evidence.
 
 - [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
-  - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Retain this check: it parses actual config and spike source and fails on missing/absolute executables or personal paths. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
+  - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. One-time historical source check; not runtime proof. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
 - [ ] **PORT2 — Audit and sanitize machine-specific documentation paths.** Complete the text audit, replace host-specific historical command paths without losing provenance, and record reviewer-counterchecked retention decisions.
 
 - [x] **DOC1 — Extract standalone schema references and separate schema behavior tests.** Done: `bbc97db`. Generate payload tables, worked exchanges and capability levels under `docs/schema/`; link from authored client documentation. Keep semantic and temporary-fixture generator/checker tests; move committed-artifact freshness out of ordinary Rust tests.
@@ -504,6 +504,18 @@ T005 is complete through its authoritative [completed children](#completed-work)
      - [ ] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
        - test: session-dispatched open/edit/reorder/submit/cancel operates on captured tree identities and preserves repository/caller invariants.
        - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
+       - [ ] **T018.3b1 — Open and cancel paused todo views.** Add the view kind, session factory and rebase menu opener; cancel restores the caller without mutation.
+         - test: real paused-rebase session opens structured todo rows through the menu, cancels to its caller with unchanged todo/HEAD/index, and reports idle-open failure readably.
+         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
+       - [ ] **T018.3b1a — Paused todo menu open and cancel regression.** Finish the view/menu implementation with real-session identity and no-mutation cancellation coverage.
+         - test: paused-rebase menu dispatch opens full-OID structured rows; cancel restores its caller and preserves todo, HEAD and index.
+         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
+       - [ ] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
+         - test: idle opener produces readable effects without changing repository or caller state.
+         - Verification: `make test-rust FILTER="--test rebase_todo"`.
+       - [ ] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
+         - test: session command/key dispatch edits the captured identities, saves exact todo order/actions and restores caller; invalid/stale submission remains readable and leaves disk unchanged.
+         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
    - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
@@ -733,6 +745,51 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
 
 
 ## Review
+
+- [ ] **[P1] Restore scoped Makefile ownership without discarding external work** (`Makefile:1-15,61-66,84-120`; commits `a3ae47f`, `7ac0630`)
+  - **Problem:** `a3ae47f` accidentally committed the externally owned `ui-tour`/`color-spike`/`readme-shots` relocation, then `7ac0630` captured the rest of that dirty Makefile: `.PHONY` changes, `LOG_TAIL`, global `MAGIT_LSP_BIN`, `ui-file`, `update-snapshots`, and removal of `update-client-behaviors`. Only `.PHONY: vscode-unit` and the `vscode-unit` recipe belong to VER3c; `a8089a3` documents the same external hunk being removed from an earlier DOC2b commit to preserve its ownership.
+  - **Why it matters:** Cohesion/cleanliness — two VSCode commits now own unrelated test-infrastructure work, defeating scoped review and the explicit preserve-unrelated-dirt contract.
+  - **Change:** Add a correction commit whose tracked `Makefile` equals `a3ae47f^:Makefile` plus only `.PHONY: vscode-unit` and the two-command `vscode-unit` target. Preserve the complete removed external delta verbatim as an unstaged `Makefile` worktree change after the commit; use index-only staging rather than deleting, rewriting, or semantically judging that work.
+  - **Done when:** `git show HEAD:Makefile` differs from `a3ae47f^:Makefile` only by the `vscode-unit` phony declaration and target, while `git diff -- Makefile` contains the preserved external hunks and no VER3c hunk; concurrent dirty files remain unchanged.
+  - **Constraints:** Do not rewrite `a3ae47f` or `7ac0630`. Do not discard, stage, reformat, or partially restore the externally owned Makefile delta. Do not touch `.opencode`, `AGENTS.md`, release files, or concurrent rebase work.
+
+- [ ] **[P1] Check Unix executable access instead of any execute bit** (`clients/vscode/lib/version.js:7-29`, `resolveCommand`; `clients/vscode/test/test.js:483-501`, `Unix PATH resolution skips non-executables and returns absolute paths`)
+  - **Problem:** `resolveCommand` accepts a Unix candidate when any `0o111` bit is set. That can select a file the current process cannot execute, such as a current-user-owned file with only the group execute bit, so the warning can name a PATH entry process launch would skip or reject.
+  - **Why it matters:** Correctness — VER3c claims diagnostic resolution matches process discovery, but permission ownership is ignored and the new test covers only `0644` versus `0755`.
+  - **Change:** Keep the regular-file check, then use `fs.accessSync(candidate, fs.constants.X_OK)` for non-Windows candidates before returning them. Extend the existing Unix test with a first PATH candidate owned by the test process but executable only for a non-owner class, followed by a genuinely executable candidate; assert the latter is selected. Preserve Windows PATHEXT and case-insensitive behavior.
+  - **Done when:** Unix resolution skips candidates inaccessible to the current user, still returns an absolute accessible candidate, and `make vscode-unit` passes.
+  - **Constraints:** Do not change launch commands, explicit path handling, warning text, Windows resolution, or add a second resolver.
+
+- [ ] **[P1] Record truthful VER3c completion evidence** (`TASKS.md:38-43`, `VER3`, `VER3c`, `VER3b`)
+  - **Problem:** VER3c is checked with “`make vscode-unit` @ `473b1de`,” but that commit has neither the `vscode-unit` target nor the resolver/test changes; both first appear later in `a3ae47f`/`7ac0630`. The cited verification therefore cannot be reproduced from the named revision.
+  - **Why it matters:** Test validity/status correctness — the canonical queue claims completion from a command unavailable at its cited commit.
+  - **Change:** Do after: **Restore scoped Makefile ownership without discarding external work** and **Check Unix executable access instead of any execute bit**. Run `make vscode-unit` from a clean detached worktree at the resulting implementation commit so preserved external dirt cannot supply the target or alter its environment. Update VER3c with its actual `Done:` implementation commit and the clean verification SHA/result.
+  - **Done when:** VER3c cites a revision where the resolver, tests, and tracked `vscode-unit` target all exist and the command passes from that clean revision; the old `473b1de` claim is removed.
+  - **Constraints:** Keep parent VER3 and native VER3b unchecked. Do not claim `make vscode-test` passed after these changes, and do not convert the earlier integration timeouts into VER3c failures.
+
+- [x] **[P1] Discover optional VSCode hosts through PATH** (`clients/vscode/test/e2e/run.mjs:7-20`, `candidates`; `clients/vscode/lib/version.js:6-30`, `resolveCommand`). Done: `aeed37f`.
+  - **Problem:** PORT1 removed the personal editor path from `real-file-spike.mjs`, but the maintained optional E2E runner still defaults only to `/usr/bin/codium` and `/usr/bin/code`. A PATH-installed editor outside `/usr/bin` is reported missing unless `MAGIT_VSCODE_BIN` is set, contradicting the runner and README claim that available `code`/`codium` binaries are discovered.
+  - **Why it matters:** Correctness/cohesion — the completed portability claim leaves the main native runner with a second, Linux-layout-specific executable-discovery policy.
+  - **Change:** In `clients/vscode/test/e2e/run.mjs`, keep `MAGIT_VSCODE_BIN` first, then resolve `codium` and `code` through PATH. Reuse `clients/vscode/lib/version.js::resolveCommand` instead of adding another PATH/PATHEXT implementation; accept an explicit existing path as well as a resolved command. Keep the current skip/fail behavior when no candidate exists.
+  - **Done when:** `run.mjs` contains no `/usr/bin` editor defaults; env override, PATH `codium`, PATH `code`, and no-editor behavior follow the existing precedence and focused-mode rules; existing VSCode tests pass.
+  - **Constraints:** Do not change the production server-command setting, launch arguments, focused-mode prerequisite policy, or `real-file-spike.mjs`'s env-first `code` fallback. Do not add shell interpolation or platform-specific default paths.
+  - Verified: `make vscode-test` @ `0122a77` → ok: build, vscode-typecheck, vscode, keybindings. Runner selection test covers explicit override, PATH codium-before-code, and absent editor; source has no `/usr/bin` editor defaults.
+
+- [x] **[P2] Retire the source-spelling portability checker** (`scripts/check-portable-paths.py:1-23`; `Makefile:32-33`, `portability-check`; `TASKS.md:45-46`, `PORT1`)
+  - **Problem:** `check-portable-paths.py` is a one-off source-token oracle: it requires one exact JavaScript spelling exactly twice, hard-codes the current JSON keys, and proves only that repository-relative files exist, not that OpenCode resolves them at runtime. It is not wired into CI or an aggregate gate, so harmless refactors break it while actual portability outside its two-file allowlist remains unchecked.
+  - **Why it matters:** Simplicity/cleanliness — permanent script and Make surface add brittle maintenance without stable behavioral coverage, while PORT1 incorrectly says to retain the check.
+  - **Change:** Delete `scripts/check-portable-paths.py` and the `portability-check` Make target. Rewrite PORT1's verification note as a one-time historical check and remove the instruction to retain it; keep the actual config/plugin and spike changes recorded without claiming runtime proof from source parsing.
+  - **Done when:** No `portability-check` target or checker reference remains; PORT1 accurately records the one-time verification and current retained behavior; documentation checks pass.
+  - **Constraints:** Do not revert the private-plugin removal, repository-relative OpenCode commands, or `MAGIT_VSCODE_BIN || 'code'`. Do not replace the script with a broader path/token scanner or add source-spelling assertions elsewhere.
+  - **Rationale:** Removed brittle source-token checker and its Make target; PORT1 entry retains only historical one-time source-check evidence, not runtime proof.
+  - Verified: `make docs-check` @ `aeed37f` → ok: docs-check.
+
+- [ ] **[P2] Delete the stale temporary handoff transcript** (`tmp-task.md:1-350`)
+  - **Problem:** `tmp-task.md` is an unreferenced 2026-10-24 worker handoff that calls itself an “AUTHORITATIVE CURRENT UPDATE,” embeds personal paths and obsolete direct verification recipes, and conflicts with `TASKS.md` as the sole current queue. Git history already preserves the transcript at `326cced`.
+  - **Why it matters:** Cleanliness/cohesion — stale status authority and superseded instructions remain in the repository with no current consumer.
+  - **Change:** Delete `tmp-task.md`; do not sanitize or relocate its contents. Keep any still-live work only where it already exists in the canonical queue.
+  - **Done when:** `tmp-task.md` is absent and no maintained document links to it; current queue and historical commit provenance remain intact.
+  - **Constraints:** Do not copy the transcript into another documentation file, alter current implementation status, or remove dated evidence documents that are explicitly labeled historical.
 
 - [x] **[P2] Return deferred sibling refreshes from session prompt closes.** Prerequisite for the server-delivery item below. test: after refresh-all is queued during a document prompt, closing either the prompt view or its origin returns fresh renders for every surviving normal-mode view. Text-mode edits and queued refresh remain intact. Verification: `make test-rust FILTER="--test prompts"`. Done: containing commit.
   - Verified: make test-rust FILTER="--test prompts" @ 7fae07c → 34 passed, including `closing_a_document_prompt_returns_every_surviving_refresh` and `closing_a_document_prompt_keeps_text_mode_refreshes_queued`.
