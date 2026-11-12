@@ -28,6 +28,17 @@ fn make_repo(path: &Path) {
     );
 }
 
+fn real_git_path() -> PathBuf {
+    let output = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .expect("locate git");
+    assert!(output.status.success(), "git is not on PATH");
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    assert!(!path.is_empty(), "git is not on PATH");
+    std::fs::canonicalize(path).unwrap()
+}
+
 fn wrapper(dir: &Path, real_git: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("git");
@@ -73,7 +84,7 @@ fn recommended_git_queries_discover_and_open_worktrees_and_propagate_failures() 
             linked.to_str().unwrap(),
         ],
     );
-    let real_git = std::fs::canonicalize("/usr/bin/git").unwrap();
+    let real_git = real_git_path();
     let wrapper_dir = temp.path().join("wrapper");
     wrapper(&wrapper_dir, &real_git);
     child(&normal, &wrapper_dir, "compatible");
