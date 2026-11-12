@@ -44,8 +44,8 @@ Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructio
 - [ ] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence.
   - [x] **VER3a — Implement VSCode startup version warnings.** Compare the package and initialized server versions, resolve the selected server command for diagnostics, and cover matching, mismatched and missing versions in existing client tests. Done: containing commit.
     - Verified: `make vscode-test` @ `64b721e` → ok: build, vscode-typecheck, vscode, keybindings. Unit assertions cover matching/mismatch/missing metadata and PATH selection; open lifecycle confirms matching metadata leaves status usable.
-  - [x] **VER3c — Match VSCode diagnostic executable resolution to process discovery.** Ignore non-executable PATH files on Unix, return absolute selected paths, and handle Windows commands that already contain a PATHEXT suffix.
-    - Verified: `make vscode-unit` @ `473b1de` → ok: vscode-typecheck, vscode-unit. Prior broader `make vscode-test` had unrelated integration timeouts; not counted as passing here.
+  - [x] **VER3c — Match VSCode diagnostic executable resolution to process discovery.** Ignore non-executable PATH files on Unix, return absolute selected paths, and handle Windows commands that already contain a PATHEXT suffix. Done: `9daa386`.
+    - Verified: `make vscode-unit` twice at clean `14e986a` → both runs exit 0: `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`; second reused dependencies. Clean detached-checkout evidence: `6954cd7`.
   - [ ] **VER3b — Verify version warnings in the native VSCode host.** Expose focused native verification through Make, fail on missing prerequisites, and record text-only warning plus usable-view evidence.
 
 - [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
@@ -893,12 +893,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not change launch commands, explicit path handling, warning text, Windows resolution, or add a second resolver.
   - Verified: `make vscode-unit` @ `89979d8` → ok: vscode-typecheck, vscode-unit; Unix regression skips owner-inaccessible `0010` candidate, selects accessible `0755` candidate, and retains the `0644` skip.
 
-- [ ] **[P1] Record truthful VER3c completion evidence** (`TASKS.md:38-43`, `VER3`, `VER3c`, `VER3b`)
+- [x] **[P1] Record truthful VER3c completion evidence** (`TASKS.md:38-43`, `VER3`, `VER3c`, `VER3b`)
   - **Problem:** VER3c is checked with “`make vscode-unit` @ `473b1de`,” but that commit has neither the `vscode-unit` target nor the resolver/test changes; both first appear later in `a3ae47f`/`7ac0630`. The cited verification therefore cannot be reproduced from the named revision.
   - **Why it matters:** Test validity/status correctness — the canonical queue claims completion from a command unavailable at its cited commit.
   - **Change:** Do after: **Restore scoped Makefile ownership without discarding external work** and **Check Unix executable access instead of any execute bit**. Run `make vscode-unit` from a clean detached worktree at the resulting implementation commit so preserved external dirt cannot supply the target or alter its environment. Update VER3c with its actual `Done:` implementation commit and the clean verification SHA/result.
   - **Done when:** VER3c cites a revision where the resolver, tests, and tracked `vscode-unit` target all exist and the command passes from that clean revision; the old `473b1de` claim is removed.
   - **Constraints:** Keep parent VER3 and native VER3b unchecked. Do not claim `make vscode-test` passed after these changes, and do not convert the earlier integration timeouts into VER3c failures.
+  - Verified: Historical source check confirms resolver and tests at `9daa386`, tracked `vscode-unit` target at `14e986a`; two clean detached-checkout `make vscode-unit` runs passed, recorded in `6954cd7`.
 
 - [x] **[P1] Resolve the real Git test binary through PATH** (`tests/git_discovery.rs:31-78`, `wrapper`, `recommended_git_queries_discover_and_open_worktrees_and_propagate_failures`)
   - **Problem:** The discovery regression canonicalizes `/usr/bin/git` before building its compatibility wrapper. Git can be available on PATH without that FHS location, including NixOS and Nix-profile installations, so the ordinary Rust suite fails before exercising the claimed discovery behavior.
