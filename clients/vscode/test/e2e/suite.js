@@ -158,7 +158,7 @@ async function run() {
     .map((request) => request.params.key);
   const matrix = [];
   const interactions = [];
-  const cdp = (method, params) => JSON.parse(execFileSync('node', [
+  const cdp = (method, params) => JSON.parse(execFileSync('node', ['--experimental-websocket',
     `${extension.extensionPath}/test/e2e/run.mjs`, '--cdp',
     process.env.MAGIT_VSCODE_CDP_PORT, method, JSON.stringify(params),
   ], { timeout: 10000, maxBuffer: 16 * 1024 * 1024 }).toString());
@@ -316,13 +316,23 @@ async function run() {
       assert.match(editor.document.getText(), /tracked\.txt/, 'version fixture status is unusable');
       const serverPath = vscode.workspace.getConfiguration('magit-lsp').get('serverPath') || 'magit-lsp';
       const executable = require(`${extension.extensionPath}/lib/version`).resolveCommand(serverPath);
-      const evidencePath = `${evidence}/version-startup-evidence.json`;
+      const warningText = await waitFor(() => {
+        const text = cdp('Runtime.evaluate', { expression: `Array.from(document.querySelectorAll('.notifications-toasts .notification-toast')).filter((element) => { const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; }).map((element) => element.innerText).join(' ')`, returnByValue: true }).result.value;
+        return text.includes('magit-lsp version mismatch') ? text : false;
+      }, 'rendered native version mismatch warning');
+      assert(warningText.includes(extension.packageJSON.version), 'rendered warning omitted extension version');
+      assert(warningText.includes(store.client.initializeResult.serverInfo.version), 'rendered warning omitted server version');
+      assert(warningText.includes(executable), 'rendered warning omitted selected executable');
+      const evidencePath = `${evidence}/version-warning-evidence.json`;
       fs.writeFileSync(evidencePath, JSON.stringify({
         fixtureVersion: extension.packageJSON.version,
         serverVersion: store.client.initializeResult.serverInfo.version,
         executable,
         initialized: Boolean(store.clientReady),
         statusText: editor.document.getText(),
+        renderedWarningText: warningText,
+        warningSource: 'visible native notification DOM text via CDP Runtime.evaluate',
+        cleanup: 'isolated editor stopped by native runner',
         evidencePath,
       }, null, 2));
       console.log(`PASS native version startup: ${evidencePath}`);

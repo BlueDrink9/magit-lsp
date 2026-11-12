@@ -2,6 +2,7 @@
 
 const modes = [
   ['MAGIT_VSCODE_VERSION_ONLY', 'version'],
+  ['MAGIT_VSCODE_VERSION_WARNING_ONLY', 'version'],
   ['MAGIT_VSCODE_EDIT_ONLY', 'edit'],
   ['MAGIT_VSCODE_HEAD_ONLY', 'head'],
   ['MAGIT_VSCODE_A34_ONLY', 'a34'],

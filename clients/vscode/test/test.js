@@ -69,17 +69,17 @@ test('optional VSCode runner selects explicit and PATH editors in precedence ord
   }
 });
 
-test('focused version runner fails when native prerequisites are missing', () => {
+test('focused version warning runner fails when native prerequisites are missing', () => {
   const runner = path.join(__dirname, 'e2e', 'run.mjs');
   const result = spawnSync(process.execPath, [runner], {
-    encoding: 'utf8', env: { PATH: '', DISPLAY: '', MAGIT_VSCODE_BIN: '', MAGIT_VSCODE_VERSION_ONLY: '1' },
+    encoding: 'utf8', env: { PATH: '', DISPLAY: '', MAGIT_VSCODE_BIN: '', MAGIT_VSCODE_VERSION_WARNING_ONLY: '1' },
   });
   assert.equal(result.status, 1);
   assert.match(result.stdout, /^FAIL e2e: no `code`\/`codium` binary found/m);
 });
 
-test('version-only launch selects the version suite branch instead of generic evidence', () => {
-  const launchEnvironment = withSuiteMode({ MAGIT_VSCODE_VERSION_ONLY: '1' });
+test('version warning target selects version suite branch instead of generic evidence', () => {
+  const launchEnvironment = withSuiteMode({ MAGIT_VSCODE_VERSION_WARNING_ONLY: '1' });
   assert.equal(launchEnvironment.MAGIT_VSCODE_SUITE_MODE, 'version');
   assert.equal(selectSuiteMode(launchEnvironment), 'version');
   assert.notEqual(selectSuiteMode(launchEnvironment), 'generic');
