@@ -689,7 +689,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - Attempts: two default PARTIAL checkpoints wired submit, but real-server regression setup remains unverified; split success and stale-refusal regressions.
         - [x] **T019.3c1a — Prove successful prepared submit through real server keys.** Exact edited replay history and usable caller; paused-save regressions unchanged.
           - test: Genuine server key-driven initial selection/edit/submit and exact Git result.
-        - [ ] **T019.3c1b — Prove stale prepared submit retains editor and edits.** Readable refusal and exact pre-dispatch repository state through genuine server dispatch.
+        - [x] **T019.3c1b — Prove stale prepared submit retains editor and edits.** Readable refusal and exact pre-dispatch repository state through genuine server dispatch.
           - test: Changed launch preconditions reject key submit without losing prepared instructions.
       - [ ] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
         - test: Exact conflict, resolved continue and abort histories/state.
