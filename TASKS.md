@@ -222,6 +222,11 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Refresh generated references for scoped todo commands.** Done: `8beb859`. The substantial-chunk gate at `46dc360` fails `schema-check` on `docs/schema/worked-exchanges.md` after registry recording changes; check registry reference freshness too. Regenerated via Make; causal todo command/keymap/exchange deltas inspected.
+  - check: `make docs-generate && make docs-artifacts-check && make docs-check` passes; generated diff is causal and committed separately with source/command rationale.
+  - Verified: `make docs-generate && make docs-artifacts-check && make docs-check` @ `46dc360` → passed; schema, registry artifacts and authored links fresh.
+  - Record queue evidence in a separate bookkeeping commit; never hand-edit generated references.
+
 - [x] **Regenerate VSCode todo keybindings through Make.** The resumed gate at `656ddd7` passes Rust/Neovim/VSCode behavior suites but fails committed keybinding freshness (`build/test-logs/keybindings.qX4K5z`). Add a narrow Make generation target because only the checker is exposed; preserve unrelated dirty Makefile edits, then regenerate and inspect the causal todo bindings.
   - check: generation and freshness verification run through Make; generated VSCode binding artifact changes only for intentional todo bindings.
   - Verified: `make vscode-keybindings-generate && make vscode-test` @ `760ad60` → generation and freshness checker passed; VSCode typecheck and tests passed.
