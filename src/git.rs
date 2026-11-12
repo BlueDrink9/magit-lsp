@@ -818,22 +818,19 @@ impl GitRepo {
         Ok(value.trim().to_string())
     }
 
-    /// Resolve a hexadecimal todo token to its unique full commit object ID.
-    pub fn resolve_todo_commit(&self, token: &str) -> Result<String> {
-        if token.len() < 4 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(Error::new("todo commit identity must be hexadecimal"));
+    /// Resolve ordered hexadecimal todo tokens in one batch to per-token outcomes.
+    pub fn resolve_todo_commits(&self, tokens: &[String]) -> Result<Vec<Result<String>>> {
+        for (index, token) in tokens.iter().enumerate() {
+            if token.len() < 4 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(Error::new(format!("todo batch row {} identity must be at least four hexadecimal characters", index + 1)));
+            }
         }
+        let input = tokens.iter().map(|token| format!("{token}\n")).collect::<String>();
         let output = self.command_with_input(
             &["cat-file", "--batch-check=%(objectname) %(objecttype)"],
-            format!("{token}\n").as_bytes(),
+            input.as_bytes(),
         )?;
-        let mut fields = output.split_whitespace();
-        let oid = fields.next().ok_or_else(|| Error::new("missing todo commit object"))?;
-        let kind = fields.next().unwrap_or("");
-        if kind != "commit" || fields.next().is_some() {
-            return Err(Error::new("todo identity is not a commit"));
-        }
-        Ok(oid.to_owned())
+        decode_todo_commit_batch(&output, tokens.len())
     }
 
     /// Read the subject belonging to a validated commit object ID.
@@ -1985,6 +1982,27 @@ fn log_finished(
     }
 }
 
+fn decode_todo_commit_batch(output: &str, expected: usize) -> Result<Vec<Result<String>>> {
+    let lines = output.lines().collect::<Vec<_>>();
+    if lines.len() != expected {
+        return Err(Error::new(format!("malformed todo object batch response: expected {expected} records, received {}", lines.len())));
+    }
+    Ok(lines.into_iter().enumerate().map(|(index, line)| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() != 2 {
+            return Err(Error::new(format!("malformed todo object response on batch row {}", index + 1)));
+        }
+        match fields[1] {
+            "missing" => Err(Error::new("missing todo commit object")),
+            "ambiguous" => Err(Error::new("ambiguous todo commit identity")),
+            "commit" if matches!(fields[0].len(), 40 | 64) && fields[0].bytes().all(|byte| byte.is_ascii_hexdigit()) => Ok(fields[0].to_owned()),
+            "commit" => Err(Error::new(format!("malformed todo object response on batch row {}", index + 1))),
+            "blob" | "tree" | "tag" => Err(Error::new("todo identity is not a commit")),
+            _ => Err(Error::new(format!("malformed todo object response on batch row {}", index + 1))),
+        }
+    }).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2034,5 +2052,22 @@ mod tests {
         assert_eq!(status.untracked.len(), 1);
         assert_eq!(status.untracked[0].status, "?");
         assert_eq!(status.untracked[0].path, "new file.txt");
+    }
+
+    #[test]
+    fn todo_batch_decoder_rejects_malformed_incomplete_and_extra_records() {
+        let oid = "0123456789abcdef0123456789abcdef01234567";
+        let malformed = decode_todo_commit_batch(&format!("{oid} commit\nbroken\n"), 2).unwrap();
+        assert!(malformed[1].as_ref().unwrap_err().to_string().contains("malformed"));
+        assert!(malformed[1].as_ref().unwrap_err().to_string().contains("row 2"));
+
+        for output in [
+            format!("{oid} commit\n"),
+            format!("{oid} commit\n{oid} commit\n{oid} commit\n"),
+        ] {
+            let message = decode_todo_commit_batch(&output, 2).unwrap_err().to_string();
+            assert!(message.contains("malformed"), "unreadable error: {message}");
+            assert!(message.contains("expected 2 records"), "missing cardinality: {message}");
+        }
     }
 }

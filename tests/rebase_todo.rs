@@ -468,8 +468,34 @@ fn rejects_bad_commands_objects_duplicates_and_leading_fold_without_mutation() {
 }
 
 #[test]
+fn mixed_valid_and_invalid_rows_report_the_failing_row_without_mutation() {
+    let (dir, repo, oid) = repo();
+    let file_before = std::fs::read(dir.path().join("file")).unwrap();
+    let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index_before = git(dir.path(), &["write-tree"]);
+    let tree = git(dir.path(), &["rev-parse", "HEAD:file"]).trim().to_owned();
+
+    for (invalid, expected) in [
+        ("zzzz".to_owned(), "hexadecimal"),
+        ("deadbeef".to_owned(), "missing"),
+        (tree, "not a commit"),
+    ] {
+        let source = format!("pick {oid} valid\npick {invalid} invalid\n");
+        let message = RebaseTodo::parse(&repo, source.as_bytes()).unwrap_err().to_string();
+        assert!(message.contains("line 2"), "wrong row for {invalid}: {message}");
+        assert!(message.contains(expected), "unreadable error for {invalid}: {message}");
+        assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
+        assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(git(dir.path(), &["write-tree"]), index_before);
+    }
+}
+
+#[test]
 fn rejects_ambiguous_abbreviation() {
-    let (dir, repo, _) = repo();
+    let (dir, repo, oid) = repo();
+    let file_before = std::fs::read(dir.path().join("file")).unwrap();
+    let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index_before = git(dir.path(), &["write-tree"]);
     let mut prefixes = std::collections::HashMap::<String, usize>::new();
     let mut ambiguous = None;
     for index in 0..5000 {
@@ -485,5 +511,11 @@ fn rejects_ambiguous_abbreviation() {
     let prefix = ambiguous.expect("bounded fixture must produce 4-hex collision");
     let matching = git(dir.path(), &["rev-parse", &format!("--disambiguate={prefix}")]);
     assert!(matching.lines().count() > 1, "Git must prove ambiguity");
-    assert!(RebaseTodo::parse(&repo, format!("pick {prefix} ambiguous\n").as_bytes()).is_err());
+    let source = format!("pick {oid} valid\npick {prefix} ambiguous\n");
+    let message = RebaseTodo::parse(&repo, source.as_bytes()).unwrap_err().to_string();
+    assert!(message.contains("line 2"), "wrong row: {message}");
+    assert!(message.to_ascii_lowercase().contains("ambiguous"), "unreadable error: {message}");
+    assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), file_before);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+    assert_eq!(git(dir.path(), &["write-tree"]), index_before);
 }
