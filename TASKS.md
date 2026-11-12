@@ -222,6 +222,17 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Reconcile todo keymap manifests and shortcut policy.** The resumed gate at `8b9f2f6` fails manifest/keybinding snapshots and reports `rebase-todo` `ctrl+s` / `rebase.todo-submit` shadowing a workbench shortcut without an allow entry. Preserve intentional scoped native submit behavior and reconcile the explicit shortcut policy and generated snapshots without weakening checks. Done: containing commit.
+  - test: shipped profiles pass shortcut policy and exact manifest/keybinding snapshot assertions with the todo bindings present.
+  - check: inspect regenerated snapshot changes for causal todo bindings only.
+  - Verification: regenerate with `make update-snapshots`; validate using `make test-rust FILTER="--test manifest"`. Record any unrelated aggregate-generator failure separately.
+  - Verified: `make test-rust FILTER="--test manifest"` → ok: rust; includes `json_matches_snapshots_and_has_the_documented_shape`, `vscode_matches_snapshots`, and `shipped_profiles_never_shadow_workbench_shortcuts_without_allow`.
+  - Snapshot check: four snapshots add the `rebase-todo` scope and its bindings/metadata; keybinding snapshots add scoped entries for that view. No pre-existing binding or metadata changed. `make update-snapshots` generated these files but exited 2 because `tests/parity.rs:129` failed: `the walk covered every registered menu action: rebase.todo-set-action`; tracked separately.
+
+- [ ] **Restore menu registry parity for contextual todo actions.** Snapshot regeneration exposed `every_action_matches_the_registry_and_the_menu_status` at `tests/parity.rs:129`: `the walk covered every registered menu action: rebase.todo-set-action`. Reconcile contextual todo command classification with menu coverage without exempting real menu actions from parity checks.
+  - test: todo contextual commands remain reachable and all registered menu actions satisfy the registry walk.
+  - Verification: `make test-rust FILTER="--test parity --test rebase_todo --test commands --test menus --test keymap"`.
+
 - [x] **Repair todo command registry example replay.** The substantial-chunk gate at `180dfce` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9: recorded s2c frame mismatch at $.result[30].data.command` after adding todo commands. Diagnose the causal registry difference and update recorded exchanges without weakening replay assertions.
   - check: recorded command responses match the current intentional registry; inspect changes and preserve unrelated frames.
   - Verification: `make test-rust FILTER="--test examples"`.
