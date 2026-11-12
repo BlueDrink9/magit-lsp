@@ -1,0 +1,26 @@
+# Edit a paused linear todo through native menu and keys.
+fixture: paused-linear-rebase-todo
+---
+sh: git rev-parse HEAD > .git/todo-head && git ls-files --stage > .git/todo-index && printf 'pick %s # third todo entry\nreword %s # second todo entry\npick %s # fourth todo entry\n' "$(git rev-parse ORIG_HEAD~1)" "$(git rev-parse ORIG_HEAD~2)" "$(git rev-parse ORIG_HEAD)" > .git/todo-expected
+keys: r
+wait
+expect view_stack.menus == 1
+keys: T
+wait screen contains "second todo entry"
+sh: test "$(wc -l < .git/rebase-merge/git-rebase-todo)" -eq 3 && ! grep -Ev '^[a-z]+ [0-9a-f]{40} ' .git/rebase-merge/git-rebase-todo
+keys: J
+wait
+expect cursor on "pick"
+keys: r
+wait screen contains "reword"
+expect cursor on "reword"
+keys: C-s
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: cmp .git/todo-expected .git/rebase-merge/git-rebase-todo && test "$(git rev-parse HEAD)" = "$(cat .git/todo-head)" && git ls-files --stage > .git/todo-index-after && cmp .git/todo-index .git/todo-index-after
+keys: r
+wait
+expect view_stack.menus == 1
+keys: Escape
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
