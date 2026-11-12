@@ -3333,11 +3333,11 @@ impl Session {
         }
 
         if let Some((kind, placement)) = outcome.open_view {
-            let is_log = kind == ViewKind::Log;
+            let handles_factory_error = matches!(kind, ViewKind::Log | ViewKind::RebaseTodo);
             let (descriptor, render) =
                 match self.push_kind(view_id, kind, placement, outcome.open_args.as_ref()) {
                     Ok(opened) => opened,
-                    Err(err) if is_log => {
+                    Err(err) if handles_factory_error => {
                         let effect = Effect::from_error(&err).unwrap_or_else(|| {
                             Effect::message(MessageLevel::Error, err.to_string())
                         });

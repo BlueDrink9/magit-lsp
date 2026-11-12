@@ -192,6 +192,18 @@ fn paused_rebase_menu_opens_todo_and_cancel_preserves_repository() {
 }
 
 #[test]
+fn failed_todo_factory_keeps_caller_and_reports_readable_message() {
+    let (dir, _repo) = paused_repo();
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    std::fs::remove_dir_all(dir.path().join(".git/rebase-merge")).unwrap();
+    let result = test.invoke("rebase.edit-todo");
+    assert!(message_texts(&result.effects).iter().any(|message| !message.trim().is_empty()));
+    assert_eq!(test.view_id(), "v1");
+    assert!(test.session.views().get("v2").is_none());
+}
+
+#[test]
 fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
     let (dir, repo) = paused_repo();
     let expected = RebaseTodo::load(&repo).unwrap().entries.into_iter().map(|entry| entry.oid).collect::<Vec<_>>();

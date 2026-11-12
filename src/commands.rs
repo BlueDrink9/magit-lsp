@@ -1144,12 +1144,7 @@ fn rebase_abort(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     rebase_action(ctx, |repo| repo.rebase_abort())
 }
 
-fn rebase_edit_todo(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let repo = GitRepo::open(ctx.repo_path)?;
-    if let Err(err) = crate::rebase_todo::RebaseTodo::load(&repo) {
-        ctx.effects.push(Effect::Message { level: MessageLevel::Warn, text: err.to_string(), hint: None, detail: None });
-        return Ok(CommandOutcome::default());
-    }
+fn rebase_edit_todo(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     Ok(CommandOutcome { open_view: Some((ViewKind::RebaseTodo, Placement::Main)), ..Default::default() })
 }
 
