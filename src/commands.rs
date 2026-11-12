@@ -185,6 +185,12 @@ pub fn enforce_effects(command_id: &str, effects: &mut [crate::protocol::Effect]
 }
 
 impl Command {
+    /// Whether shipped profiles must explicitly bind or unbind this command.
+    pub fn requires_profile_binding(&self) -> bool {
+        !matches!(self.scope, Scope::MenuAction)
+            && !matches!(self.id, "rebase.todo-set-action" | "rebase.todo-move-before")
+    }
+
     /// Whether this command applies to a view scope, including command-specific exceptions.
     pub fn applies_to(&self, view_scope: &str) -> bool {
         self.scope.matches(view_scope) || (self.id == "open.commit" && view_scope == "log")

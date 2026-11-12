@@ -123,9 +123,7 @@ fn check_coverage(profile: Profile) -> Result<(), ConfigError> {
                     .at_file(profile.file_label()),
             );
         }
-        // Menu actions are bound by their menu item; todo editor actions are
-        // bound only inside the editor, not by a profile scope.
-        if matches!(command.scope, commands::Scope::MenuAction | commands::Scope::RebaseTodo) {
+        if !command.requires_profile_binding() {
             continue;
         }
         if !declared.contains(command.id) {

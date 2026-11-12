@@ -430,6 +430,11 @@ fn the_registry_lists_every_named_command_once() {
         assert_eq!(command.scope, Scope::RebaseTodo, "{id}");
         assert!(command.applies_to("rebase-todo"), "{id}");
         assert!(!command.applies_to("status"), "{id}");
+        assert_eq!(
+            command.requires_profile_binding(),
+            !matches!(id, "rebase.todo-set-action" | "rebase.todo-move-before"),
+            "{id}"
+        );
     }
     assert_eq!(registry().get("rebase.edit-todo").unwrap().scope, Scope::MenuAction);
     for id in ["commit-message.history-prev", "commit-message.history-next"] {

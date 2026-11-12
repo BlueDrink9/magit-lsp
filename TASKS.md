@@ -925,12 +925,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not change the production server-command setting, launch arguments, focused-mode prerequisite policy, or `real-file-spike.mjs`'s env-first `code` fallback. Do not add shell interpolation or platform-specific default paths.
   - Verified: `make vscode-unit` twice @ clean detached `14e986a` → ok: vscode-typecheck, vscode-unit (`6954cd7`). Harness test covers explicit override, PATH `codium` precedence, `code` fallback, and absent editor; no native editor evidence claimed. Done: `aeed37f`.
 
-- [ ] **[P2] Restore profile coverage for contextual todo commands** (`src/commands.rs:25-79,925-936`, `Scope::RebaseTodo`; `src/manifest.rs:107-138`, `check_coverage`; `tests/keymap.rs:29-59`, `every_profile_parses_and_covers_every_command`)
+- [x] **[P2] Restore profile coverage for contextual todo commands** (`src/commands.rs:25-79,925-936`, `Scope::RebaseTodo`; `src/manifest.rs:107-138`, `check_coverage`; `tests/keymap.rs:29-59`, `every_profile_parses_and_covers_every_command`)
   - **Problem:** Both production and test coverage skip every `Scope::RebaseTodo` command, even though nine are profile-bound and only `rebase.todo-set-action` plus `rebase.todo-move-before` are intentionally argument-only. A missing submit/action/movement binding therefore passes the check named “covers every command.”
   - **Why it matters:** Test validity/cohesion — the new scope weakens the project-wide profile invariant instead of recording its two deliberate exceptions.
   - **Change:** Add one registry-owned predicate on `Command` that says whether a command requires an explicit profile binding: menu actions and the two argument-only todo commands return false; all other commands return true. Use it from both `manifest::check_coverage` and the keymap regression, removing the blanket `RebaseTodo` exclusion.
   - **Done when:** Deleting any of the nine user-facing todo bindings makes coverage fail, the two argument-only commands remain intentionally unbound, and `make test-rust FILTER="--test commands --test keymap --test manifest"` passes.
   - **Constraints:** Do not bind the argument-only commands, duplicate exception lists in profiles/tests, or change generated keybinding output.
+  - Verified: `make test-rust FILTER="--test commands --test keymap --test manifest"` @ `0a98afe` → ok: rust.
 
 - [ ] **[P2] Pin the VSCode adapter version to the server package version** (`tests/client_versions.rs:1-16`, `bundled_lua_version_matches_cargo_package_version`; `clients/vscode/package.json:1-7`, `version`; `clients/vscode/lib/session.js:15-18`, `extensionVersion`)
   - **Problem:** The drift test compares Cargo only with the Lua adapter. VSCode reads its own package version for startup negotiation, so an independent package-version edit can make every bundled VSCode checkout report a mismatch without failing any consistency check.
