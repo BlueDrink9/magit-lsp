@@ -19,7 +19,7 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 | **Rebase todo** | `git-rebase-mode` | Structured paused or prepared initial todo with pick/reword/edit/squash/fixup/drop and full-OID commit rows | `p`/`r`/`e`/`s`/`f`/`d` change action; `K`/`J` move row; `ctrl+s` submits; `Escape` cancels | R-TODO / R-7.3 |
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | R-OP-STATE / R-7.3 |
 
-The paused merge-backend todo editor rejects `update-ref` commands; repositories using `rebase.updateRefs=true` cannot use it. A prepared initial todo is removed after execution starts, including when `edit` pauses Git; the caller remains usable for refresh and explicit abort.
+The paused merge-backend todo editor rejects `update-ref` commands; repositories using `rebase.updateRefs=true` cannot use it. A prepared initial todo is removed after execution starts, including when `edit` pauses Git or replay conflicts; the caller remains usable for refresh, conflict resolution and explicit `rebase.continue` or abort. A started execution failure reports its readable Git effect without restoring the prepared editor or automatically aborting the real operation.
 | **Merge / conflicts** | `magit-merge` + unmerged | Unmerged section; per-conflict actions | take ours/theirs, mark resolved, open merge tool (client effect `openMergeTool`), continue, abort | R-7.1 |
 | **Sequencer** | `A`, `V` | In-progress cherry-pick/revert | continue, skip, abort | 7 |
 | **Commit message** | with-editor buffer | Native real Git file; companion staged diff, history recall (R-EDIT-HISTORY), trailers and lint remain roadmap | confirm, cancel; planned history prev/next, add trailer | R-EDIT |

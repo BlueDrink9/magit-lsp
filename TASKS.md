@@ -682,7 +682,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
     - [x] **T019.3b — Launch the validated initial plan.**
       - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `8701ed8` → exit 0; edited-plan real Git launch and stale-HEAD refusal pass. Revalidate prepared ownership and launch actual interactive Git with explicit no-autosquash; prove exclusive-base edited-history results and stale-plan refusal.
       - test: Real Git success and stale refusal retain exact intended instructions/state.
-    - [ ] **T019.3c — Dispatch launch and paused outcomes.** Prepared submit launches instead of saving a paused file; conflicts remain real Git state with readable effects and continue/abort support.
+    - [x] **T019.3c — Dispatch launch and paused outcomes.** Prepared submit launches instead of saving a paused file; conflicts remain real Git state with readable effects and continue/abort support.
       - test: Key-driven submit, usable caller, conflict/continue/abort and exact repository state.
       - [x] **T019.3c1 — Submit prepared plans through real server dispatch.** Prepared submit invokes the launch adapter, successful execution restores caller, stale refusal retains editor and instructions; paused submit remains save-only.
         - test: Real-server key submit, exact resulting history/state and stale refusal.
@@ -692,19 +692,20 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - [x] **T019.3c1b — Prove stale prepared submit retains editor and edits.** Readable refusal, retained edited action label, and exact pre-dispatch repository state through genuine server dispatch.
           - test: Changed launch preconditions reject key submit without losing prepared instructions.
           - Verified: `make test-rust FILTER="--test server_async stale_prepared_rebase_submit_retains_editor_and_edits"` @ `7312e65` → `ok: rust`. Stale render includes `reword` at known edited row; full-OID row identities, unchanged refs/worktree/index/operation state, and caller refresh asserted.
-      - [ ] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
+      - [x] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
         - test: Exact conflict, resolved continue and abort histories/state.
         - [x] **T019.3c2a — Verify launch conflict, continue and abort at Git boundary.** Exact replay-conflict state, resolved continuation and abort restoration from edited prepared plans.
           - test: Real Git paused/conflict histories, index/worktree and operation-state lifecycle.
           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `d7b4563` → `ok: rust`; real conflict resolution/continue, conflict abort and intentional edit-pause abort pass.
-        - [ ] **T019.3c2b — Present execution outcomes through server dispatch.** Distinguish stale preflight refusal from execution that actually started; expose real operation state and usable caller/actions without automatic abort or retaining a misleading preflight editor.
+        - [x] **T019.3c2b — Present execution outcomes through server dispatch.** Distinguish stale preflight refusal from execution that actually started; expose real operation state and usable caller/actions without automatic abort or retaining a misleading preflight editor.
           - test: Genuine-server key submit into edit pause and conflict, readable effects, actual state and usable continue/abort dispatch.
           - [x] **T019.3c2b1 — Dispatch started execution and edit pause.** Typed preflight/started outcomes; real-server edit pause, caller usability and explicit abort restoration, with existing stale/paused-save invariants.
             - test: Genuine-server edit-pause submit and explicit abort; stale-submit and paused-save regressions.
             - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `e3a2bab` → `ok: rust`; genuine-server edit pause pops the prepared todo, leaves the caller refreshable, and `rebase.abort` restores HEAD, refs, index tree and worktree; stale-submit and paused-save suites pass.
             - Incident: Restored the saved seven-hunk protected delta from `/tmp/opencode/commands-baseline.diff` to unstaged `src/commands.rs`. Cause unknown: commit history establishes ownership of the typed submit change, not the operation that removed the protected delta. Evidence: saved patch applied cleanly; normalized restored diff body exactly matches the saved patch; `src/commands.rs` index diff remains empty; HEAD `24c5ceb` retains the typed submit change.
-          - [ ] **T019.3c2b2 — Dispatch conflict and resolved continuation.** Actual conflict state and readable effect after key submit, usable caller and explicit resolved continue to exact final history.
+          - [x] **T019.3c2b2 — Dispatch conflict and resolved continuation.** Actual conflict state and readable effect after key submit, usable caller and explicit resolved continue to exact final history.
             - test: Genuine-server conflict/continue lifecycle and exact repository-state assertions.
+            - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `d13b123` → `ok: rust`; `prepared_rebase_conflict_can_be_resolved_and_continued_from_caller` checks key submit conflict, stopped HEAD, unmerged index, conflict bytes and live operation, then resolved `rebase.continue`, exact final history/content/index tree and cleared operation. Suite also passes `prepared_rebase_edit_pause_is_abortable_from_usable_caller`, `stale_prepared_rebase_submit_retains_editor_and_edits`, `prepared_todo_view_edits_in_memory_and_cannot_save_paused_file`, and `paused_todo_view_save_does_not_rewrite_git_state`.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
