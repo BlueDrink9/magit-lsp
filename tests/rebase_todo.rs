@@ -181,6 +181,58 @@ fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
 }
 
 #[test]
+fn todo_action_keys_change_captured_full_oid_row() {
+    let (dir, repo) = paused_repo();
+    let selected = RebaseTodo::load(&repo).unwrap().entries[1].oid.clone();
+    assert_eq!(selected.len(), 40);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let tree = test.tree();
+    let node = tree.nodes.iter().find(|node| node.commit.as_deref() == Some(&selected)).unwrap();
+    let line = tree.line_nodes.iter().position(|line| line.node == node.id).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line, column: 0 });
+
+    for (key, action) in [("p", "pick"), ("r", "reword"), ("e", "edit"), ("s", "squash"), ("f", "fixup"), ("d", "drop")] {
+        test.press(key);
+        assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&selected)).unwrap().status.as_deref(), Some(action));
+    }
+
+    test.press("Escape");
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
+fn todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable() {
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let entries = RebaseTodo::load(&repo).unwrap().entries;
+    let identities = entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let tree = test.tree();
+    let node = tree.nodes.iter().find(|node| node.commit.as_deref() == Some(&identities[0])).unwrap();
+    let line = tree.line_nodes.iter().position(|line| line.node == node.id).unwrap();
+    test.set_cursor(magit_lsp::protocol::Cursor { line, column: 0 });
+
+    for key in ["s", "f"] {
+        let result = test.press(key);
+        assert!(message_texts(&result.effects).iter().any(|message| message.contains("first todo action cannot squash or fixup")));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(test.tree().nodes.iter().filter_map(|node| node.commit.as_ref()).collect::<Vec<_>>(), identities.iter().collect::<Vec<_>>());
+        assert!(test.tree().nodes.iter().filter(|node| node.commit.is_some()).all(|node| node.status.as_deref() == Some("pick")));
+    }
+
+    test.press("r");
+    assert_eq!(test.tree().nodes.iter().find(|node| node.commit.as_deref() == Some(&identities[0])).unwrap().status.as_deref(), Some("reword"));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    test.press("Escape");
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
 fn dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor() {
     let (dir, repo) = paused_repo();
     let todo_path = repo.rebase_todo_path().unwrap();

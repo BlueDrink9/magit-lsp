@@ -541,6 +541,14 @@ T005 is complete through its authoritative [completed children](#completed-work)
      - [ ] **T018.3c2 — Contextual todo key safety coverage.** Extend key tests across all six actions, invalid leading squash/fixup, boundary moves, and subsequent usable submit/cancel.
        - test: key rejection preserves model/disk and valid subsequent input works; each supported action and boundary behavior directly asserted.
        - Verification: `make test-rust FILTER="--test rebase_todo"`.
+       - Attempts: Two default checkpoints left test edits unverified; added action transitions disturbed movement preconditions. Separate action safety from movement/caller tests.
+       - [x] **T018.3c2a — Todo action-key safety.** Isolate six-action key assertions and leading squash/fixup rejection from the existing movement regression; prove unchanged disk/model and usable subsequent input.
+         - test: six actions and both leading-fold rejection paths via actual session keys.
+         - Verification: `make test-rust FILTER="--test rebase_todo"`.
+         - Verified: `make test-rust FILTER="--test rebase_todo"` @ `97cf821` → ok: rust. `todo_action_keys_change_captured_full_oid_row` asserts all six action keys on one structured full-OID selection; `todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable` asserts readable squash/fixup rejection, unchanged tree/todo bytes, and a subsequent valid action key.
+       - [ ] **T018.3c2b — Todo movement boundaries and caller safety.** Assert first/last boundary movement and subsequent submit/cancel preserve caller and repository invariants using fresh or restored valid preconditions.
+         - test: boundary moves and subsequent key submit/cancel preserve identity and repository state.
+         - Verification: `make test-rust FILTER="--test rebase_todo"`.
    - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
