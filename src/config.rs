@@ -27,6 +27,7 @@ pub const VIEW_SCOPES: &[&str] = &[
     "log.select",
     "select",
     "menu",
+    "rebase-todo",
     "commit-message",
     "process-log",
 ];

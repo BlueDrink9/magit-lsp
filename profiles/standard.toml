@@ -91,6 +91,9 @@ cancel = ["Escape", "ctrl+c"]
 save-args = ["ctrl+s"]
 reset-args = ["ctrl+r"]
 
+[keys.rebase-todo]
+cancel = ["Escape", "ctrl+c"]
+
 [keys.commit-message]
 confirm = ["ctrl+Enter"]
 cancel = ["ctrl+shift+x"]
