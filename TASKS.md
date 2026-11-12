@@ -798,6 +798,9 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - [x] **T019.5f1b — Native fixup caller reuse.** test: Interact with the caller after verified completion and preserve its resulting repository state.
           - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `6375fc8` → prior recorded pass. Lines 24–31 capture completed HEAD/index/branch/history, invoke native `r`, open menu, Escape to caller, assert caller view, and compare exact repository state with clean status and cleared rebase state.
       - [ ] **T019.5f2 — Native instant squash editing and recovery.** test: Native S selection uses registered message editing and explicit cancellation/recovery; exact resulting Git state and caller usability are asserted.
+        - [x] **T019.5f2a — Native squash message confirmation.** test: Native S and registered message confirmation produce the exact selected-target message, history and content.
+          - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `26b5801` → `ok: ui-file`; native S selection and registered real-file confirmation assert exact target message, full history, selected-target ancestry, fixture-derived content including its blank line, clean index/worktree, and cleared rebase operation. No orphan `magit-lsp` process (`pgrep -af magit-lsp` matched only its own shell command).
+        - [ ] **T019.5f2b — Native squash cancellation and recovery.** test: Native registered-editor cancellation retains actual post-marker state, followed by explicit native recovery and a usable caller.
 
 ### Feature — Phase 6: Plain acceptance
 
