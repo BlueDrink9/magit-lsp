@@ -4,6 +4,10 @@
 
   "experimental": { "subagent_depth": 2 },
 
+  // OpenCode V2 only accepts and preserves this block; it runs no language
+  // servers itself. The `lsp` tool and diagnostics come from the
+  // `opencode-v2-lsp-support` plugin, installed globally at
+  // `~/.local/share/opencode/plugins/opencode-v2-lsp-support`.
   "lsp": {
     "rust": {
       "command": ["scripts/nix-exec", "rust-analyzer"]
