@@ -58,6 +58,96 @@ fn opening_multirow_rebase_todo_batches_object_resolution_once() {
     }
 }
 
+#[test]
+fn prepared_rebase_submit_through_real_server_keys_restores_caller() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("base", [("base", "base\n")])
+        .commit("one", [("one", "1\n")])
+        .commit("two", [("two", "2\n")])
+        .commit("three", [("three", "3\n")])
+        .build();
+    let base = tmp.git(&["rev-parse", "HEAD~3"]).trim().to_owned();
+    let mut server = TestServer::spawn(&[("GIT_EDITOR", "true")]);
+    assert!(server.initialize_rich(json!({}))["error"].is_null());
+    let status = open_view(&mut server, 2, &repo_param(tmp.path()));
+
+    let press = |server: &mut TestServer, id: i64, view: &str, key: &str, line: u64| {
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/key","params":{
+            "viewId":view,"version":1,"key":key,"editorMode":"normal",
+            "cursor":{"line":line,"column":0}}}));
+        server.response_with_id(id)
+    };
+    let pushed = |response: &Value| {
+        let descriptor = response["result"]["effects"].as_array().unwrap().iter()
+            .find(|effect| effect["type"] == "pushView").expect("pushView effect")["descriptor"].clone();
+        (descriptor["id"].as_str().unwrap().to_owned(), descriptor["uri"].as_str().unwrap().to_owned())
+    };
+    let opened = |server: &mut TestServer, view: &str| {
+        let mut render = false;
+        let mut keymap = false;
+        let mut version = None;
+        while !render || !keymap {
+            let message = server.recv();
+            if message["params"]["viewId"] == view {
+                if message["method"] == "view/render" {
+                    render = true;
+                    version = message["params"]["version"].as_u64();
+                }
+                keymap |= message["method"] == "view/keymap";
+            }
+        }
+        server.send(json!({"jsonrpc":"2.0","method":"view/rendered",
+            "params":{"viewId":view,"version":version.unwrap()}}));
+    };
+
+    let (menu, _) = pushed(&press(&mut server, 3, &status, "r", 0));
+    opened(&mut server, &menu);
+    let (selector, _) = pushed(&press(&mut server, 4, &menu, "i", 0));
+    opened(&mut server, &selector);
+    let mut base_line = None;
+    for line in 0..100 {
+        let id = 50 + line as i64;
+        server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke","params":{
+            "viewId":selector,"command":"common.copy-value","version":1,
+            "cursor":{"line":line,"column":0}}}));
+        let copied = server.response_with_id(id);
+        if copied["result"]["effects"].as_array().unwrap().iter()
+            .any(|effect| effect["type"] == "clipboard" && effect["text"] == base)
+        {
+            base_line = Some(line);
+            break;
+        }
+    }
+    let base_line = base_line.expect("server-owned base identity");
+    server.send(json!({"jsonrpc":"2.0","id":6,"method":"view/invoke","params":{
+        "viewId":selector,"command":"common.confirm","version":1,
+        "cursor":{"line":base_line,"column":0}}}));
+    let (todo, _) = pushed(&server.response_with_id(6));
+    opened(&mut server, &todo);
+
+    assert!(press(&mut server, 7, &todo, "r", 0)["result"]["effects"].as_array().unwrap().is_empty());
+    assert_eq!(server.recv()["method"], "view/render");
+    assert!(press(&mut server, 8, &todo, "J", 0)["result"]["effects"].as_array().unwrap().is_empty());
+    assert_eq!(server.recv()["method"], "view/render");
+    assert!(press(&mut server, 9, &todo, "d", 2)["result"]["effects"].as_array().unwrap().is_empty());
+    assert_eq!(server.recv()["method"], "view/render");
+    let submitted = press(&mut server, 10, &todo, "ctrl+s", 0);
+    let submit_effects = submitted["result"]["effects"].as_array().unwrap();
+    assert!(submit_effects.iter().any(|effect| effect["type"] == "popView" && effect["viewId"] == todo), "{submitted}");
+    assert!(submit_effects.iter().any(|effect| effect["type"] == "focusView" && effect["viewId"] == status), "{submitted}");
+    assert_eq!(tmp.git(&["log", "--format=%s", "--reverse", &format!("{base}..HEAD")]), "two\none\n");
+    assert_eq!(tmp.git(&["show", "HEAD:one"]), "1\n");
+    assert_eq!(tmp.git(&["show", "HEAD~1:two"]), "2\n");
+    assert!(!tmp.path().join("three").exists());
+
+    server.send(json!({"jsonrpc":"2.0","id":11,"method":"view/invoke",
+        "params":{"viewId":status,"command":"common.refresh"}}));
+    let refreshed = server.response_with_id(11);
+    assert!(refreshed["result"]["effects"].as_array().unwrap().is_empty(), "{refreshed}");
+    shutdown_and_exit(&mut server);
+    assert!(server.finish(Duration::from_secs(10)).success());
+}
+
 fn limited_rich(effects: Value, prompts: Value) -> Value {
     json!({"experimental":{"magit":{
         "v":1,"keys":"dynamic","modifiers":"full",

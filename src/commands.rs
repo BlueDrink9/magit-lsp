@@ -1195,7 +1195,7 @@ fn rebase_todo_move_before(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 fn rebase_todo_submit(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.save() {
+    match ctx.view.rebase_todo_mut().ok_or_else(|| crate::Error::new("rebase todo view unavailable"))?.submit() {
         Ok(()) => Ok(CommandOutcome { pop: true, ..Default::default() }),
         Err(error) => { ctx.effects.push(Effect::message(MessageLevel::Warn, error.to_string())); Ok(CommandOutcome { refresh: true, ..Default::default() }) }
     }

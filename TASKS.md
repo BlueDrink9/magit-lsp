@@ -684,6 +684,15 @@ T005 is complete through its authoritative [completed children](#completed-work)
       - test: Real Git success and stale refusal retain exact intended instructions/state.
     - [ ] **T019.3c — Dispatch launch and paused outcomes.** Prepared submit launches instead of saving a paused file; conflicts remain real Git state with readable effects and continue/abort support.
       - test: Key-driven submit, usable caller, conflict/continue/abort and exact repository state.
+      - [ ] **T019.3c1 — Submit prepared plans through real server dispatch.** Prepared submit invokes the launch adapter, successful execution restores caller, stale refusal retains editor and instructions; paused submit remains save-only.
+        - test: Real-server key submit, exact resulting history/state and stale refusal.
+        - Attempts: two default PARTIAL checkpoints wired submit, but real-server regression setup remains unverified; split success and stale-refusal regressions.
+        - [x] **T019.3c1a — Prove successful prepared submit through real server keys.** Exact edited replay history and usable caller; paused-save regressions unchanged.
+          - test: Genuine server key-driven initial selection/edit/submit and exact Git result.
+        - [ ] **T019.3c1b — Prove stale prepared submit retains editor and edits.** Readable refusal and exact pre-dispatch repository state through genuine server dispatch.
+          - test: Changed launch preconditions reject key submit without losing prepared instructions.
+      - [ ] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
+        - test: Exact conflict, resolved continue and abort histories/state.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
   - [ ] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.

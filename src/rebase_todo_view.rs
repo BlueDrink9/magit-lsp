@@ -76,6 +76,9 @@ impl RebaseTodoView {
 
     /// Save through guarded paused-todo persistence.
     pub fn save(&self) -> Result<()> { match &self.owner { TodoOwner::Paused(repo, todo) => todo.save(repo), TodoOwner::Prepared(_, _) => Err(Error::new("prepared rebase todo cannot be saved as a paused todo")) } }
+
+    /// Submit a paused todo by saving it, or launch a prepared initial rebase.
+    pub fn submit(&self) -> Result<()> { match &self.owner { TodoOwner::Paused(repo, todo) => todo.save(repo), TodoOwner::Prepared(repo, plan) => plan.launch(repo, &std::env::current_exe()?) } }
 }
 
 impl View for RebaseTodoView {
