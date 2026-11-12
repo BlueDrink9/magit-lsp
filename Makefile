@@ -47,6 +47,9 @@ vscode-test: build
 	$(call run,vscode,npm --silent --prefix clients/vscode test)
 	$(call run,keybindings,node clients/vscode/scripts/gen-keybindings.mjs --check)
 
+vscode-keybindings-generate:
+	$(call run,vscode-keybindings-generate,node clients/vscode/scripts/gen-keybindings.mjs)
+
 vscode-typecheck:
 	$(call run,vscode-typecheck,npm --silent --prefix clients/vscode run typecheck)
 

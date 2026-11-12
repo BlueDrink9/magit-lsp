@@ -222,6 +222,13 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Regenerate VSCode todo keybindings through Make.** The resumed gate at `656ddd7` passes Rust/Neovim/VSCode behavior suites but fails committed keybinding freshness (`build/test-logs/keybindings.qX4K5z`). Add a narrow Make generation target because only the checker is exposed; preserve unrelated dirty Makefile edits, then regenerate and inspect the causal todo bindings.
+  - check: generation and freshness verification run through Make; generated VSCode binding artifact changes only for intentional todo bindings.
+  - Verified: `make vscode-keybindings-generate && make vscode-test` @ `760ad60` → generation and freshness checker passed; VSCode typecheck and tests passed.
+  - test: VSCode tests pass with current generated bindings.
+  - Verification: `make vscode-keybindings-generate && make vscode-test` (new generation target).
+  - Commit generated artifact separately from target and queue bookkeeping; stage only the new Make target hunk.
+
 - [x] **Align recorded actions with todo editor scope.** The gate at `e30a080` fails `commit-edit-abort.jsonl:9` at `$.result[31].data.command` after correcting contextual todo command scope. Update only causally affected code-action frames; retain exact replay checks.
   - check: real-server replay passes and recorded status actions no longer advertise editor-only todo commands.
   - Verification: `make test-rust FILTER="--test examples"`.
