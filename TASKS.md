@@ -665,6 +665,12 @@ T005 is complete through its authoritative [completed children](#completed-work)
           - test: Key-driven cancellation, HEAD/index/worktree/refs/operation state and caller refresh.
         - [ ] **T019.2b2b — Verify initial preparation failure safety.** Assert invalid selection and changed preparation preconditions report readable effects, retain usable caller and preserve repository state.
           - test: Direct failing selection/preparation dispatch and paused-editor regressions.
+          - Attempts: Two default PARTIALs identified preparation errors escaping as `Err`; split invalid-selection coverage from the production readable-error correction.
+          - [x] **T019.2b2b1 — Reject invalid initial selection safely.** Direct invalid-selection regression preserves repository state and usable caller.
+            - test: Readable invalid-selection effect and exact unchanged state.
+            - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → exit 0; `ok: rust`.
+          - [ ] **T019.2b2b2 — Surface failed initial preparation readably.** Convert actual preparation failure into a readable effect while restoring a usable caller.
+            - test: Changed preconditions after selection opens; exact pre-dispatch repository state preserved, no editor leaked.
   - [ ] **T019.3 — Execute the edited initial rebase plan.** Add the verified launch adapter, submission revalidation and readable execution/conflict handling.
     - test: Exact repository histories prove exclusive-base execution, edited order/actions, conflict, continue and abort; stale submission preserves editor and repository.
   - [ ] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.

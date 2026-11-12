@@ -123,6 +123,23 @@ fn initial_rebase_selector_cancel_and_stale_preparation_keep_caller_usable() {
 }
 
 #[test]
+fn initial_rebase_invalid_selection_keeps_caller_usable() {
+    let (dir, _, base) = repo();
+    let before = state(dir.path());
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r");
+    test.press("i");
+    test.ack();
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
+    let invalid = test.invoke_here("common.confirm");
+    assert!(common::message_texts(&invalid.effects).iter().any(|message| !message.trim().is_empty()), "effects: {:?}", invalid.effects);
+    assert_eq!(*test.session.views().get(test.view_id()).unwrap().kind(), magit_lsp::view::ViewKind::Log);
+    assert_eq!(state(dir.path()), before);
+    assert!(common::message_texts(&test.invoke("common.refresh").effects).is_empty());
+}
+
+#[test]
 fn invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository() {
     let (dir, repo, base) = repo();
     assert!(PreparedRebase::prepare(&repo, "not-a-revision").is_err());
