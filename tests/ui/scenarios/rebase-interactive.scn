@@ -54,6 +54,7 @@ sh: nvim --headless --server ../nvim.sock --remote-expr "getline('.')" | grep -q
 sh: printf 'pick %s two\npick %s one\ndrop %s three\n' "$(git rev-parse --short=12 HEAD~1)" "$(git rev-parse --short=12 HEAD~2)" "$(git rev-parse --short=12 HEAD)" > .git/prepared-edited-expected && nvim --headless --server ../nvim.sock --remote-expr "writefile(getline(1,'$'), '.git/prepared-edited-actual')" >/dev/null && cmp .git/prepared-edited-expected .git/prepared-edited-actual
 keys: Escape
 wait screen contains "Unstaged changes"
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/initial-head)" && test "$(git branch --show-current)" = "$(cat .git/initial-branch)" && git show-ref > .git/initial-refs-after && cmp .git/initial-refs .git/initial-refs-after && git ls-files --stage > .git/initial-index-after && cmp .git/initial-index .git/initial-index-after && git diff --binary HEAD > .git/initial-worktree-after && cmp .git/initial-worktree .git/initial-worktree-after && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
 expect view_stack.count == 1
 keys: r
 wait
@@ -99,8 +100,6 @@ wait
 expect view_stack.menus == 1
 keys: Escape
 wait screen contains "Unstaged changes"
-expect view_stack.count == 1
-expect view_stack.count == 1
 expect view_stack.count == 1
 sh: test "$(git rev-parse HEAD)" = "$(cat .git/launched-head)" && test "$(git branch --show-current)" = "$(cat .git/launched-branch)" && git show-ref > .git/launched-refs-after && cmp .git/launched-refs .git/launched-refs-after && git ls-files --stage > .git/launched-index-after && cmp .git/launched-index .git/launched-index-after && git diff --binary HEAD > .git/launched-worktree-after && cmp .git/launched-worktree .git/launched-worktree-after && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
 keys: r
