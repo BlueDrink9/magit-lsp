@@ -256,6 +256,10 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **Refresh initial-rebase generated references.** Done: `b2c99d3`. Gate `make test` passes at `0680cdb`; `make docs-artifacts-check` fails stale `docs/schema/worked-exchanges.md` (`build/test-logs/schema-check.i0tOdS`). Regenerate registry/schema references through Make and inspect only causal initial-rebase deltas.
+  - check: `make docs-generate && make docs-artifacts-check && make docs-check` passes. Generated artifacts must be committed separately from queue bookkeeping, naming the promotion and generation command.
+  - Verified: `make test` @ `0680cdb` → passed; `make docs-generate && make docs-artifacts-check && make docs-check` @ `b2c99d3` → passed; generated reference commit: `b2c99d3`.
+
 - [x] **Repair initial-rebase command replay fixtures.** Done: `3ebfadc`. Substantial-chunk gate at `cea53d3` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.Yt68Il`). Refresh only causally changed recorded code-action frames from real-server output; preserve exact replay assertions and unrelated frames.
   - check: `make test-rust FILTER="--test examples"` passes with inspected fixture-only causal diff. Generated standalone references remain separate.
   - Attempts: Two default orientation checkpoints, no edits; observed enabled `rebase.interactive` moves within code-action ordering. Split first causal recording repair from complete replay.
