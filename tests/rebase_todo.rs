@@ -181,6 +181,58 @@ fn todo_key_input_changes_action_and_reorders_full_oid_rows() {
 }
 
 #[test]
+fn todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository() {
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let entries = RebaseTodo::load(&repo).unwrap().entries;
+    let identities = entries.iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(dir.path(), &["write-tree"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    let order = |test: &TestSession| test.tree().nodes.iter().filter_map(|node| node.commit.clone()).collect::<Vec<_>>();
+
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
+    test.press("K");
+    assert_eq!(order(&test), identities);
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 1, column: 0 });
+    test.press("J");
+    assert_eq!(order(&test), identities);
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
+    test.press("J");
+    assert_eq!(order(&test), vec![identities[1].clone(), identities[0].clone()]);
+    test.press("ctrl+s");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("pick {} {}\npick {} {}\n", entries[1].oid, entries[1].subject, entries[0].oid, entries[0].subject));
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["write-tree"]), index);
+    let refresh = test.invoke("common.refresh");
+    assert!(message_texts(&refresh.effects).is_empty());
+    git(dir.path(), &["rebase", "--abort"]);
+
+    let (dir, repo) = paused_repo();
+    let path = repo.rebase_todo_path().unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let index = git(dir.path(), &["write-tree"]);
+    let mut test = TestSession::new(dir.path().to_string_lossy(), Profile::Standard);
+    test.open_status_view(STATUS_VIEWPORT);
+    test.press("r T");
+    test.set_cursor(magit_lsp::protocol::Cursor { line: 0, column: 0 });
+    test.press("r");
+    test.press("J");
+    test.press("Escape");
+    assert_eq!(test.view_id(), "v1");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["write-tree"]), index);
+    let refresh = test.invoke("common.refresh");
+    assert!(message_texts(&refresh.effects).is_empty());
+    git(dir.path(), &["rebase", "--abort"]);
+}
+
+#[test]
 fn todo_action_keys_change_captured_full_oid_row() {
     let (dir, repo) = paused_repo();
     let selected = RebaseTodo::load(&repo).unwrap().entries[1].oid.clone();

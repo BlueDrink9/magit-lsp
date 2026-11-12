@@ -529,7 +529,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
             - test: dispatched invalid/stale submission and edited cancellation preserve repository and caller invariants.
             - Verification: `make test-rust FILTER="--test rebase_todo"`.
             - Verified: `make test-rust FILTER="--test rebase_todo"` @ 7893c2b → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` covers invalid edit rejection without todo replacement and continued editor dispatch, stale external todo preservation and readable refusal; `dispatched_todo_cancel_after_edits_preserves_repository_and_restores_caller` covers an action edit then cancel with exact todo/HEAD/index preservation.
-   - [ ] **T018.3c — Native todo editing key affordances.** Add server-owned contextual action/reorder key commands so users can edit without constructing `view/invoke` arguments. Existing argument-based commands remain internal dispatch infrastructure, not a completed native editing affordance.
+   - [x] **T018.3c — Native todo editing key affordances.** Add server-owned contextual action/reorder key commands so users can edit without constructing `view/invoke` arguments. Existing argument-based commands remain internal dispatch infrastructure, not a completed native editing affordance.
      - Research: VERIFIED at `6ff3713`: both profiles bind only cancel/submit (`profiles/standard.toml:94-96`, `profiles/vim.toml:96-98`); action/reorder use explicit args (`src/commands.rs:1144-1163`). Native conformance exposed the missing input path.
      - test: real session key input changes selected full-OID row actions and moves rows using server tree identity; invalid leading squash/fixup remains readable and safe.
      - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
@@ -538,7 +538,7 @@ T005 is complete through its authoritative [completed children](#completed-work)
         - test: selected full-OID action and repeated up/down movement through key input; existing dispatch and cancellation regressions pass.
         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
         - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `6ff3713` → ok: rust. `todo_key_input_changes_action_and_reorders_full_oid_rows` uses session key input for selected full-OID action and repeated `J`/`K` reorder; the full rebase todo suite retains submit and cancellation regressions, and keymap validation accepts both profile bindings.
-     - [ ] **T018.3c2 — Contextual todo key safety coverage.** Extend key tests across all six actions, invalid leading squash/fixup, boundary moves, and subsequent usable submit/cancel.
+     - [x] **T018.3c2 — Contextual todo key safety coverage.** Extend key tests across all six actions, invalid leading squash/fixup, boundary moves, and subsequent usable submit/cancel.
        - test: key rejection preserves model/disk and valid subsequent input works; each supported action and boundary behavior directly asserted.
        - Verification: `make test-rust FILTER="--test rebase_todo"`.
        - Attempts: Two default checkpoints left test edits unverified; added action transitions disturbed movement preconditions. Separate action safety from movement/caller tests.
@@ -546,9 +546,11 @@ T005 is complete through its authoritative [completed children](#completed-work)
          - test: six actions and both leading-fold rejection paths via actual session keys.
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
          - Verified: `make test-rust FILTER="--test rebase_todo"` @ `97cf821` → ok: rust. `todo_action_keys_change_captured_full_oid_row` asserts all six action keys on one structured full-OID selection; `todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable` asserts readable squash/fixup rejection, unchanged tree/todo bytes, and a subsequent valid action key.
-       - [ ] **T018.3c2b — Todo movement boundaries and caller safety.** Assert first/last boundary movement and subsequent submit/cancel preserve caller and repository invariants using fresh or restored valid preconditions.
+       - [x] **T018.3c2b — Todo movement boundaries and caller safety.** Assert first/last boundary movement and subsequent submit/cancel preserve caller and repository invariants using fresh or restored valid preconditions.
          - test: boundary moves and subsequent key submit/cancel preserve identity and repository state.
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
+         - Attempts: Two inherited fixes left the order helper borrowing the session across mutations; passing `&TestSession` at each assertion limited the immutable borrow to the call.
+         - Verified: `make test-rust FILTER="--test rebase_todo"` @ `42bf123` → ok: rust. `todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository` asserts first/last `K`/`J` no-ops, subsequent valid movement and exact submit, edited/moved cancel restoration, usable caller refresh, and unchanged HEAD/index.
    - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
