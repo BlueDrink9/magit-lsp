@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
+getrandom = "0.4"
 same-file = "1.0"
 lsp-server = "0.10"
 lsp-types = "0.97"

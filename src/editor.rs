@@ -32,6 +32,8 @@ pub const SOCKET_ENV: &str = "MAGIT_LSP_SOCKET";
 pub const EDIT_ID_ENV: &str = "MAGIT_LSP_EDIT_ID";
 /// Private one-shot credential inherited by the spawned Git editor helper.
 pub const HELPER_TOKEN_ENV: &str = "MAGIT_LSP_HELPER_TOKEN";
+/// Reusable, admission-only credential for a bounded sequence of editor helpers.
+pub const EDIT_SCOPE_ENV: &str = "MAGIT_LSP_EDIT_SCOPE";
 /// The kind the helper reports for Git's commit message file.
 pub const COMMIT_MESSAGE_KIND: &str = "commit-message";
 /// The helper kind Git uses for an interactive rebase todo file.
@@ -41,8 +43,12 @@ pub const REBASE_TODO_KIND: &str = "rebase-todo";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EditHello {
+    #[serde(default)]
     edit_id: String,
+    #[serde(default)]
     token: String,
+    #[serde(default)]
+    scope: Option<String>,
     path: String,
     kind: String,
 }
@@ -89,6 +95,7 @@ struct EditEntry {
     owner: String,
     completed: std_mpsc::Receiver<bool>,
     completion: std_mpsc::Sender<bool>,
+    scope_token: Option<String>,
 }
 
 #[cfg(all(test, unix))]
@@ -423,6 +430,44 @@ pub struct EditRegistry {
     /// lock so a delivery can be recorded while the lifecycle lock is held.
     deliveries: Mutex<HashMap<String, u64>>,
     next_delivery: std::sync::atomic::AtomicU64,
+    scopes: Mutex<HashMap<String, EditScopeState>>,
+}
+
+struct EditScopeState { owner: String, repo_path: String, active: bool }
+
+/// Admission credential for sequential fresh editor runs; revoke on operation exit.
+/// This reusable bearer credential admits helpers only and never confirms drafts.
+pub struct EditScope { token: String }
+
+fn opaque_scope_id() -> Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|error| Error::new(error.to_string()))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+impl Drop for EditScope {
+    fn drop(&mut self) { registry().revoke_scope(&self.token); }
+}
+
+struct ScopeInvocation {
+    token: String,
+    run_id: Option<String>,
+}
+
+impl Drop for ScopeInvocation {
+    fn drop(&mut self) {
+        if let Some(run_id) = self.run_id.take() {
+            registry().resolve(&run_id, Reply::Abort);
+        }
+        if let Some(scope) = registry().scopes.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&self.token) {
+            scope.active = false;
+        }
+    }
+}
+
+impl EditScope {
+    /// Credential for inherited helper environment; admission only, never confirmation.
+    pub fn credential(&self) -> &str { &self.token }
 }
 
 /// One registry-owned pending draft identity and exact issued URI.
@@ -442,7 +487,30 @@ impl EditRegistry {
             history: Mutex::new(HashMap::new()),
             deliveries: Mutex::new(HashMap::new()),
             next_delivery: std::sync::atomic::AtomicU64::new(0),
+            scopes: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Create an admission-only scope bound to one owner and canonical repository.
+    #[cfg(unix)]
+    pub fn scope(&self, repo_path: &str, owner: &str) -> Result<EditScope> {
+        let repo = GitRepo::open(repo_path)?;
+        let token = opaque_scope_id()?;
+        self.scopes.lock().unwrap_or_else(|p| p.into_inner()).insert(token.clone(), EditScopeState {
+            owner: owner.to_string(), repo_path: repo.root().to_string_lossy().into_owned(), active: false,
+        });
+        Ok(EditScope { token })
+    }
+
+    fn revoke_scope(&self, token: &str) {
+        if let Some(scope) = self.scopes.lock().unwrap_or_else(|p| p.into_inner()).remove(token) {
+            if scope.active { self.abort_scope_runs(token); }
+        }
+    }
+
+    fn abort_scope_runs(&self, token: &str) {
+        let ids: Vec<String> = self.lock().iter().filter(|(_, e)| e.scope_token.as_deref() == Some(token)).map(|(id, _)| id.clone()).collect();
+        for id in ids { self.resolve(&id, Reply::Abort); }
     }
 
     /// Allocate a draft before Git, bound to a trusted connection and repository.
@@ -463,6 +531,7 @@ impl EditRegistry {
                 owner: owner.to_string(),
                 completed,
                 completion,
+                scope_token: None,
             },
         );
         Ok(edit_id)
@@ -477,7 +546,7 @@ impl EditRegistry {
     /// Apply an operation under the registry's sole lifecycle lock. Repository
     /// and owner come from trusted server state, never client parameters.
     #[cfg(unix)]
-    pub(crate) fn apply<T>(
+    pub fn apply<T>(
         &self,
         owner: &str,
         run_id: &str,
@@ -967,16 +1036,15 @@ fn unix_helper(file: &str) -> Result<bool> {
 
     let socket = std::env::var_os(SOCKET_ENV)
         .ok_or_else(|| Error::new(format!("{SOCKET_ENV} is not set")))?;
-    let edit_id =
-        std::env::var(EDIT_ID_ENV).map_err(|_| Error::new(format!("{EDIT_ID_ENV} is not set")))?;
+    let edit_id = std::env::var(EDIT_ID_ENV).unwrap_or_default();
     let path = absolute(file)?;
 
     let mut stream = UnixStream::connect(Path::new(&socket))
         .map_err(|error| Error::new(format!("cannot connect to the editor bridge: {error}")))?;
     let hello = EditHello {
         edit_id,
-        token: std::env::var(HELPER_TOKEN_ENV)
-            .map_err(|_| Error::new("editor helper credential is not set"))?,
+        token: std::env::var(HELPER_TOKEN_ENV).unwrap_or_default(),
+        scope: std::env::var(EDIT_SCOPE_ENV).ok(),
         path: path.to_string_lossy().into_owned(),
         kind: COMMIT_MESSAGE_KIND.to_string(),
     };
@@ -1146,8 +1214,34 @@ fn handle_connection(
 fn handle_edit(
     stream: &mut std::os::unix::net::UnixStream,
     emitter: EffectEmitter,
-    hello: EditHello,
+    mut hello: EditHello,
 ) -> Result<()> {
+    let mut admission = None;
+    if let Some(scope_token) = hello.scope.take() {
+        let (owner, repo_path) = {
+            let scopes = registry().scopes.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(scope) = scopes.get(&scope_token) else { return write_reply(stream, false, None); };
+            if scope.active { return write_reply(stream, false, None); }
+            (scope.owner.clone(), scope.repo_path.clone())
+        };
+        let repo = GitRepo::open(&repo_path)?;
+        let draft = draft::Draft::for_kind(&repo, owner.clone(), draft::DraftKind::CommitMessage)?;
+        hello.edit_id = draft.run_id().to_string();
+        hello.token = draft.helper_token().to_string();
+        let (replies, waiting) = std_mpsc::channel();
+        let (completion, completed) = std_mpsc::channel();
+        let mut scopes = registry().scopes.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(scope) = scopes.get_mut(&scope_token) else { return write_reply(stream, false, None); };
+        if scope.active || scope.owner != owner || scope.repo_path != repo_path {
+            return write_reply(stream, false, None);
+        }
+        scope.active = true;
+        registry().lock().insert(hello.edit_id.clone(), EditEntry {
+            repo_path, replies, waiting: Some(waiting), draft, owner, completed, completion,
+            scope_token: Some(scope_token.clone()),
+        });
+        admission = Some(ScopeInvocation { token: scope_token, run_id: Some(hello.edit_id.clone()) });
+    }
     let (replies, completion) = {
         let mut entries = registry().lock();
         let Some(entry) = entries.get_mut(&hello.edit_id) else {
@@ -1216,6 +1310,7 @@ fn handle_edit(
     };
     let result = write_reply(stream, reply == Reply::Ok, None);
     let _ = completion.send(result.is_ok());
+    drop(admission);
     result
 }
 

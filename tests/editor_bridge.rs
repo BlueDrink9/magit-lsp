@@ -1506,6 +1506,67 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
     assert!(!log.contains(&token), "private helper token leaked in logs");
 }
 
+#[cfg(unix)]
+#[test]
+fn scoped_real_helpers_get_fresh_runs_and_confirm_sequential_files() {
+    use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
+    use magit_lsp::protocol::{DraftFinishReason, Effect};
+    use std::sync::{mpsc, Arc};
+
+    let (tmp, _) = staged_repo();
+    let owner = "scoped-sequential-test";
+    let registry = registry();
+    let scope = registry
+        .scope(tmp.path().to_str().unwrap(), owner)
+        .unwrap();
+    let (effects_tx, effects_rx) = mpsc::channel();
+    let socket = magit_lsp::editor::start_listener(
+        Arc::new(move |effects| effects_tx.send(effects).unwrap()),
+        Arc::new(|_| None),
+    )
+    .expect("editor bridge listener");
+    let message_path = tmp.path().join(".git/COMMIT_EDITMSG");
+    let mut runs = Vec::new();
+
+    for message in ["First scoped message\n", "Second scoped message\n"] {
+        write(&message_path, "template\n");
+        let mut helper = Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+            .arg("--editor-helper")
+            .arg(&message_path)
+            .env(SOCKET_ENV, socket)
+            .env(EDIT_SCOPE_ENV, scope.credential())
+            .env_remove(magit_lsp::editor::EDIT_ID_ENV)
+            .env_remove(magit_lsp::editor::HELPER_TOKEN_ENV)
+            .spawn()
+            .unwrap();
+        let effects = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (run_id, uri, text) = effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
+                _ => None,
+            })
+            .expect("ordinary real-file edit announcement");
+        registry
+            .apply(owner, &run_id, &uri, |draft, context| {
+                draft.did_open(context, 1, text.as_bytes())?;
+                draft.did_change(context, 2, message.as_bytes())?;
+                assert_eq!(
+                    draft.finish(context, 2, DraftFinishReason::Confirm)?,
+                    magit_lsp::editor::Reply::Ok
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert!(helper.wait().unwrap().success());
+        assert_eq!(read(&message_path), message);
+        runs.push(run_id);
+    }
+
+    assert_ne!(runs[0], runs[1], "each admitted helper gets a fresh run");
+    drop(scope);
+}
+
 #[test]
 fn a_cancel_creates_no_commit() {
     let (tmp, _repo) = staged_repo();
