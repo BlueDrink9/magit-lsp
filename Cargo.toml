@@ -32,7 +32,6 @@ toml_edit = "0.25"
 
 [dev-dependencies]
 expect-test = "1"
-tempfile = "3"
 proptest = "1"
 rstest = "0.26"
 
