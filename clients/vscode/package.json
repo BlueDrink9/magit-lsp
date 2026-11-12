@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "magit-lsp",
   "private": true,
+  "packageManager": "pnpm@10.13.1",
   "license": "Apache-2.0",
   "engines": {
     "vscode": "^1.85.0"
@@ -22,7 +23,7 @@
   "scripts": {
     "gen:keybindings": "node scripts/gen-keybindings.mjs",
     "test": "node test/test.js && node test/integration.js",
-    "typecheck": "node_modules/.bin/tsc -p jsconfig.json",
+    "typecheck": "tsc -p jsconfig.json",
     "test:unit": "node test/test.js",
     "test:integration": "node test/integration.js",
     "test:e2e": "node test/e2e/run.mjs"

@@ -90,10 +90,9 @@ outputs, and `make docs-check` runs checker unit tests plus link validation.
 references separately from source or authored documentation, with a commit
 message naming the changed source/contract and generation command; inspect its
 diff before commit. Ordinary `make test` does not regenerate or check artifacts.
-The Nix development shell supplies Node.js and npm. VSCode TypeScript and
-declarations remain owned by `clients/vscode/package-lock.json`; install locked
-project dependencies before running `make vscode-unit`. No dependency setup
-target currently exists.
+The Nix development shell supplies Node.js and pnpm. VSCode TypeScript and
+declarations remain owned by `clients/vscode/pnpm-lock.yaml`; VSCode Make targets
+install locked dependencies when needed, using the shared pnpm store.
 
 ### 8.8 Real-UI tests (L3)
 

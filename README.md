@@ -119,7 +119,7 @@ the specification is a reference configuration, not a tested client.
 - An external `magit-lsp` server. Rust/cargo is needed only for source builds,
   not for users of a future approved binary release.
 - Neovim 0.11+ or VSCode 1.85+ for the respective client. Source VSCode setup
-  also uses Node.js 22+ and npm; see the [install guide](docs/CLIENT_INSTALL.md).
+  also uses Node.js 22+ and pnpm 10; see the [install guide](docs/CLIENT_INSTALL.md).
 - `git` on `PATH` — all VCS reads/writes shell out to the `git` CLI. Git
   **2.30.8 is the tested recommendation**, not a hard minimum; older versions are not blocked, but some
   operations may fail. Failures on an older Git produce a tracing warning.
@@ -137,7 +137,7 @@ make test
 
 Local prerequisites: `git` (2.30.8 recommended), a Rust toolchain (`cargo`,
 stable), Neovim (any recent version with Lua) and Node.js 22 or newer with
-npm for the VSCode client tests. See below for the exact pieces.
+pnpm for the VSCode client tests. See below for the exact pieces.
 
 Individual pieces:
 
@@ -161,13 +161,13 @@ user-visible rendering.
 ### VSCode client tests
 
 The VSCode extension requires VSCode 1.85 or newer. Running its Node tests also
-requires Node.js and npm; exercising the extension against Git requires `git`
+requires Node.js and pnpm; exercising the extension against Git requires `git`
 and a server binary (the native harness currently expects a local `cargo build`). Install the extension's locked dependencies
 and run its automated tests from the repository root:
 
 ```sh
-npm --prefix clients/vscode ci
-npm --prefix clients/vscode test
+make vscode-deps
+make vscode-test
 ```
 
 These are Node unit tests for the extension's context, rendering, menu,
@@ -176,11 +176,9 @@ server. `make vscode-test` runs the same node tests plus
 `node clients/vscode/scripts/gen-keybindings.mjs --check`, which regenerates
 `contributes.keybindings` from the server's static manifest and fails when the
 committed one is stale (e.g. after editing a profile in Rust without running
-the generator). `npm ci --prefix clients/vscode` installs the locked
-dependency versions from `package-lock.json`; it is the only supported way to
-set up the client's dependencies, so CI and local runs see identical versions.
-`make test` includes `vscode-test` and CI installs the locked dependencies
-(Node 22) before running it.
+the generator). Make installs locked dependency versions from
+`pnpm-lock.yaml` when needed, using a shared pnpm store. `make test` includes
+`vscode-test`; CI uses the same Make bootstrap.
 
 To test the extension in an Extension Development Host, build the server and
 install the extension dependencies first. Then create a disposable repository
@@ -189,7 +187,7 @@ built server, and launch VSCode with the extension development path:
 
 ```sh
 cargo build
-npm --prefix clients/vscode ci
+make vscode-deps
 
 server="$(pwd)/target/debug/magit-lsp"
 extension="$(pwd)/clients/vscode"

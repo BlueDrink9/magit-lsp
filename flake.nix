@@ -34,6 +34,7 @@
               lua-language-server
               neovim
               nodejs
+              pnpm
               python3
               pyright
               rust-analyzer
