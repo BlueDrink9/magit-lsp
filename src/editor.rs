@@ -456,11 +456,11 @@ struct ScopeInvocation {
 
 impl Drop for ScopeInvocation {
     fn drop(&mut self) {
-        if let Some(run_id) = self.run_id.take() {
-            registry().resolve(&run_id, Reply::Abort);
-        }
         if let Some(scope) = registry().scopes.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&self.token) {
             scope.active = false;
+        }
+        if let Some(run_id) = self.run_id.take() {
+            registry().resolve(&run_id, Reply::Abort);
         }
     }
 }
@@ -1308,9 +1308,9 @@ fn handle_edit(
             }
         }
     };
+    drop(admission.take());
     let result = write_reply(stream, reply == Reply::Ok, None);
     let _ = completion.send(result.is_ok());
-    drop(admission);
     result
 }
 

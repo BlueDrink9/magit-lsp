@@ -1508,7 +1508,7 @@ fn real_file_production_helper_rejects_spoofs_and_duplicate_join() {
 
 #[cfg(unix)]
 #[test]
-fn scoped_real_helpers_get_fresh_runs_and_confirm_sequential_files() {
+fn scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks() {
     use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
     use magit_lsp::protocol::{DraftFinishReason, Effect};
     use std::sync::{mpsc, Arc};
@@ -1565,6 +1565,121 @@ fn scoped_real_helpers_get_fresh_runs_and_confirm_sequential_files() {
 
     assert_ne!(runs[0], runs[1], "each admitted helper gets a fresh run");
     drop(scope);
+    assert_scoped_helper_denials_and_cleanup(socket, &effects_rx);
+}
+
+#[cfg(unix)]
+fn assert_scoped_helper_denials_and_cleanup(
+    socket: &Path,
+    effects_rx: &std::sync::mpsc::Receiver<Vec<magit_lsp::protocol::Effect>>,
+) {
+    use magit_lsp::editor::{registry, EDIT_SCOPE_ENV, SOCKET_ENV};
+    use magit_lsp::protocol::{DraftFinishReason, Effect};
+
+    let (tmp, _) = staged_repo();
+    let owner = "scoped-denial-test";
+    let registry = registry();
+    let launch = |path: &Path, credential: &str| {
+        Command::new(env!("CARGO_BIN_EXE_magit-lsp"))
+            .arg("--editor-helper")
+            .arg(path)
+            .env(SOCKET_ENV, socket)
+            .env(EDIT_SCOPE_ENV, credential)
+            .env_remove(magit_lsp::editor::EDIT_ID_ENV)
+            .env_remove(magit_lsp::editor::HELPER_TOKEN_ENV)
+            .spawn()
+            .unwrap()
+    };
+    let wait = |child: &mut std::process::Child| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                let _ = child.wait();
+                panic!("editor helper did not exit within 10 seconds");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let message_path = tmp.path().join(".git/COMMIT_EDITMSG");
+    write(&message_path, "template\n");
+    let scope = registry.scope(tmp.path().to_str().unwrap(), owner).unwrap();
+    let mut first = launch(&message_path, scope.credential());
+    let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (run, uri, text) = edit.into_iter().find_map(|effect| match effect {
+        Effect::EditDocument { run_id, uri, text, .. } => Some((run_id, uri, text)),
+        _ => None,
+    }).unwrap();
+    let mut denied = launch(&message_path, scope.credential());
+    let denied = wait(&mut denied);
+    assert!(!denied.success(), "concurrent callback denied");
+    assert!(effects_rx.try_recv().is_err(), "denial emits no delivery");
+    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 1);
+    registry.apply(owner, &run, &uri, |draft, context| {
+        draft.did_open(context, 1, text.as_bytes())?;
+        draft.did_change(context, 2, b"confirmed original\n")?;
+        draft.finish(context, 2, DraftFinishReason::Confirm)?;
+        Ok(())
+    }).unwrap();
+    assert!(wait(&mut first).success(), "original callback remains confirmable");
+
+    write(&message_path, "invalid-path\n");
+    let mut invalid = launch(&tmp.path().join("missing-editor-file"), scope.credential());
+    assert!(!wait(&mut invalid).success());
+    assert!(effects_rx.try_recv().is_err(), "invalid path emits no delivery");
+
+    write(&message_path, "template\n");
+    let mut active = launch(&message_path, scope.credential());
+    let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let active_run = edit.into_iter().find_map(|effect| match effect {
+        Effect::EditDocument { run_id, .. } => Some(run_id),
+        _ => None,
+    }).unwrap();
+    assert!(!registry.resolve(&run, magit_lsp::editor::Reply::Abort));
+    assert!(registry.apply(owner, &run, &uri, |draft, context| {
+        draft.finish(context, 1, DraftFinishReason::Confirm)
+    }).is_err());
+    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 1);
+    let revoked_credential = scope.credential().to_string();
+    drop(scope);
+    assert!(!wait(&mut active).success(), "scope revocation aborts helper");
+    assert_eq!(registry.pending_for(owner, tmp.path().to_str().unwrap()).len(), 0);
+    assert!(!registry.resolve(&active_run, magit_lsp::editor::Reply::Abort));
+
+    let mut late = launch(&message_path, &revoked_credential);
+    assert!(!wait(&mut late).success(), "late callback after revoke is denied");
+    assert!(effects_rx.try_recv().is_err(), "late denial emits no delivery");
+
+    let next = registry.scope(tmp.path().to_str().unwrap(), owner).unwrap();
+    let mut disconnected = launch(&message_path, next.credential());
+    let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let disconnected_run = edit.into_iter().find_map(|effect| match effect {
+        Effect::EditDocument { run_id, .. } => Some(run_id),
+        _ => None,
+    }).unwrap();
+    disconnected.kill().unwrap();
+    let _ = wait(&mut disconnected);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !registry.pending_for(owner, tmp.path().to_str().unwrap()).is_empty() {
+        assert!(Instant::now() < deadline, "disconnected callback cleanup timed out");
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!registry.resolve(&disconnected_run, magit_lsp::editor::Reply::Abort));
+
+    let mut recovered = launch(&message_path, next.credential());
+    let edit = effects_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let recovered_run = edit.into_iter().find_map(|effect| match effect {
+        Effect::EditDocument { run_id, .. } => Some(run_id),
+        _ => None,
+    }).unwrap();
+    assert!(registry.resolve(&recovered_run, magit_lsp::editor::Reply::Abort));
+    assert!(!wait(&mut recovered).success());
+    assert!(registry.pending_for(owner, tmp.path().to_str().unwrap()).is_empty());
+    assert!(effects_rx.try_recv().is_err(), "cleanup leaves no delivery");
+    drop(next);
 }
 
 #[test]
