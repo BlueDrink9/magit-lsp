@@ -1178,12 +1178,13 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not add another scenario, snapshots or image capture. Do not substitute the Rust cancellation tests or post-launch baseline for this native acceptance check.
   - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `7be7ff2` → `ok: build`, `ok: ui-file`; edited cancellation compares original repo baseline before subsequent selector. `pgrep -af magit-lsp` showed no server orphan.
 
-- [ ] **[P2] Reconcile focused version-startup documentation with the shared runner** (`docs/TESTING.md:98-110`, focused version targets; `clients/vscode/test/e2e/run.mjs:47-49,210-214`, `focusedVersion`; `clients/vscode/test/e2e/suite.js:311-350`, version branch)
+- [x] **[P2] Reconcile focused version-startup documentation with the shared runner** (`docs/TESTING.md:98-110`, focused version targets; `clients/vscode/test/e2e/run.mjs:47-49,210-214`, `focusedVersion`; `clients/vscode/test/e2e/suite.js:311-350`, version branch)
   - **Problem:** The documentation promises `version-startup-evidence.json` and says the startup target does not verify warning visibility. Both focused flags now select the same version branch, which requires visible warning text and writes only `version-warning-evidence.json`; the documented startup artifact is no longer produced.
   - **Why it matters:** Contract drift and simplicity — the maintained verification instructions describe a retired distinction and direct users to a nonexistent artifact.
   - **Change:** Update `docs/TESTING.md` to state that both existing targets run the shared startup-and-visible-warning check and produce `version-warning-evidence.json`. Remove the claim that the startup target stops short of visibility verification. Keep earlier dated queue evidence historical rather than rewriting successful past runs.
   - **Done when:** Each documented target's behavior and artifact name match the current shared runner; documentation checks pass.
   - **Constraints:** Documentation-only correction; do not introduce another runner branch, duplicate evidence producer, or change existing Make target names.
+  - Verified: `make docs-check` @ `27ad2de` → documentation checks passed; both target descriptions name shared startup-and-visible-warning behavior and `version-warning-evidence.json`.
 
 ### P3
 
