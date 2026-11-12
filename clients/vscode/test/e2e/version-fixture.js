@@ -19,6 +19,7 @@ function createVersionFixture(parent) {
     }
   };
   copyRuntime(path.join(source, 'lib'), path.join(extensionPath, 'lib'));
+  copyRuntime(path.join(source, 'types'), path.join(extensionPath, 'types'));
   fs.copyFileSync(path.join(source, 'extension.js'), path.join(extensionPath, 'extension.js'));
   const originalManifest = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
   const manifest = { ...originalManifest, version: '9999.0.0' };

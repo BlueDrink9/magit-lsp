@@ -109,6 +109,9 @@ test('mismatched extension fixture isolates manifest version, runtime and cleanu
     assert.deepEqual(copiedManifest.contributes, original.contributes);
     assert.equal(fs.existsSync(path.join(fixture.extensionPath, 'extension.js')), true);
     assert.equal(fs.existsSync(path.join(fixture.extensionPath, 'lib', 'session.js')), true);
+    assert.equal(require.resolve('../types/shared-lists', {
+      paths: [path.join(fixture.extensionPath, 'lib')],
+    }), path.join(fixture.extensionPath, 'types', 'shared-lists.js'));
     assert.equal(require.resolve('jsonc-parser', { paths: [fixture.extensionPath] }),
       require.resolve('jsonc-parser', { paths: [path.join(__dirname, '..')] }));
     assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'package.json')), sourceManifest);

@@ -94,6 +94,12 @@ The Nix development shell supplies Node.js and pnpm. VSCode TypeScript and
 declarations remain owned by `clients/vscode/pnpm-lock.yaml`; VSCode Make targets
 install locked dependencies when needed, using the shared pnpm store.
 
+`make vscode-version-startup` runs the real VSCode startup check against an
+isolated extension fixture with version `9999.0.0`. Its
+`version-startup-evidence.json` records fixture activation, initialized server
+version, selected executable and usable status text. This verifies startup, not
+version-warning visibility; that requires `make vscode-version-warning`.
+
 ### 8.8 Real-UI tests (L3)
 
 L3 drives a real Neovim inside tmux and asserts on the captured screen. It
