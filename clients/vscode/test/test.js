@@ -17,6 +17,7 @@ const promptVectors = require('../../../tests/data/client-contracts.json').promp
 const pickVectors = require('../../../tests/data/client-contracts.json').picks;
 const noVisionPolicy = require('./no-vision');
 const versions = require('../lib/version');
+const { createVersionFixture } = require('./e2e/version-fixture');
 const renderVectors = require('../../../tests/data/client-contracts.json').renders;
 
 const failures = [];
@@ -62,6 +63,39 @@ test('optional VSCode runner selects explicit and PATH editors in precedence ord
     assert.equal(absent.status, 1);
     assert.equal(absent.stdout.trim(), '');
   } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('focused version runner fails when native prerequisites are missing', () => {
+  const runner = path.join(__dirname, 'e2e', 'run.mjs');
+  const result = spawnSync(process.execPath, [runner], {
+    encoding: 'utf8', env: { PATH: '', DISPLAY: '', MAGIT_VSCODE_BIN: '', MAGIT_VSCODE_VERSION_ONLY: '1' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^FAIL e2e: no `code`\/`codium` binary found/m);
+});
+
+test('mismatched extension fixture isolates manifest version, runtime and cleanup', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vscode-version-fixture-'));
+  const sourceManifest = fs.readFileSync(path.join(__dirname, '..', 'package.json'));
+  const fixture = createVersionFixture(directory);
+  try {
+    const copiedManifest = JSON.parse(fs.readFileSync(path.join(fixture.extensionPath, 'package.json'), 'utf8'));
+    const original = JSON.parse(sourceManifest);
+    assert.equal(copiedManifest.version, '9999.0.0');
+    assert.equal(copiedManifest.name, original.name);
+    assert.equal(copiedManifest.publisher, original.publisher);
+    assert.equal(copiedManifest.main, original.main);
+    assert.deepEqual(copiedManifest.contributes, original.contributes);
+    assert.equal(fs.existsSync(path.join(fixture.extensionPath, 'extension.js')), true);
+    assert.equal(fs.existsSync(path.join(fixture.extensionPath, 'lib', 'session.js')), true);
+    assert.equal(require.resolve('jsonc-parser', { paths: [fixture.extensionPath] }),
+      require.resolve('jsonc-parser', { paths: [path.join(__dirname, '..')] }));
+    assert.deepEqual(fs.readFileSync(path.join(__dirname, '..', 'package.json')), sourceManifest);
+  } finally {
+    fixture.cleanup();
+    assert.equal(fs.existsSync(fixture.extensionPath), false);
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
