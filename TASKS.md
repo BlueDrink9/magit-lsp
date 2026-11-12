@@ -784,12 +784,14 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Rationale:** Removed brittle source-token checker and its Make target; PORT1 entry retains only historical one-time source-check evidence, not runtime proof.
   - Verified: `make docs-check` @ `aeed37f` → ok: docs-check.
 
-- [ ] **[P2] Delete the stale temporary handoff transcript** (`tmp-task.md:1-350`)
+- [x] **[P2] Delete the stale temporary handoff transcript** (`tmp-task.md:1-350`). Done: containing commit.
   - **Problem:** `tmp-task.md` is an unreferenced 2026-10-24 worker handoff that calls itself an “AUTHORITATIVE CURRENT UPDATE,” embeds personal paths and obsolete direct verification recipes, and conflicts with `TASKS.md` as the sole current queue. Git history already preserves the transcript at `326cced`.
   - **Why it matters:** Cleanliness/cohesion — stale status authority and superseded instructions remain in the repository with no current consumer.
   - **Change:** Delete `tmp-task.md`; do not sanitize or relocate its contents. Keep any still-live work only where it already exists in the canonical queue.
   - **Done when:** `tmp-task.md` is absent and no maintained document links to it; current queue and historical commit provenance remain intact.
   - **Constraints:** Do not copy the transcript into another documentation file, alter current implementation status, or remove dated evidence documents that are explicitly labeled historical.
+  - Git grep sweep: `git grep -n 'tmp-task.md' -- '*.md'` found only references in this removal ticket; no maintained document links to it.
+  - Verified: `make docs-check` @ `130f8eb` → ok: docs-check; `tmp-task.md` absent.
 
 - [x] **[P2] Return deferred sibling refreshes from session prompt closes.** Prerequisite for the server-delivery item below. test: after refresh-all is queued during a document prompt, closing either the prompt view or its origin returns fresh renders for every surviving normal-mode view. Text-mode edits and queued refresh remain intact. Verification: `make test-rust FILTER="--test prompts"`. Done: containing commit.
   - Verified: make test-rust FILTER="--test prompts" @ 7fae07c → 34 passed, including `closing_a_document_prompt_returns_every_surviving_refresh` and `closing_a_document_prompt_keeps_text_mode_refreshes_queued`.
