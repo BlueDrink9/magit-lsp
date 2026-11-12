@@ -276,6 +276,11 @@ pub const WORKBENCH_ALLOW: &[AllowEntry] = &[
         scope: Some("menu"),
         reason: "menu.reset-args is restricted to menu views",
     },
+    AllowEntry {
+        key: "ctrl+s",
+        scope: Some("rebase-todo"),
+        reason: "rebase.todo-submit is restricted to rebase todo views",
+    },
 ];
 
 /// A denied key that has no allow entry.
