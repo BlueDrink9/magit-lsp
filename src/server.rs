@@ -5029,11 +5029,9 @@ fn spawn_repository_operation(
         .name("magit-lsp-commit".to_string())
         .spawn(move || {
             let _progress = progress;
-            let result = runner::with_cancel(Some(cancel), || match operation {
-                crate::git::RepositoryOperation::Commit(operation) => match editor::socket_path() {
-                    Some(socket) => editor::commit(&repo, &edit.id, socket, &operation),
-                    None => Err(Error::new("the editor bridge is not running")),
-                },
+            let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
+                Some(socket) => editor::execute_operation(&repo, &edit.id, socket, &operation),
+                None => Err(Error::new("the editor bridge is not running")),
             });
             // Release both resources before any outcome or progress-end reaches
             // the client, including when Git was killed before opening an editor.

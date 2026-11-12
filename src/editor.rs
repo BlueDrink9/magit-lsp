@@ -830,6 +830,32 @@ pub fn commit(
     operation: &crate::git::CommitOperation,
 ) -> Result<crate::git::CommitOutcome> {
     let repo = crate::runner::with_cancel(None, || GitRepo::open(repo_path))?;
+    let env = registered_editor_environment(edit_id, socket, operation, &repo)?;
+    let args = operation.argv();
+    let env = env.iter().map(|(key, value)| (*key, value.as_str())).collect::<Vec<_>>();
+    repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
+}
+
+/// Execute a typed repository operation using the registered editor bridge.
+pub fn execute_operation(
+    repo_path: &str,
+    edit_id: &str,
+    socket: &Path,
+    operation: &crate::git::RepositoryOperation,
+) -> Result<crate::git::CommitOutcome> {
+    match operation {
+        crate::git::RepositoryOperation::Commit(operation) => {
+            commit(repo_path, edit_id, socket, operation)
+        }
+    }
+}
+
+fn registered_editor_environment(
+    edit_id: &str,
+    socket: &Path,
+    operation: &crate::git::CommitOperation,
+    repo: &GitRepo,
+) -> Result<Vec<(&'static str, String)>> {
     let editor = helper_invocation()?;
     let socket = socket.to_string_lossy();
     let token = registry().helper_token(edit_id)?;
@@ -840,18 +866,17 @@ pub fn commit(
         _ => None,
     };
     let mut env = vec![
-        ("GIT_EDITOR", editor.as_str()),
-        ("EDITOR", editor.as_str()),
-        ("VISUAL", editor.as_str()),
-        (SOCKET_ENV, socket.as_ref()),
-        (EDIT_ID_ENV, edit_id),
-        (HELPER_TOKEN_ENV, token.as_str()),
+        ("GIT_EDITOR", editor.clone()),
+        ("EDITOR", editor.clone()),
+        ("VISUAL", editor.clone()),
+        (SOCKET_ENV, socket.into_owned()),
+        (EDIT_ID_ENV, edit_id.to_string()),
+        (HELPER_TOKEN_ENV, token),
     ];
     if let Some(date) = &committer_date {
-        env.push(("GIT_COMMITTER_DATE", date.as_str()));
+        env.push(("GIT_COMMITTER_DATE", date.clone()));
     }
-    let args = operation.argv();
-    repo.commit(&args.iter().map(String::as_str).collect::<Vec<_>>(), &env)
+    Ok(env)
 }
 
 /// The helper subcommand: forward the file Git passed, then wait for a reply.
