@@ -93,6 +93,29 @@ fn exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only() {
 }
 
 #[test]
+fn prepared_plan_rejected_edits_preserve_complete_entries() {
+    let (_dir, repo, base) = repo();
+    let mut plan = PreparedRebase::prepare(&repo, &base).unwrap();
+    let ids = plan.entries().iter().map(|entry| entry.oid.clone()).collect::<Vec<_>>();
+
+    let before = plan.entries().to_vec();
+    assert!(plan.move_before(&ids[0], Some("unknown")).is_err());
+    assert_eq!(plan.entries(), before);
+    assert!(plan.move_before(&ids[0], Some(&ids[0])).is_err());
+    assert_eq!(plan.entries(), before);
+
+    plan.set_action(&ids[1], TodoAction::Fixup).unwrap();
+    let before = plan.entries().to_vec();
+    assert!(plan.move_before(&ids[0], None).is_err());
+    assert_eq!(plan.entries(), before);
+
+    plan.set_action(&ids[0], TodoAction::Reword).unwrap();
+    let before = plan.entries().to_vec();
+    assert!(plan.set_action(&ids[0], TodoAction::Squash).is_err());
+    assert_eq!(plan.entries(), before);
+}
+
+#[test]
 fn launch_uses_edited_order_and_drop_despite_autosquash_config() {
     let dir = TempDir::new().unwrap();
     git(dir.path(), &["init", "-b", "main"]);

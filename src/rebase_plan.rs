@@ -50,27 +50,27 @@ impl PreparedRebase {
 
     /// Change an entry action by full commit object ID.
     pub fn set_action(&mut self, oid: &str, action: TodoAction) -> Result<()> {
-        let index = self.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
-        self.entries[index].action = action;
-        if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) {
-            self.entries[index].action = TodoAction::Pick;
-            return Err(Error::new("first todo action cannot squash or fixup"));
-        }
-        Ok(())
+        let mut entries = self.entries.clone();
+        let index = entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
+        entries[index].action = action;
+        self.replace_entries(entries)
     }
 
     /// Move an existing commit before another, or to the end when `before` is absent.
     pub fn move_before(&mut self, oid: &str, before: Option<&str>) -> Result<()> {
-        let from = self.entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
-        let entry = self.entries.remove(from);
-        let to = match before { Some(id) => self.entries.iter().position(|candidate| candidate.oid == id).ok_or_else(|| Error::new("target is not in the prepared rebase plan"))?, None => self.entries.len() };
-        self.entries.insert(to, entry);
-        if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
-        Ok(())
+        let mut entries = self.entries.clone();
+        let from = entries.iter().position(|entry| entry.oid == oid).ok_or_else(|| Error::new("commit is not in the prepared rebase plan"))?;
+        let to = match before { Some(id) => entries.iter().position(|candidate| candidate.oid == id).ok_or_else(|| Error::new("target is not in the prepared rebase plan"))?, None => entries.len() };
+        if oid == before.unwrap_or("") { return Err(Error::new("invalid todo move")); }
+        let entry = entries.remove(from);
+        let to = if to > from { to - 1 } else { to };
+        entries.insert(to, entry);
+        self.replace_entries(entries)
     }
 
     /// Recheck launch inputs without changing the edited plan or repository.
     pub fn validate_launch(&self, repo: &GitRepo) -> Result<()> {
+        if matches!(self.entries.first().map(|entry| entry.action), Some(TodoAction::Squash | TodoAction::Fixup)) { return Err(Error::new("first todo action cannot squash or fixup")); }
         if repo.repository_identity()? != self.repository { return Err(Error::new("repository identity changed since rebase plan preparation")); }
         let (head, reference) = repo.head_identity()?;
         if head != self.head { return Err(Error::new("HEAD changed since rebase plan preparation")); }
