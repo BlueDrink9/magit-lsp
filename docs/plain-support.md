@@ -55,8 +55,8 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `commit.create` | menu-action | Implemented | editDocument | `workspace.applyEdit` | Unavailable — workspace.applyEdit is required | Available | Available | workspace.applyEdit is required |
 | `commit.extend` | menu-action | Implemented | editDocument | `workspace.applyEdit` | Unavailable — workspace.applyEdit is required | Available | Available | workspace.applyEdit is required |
 | `commit.fixup` | menu-action | Implemented | — | — | Available | Available | Available | — |
-| `commit.instant-fixup` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
-| `commit.instant-squash` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
+| `commit.instant-fixup` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `commit.instant-squash` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `commit.reshelve` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
 | `commit.revise` | menu-action | Planned (R-4.1) | — | — | Planned (R-4.1) | Planned (R-4.1) | Planned (R-4.1) | — |
 | `commit.reword` | menu-action | Implemented | editDocument | `workspace.applyEdit` | Unavailable — workspace.applyEdit is required | Available | Available | workspace.applyEdit is required |

@@ -21,8 +21,8 @@
 | `magit-commit-alter` | `c A` | `commit.alter` | Planned R-4.1 | commit |
 | `magit-commit-augment` | `c n` | `commit.augment` | Planned R-4.1 | commit |
 | `magit-commit-revise` | `c W` | `commit.revise` | Planned R-4.1 | commit |
-| `magit-commit-instant-fixup` | `c F` | `commit.instant-fixup` | Planned R-4.1 | commit |
-| `magit-commit-instant-squash` | `c S` | `commit.instant-squash` | Planned R-4.1 | commit |
+| `magit-commit-instant-fixup` | `c F` | `commit.instant-fixup` | Implemented | commit |
+| `magit-commit-instant-squash` | `c S` | `commit.instant-squash` | Implemented | commit |
 | `magit-rebase-reword-commit` | `c R` | `commit.reword-past` | Planned R-4.1 | commit |
 | `magit-commit-autofixup` | `c x` | `commit.autofixup` | Planned R-4.1 | commit |
 | `magit-commit-absorb-modules` | `c X` | `commit.absorb-modules` | Planned R-4.1 | commit |
