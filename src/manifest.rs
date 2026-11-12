@@ -106,6 +106,10 @@ pub fn check(profiles: &[Profile], config: &Config) -> Result<(), ConfigError> {
 /// Check that a shipped profile binds or explicitly unbinds every command (R5).
 fn check_coverage(profile: Profile) -> Result<(), ConfigError> {
     let keys = config::profile_keys(profile)?;
+    check_coverage_keys(profile, &keys)
+}
+
+fn check_coverage_keys(profile: Profile, keys: &config::KeysConfig) -> Result<(), ConfigError> {
     let mut declared = BTreeSet::new();
     for (scope, scope_keys) in &keys.scopes {
         for name in scope_keys.commands.keys() {
@@ -136,6 +140,35 @@ fn check_coverage(profile: Profile) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn todo_user_commands_require_profile_bindings() {
+        let commands = [
+            "rebase.todo-submit", "rebase.todo-pick", "rebase.todo-reword",
+            "rebase.todo-edit", "rebase.todo-squash", "rebase.todo-fixup",
+            "rebase.todo-drop", "rebase.todo-up", "rebase.todo-down",
+        ];
+        for command in commands {
+            let mut keys = config::profile_keys(Profile::Standard).unwrap();
+            keys.scopes.get_mut("rebase-todo").unwrap().commands.remove(command);
+            let error = check_coverage_keys(Profile::Standard, &keys).unwrap_err();
+            assert!(error.to_string().contains(command), "{command}: {error}");
+        }
+    }
+
+    #[test]
+    fn todo_argument_commands_remain_unbound() {
+        let keys = config::profile_keys(Profile::Standard).unwrap();
+        let todo = &keys.scopes["rebase-todo"].commands;
+        assert!(!todo.contains_key("rebase.todo-set-action"));
+        assert!(!todo.contains_key("rebase.todo-move-before"));
+        check_coverage_keys(Profile::Standard, &keys).unwrap();
+    }
 }
 
 /// A VSCode `contributes.keybindings` entry plus the data the deny-list needs.
