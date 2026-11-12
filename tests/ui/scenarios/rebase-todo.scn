@@ -24,3 +24,29 @@ expect view_stack.menus == 1
 keys: Escape
 wait screen contains "Unstaged changes"
 expect view_stack.count == 1
+keys: r
+wait
+keys: T
+wait screen contains "second todo entry"
+sh: cp .git/rebase-merge/git-rebase-todo .git/todo-before-rejection
+keys: s
+wait screen contains "first todo action cannot squash or fixup"
+expect view_stack.count == 2
+sh: cmp .git/todo-before-rejection .git/rebase-merge/git-rebase-todo
+keys: r
+wait screen contains "reword"
+expect cursor on "reword"
+keys: Escape
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: cp .git/rebase-merge/git-rebase-todo .git/todo-before-cancel && git rev-parse HEAD > .git/todo-head-before-cancel && git ls-files --stage > .git/todo-index-before-cancel
+keys: r
+wait
+keys: T
+wait screen contains "second todo entry"
+keys: J
+wait
+keys: Escape
+wait screen contains "Unstaged changes"
+expect view_stack.count == 1
+sh: cmp .git/todo-before-cancel .git/rebase-merge/git-rebase-todo && test "$(git rev-parse HEAD)" = "$(cat .git/todo-head-before-cancel)" && git ls-files --stage > .git/todo-index-after-cancel && cmp .git/todo-index-before-cancel .git/todo-index-after-cancel

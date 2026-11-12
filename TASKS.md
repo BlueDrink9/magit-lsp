@@ -551,15 +551,16 @@ T005 is complete through its authoritative [completed children](#completed-work)
          - Verification: `make test-rust FILTER="--test rebase_todo"`.
          - Attempts: Two inherited fixes left the order helper borrowing the session across mutations; passing `&TestSession` at each assertion limited the immutable borrow to the call.
          - Verified: `make test-rust FILTER="--test rebase_todo"` @ `42bf123` → ok: rust. `todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository` asserts first/last `K`/`J` no-ops, subsequent valid movement and exact submit, edited/moved cancel restoration, usable caller refresh, and unchanged HEAD/index.
-   - [ ] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
+    - [x] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
      - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
      - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
      - [x] **T018.4a — Native todo submission.** Add a paused linear-rebase fixture and prove native menu opening, full-OID action/reorder input, exact submitted todo, unchanged HEAD/index, and usable caller restoration.
        - test: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
        - Attempts: two default checkpoints established the fixture and corrected a menu-open race; current scenario reaches the editor but combines invalid folding preconditions with submission. Split submission from safety.
        - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn` @ `15b41e9` → ok: ui-file. Native menu and todo editor assert three full-OID rows; real `J`, `r`, and `C-s` input produces the exact reordered/reworded todo, preserves HEAD/index, and restores a caller that reopens and closes the rebase menu.
-     - [ ] **T018.4b — Native todo rejection and cancellation.** Extend the native scenario with isolated invalid-leading-action rejection, subsequent valid input, edited cancellation, exact original todo/HEAD/index preservation, and usable caller restoration.
-       - test: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
+      - [x] **T018.4b — Native todo rejection and cancellation.** Extend the native scenario with isolated invalid-leading-action rejection, subsequent valid input, edited cancellation, exact original todo/HEAD/index preservation, and usable caller restoration.
+        - test: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
+        - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn` @ `14c5ce5` → ok: build, ui-file. Native scenario checks readable leading-squash rejection with unchanged disk todo and live editor, subsequent reword input, then reordered Escape cancellation with byte-exact todo plus unchanged HEAD/index and restored caller.
 - [ ] **T019 — interactive-rebase.** [Scope](./TASKS_PART_SEVEN.md#t019-interactive-rebase-l). Fold in `commit.instant-fixup`/`commit.instant-squash` (commit-menu "Edit and rebase" group, `R`/`S`, R-4.1) at the end: both run `git rebase -i --autosquash` against a selected target and therefore share T017's failed-rebase/conflict state and the T019 continue/abort/conflict handling — they are NOT T015 (`commit.fixup` `f` = `git commit --fixup=<target>`, a standalone fixup commit with no rebase/sequencer). Add a `commit.instant-*` handler + autosquash invocation + exact-repository-state/conflict tests once T019's interactive-rebase machinery exists; do not schedule them separately.
 
 ### Feature — Phase 6: Plain acceptance
