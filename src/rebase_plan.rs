@@ -105,6 +105,6 @@ impl PreparedRebase {
             let action = match entry.action { TodoAction::Pick => "pick", TodoAction::Reword => "reword", TodoAction::Edit => "edit", TodoAction::Squash => "squash", TodoAction::Fixup => "fixup", TodoAction::Drop => "drop" };
             todo.push_str(&format!("{action} {} {}\n", entry.oid, entry.subject));
         }
-        Ok(LaunchOutcome::Started(repo.launch_interactive_rebase(&self.base, todo.as_bytes(), executable)))
+        Ok(LaunchOutcome::Started(repo.launch_interactive_rebase(&self.base, Some(todo.as_bytes()), crate::rebase_sequence_editor::SequenceEditorPolicy::PreparedReplacement, executable)))
     }
 }

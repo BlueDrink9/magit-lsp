@@ -3,6 +3,7 @@ mod common;
 use common::{git, write};
 use magit_lsp::git::GitRepo;
 use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority};
+use magit_lsp::rebase_sequence_editor::SequenceEditorPolicy;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -33,6 +34,27 @@ fn state(path: &Path) -> (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>) {
         std::fs::read(path.join(".git/index")).unwrap(),
         std::fs::read(path.join("file")).unwrap(),
     )
+}
+
+#[test]
+fn shared_autosquash_launcher_preserves_git_transformed_fixup_todo() {
+    let (dir, repo, ids) = repo();
+    git(dir.path(), &["reset", "--hard", "HEAD"]);
+    write(&dir.path().join("fixup-only"), "folded\n");
+    git(dir.path(), &["add", "fixup-only"]);
+    git(dir.path(), &["commit", "--fixup", &ids[2]]);
+    let marker = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let marker_message = git(dir.path(), &["show", "-s", "--format=%s", &marker]);
+    assert!(marker_message.starts_with("fixup! two"));
+    repo.launch_interactive_rebase(&ids[1], None, SequenceEditorPolicy::PreserveAutosquash,
+        Path::new(env!("CARGO_BIN_EXE_magit-lsp"))).unwrap();
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD~2"]).trim(), ids[1]);
+    assert_eq!(git(dir.path(), &["show", "-s", "--format=%s", "HEAD~1"]).trim(), "two");
+    assert_eq!(git(dir.path(), &["show", "-s", "--format=%s", "HEAD"]).trim(), "three");
+    assert_eq!(std::fs::read(dir.path().join("file")).unwrap(), b"three\n");
+    assert_eq!(std::fs::read(dir.path().join("fixup-only")).unwrap(), b"folded\n");
+    assert!(!git(dir.path(), &["rev-list", "--all"]).lines().any(|oid| oid == marker));
+    assert!(!dir.path().join(".git/rebase-merge").exists());
 }
 
 #[test]

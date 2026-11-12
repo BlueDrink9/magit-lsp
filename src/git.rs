@@ -892,17 +892,18 @@ impl GitRepo {
     }
 
     /// Launch Git's interactive rebase using a validated external todo plan.
-    pub(crate) fn launch_interactive_rebase(&self, base: &str, plan: &[u8], executable: &Path) -> Result<()> {
+    /// Launch interactive rebase with either an exact prepared todo or Git-preserved autosquash todo.
+    pub fn launch_interactive_rebase(&self, base: &str, plan: Option<&[u8]>, policy: crate::rebase_sequence_editor::SequenceEditorPolicy, executable: &Path) -> Result<()> {
         let directory = tempfile::Builder::new().prefix("magit-lsp-rebase-").tempdir()?;
-        let plan_path = directory.path().join("todo plan");
-        std::fs::write(&plan_path, plan)?;
-        let editor = crate::rebase_sequence_editor::command_for(executable);
-        let plan_path = plan_path.to_string_lossy().into_owned();
-        let env = [
-            (crate::rebase_sequence_editor::PLAN_FILE_ENV, plan_path.as_str()),
-            ("GIT_SEQUENCE_EDITOR", editor.as_str()),
-        ];
-        let args = ["-c", "rebase.autoSquash=false", "rebase", "--interactive", "--no-autosquash", base];
+        let plan_path = if let Some(plan) = plan { let path = directory.path().join("todo plan"); std::fs::write(&path, plan)?; Some(path) } else { None };
+        let editor = crate::rebase_sequence_editor::command_for(executable, policy);
+        let plan_path = plan_path.map(|path| path.to_string_lossy().into_owned());
+        let mut command_args = vec!["-c", if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash { "rebase.autoSquash=true" } else { "rebase.autoSquash=false" }, "rebase", "--interactive"];
+        if policy == crate::rebase_sequence_editor::SequenceEditorPolicy::PreserveAutosquash { command_args.push("--autosquash"); } else { command_args.push("--no-autosquash"); }
+        command_args.push(base);
+        let args = command_args;
+        let mut env = vec![("GIT_SEQUENCE_EDITOR", editor.as_str())];
+        if let Some(path) = plan_path.as_deref() { env.push((crate::rebase_sequence_editor::PLAN_FILE_ENV, path)); }
         let started = Instant::now();
         let mut command = git_command(&self.root, &args, Stdio::null(), &env);
         let out = runner::run_owned(&mut command, None).map_err(|error| Error::new(format!("failed to run git: {error}")))?;
