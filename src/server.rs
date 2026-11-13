@@ -26,7 +26,7 @@ use lsp_types::{
     ServerCapabilities,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
@@ -63,6 +63,21 @@ struct MutationTurn {
     gate: Arc<MutationGate>,
     ticket: u64,
     repo_path: String,
+}
+
+/// Worker-owned same-repository mutation reservation.
+struct DeferredReservation {
+    repositories: Arc<Mutex<HashSet<String>>>,
+    repo: String,
+}
+
+impl Drop for DeferredReservation {
+    fn drop(&mut self) {
+        self.repositories
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.repo);
+    }
 }
 
 impl MutationTurn {
@@ -181,6 +196,8 @@ struct Shared {
     next_progress: Arc<AtomicU64>,
     /// Per-repository mutation tickets, allocated in request order.
     mutation_gates: Arc<Mutex<HashMap<String, Arc<MutationGate>>>>,
+    /// Repositories owned by detached workers after their request returned.
+    deferred_repositories: Arc<Mutex<HashSet<String>>>,
     /// Running repository watchers, keyed by repository root.
     watchers: Arc<Mutex<HashMap<String, RepoWatcher>>>,
 }
@@ -264,6 +281,7 @@ impl Shared {
             progress_changed: Arc::new(Notify::new()),
             next_progress: Arc::new(AtomicU64::new(0)),
             mutation_gates: Arc::new(Mutex::new(HashMap::new())),
+            deferred_repositories: Arc::new(Mutex::new(HashSet::new())),
             watchers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -374,6 +392,26 @@ impl Shared {
             ticket,
             repo_path,
         }
+    }
+
+    /// Reserve exclusive mutation authority until a detached worker exits.
+    fn reserve_deferred(&self, repo: String) -> Option<DeferredReservation> {
+        let mut repositories = self
+            .deferred_repositories
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        repositories.insert(repo.clone()).then(|| DeferredReservation {
+            repositories: self.deferred_repositories.clone(),
+            repo,
+        })
+    }
+
+    /// Whether a detached worker still owns mutation authority for `repo`.
+    fn deferred_pending(&self, repo: &str) -> bool {
+        self.deferred_repositories
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(repo)
     }
 
     /// Start the repository watcher for `repo` unless one is already running
@@ -2841,6 +2879,14 @@ fn execute_plain_action(
     if shared.cancellation_pending(&repo) {
         return cancelling_response();
     }
+    if shared.deferred_pending(&repo)
+        && matches!(
+            params.command.as_str(),
+            "status.stage" | "status.unstage" | "status.stage-all" | "status.unstage-all"
+        )
+    {
+        return deferred_operation_response();
+    }
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new("Plain action session closed"))?;
@@ -4543,6 +4589,9 @@ fn invoke_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     if shared.cancellation_pending(&repo) {
         return cancelling_response();
     }
+    if shared.deferred_pending(&repo) && repository_mutation_command(&p.command) {
+        return deferred_operation_response();
+    }
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
@@ -4570,6 +4619,15 @@ fn key_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     let handle = shared
         .session(&repo)
         .ok_or_else(|| Error::new(format!("unknown view: {}", p.view_id)))?;
+    if shared.deferred_pending(&repo)
+        && handle
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .resolved_key_command(&p)?
+            .is_some_and(|command| repository_mutation_command(&command))
+    {
+        return deferred_operation_response();
+    }
     let (completion, step): (
         Option<crate::session::PromptCompletion>,
         Option<crate::session::Execution>,
@@ -4611,6 +4669,38 @@ fn cancelling_response() -> Result<Dispatched> {
         MessageLevel::Info, "Cancelling… wait for the current Git operation to finish".to_string(),
     )] }),
     ))
+}
+
+/// Readable refusal while a detached worker owns repository mutation authority.
+fn deferred_operation_response() -> Result<Dispatched> {
+    Ok(Dispatched::value(
+        serde_json::json!({ "effects": [Effect::message(
+        MessageLevel::Info, "Wait for the current Git operation to finish".to_string(),
+    )] }),
+    ))
+}
+
+/// Whether a command can change repository or index state.
+fn repository_mutation_command(command: &str) -> bool {
+    matches!(
+        command,
+        "status.stage"
+            | "status.unstage"
+            | "status.stage-all"
+            | "status.unstage-all"
+            | "status.discard"
+            | "commit.create"
+            | "commit.amend"
+            | "commit.extend"
+            | "commit.reword"
+            | "commit.fixup"
+            | "commit.instant-fixup"
+            | "commit.instant-squash"
+            | "rebase.continue"
+            | "rebase.skip"
+            | "rebase.abort"
+            | "rebase.todo-submit"
+    )
 }
 
 /// Wait with no session ownership; reacquire only to validate and apply an answer.
@@ -5001,6 +5091,13 @@ fn spawn_repository_operation(
     repo: String,
     operation: crate::git::RepositoryOperation,
 ) {
+    let Some(reservation) = shared.reserve_deferred(repo.clone()) else {
+        let _ = shared.sender.send(show_message(
+            1,
+            "Wait for the current Git operation to finish".to_string(),
+        ));
+        return;
+    };
     let unsupported = shared
         .client
         .lock()
@@ -5076,6 +5173,7 @@ fn spawn_repository_operation(
         .name("magit-lsp-commit".to_string())
         .spawn(move || {
             let _progress = progress;
+            let reservation = reservation;
             let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
                 Some(socket) => {
                     let executable = std::env::current_exe()
@@ -5184,6 +5282,9 @@ fn spawn_repository_operation(
                     messages.extend(effect_notifications(&shared.client, effects));
                 }
             }
+            // Cleanup and outcome construction are complete. Release before
+            // publishing the outcome so its receipt means new work may start.
+            drop(reservation);
             for message in messages {
                 let _ = sender.send(message);
             }

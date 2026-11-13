@@ -1164,6 +1164,65 @@ impl Session {
         step
     }
 
+    /// Resolve a key without changing pending chords, returning its command when complete.
+    pub fn resolved_key_command(&self, params: &ViewKeyParams) -> Result<Option<String>> {
+        let view = self
+            .views
+            .get(&params.view_id)
+            .ok_or_else(|| Error::new(format!("unknown view: {}", params.view_id)))?;
+        let cursor_moved = view.key_cursor.is_some() && view.key_cursor != Some(params.cursor);
+        if view.is_menu() {
+            let mut pending = view.menu_pending.clone();
+            if cursor_moved {
+                pending.clear();
+            }
+            let menu = view.menu();
+            let keys: Vec<String> = menu
+                .as_ref()
+                .into_iter()
+                .flat_map(|menu| &menu.groups)
+                .flat_map(|group| &group.items)
+                .map(|item| item.key().to_string())
+                .collect();
+            let MenuResolution::Complete(key) =
+                keyhandler::resolve_menu(&mut pending, &params.key, &keys)
+            else {
+                return Ok(None);
+            };
+            return Ok(menu.and_then(|menu| {
+                menu.groups.iter().flat_map(|group| &group.items).find_map(|item| {
+                    match item {
+                        crate::menu::Item::Action { key: item_key, command, .. }
+                            if item_key == &key => Some(command.clone()),
+                        _ => None,
+                    }
+                })
+            }));
+        }
+
+        let keymap = self.keymap_for(view.descriptor().scope.as_str()).cloned().map(|keymap| {
+            keymap.with_basic_modifiers(
+                self.rich_capabilities
+                    .as_ref()
+                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
+            )
+        });
+        let mut pending = view.pending.clone();
+        if cursor_moved {
+            pending.clear();
+        }
+        Ok(match keyhandler::resolve(
+            keymap.as_ref(),
+            &mut pending,
+            &params.key,
+            params.editor_mode,
+            view.descriptor().capture,
+        )? {
+            Resolution::Run { command, .. } => Some(command),
+            _ => None,
+        })
+    }
+
     fn begin_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
         let already_pending = self.pending_prompt.is_some();
         let result = self.key_start(params, &crate::ui::NullUi)?;

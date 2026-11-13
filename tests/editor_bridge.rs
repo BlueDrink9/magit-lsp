@@ -1340,6 +1340,20 @@ fn reused_commit_uri_rejects_old_run_signals_before_new_run_commits_once() {
         "confirmed"
     );
     wait_for_commit(&tmp, "First run");
+    loop {
+        let message = server.recv();
+        if message["method"] == "view/effects"
+            && message["params"]["effects"].as_array().is_some_and(|effects| {
+                effects.iter().any(|effect| {
+                    effect["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Committed:"))
+                })
+            })
+        {
+            break;
+        }
+    }
     write(&tmp.path().join("f.txt"), "second staged content\n");
     git(tmp.path(), &["add", "f.txt"]);
     let fresh = start_commit(&mut server, &status);

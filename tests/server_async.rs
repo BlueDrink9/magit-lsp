@@ -510,6 +510,44 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
             }
         }
     };
+    let paused_head = tmp.git(&["rev-parse", "HEAD"]);
+    let paused_branch = tmp.git(&["rev-parse", "refs/heads/main"]);
+    let paused_index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+    server.send(json!({"jsonrpc":"2.0","id":12,"method":"view/invoke","params":{
+        "viewId":status,"command":"common.refresh"}}));
+    assert!(server.response_with_id(12)["error"].is_null());
+    let (other_tmp, _) = init_repo();
+    std::fs::write(other_tmp.path().join("f.txt"), "other\n").unwrap();
+    let other = open_view(&mut server, 13, &repo_param(other_tmp.path()));
+    server.send(json!({"jsonrpc":"2.0","id":14,"method":"view/invoke","params":{
+        "viewId":other,"command":"status.stage-all"}}));
+    let other_staged = server.response_with_id(14);
+    assert!(other_staged["error"].is_null(), "{other_staged}");
+    assert_eq!(other_tmp.git(&["show", ":f.txt"]), "other\n");
+    server.send(json!({"jsonrpc":"2.0","id":15,"method":"view/resync","params":{
+        "viewId":status}}));
+    let status_version = server.response_with_id(15)["result"]["version"].as_u64().unwrap();
+    server.send(json!({"jsonrpc":"2.0","id":16,"method":"view/key","params":{
+        "viewId":status,"version":status_version,"key":"F5","editorMode":"normal",
+        "cursor":{"line":0,"column":0}}}));
+    let read_key = server.response_with_id(16);
+    assert!(read_key["result"]["effects"].as_array().unwrap().iter().all(|effect|
+        effect["text"] != "Wait for the current Git operation to finish"), "{read_key}");
+    server.send(json!({"jsonrpc":"2.0","id":17,"method":"view/key","params":{
+        "viewId":status,"version":status_version,"key":"S","editorMode":"normal",
+        "cursor":{"line":0,"column":0}}}));
+    let key_refused = server.response_with_id(17);
+    assert!(key_refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["text"] == "Wait for the current Git operation to finish"), "{key_refused}");
+    server.send(json!({"jsonrpc":"2.0","id":9,"method":"view/invoke","params":{
+        "viewId":status,"command":"rebase.abort"}}));
+    let refused = server.response_with_id(9);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message"
+            && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), paused_head);
+    assert_eq!(tmp.git(&["rev-parse", "refs/heads/main"]), paused_branch);
+    assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), paused_index);
     let edited = "selected target subject\n\nnew squash paragraph\n";
     server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}));
@@ -521,12 +559,22 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
     let confirmed = server.response_with_id(7);
     assert!(confirmed["error"].is_null(), "{confirmed}");
     let mut caller_rendered = false;
-    while !caller_rendered {
+    let mut completed = false;
+    while !caller_rendered || !completed {
         let message = server.recv();
         if message["method"] == "view/render" && message["params"]["viewId"] == status {
             server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{
                 "viewId":status,"version":message["params"]["version"]}}));
             caller_rendered = true;
+        }
+        if message["method"] == "view/effects" {
+            completed |= message["params"]["effects"].as_array().is_some_and(|effects| {
+                effects.iter().any(|effect| {
+                    effect["text"].as_str().is_some_and(|text| {
+                        text.starts_with("Instant autosquash completed")
+                    })
+                })
+            });
         }
     }
     assert_eq!(tmp.git(&["log", "--format=%s", "--reverse"]),
@@ -538,6 +586,17 @@ fn instant_squash_selection_edits_message_through_registered_server_callback() {
     assert_eq!(tmp.git(&["write-tree"]), tmp.git(&["rev-parse", "HEAD^{tree}"]));
     assert!(!tmp.path().join(".git/rebase-merge").exists());
     assert!(!tmp.path().join(".git/rebase-apply").exists());
+    std::fs::write(tmp.path().join("fix.txt"), "after\n").unwrap();
+    server.send(json!({"jsonrpc":"2.0","id":10,"method":"view/invoke","params":{
+        "viewId":status,"command":"common.refresh"}}));
+    assert!(server.response_with_id(10)["error"].is_null());
+    server.send(json!({"jsonrpc":"2.0","id":11,"method":"view/invoke","params":{
+        "viewId":status,"command":"status.stage-all"}}));
+    let staged = server.response_with_id(11);
+    assert!(staged["error"].is_null(), "{staged}");
+    assert!(staged["result"]["effects"].as_array().unwrap().iter().all(|effect|
+        effect["text"] != "Wait for the current Git operation to finish"), "{staged}");
+    assert_eq!(tmp.git(&["show", ":fix.txt"]), "after\n");
     server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/invoke","params":{
         "viewId":status,"command":"common.refresh"}}));
     assert!(server.response_with_id(8)["error"].is_null());
