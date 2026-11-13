@@ -337,7 +337,7 @@ fn dispatched_instant_fixup_conflict_is_left_for_explicit_recovery() {
     assert_eq!(tmp.git(&["rev-parse", "HEAD"]).trim(), target);
     assert_eq!(tmp.git(&["status", "--porcelain"]), "UU file\n");
     assert!(std::fs::read_to_string(tmp.path().join("file")).unwrap().contains("<<<<<<<"));
-    assert_eq!(tmp.git(&["rebase", "--show-current-patch"]).contains("fixup! selected target"), true);
+    assert!(tmp.git(&["rebase", "--show-current-patch"]).contains(&format!("fixup! {target}")));
     assert_ne!(marker, prior_head);
     server.send(json!({"jsonrpc":"2.0","method":"view/rendered","params":{"viewId":status,"version":caller["params"]["version"]}}));
     server.send(json!({"jsonrpc":"2.0","id":7,"method":"view/invoke","params":{"viewId":status,"command":"rebase.abort","version":caller["params"]["version"]}}));
@@ -420,7 +420,7 @@ fn dispatched_instant_fixup_conflict_can_be_resolved_and_continued() {
     assert_eq!(std::fs::read_to_string(tmp.path().join(".git/rebase-merge/git-rebase-todo")).unwrap(), "");
     let done = std::fs::read_to_string(tmp.path().join(".git/rebase-merge/done")).unwrap();
     assert!(done.lines().map(|line| line.split_once(' ').unwrap().1.split_once(' ').unwrap().1).eq([
-        "# selected target", "# fixup! selected target", "# newer head"]), "{done}");
+        "# selected target", &format!("# fixup! {target}"), "# newer head"]), "{done}");
     std::fs::write(tmp.path().join("file"), "resolved\n").unwrap();
     tmp.git(&["add", "file"]);
     server.send(json!({"jsonrpc":"2.0","id":8,"method":"view/invoke","params":{"viewId":status,"command":"rebase.continue","version":caller["params"]["version"]}}));

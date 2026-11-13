@@ -64,6 +64,58 @@ fn captured_fixup_executes_marker_and_real_autosquash() {
 }
 
 #[test]
+fn instant_fixup_with_duplicate_subject_folds_selected_full_oid() {
+    let (dir, _repo, ids) = repo();
+    git(dir.path(), &["reset", "--hard", &ids[1]]);
+    write(&dir.path().join("later-two"), "later\n");
+    git(dir.path(), &["add", "later-two"]);
+    git(dir.path(), &["commit", "-m", "two"]);
+    let selected = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    write(&dir.path().join("following"), "following\n");
+    git(dir.path(), &["add", "following"]);
+    git(dir.path(), &["commit", "-m", "following"]);
+    write(&dir.path().join("fixup-only"), "folded\n");
+    git(dir.path(), &["add", "fixup-only"]);
+    let repo = GitRepo::open(dir.path()).unwrap();
+    let authority = InstantRebaseAuthority::prepare(&repo, &selected, InstantAutosquashKind::Fixup).unwrap();
+    let result = authority.execute(&repo, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), &[]);
+    assert!(matches!(result, InstantRebaseOutcome::Completed { .. }), "unexpected outcome: {result:?}");
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD~2"]).trim(), ids[1]);
+    assert_eq!(git(dir.path(), &["log", "--format=%s", &format!("{}..HEAD", ids[1])]), "following\ntwo\n");
+    assert_eq!(git(dir.path(), &["show", "HEAD~1:later-two"]), "later\n");
+    assert_eq!(git(dir.path(), &["show", "HEAD:fixup-only"]), "folded\n");
+    assert_eq!(git(dir.path(), &["show", "HEAD:following"]), "following\n");
+    assert!(!git(dir.path(), &["rev-list", "--all"]).lines().any(|oid| oid == selected));
+}
+
+#[test]
+fn commit_msg_hook_suffix_rejects_marker_before_rebase_and_retains_hook_result() {
+    let (dir, repo, ids) = repo();
+    write(&dir.path().join("hook-only"), "retained\n");
+    git(dir.path(), &["add", "hook-only"]);
+    let hook = dir.path().join(".git/hooks/commit-msg");
+    write(&hook, "#!/bin/sh\nprintf ' extra' >> \"$1\"\n");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let authority = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();
+    let outcome = authority.execute(&repo, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), &[]);
+    let marker = match outcome {
+        InstantRebaseOutcome::RebaseStopped { marker, phase, error } => {
+            assert_eq!(phase, "marker verification");
+            assert!(error.contains("created autosquash marker does not match"));
+            marker
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    };
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]).trim(), marker);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD^"]).trim(), ids[3]);
+    assert_eq!(git(dir.path(), &["show", "-s", "--format=%s", &marker]).trim(), format!("fixup! {}  extra", ids[2]));
+    assert_eq!(git(dir.path(), &["show", &format!("{marker}:hook-only")]), "retained\n");
+    assert!(!dir.path().join(".git/rebase-merge").exists());
+    assert!(!dir.path().join(".git/rebase-apply").exists());
+}
+
+#[test]
 fn stale_refusal_and_post_marker_launch_failure_preserve_real_state() {
     let (dir, repo, ids) = repo();
     let stale = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();

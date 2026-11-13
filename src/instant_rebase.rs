@@ -46,11 +46,13 @@ impl InstantRebaseAuthority {
             return InstantRebaseOutcome::Refused(error.to_string());
         }
         let target = self.target.clone();
-        let marker_arg = match self.kind {
-            InstantAutosquashKind::Fixup => "--fixup",
-            InstantAutosquashKind::Squash => "--squash",
+        let marker_prefix = match self.kind {
+            InstantAutosquashKind::Fixup => "fixup!",
+            InstantAutosquashKind::Squash => "squash!",
         };
-        let commit = match repo.commit(&[marker_arg, &target, "--no-edit"], &[]) {
+        let marker_message = format!("{marker_prefix} {target}");
+        let marker_arg = format!("--message={marker_message}");
+        let commit = match repo.commit(&[&marker_arg], &[]) {
             Ok(outcome) => outcome,
             Err(error) => return InstantRebaseOutcome::MarkerFailed(error.to_string()),
         };
@@ -58,7 +60,7 @@ impl InstantRebaseAuthority {
             Ok((head, _)) => head,
             Err(error) => return InstantRebaseOutcome::RebaseStopped { marker: String::new(), phase: "marker verification".into(), error: error.to_string() },
         };
-        if let Err(error) = repo.verify_autosquash_marker(&marker, &self.target, &self.head, marker_arg) {
+        if let Err(error) = repo.verify_autosquash_marker(&marker, &self.head, &marker_message) {
             return InstantRebaseOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
         }
         match repo.launch_interactive_rebase_with_env(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable, editor_env) {

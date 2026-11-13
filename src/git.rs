@@ -930,17 +930,13 @@ impl GitRepo {
         Ok(())
     }
 
-    /// Verify autosquash marker identity, kind, and expected captured HEAD parent.
-    pub fn verify_autosquash_marker(&self, marker: &str, target: &str, expected_parent: &str, marker_arg: &str) -> Result<()> {
+    /// Verify exact autosquash marker subject, identity, and expected captured HEAD parent.
+    pub fn verify_autosquash_marker(&self, marker: &str, expected_parent: &str, expected_subject: &str) -> Result<()> {
         let head = self.run(&["rev-parse", "HEAD"])?;
         let parent = self.run(&["rev-parse", &format!("{marker}^")])?;
         let subject = self.run(&["show", "-s", "--format=%s", marker])?;
-        let prefix = match marker_arg {
-            "--fixup" => "fixup! ",
-            "--squash" => "squash! ",
-            _ => return Err(Error::new("unsupported instant autosquash marker kind")),
-        };
-        if head.trim() != marker || parent.trim() != expected_parent || !subject.starts_with(&format!("{prefix}{}", self.commit_subject(target)?)) {
+        let subject = subject.strip_suffix('\n').unwrap_or(&subject);
+        if head.trim() != marker || parent.trim() != expected_parent || subject != expected_subject {
             return Err(Error::new("created autosquash marker does not match captured target and HEAD"));
         }
         Ok(())
