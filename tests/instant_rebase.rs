@@ -4,7 +4,10 @@ use common::{git, write};
 use magit_lsp::git::GitRepo;
 use magit_lsp::instant_rebase::{InstantAutosquashKind, InstantRebaseAuthority, InstantRebaseOutcome};
 use magit_lsp::rebase_sequence_editor::SequenceEditorPolicy;
+use magit_lsp::runner::{self, CancelHandle};
 use std::path::Path;
+use std::thread;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn repo() -> (TempDir, GitRepo, Vec<String>) {
@@ -34,6 +37,14 @@ fn state(path: &Path) -> (String, String, String, Vec<u8>, Vec<u8>, Vec<u8>) {
         std::fs::read(path.join(".git/index")).unwrap(),
         std::fs::read(path.join("file")).unwrap(),
     )
+}
+
+fn wait_for_path(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        assert!(Instant::now() < deadline, "timed out waiting for {}", path.display());
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -113,6 +124,66 @@ fn commit_msg_hook_suffix_rejects_marker_before_rebase_and_retains_hook_result()
     assert_eq!(git(dir.path(), &["show", &format!("{marker}:hook-only")]), "retained\n");
     assert!(!dir.path().join(".git/rebase-merge").exists());
     assert!(!dir.path().join(".git/rebase-apply").exists());
+}
+
+#[test]
+fn post_commit_cancellation_retains_marker_and_never_launches_autosquash() {
+    let (dir, repo, ids) = repo();
+    write(&dir.path().join("marker-only"), "retained\n");
+    git(dir.path(), &["add", "marker-only"]);
+    let parent = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    let tree = git(dir.path(), &["write-tree"]).trim().to_owned();
+    let ready = dir.path().join(".git/post-ready");
+    let pidfile = dir.path().join(".git/post-pid");
+    let hook = dir.path().join(".git/hooks/post-commit");
+    write(
+        &hook,
+        &format!(
+            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\ntouch '{}'\nwhile :; do :; done\n",
+            pidfile.display(),
+            ready.display()
+        ),
+    );
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let authority = InstantRebaseAuthority::prepare(&repo, &ids[2], InstantAutosquashKind::Fixup).unwrap();
+    let root = dir.path().to_path_buf();
+    let cancel = CancelHandle::new();
+    let worker_cancel = cancel.clone();
+    let worker = thread::spawn(move || {
+        let repo = GitRepo::open(root).unwrap();
+        runner::with_cancel(Some(worker_cancel), || {
+            authority.execute(&repo, Path::new(env!("CARGO_BIN_EXE_magit-lsp")), &[])
+        })
+    });
+
+    wait_for_path(&ready);
+    let marker_at_barrier = git(dir.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(marker_at_barrier, parent, "post-commit runs after recording the marker");
+    let hook_pid: u32 = std::fs::read_to_string(&pidfile).unwrap().parse().unwrap();
+    cancel.cancel();
+    let outcome = worker.join().expect("instant worker");
+    let marker = match outcome {
+        InstantRebaseOutcome::RebaseStopped { marker, phase, error } => {
+            assert_eq!(phase, "cancelled");
+            assert_eq!(error, "operation cancelled");
+            marker
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    };
+
+    assert_eq!(marker, marker_at_barrier);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]).trim(), marker);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD^"]).trim(), parent);
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD^{tree}"]).trim(), tree);
+    assert_eq!(git(dir.path(), &["show", &format!("{marker}:marker-only")]), "retained\n");
+    assert!(!dir.path().join(".git/rebase-merge").exists());
+    assert!(!dir.path().join(".git/rebase-apply").exists());
+    assert!(!Path::new(&format!("/proc/{hook_pid}")).exists(), "post-commit hook was reaped");
+    let cwd = dir.path().display().to_string();
+    assert!(!runner::global_log().iter().iter().any(|record| {
+        record.cwd == cwd && record.args.iter().any(|arg| arg == "rebase")
+    }), "autosquash command must not launch");
 }
 
 #[test]

@@ -255,3 +255,28 @@ fn cancellation_after_exit_does_not_cancel_the_next_command() {
     });
     canceller.join().expect("canceller thread");
 }
+
+#[test]
+fn consumed_child_cancellation_retains_operation_intent_only_on_its_handle() {
+    let markers = TempDir::new().expect("marker tempdir");
+    let marker = markers.path().join("ready");
+    let handle = CancelHandle::new();
+    let worker_handle = handle.clone();
+    let worker = thread::spawn(move || {
+        runner::with_cancel(Some(worker_handle), || {
+            runner::run_owned(
+                Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("touch {}; while :; do :; done", marker.display())),
+                None,
+            )
+        })
+    });
+
+    wait_for_start(&markers.path().join("ready"));
+    handle.cancel();
+    let result = worker.join().expect("worker thread").expect("owned child");
+    assert!(result.outcome.cancelled, "the running child consumed cancellation");
+    assert!(handle.was_requested(), "operation intent survives child consumption");
+    assert!(!CancelHandle::new().was_requested(), "an unrelated handle starts clear");
+}

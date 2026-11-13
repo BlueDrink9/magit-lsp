@@ -2,6 +2,7 @@
 
 use crate::git::GitRepo;
 use crate::rebase_sequence_editor::SequenceEditorPolicy;
+use crate::runner;
 use crate::{Error, Result};
 use std::path::Path;
 
@@ -42,8 +43,20 @@ pub struct InstantRebaseAuthority {
 impl InstantRebaseAuthority {
     /// Execute a captured autosquash, retaining every mutation after execution starts.
     pub fn execute(&self, repo: &GitRepo, executable: &Path, editor_env: &[(&str, &str)]) -> InstantRebaseOutcome {
+        let cancel = runner::current_cancel();
+        let stopped = |marker: String| InstantRebaseOutcome::RebaseStopped {
+            marker,
+            phase: "cancelled".into(),
+            error: "operation cancelled".into(),
+        };
+        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+            return stopped(String::new());
+        }
         if let Err(error) = self.validate(repo) {
             return InstantRebaseOutcome::Refused(error.to_string());
+        }
+        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+            return stopped(String::new());
         }
         let target = self.target.clone();
         let marker_prefix = match self.kind {
@@ -62,6 +75,9 @@ impl InstantRebaseAuthority {
         };
         if let Err(error) = repo.verify_autosquash_marker(&marker, &self.head, &marker_message) {
             return InstantRebaseOutcome::RebaseStopped { marker, phase: "marker verification".into(), error: error.to_string() };
+        }
+        if cancel.as_ref().is_some_and(runner::CancelHandle::was_requested) {
+            return stopped(marker);
         }
         match repo.launch_interactive_rebase_with_env(&self.base, None, SequenceEditorPolicy::PreserveAutosquash, executable, editor_env) {
             Ok(()) => InstantRebaseOutcome::Completed { marker, warning: commit.warning },

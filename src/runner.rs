@@ -236,6 +236,7 @@ pub fn trace_current(event: &str, detail: Value) {
 #[derive(Debug, Default)]
 struct CancelState {
     cancelled: AtomicBool,
+    requested: AtomicBool,
 }
 
 /// A handle that enqueues cancellation intent for the current operation.
@@ -255,12 +256,18 @@ impl CancelHandle {
 
     /// Mark the request cancelled; the process owner observes and handles it.
     pub fn cancel(&self) {
+        self.state.requested.store(true, Ordering::SeqCst);
         self.state.cancelled.store(true, Ordering::SeqCst);
     }
 
     /// Whether [`Self::cancel`] has been called.
     pub fn is_cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Whether cancellation was requested during this operation, even if its child consumed it.
+    pub fn was_requested(&self) -> bool {
+        self.state.requested.load(Ordering::SeqCst)
     }
 
     pub(super) fn take_cancelled(&self) -> bool {
