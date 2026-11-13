@@ -428,34 +428,83 @@ async function closeTab(record) {
 }
 
 /**
+ * Whether terminal teardown still owns the exact acknowledged draft snapshot.
+ *
+ * @param {object} record
+ * @param {{client: object, generation: number, version: number, text: string}} guard
+ * @returns {boolean}
+ */
+function ownsTeardown(record, guard) {
+  return store.drafts.get(record.runId) === record
+    && store.draftUris.get(record.uri.toString()) === record.runId
+    && !store.disposing
+    && store.client === guard.client
+    && record.client === guard.client
+    && !record.disconnected
+    && record.generation === guard.generation
+    && record.version === guard.version
+    && record.text === guard.text
+    && record.document
+    && !record.document.isClosed
+    && record.document.getText() === guard.text;
+}
+
+/**
  * Forget a draft after its run is terminal and restore the owning view.
  *
  * @param {object} record
+ * @param {{client: object, generation: number, version: number, text: string}} [guard]
+ * @returns {Promise<boolean>}
  */
-async function forget(record) {
+async function forget(record, guard) {
   if (record.closing) {
-    return;
+    return false;
   }
-  record.closing = true;
-  if (store.activeDraftId === record.runId) {
-    store.activeDraftId = undefined;
-  }
-  await setContext(edit.inactiveContext());
-  record.attached = false;
-  // Revert only after a positively acknowledged finish/abort, so the native
-  // workbench does not offer a second Save dialog during terminal teardown.
-  record.discarding = true;
-  if (record.document && !record.document.isClosed) {
-    await vscode.commands.executeCommand('workbench.action.files.revert', record.uri);
-  }
-  await closeTab(record);
-  store.drafts.delete(record.runId);
-  store.draftUris.delete(record.uri.toString());
-  const viewId = baseViewId(record);
-  if (viewId) {
-    await views.focusView(viewId);
-  } else {
-    views.activateView(undefined);
+  try {
+    await vscode.commands.executeCommand(
+      'workbench.action.files.setActiveEditorReadonlyInSession', record.uri
+    );
+    if (guard && !ownsTeardown(record, guard)) {
+      fail(record, 'the commit draft changed or disconnected during abort teardown; text was retained');
+      return false;
+    }
+    record.closing = true;
+    if (store.activeDraftId === record.runId) {
+      store.activeDraftId = undefined;
+    }
+    await setContext(edit.inactiveContext());
+    if (guard && !ownsTeardown(record, guard)) {
+      record.closing = false;
+      store.activeDraftId = record.runId;
+      await setContext(edit.editingContext(record.effect));
+      fail(record, 'the commit draft changed or disconnected during abort teardown; text was retained');
+      return false;
+    }
+    record.attached = false;
+    // Revert only after a positively acknowledged finish/abort, so the native
+    // workbench does not offer a second Save dialog during terminal teardown.
+    record.discarding = true;
+    if (record.document && !record.document.isClosed) {
+      await vscode.commands.executeCommand('workbench.action.files.revert', record.uri);
+    }
+    await closeTab(record);
+    store.drafts.delete(record.runId);
+    store.draftUris.delete(record.uri.toString());
+    const viewId = baseViewId(record);
+    if (viewId) {
+      await views.focusView(viewId);
+    } else {
+      views.activateView(undefined);
+    }
+    return true;
+  } finally {
+    try {
+      await vscode.commands.executeCommand(
+        'workbench.action.files.resetActiveEditorReadonlyInSession', record.uri
+      );
+    } catch (error) {
+      store.output.appendLine(`commit draft editable restore failed: ${message(error)}`);
+    }
   }
 }
 
@@ -570,7 +619,7 @@ async function cancel(record) {
     fail(record, 'the commit draft changed while aborting; newer text was retained');
     return;
   }
-  await forget(record);
+  await forget(record, { client, generation, version, text });
 }
 
 /**

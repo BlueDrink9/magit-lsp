@@ -795,10 +795,98 @@ async function run() {
     assert.equal(draft.document.getText(), 'retain native edit made during Abort\n');
     assert(vscode.__test.messages.some((notice) => notice.level === 'error'
       && notice.text.includes('changed while aborting')));
+
+    const teardownText = 'retain native edit during acknowledged Abort teardown\n';
+    const teardownContext = deferredAbort();
+    const savedExecute = vscode.commands.executeCommand;
+    let waitingOnTeardownContext = false;
+    const teardownCommands = [];
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.cancel') {
+        const sent = params.arguments[0];
+        return { type: 'aborted', runId: sent.runId, uri: sent.uri, version: sent.version };
+      }
+      return realSendRequest(method, params);
+    };
+    vscode.commands.executeCommand = async (name, ...args) => {
+      teardownCommands.push(name);
+      if (name === 'setContext' && args[0] === 'magit.editing' && args[1] === false
+        && !waitingOnTeardownContext) {
+        waitingOnTeardownContext = true;
+        return teardownContext.response;
+      }
+      return savedExecute(name, ...args);
+    };
+    const pendingTeardownAbort = invokeGenerated('common.cancel');
+    await waitFor(() => waitingOnTeardownContext, 'acknowledged Abort teardown context');
+    draft.document.replaceText(teardownText);
+    teardownContext.release();
+    await pendingTeardownAbort;
+    vscode.commands.executeCommand = savedExecute;
+    assert.equal(draft.document.getText(), teardownText, 'teardown edit retains exact bytes');
+    assert(draftStore.drafts.has(draft.runId), 'teardown edit retains registration');
+    assert(!draft.document.isClosed, 'teardown edit keeps tab open');
+    assert.equal(vscode.__test.contextValues.get('magit.editing'), true,
+      'teardown edit restores registered context');
+    assert(!teardownCommands.includes('workbench.action.files.revert'),
+      'teardown edit prevents revert');
+    assert(teardownCommands.includes('workbench.action.files.resetActiveEditorReadonlyInSession'),
+    'teardown edit restores editable state');
+
     client.sendRequest = savedRequest;
+    let healthyReverts = 0;
+    vscode.commands.executeCommand = async (name, ...args) => {
+      if (name === 'workbench.action.files.revert') healthyReverts += 1;
+      return savedExecute(name, ...args);
+    };
     await invokeGenerated('common.cancel');
+    vscode.commands.executeCommand = savedExecute;
     assert(!draftStore.drafts.has(draft.runId), 'healthy exact Abort closes after retained edit retry');
     assert(draft.document.isClosed, 'healthy exact Abort closes editor once');
+    assert.equal(healthyReverts, 1, 'healthy exact Abort reverts once');
+    await idle(draft);
+
+    draft = await startDraft();
+    const disconnectText = 'retain text after disconnect during Abort teardown\n';
+    draft.document.replaceText(disconnectText);
+    await waitFor(() => draft.text === disconnectText && !draft.flushQueued,
+      'disconnect teardown text synchronized');
+    const teardownGate = deferredAbort();
+    let waitingOnTeardownGate = false;
+    const disconnectTeardownCommands = [];
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.cancel') {
+        const sent = params.arguments[0];
+        return { type: 'aborted', runId: sent.runId, uri: sent.uri, version: sent.version };
+      }
+      return realSendRequest(method, params);
+    };
+    vscode.commands.executeCommand = async (name, ...args) => {
+      disconnectTeardownCommands.push(name);
+      if (name === 'workbench.action.files.setActiveEditorReadonlyInSession'
+        && !waitingOnTeardownGate) {
+        waitingOnTeardownGate = true;
+        return teardownGate.response;
+      }
+      return savedExecute(name, ...args);
+    };
+    const pendingDisconnectAbort = invokeGenerated('common.cancel');
+    await waitFor(() => waitingOnTeardownGate, 'acknowledged Abort teardown gate');
+    require('../lib/drafts').disconnect('disconnect during Abort teardown');
+    teardownGate.release();
+    await pendingDisconnectAbort;
+    vscode.commands.executeCommand = savedExecute;
+    assert.equal(draft.document.getText(), disconnectText, 'disconnect teardown retains exact bytes');
+    assert(draftStore.drafts.has(draft.runId), 'disconnect teardown retains registration');
+    assert(!draft.document.isClosed, 'disconnect teardown keeps tab open');
+    assert(!disconnectTeardownCommands.includes('workbench.action.files.revert'),
+      'disconnect teardown prevents revert');
+    assert(disconnectTeardownCommands.includes('workbench.action.files.resetActiveEditorReadonlyInSession'),
+    'disconnect teardown restores editable state');
+    draft.disconnected = false;
+    client.sendRequest = savedRequest;
+    await invokeGenerated('common.cancel');
+    assert(!draftStore.drafts.has(draft.runId), 'healthy exact Abort closes after disconnect retry');
     await idle(draft);
 
     for (const action of ['abort', 'progress-cancel']) {
