@@ -641,6 +641,31 @@ async function run() {
     await invokeGenerated('common.cancel');
     await idle(draft);
 
+    draft = await startDraft();
+    const abortText = 'retain text after rejected abort\n';
+    draft.document.replaceText(abortText);
+    const realSendRequest = client.sendRequest.bind(client);
+    const savedRequest = client.sendRequest;
+    for (const fake of [
+      async () => { throw new Error('abort transport failure'); },
+      async () => ({ type: 'aborted', runId: 'wrong', uri: draft.uri.toString(), version: draft.version }),
+      async () => ({ type: 'aborted', runId: draft.runId, uri: 'file:///wrong', version: draft.version }),
+      async () => ({ type: 'aborted', runId: draft.runId, uri: draft.uri.toString(), version: draft.version - 1 }),
+    ]) {
+      client.sendRequest = async (method, params) => method === 'workspace/executeCommand'
+        && params.arguments?.[0]?.command === 'common.cancel' ? fake() : realSendRequest(method, params);
+      await invokeGenerated('common.cancel');
+      assert(draftStore.drafts.has(draft.runId), 'failed Abort retains registration');
+      assert.equal(draft.document.getText(), abortText, 'failed Abort retains bytes');
+      assert(!draft.document.isClosed, 'failed Abort keeps editor open');
+      assert(vscode.__test.messages.some((notice) => notice.level === 'error' && notice.text.includes('draft')));
+    }
+    client.sendRequest = savedRequest;
+    await invokeGenerated('common.cancel');
+    assert(!draftStore.drafts.has(draft.runId), 'valid Abort acknowledgement closes draft');
+    assert(draft.document.isClosed, 'valid Abort closes the editor');
+    await idle(draft);
+
     for (const action of ['abort', 'progress-cancel']) {
       draft = await startDraft();
       const priorHead = head();

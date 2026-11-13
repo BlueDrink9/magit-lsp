@@ -533,23 +533,23 @@ async function cancel(record) {
   // Abort must not wait behind an in-flight confirmation. Invalidate
   // callbacks first; the server owns finish-versus-cancel arbitration.
   record.generation += 1;
-  record.closing = true;
-  const viewId = baseViewId(record);
-  if (viewId && !record.disconnected && store.client === record.client) {
-    try {
-      const result = await record.client.sendRequest('view/invoke', {
-        viewId, command: 'common.cancel', args: { runId: record.runId },
-        cursor: { line: 0, column: 0 },
-      });
-      await require('./effects').applyEffects(result && result.effects, viewId);
-    } catch (error) {
-      store.output.appendLine(`commit draft cancel failed: ${message(error)}`);
-    }
-  } else {
-    store.output.appendLine('commit draft cancel found no server view');
+  if (record.disconnected || store.client !== record.client) {
+    fail(record, 'the server connection is unavailable; draft was not aborted');
+    return;
   }
-  record.closing = false;
-  await forget(record);
+  if (!(await flush(record))) return;
+  try {
+    const result = await record.client.sendRequest('workspace/executeCommand', { command: 'magit.command', arguments: [{
+      command: 'common.cancel', runId: record.runId, uri: record.uri.toString(), version: record.version,
+    }] });
+    if (!acknowledged(result, 'aborted', record, record.version)) {
+      fail(record, 'unexpected commit draft abort acknowledgement');
+      return;
+    }
+    await forget(record);
+  } catch (error) {
+    fail(record, `abort failed: ${message(error)}`);
+  }
 }
 
 /**

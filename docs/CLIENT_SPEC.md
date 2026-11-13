@@ -941,7 +941,8 @@ versioned apply edit. Absent → the server sends manual instructions naming the
 open that file yourself, send `didOpen`/`didChange`, and invoke the offered
 Confirm/Abort code actions (the manual path sends neither `applyEdit` nor
 `showDocument`). Saved-file close confirms disk bytes; explicit Abort cancels the
-run and restores the status document. `window.workDoneProgress` present → the
+run and restores the status document only after an exact Abort acknowledgement;
+failed Abort retains the editable draft. `window.workDoneProgress` present → the
 server runs `window/workDoneProgress/create` and `$/progress` begin/report/end
 for mutations; absent → no progress notifications, the operation still runs and
 outcomes arrive as messages. Completion is not implemented: the server
