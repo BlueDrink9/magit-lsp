@@ -1061,36 +1061,46 @@ fn canonical_frame(
     serde_json::from_str(&text).expect("parse canonical frame")
 }
 
-/// Return first JSON path whose values differ.
-fn first_differing_json_path(expected: &Value, observed: &Value) -> Option<String> {
-    fn walk(expected: &Value, observed: &Value, path: &str) -> Option<String> {
+/// Return first differing JSON path and its values.
+fn first_difference<'a>(expected: &'a Value, observed: &'a Value) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
+    fn walk<'a>(expected: Option<&'a Value>, observed: Option<&'a Value>, path: &str) -> Option<(String, Option<&'a Value>, Option<&'a Value>)> {
         match (expected, observed) {
-            (Value::Object(a), Value::Object(b)) => {
+            (Some(Value::Object(a)), Some(Value::Object(b))) => {
                 for key in a.keys().chain(b.keys()) {
                     if a.get(key) != b.get(key) {
                         let child = format!("{path}.{}", key);
-                        if a.get(key).is_none() || b.get(key).is_none() {
-                            return Some(child);
-                        }
-                        if let Some(found) = walk(&a[key], &b[key], &child) { return Some(found); }
+                        return walk(a.get(key), b.get(key), &child);
                     }
                 }
                 None
             }
-            (Value::Array(a), Value::Array(b)) => {
+            (Some(Value::Array(a)), Some(Value::Array(b))) => {
                 for index in 0..a.len().max(b.len()) {
                     if a.get(index) != b.get(index) {
                         let child = format!("{path}[{index}]");
-                        if index >= a.len() || index >= b.len() { return Some(child); }
-                        if let Some(found) = walk(&a[index], &b[index], &child) { return Some(found); }
+                        return walk(a.get(index), b.get(index), &child);
                     }
                 }
                 None
             }
-            _ => Some(if path.is_empty() { "$".to_owned() } else { path.to_owned() }),
+            _ => Some((if path.is_empty() { "$".to_owned() } else { path.to_owned() }, expected, observed)),
         }
     }
-    walk(expected, observed, "$")
+    walk(Some(expected), Some(observed), "$")
+}
+
+const JSON_EXCERPT_LIMIT: usize = 240;
+
+/// Serialize a differing JSON value as a bounded excerpt.
+fn json_excerpt(value: Option<&Value>) -> String {
+    let Some(value) = value else { return "<missing>".to_owned() };
+    let text = serde_json::to_string(value).expect("serialise JSON value");
+    let total = value.as_str().map_or_else(|| text.chars().count(), |value| value.chars().count());
+    if text.chars().count() <= JSON_EXCERPT_LIMIT {
+        return format!("{text:?} ({total} chars total)");
+    }
+    let excerpt: String = text.chars().take(JSON_EXCERPT_LIMIT).collect();
+    format!("{:?}... ({total} chars total)", excerpt)
 }
 
 /// Replay one recorded example against the real server.
@@ -1174,9 +1184,11 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                     &mut recorded_hashes,
                 );
                 if observed != expected {
+                    let (path, expected_value, observed_value) = first_difference(&expected, &observed)
+                        .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
                     return Err(format!(
-                        "{where_}: recorded s2c frame mismatch at {}\n  expected: {expected}\n  observed: {observed}",
-                        first_differing_json_path(&expected, &observed).unwrap_or_else(|| "<unknown>".to_owned())
+                        "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}",
+                        json_excerpt(expected_value), json_excerpt(observed_value)
                     ));
                 }
             }
@@ -1290,4 +1302,34 @@ fn commit_hashes_normalize_by_first_seen_position() {
     let mut other = HashNormalizer::new();
     let renumbered = canonical_frame(&only_second, RECORDED_ROOT, RECORDED_BINARY, &mut other);
     assert_eq!(renumbered["result"]["text"][0], "parent hash-1");
+}
+
+#[test]
+fn mismatch_message_reports_differing_values_and_path() {
+    let expected = serde_json::json!({"result":[{"command":"a"},{"command":"b"}]});
+    let observed = serde_json::json!({"result":[{"command":"a"},{"command":"c"}]});
+    let (path, expected_value, observed_value) = first_difference(&expected, &observed).unwrap();
+    let message = format!("at {path} expected: {} observed: {}", json_excerpt(expected_value), json_excerpt(observed_value));
+    assert!(message.contains("$.result[1].command"));
+    assert!(message.contains(r#"expected: "\"b\"""#));
+    assert!(message.contains(r#"observed: "\"c\"""#));
+}
+
+#[test]
+fn json_excerpt_bounds_long_values() {
+    let value = Value::String("x".repeat(500));
+    let excerpt = json_excerpt(Some(&value));
+    assert_eq!(excerpt.split("...").next().unwrap().matches('x').count(), 239);
+    assert!(excerpt.contains("500 chars total"));
+    assert!(!excerpt.contains(&"x".repeat(500)));
+}
+
+#[test]
+fn first_difference_reports_missing_key() {
+    let expected = serde_json::json!({"result":{"command":"a"}});
+    let observed = serde_json::json!({"result":{}});
+    let (path, expected_value, observed_value) = first_difference(&expected, &observed).unwrap();
+    assert_eq!(path, "$.result.command");
+    assert!(expected_value.is_some());
+    assert_eq!(json_excerpt(observed_value), "<missing>");
 }
