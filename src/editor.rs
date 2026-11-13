@@ -508,6 +508,12 @@ impl EditRegistry {
         self.scope_with_lifecycle(repo_path, owner, Arc::new(|_| {}), Arc::new(|_| {}))
     }
 
+    /// Create an admission-only scope; managed editor scopes require Unix.
+    #[cfg(not(unix))]
+    pub fn scope(&self, _repo_path: &str, _owner: &str) -> Result<EditScope> {
+        Err(Error::new("managed commit drafts require Unix"))
+    }
+
     /// Create a scope whose fresh runs notify worker-owned configuration lifecycle hooks.
     #[cfg(unix)]
     pub fn scope_with_lifecycle(
@@ -524,6 +530,18 @@ impl EditRegistry {
             on_admit, on_release,
         });
         Ok(EditScope { token })
+    }
+
+    /// Create a lifecycle scope; managed editor scopes require Unix.
+    #[cfg(not(unix))]
+    pub fn scope_with_lifecycle(
+        &self,
+        _repo_path: &str,
+        _owner: &str,
+        _on_admit: Arc<dyn Fn(&str) + Send + Sync>,
+        _on_release: Arc<dyn Fn(&str) + Send + Sync>,
+    ) -> Result<EditScope> {
+        Err(Error::new("managed commit drafts require Unix"))
     }
 
     fn revoke_scope(&self, token: &str) {
