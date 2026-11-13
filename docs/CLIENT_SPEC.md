@@ -112,7 +112,8 @@ the exact latest text. The server validates that version and writes it safely.
 For saved-file close use `source:"saved-file"` instead: the server reads saved disk
 bytes and never substitutes unsaved didChange text. Successful response is
 `{type:"confirmed",runId,uri,version}`; Git success is reported separately.
-Only this semantic command is registered here, not the full Plain dispatcher.
+Only these draft confirmation and Abort semantic commands are registered here,
+not the full Plain dispatcher.
 
 Ordinary `didClose` confirms saved disk bytes by accepted assumption, despite
 standard LSP's lack of run identity/reliability guarantees. VSCode identifies
@@ -122,7 +123,11 @@ the run-aware semantic saved-file command. Focus changes, nonlast tab closure,
 deactivation/disconnect and language changes do not confirm. No synthetic didClose
 or capability negotiation is used. Native dirty-close Save saves then confirms;
 Discard-unsaved confirms prior saved bytes; Cancel retains the editor. Explicit
-Abort uses existing `view/invoke common.cancel` with `args:{runId}`.
+Abort sends `workspace/executeCommand {command:"magit.command",arguments:[{
+command:"common.cancel",runId,uri,version}]}` for the exact synchronized draft
+version. Success returns `{type:"aborted",runId,uri,version}`. On rejection or
+missing or mismatched acknowledgement, retain the editable draft; only the exact
+acknowledgement ends it.
 
 Helper target/path/owner/run validation, exact-version errors and read/write
 failures retain the helper. Registry locking arbitrates terminal/abort decisions
@@ -940,8 +945,8 @@ versioned apply edit. Absent → the server sends manual instructions naming the
 `COMMIT_EDITMSG` path together with the Confirm and Abort actions; you can still
 open that file yourself, send `didOpen`/`didChange`, and invoke the offered
 Confirm/Abort code actions (the manual path sends neither `applyEdit` nor
-`showDocument`). Saved-file close confirms disk bytes; explicit Abort cancels the
-run and restores the status document only after an exact Abort acknowledgement;
+`showDocument`). Saved-file close confirms disk bytes; explicit Abort uses the
+run-aware command above and restores the status document only after its exact acknowledgement;
 failed Abort retains the editable draft. `window.workDoneProgress` present → the
 server runs `window/workDoneProgress/create` and `$/progress` begin/report/end
 for mutations; absent → no progress notifications, the operation still runs and

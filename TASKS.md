@@ -1163,12 +1163,13 @@ Editing/synchronization review (2026-11-13; base `1ccb038adc2b9e9633f394ca1fea78
   - **Constraints:** Touch only `clients/vscode/test/integration.js`; reuse its real-server fixture and mocked editor APIs. Do not claim native execution, change server arbitration, or add another harness.
   - Verified: `make vscode-test` @ `275bcc2` → `ok: vscode/keybindings`.
 
-- [ ] **[P2] Replace the retired Abort envelope in the current client contract** (`docs/CLIENT_SPEC.md:108-125,941-946`, Current real-file commit editing and Plain draft description)
+- [x] **[P2] Replace the retired Abort envelope in the current client contract** (`docs/CLIENT_SPEC.md:108-125,941-946`, Current real-file commit editing and Plain draft description)
   - **Problem:** The changed Plain paragraph now requires exact Abort acknowledgement, but the same document's current real-file contract still instructs clients to send `view/invoke common.cancel` with `args:{runId}`. This is the retired, unacknowledged path that the fix removes.
   - **Why it matters:** Contract correctness — implementers following the primary contract would recreate the unsafe cancellation path.
   - **Change:** Replace the explicit Abort sentence at line 125 with the existing `workspace/executeCommand` / `magit.command` envelope containing `command:"common.cancel"`, `runId`, `uri`, and synchronized `version`. State the exact `{type:"aborted",runId,uri,version}` response and retention on rejected, missing or mismatched acknowledgement. Clarify the nearby confirmation-only dispatcher wording so it does not exclude Abort. Keep the Plain paragraph consistent without duplicating detailed protocol tables.
   - **Done when:** The current real-file section documents the same request and response as `src/protocol.rs:90-102,150-157` and `src/server.rs:3020-3045`; `make docs-check` passes.
   - **Constraints:** Edit only authored `docs/CLIENT_SPEC.md`; do not hand-edit generated references, change protocol, or claim native verification.
+  - Verified: `make docs-check` @ `cc73c59` → exit 0; `ok: docs-check`.
 
 - [x] **[P2] Restore profile coverage for contextual todo commands** (`src/commands.rs:25-79,925-936`, `Scope::RebaseTodo`; `src/manifest.rs:107-138`, `check_coverage`; `tests/keymap.rs:29-59`, `every_profile_parses_and_covers_every_command`)
   - **Problem:** Both production and test coverage skip every `Scope::RebaseTodo` command, even though nine are profile-bound and only `rebase.todo-set-action` plus `rebase.todo-move-before` are intentionally argument-only. A missing submit/action/movement binding therefore passes the check named “covers every command.”
