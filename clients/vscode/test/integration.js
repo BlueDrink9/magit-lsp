@@ -666,6 +666,70 @@ async function run() {
     assert(draft.document.isClosed, 'valid Abort closes the editor');
     await idle(draft);
 
+    const deferredAbort = () => {
+      let release;
+      const response = new Promise((resolve) => { release = resolve; });
+      return { response, release };
+    };
+    draft = await startDraft();
+    draft.document.replaceText('abort snapshot before later failure\n');
+    await waitFor(() => draft.text === draft.document.getText() && !draft.flushQueued,
+      'abort failure snapshot synchronized');
+    const failedAbort = deferredAbort();
+    let sentAbort;
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.cancel') {
+        sentAbort = params.arguments[0];
+        return failedAbort.response;
+      }
+      return realSendRequest(method, params);
+    };
+    const pendingFailedAbort = invokeGenerated('common.cancel');
+    await waitFor(() => sentAbort, 'deferred Abort request');
+    draft.document.replaceText('retain edit after later synchronization failure\n');
+    const savedNotification = client.sendNotification;
+    client.sendNotification = async (method, params) => method === 'textDocument/didChange'
+      ? Promise.reject(new Error('later synchronization failure'))
+      : savedNotification.call(client, method, params);
+    await draft.queue;
+    client.sendNotification = savedNotification;
+    failedAbort.release({ type: 'aborted', runId: sentAbort.runId,
+      uri: sentAbort.uri, version: sentAbort.version });
+    await pendingFailedAbort;
+    assert(draftStore.drafts.has(draft.runId), 'late Abort after failure retains registration');
+    assert.equal(draft.document.getText(), 'retain edit after later synchronization failure\n',
+      'late Abort after failure retains newer bytes');
+    assert(!draft.document.isClosed, 'late Abort after failure keeps editor open');
+
+    await draft.document.save();
+    const editAbort = deferredAbort();
+    sentAbort = undefined;
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.cancel') {
+        sentAbort = params.arguments[0];
+        return editAbort.response;
+      }
+      return realSendRequest(method, params);
+    };
+    const pendingEditAbort = invokeGenerated('common.cancel');
+    await waitFor(() => sentAbort, 'deferred Abort before native edit');
+    const sentVersion = sentAbort.version;
+    draft.document.replaceText('retain native edit made during Abort\n');
+    await waitFor(() => draft.version > sentVersion && draft.text === draft.document.getText(),
+      'native edit synchronized during Abort');
+    editAbort.release({ type: 'aborted', runId: sentAbort.runId,
+      uri: sentAbort.uri, version: sentVersion });
+    await pendingEditAbort;
+    assert(draftStore.drafts.has(draft.runId), 'Abort snapshot cannot close over newer edit');
+    assert.equal(draft.document.getText(), 'retain native edit made during Abort\n');
+    assert(vscode.__test.messages.some((notice) => notice.level === 'error'
+      && notice.text.includes('changed while aborting')));
+    client.sendRequest = savedRequest;
+    await invokeGenerated('common.cancel');
+    assert(!draftStore.drafts.has(draft.runId), 'healthy exact Abort closes after retained edit retry');
+    assert(draft.document.isClosed, 'healthy exact Abort closes editor once');
+    await idle(draft);
+
     for (const action of ['abort', 'progress-cancel']) {
       draft = await startDraft();
       const priorHead = head();

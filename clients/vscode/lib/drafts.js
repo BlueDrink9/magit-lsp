@@ -60,6 +60,21 @@ function live(record) {
 }
 
 /**
+ * Whether an asynchronous barrier still owns the same live draft generation.
+ *
+ * @param {object} record
+ * @param {object} client
+ * @param {number} generation
+ * @returns {boolean}
+ */
+function ownsBarrier(record, client, generation) {
+  return live(record)
+    && store.client === client
+    && !record.disconnected
+    && record.generation === generation;
+}
+
+/**
  * The draft owning the focused editor, if any.
  *
  * @returns {object|undefined}
@@ -180,14 +195,14 @@ async function request(record, method, payload) {
   }
   try {
     await store.clientReady;
-    if (store.client !== client || !live(record) || record.disconnected) return undefined;
+    if (!ownsBarrier(record, client, generation)) return undefined;
     const result = await client.sendRequest(method, payload);
-    if (!live(record) || store.client !== client || record.disconnected || record.generation !== generation) {
+    if (!ownsBarrier(record, client, generation)) {
       return undefined;
     }
     return result;
   } catch (error) {
-    if (!live(record) || record.disconnected || record.generation !== generation) {
+    if (!ownsBarrier(record, client, generation)) {
       return undefined;
     }
     fail(record, error);
@@ -533,23 +548,29 @@ async function cancel(record) {
   // Abort must not wait behind an in-flight confirmation. Invalidate
   // callbacks first; the server owns finish-versus-cancel arbitration.
   record.generation += 1;
-  if (record.disconnected || store.client !== record.client) {
+  const generation = record.generation;
+  const client = record.client;
+  if (!client || !ownsBarrier(record, client, generation)) {
     fail(record, 'the server connection is unavailable; draft was not aborted');
     return;
   }
   if (!(await flush(record))) return;
-  try {
-    const result = await record.client.sendRequest('workspace/executeCommand', { command: 'magit.command', arguments: [{
-      command: 'common.cancel', runId: record.runId, uri: record.uri.toString(), version: record.version,
-    }] });
-    if (!acknowledged(result, 'aborted', record, record.version)) {
-      fail(record, 'unexpected commit draft abort acknowledgement');
-      return;
-    }
-    await forget(record);
-  } catch (error) {
-    fail(record, `abort failed: ${message(error)}`);
+  if (!ownsBarrier(record, client, generation)) return;
+  const version = record.version;
+  const text = record.document.getText();
+  const result = await request(record, 'workspace/executeCommand', { command: 'magit.command', arguments: [{
+    command: 'common.cancel', runId: record.runId, uri: record.uri.toString(), version,
+  }] });
+  if (!result) return;
+  if (!acknowledged(result, 'aborted', record, version)) {
+    fail(record, 'unexpected commit draft abort acknowledgement');
+    return;
   }
+  if (record.version !== version || record.text !== text || record.document.getText() !== text) {
+    fail(record, 'the commit draft changed while aborting; newer text was retained');
+    return;
+  }
+  await forget(record);
 }
 
 /**
