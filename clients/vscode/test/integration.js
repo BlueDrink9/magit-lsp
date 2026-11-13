@@ -540,6 +540,11 @@ async function run() {
       return draft;
     };
     const unchangedIndex = () => execFileSync('git', ['-C', repo, 'show', ':tracked.txt']);
+    const deferredAbort = () => {
+      let release;
+      const response = new Promise((resolve) => { release = resolve; });
+      return { response, release };
+    };
     let draft = await startDraft();
     const commitMessage = `integration managed ${Date.now()}`;
     const beforeSave = head();
@@ -646,6 +651,78 @@ async function run() {
     draft.document.replaceText(abortText);
     const realSendRequest = client.sendRequest.bind(client);
     const savedRequest = client.sendRequest;
+    const priorHead = head();
+    const priorIndex = unchangedIndex();
+    const savedNotification = client.sendNotification;
+    client.sendNotification = async (method, params) => method === 'textDocument/didChange'
+      ? Promise.reject(new Error('draft synchronization rejected'))
+      : savedNotification.call(client, method, params);
+    const requestStart = client.requests.length;
+    const noticeStart = vscode.__test.messages.length;
+    await invokeGenerated('common.cancel');
+    assert.equal(client.requests.slice(requestStart).filter((request) =>
+      request.method === 'workspace/executeCommand'
+        && request.params.arguments?.[0]?.command === 'common.cancel').length, 0,
+    'rejected sync sends no Abort request');
+    assert(draftStore.drafts.has(draft.runId), 'rejected sync retains registration');
+    assert.equal(draft.document.getText(), abortText, 'rejected sync retains bytes');
+    assert(!draft.document.isClosed, 'rejected sync keeps tab open');
+    assert(vscode.__test.messages.slice(noticeStart).some((notice) =>
+      notice.level === 'error' && notice.text.includes('draft synchronization rejected')),
+    'rejected sync reports current error');
+    assert.equal(head(), priorHead, 'rejected sync leaves HEAD unchanged');
+    assert.deepEqual(unchangedIndex(), priorIndex, 'rejected sync leaves index unchanged');
+    client.sendNotification = savedNotification;
+
+    const owner = draft.client;
+    draft.client = undefined;
+    const unavailableNoticeStart = vscode.__test.messages.length;
+    await invokeGenerated('common.cancel');
+    assert.equal(draft.document.getText(), abortText, 'unavailable owner retains bytes');
+    assert(!draft.document.isClosed, 'unavailable owner retains tab');
+    assert(draftStore.drafts.has(draft.runId), 'unavailable owner retains registration');
+    assert(vscode.__test.messages.slice(unavailableNoticeStart).some((notice) =>
+      notice.level === 'error' && notice.text.includes('connection is unavailable')),
+    'unavailable owner reports current error');
+    assert.equal(head(), priorHead, 'unavailable owner leaves HEAD unchanged');
+    assert.deepEqual(unchangedIndex(), priorIndex, 'unavailable owner leaves index unchanged');
+    draft.client = owner;
+
+    const confirmation = deferredAbort();
+    let sentConfirm;
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.confirm') {
+        sentConfirm = params.arguments[0];
+        return confirmation.response;
+      }
+      return realSendRequest(method, params);
+    };
+    const pendingConfirm = invokeGenerated('common.confirm');
+    await waitFor(() => sentConfirm, 'deferred confirmation response');
+    let sentAbortDuringConfirm;
+    client.sendRequest = async (method, params) => {
+      if (method === 'workspace/executeCommand' && params.arguments?.[0]?.command === 'common.cancel') {
+        sentAbortDuringConfirm = params.arguments[0];
+        return realSendRequest(method, params);
+      }
+      return realSendRequest(method, params);
+    };
+    await invokeGenerated('common.cancel');
+    assert(sentAbortDuringConfirm, 'Abort sent before confirmation release');
+    confirmation.release({ type: 'confirmed', runId: sentConfirm.runId,
+      uri: sentConfirm.uri, version: sentConfirm.version });
+    await pendingConfirm;
+    assert(!draftStore.drafts.has(draft.runId), 'late confirmation cannot retain invalidated draft');
+    assert(draft.document.isClosed, 'late confirmation cannot prevent Abort teardown');
+    assert.equal(head(), priorHead, 'Abort during confirmation leaves HEAD unchanged');
+    assert.deepEqual(unchangedIndex(), priorIndex, 'Abort during confirmation leaves index unchanged');
+    client.sendRequest = savedRequest;
+    await idle(draft);
+
+    draft = await startDraft();
+    draft.document.replaceText(abortText);
+    await waitFor(() => draft.text === abortText && !draft.flushQueued,
+      'retry Abort text synchronized');
     for (const fake of [
       async () => { throw new Error('abort transport failure'); },
       async () => ({ type: 'aborted', runId: 'wrong', uri: draft.uri.toString(), version: draft.version }),
@@ -658,7 +735,6 @@ async function run() {
       assert(draftStore.drafts.has(draft.runId), 'failed Abort retains registration');
       assert.equal(draft.document.getText(), abortText, 'failed Abort retains bytes');
       assert(!draft.document.isClosed, 'failed Abort keeps editor open');
-      assert(vscode.__test.messages.some((notice) => notice.level === 'error' && notice.text.includes('draft')));
     }
     client.sendRequest = savedRequest;
     await invokeGenerated('common.cancel');
@@ -666,11 +742,6 @@ async function run() {
     assert(draft.document.isClosed, 'valid Abort closes the editor');
     await idle(draft);
 
-    const deferredAbort = () => {
-      let release;
-      const response = new Promise((resolve) => { release = resolve; });
-      return { response, release };
-    };
     draft = await startDraft();
     draft.document.replaceText('abort snapshot before later failure\n');
     await waitFor(() => draft.text === draft.document.getText() && !draft.flushQueued,
@@ -687,12 +758,12 @@ async function run() {
     const pendingFailedAbort = invokeGenerated('common.cancel');
     await waitFor(() => sentAbort, 'deferred Abort request');
     draft.document.replaceText('retain edit after later synchronization failure\n');
-    const savedNotification = client.sendNotification;
+    const savedLaterNotification = client.sendNotification;
     client.sendNotification = async (method, params) => method === 'textDocument/didChange'
       ? Promise.reject(new Error('later synchronization failure'))
-      : savedNotification.call(client, method, params);
+      : savedLaterNotification.call(client, method, params);
     await draft.queue;
-    client.sendNotification = savedNotification;
+    client.sendNotification = savedLaterNotification;
     failedAbort.release({ type: 'aborted', runId: sentAbort.runId,
       uri: sentAbort.uri, version: sentAbort.version });
     await pendingFailedAbort;
