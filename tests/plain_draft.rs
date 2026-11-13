@@ -625,6 +625,39 @@ fn explicit_abort_creates_no_commit_and_restores_the_status_view() {
 }
 
 #[test]
+fn offered_plain_stage_is_refused_during_registered_commit_wait() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n"), ("g.txt", "unchanged\n")])
+        .modify_standard()
+        .modify("g.txt", "changed\n")
+        .build();
+    let (mut server, mut editor, uri) = open_plain(&repo, caps(true));
+    let mut seen = Vec::new();
+    let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let index = repo.git(&["write-tree"]);
+
+    let _ = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 210);
+    let stage = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 220);
+    let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage, 230);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index);
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 240);
+    let abort = draft_action(&offered, "common.cancel");
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 250)["error"].is_null());
+    let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
+    wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
+    let stage = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 260);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage, 270)["error"].is_null());
+    server.shutdown_and_exit();
+    let (status, _) = server.finish_with_messages(Duration::from_secs(10));
+    assert!(status.success());
+}
+
+#[test]
 fn close_after_abort_is_ignored() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "before\n")])
@@ -1388,4 +1421,3 @@ fn late_draft_delivery_failure_after_open_never_cancels_the_run() {
         assert!(status.success());
     }
 }
-
