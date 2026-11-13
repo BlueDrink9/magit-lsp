@@ -1008,8 +1008,10 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
     for (encoding, lambda_end, astral_end) in [("utf-8", 3, 5), ("utf-16", 2, 3), ("utf-32", 2, 2)]
     {
         let (tmp, _) = staged_repo();
+        let (other_tmp, _) = staged_repo();
         let head = tmp.git(&["rev-parse", "HEAD"]);
         let target = tmp.path().join(".git/COMMIT_EDITMSG");
+        let other_target = other_tmp.path().join(".git/COMMIT_EDITMSG");
         let mut server = TestServer::spawn(&[]);
         let mut capabilities = rich_capabilities();
         capabilities["general"]["positionEncodings"] = json!([encoding]);
@@ -1019,7 +1021,10 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
             encoding
         );
         let status = open_status(&mut server, 2, &json!(tmp.path().to_string_lossy()));
+        let other_status = open_status(&mut server, 3, &json!(other_tmp.path().to_string_lossy()));
         let edit = start_commit(&mut server, &status);
+        let other_edit = start_commit(&mut server, &other_status);
+        sync_draft(&mut server, &other_edit, "other\n");
         sync_draft(&mut server, &edit, "aλ\r\nz😀\n");
         // Skipped versions and multiple ranges, including a dependent range.
         server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
@@ -1027,6 +1032,11 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
                 {"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":lambda_end}},"text":"λ!"},
                 {"range":{"start":{"line":0,"character":lambda_end+1},"end":{"line":0,"character":lambda_end+1}},"text":"?"},
                 {"range":{"start":{"line":1,"character":astral_end},"end":{"line":1,"character":astral_end}},"text":"!"}
+            ]
+        }}));
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":other_edit["uri"],"version":3},"contentChanges":[
+                {"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":0}},"text":"success\n"}
             ]
         }}));
         // Failed native close re-presents precisely the accepted incremental
@@ -1056,6 +1066,12 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
         assert!(command_confirm(&mut server, 21, &edit, 5, "synchronized")["error"].is_object());
         server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":edit["uri"],"languageId":"text","version":5,"text":recovery["text"]}
+        }}));
+        change_draft(&mut server, &edit, 5, "stale must not land\n");
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":other_edit["uri"],"version":4},"contentChanges":[
+                {"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":0}},"text":"stale\n"}
+            ]
         }}));
         let (line, column) = match encoding {
             "utf-8" => (0, 2),  // inside λ
@@ -1101,7 +1117,30 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
                 {"range":{"start":{"line":0,"character":-1},"end":{"line":0,"character":0}},"text":"malformed"}
             ]
         }}));
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":other_edit["uri"],"version":5},"contentChanges":[
+                {"range":{"start":{"line":3,"character":0},"end":{"line":3,"character":0}},"text":"rejected\n"}
+            ]
+        }}));
         assert!(command_confirm(&mut server, 14, &edit, 9, "synchronized")["error"].is_object());
+        let other_held = other_tmp.path().join(".git/held-sync-message");
+        std::fs::rename(&other_target, &other_held).unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+            "textDocument":{"uri":other_edit["uri"]}
+        }}));
+        let other_recovery = loop {
+            if let Some(effect) = edit_document(&server.recv()) {
+                if effect["runId"] == other_edit["runId"] {
+                    break effect;
+                }
+            }
+        };
+        assert_eq!(other_recovery["version"], 5);
+        assert_eq!(other_recovery["text"], "other\nsuccess\nstale\nrejected\n");
+        std::fs::rename(&other_held, &other_target).unwrap();
+        server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":other_edit["uri"],"languageId":"text","version":5,"text":other_recovery["text"]}
+        }}));
         std::fs::rename(&target, &held).unwrap();
         server.send(
             json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
@@ -1143,6 +1182,9 @@ fn incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state
         assert_eq!(confirmed["result"]["type"], "confirmed", "{confirmed}");
         wait_for_commit(&tmp, "aλ!?\nz😀!?");
         assert_eq!(read(&target), "aλ!?\r\nz😀!?\n");
+        let other_confirmed = command_confirm(&mut server, 30, &other_edit, 5, "synchronized");
+        assert_eq!(other_confirmed["result"]["type"], "confirmed", "{other_confirmed}");
+        wait_for_commit(&other_tmp, "other\nsuccess\nstale\nrejected");
         server.shutdown_and_exit();
         assert!(server.finish(Duration::from_secs(10)).success());
     }

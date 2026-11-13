@@ -3194,11 +3194,10 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
                 })
                 .collect::<Vec<_>>();
             let mut docs = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
-            let mut candidate = docs.clone();
-            if candidate
-                .change(uri, p.text_document.version, &changes, encoding)
-                .is_err()
-            {
+            let Some(mut candidate) = docs.get(uri).cloned() else {
+                return Err(Error::new("Document is not open"));
+            };
+            if candidate.change(p.text_document.version, &changes, encoding).is_err() {
                 let stale_full_text =
                     p.content_changes.len() == 1 && p.content_changes[0].range.is_none();
                 drop(docs);
@@ -3211,15 +3210,13 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
                     "Invalid document change or stale or duplicated version; document requires repair",
                 ));
             }
-            let Some(text) = candidate.get(uri).map(|doc| doc.text.clone()) else {
-                return Err(Error::new("Document is not open"));
-            };
+            let text = candidate.text.clone();
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
                     draft.did_change(context, p.text_document.version, text.as_bytes())
                 })?;
             }
-            *docs = candidate;
+            docs.replace(uri, candidate).map_err(|_| Error::new("Document is not open"))?;
             Ok(())
         }
         "textDocument/didClose" => {

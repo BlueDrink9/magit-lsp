@@ -36,6 +36,52 @@ pub struct Document {
     observed_version: i32,
 }
 
+impl Document {
+    /// Validate and apply one versioned change set to this document snapshot.
+    pub fn change(&mut self, version: i32, changes: &[Change], encoding: Encoding) -> Result<(), ()> {
+        if version <= self.observed_version {
+            self.repair = true;
+            self.observed_version = self.observed_version.max(version);
+            return Err(());
+        }
+        let mut text = self.text.clone();
+        if self.repair
+            && changes
+                .first()
+                .is_none_or(|c| c.start.is_some() || c.end.is_some())
+        {
+            self.repair = true;
+            self.observed_version = self.observed_version.max(version);
+            return Err(());
+        }
+        let result = (|| {
+            for change in changes {
+                match (change.start, change.end) {
+                    (None, None) => text.clone_from(&change.text),
+                    (Some(start), Some(end)) => {
+                        let a = offset(&text, start, encoding).ok_or(())?;
+                        let b = offset(&text, end, encoding).ok_or(())?;
+                        if a > b { return Err(()); }
+                        text.replace_range(a..b, &change.text);
+                    }
+                    _ => return Err(()),
+                }
+            }
+            Ok::<(), ()>(())
+        })();
+        if result.is_err() {
+            self.repair = true;
+            self.observed_version = self.observed_version.max(version);
+            return result;
+        }
+        self.text = text;
+        self.version = version;
+        self.observed_version = version;
+        self.repair = false;
+        Ok(())
+    }
+}
+
 /// URI-keyed store of open documents. Invalid notifications never partially apply.
 #[derive(Debug, Default, Clone)]
 pub struct DocStore {
@@ -67,6 +113,12 @@ impl DocStore {
     pub fn get(&self, uri: &str) -> Option<&Document> {
         self.documents.get(uri)
     }
+    /// Replace one tracked document snapshot after external acceptance.
+    pub fn replace(&mut self, uri: &str, document: Document) -> Result<(), ()> {
+        let current = self.documents.get_mut(uri).ok_or(())?;
+        *current = document;
+        Ok(())
+    }
     /// Validate versionless save text; it cannot replace the live snapshot or repair it.
     pub fn save_text(&self, uri: &str, text: &str) -> Result<(), ()> {
         let document = self.documents.get(uri).ok_or(())?;
@@ -93,47 +145,7 @@ impl DocStore {
         changes: &[Change],
         encoding: Encoding,
     ) -> Result<(), ()> {
-        let current = self.documents.get(uri).ok_or(())?;
-        if version <= current.observed_version {
-            self.require_repair(uri, Some(version));
-            return Err(());
-        }
-        let mut text = current.text.clone();
-        if current.repair
-            && changes
-                .first()
-                .is_none_or(|c| c.start.is_some() || c.end.is_some())
-        {
-            self.require_repair(uri, Some(version));
-            return Err(());
-        }
-        let result = (|| {
-            for change in changes {
-                match (change.start, change.end) {
-                    (None, None) => text.clone_from(&change.text),
-                    (Some(start), Some(end)) => {
-                        let a = offset(&text, start, encoding).ok_or(())?;
-                        let b = offset(&text, end, encoding).ok_or(())?;
-                        if a > b {
-                            return Err(());
-                        }
-                        text.replace_range(a..b, &change.text);
-                    }
-                    _ => return Err(()),
-                }
-            }
-            Ok::<(), ()>(())
-        })();
-        if result.is_err() {
-            self.require_repair(uri, Some(version));
-            return result;
-        }
-        let doc = self.documents.get_mut(uri).ok_or(())?;
-        doc.text = text;
-        doc.version = version;
-        doc.observed_version = version;
-        doc.repair = false;
-        Ok(())
+        self.documents.get_mut(uri).ok_or(())?.change(version, changes, encoding)
     }
 }
 
