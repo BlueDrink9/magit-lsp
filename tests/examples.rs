@@ -1164,7 +1164,15 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                 server.send(expand_client_frame(&message, &root, run_id.as_deref()));
             }
             Dir::ServerToClient => {
-                let mut actual = server.recv();
+                let mut actual = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.recv()))
+                    .map_err(|panic| {
+                        let detail = panic
+                            .downcast_ref::<String>()
+                            .map(String::as_str)
+                            .or_else(|| panic.downcast_ref::<&str>().copied())
+                            .unwrap_or("server receive panicked");
+                        format!("{where_}: {detail}")
+                    })?;
                 while ignore_keymaps
                     && actual.get("method").and_then(Value::as_str) == Some("view/keymap")
                 {
@@ -1187,8 +1195,8 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                     let (path, expected_value, observed_value) = first_difference(&expected, &observed)
                         .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
                     return Err(format!(
-                        "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}",
-                        json_excerpt(expected_value), json_excerpt(observed_value)
+                        "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
+                        json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
                     ));
                 }
             }
