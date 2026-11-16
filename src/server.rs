@@ -5181,8 +5181,8 @@ fn spawn_repository_operation(
     let worker = std::thread::Builder::new()
         .name("magit-lsp-commit".to_string())
         .spawn(move || {
-            let _progress = progress;
             let reservation = reservation;
+            let _progress = progress;
             let result = runner::with_cancel(Some(cancel), || match editor::socket_path() {
                 Some(socket) => {
                     let executable = std::env::current_exe()
@@ -5291,9 +5291,8 @@ fn spawn_repository_operation(
                     messages.extend(effect_notifications(&shared.client, effects));
                 }
             }
-            // Cleanup and outcome construction are complete. Release before
-            // publishing the outcome so its receipt means new work may start.
-            drop(reservation);
+            // Keep the repository reserved until all prepared outcomes are
+            // published; lexical drop order ends progress before releasing it.
             for message in messages {
                 let _ = sender.send(message);
             }
