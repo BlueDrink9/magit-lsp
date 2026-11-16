@@ -281,9 +281,22 @@ fn log_path_prompt_binds_the_menu_options_not_a_render_version() {
         let Execution::Prompt(prompt) = test.session.start_key(&key).unwrap() else {
             panic!("path prompt");
         };
-        test.session.resize(&menu.id, STATUS_VIEWPORT).unwrap();
-        let refreshed = test.session.refresh(&menu.id).unwrap().unwrap();
-        test.session.ack(&menu.id, refreshed.version).unwrap();
+        assert_eq!(option_value(&test, &menu.id, "=f"), None);
+        let menu_version = test.session.views().get(&menu.id).unwrap().version();
+        let resized = test
+            .session
+            .resize(&menu.id, STATUS_VIEWPORT)
+            .unwrap()
+            .expect("resize renders the origin while its document prompt is open");
+        assert!(resized.version > menu_version);
+        test.session.ack(&menu.id, resized.version).unwrap();
+        assert!(test.session.refresh(&menu.id).unwrap().is_none());
+        assert_eq!(
+            test.session.views().get(&menu.id).unwrap().version(),
+            resized.version,
+            "the queued refresh does not advance the legitimate resize render"
+        );
+        assert_eq!(option_value(&test, &menu.id, "=f"), None);
         if close {
             test.session.close(&menu.id).unwrap();
         }
