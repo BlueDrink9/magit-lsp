@@ -1277,6 +1277,8 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         );
         let id = client.send(terminal);
         assert!(client.until_response(id)["result"].as_array().unwrap().is_empty());
+        let close = client.editor.close(&expected_uri);
+        client.send(close);
 
         std::fs::write(repo.path().join("f.txt"), "abort draft worktree change\n").unwrap();
         client.until(|c| c.editor.text(&uri).contains("f.txt"));
@@ -1311,7 +1313,7 @@ fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
         let id = client.send(actions);
         let offered = client.until_response(id)["result"].as_array().unwrap().clone();
         let abort = offered.iter().find(|action| action["title"] == "Abort commit")
-            .expect("attached draft offers Abort")["command"]["arguments"][0].clone();
+            .unwrap_or_else(|| panic!("attached draft offers Abort: {offered:?}\n{}", client.server.stderr_text()))["command"]["arguments"][0].clone();
         assert_eq!(abort["command"], "common.cancel");
         assert_eq!(abort["version"], 2);
         let abort_head = repo.git(&["rev-parse", "HEAD"]);
