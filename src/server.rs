@@ -2,9 +2,7 @@ use crate::config::{ConfigService, LoadOptions};
 use crate::docstore::{Change as StoredChange, DocStore, Encoding};
 use crate::editor;
 use crate::errors;
-use crate::presentation::plain::{
-    whole_document_edit, ApplyEdit, DocumentFormat, PlainDocument,
-};
+use crate::presentation::plain::{whole_document_edit, ApplyEdit, DocumentFormat, PlainDocument};
 use crate::presentation::{
     negotiate, CustomRender, PlainCapabilities, Presentation, PromptSupport, Ui,
 };
@@ -398,10 +396,12 @@ impl Shared {
             .deferred_repositories
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        repositories.insert(repo.clone()).then(|| DeferredReservation {
-            repositories: self.deferred_repositories.clone(),
-            repo,
-        })
+        repositories
+            .insert(repo.clone())
+            .then(|| DeferredReservation {
+                repositories: self.deferred_repositories.clone(),
+                repo,
+            })
     }
 
     /// Whether a detached worker still owns mutation authority for `repo`.
@@ -575,7 +575,9 @@ impl Shared {
             if let Some(edit_id) = edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = edit_scope { scope.revoke(); }
+            if let Some(scope) = edit_scope {
+                scope.revoke();
+            }
         }
         let enabled = self
             .client
@@ -670,7 +672,9 @@ impl Shared {
             if let Some(edit_id) = run.edit_id {
                 editor::registry().resolve(&edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = run.edit_scope { scope.revoke(); }
+            if let Some(scope) = run.edit_scope {
+                scope.revoke();
+            }
         }
         editor::registry().abort_all();
         self.prompts.close();
@@ -727,7 +731,9 @@ impl Shared {
             if let Some(edit_id) = &run.edit_id {
                 editor::registry().resolve(edit_id, editor::Reply::Abort);
             }
-            if let Some(scope) = &run.edit_scope { scope.revoke(); }
+            if let Some(scope) = &run.edit_scope {
+                scope.revoke();
+            }
         }
     }
 
@@ -1084,13 +1090,7 @@ fn send_plain_edit_document(
             .unwrap_or_else(|p| p.into_inner())
             .get(&uri)
             .map(|document| {
-                whole_document_edit(
-                    &uri,
-                    document.version,
-                    &document.text,
-                    &text,
-                    encoding,
-                )
+                whole_document_edit(&uri, document.version, &document.text, &text, encoding)
             })
     } else {
         None
@@ -1370,7 +1370,11 @@ fn repository_session(shared: &Shared, repo: &str) -> SessionHandle {
         return handle;
     }
     let draft_owner = matches!(
-        shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+        shared
+            .client
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .presentation,
         Some(Presentation::Plain(_))
     )
     .then(|| shared.draft_owner.as_ref().clone());
@@ -1404,9 +1408,8 @@ fn refresh_pending_views(shared: &Shared, repo: &str) -> Result<Vec<ViewRender>>
 
 fn report_pending_refresh_error(shared: &Shared, error: Error) {
     tracing::warn!(%error, "failed to refresh pending commit draft rows");
-    let effects = errors::effects_for_result(Err(error)).unwrap_or_else(|error| {
-        vec![Effect::message(MessageLevel::Error, error.to_string())]
-    });
+    let effects = errors::effects_for_result(Err(error))
+        .unwrap_or_else(|error| vec![Effect::message(MessageLevel::Error, error.to_string())]);
     for message in effect_notifications(&shared.client, effects) {
         let _ = shared.sender.send(message);
     }
@@ -1469,7 +1472,9 @@ fn plain_change(shared: &Shared, uri: &str) {
                         .get_mut(uri)
                         .filter(|entry| entry.incarnation == incarnation)
                         .and_then(|entry| {
-                            entry.controller.observe(snapshot.version, snapshot.text.clone());
+                            entry
+                                .controller
+                                .observe(snapshot.version, snapshot.text.clone());
                             entry.controller.render_actions(
                                 tree,
                                 view_id,
@@ -1496,7 +1501,9 @@ fn plain_change(shared: &Shared, uri: &str) {
                         .get_mut(uri)
                         .filter(|entry| entry.incarnation == incarnation)
                     {
-                        entry.controller.adopt(snapshot.version, snapshot.text.clone());
+                        entry
+                            .controller
+                            .adopt(snapshot.version, snapshot.text.clone());
                         entry
                             .controller
                             .retain_actions(tree, &view_id, generation, &scope, None);
@@ -2050,8 +2057,12 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                     }
                     return;
                 }
-                let presentation = shared.client.lock().unwrap_or_else(|p| p.into_inner())
-                    .presentation.clone();
+                let presentation = shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .presentation
+                    .clone();
                 if matches!(presentation, Some(Presentation::Plain(_))) {
                     deliver_plain_effects(&shared, effects);
                     return;
@@ -2067,16 +2078,19 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                         }
                     }
                 }
-                let _ = shared.sender.send(custom_ui(&shared.client).effects(ViewEffectsParams {
-                    effects: effects.clone(),
-                }));
+                let _ = shared
+                    .sender
+                    .send(custom_ui(&shared.client).effects(ViewEffectsParams {
+                        effects: effects.clone(),
+                    }));
                 // A dynamic client gets the edit's keymap as a normal
                 // `view/keymap`, keyed by the edit id. Static clients use
                 // their own bindings and ignore it.
                 if !unsupported_edit && dynamic_delivery(&shared.client) {
                     for effect in &effects {
                         if let Effect::EditDocument { run_id, kind, .. } = effect {
-                            let config = shared.edit_configs
+                            let config = shared
+                                .edit_configs
                                 .lock()
                                 .unwrap_or_else(|p| p.into_inner())
                                 .get(run_id)
@@ -2084,10 +2098,9 @@ async fn serve(options: ServerOptions) -> Result<i32> {
                             if let Some(keymap) =
                                 config.and_then(|config| edit_keymap(&config, run_id, kind))
                             {
-                                let _ = shared.sender.send(Message::Notification(Notification::new(
-                                    VIEW_KEYMAP.to_string(),
-                                    keymap,
-                                )));
+                                let _ = shared.sender.send(Message::Notification(
+                                    Notification::new(VIEW_KEYMAP.to_string(), keymap),
+                                ));
                             }
                         }
                     }
@@ -2470,9 +2483,12 @@ fn plain_unsupported_execute_reason(request: &Request) -> Option<&'static str> {
         crate::commands::Availability::Implemented
             if !crate::dispatch::content_command(command)
                 && crate::dispatch::visibility_command(command).is_none()
+                && !crate::dispatch::plain_todo_action(command)
                 && !matches!(
                     command,
                     "open.commit"
+                        | "open.rebase"
+                        | "rebase.todo-submit"
                         | "open.branch"
                         | "open.log"
                         | "menu.run-action"
@@ -2678,14 +2694,15 @@ fn plain_execute_params(request: &Request) -> Option<crate::dispatch::PlainActio
 
 /// Stale Plain action feedback without running the command or touching Git.
 fn plain_stale_message() -> Result<Dispatched> {
-    Ok(Dispatched::with(serde_json::to_value(
-        ViewInvokeResponse {
+    Ok(Dispatched::with(
+        serde_json::to_value(ViewInvokeResponse {
             effects: vec![Effect::message(
                 MessageLevel::Warn,
                 crate::errors::STALE_VIEW,
             )],
-        },
-    )?, vec![show_message(2, crate::errors::STALE_VIEW.to_string())]))
+        })?,
+        vec![show_message(2, crate::errors::STALE_VIEW.to_string())],
+    ))
 }
 
 /// Refuse an unsupported Plain action without entering dispatch or registering prompts.
@@ -2759,7 +2776,12 @@ fn execute_plain_action(
             crate::dispatch::PlainActionTarget::View(target) => {
                 let supported = matches!(
                     params.command.as_str(),
-                    "open.commit" | "open.branch" | "open.log" | "common.cancel"
+                    "open.commit"
+                        | "open.branch"
+                        | "open.log"
+                        | "open.rebase"
+                        | "common.cancel"
+                        | "rebase.todo-submit"
                 );
                 let applies = crate::commands::registry()
                     .get(&params.command)
@@ -2777,10 +2799,18 @@ fn execute_plain_action(
                     let valid = scope == "prompt"
                         && target.view_id == view_id
                         && tree.node(&target.node_id).is_some_and(|node| {
-                            node.kind == crate::tree::NodeKind::Line
-                                && prompt_row_id(&node.id)
+                            node.kind == crate::tree::NodeKind::Line && prompt_row_id(&node.id)
                         });
                     if !valid {
+                        return plain_stale_message();
+                    }
+                } else if crate::dispatch::plain_todo_action(&params.command) {
+                    if scope != "rebase-todo"
+                        || target.view_id != view_id
+                        || !tree
+                            .node(&target.node_id)
+                            .is_some_and(|node| node.commit.is_some())
+                    {
                         return plain_stale_message();
                     }
                 } else if !crate::dispatch::visibility_command(&params.command).is_some()
@@ -2824,10 +2854,7 @@ fn execute_plain_action(
                                     status: crate::menu::MenuStatus::Implemented,
                                     ..
                                 }),
-                            ) => {
-                                matches!(command.as_str(), "log.current")
-                                    || crate::presentation::commit_draft_command(command)
-                            }
+                            ) => crate::dispatch::plain_menu_action(command),
                             (
                                 "menu.run-option",
                                 Some(crate::menu::Item::Option {
@@ -3007,14 +3034,18 @@ fn draft_request(shared: &Shared, request: &Request) -> Result<Value> {
                     || editor::registry().run_for_uri(&shared.draft_owner, &command.uri)?
                         != command.run_id
                 {
-                    return Err(Error::new("Commit draft abort identity is stale or foreign"));
+                    return Err(Error::new(
+                        "Commit draft abort identity is stale or foreign",
+                    ));
                 }
                 let documents = shared.documents.lock().unwrap_or_else(|p| p.into_inner());
                 if !documents
                     .get(&command.uri)
                     .is_some_and(|doc| !doc.repair && doc.version == command.version)
                 {
-                    return Err(Error::new("Wait for the exact synchronized document version"));
+                    return Err(Error::new(
+                        "Wait for the exact synchronized document version",
+                    ));
                 }
                 drop(documents);
                 if !editor::registry().resolve(&command.run_id, editor::Reply::Abort) {
@@ -3107,7 +3138,10 @@ fn is_workspace_commit_message(shared: &Shared, uri: &str) -> bool {
     let Some(path) = file_uri_path(uri) else {
         return false;
     };
-    if !path.file_name().is_some_and(|name| name == "COMMIT_EDITMSG") {
+    if !path
+        .file_name()
+        .is_some_and(|name| name == "COMMIT_EDITMSG")
+    {
         return false;
     }
     let Some(dir) = path.parent() else {
@@ -3180,7 +3214,10 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
             let Some(mut candidate) = docs.get(uri).cloned() else {
                 return Err(Error::new("Document is not open"));
             };
-            if candidate.change(p.text_document.version, &changes, encoding).is_err() {
+            if candidate
+                .change(p.text_document.version, &changes, encoding)
+                .is_err()
+            {
                 let stale_full_text =
                     p.content_changes.len() == 1 && p.content_changes[0].range.is_none();
                 drop(docs);
@@ -3206,7 +3243,8 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
                     }
                 })?;
             }
-            docs.replace(uri, candidate).map_err(|_| Error::new("Document is not open"))?;
+            docs.replace(uri, candidate)
+                .map_err(|_| Error::new("Document is not open"))?;
             Ok(())
         }
         "textDocument/didClose" => {
@@ -3891,21 +3929,21 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             else {
                 continue;
             };
-            if !matches!(command.as_str(), "log.current")
-                && !crate::presentation::commit_draft_command(command)
-            {
+            if !crate::dispatch::plain_menu_action(command) {
                 continue;
             }
             let unavailable = crate::commands::registry()
                 .get(command)
-                .and_then(|registered| match capabilities
-                    .as_ref()
-                    .map(|caps| caps.plain_availability(registered))
-                {
-                    Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
-                        Some(reason)
+                .and_then(|registered| {
+                    match capabilities
+                        .as_ref()
+                        .map(|caps| caps.plain_availability(registered))
+                    {
+                        Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
+                            Some(reason)
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 });
             if unavailable.is_some()
                 && !capabilities
@@ -3958,8 +3996,13 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             continue;
         }
         let registry_availability = crate::commands::registry().availability(command.id);
-        if crate::dispatch::visibility_command(command.id).is_some() {
-            if scope != "status" {
+        if crate::dispatch::visibility_command(command.id).is_some()
+            || crate::dispatch::plain_todo_action(command.id)
+        {
+            let todo = crate::dispatch::plain_todo_action(command.id);
+            if (!todo && scope != "status")
+                || (todo && (scope != "rebase-todo" || line_node.commit.is_none()))
+            {
                 continue;
             }
             let local = matches!(
@@ -3968,7 +4011,7 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             );
             // Offer global controls from section headers; their typed target is
             // still any retained status node when a client invokes them.
-            if !local && line_node.kind != crate::tree::NodeKind::Section {
+            if !todo && !local && line_node.kind != crate::tree::NodeKind::Section {
                 continue;
             }
             if local && tree.collapsible_ancestor(&line_node.id).is_none() {
@@ -4012,9 +4055,8 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
         if !crate::dispatch::content_command(command.id) {
             let semantic = (matches!(
                 command.id,
-                "open.commit" | "open.branch" | "open.log"
-            )
-                && command.applies_to(&scope))
+                "open.commit" | "open.branch" | "open.log" | "open.rebase" | "rebase.todo-submit"
+            ) && command.applies_to(&scope))
                 || (command.id == "common.cancel" && scope != "status");
             if semantic {
                 let args = serde_json::json!({
@@ -4103,14 +4145,15 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
             // (a commit run whose draft was never opened, or a missing
             // capability). Prefer that readable reason over the generic adapter
             // notice; a planned command keeps its roadmap reason.
-            let plain_reason = capabilities.as_ref().and_then(|caps| {
-                match caps.plain_availability(command) {
-                    crate::presentation::PlainAvailability::Unavailable { reason } => {
-                        Some(reason)
-                    }
-                    crate::presentation::PlainAvailability::Available => None,
-                }
-            });
+            let plain_reason =
+                capabilities
+                    .as_ref()
+                    .and_then(|caps| match caps.plain_availability(command) {
+                        crate::presentation::PlainAvailability::Unavailable { reason } => {
+                            Some(reason)
+                        }
+                        crate::presentation::PlainAvailability::Available => None,
+                    });
             let reason = match registry_availability {
                 Some(crate::commands::Availability::Planned(roadmap)) => {
                     Some(format!("Planned: roadmap {roadmap}"))
@@ -4161,7 +4204,9 @@ fn plain_code_actions(shared: &Shared, params: &lsp_types::CodeActionParams) -> 
                 .as_ref()
                 .map(|caps| caps.plain_availability(command))
             {
-                Some(crate::presentation::PlainAvailability::Unavailable { reason }) => Some(reason),
+                Some(crate::presentation::PlainAvailability::Unavailable { reason }) => {
+                    Some(reason)
+                }
                 Some(crate::presentation::PlainAvailability::Available) => None,
                 None => continue,
             };
@@ -4304,8 +4349,7 @@ fn prompt_row_id(id: &str) -> bool {
     id.strip_prefix("prompt:")
         .and_then(|rest| rest.split_once(':'))
         .is_some_and(|(_, row)| {
-            matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
-                || row.starts_with("item:")
+            matches!(row, "yes" | "no" | "submit" | "cancel" | "done") || row.starts_with("item:")
         })
 }
 
@@ -4470,11 +4514,18 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
         None => {
             // Repository discovery/initialisation must not own the registry.
             let draft_owner = matches!(
-                shared.client.lock().unwrap_or_else(|p| p.into_inner()).presentation,
+                shared
+                    .client
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .presentation,
                 Some(Presentation::Plain(_))
             )
             .then(|| shared.draft_owner.as_ref().clone());
-            let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(&repo, draft_owner)));
+            let candidate = Arc::new(Mutex::new(Session::new_with_draft_owner(
+                &repo,
+                draft_owner,
+            )));
             shared
                 .sessions
                 .lock()
@@ -4745,9 +4796,7 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                         .prompt_id;
                     let value = match answer {
                         Some(answer) if !answer.cancelled => {
-                            let free = answer
-                                .free_text
-                                .filter(|text| !text.trim().is_empty());
+                            let free = answer.free_text.filter(|text| !text.trim().is_empty());
                             if let Some(custom) = free {
                                 Some(PromptValue::Choice(PromptChoiceAnswer::Custom { custom }))
                             } else if answer.selected.is_empty() {
@@ -4777,9 +4826,7 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                     };
                     let mut session = handle.lock().unwrap_or_else(|p| p.into_inner());
                     let mut result = session.open_document_prompt(&request)?;
-                    if let (true, Some(pref), Some(declared)) =
-                        (over_limit, preference, declared)
-                    {
+                    if let (true, Some(pref), Some(declared)) = (over_limit, preference, declared) {
                         let hint = match client_name.as_deref() {
                             Some(name) => format!("Set pick.clients[\"{name}\"] to override."),
                             None => "Set pick.clients.<client> to override.".to_string(),
@@ -4819,9 +4866,7 @@ fn drive_execution(shared: &Shared, repo: &str, mut step: Execution) -> Result<I
                             Execution::Prompt(_) => {
                                 return Err(Error::new("refused prompt did not finish"))
                             }
-                            Execution::Pick(_) => {
-                                return Err(Error::new("pick did not finish"))
-                            }
+                            Execution::Pick(_) => return Err(Error::new("pick did not finish")),
                         };
                         result.effects.insert(
                             0,
@@ -4994,6 +5039,19 @@ fn dispatched_outcome(
         }
     }
 
+    if shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .is_some()
+    {
+        notifications.extend(effect_notifications(
+            &shared.client,
+            outcome.effects.clone(),
+        ));
+    }
+
     Ok(Dispatched::with(
         serde_json::to_value(ViewInvokeResponse {
             effects: outcome.effects,
@@ -5063,7 +5121,9 @@ struct RepositoryEdit {
 
 impl Drop for RepositoryEdit {
     fn drop(&mut self) {
-        if let Some(scope) = &self.scope { scope.revoke(); }
+        if let Some(scope) = &self.scope {
+            scope.revoke();
+        }
     }
 }
 
@@ -5111,18 +5171,40 @@ fn spawn_repository_operation(
     // until the editor (or the failure) has been answered.
     let (edit, edit_id, edit_scope) = match &operation {
         crate::git::RepositoryOperation::Commit(_) => {
-            let edit_id = match editor::registry().create(&repo, &shared.draft_owner, editor::draft::DraftKind::CommitMessage) {
+            let edit_id = match editor::registry().create(
+                &repo,
+                &shared.draft_owner,
+                editor::draft::DraftKind::CommitMessage,
+            ) {
                 Ok(id) => id,
                 Err(error) => {
-                    let _ = sender.send(show_message(1, format!("Cannot open commit draft: {error}")));
+                    let _ = sender.send(show_message(
+                        1,
+                        format!("Cannot open commit draft: {error}"),
+                    ));
                     return;
                 }
             };
-            shared.edit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(
-                edit_id.clone(), shared.config.for_repository(std::path::Path::new(&repo)),
-            );
-            let commit = CommitEdit { id: edit_id.clone(), configs: shared.edit_configs.clone() };
-            (RepositoryEdit { _commit: Some(commit), scope: None }, Some(edit_id), None)
+            shared
+                .edit_configs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(
+                    edit_id.clone(),
+                    shared.config.for_repository(std::path::Path::new(&repo)),
+                );
+            let commit = CommitEdit {
+                id: edit_id.clone(),
+                configs: shared.edit_configs.clone(),
+            };
+            (
+                RepositoryEdit {
+                    _commit: Some(commit),
+                    scope: None,
+                },
+                Some(edit_id),
+                None,
+            )
         }
         crate::git::RepositoryOperation::InstantRebase(_) => {
             let config = shared.config.for_repository(std::path::Path::new(&repo));
@@ -5132,23 +5214,43 @@ fn spawn_repository_operation(
                 &repo,
                 &shared.draft_owner,
                 Arc::new(move |run_id| {
-                    admit_configs.lock().unwrap_or_else(|p| p.into_inner()).insert(run_id.to_string(), config.clone());
+                    admit_configs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .insert(run_id.to_string(), config.clone());
                 }),
                 Arc::new(move |run_id| {
-                    release_configs.lock().unwrap_or_else(|p| p.into_inner()).remove(run_id);
+                    release_configs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .remove(run_id);
                 }),
             ) {
                 Ok(scope) => Arc::new(scope),
                 Err(error) => {
-                    let _ = sender.send(show_message(1, format!("Cannot open instant autosquash draft scope: {error}")));
+                    let _ = sender.send(show_message(
+                        1,
+                        format!("Cannot open instant autosquash draft scope: {error}"),
+                    ));
                     return;
                 }
             };
-            (RepositoryEdit { _commit: None, scope: Some(scope.clone()) }, None, Some(scope))
+            (
+                RepositoryEdit {
+                    _commit: None,
+                    scope: Some(scope.clone()),
+                },
+                None,
+                Some(scope),
+            )
         }
     };
     let (token, cancel) = shared.begin_progress_with_scope(
-        &sender, "commit", edit_id.clone(), Some(&repo), edit_scope.clone(),
+        &sender,
+        "commit",
+        edit_id.clone(),
+        Some(&repo),
+        edit_scope.clone(),
     );
     let progress = ProgressEnd {
         shared: shared.clone(),
@@ -5745,7 +5847,11 @@ mod commit_tests {
         );
         let retained = Arc::downgrade(&config);
         let id = editor::registry()
-            .create(tmp.path().to_str().unwrap(), "test-connection", editor::draft::DraftKind::CommitMessage)
+            .create(
+                tmp.path().to_str().unwrap(),
+                "test-connection",
+                editor::draft::DraftKind::CommitMessage,
+            )
             .unwrap();
         let configs = Arc::new(Mutex::new(HashMap::from([(id.clone(), config)])));
         let edit = CommitEdit {
@@ -5845,10 +5951,7 @@ mod commit_tests {
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(repo.clone(), handle.clone());
             {
-                let mut view_repos = shared
-                    .view_repos
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                let mut view_repos = shared.view_repos.lock().unwrap_or_else(|p| p.into_inner());
                 for view_id in [&status, &log, &prompt] {
                     view_repos.insert(view_id.clone(), repo.clone());
                 }
@@ -5909,7 +6012,10 @@ mod commit_tests {
             if !close_origin {
                 let status_view = session.views().get(&status).unwrap();
                 assert!(status_view.version() > status_version);
-                assert!(!status_view.dirty(), "the resumed origin has no refresh left");
+                assert!(
+                    !status_view.dirty(),
+                    "the resumed origin has no refresh left"
+                );
             }
         }
     }

@@ -17,8 +17,8 @@ use crate::presentation::prompt::{self, PromptAction, PromptDelivery, PromptDocu
 use crate::process_log::ProcessLogView;
 use crate::protocol::{
     Cursor, Effect, MessageLevel, PickItem, PromptChoiceAnswer, PromptItem, PromptKind, Selection,
-    ViewInvokeParams, ViewKeyParams, ViewKeymapParams, ViewPickParams, ViewPromptParams, ViewRender,
-    ViewSetModeParams,
+    ViewInvokeParams, ViewKeyParams, ViewKeymapParams, ViewPickParams, ViewPromptParams,
+    ViewRender, ViewSetModeParams,
 };
 use crate::status_view::StatusView;
 use crate::tree::{Node, NodeKind, Tree};
@@ -876,14 +876,36 @@ impl Session {
         if self.views.get(&id).is_some() {
             return Err(Error::new(format!("view already open: {id}")));
         }
-
         let mut view = create_view(&self.repo_path, &kind, args, &self.keymaps)?;
         if let Some(limit) = section_line_limit {
             view.set_section_line_limit(Some(limit));
         }
+        self.open_provider_view(id, placement, viewport, view)
+    }
+
+    /// Open a provider-owned view through the normal render and dispatch lifecycle.
+    pub fn open_provider_view(
+        &mut self,
+        id: impl Into<String>,
+        placement: Placement,
+        viewport: Viewport,
+        view: Box<dyn View>,
+    ) -> Result<(ViewDescriptor, ViewRender)> {
+        let id = id.into();
+        if self.views.get(&id).is_some() {
+            return Err(Error::new(format!("view already open: {id}")));
+        }
+        let kind = view.kind();
         let placement = self.placement(placement);
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.draft_owner.clone(),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         self.publish();
@@ -1190,37 +1212,46 @@ impl Session {
                 return Ok(None);
             };
             return Ok(menu.and_then(|menu| {
-                menu.groups.iter().flat_map(|group| &group.items).find_map(|item| {
-                    match item {
-                        crate::menu::Item::Action { key: item_key, command, .. }
-                            if item_key == &key => Some(command.clone()),
+                menu.groups
+                    .iter()
+                    .flat_map(|group| &group.items)
+                    .find_map(|item| match item {
+                        crate::menu::Item::Action {
+                            key: item_key,
+                            command,
+                            ..
+                        } if item_key == &key => Some(command.clone()),
                         _ => None,
-                    }
-                })
+                    })
             }));
         }
 
-        let keymap = self.keymap_for(view.descriptor().scope.as_str()).cloned().map(|keymap| {
-            keymap.with_basic_modifiers(
-                self.rich_capabilities
-                    .as_ref()
-                    .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
-            )
-        });
+        let keymap = self
+            .keymap_for(view.descriptor().scope.as_str())
+            .cloned()
+            .map(|keymap| {
+                keymap.with_basic_modifiers(
+                    self.rich_capabilities
+                        .as_ref()
+                        .is_some_and(|caps| caps.modifiers == crate::protocol::KeyModifiers::Basic),
+                )
+            });
         let mut pending = view.pending.clone();
         if cursor_moved {
             pending.clear();
         }
-        Ok(match keyhandler::resolve(
-            keymap.as_ref(),
-            &mut pending,
-            &params.key,
-            params.editor_mode,
-            view.descriptor().capture,
-        )? {
-            Resolution::Run { command, .. } => Some(command),
-            _ => None,
-        })
+        Ok(
+            match keyhandler::resolve(
+                keymap.as_ref(),
+                &mut pending,
+                &params.key,
+                params.editor_mode,
+                view.descriptor().capture,
+            )? {
+                Resolution::Run { command, .. } => Some(command),
+                _ => None,
+            },
+        )
     }
 
     fn begin_key(&mut self, params: &ViewKeyParams) -> Result<Execution> {
@@ -1430,7 +1461,9 @@ impl Session {
 
     /// The staged prompt request awaiting delivery, if any.
     pub fn pending_prompt_request(&self) -> Option<ViewPromptParams> {
-        self.pending_prompt.as_ref().map(|pending| pending.request.clone())
+        self.pending_prompt
+            .as_ref()
+            .map(|pending| pending.request.clone())
     }
 
     fn drive(&mut self, mut step: Execution, ui: &dyn PromptUi) -> Result<InvokeResult> {
@@ -1519,10 +1552,7 @@ impl Session {
     /// were edited is repaired by re-rendering the prompt view; otherwise the
     /// edited field values are adopted and the authoritative tree is returned
     /// with no render.
-    pub fn reconcile_prompt_document(
-        &mut self,
-        document: &str,
-    ) -> Result<Option<PromptReconcile>> {
+    pub fn reconcile_prompt_document(&mut self, document: &str) -> Result<Option<PromptReconcile>> {
         if !self.prompt_active() {
             return Ok(None);
         }
@@ -1704,8 +1734,7 @@ impl Session {
         if prompt != prompt_id {
             return Ok(None);
         }
-        if !matches!(row, "yes" | "no" | "submit" | "cancel" | "done")
-            && !row.starts_with("item:")
+        if !matches!(row, "yes" | "no" | "submit" | "cancel" | "done") && !row.starts_with("item:")
         {
             return Ok(None);
         }
@@ -1766,9 +1795,7 @@ impl Session {
             if reconciled.repaired {
                 (true, None)
             } else {
-                let action = document_state
-                    .answer(row_id)
-                    .map_err(Error::new)?;
+                let action = document_state.answer(row_id).map_err(Error::new)?;
                 let answer = match action {
                     PromptAction::Toggle(item_id) => {
                         document_state.toggle_item(&item_id).map_err(Error::new)?;
@@ -1822,7 +1849,9 @@ impl Session {
             .as_ref()
             .ok_or_else(|| Error::new("no prompt is active"))?;
         if pending.request.prompt_id != prompt_id {
-            return Err(Error::new(format!("prompt {prompt_id} is no longer active")));
+            return Err(Error::new(format!(
+                "prompt {prompt_id} is no longer active"
+            )));
         }
         let prompt_view = pending
             .prompt_view
@@ -2507,7 +2536,7 @@ impl Session {
         let valid = self.views.get(view_id).is_some_and(|view| view.version() == generation
             && view.menu().is_some_and(|menu| menu.id == menu_id
                 && matches!(menu.item(key), Some(crate::menu::Item::Action { command, status: MenuStatus::Implemented, .. })
-                    if matches!(command.as_str(), "log.current") || crate::presentation::commit_draft_command(command))));
+                    if crate::dispatch::plain_menu_action(command))));
         if !valid {
             return Ok(unbound(key));
         }
@@ -2610,9 +2639,7 @@ impl Session {
                     reader,
                 },
             );
-            let pick = self
-                .pending_pick_request()
-                .expect("pick just staged");
+            let pick = self.pending_pick_request().expect("pick just staged");
             self.publish();
             return Ok(Execution::Pick(pick));
         }
@@ -2748,8 +2775,15 @@ impl Session {
             suffix += 1;
         }
 
-        let (descriptor, render, mut open_view) =
-            initialize_open_view(&self.repo_path, id, kind, placement, viewport, view, self.draft_owner.clone());
+        let (descriptor, render, mut open_view) = initialize_open_view(
+            &self.repo_path,
+            id,
+            kind,
+            placement,
+            viewport,
+            view,
+            self.draft_owner.clone(),
+        );
         open_view.published = self.published.clone();
         self.views.push(open_view);
         Ok((descriptor, render))
@@ -2867,10 +2901,7 @@ impl Session {
         {
             let source = match version {
                 Some(version) if Some(version) == view.acked_version => view.acked.as_ref(),
-                Some(v) if validated_offer
-                    && view.acked_version.is_none()
-                    && v == view.version =>
-                {
+                Some(v) if validated_offer && view.acked_version.is_none() && v == view.version => {
                     Some(&view.tree)
                 }
                 Some(version) if !requires_ack && version == view.version => Some(&view.tree),
@@ -3234,9 +3265,9 @@ impl Session {
                 let repo = crate::git::GitRepo::open(&self.repo_path)?;
                 let resolved: Result<Vec<String>> =
                     commits.iter().map(|oid| repo.resolve_commit(oid)).collect();
-                resolved
-                    .ok()
-                    .filter(|resolved| !resolved.is_empty() && resolved.iter().all(|oid| !oid.is_empty()))
+                resolved.ok().filter(|resolved| {
+                    !resolved.is_empty() && resolved.iter().all(|oid| !oid.is_empty())
+                })
             } else {
                 None
             };
@@ -3340,36 +3371,90 @@ impl Session {
                 }
                 if operation == SelectionOperation::FixupCommit {
                     let Some(oid) = valid.first().filter(|_| valid.len() == 1).cloned() else {
-                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one commit to fix up")], ..InvokeResult::empty() });
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Warn,
+                                "Select exactly one commit to fix up",
+                            )],
+                            ..InvokeResult::empty()
+                        });
                     };
                     let repo = crate::git::GitRepo::open(&self.repo_path)?;
                     let subject = match repo.commit_subject(&oid) {
                         Ok(subject) => subject,
-                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::from_error(&error).unwrap_or_else(|| Effect::message(MessageLevel::Error, error.to_string()))], ..InvokeResult::empty() }),
+                        Err(error) => {
+                            return Ok(InvokeResult {
+                                effects: vec![Effect::from_error(&error).unwrap_or_else(|| {
+                                    Effect::message(MessageLevel::Error, error.to_string())
+                                })],
+                                ..InvokeResult::empty()
+                            })
+                        }
                     };
                     let result = repo.commit(&["--fixup", &oid], &[]);
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
-                    let mut effects = vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }];
+                    let mut effects = vec![
+                        Effect::PopView {
+                            view_id: view_id.to_string(),
+                        },
+                        Effect::FocusView {
+                            view_id: caller.clone(),
+                        },
+                    ];
                     match result {
-                        Ok(_) => effects.push(Effect::message(MessageLevel::Info, format!("Created fixup! {subject}"))),
-                        Err(error) => effects.push(Effect::from_error(&error).unwrap_or_else(|| Effect::message(MessageLevel::Error, error.to_string()))),
+                        Ok(_) => effects.push(Effect::message(
+                            MessageLevel::Info,
+                            format!("Created fixup! {subject}"),
+                        )),
+                        Err(error) => {
+                            effects.push(Effect::from_error(&error).unwrap_or_else(|| {
+                                Effect::message(MessageLevel::Error, error.to_string())
+                            }))
+                        }
                     }
-                    return Ok(InvokeResult { effects, keymap: self.keymap_notice(&caller), ..InvokeResult::empty() });
+                    return Ok(InvokeResult {
+                        effects,
+                        keymap: self.keymap_notice(&caller),
+                        ..InvokeResult::empty()
+                    });
                 }
                 if let SelectionOperation::InstantAutosquash(kind) = operation {
                     let Some(oid) = valid.first().filter(|_| valid.len() == 1).cloned() else {
-                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one commit for instant autosquash")], ..InvokeResult::empty() });
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Warn,
+                                "Select exactly one commit for instant autosquash",
+                            )],
+                            ..InvokeResult::empty()
+                        });
                     };
                     let repo = GitRepo::open(&self.repo_path)?;
-                    let authority = match crate::instant_rebase::InstantRebaseAuthority::prepare(&repo, &oid, kind) {
+                    let authority = match crate::instant_rebase::InstantRebaseAuthority::prepare(
+                        &repo, &oid, kind,
+                    ) {
                         Ok(authority) => authority,
-                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Error, error.to_string())], ..InvokeResult::empty() }),
+                        Err(error) => {
+                            return Ok(InvokeResult {
+                                effects: vec![Effect::message(
+                                    MessageLevel::Error,
+                                    error.to_string(),
+                                )],
+                                ..InvokeResult::empty()
+                            })
+                        }
                     };
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
                     return Ok(InvokeResult {
-                        effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::FocusView { view_id: caller.clone() }],
+                        effects: vec![
+                            Effect::PopView {
+                                view_id: view_id.to_string(),
+                            },
+                            Effect::FocusView {
+                                view_id: caller.clone(),
+                            },
+                        ],
                         keymap: self.keymap_notice(&caller),
                         commit: Some(crate::git::RepositoryOperation::InstantRebase(authority)),
                         ..InvokeResult::empty()
@@ -3377,18 +3462,52 @@ impl Session {
                 }
                 if operation == SelectionOperation::InitialRebase {
                     let Some(base) = valid.first().filter(|_| valid.len() == 1).cloned() else {
-                        return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Warn, "Select exactly one rebase base")], ..InvokeResult::empty() });
+                        return Ok(InvokeResult {
+                            effects: vec![Effect::message(
+                                MessageLevel::Warn,
+                                "Select exactly one rebase base",
+                            )],
+                            ..InvokeResult::empty()
+                        });
                     };
                     let repo = GitRepo::open(&self.repo_path)?;
                     let plan = match crate::rebase_plan::PreparedRebase::prepare(&repo, &base) {
                         Ok(plan) => plan,
-                        Err(error) => return Ok(InvokeResult { effects: vec![Effect::message(MessageLevel::Error, error.to_string())], ..InvokeResult::empty() }),
+                        Err(error) => {
+                            return Ok(InvokeResult {
+                                effects: vec![Effect::message(
+                                    MessageLevel::Error,
+                                    error.to_string(),
+                                )],
+                                ..InvokeResult::empty()
+                            })
+                        }
                     };
                     self.pending_selections.remove(view_id);
                     self.views.remove(view_id);
-                    let (descriptor, render) = self.push_view(&caller, ViewKind::RebaseTodo, Placement::Main, Box::new(crate::rebase_todo_view::RebaseTodoView::prepared(repo, plan)))?;
+                    let (descriptor, render) = self.push_view(
+                        &caller,
+                        ViewKind::RebaseTodo,
+                        Placement::Main,
+                        Box::new(crate::rebase_todo_view::RebaseTodoView::prepared(
+                            repo, plan,
+                        )),
+                    )?;
                     let prepared_id = descriptor.id.clone();
-                    return Ok(InvokeResult { effects: vec![Effect::PopView { view_id: view_id.to_string() }, Effect::PushView { descriptor }, Effect::FocusView { view_id: prepared_id.clone() }], render: Some(render), keymap: self.keymap_notice(&prepared_id), ..InvokeResult::empty() });
+                    return Ok(InvokeResult {
+                        effects: vec![
+                            Effect::PopView {
+                                view_id: view_id.to_string(),
+                            },
+                            Effect::PushView { descriptor },
+                            Effect::FocusView {
+                                view_id: prepared_id.clone(),
+                            },
+                        ],
+                        render: Some(render),
+                        keymap: self.keymap_notice(&prepared_id),
+                        ..InvokeResult::empty()
+                    });
                 }
             }
             return Ok(InvokeResult::empty());
@@ -3618,7 +3737,9 @@ fn create_view(
                 None,
             )?))
         }
-        ViewKind::RebaseTodo => Ok(Box::new(crate::rebase_todo_view::RebaseTodoView::load(GitRepo::open(repo_path)?)?)),
+        ViewKind::RebaseTodo => Ok(Box::new(crate::rebase_todo_view::RebaseTodoView::load(
+            GitRepo::open(repo_path)?,
+        )?)),
         ViewKind::ProcessLog => Ok(Box::new(ProcessLogView::new())),
         ViewKind::Prompt => Err(Error::new("The `prompt` view is not client-openable.")),
         ViewKind::Menu(name) => {
