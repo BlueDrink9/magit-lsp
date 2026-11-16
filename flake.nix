@@ -33,6 +33,8 @@
               lua5_4
               lua-language-server
               neovim
+              helix
+              vscodium
               nodejs
               pnpm
               python3
@@ -42,16 +44,14 @@
               rustfmt
               tmux
               typescript-language-server
+              cargo-machete
+              lua51Packages.luacheck
               # jscpd.packages.${system}.default
             ];
 
             shellHook = ''
               export RUST_SRC_PATH="${pkgs.rustPlatform.rustLibSrc}"
               echo "magit-lsp dev shell"
-              echo "  rust-analyzer:            $(command -v rust-analyzer)"
-              echo "  lua-language-server:      $(command -v lua-language-server)"
-              echo "  typescript-language-server: $(command -v typescript-language-server)"
-              echo "  pyright-langserver:       $(command -v pyright-langserver)"
             '';
           };
         });
