@@ -22,6 +22,70 @@ a temp `HOME`, `XDG_CONFIG_HOME` to a temp dir, `LC_ALL=C`, fixed author and
 committer, so hashes are stable and appear verbatim in snapshots. Normalise
 only temp paths and timings.
 
+### Fixtures and oracles
+
+#### Commit identity
+
+- **VERIFIED:** Amend and Extend use `--amend` (Extend adds `--no-edit`); Reword adds `--only --allow-empty`, excluding staged content ([src/git.rs:239–249](../src/git.rs#L239)).
+- **VERIFIED:** Changed-message Reword changes HEAD's OID but preserves its tree and index; staged amendments change the OID. Clean Extend with preserved metadata can retain it: “amend” does **not** imply an unconditional inequality oracle ([tests/editor_bridge.rs:452–486](../tests/editor_bridge.rs#L452)).
+- **VERIFIED:** Ordinary `commit.fixup` creates an additional commit whose parent is the previous HEAD; it does not yet fold the target ([src/session.rs:3341–3355](../src/session.rs#L3341), [tests/log_commands.rs:55–59](../tests/log_commands.rs#L55)).
+- **VERIFIED:** Instant fixup/squash creates a marker then launches autosquash; tests preserve the exclusive base OID and check that the marker disappears from reachable history ([src/instant_rebase.rs:61–84](../src/instant_rebase.rs#L61), [tests/instant_rebase.rs:224–238](../tests/instant_rebase.rs#L224)).
+- **INFERRED:** Rebase rewrites commits whose parent/tree/message/metadata changes, and consequently affected descendants; unchanged picks may retain OIDs, so do not assert that every replayed OID differs merely because rebase ran ([src/rebase_plan.rs:100–108](../src/rebase_plan.rs#L100); external semantics: [Git rebase manual](https://git-scm.com/docs/git-rebase)).
+- **VERIFIED:** Preparing/editing/discarding an unlaunched plan preserves repository state; prepared Reword/Squash currently refuse launch without mutation. Cancelled amendment also preserves HEAD/index ([tests/rebase_interactive.rs:89–118](../tests/rebase_interactive.rs#L89), [tests/editor_bridge.rs:443–446](../tests/editor_bridge.rs#L443)).
+
+#### Abbreviations and full identities
+
+- **VERIFIED:** Log rows use a hard-coded **8** characters, while node identity, selection and copy retain the full OID ([src/log_view.rs:312–346](../src/log_view.rs#L312)).
+- **VERIFIED:** Rebase-todo rows use a hard-coded **12** characters; their node IDs/commit metadata retain full OIDs, and the submitted prepared Git todo writes full OIDs ([src/rebase_todo_view.rs:42–48](../src/rebase_todo_view.rs#L42), [src/rebase_plan.rs:103–106](../src/rebase_plan.rs#L103)).
+- **VERIFIED:** These display lengths are renderer literals, not Git abbreviation configuration; log acquisition requests full `%H`/`%P`. Full-OID validation accepts **40 or 64** hexadecimal characters, not universally 40 ([src/log_view.rs:333](../src/log_view.rs#L333), [src/rebase_todo_view.rs:46](../src/rebase_todo_view.rs#L46), [src/git.rs:726](../src/git.rs#L726), [src/git.rs:1855](../src/git.rs#L1855)).
+
+#### Capability declarations, not inferred editor features
+
+- **VERIFIED:** Absence of `experimental.magit` selects Plain; a present declaration selects validated Rich v1. Wire semantics belong in [PROTOCOL.md](PROTOCOL.md), not this fixture inventory ([src/presentation/mod.rs:35–51](../src/presentation/mod.rs#L35)).
+
+| Declaration/profile | Declared capability matrix | Evidence |
+| --- | --- | --- |
+| Plain minimum | `workspace.applyEdit=true`, `textDocument.codeAction={}`; no Rich selector | **VERIFIED** [tests/common/editor_model/mod.rs:82–86](../tests/common/editor_model/mod.rs#L82) |
+| Rich minimum | v1, dynamic keys, basic modifiers, main layout; empty optional effects/prompts, no picker | **VERIFIED** [tests/common/editor_model/mod.rs:82–86](../tests/common/editor_model/mod.rs#L82) |
+| Current Neovim | v1, dynamic keys; basic/full modifiers depending on terminal/GUI; main/side/bottom/float | **VERIFIED** [lua/magit-lsp/config.lua:84–106](../lua/magit-lsp/config.lua#L84) |
+| Current VSCode | v1, static keys, full modifiers, main only | **VERIFIED** [clients/vscode/lib/session.js:50–58](../clients/vscode/lib/session.js#L50) |
+| Both current clients | Effects: visitFile, clipboard, editDocument; prompts: confirm, text, choice, multiChoice, secret | **VERIFIED** [lua/magit-lsp/config.lua:107–108](../lua/magit-lsp/config.lua#L107), [lua/magit-lsp/shared.lua:11–15](../lua/magit-lsp/shared.lua#L11), [clients/vscode/lib/session.js:57–58](../clients/vscode/lib/session.js#L57), [clients/vscode/types/shared-lists.js:6–20](../clients/vscode/types/shared-lists.js#L6) |
+| Current Neovim picker | Only fallbackView=true; multi/freeText/description/detail/group/preselection=false; maxItems=100 | **VERIFIED** [lua/magit-lsp/config.lua:109–117](../lua/magit-lsp/config.lua#L109) |
+| Current VSCode picker | multi/description/detail/preselection/fallbackView=true; freeText/group=false; no declared item limit | **VERIFIED** [clients/vscode/lib/session.js:59–67](../clients/vscode/lib/session.js#L59), [src/presentation/mod.rs:104–105](../src/presentation/mod.rs#L104) |
+
+- **VERIFIED:** Named `Plain` uses Plain minimum; `RichNative`/`RichDoc` use retained Neovim/VSCode rows, respectively. Those rows omit `pick`, unlike current producers; the labels are harness profiles, not alternate protocol modes ([tests/common/editor_model/presets.rs:7–9,38–55](../tests/common/editor_model/presets.rs#L38), [tests/fixtures/current-client-capabilities.json:7–28,46–64](../tests/fixtures/current-client-capabilities.json#L7)).
+
+#### Fixture inventory
+
+- **VERIFIED:** Rust `RepoFixture` generates temporary repositories from ordered commits/files, staged renames/files and unstaged edits, with unborn/detached options; `init_repo` has committed ten-line `f.txt`, and `init_unborn_repo` only staged `f.txt` containing `a/b/c` lines ([tests/common/mod.rs:146–185,234–292](../tests/common/mod.rs#L146)).
+- **VERIFIED:** Rust helpers isolate identity/config/dates; UI builders additionally fix UTC and disable interactive Git editors/prompts. UI repositories are generated into empty destinations, not committed repository directories ([tests/common/mod.rs:18–43](../tests/common/mod.rs#L18), [scripts/ui_lib/fixtures.py:78–113,315–333](../scripts/ui_lib/fixtures.py#L78)).
+
+| Generated UI fixture | Contents | Evidence (all **VERIFIED**) |
+| --- | --- | --- |
+| `clean` | Initial commit, ten-line `f.txt` | [scripts/ui_lib/fixtures.py:156–157](../scripts/ui_lib/fixtures.py#L156) |
+| `modified-two-files` | Committed ten-line f/g; unstaged standard f edits and g line-2 edit | [scripts/ui_lib/fixtures.py:21–51,160–163](../scripts/ui_lib/fixtures.py#L160) |
+| `two-hunk-siblings` | 40-line f with edits at 5/35; independently modified g | [scripts/ui_lib/fixtures.py:53–58,166–175](../scripts/ui_lib/fixtures.py#L166) |
+| `staged-one-file` | Committed f, standard edits staged | [scripts/ui_lib/fixtures.py:178–181](../scripts/ui_lib/fixtures.py#L178) |
+| `staged-and-unstaged` | Standard f edits staged, g edits unstaged | [scripts/ui_lib/fixtures.py:184–188](../scripts/ui_lib/fixtures.py#L184) |
+| `staged-failing-hook` / `staged-slow-hook` | Staged f edits; rejecting pre-commit hook, immediate / one-second delay | [scripts/ui_lib/fixtures.py:191–220](../scripts/ui_lib/fixtures.py#L191) |
+| `untracked` / `unborn` | Initial f plus untracked new.txt / staged ten-line f without commits | [scripts/ui_lib/fixtures.py:223–230](../scripts/ui_lib/fixtures.py#L223) |
+| `in-progress-rebase` | Divergent topic/main edits to f line 2; conflicting rebase | [scripts/ui_lib/fixtures.py:233–244](../scripts/ui_lib/fixtures.py#L233) |
+| `paused-linear-rebase-todo` | Initial plus four topic commits; stopped at first edit, three pending entries | [scripts/ui_lib/fixtures.py:247–259](../scripts/ui_lib/fixtures.py#L247) |
+| `linear-rebase-history` | Base plus one/two/three commits adding corresponding files | [scripts/ui_lib/fixtures.py:262–265](../scripts/ui_lib/fixtures.py#L262) |
+| `instant-rebase-history` | Linear history plus staged sentinel in two; registered builder, absent from public `FIXTURES` tuple | [scripts/ui_lib/fixtures.py:60–75,268–271,309](../scripts/ui_lib/fixtures.py#L268) |
+| `in-progress-cherry-pick` | Divergent side/main line-2 edits; conflicting cherry-pick | [scripts/ui_lib/fixtures.py:274–284](../scripts/ui_lib/fixtures.py#L274) |
+| `log-history` | Three f revisions/subjects, topic at HEAD, v1 at HEAD~1 | [scripts/ui_lib/fixtures.py:287–293](../scripts/ui_lib/fixtures.py#L287) |
+
+- **VERIFIED:** Committed `tests/fixtures/lsp_traces/initialize-*.json` are retained initialize declarations/client identities for plain/bundled Neovim 0.12.6 and Helix 25.07.1, consumed rather than regenerated by tests ([tests/quirks.rs:7–19,24–30](../tests/quirks.rs#L7), [tests/common/editor_model/presets.rs:18–26](../tests/common/editor_model/presets.rs#L18)).
+- **VERIFIED:** Committed `current-client-capabilities.json` contains Neovim/VSCodium identity, Rich declarations and capture/producer provenance; presets load it, not a live client capture ([tests/fixtures/current-client-capabilities.json:3–38,42–74](../tests/fixtures/current-client-capabilities.json#L3), [tests/common/editor_model/presets.rs:47–55](../tests/common/editor_model/presets.rs#L47)).
+- **VERIFIED:** Committed text goldens cover standard/vim manifests and generated VSCode bindings, plus commit-menu layouts at widths 60/140; tests render fresh output for comparison ([tests/manifest.rs:41–68](../tests/manifest.rs#L41), [tests/menu.rs:194–200](../tests/menu.rs#L194)).
+
+#### Choosing assertion values
+
+- **VERIFIED — contract-derived:** Capability expectations come from minimum/client declarations; display lengths from renderer literals; Reword tree/index preservation and read-only plan preparation have direct state assertions ([tests/common/editor_model/mod.rs:82–86](../tests/common/editor_model/mod.rs#L82), [src/log_view.rs:333](../src/log_view.rs#L333), [src/rebase_todo_view.rs:46](../src/rebase_todo_view.rs#L46), [tests/editor_bridge.rs:458–461](../tests/editor_bridge.rs#L458), [tests/rebase_interactive.rs:90–101](../tests/rebase_interactive.rs#L90)).
+- **VERIFIED — observed outputs:** Captured declaration values, exact rendered golden text and Git-produced hashes/state are observations, not universal constants; tests compare generated manifests to goldens, capture baseline HEAD/tree/index, and compare independently built UI fixtures for determinism ([tests/common/editor_model/presets.rs:18–35](../tests/common/editor_model/presets.rs#L18), [tests/manifest.rs:43–45](../tests/manifest.rs#L43), [tests/ui/scenarios/commit-head-operations.scn:7,23](../tests/ui/scenarios/commit-head-operations.scn#L7), [tests/ui/test_fixtures.py:73–86](../tests/ui/test_fixtures.py#L73)).
+- **VERIFIED:** A `40`-character assertion is fixture-specific, whereas production accepts 40/64; exact hunk-header strings are Git-output expectations for the chosen fixture, not wire contracts ([tests/instant_rebase.rs:243–252](../tests/instant_rebase.rs#L243), [src/git.rs:1855](../src/git.rs#L1855), [tests/ui/test_fixtures.py:106–117](../tests/ui/test_fixtures.py#L106)).
+
 ### 8.3 Other Rust layers
 
 - **Patch engine:** `proptest` — random file pairs and random selections;
