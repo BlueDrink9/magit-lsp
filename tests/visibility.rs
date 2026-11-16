@@ -132,6 +132,9 @@ fn cycle_visibility_preserves_the_retained_cursor_identity_and_refuses_stale_inp
     test.set_cursor(result.render.unwrap().cursor.unwrap());
     assert_eq!(test.focused_node().id, "section:untracked");
     test.ack();
+    let before_stale_text = test.text().to_owned();
+    let before_stale_visibility = test.tree().lines.clone();
+    let before_stale_status = tmp.git(&["status", "--short"]);
     let result = test.invoke_at_version(
         "common.cycle-visibility",
         initial.version,
@@ -139,12 +142,24 @@ fn cycle_visibility_preserves_the_retained_cursor_identity_and_refuses_stale_inp
         None,
         None,
     );
-    assert!(result.render.is_none());
+    let recovery = result
+        .render
+        .as_ref()
+        .expect("stale positional request emits recovery render");
+    assert!(
+        recovery.text.is_some() || recovery.edits.is_some(),
+        "recovery must contain rendered content"
+    );
+    assert!(recovery.version > initial.version);
     assert_eq!(
         message_texts(&result.effects),
         vec![magit_lsp::errors::STALE_VIEW]
     );
     assert_eq!(count_kind(test.tree(), NodeKind::File), 0);
+    assert_eq!(test.focused_node().id, "section:untracked");
+    assert_eq!(test.text(), before_stale_text);
+    assert_eq!(test.tree().lines, before_stale_visibility);
+    assert_eq!(tmp.git(&["status", "--short"]), before_stale_status);
 }
 
 /// Run one of the recursive visibility commands.
