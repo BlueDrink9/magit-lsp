@@ -1,0 +1,22 @@
+# Plugin-free fixup selection targets a non-HEAD commit and restores status.
+fixture: log-history
+client: plain
+---
+expect project_modules == 0
+expect rich_notifications == 0
+sh: printf '\nfixup staged sentinel\n' >> f.txt && git add f.txt && git rev-parse HEAD > .git/fixup-head && git rev-parse HEAD~2 > .git/fixup-target && git show -s --format=%s HEAD~2 > .git/fixup-target-subject && git write-tree > .git/fixup-index && cp f.txt .git/fixup-worktree
+wait screen contains "Staged changes (1)"
+keys: ":lua PlainUI.action('open.commit')" Enter
+wait screen contains "Fixup"
+snapshot: commit-menu
+keys: ":lua PlainUI.action('menu.run-action','f')" Enter
+wait screen contains "Select commit"
+goto "old searchable subject"
+snapshot: selected-fixup-target
+keys: ":lua PlainUI.action('common.confirm')" Enter
+wait screen contains "Unstaged changes"
+wait
+sh: test "$(git rev-parse HEAD^)" = "$(cat .git/fixup-head)" && test "$(git rev-parse HEAD~3)" = "$(cat .git/fixup-target)" && printf 'fixup! %s\n' "$(cat .git/fixup-target-subject)" > .git/fixup-expected-message && git cat-file commit HEAD > .git/fixup-object && sed '1,/^$/d' .git/fixup-object > .git/fixup-actual-message && cmp .git/fixup-expected-message .git/fixup-actual-message && test "$(git rev-parse HEAD^{tree})" = "$(cat .git/fixup-index)" && test "$(git write-tree)" = "$(cat .git/fixup-index)" && git show HEAD:f.txt > .git/fixup-committed-file && cmp .git/fixup-worktree .git/fixup-committed-file && cmp .git/fixup-worktree f.txt && test -z "$(git status --porcelain)" && test ! -e .git/index.lock
+expect project_modules == 0
+expect rich_notifications == 0
+snapshot: caller-restored

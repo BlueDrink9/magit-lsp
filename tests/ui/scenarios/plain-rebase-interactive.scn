@@ -1,0 +1,38 @@
+# Plugin-free base selection and identity-bound todo edits execute exact history.
+fixture: linear-rebase-history
+client: plain
+---
+expect project_modules == 0
+expect rich_notifications == 0
+sh: git rev-parse HEAD > .git/initial-head && git rev-parse HEAD~3 > .git/initial-base && git branch --show-current > .git/initial-branch && git ls-files --stage > .git/initial-index && git show-ref > .git/initial-refs && git diff --binary HEAD > .git/initial-worktree && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+keys: ":lua PlainUI.action('open.rebase')" Enter
+wait screen contains "Rebase"
+snapshot: rebase-menu
+keys: ":lua PlainUI.action('menu.run-action','i')" Enter
+wait screen contains "Log — initial rebase base"
+# Locate a unique commit subject, then move natively to the exclusive base.
+# Only the cursor moves; the offered server action retains commit identity.
+goto "three"
+keys: j j j
+expect cursor on "base"
+snapshot: selected-base
+keys: ":lua PlainUI.action('common.confirm')" Enter
+wait
+goto "one"
+expect screen contains "pick"
+snapshot: prepared-todo
+sh: test "$(git rev-parse HEAD)" = "$(cat .git/initial-head)" && git ls-files --stage > .git/prepared-index && cmp .git/initial-index .git/prepared-index && git show-ref > .git/prepared-refs && cmp .git/initial-refs .git/prepared-refs && git diff --binary HEAD > .git/prepared-worktree && cmp .git/initial-worktree .git/prepared-worktree && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply
+keys: ":lua PlainUI.action('rebase.todo-down')" Enter
+wait
+goto "three"
+keys: ":lua PlainUI.action('rebase.todo-drop')" Enter
+wait
+goto "drop"
+snapshot: edited-todo
+keys: ":lua PlainUI.action('rebase.todo-submit')" Enter
+wait screen contains "Unstaged changes"
+wait
+sh: git log --format=%s --reverse "$(cat .git/initial-base)..HEAD" > .git/actual-history && printf 'two\none\n' > .git/expected-history && cmp .git/expected-history .git/actual-history && test "$(git rev-parse HEAD~2)" = "$(cat .git/initial-base)" && test "$(git branch --show-current)" = "$(cat .git/initial-branch)" && git ls-tree -r --name-only HEAD > .git/actual-paths && printf 'base\none\ntwo\n' > .git/expected-paths && cmp .git/expected-paths .git/actual-paths && git show HEAD:base > .git/actual-base && git show HEAD:one > .git/actual-one && git show HEAD~1:two > .git/actual-two && printf 'base\n' > .git/expected-base && printf 'one\n' > .git/expected-one && printf 'two\n' > .git/expected-two && cmp .git/expected-base .git/actual-base && cmp .git/expected-one .git/actual-one && cmp .git/expected-two .git/actual-two && cmp .git/expected-base base && cmp .git/expected-one one && cmp .git/expected-two two && test ! -e three && test "$(git write-tree)" = "$(git rev-parse HEAD^{tree})" && test -z "$(git status --porcelain)" && test ! -d .git/rebase-merge && test ! -d .git/rebase-apply && test ! -e .git/index.lock
+expect project_modules == 0
+expect rich_notifications == 0
+snapshot: submitted-status
