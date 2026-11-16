@@ -1156,7 +1156,10 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         let elapsed = started.elapsed();
         let actions = response["result"].as_array().expect("code actions");
         assert!(!actions.is_empty());
-        assert!(actions.len() <= 9, "bounded offers: {}", actions.len());
+        // File rows include the status-scope open.rebase view action; hunk
+        // rows offer the nine content/hunk actions applicable to that target.
+        let expected_offers = if row == file_row as u32 { 10 } else { 9 };
+        assert_eq!(actions.len(), expected_offers, "status offer contract");
         let identities: Vec<_> = actions
             .iter()
             .map(|action| {
@@ -1171,6 +1174,9 @@ fn large_retained_view_repeated_code_actions_report_latency_without_mutation() {
         sorted.sort();
         sorted.dedup();
         assert_eq!(identities.len(), sorted.len(), "duplicate command offers");
+        if row == file_row as u32 {
+            assert!(identities.iter().any(|command| command == "open.rebase"));
+        }
         assert!(
             actions
                 .iter()
