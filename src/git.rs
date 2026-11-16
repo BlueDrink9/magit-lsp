@@ -1268,49 +1268,42 @@ impl GitRepo {
         self.run(&args)
     }
 
+    /// Apply the whole hunk with `hunk_id` for `path`, targeting the index or
+    /// the worktree.
+    ///
+    /// The diff is re-read first, so the hunk is located by content even when
+    /// lines above it shifted since the status was rendered.
+    fn hunk_op(&self, path: &str, hunk_id: &str, staged: bool, worktree: bool) -> Result<()> {
+        let layout = self.file_layout(path, staged)?;
+        let hunk = layout
+            .hunks
+            .iter()
+            .find(|h| h.hunk.id == hunk_id)
+            .ok_or_else(|| Error::hunk_not_found(path))?;
+        let patch = format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk));
+        if worktree {
+            self.apply_worktree(&patch, true)
+        } else {
+            self.apply_index(&patch, staged)
+        }
+    }
+
     /// Stage the whole unstaged hunk with `hunk_id` for `path`.
     ///
     /// The diff is re-read first, so the hunk is located by content even when
     /// lines above it shifted since the status was rendered.
     pub fn stage_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
-        let layout = self.file_layout(path, false)?;
-        let hunk = layout
-            .hunks
-            .iter()
-            .find(|h| h.hunk.id == hunk_id)
-            .ok_or_else(|| Error::hunk_not_found(path))?;
-        self.apply_index(
-            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
-            false,
-        )
+        self.hunk_op(path, hunk_id, false, false)
     }
 
     /// Unstage the whole staged hunk with `hunk_id` for `path`.
     pub fn unstage_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
-        let layout = self.file_layout(path, true)?;
-        let hunk = layout
-            .hunks
-            .iter()
-            .find(|h| h.hunk.id == hunk_id)
-            .ok_or_else(|| Error::hunk_not_found(path))?;
-        self.apply_index(
-            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
-            true,
-        )
+        self.hunk_op(path, hunk_id, true, false)
     }
 
     /// Discard an unstaged hunk by its content-based identity.
     pub fn discard_hunk(&self, path: &str, hunk_id: &str) -> Result<()> {
-        let layout = self.file_layout(path, false)?;
-        let hunk = layout
-            .hunks
-            .iter()
-            .find(|h| h.hunk.id == hunk_id)
-            .ok_or_else(|| Error::hunk_not_found(path))?;
-        self.apply_worktree(
-            &format!("{}{}", layout.header, patch::full_hunk_patch(&hunk.hunk)),
-            true,
-        )
+        self.hunk_op(path, hunk_id, false, true)
     }
 
     /// Discard a document-line selection from the worktree without changing the index.

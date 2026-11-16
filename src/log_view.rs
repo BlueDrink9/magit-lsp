@@ -1,7 +1,7 @@
 //! Cached, server-rendered Git history and commit selection metadata.
 
 use crate::git::{GitCommit, GitLogOptions, GitLogPage, GitLogRow, GitRepo};
-use crate::tree::{Node, NodeKind, Token, Tree};
+use crate::tree::{LineNode, Node, NodeKind, Token, Tree};
 use crate::view::{Ctx, Scope, View, ViewKind};
 use crate::Result;
 use std::collections::HashSet;
@@ -65,19 +65,6 @@ impl LogView {
             .as_ref()
             .is_some_and(|selection| selection.allow_free_text)
             .then_some(self.revision.as_str())
-    }
-
-    /// Replace the free-text revision, applying the document field rules.
-    ///
-    /// Fails with a readable message for a view that does not accept free
-    /// text, a multi-line value, or a value over the field byte limit.
-    pub fn set_revision(&mut self, text: &str) -> std::result::Result<(), String> {
-        if self.revision().is_none() {
-            return Err("this log selection does not accept a revision".to_string());
-        }
-        crate::presentation::prompt::validate_field("Revision", text)?;
-        self.revision = text.to_string();
-        Ok(())
     }
 
     /// Ingest one client revision of the rendered log-selection document.
@@ -240,7 +227,7 @@ fn render(
     };
     let heading = selection.map_or_else(|| "Log".to_string(), |s| format!("Log — {}", s.purpose));
     tree.lines.push(heading.clone());
-    tree.line_nodes.push(line("log:header", NodeKind::Header));
+    tree.line_nodes.push(LineNode::new("log:header", NodeKind::Header));
     tree.nodes.push(node(
         "log:header",
         NodeKind::Header,
@@ -260,13 +247,13 @@ fn render(
         );
         let index = tree.lines.len();
         tree.lines.push(text.clone());
-        tree.line_nodes.push(line("log:prompt", NodeKind::Message));
+        tree.line_nodes.push(LineNode::new("log:prompt", NodeKind::Message));
         tree.nodes
             .push(node("log:prompt", NodeKind::Message, text, None, index));
         if selection.allow_free_text {
             let index = tree.lines.len();
             tree.lines.push(revision.to_string());
-            tree.line_nodes.push(line("log:field:rev", NodeKind::Field));
+            tree.line_nodes.push(LineNode::new("log:field:rev", NodeKind::Field));
             tree.nodes.push(node(
                 "log:field:rev",
                 NodeKind::Field,
@@ -284,7 +271,7 @@ fn render(
                 tree.lines.push(text.clone());
                 let index = tree.lines.len() - 1;
                 let id = format!("log:graph:{index}");
-                tree.line_nodes.push(line(&id, NodeKind::Blank));
+                tree.line_nodes.push(LineNode::new(&id, NodeKind::Blank));
                 tree.nodes
                     .push(node(&id, NodeKind::Blank, text.clone(), None, index));
             }
@@ -303,7 +290,7 @@ fn render(
     if page.commits.is_empty() {
         tree.lines.push("(no commits)".into());
         let n = tree.lines.len() - 1;
-        tree.line_nodes.push(line("log:empty", NodeKind::Message));
+        tree.line_nodes.push(LineNode::new("log:empty", NodeKind::Message));
         tree.nodes.push(node(
             "log:empty",
             NodeKind::Message,
@@ -315,7 +302,7 @@ fn render(
     if page.has_more {
         let n = tree.lines.len();
         tree.lines.push("  ... load more ...".into());
-        tree.line_nodes.push(line("log:more", NodeKind::Message));
+        tree.line_nodes.push(LineNode::new("log:more", NodeKind::Message));
         tree.nodes
             .push(node("log:more", NodeKind::Message, "load more", None, n));
     }
@@ -348,7 +335,7 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
     );
     let text = format!("{prefix}{}  {}  {}", c.subject, c.author, c.date);
     tree.lines.push(text.clone());
-    tree.line_nodes.push(line(&id, NodeKind::Commit));
+    tree.line_nodes.push(LineNode::new(&id, NodeKind::Commit));
     let mut commit_node = node(
         &id,
         NodeKind::Commit,
@@ -394,20 +381,7 @@ fn commit_node(tree: &mut Tree, c: &GitCommit, show_marks: bool, marked: bool) {
         modifiers: Vec::new(),
     });
 }
-fn line(id: &str, kind: NodeKind) -> crate::tree::LineNode {
-    crate::tree::LineNode {
-        node: id.into(),
-        kind,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        text: None,
-    }
-}
+/// A commit node: [`Node::new`] plus the full commit identity for selection.
 fn node(
     id: &str,
     kind: NodeKind,
@@ -415,22 +389,7 @@ fn node(
     commit: Option<String>,
     line: usize,
 ) -> Node {
-    Node {
-        id: id.into(),
-        kind,
-        label: label.into(),
-        start_line: line,
-        end_line: line,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        copy: None,
-        mutation: None,
-        commit,
-        children: Vec::new(),
-    }
+    let mut node = Node::new(id, kind, label, line);
+    node.commit = commit;
+    node
 }

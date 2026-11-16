@@ -5,7 +5,7 @@
 //! on the node rather than recovered from the rendered line.
 
 use crate::runner::{self, ProcessRecord};
-use crate::tree::{Node, NodeKind, Token, Tree};
+use crate::tree::{LineNode, Node, NodeKind, Token, Tree};
 use crate::view::{Ctx, Scope, View, ViewKind};
 
 /// A read-only view over every finished Git invocation.
@@ -53,9 +53,9 @@ fn build(records: Vec<ProcessRecord>) -> Tree {
     let text = format!("{header} {count}");
     tree.lines.push(text.clone());
     tree.line_nodes
-        .push(line_node("process-log:header", NodeKind::Header));
+        .push(LineNode::new("process-log:header", NodeKind::Header));
     tree.nodes
-        .push(node("process-log:header", NodeKind::Header, header, 0));
+        .push(Node::new("process-log:header", NodeKind::Header, header, 0));
     tree.tokens.push(Token {
         line: 0,
         start: 0,
@@ -87,9 +87,9 @@ fn record_node(tree: &mut Tree, record: &ProcessRecord) {
     );
     tree.lines.push(text.clone());
 
-    tree.line_nodes.push(line_node(&id, NodeKind::Hunk));
+    tree.line_nodes.push(LineNode::new(&id, NodeKind::Hunk));
 
-    let mut record_node = node(&id, NodeKind::Hunk, command.clone(), line);
+    let mut record_node = Node::new(&id, NodeKind::Hunk, command.clone(), line);
     record_node.copy = Some(command.clone());
     tree.nodes.push(record_node);
 
@@ -127,7 +127,7 @@ fn output_lines(tree: &mut Tree, record_id: &str, label: &str, output: &str, fai
         let line = tree.lines.len();
         let text = format!("  {label}: {output_line}");
         tree.lines.push(text.clone());
-        tree.line_nodes.push(line_node(record_id, NodeKind::Line));
+        tree.line_nodes.push(LineNode::new(record_id, NodeKind::Line));
         if label == "stderr" {
             tree.tokens.push(Token {
                 line,
@@ -145,38 +145,3 @@ fn output_lines(tree: &mut Tree, record_id: &str, label: &str, output: &str, fai
     }
 }
 
-fn line_node(id: &str, kind: NodeKind) -> crate::tree::LineNode {
-    crate::tree::LineNode {
-        node: id.to_string(),
-        kind,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        text: None,
-    }
-}
-
-fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -> Node {
-    Node {
-        id: id.to_string(),
-        kind,
-        label: label.into(),
-        start_line,
-        end_line: start_line,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        copy: None,
-        mutation: None,
-        commit: None,
-        children: Vec::new(),
-    }
-}

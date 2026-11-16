@@ -48,13 +48,6 @@ impl ViewKind {
         self.as_str().to_string()
     }
 
-    /// The bare menu id, for `ViewKind::Menu`.
-    pub fn menu_name(&self) -> Option<&str> {
-        match self {
-            ViewKind::Menu(name) => Some(name.trim_start_matches("menu.")),
-            _ => None,
-        }
-    }
 }
 
 impl fmt::Display for ViewKind {

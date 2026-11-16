@@ -8,36 +8,20 @@ use serde_json::Value;
 
 /// Menu actions supported by the standard-LSP document interaction.
 pub fn plain_menu_action(command: &str) -> bool {
-    matches!(
-        command,
-        "log.current"
-            | "commit.fixup"
-            | "rebase.interactive"
-            | "rebase.continue"
-            | "rebase.skip"
-            | "rebase.abort"
-    ) || crate::presentation::commit_draft_command(command)
+    matches!(command, "log.current" | "commit.fixup" | "rebase.interactive"
+        | "rebase.continue" | "rebase.skip" | "rebase.abort")
+        || crate::presentation::commit_draft_command(command)
 }
 
 /// Structured todo actions whose cursor comes from a retained node identity.
 pub fn plain_todo_action(command: &str) -> bool {
-    matches!(
-        command,
-        "rebase.todo-pick"
-            | "rebase.todo-reword"
-            | "rebase.todo-edit"
-            | "rebase.todo-squash"
-            | "rebase.todo-fixup"
-            | "rebase.todo-drop"
-            | "rebase.todo-up"
-            | "rebase.todo-down"
-    )
+    matches!(command, "rebase.todo-pick" | "rebase.todo-reword" | "rebase.todo-edit"
+        | "rebase.todo-squash" | "rebase.todo-fixup" | "rebase.todo-drop"
+        | "rebase.todo-up" | "rebase.todo-down")
 }
 
 /// A content-addressed action target tied to an existing server node identity.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActionTarget {
     /// Existing path/content-derived tree node identity.
@@ -51,9 +35,7 @@ pub struct ActionTarget {
 }
 
 /// Normalized inclusive row coordinates retained as Plain selection input metadata.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectionIntent {
     /// First selected row in the retained render.
@@ -63,9 +45,7 @@ pub struct SelectionIntent {
 }
 
 /// A Plain `workspace/executeCommand` action offered from a retained render.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PlainActionParams {
     /// Registered command identifier.
@@ -82,9 +62,7 @@ pub struct PlainActionParams {
 ///
 /// The wire object always carries a camelCase `kind` discriminator so clients
 /// can forward an offered target without inspecting its fields.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PlainActionTarget {
     /// Content-addressed target from a status tree.
@@ -98,9 +76,7 @@ pub enum PlainActionTarget {
 }
 
 /// Semantic status-node identity used by local and global visibility actions.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SemanticNodeTarget {
     /// Logical view identity in the offering render.
@@ -129,9 +105,7 @@ pub fn visibility_command(command: &str) -> Option<crate::view::VisibilityComman
 }
 
 /// Semantic view identity used for supported menu and Back transitions.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SemanticViewTarget {
@@ -140,9 +114,7 @@ pub struct SemanticViewTarget {
 }
 
 /// Typed identity of an item in one logical menu view.
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SemanticMenuItemTarget {

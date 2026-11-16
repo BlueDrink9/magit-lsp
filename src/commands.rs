@@ -1733,6 +1733,42 @@ macro_rules! menu_opener {
     };
 }
 
+/// Define a command that saves or restores the open menu's switches/options.
+macro_rules! menu_args {
+    ($(#[$doc:meta])* $name:ident, $method:ident, $message:literal) => {
+        $(#[$doc])*
+        fn $name(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+            match ctx.view.menu_mut() {
+                Some(menu) => {
+                    menu.$method();
+                    ctx.info($message);
+                }
+                None => ctx.info("No menu is open"),
+            }
+            Ok(CommandOutcome::default())
+        }
+    };
+}
+
+/// Define a command that applies a visibility command to the section at point.
+macro_rules! section_visibility {
+    ($name:ident, $command:ident) => {
+        fn $name(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+            let recursive = ctx.recursive();
+            apply_visibility(ctx, VisibilityCommand::$command { recursive })
+        }
+    };
+}
+
+/// Define a command that sets the view's detail level.
+macro_rules! detail_level {
+    ($name:ident, $level:literal) => {
+        fn $name(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+            apply_visibility(ctx, VisibilityCommand::SetDetail($level))
+        }
+    };
+}
+
 menu_opener!(open_branch, "branch");
 menu_opener!(open_log, "log");
 menu_opener!(open_diff, "diff");
@@ -1754,32 +1790,22 @@ menu_opener!(open_ignore, "ignore");
 menu_opener!(open_patch_apply, "patch-apply");
 menu_opener!(open_patch_create, "patch-create");
 
-/// Remember the current switches/options as this menu's defaults.
-///
-/// Storage is in memory for now; persisted global/per-repo storage arrives
-/// with the menu configuration work (§3.11, §3.18).
-fn save_menu_args(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    match ctx.view.menu_mut() {
-        Some(menu) => {
-            menu.save_args();
-            ctx.info("Saved menu arguments");
-        }
-        None => ctx.info("No menu is open"),
-    }
-    Ok(CommandOutcome::default())
-}
+menu_args!(
+    /// Remember the current switches/options as this menu's defaults.
+    ///
+    /// Storage is in memory for now; persisted global/per-repo storage arrives
+    /// with the menu configuration work (§3.11, §3.18).
+    save_menu_args,
+    save_args,
+    "Saved menu arguments"
+);
 
-/// Restore the menu's saved switches/options.
-fn reset_menu_args(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    match ctx.view.menu_mut() {
-        Some(menu) => {
-            menu.reset_args();
-            ctx.info("Reset menu arguments");
-        }
-        None => ctx.info("No menu is open"),
-    }
-    Ok(CommandOutcome::default())
-}
+menu_args!(
+    /// Restore the menu's saved switches/options.
+    reset_menu_args,
+    reset_args,
+    "Reset menu arguments"
+);
 
 /// Flip the view between interactive and text mode; the session applies it.
 fn toggle_text_mode(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -1919,20 +1945,9 @@ fn apply_visibility(
     Ok(CommandOutcome::default())
 }
 
-fn toggle_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let recursive = ctx.recursive();
-    apply_visibility(ctx, VisibilityCommand::Toggle { recursive })
-}
-
-fn show_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let recursive = ctx.recursive();
-    apply_visibility(ctx, VisibilityCommand::Show { recursive })
-}
-
-fn hide_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    let recursive = ctx.recursive();
-    apply_visibility(ctx, VisibilityCommand::Hide { recursive })
-}
+section_visibility!(toggle_section, Toggle);
+section_visibility!(show_section, Show);
+section_visibility!(hide_section, Hide);
 
 fn show_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     apply_visibility(ctx, VisibilityCommand::ShowAll)
@@ -1950,27 +1965,13 @@ fn less_detail(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
     apply_visibility(ctx, VisibilityCommand::LessDetail)
 }
 
-fn detail_level_1(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    apply_visibility(ctx, VisibilityCommand::SetDetail(1))
-}
-
-fn detail_level_2(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    apply_visibility(ctx, VisibilityCommand::SetDetail(2))
-}
-
-fn detail_level_3(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    apply_visibility(ctx, VisibilityCommand::SetDetail(3))
-}
-
-fn detail_level_4(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    apply_visibility(ctx, VisibilityCommand::SetDetail(4))
-}
+detail_level!(detail_level_1, 1);
+detail_level!(detail_level_2, 2);
+detail_level!(detail_level_3, 3);
+detail_level!(detail_level_4, 4);
 
 fn next_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    Ok(CommandOutcome {
-        cursor: section_cursor(ctx.view, ctx.cursor, true),
-        ..Default::default()
-    })
+    section_cursor_command(ctx, true)
 }
 
 fn cycle_visibility(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
@@ -2009,10 +2010,7 @@ fn parent_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 fn prev_section(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
-    Ok(CommandOutcome {
-        cursor: section_cursor(ctx.view, ctx.cursor, false),
-        ..Default::default()
-    })
+    section_cursor_command(ctx, false)
 }
 
 /// Move to a visible structured header of the requested kind.
@@ -2163,6 +2161,14 @@ fn unstage_all(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 }
 
 /// The cursor line of the next or previous section header.
+/// Move the cursor to the next (`forward`) or previous section header.
+fn section_cursor_command(ctx: &mut CommandCtx<'_>, forward: bool) -> Result<CommandOutcome> {
+    Ok(CommandOutcome {
+        cursor: section_cursor(ctx.view, ctx.cursor, forward),
+        ..Default::default()
+    })
+}
+
 fn section_cursor(view: &OpenView, cursor: Option<Cursor>, forward: bool) -> Option<Cursor> {
     let cursor = cursor?;
     let source = view.command_source_tree().unwrap_or_else(|| view.tree());

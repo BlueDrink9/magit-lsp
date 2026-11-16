@@ -159,11 +159,6 @@ impl RepoWatcher {
         !lock.exists()
     }
 
-    /// Whether the repository is currently locked for an index write.
-    pub fn index_locked(repo: &Path) -> bool {
-        repo.join(".git").join("index.lock").is_file()
-    }
-
     /// Stop the watcher and wait for its thread.
     pub fn join(&mut self) {
         self.watcher.take();

@@ -20,12 +20,8 @@ impl magit_lsp::view::View for MemoryProvider {
     fn kind(&self) -> magit_lsp::view::ViewKind {
         magit_lsp::view::ViewKind::Other("memory".into())
     }
-    fn title(&self) -> String {
-        "Memory provider".into()
-    }
-    fn scope(&self) -> magit_lsp::view::Scope {
-        magit_lsp::view::Scope::new("common")
-    }
+    fn title(&self) -> String { "Memory provider".into() }
+    fn scope(&self) -> magit_lsp::view::Scope { magit_lsp::view::Scope::new("common") }
     fn on_refresh(&mut self) -> magit_lsp::Result<()> {
         self.current = self.value.lock().unwrap().clone();
         Ok(())
@@ -34,15 +30,9 @@ impl magit_lsp::view::View for MemoryProvider {
         use magit_lsp::tree::{LineNode, Node, NodeKind, Tree};
         let mut node = Node::new("memory:item", NodeKind::Line, "Display only", 0);
         node.copy = Some(self.current.clone());
-        Tree {
-            version: 0,
-            lines: vec!["Display only".into()],
-            nodes: vec![node],
+        Tree { version: 0, lines: vec!["Display only".into()], nodes: vec![node],
             line_nodes: vec![LineNode::new("memory:item", NodeKind::Line)],
-            tokens: vec![],
-            symbols: vec![],
-            links: vec![],
-        }
+            tokens: vec![], symbols: vec![], links: vec![] }
     }
 }
 
@@ -53,71 +43,28 @@ fn non_git_provider_uses_real_dispatch_refresh_ack_and_structured_view_interacti
     let directory = tempfile::TempDir::new().unwrap();
     let mut session = magit_lsp::session::Session::new(directory.path().to_string_lossy());
     let value = std::sync::Arc::new(std::sync::Mutex::new("provider:first".into()));
-    let (_, initial) = session
-        .open_provider_view(
-            "memory",
-            Placement::Main,
-            Viewport { cols: 80, rows: 24 },
-            Box::new(MemoryProvider {
-                value: value.clone(),
-                current: "provider:first".into(),
-            }),
-        )
-        .unwrap();
-    assert_eq!(
-        initial.text.as_ref().unwrap(),
-        &vec!["Display only".to_string()]
-    );
+    let (_, initial) = session.open_provider_view("memory", Placement::Main,
+        Viewport { cols: 80, rows: 24 }, Box::new(MemoryProvider {
+            value: value.clone(), current: "provider:first".into(),
+        })).unwrap();
+    assert_eq!(initial.text.as_ref().unwrap(), &vec!["Display only".to_string()]);
     session.ack("memory", initial.version).unwrap();
     let request = |command: &str, version| DispatchRequest {
-        command: command.into(),
-        target: DispatchTarget {
-            view_id: "memory".into(),
-            version: Some(version),
+        command: command.into(), target: DispatchTarget {
+            view_id: "memory".into(), version: Some(version),
             cursor: Some(magit_lsp::protocol::Cursor { line: 0, column: 0 }),
-            selection: None,
-            key: None,
-        },
-        action_target: None,
-        args: None,
+            selection: None, key: None,
+        }, action_target: None, args: None,
     };
-    let copied = session
-        .dispatch(
-            request("common.copy-value", initial.version),
-            &magit_lsp::ui::NullUi,
-        )
-        .unwrap();
-    assert_eq!(
-        copied.effects,
-        vec![Effect::Clipboard {
-            text: "provider:first".into()
-        }]
-    );
+    let copied = session.dispatch(request("common.copy-value", initial.version), &magit_lsp::ui::NullUi).unwrap();
+    assert_eq!(copied.effects, vec![Effect::Clipboard { text: "provider:first".into() }]);
     *value.lock().unwrap() = "provider:second".into();
-    session
-        .dispatch(
-            request("common.refresh", initial.version),
-            &magit_lsp::ui::NullUi,
-        )
-        .unwrap();
+    session.dispatch(request("common.refresh", initial.version), &magit_lsp::ui::NullUi).unwrap();
     let version = session.views().get("memory").unwrap().version();
     session.ack("memory", version).unwrap();
-    let copied = session
-        .dispatch(
-            request("common.copy-value", version),
-            &magit_lsp::ui::NullUi,
-        )
-        .unwrap();
-    assert_eq!(
-        copied.effects,
-        vec![Effect::Clipboard {
-            text: "provider:second".into()
-        }]
-    );
-    assert_eq!(
-        session.views().get("memory").unwrap().tree().lines,
-        vec!["Display only"]
-    );
+    let copied = session.dispatch(request("common.copy-value", version), &magit_lsp::ui::NullUi).unwrap();
+    assert_eq!(copied.effects, vec![Effect::Clipboard { text: "provider:second".into() }]);
+    assert_eq!(session.views().get("memory").unwrap().tree().lines, vec!["Display only"]);
     assert!(!directory.path().join(".git").exists());
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }

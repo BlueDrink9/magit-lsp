@@ -99,11 +99,6 @@ impl Item {
         matches!(self, Item::Action { .. })
     }
 
-    /// Whether the item is a switch.
-    pub fn is_switch(&self) -> bool {
-        matches!(self, Item::Switch { .. })
-    }
-
     /// Whether the item is an option.
     pub fn is_option(&self) -> bool {
         matches!(self, Item::Option { .. })
@@ -309,14 +304,6 @@ impl Menu {
             .find(|item| item.key() == key)
     }
 
-    /// Find a mutable item by its canonical key.
-    pub fn item_mut(&mut self, key: &str) -> Option<&mut Item> {
-        self.groups
-            .iter_mut()
-            .flat_map(|group| &mut group.items)
-            .find(|item| item.key() == key)
-    }
-
     /// The argument preview line, e.g. `git commit --all --no-verify`.
     pub fn preview(&self) -> String {
         let mut parts = vec![self.base_command()];
@@ -436,10 +423,10 @@ impl<'a> Builder<'a> {
         let line = self.tree.lines.len();
         let id = format!("menu:{}/title", self.menu.id);
         self.tree.lines.push(format!(" {}", self.menu.title));
-        self.tree.line_nodes.push(line_node(&id, NodeKind::Header));
+        self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Header));
         self.tree
             .nodes
-            .push(node(&id, NodeKind::Header, self.menu.title.clone(), line));
+            .push(Node::new(&id, NodeKind::Header, self.menu.title.clone(), line));
         self.token(line, 1, self.menu.title.len(), "magit.menu.title");
     }
 
@@ -459,11 +446,11 @@ impl<'a> Builder<'a> {
             self.tree.lines.push(format!(" {}", group.title));
             self.tree
                 .line_nodes
-                .push(line_node(&group_id, NodeKind::Section));
+                .push(LineNode::new(&group_id, NodeKind::Section));
             self.token(line, 1, group.title.len(), "magit.menu.group");
 
             let index = self.tree.nodes.len();
-            let mut group_node = node(&group_id, NodeKind::Section, group.title.clone(), start);
+            let mut group_node = Node::new(&group_id, NodeKind::Section, group.title.clone(), start);
             self.tree.nodes.push(group_node.clone());
 
             let mut children = Vec::new();
@@ -547,7 +534,7 @@ impl<'a> Builder<'a> {
             for (start, length, token_type) in line_tokens {
                 self.token(line, start, length, token_type);
             }
-            let mut entry = line_node(&id, NodeKind::Line);
+            let mut entry = LineNode::new(&id, NodeKind::Line);
             entry.status = Some(status_name(item.status()));
             self.tree.line_nodes.push(entry);
             if offset == 0 {
@@ -605,10 +592,10 @@ impl<'a> Builder<'a> {
         let text = self.menu.preview();
         let id = format!("menu:{}/preview", self.menu.id);
         self.tree.lines.push(format!(" {text}"));
-        self.tree.line_nodes.push(line_node(&id, NodeKind::Message));
+        self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Message));
         self.tree
             .nodes
-            .push(node(&id, NodeKind::Message, text.clone(), line));
+            .push(Node::new(&id, NodeKind::Message, text.clone(), line));
         self.token(line, 1, text.len(), "magit.menu.preview");
     }
 
@@ -636,7 +623,7 @@ impl<'a> Builder<'a> {
             // column row's first line.
             for block in &row {
                 let group_id = format!("menu:{}/group:{}", self.menu.id, slug(&block.group.title));
-                let mut group_node = node(
+                let mut group_node = Node::new(
                     &group_id,
                     NodeKind::Section,
                     block.group.title.clone(),
@@ -683,7 +670,7 @@ impl<'a> Builder<'a> {
                 match owner {
                     Some((key, item)) => {
                         let id = format!("menu:{}/item:{key}", self.menu.id);
-                        let mut entry = line_node(&id, NodeKind::Line);
+                        let mut entry = LineNode::new(&id, NodeKind::Line);
                         entry.status = Some(status_name(item.status()));
                         self.tree.line_nodes.push(entry);
                         self.tree.nodes.push(item_node(&id, item, line));
@@ -694,7 +681,7 @@ impl<'a> Builder<'a> {
                             format!("menu:{}/group:{}", self.menu.id, slug(&group.group.title));
                         self.tree
                             .line_nodes
-                            .push(line_node(&group_id, NodeKind::Section));
+                            .push(LineNode::new(&group_id, NodeKind::Section));
                     }
                 }
             }
@@ -910,44 +897,8 @@ fn slug(title: &str) -> String {
         .collect()
 }
 
-fn line_node(id: &str, kind: NodeKind) -> LineNode {
-    LineNode {
-        node: id.to_string(),
-        kind,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        text: None,
-    }
-}
-
-fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -> Node {
-    Node {
-        id: id.to_string(),
-        kind,
-        label: label.into(),
-        start_line,
-        end_line: start_line,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        copy: None,
-        mutation: None,
-        commit: None,
-        children: Vec::new(),
-    }
-}
-
 fn item_node(id: &str, item: &Item, line: usize) -> Node {
-    let mut node = node(id, NodeKind::Line, item.label().to_string(), line);
+    let mut node = Node::new(id, NodeKind::Line, item.label().to_string(), line);
     node.status = Some(status_name(item.status()));
     node.copy = Some(item.label().to_string());
     node

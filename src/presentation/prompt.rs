@@ -668,7 +668,7 @@ impl PromptDocument {
     ) {
         let line = tree.lines.len();
         tree.lines.push(text);
-        tree.line_nodes.push(line_node(&id, kind));
+        tree.line_nodes.push(LineNode::new(&id, kind));
         tree.nodes.push(Node {
             id,
             kind,
@@ -699,7 +699,7 @@ impl PromptDocument {
     ) {
         let line = tree.lines.len();
         tree.lines.push(clip(label, cols));
-        tree.line_nodes.push(line_node(&id, NodeKind::Line));
+        tree.line_nodes.push(LineNode::new(&id, NodeKind::Line));
         tree.nodes.push(Node {
             id,
             kind: NodeKind::Line,
@@ -730,7 +730,7 @@ impl PromptDocument {
         let line = tree.lines.len();
         let id = item_row_id(&self.prompt_id, &item.id);
         tree.lines.push(text);
-        tree.line_nodes.push(line_node(&id, NodeKind::Line));
+        tree.line_nodes.push(LineNode::new(&id, NodeKind::Line));
         tree.nodes.push(Node {
             id,
             kind: NodeKind::Line,
@@ -873,17 +873,3 @@ fn empty_tree() -> Tree {
     }
 }
 
-fn line_node(id: &str, kind: NodeKind) -> LineNode {
-    LineNode {
-        node: id.to_string(),
-        kind,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        text: None,
-    }
-}

@@ -176,6 +176,53 @@ pub struct LineNode {
     pub text: Option<String>,
 }
 
+impl Node {
+    /// A node with `label` on one line and no metadata, copy text or children.
+    pub fn new(
+        id: impl Into<NodeId>,
+        kind: NodeKind,
+        label: impl Into<String>,
+        start_line: usize,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            label: label.into(),
+            start_line,
+            end_line: start_line,
+            section: None,
+            path: None,
+            hunk_id: None,
+            status: None,
+            marker: None,
+            line_index: None,
+            new_line: None,
+            copy: None,
+            mutation: None,
+            commit: None,
+            children: Vec::new(),
+        }
+    }
+}
+
+impl LineNode {
+    /// A line node owning `id` with no section, path or hunk metadata.
+    pub fn new(id: impl Into<NodeId>, kind: NodeKind) -> Self {
+        Self {
+            node: id.into(),
+            kind,
+            section: None,
+            path: None,
+            hunk_id: None,
+            status: None,
+            marker: None,
+            line_index: None,
+            new_line: None,
+            text: None,
+        }
+    }
+}
+
 /// A semantic-token range, using the `magit.*` type names of TASKS.md §3.15.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Token {

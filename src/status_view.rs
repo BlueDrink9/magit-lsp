@@ -333,8 +333,8 @@ fn add_rebase(tree: &mut Tree, state: Option<RebaseState>) {
     let line = tree.lines.len();
     let label = if state.conflicted { "Rebase (conflicted)" } else { "Rebase (active)" };
     tree.lines.push(label.to_string());
-    tree.line_nodes.push(line_node(id, NodeKind::Section));
-    let mut section = node(id, NodeKind::Section, "Rebase", line);
+    tree.line_nodes.push(LineNode::new(id, NodeKind::Section));
+    let mut section = Node::new(id, NodeKind::Section, "Rebase", line);
     section.section = Some("rebase".to_string());
     let mut children = Vec::new();
     for (action, available) in [("continue", !state.conflicted), ("skip", true), ("abort", true)] {
@@ -342,8 +342,8 @@ fn add_rebase(tree: &mut Tree, state: Option<RebaseState>) {
         let child_line = tree.lines.len();
         let text = format!("  {action}: {}", if available { "available" } else { "unavailable (resolve conflicts)" });
         tree.lines.push(text.clone());
-        tree.line_nodes.push(line_node(&child_id, NodeKind::Message));
-        let mut child = node(&child_id, NodeKind::Message, text, child_line);
+        tree.line_nodes.push(LineNode::new(&child_id, NodeKind::Message));
+        let mut child = Node::new(&child_id, NodeKind::Message, text, child_line);
         child.section = Some(if available { action } else { "unavailable" }.to_string());
         child.status = Some("rebase_operation".to_string());
         tree.nodes.push(child);
@@ -454,10 +454,10 @@ where
         self.tree.lines.push(format!("Head: {branch}"));
         self.tree
             .line_nodes
-            .push(line_node("header", NodeKind::Header));
+            .push(LineNode::new("header", NodeKind::Header));
         self.tree
             .nodes
-            .push(node("header", NodeKind::Header, "Head", line));
+            .push(Node::new("header", NodeKind::Header, "Head", line));
     }
 
     fn section(&mut self, key: &str, title: &str, files: &[FileEntry]) {
@@ -466,18 +466,18 @@ where
         self.tree.lines.push(String::new());
         self.tree
             .line_nodes
-            .push(line_node(&section_id, NodeKind::Blank));
+            .push(LineNode::new(&section_id, NodeKind::Blank));
 
         let line = self.tree.lines.len();
         let text = format!("{title} ({})", files.len());
         self.tree.lines.push(text.clone());
 
-        let mut entry = line_node(&section_id, NodeKind::Section);
+        let mut entry = LineNode::new(&section_id, NodeKind::Section);
         entry.section = Some(key.to_string());
         self.tree.line_nodes.push(entry);
 
         let index = self.tree.nodes.len();
-        let mut section = node(&section_id, NodeKind::Section, title, line);
+        let mut section = Node::new(&section_id, NodeKind::Section, title, line);
         section.section = Some(key.to_string());
         self.tree.nodes.push(section);
 
@@ -501,10 +501,10 @@ where
             let text = format!("{hidden} more lines: expand");
             let row = self.tree.lines.len();
             self.tree.lines.push(text.clone());
-            self.tree.line_nodes.push(line_node(&id, NodeKind::Message));
+            self.tree.line_nodes.push(LineNode::new(&id, NodeKind::Message));
             self.tree
                 .nodes
-                .push(node(&id, NodeKind::Message, text, row));
+                .push(Node::new(&id, NodeKind::Message, text, row));
             self.tree.nodes[index].children = vec![id];
         } else if self.visibility.is_expanded(&section_id) {
             let children = files
@@ -522,14 +522,14 @@ where
             .lines
             .push(format!("  {} {}", file.status, file.path));
 
-        let mut entry = line_node(&file_id, NodeKind::File);
+        let mut entry = LineNode::new(&file_id, NodeKind::File);
         entry.section = Some(section.to_string());
         entry.path = Some(file.path.clone());
         entry.status = Some(file.status.clone());
         self.tree.line_nodes.push(entry);
 
         let index = self.tree.nodes.len();
-        let mut file_node = node(&file_id, NodeKind::File, file.path.clone(), line);
+        let mut file_node = Node::new(&file_id, NodeKind::File, file.path.clone(), line);
         file_node.section = Some(section.to_string());
         file_node.path = Some(file.path.clone());
         file_node.status = Some(file.status.clone());
@@ -600,7 +600,7 @@ where
         );
         self.tree.lines.push(header.clone());
 
-        let mut entry = line_node(&hunk_id, NodeKind::Hunk);
+        let mut entry = LineNode::new(&hunk_id, NodeKind::Hunk);
         entry.section = Some(section.to_string());
         entry.path = Some(file.path.clone());
         entry.hunk_id = Some(hunk.id.clone());
@@ -608,7 +608,7 @@ where
         self.tree.line_nodes.push(entry);
 
         let index = self.tree.nodes.len();
-        let mut hunk_node = node(&hunk_id, NodeKind::Hunk, "@@", line);
+        let mut hunk_node = Node::new(&hunk_id, NodeKind::Hunk, "@@", line);
         hunk_node.section = Some(section.to_string());
         hunk_node.path = Some(file.path.clone());
         hunk_node.hunk_id = Some(hunk.id.clone());
@@ -658,7 +658,7 @@ where
                     last_new = new_line;
                 }
 
-                let mut entry = line_node(&id, NodeKind::Line);
+                let mut entry = LineNode::new(&id, NodeKind::Line);
                 entry.section = Some(section.to_string());
                 entry.path = Some(file.path.clone());
                 entry.hunk_id = Some(hunk.id.clone());
@@ -668,7 +668,7 @@ where
                 entry.text = Some(diff_line.text.clone());
                 self.tree.line_nodes.push(entry);
 
-                let mut line_node = node(&id, NodeKind::Line, diff_line.text.clone(), line);
+                let mut line_node = Node::new(&id, NodeKind::Line, diff_line.text.clone(), line);
                 if matches!(diff_line.marker, '+' | '-' | ' ') {
                     line_node.copy = Some(diff_line.text.clone());
                 }
@@ -708,17 +708,17 @@ where
         self.tree.lines.push(String::new());
         self.tree
             .line_nodes
-            .push(line_node("message:clean", NodeKind::Blank));
+            .push(LineNode::new("message:clean", NodeKind::Blank));
 
         let line = self.tree.lines.len();
         let text = "Working tree clean";
         self.tree.lines.push(text.to_string());
         self.tree
             .line_nodes
-            .push(line_node("message:clean", NodeKind::Message));
+            .push(LineNode::new("message:clean", NodeKind::Message));
         self.tree
             .nodes
-            .push(node("message:clean", NodeKind::Message, text, line));
+            .push(Node::new("message:clean", NodeKind::Message, text, line));
     }
 
     fn finish(mut self) -> Tree {
@@ -819,21 +819,6 @@ where
     }
 }
 
-fn line_node(id: &str, kind: NodeKind) -> LineNode {
-    LineNode {
-        node: id.to_string(),
-        kind,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        text: None,
-    }
-}
-
 /// Source content from each valid hunk line, without markers or metadata.
 fn hunk_source_text(hunk: &Hunk) -> String {
     let mut text = String::new();
@@ -849,27 +834,6 @@ fn hunk_source_text(hunk: &Hunk) -> String {
         first = false;
     }
     text
-}
-
-fn node(id: &str, kind: NodeKind, label: impl Into<String>, start_line: usize) -> Node {
-    Node {
-        id: id.to_string(),
-        kind,
-        label: label.into(),
-        start_line,
-        end_line: start_line,
-        section: None,
-        path: None,
-        hunk_id: None,
-        status: None,
-        marker: None,
-        line_index: None,
-        new_line: None,
-        copy: None,
-        mutation: None,
-        commit: None,
-        children: Vec::new(),
-    }
 }
 
 fn status_token(status: &str) -> &'static str {
