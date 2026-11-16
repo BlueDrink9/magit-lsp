@@ -625,7 +625,7 @@ fn explicit_abort_creates_no_commit_and_restores_the_status_view() {
 }
 
 #[test]
-fn offered_plain_stage_is_refused_during_registered_commit_wait() {
+fn effective_plain_mutations_are_refused_during_registered_commit_wait() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "before\n"), ("g.txt", "unchanged\n")])
         .modify_standard()
@@ -636,6 +636,22 @@ fn offered_plain_stage_is_refused_during_registered_commit_wait() {
     let draft_uri = start_open_draft(&repo, &mut server, &mut editor, &uri, &mut seen);
     let head = repo.git(&["rev-parse", "HEAD"]);
     let index = repo.git(&["write-tree"]);
+    let worktree = repo.git(&["status", "--porcelain=v1"]);
+    let diff = repo.git(&["diff", "--binary"]);
+
+    // Opening the draft queued a status render. The first query drains its
+    // applyEdit/echo; the second obtains the acknowledged snapshot, not a retry.
+    let _ = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 205);
+    let discard = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 207);
+    let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, discard, 206);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index);
+    assert_eq!(repo.git(&["status", "--porcelain=v1"]), worktree);
+    assert_eq!(repo.git(&["diff", "--binary"]), diff);
+    assert!(!repo.path().join(".git/rebase-merge").exists());
+    assert!(!repo.path().join(".git/rebase-apply").exists());
 
     let _ = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 210);
     let stage = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 220);
@@ -644,14 +660,73 @@ fn offered_plain_stage_is_refused_during_registered_commit_wait() {
         effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(repo.git(&["write-tree"]), index);
+    assert_eq!(repo.git(&["status", "--porcelain=v1"]), worktree);
+
+    let open = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "open.commit", 231);
+    let opened = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open, 232);
+    assert!(opened["error"].is_null(), "{opened}");
+    assert!(opened["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "pushView" && effect["descriptor"]["scope"] == "menu.commit"), "{opened}");
+    // The first query drains the menu edit/echo; the second observes its acknowledged snapshot.
+    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 233);
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 234);
+    let create = offered.iter().find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
+        .expect("fresh commit creation menu action")["command"]["arguments"][0].clone();
+    let refused = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 235);
+    assert!(refused["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["text"] == "Wait for the current Git operation to finish"), "{refused}");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index);
+    assert_eq!(repo.git(&["diff", "--binary"]), diff);
+    assert_eq!(repo.git(&["status", "--porcelain=v1"]), worktree);
+    assert!(!repo.path().join(".git/rebase-merge").exists());
+    assert!(!repo.path().join(".git/rebase-apply").exists());
+
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 236);
+    let cancel = draft_action(&offered, "common.cancel");
+    let cancelled = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, cancel, 237);
+    assert!(cancelled["error"].is_null(), "{cancelled}");
+    assert!(cancelled["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "popView"), "{cancelled}");
 
     let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 240);
     let abort = draft_action(&offered, "common.cancel");
     assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, abort, 250)["error"].is_null());
     let expected_path = repo.path().join(".git/COMMIT_EDITMSG").to_string_lossy().to_string();
     wait_for_status_view(&mut server, &mut editor, &draft_uri, &mut seen, &uri, &expected_path);
-    let stage = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.stage", 260);
-    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, stage, 270)["error"].is_null());
+    server.send(editor.close(&draft_uri));
+    let discard = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "g.txt", "status.discard", 260);
+    let result = execute_action(&mut server, &mut editor, &draft_uri, &mut seen, discard, 270);
+    assert!(result["error"].is_null(), "{result}");
+    let _ = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, 0, 271);
+    // Text locates only the cursor; the offered opaque target owns identity.
+    let yes = editor.text(&uri).lines().position(|line| line.trim() == "Yes").expect("discard confirmation") as u32;
+    let offered = code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &uri, yes, 272);
+    let answer = draft_action(&offered, "prompt.answer");
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, answer, 273)["error"].is_null());
+    assert_eq!(std::fs::read_to_string(repo.path().join("g.txt")).unwrap(), "unchanged\n");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.git(&["write-tree"]), index);
+
+    let open = wait_for_status_action(&mut server, &mut editor, &draft_uri, &mut seen, &uri, "f.txt", "open.commit", 280);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, open, 281)["error"].is_null());
+    let create = wait_for_commit_menu(&mut server, &mut editor, &draft_uri, &mut seen, &uri)
+        .into_iter().find(|action| action["command"]["arguments"][0]["target"]["itemKey"] == "c")
+        .expect("same commit creation after release")["command"]["arguments"][0].clone();
+    let start = seen.len();
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 282)["error"].is_null());
+    while !seen[start..].iter().any(|message| message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri) {
+        pump(&mut server, &mut editor, &draft_uri, &mut seen);
+    }
+    let template = std::fs::read_to_string(&expected_path).expect("second commit template");
+    server.send(editor.open(&draft_uri, &template));
+    server.send(editor.edit(&draft_uri, "Commit after deferred ownership release\n"));
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 300);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 301)["error"].is_null());
+    wait_for_head_change(&repo, &head);
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]), "Commit after deferred ownership release\n\n");
+    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(repo.git(&["status", "--porcelain=v1"]), "");
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));
     assert!(status.success());

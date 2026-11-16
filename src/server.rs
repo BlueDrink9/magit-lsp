@@ -2738,7 +2738,7 @@ fn execute_plain_action(
             _ => return plain_stale_message(),
         }
     };
-    let (repo, view_id, line, scope) = {
+    let (repo, view_id, line, scope, effective_command) = {
         let documents = shared
             .plain_documents
             .lock()
@@ -2757,6 +2757,7 @@ fn execute_plain_action(
                 "Plain action retained snapshot identity/generation mismatch");
             return plain_stale_message();
         }
+        let mut effective_command = params.command.clone();
         let line = match &params.target {
             crate::dispatch::PlainActionTarget::Content(target) => {
                 let Some(node) = tree.node(&target.node_id) else {
@@ -2843,6 +2844,7 @@ fn execute_plain_action(
                                     ..
                                 }),
                             ) => {
+                                effective_command = command.clone();
                                 crate::dispatch::plain_menu_action(command)
                             }
                             (
@@ -2874,17 +2876,12 @@ fn execute_plain_action(
         }
         let repo = entry.repo.clone();
         let view_id = entry.view_id.clone();
-        (repo, view_id, line, scope.to_string())
+        (repo, view_id, line, scope.to_string(), effective_command)
     };
     if shared.cancellation_pending(&repo) {
         return cancelling_response();
     }
-    if shared.deferred_pending(&repo)
-        && matches!(
-            params.command.as_str(),
-            "status.stage" | "status.unstage" | "status.stage-all" | "status.unstage-all"
-        )
-    {
+    if shared.deferred_pending(&repo) && repository_mutation_command(&effective_command) {
         return deferred_operation_response();
     }
     let handle = shared
