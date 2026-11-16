@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
 ROOT = Path.cwd()
@@ -128,10 +129,14 @@ def format_paths(paths: list[str], tree: Path, write: bool) -> bool:
                     command.append("--check")
                 okay &= invoke([*command, *files], tree, name)
     if rust:
-        command = ["cargo", "fmt", "--all"]
+        manifest = tomllib.loads((tree / "Cargo.toml").read_text())
+        edition = str(manifest["package"]["edition"])
+        # rustfmt normally follows mod declarations into unselected files.
+        # Format only the selected inputs, retaining the snapshot mutation guard.
+        command = ["rustfmt", "--edition", edition, "--config", "skip_children=true"]
         if not write:
-            command += ["--", "--check"]
-        okay &= invoke(command, tree, "cargo fmt --all" if write else "cargo fmt --all -- --check")
+            command.append("--check")
+        okay &= invoke([*command, *rust], tree, "rustfmt selected inputs")
     return okay
 
 
