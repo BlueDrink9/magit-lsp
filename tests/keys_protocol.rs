@@ -303,7 +303,9 @@ fn non_positional_keys_and_menu_options_ignore_obsolete_render_versions() {
         .build();
     let (mut test, initial) = TestSession::open_status(&tmp, Profile::Vim);
     test.ack();
+    write(&tmp.path().join("new.txt"), "new file\n");
     test.refresh().expect("advance render");
+    std::fs::remove_file(tmp.path().join("new.txt")).unwrap();
     test.ack();
     let prefix = test.press_at_version("g", initial.version);
     assert!(prefix.effects.is_empty());
