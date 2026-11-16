@@ -41,6 +41,7 @@ function PlainUI.snapshot()
     rich_notifications = vim.g.plain_smoke_rich_notifications,
     applied_edits = applied,
     messages = vim.split(vim.fn.execute('messages'), '\n'),
+    stale_feedback = vim.fn.execute('messages'):find('This view is stale; please retry on the current view.', 1, true) ~= nil,
     capabilities = client and client.config.capabilities,
   }
 end
@@ -53,8 +54,16 @@ function PlainUI.action(command, item_key)
       local selected = type(action.command) == 'table' and action.command or action
       local args = selected.arguments
       local target = args and args[1]
-      return type(target) == 'table' and target.command == command
+      local matches = type(target) == 'table' and target.command == command
         and (item_key == nil or (target.target and target.target.itemKey == item_key))
+      if matches then PlainUI.last_command = vim.deepcopy(selected) end
+      return matches
     end,
   })
+end
+
+--- Replay the last opaque server command to verify visible stale-action refusal.
+function PlainUI.replay_last()
+  local client = assert(vim.lsp.get_client_by_id(vim.g.plain_smoke_client_id))
+  client:exec_cmd(assert(PlainUI.last_command), { bufnr = vim.api.nvim_get_current_buf() })
 end

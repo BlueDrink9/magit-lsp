@@ -880,6 +880,19 @@ class NativeSessionTest(unittest.TestCase):
             self.assertTrue(all(call.args[1] == 0 for call in kill.call_args_list))
             self.assertEqual(report["remaining_owned_pids"], [123])
 
+    def test_process_birth_record_is_required_for_real_signal_probe(self) -> None:
+        from ui_lib import process_identity
+        with tempfile.TemporaryDirectory() as directory:
+            record = Path(directory) / "server.pid"
+            pid = os.getpid()
+            birth = process_identity.identity(pid)
+            self.assertIsNotNone(birth)
+            self.assertFalse(process_identity.signal_owned(pid, record, 0))
+            record.with_suffix(".identity").write_text(json.dumps({"pid": pid, "identity": "different-birth"}))
+            self.assertFalse(process_identity.signal_owned(pid, record, 0))
+            record.with_suffix(".identity").write_text(json.dumps({"pid": pid, "identity": birth}))
+            self.assertTrue(process_identity.signal_owned(pid, record, 0))
+
     def test_missing_roles_cannot_claim_verified_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run = make_run(directory)

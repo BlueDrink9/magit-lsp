@@ -16,6 +16,12 @@ goto "g.txt"
 keys: ":lua PlainUI.action('status.stage')" Enter
 wait
 sh: git diff --cached --name-only > .git/staged-names && test "$(cat .git/staged-names)" = g.txt && git show :g.txt > .git/staged-g && cmp .git/staged-g g.txt
+sh: git write-tree > .git/staged-index
+keys: ":lua PlainUI.replay_last()" Enter
+keys: Enter
+wait state stale_feedback == true
+sh: git write-tree > .git/refused-index && cmp .git/staged-index .git/refused-index && git rev-parse HEAD > .git/refused-head && cmp .git/before-head .git/refused-head && cmp .git/worktree-f f.txt && cmp .git/worktree-g g.txt
+snapshot: visible-stale-refusal
 goto "Staged changes (1)"
 expect screen contains "Staged changes (1)"
 snapshot: staged-file
