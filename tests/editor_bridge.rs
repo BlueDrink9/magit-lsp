@@ -557,7 +557,7 @@ fn r_edit_2_eof_during_precommit_cancels_owned_hook() {
 
     let mut server = TestServer::spawn(&[]);
     server.recv_timeout = Duration::from_secs(20);
-    server.initialize(json!({}));
+    server.initialize(rich_capabilities());
     let repo = json!(tmp.path().to_string_lossy());
     let status = open_status(&mut server, 2, &repo);
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":status,"command":"commit.create"}}));
@@ -2279,7 +2279,13 @@ fn r_edit_2_progress_cancel_during_commit_msg_hook() {
     assert_eq!(tmp.git(&["write-tree"]), tree);
     assert_eq!(read(&tmp.path().join("f.txt")), worktree);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Path::new(&format!("/proc/{child}/stat")).exists() {
+    while std::fs::read_to_string(format!("/proc/{child}/stat"))
+        .ok()
+        .and_then(|stat| stat.rsplit_once(')').map(|(_, tail)| {
+            !matches!(tail.trim_start().chars().next(), Some('Z' | 'X'))
+        }))
+        .unwrap_or(false)
+    {
         assert!(
             Instant::now() < deadline,
             "hook descendant survived cancellation"
