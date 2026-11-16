@@ -1,14 +1,9 @@
 {
-  description = "magit-lsp development shell with Rust, Lua, Node and Python LSP servers";
+  description = "magit-lsp development and testing environments";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # inputs.jscpd.url = "github:kucherenko/jscpd";
-  # inputs.jscpd.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self
-  , nixpkgs
-  # , jscpd
-  }:
+  outputs = { self, nixpkgs }:
     let
       systems = [
         "x86_64-linux"
@@ -19,12 +14,30 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
-      devShells = forAllSystems (system:
+      packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
         in
         {
-          default = pkgs.mkShell {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "magit-lsp";
+            version = "0.1.0";
+            src = pkgs.lib.cleanSource ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            meta = {
+              description = "A Git repository interface for editors over the Language Server Protocol";
+              license = pkgs.lib.licenses.gpl3Only;
+              mainProgram = "magit-lsp";
+            };
+          };
+        });
+
+      devShells = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+
+          # Development tools, excluding test editors.
+          dev = pkgs.mkShell {
             packages = with pkgs; [
               cargo
               clippy
@@ -32,9 +45,6 @@
               gnumake
               lua5_4
               lua-language-server
-              neovim
-              helix
-              vscodium
               nodejs
               pnpm
               python3
@@ -42,8 +52,9 @@
               rust-analyzer
               rustc
               rustfmt
-              tmux
               typescript-language-server
+
+              # Development-only checking tools
               cargo-machete
               lua51Packages.luacheck
               # jscpd.packages.${system}.default
@@ -54,6 +65,33 @@
               echo "magit-lsp dev shell"
             '';
           };
+
+          # Adds test editors, without VSCodium.
+          test = pkgs.mkShell {
+            inputsFrom = [ dev ];
+
+            packages = with pkgs; [
+              neovim
+              helix
+              tmux
+            ];
+          };
+
+          # VSCodium is opt-in.
+          vscode = pkgs.mkShell {
+            inputsFrom = [ test ];
+
+            packages = with pkgs; [
+              vscodium
+            ];
+          };
+        in
+        {
+          # The default shell is the complete local development and test setup;
+          # keep `nix develop .#dev` available for a smaller tool-only shell.
+          default = test;
+          inherit dev;
+          inherit test vscode;
         });
     };
 }
