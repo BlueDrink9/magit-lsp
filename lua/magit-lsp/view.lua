@@ -682,7 +682,7 @@ function M.open(descriptor, opts)
   local placement = M.placements[opts.placement or view.placement] or M.placements.main
   view.win = placement.place(view, opts)
   attach(view)
-  hooks.view_open(key, view.kind, view.buf)
+  hooks.view_open(key, view.kind, view.buf, view.title)
 
   vim.api.nvim_create_autocmd('BufWipeout', {
     buffer = view.buf,

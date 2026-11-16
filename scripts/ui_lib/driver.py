@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from . import fixtures, startup
+from . import fixtures, keys, startup
 from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, NATIVE_SHUTDOWN, PLAIN_INIT, RUNS, run_dir
 
 SESSION = "magit"
@@ -491,95 +491,122 @@ def wait_screen(run: Run, text: str, timeout_ms: int = SCREEN_TIMEOUT_MS) -> boo
     return text in capture(run)
 
 
-_TMUX_KEY = re.compile(
-    r"^(?:"
-    r"(?:C|M|S)-(?:[A-Za-z0-9]|\\(?:\\||\[|\]|/))"
-    r"|F(?:[1-9]|1[0-2])"
-    r"|Escape|Esc|Enter|CR|Tab|BTab|BSpace|Space"
-    r"|Delete|DC|Insert|IC|Home|End|PPage|NPage|Up|Down|Left|Right"
-    r")$"
-)
+def parse_cursor(value: str) -> tuple[int, int | None]:
+    """Parse a `row` or `row:col` barrier coordinate, both zero-based."""
+    match = re.fullmatch(r"(\d+)(?::(\d+))?", value or "")
+    if match is None:
+        raise DriverError(f"invalid cursor `{value}`; expected row or row:col")
+    row = int(match.group(1))
+    col = int(match.group(2)) if match.group(2) is not None else None
+    return row, col
+
+
+def _view_matches(view: dict, wanted: str) -> bool:
+    """Whether one snapshot view matches an id, its suffix, its title or kind."""
+    candidates = [
+        view.get("id"),
+        view.get("title"),
+        view.get("kind"),
+        view.get("name"),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        text = str(candidate)
+        if text == wanted:
+            return True
+        # Server view ids are only unique per LSP client; the client stores
+        # `<client-id>\0<server-id>` and users normally name the server id.
+        if "\0" in text and text.rsplit("\0", 1)[1] == wanted:
+            return True
+    return False
+
+
+def _pending_barriers(
+    run: Run,
+    *,
+    text: str | None,
+    cursor: tuple[int, int | None] | None,
+    view: str | None,
+) -> list[str]:
+    """Evaluate every requested barrier and return the unmet descriptions."""
+    pending: list[str] = []
+    if text is not None:
+        try:
+            screen = capture(run)
+        except DriverError as error:
+            pending.append(f"screen unavailable: {error}")
+        else:
+            if text not in screen:
+                pending.append(f"screen text {text!r}")
+    if cursor is not None or view is not None:
+        try:
+            state = snapshot(run)
+        except DriverError as error:
+            pending.append(f"state unavailable: {error}")
+        else:
+            if cursor is not None:
+                row, col = cursor
+                current = state.get("cursor") or {}
+                actual_row = current.get("row")
+                actual_col = current.get("col")
+                if actual_row != row or (
+                    col is not None and actual_col != col
+                ):
+                    pending.append(
+                        f"cursor ({actual_row}, {actual_col}) at row {row}"
+                        + (f" col {col}" if col is not None else "")
+                    )
+            if view is not None:
+                stack = state.get("view_stack")
+                if not isinstance(stack, list):
+                    pending.append(f"view {view!r} (snapshot has no view_stack)")
+                elif not any(_view_matches(entry, view) for entry in stack):
+                    pending.append(f"view {view!r}")
+    return pending
+
+
+def wait_barriers(
+    run: Run,
+    *,
+    text: str | None = None,
+    cursor: tuple[int, int | None] | None = None,
+    view: str | None = None,
+    timeout_ms: int = 2000,
+    poll_ms: int = 20,
+) -> list[str]:
+    """Poll until every requested barrier holds; return the unmet ones at timeout.
+
+    An empty list means success. At least one barrier should be supplied; a
+    caller with no barriers keeps using `wait_idle`. Unlike `wait_idle`, a
+    barrier can observe a pending prompt through the screen or a structural
+    snapshot, so `--text` is safe for prompts that block Neovim's RPC loop.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        pending = _pending_barriers(run, text=text, cursor=cursor, view=view)
+        if not pending:
+            return []
+        if time.monotonic() >= deadline:
+            return pending
+        time.sleep(poll_ms / 1000)
+
+
+def screen_excerpt(screen: str, limit: int = 12) -> str:
+    """Trim blank rows and show at most `limit` lines with a middle ellipsis."""
+    rows = [row.rstrip() for row in screen.splitlines()]
+    while rows and not rows[-1]:
+        rows.pop()
+    if len(rows) <= limit:
+        return "\n".join(rows)
+    head = max((limit - 1) // 2, 0)
+    tail = max(limit - 1 - head, 0)
+    return "\n".join([*rows[:head], "…", *rows[-tail:]])
 
 
 def is_key_name(token: str) -> bool:
-    """True when `token` should be sent as a tmux key name, not literal text."""
-    return bool(_TMUX_KEY.fullmatch(token))
-
-
-# tmux named keys drop the modifier for special keys terminfo has no sequence
-# for (`send-keys C-Enter` delivers plain Enter on tmux 3.8). Neovim decodes
-# the xterm modifyOtherKeys/CSI-u forms below, so the driver sends those bytes
-# directly with `send-keys -H` (one hex byte per argument). Alt combinations
-# stay on the tmux named-key path: Neovim drops the alt bit from CSI-u
-# sequences, while tmux named keys deliver the ESC-prefixed form it already
-# understands.
-_CSI_U_CODEPOINT = {
-    "Enter": "13",
-    "CR": "13",
-    "Tab": "9",
-    "BTab": "9",
-    "Escape": "27",
-    "Esc": "27",
-    "Space": "32",
-    "BSpace": "127",
-}
-_CSI_U_FINAL = {
-    "Up": "A",
-    "Down": "B",
-    "Right": "C",
-    "Left": "D",
-    "Home": "H",
-    "End": "F",
-}
-_CSI_U_TILDE = {"PPage": "5", "NPage": "6", "Insert": "2", "IC": "2"}
-_ARROW_ALIASES = {
-    "ArrowUp": "Up",
-    "ArrowDown": "Down",
-    "ArrowLeft": "Left",
-    "ArrowRight": "Right",
-}
-# modifyOtherKeys modifier value = 1 + shift(1) + ctrl(4); alt is unsupported.
-_KEY_MODIFIER_VALUE = {"c": 4, "s": 1, "ctrl": 4, "control": 4, "shift": 1}
-_MODIFIED_KEY = re.compile(
-    r"^(?:(?:[CS]|(?i:ctrl|control|shift))[+-])+(?P<key>[A-Za-z0-9]+)$"
-)
-# A terminal reports shifted Tab as backtab (`ESC [ Z`), and tmux's `BTab` name
-# sends that portable sequence, so route the chord there instead of a modifier
-# encoded form. Ctrl is not a backtab combination and stays on CSI-u.
-_SHIFT_TAB = re.compile(r"^(?:S|(?i:shift))[+-](?i:tab)$")
-_BACKTAB = "BTab"
-
-
-def _csi_u_bytes(token: str) -> list[str] | None:
-    """Hex bytes for a modifier+special-key token tmux cannot encode.
-
-    Returns one hex string per byte for `send-keys -H`, or `None` when the
-    token carries no modifier, carries alt (kept on tmux named keys), names a
-    shifted Tab (sent as terminal backtab), or names a key with no verified
-    CSI-u encoding (single characters, F-keys).
-    """
-    if _SHIFT_TAB.fullmatch(token):
-        return None
-    match = _MODIFIED_KEY.fullmatch(token)
-    if match is None:
-        return None
-    value = 1
-    for modifier in re.findall(r"[A-Za-z]+", token[: -len(match.group("key"))]):
-        if modifier.lower() not in _KEY_MODIFIER_VALUE:
-            return None
-        value += _KEY_MODIFIER_VALUE[modifier.lower()]
-    key = _ARROW_ALIASES.get(match.group("key"), match.group("key"))
-    if key in _CSI_U_CODEPOINT:
-        sequence = f"\x1b[{_CSI_U_CODEPOINT[key]};{value}u"
-    elif key in _CSI_U_FINAL:
-        sequence = f"\x1b[1;{value}{_CSI_U_FINAL[key]}"
-    elif key in _CSI_U_TILDE:
-        sequence = f"\x1b[{_CSI_U_TILDE[key]};{value}~"
-    elif value == 6 and len(key) == 1 and key.isascii() and key.isalnum():
-        sequence = f"\x1b[{ord(key)};{value}u"
-    else:
-        return None
-    return [f"{byte:02x}" for byte in sequence.encode("ascii")]
+    """True when `token` is sent as a tmux key name, not literal text."""
+    return keys.encode(token).kind == "tmux"
 
 
 def send_keys(run: Run, tokens: list[str]) -> None:
@@ -587,17 +614,17 @@ def send_keys(run: Run, tokens: list[str]) -> None:
 
     Modifier+special-key tokens (such as `C-Enter`) go through raw CSI-u
     bytes; plain tmux names would drop their modifier. Shifted Tab goes through
-    tmux's backtab name so Neovim sees its `<S-Tab>` mapping.
+    tmux's backtab name so Neovim sees its `<S-Tab>` mapping. The table in
+    `ui_lib.keys` decides which path each token takes.
     """
     for token in tokens:
-        if _SHIFT_TAB.fullmatch(token):
-            _tmux(run, "send-keys", "-t", SESSION, _BACKTAB)
-            continue
-        raw = _csi_u_bytes(token)
-        if raw is not None:
-            _tmux(run, "send-keys", "-t", SESSION, "-H", *raw)
-        elif is_key_name(token):
-            _tmux(run, "send-keys", "-t", SESSION, token)
+        encoding = keys.encode(token)
+        if encoding.kind == "backtab":
+            _tmux(run, "send-keys", "-t", SESSION, str(encoding.value))
+        elif encoding.kind == "csi-u":
+            _tmux(run, "send-keys", "-t", SESSION, "-H", *encoding.value)
+        elif encoding.kind == "tmux":
+            _tmux(run, "send-keys", "-t", SESSION, str(encoding.value))
         else:
             _tmux(run, "send-keys", "-t", SESSION, "-l", "--", token)
 

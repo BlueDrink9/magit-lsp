@@ -252,8 +252,8 @@ For every bug: **(a)** confirm the failing scenario fails for the stated reason,
 | Command | Behaviour |
 | --- | --- |
 | `ui start <fixture> [--size WxH] [--profile standard\|vim] [--ansi\|--truecolor]` | Build the fixture repo, start Neovim in a detached tmux session with `--listen <sock>`, `TERM=xterm-256color`, `NVIM_APPNAME` isolated, `-u scripts/minimal_init.lua`. Prints the run id |
-| `ui keys <key>…` | Send keys. Literal text uses `tmux send-keys -l`; names (`Escape`, `BSpace`, `Enter`, `C-c`, `Up`) are sent as tmux key names |
-| `ui wait [--ms N]` | Poll `idle()` (via `nvim --server <sock> --remote-expr 'luaeval(...)'`) until true or timeout (default 2000 ms). Non-zero exit on timeout and print `state` |
+| `ui keys <key>…` | Send keys. Literal text uses `tmux send-keys -l`; names (`Escape`, `BSpace`, `Enter`, `C-c`, `Up`) are sent as tmux key names. `--list` prints the supported names and both client spellings; `--check <key>…` validates without sending |
+| `ui wait [--ms N] [--text S] [--cursor R[:C]] [--view ID\|TITLE]` | Poll the selected barrier(s) until all hold or timeout (default 2000 ms). With no barrier, wait for `idle()`. Non-zero exit on timeout and print state, a screen excerpt and the log path |
 | `ui screen [--ansi]` | `tmux capture-pane -p` (plain) or `-p -e` (escape codes). Plain output is exactly `rows` lines |
 | `ui state` | Print `snapshot()` JSON |
 | `ui trace [N]` | Print the last N key traces with per-hop durations |
@@ -296,6 +296,60 @@ output then misclassifies a valid `true` as unexpected and terminal responses
 may be consumed by the shell. The headless invocation keeps expression output on
 stdout and prevents helper-side terminal reads/probes.
 
+### A.1.2 Key tokens and spellings
+
+`scripts/ui keys --list` prints one table from the encoding table in
+`scripts/ui_lib/keys.py`, which is also what `send_keys` uses; there is no
+second hand-maintained key list. Columns are the canonical key, the accepted
+Neovim harness spellings, the canonical §3.8 VSCode `keybindings.json`
+spelling, and how the unmodified key is sent. The VSCode column is a
+cross-reference, not a spelling the Neovim harness accepts.
+
+Accepted harness tokens are:
+
+- W3C names (`Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `Insert`, `Home`,
+  `End`, `PageUp`, `PageDown`, `ArrowUp`, `ArrowDown`, `ArrowLeft`,
+  `ArrowRight`, `F1`–`F12`) and the older tmux aliases (`CR`, `Esc`, `BSpace`,
+  `DC`, `IC`, `PPage`, `NPage`, `Up`, `Down`, `Left`, `Right`).
+- Modifier chords use the tmux short forms for one character (`C-c`, `S-a`,
+  `M-3`). Ctrl or Shift plus a special key also accepts the long forms
+  (`ctrl+Enter`, `control+Enter`, `shift+Tab`) and is sent as raw CSI-u bytes
+  because tmux drops modifiers it has no terminfo sequence for. `shift+Tab`,
+  `S-Tab` and `BTab` all use terminal backtab. Meta has no harness encoding.
+  A canonical long form that the tmux path cannot express (`ctrl+c`) is not
+  silently equivalent to `C-c`; `keys --check` rejects it with the short
+  suggestion.
+- Anything else is literal text, sent verbatim with `send-keys -l`.
+
+`scripts/ui keys --check <key>…` validates tokens without loading a run or
+sending anything. Check mode accepts named keys, supported chords and single
+characters, not arbitrary multi-character literal strings (use `keys <text>`
+to send those). Unknown names therefore cannot pass as literal text. It prints
+`ok` with the resolved transport for supported tokens, and `invalid` with the
+nearest valid spelling for an unknown name
+(`Escpae` → `Escape`, `ctrl+c` → `C-c`, `C-Escpae` → `C-Escape`). It exits 1
+when any token is invalid. A canonical chord is rejected rather than silently
+typed when the harness cannot encode it, even though the send path would treat
+that token as literal text.
+
+### A.1.3 Wait barriers
+
+`scripts/ui wait` accepts these barriers, and waits until every supplied
+barrier holds in the same polling iteration (screen and state observations
+are sequential, not an atomic snapshot):
+
+| Barrier | Observation |
+| --- | --- |
+| `--text <substring>` | Literal substring in `tmux capture-pane` output. This also works while a prompt blocks Neovim's RPC loop, where `idle()` stays false |
+| `--cursor <row[:col]>` | Snapshot `cursor.row` and, when given, `cursor.col` (zero-based) |
+| `--view <id or title>` | A `view_stack` entry whose full id, server-id suffix after the client-id separator, `title` or `kind` equals the value. Rich snapshots only; the Plain client has no server view stack |
+
+With no barrier it polls `idle()` exactly as before. `--ms N` is the shared
+deadline (default 2000 ms). On timeout `wait` exits 2 and prints the unmet
+barriers, compact `snapshot()` state, a trimmed screen excerpt and the trace log
+path plus the run directory, so a failure is diagnosable from the terminal
+without re-running the scenario.
+
 ### A.2 `snapshot()` JSON
 
 ```json
@@ -307,7 +361,8 @@ stdout and prevents helper-side terminal reads/probes.
     {"id": 1000, "float": false, "row": 0, "col": 0, "width": 100, "height": 28, "full_width": true, "buffer": 3, "filetype": "magit-lsp"},
     {"id": 1004, "float": true,  "row": 20, "col": 0, "width": 100, "height": 9,  "full_width": true, "buffer": 5, "filetype": "magit-lsp"}
   ],
-  "view_stack": [{"id": "v1", "kind": "status"}, {"id": "v2", "kind": "menu.commit"}],
+  "view_stack": [{"id": "v1", "kind": "status", "title": "Status"},
+                 {"id": "v2", "kind": "menu.commit", "title": "Commit"}],
   "pending": "-",
   "render": {"version": 14, "acked": 14},
   "keymap": {"scope": "menu.commit", "capture": true, "keys": ["c", "e", "a", "-a", "q"]},
@@ -316,7 +371,7 @@ stdout and prevents helper-side terminal reads/probes.
 }
 ```
 
-`pending` and `keymap.keys` come from the server's `view/keymap` and `view/render` so clients stay thin; the debug module only reports what the client already holds.
+`pending` and `keymap.keys` come from the server's `view/keymap` and `view/render` so clients stay thin; the debug module only reports what the client already holds. `view_stack` entries also carry the server's `title`, which `wait --view` matches alongside the id and kind.
 
 ### A.3 `idle()`
 

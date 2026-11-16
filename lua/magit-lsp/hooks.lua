@@ -74,8 +74,9 @@ end
 ---@param id string
 ---@param kind string
 ---@param buf integer|nil
-function M.view_open(id, kind, buf)
-  local _ = id, kind, buf
+---@param title string|nil
+function M.view_open(id, kind, buf, title)
+  local _ = id, kind, buf, title
 end
 
 --- Record that a view is gone.

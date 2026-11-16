@@ -6,7 +6,7 @@ import io
 import os
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,7 +14,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ui_lib import cli, driver  # noqa: E402
+from ui_lib import cli, driver, keys  # noqa: E402
 
 
 class SizeTest(unittest.TestCase):
@@ -68,6 +68,135 @@ class TraceFormatTest(unittest.TestCase):
         self.assertNotIn("#1", only_last)
         self.assertIn("#2", only_last)
         self.assertEqual(driver.format_trace(events, 0), "")
+
+
+class KeyCommandTest(unittest.TestCase):
+    def test_list_prints_the_encoding_table_without_a_run(self) -> None:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(cli.main(["keys", "--list"]), 0)
+        text = out.getvalue()
+        self.assertIn("NEOVIM SPELLINGS", text)
+        self.assertIn("VSCODE", text)
+        self.assertIn("BSpace", text)
+        self.assertIn("backspace", text)
+        self.assertIn("shift+Tab", text)
+        self.assertIn("shift+tab", text)
+        for key in keys.NAMED_KEYS:
+            with self.subTest(key=key.name):
+                self.assertIn(key.vscode, text)
+                for token in key.tokens:
+                    self.assertIn(token, text)
+                    self.assertEqual(keys.encode(token).value, key.tmux)
+
+    def test_check_accepts_supported_tokens(self) -> None:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(cli.main(["keys", "--check", "C-c", "M-3", "g"]), 0)
+        text = out.getvalue()
+        self.assertIn("ok 'C-c': tmux key C-c", text)
+        self.assertIn("ok 'g': literal text 'g'", text)
+
+    def test_check_rejects_an_unknown_spelling_and_suggests(self) -> None:
+        for token, suggestion in (
+            ("Escpae", "Escape"), ("ctrl+c", "C-c"), ("F13", "F1"),
+            ("HyperKey", "nearest spelling"), ("hello world", "keys <text>"),
+            ("C-Delete", "no terminal encoding"),
+            ("S-S-Enter", "no terminal encoding"),
+        ):
+            with self.subTest(token=token):
+                error = io.StringIO()
+                with redirect_stderr(error):
+                    self.assertEqual(cli.main(["keys", "--check", token]), 1)
+                self.assertIn(suggestion, error.getvalue())
+
+    def test_check_needs_a_token(self) -> None:
+        error = io.StringIO()
+        with redirect_stderr(error):
+            self.assertEqual(cli.main(["keys", "--check"]), 1)
+        self.assertIn("needs at least one key", error.getvalue())
+
+    def test_list_rejects_a_run(self) -> None:
+        error = io.StringIO()
+        with redirect_stderr(error):
+            self.assertEqual(cli.main(["keys", "--list", "--run", "abc"]), 1)
+        self.assertIn("does not use a run", error.getvalue())
+
+
+class WaitCommandTest(unittest.TestCase):
+    def test_parses_and_forwards_all_barriers(self) -> None:
+        run = object()
+        with (
+            patch.object(driver, "load_run", return_value=run),
+            patch.object(driver, "wait_barriers", return_value=[]) as wait,
+        ):
+            self.assertEqual(
+                cli._wait(
+                    [
+                        "--text",
+                        "main",
+                        "--cursor",
+                        "1:2",
+                        "--view",
+                        "status",
+                        "--ms",
+                        "50",
+                    ]
+                ),
+                0,
+            )
+        wait.assert_called_once_with(
+            run, text="main", cursor=(1, 2), view="status", timeout_ms=50
+        )
+
+    def test_without_barriers_waits_for_idle(self) -> None:
+        run = object()
+        with (
+            patch.object(driver, "load_run", return_value=run),
+            patch.object(driver, "wait_idle", return_value=True) as idle,
+        ):
+            self.assertEqual(cli._wait(["--ms", "10"]), 0)
+        idle.assert_called_once_with(run, timeout_ms=10)
+
+    def test_timeout_reports_state_screen_and_log_path(self) -> None:
+        run = driver.Run(
+            id="test-run",
+            fixture="clean",
+            profile="vim",
+            cols=100,
+            rows=30,
+            color="ansi",
+            directory="/tmp/test-run",
+            repo="/tmp/test-run/repo",
+            home="/tmp/test-run/home",
+            socket="/tmp/test-run/nvim.sock",
+            trace="/tmp/test-run/trace.jsonl",
+            tmux="magit-ui-test-run",
+        )
+        error = io.StringIO()
+        with (
+            patch.object(driver, "load_run", return_value=run),
+            patch.object(
+                driver, "wait_barriers", return_value=["screen text 'prompt'"]
+            ),
+            patch.object(driver, "state_json", return_value='{"idle":false}'),
+            patch.object(driver, "capture", return_value="line one\nline two"),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(cli._wait(["--text", "prompt", "--ms", "5"]), 2)
+        text = error.getvalue()
+        self.assertIn("timed out after 5 ms waiting for screen text 'prompt'", text)
+        self.assertIn('state: {"idle":false}', text)
+        self.assertIn("screen excerpt:", text)
+        self.assertIn("line one", text)
+        self.assertIn("log: /tmp/test-run/trace.jsonl", text)
+        self.assertIn("run: /tmp/test-run", text)
+
+    def test_invalid_cursor_is_rejected_without_a_run(self) -> None:
+        error = io.StringIO()
+        with redirect_stderr(error):
+            self.assertEqual(cli.main(["wait", "--cursor", "1:x"]), 1)
+        self.assertIn("invalid cursor", error.getvalue())
 
 
 class MainTest(unittest.TestCase):

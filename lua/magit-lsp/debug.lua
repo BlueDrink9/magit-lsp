@@ -122,7 +122,8 @@ end
 ---@param id string
 ---@param kind string
 ---@param buf integer|nil the view's buffer, used to find the active view
-function M.view_open(id, kind, buf)
+---@param title string|nil the server's display title
+function M.view_open(id, kind, buf, title)
   if not id then
     return
   end
@@ -133,6 +134,7 @@ function M.view_open(id, kind, buf)
     M.order[#M.order + 1] = id
   end
   view.kind = kind or view.kind or ''
+  view.title = title or view.title
   view.buf = buf or view.buf
   M.trace('window_opened', { view = id, kind = view.kind, buffer = buf })
 end
@@ -424,7 +426,7 @@ function M.snapshot()
   end
   local stack = {}
   for _, id in ipairs(M.order) do
-    stack[#stack + 1] = { id = id, kind = M.views[id].kind }
+    stack[#stack + 1] = { id = id, kind = M.views[id].kind, title = M.views[id].title }
   end
   local drafts = {}
   for _, record in pairs(require('magit-lsp.view').views) do

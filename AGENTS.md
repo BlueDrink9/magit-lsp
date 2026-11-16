@@ -45,6 +45,11 @@ Start in these components:
 
 ## Read the right source
 
+- **Queue file:** `TASKS.md` is the sole numbered implementation and
+  review queue (agent instructions call it "the queue file"). It holds
+  `## Immediate`, ad hoc, review, bugfix and feature sections. The checkbox plus
+  `Done: <commit>` is the single authoritative completion record; other
+  documents link to it and never restate status.
 - [`TASKS.md`](./TASKS.md) is canonical for the roadmap and queue. Decisions,
   glossary, correctness contracts and architecture design (§§0–3) live in
   [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). Protocol reference (§4)
@@ -66,42 +71,52 @@ Start in these components:
 
 ## Working conventions
 
-- **No-vision policy (mandatory for every agent, including delegated workers and subagents):** never use vision, inspect or render images, or invoke image/screenshot tools, under any circumstances. Do not capture screenshots or add image-snapshot tests/capture paths. Native UI verification remains real and interactive, but evidence and acceptance must be text/structured state only (for example `.screen`, accessibility/DOM text, JSON, wire/API and Git state). Text snapshots are allowed. Do not impose image-based acceptance or future screenshot inspection requirements.
-
-- Shared ticket rules: feature Rust state tests and conformance scenarios;
-  focused Neovim native evidence only for new visible behavior, and VSCode
-  evidence only for changed declared capabilities or `clients/vscode/` files.
-  CI runs all tests; full local runs are optional (`MAGIT_NATIVE=1` enables the
-  native tier). Golden changes require a dedicated commit whose message explains
-  every changed hunk; keep goldens small/normalized with immutable assertions.
-  Ship generated files only when clients need them, mark them generated and add
-  CI drift checks. Fake capability modules need `// anchor:` to a real client or
-  trace (or `anchor: none yet`), and assertions must also run against real
-  behavior. Capability absence means unsupported only when the declaration is
-  the feature; sub-feature absence is not a signal. For applyEdit, verify result
-  text hash, not `applied: true`, and send one document per request. Delete unused
-  declarations rather than deprecating them. Compress completed tickets to 12
-  lines: requirement, `Done: <commit>`, and enforcing test; put evidence narrative
-  in commit message.
-
+- **No-vision policy (mandatory for every agent, including delegated workers and
+  subagents):** never use vision, inspect or render images, or invoke
+  image/screenshot tools. Do not capture screenshots or add image-snapshot
+  tests/capture paths. Native UI verification stays real and interactive, but
+  evidence and acceptance are text/structured state only (`.screen`,
+  accessibility/DOM text, JSON, wire/API and Git state). Text snapshots are
+  allowed. Never impose image-based acceptance.
+- **Test only through the Makefile.** Run tests, builds, snapshot updates and UI
+  scenarios only via the targets in "Verification". Do not compose your own
+  `cargo test`/`cargo build`/`cargo nextest`, `nvim`, `npm test` or
+  `python3 scripts/ui run` command lines. If no target fits, stop and say so
+  (propose a target) instead of improvising. Never run formatters (pre-commit
+  hooks format) and never use `--no-verify`.
 - Keep changes scoped to the requested task. Do not take on unrelated unchecked
   roadmap or review backlog items.
+- Feature work gets Rust state tests and conformance scenarios. Native-client
+  evidence is required only for new visible behavior (Neovim) or changed declared
+  capabilities / `clients/vscode/` files (VSCode). A test is permanent only if it
+  guards a regression with a stable oracle through existing infrastructure;
+  one-off confirmation is a recorded check, not a new test file.
+- Executable code longer than ~10 lines lives in a maintained script under
+  `scripts/` that an existing make target exercises. Markdown shows an
+  invocation, not a program to extract. Historical records are exempt but must be
+  labeled with version/date.
 - Every external/public function and type needs a concise docstring (`///` in
   Rust; LuaLS `---` annotation in Lua) describing what it does.
 - No backward-compatibility shims: reshape or remove obsolete protocol methods,
-  config keys and APIs instead.
-- Never address hunks by index. Hunk identity is based on path and content, not
-  position, so it survives refreshes and concurrent edits.
+  config keys and APIs, and delete unused declarations instead of deprecating them.
+- Never address hunks by index. Hunk identity is based on path and content.
 - Never parse rendered text to recover structure. Resolve navigation, folding
   and cursor context through the server tree (`src/tree.rs`).
 - Clients display server-rendered document text verbatim; do not recompose it.
 - Never show raw JSON or Lua tables to users. Git failures are user-facing
   `Effect::Message`s with a readable summary (and optional hint/detail), not
-  JSON-RPC errors. See TASKS.md IMM-3, §3.5 and `src/errors.rs`.
-- Choose verification proportionate to the change: run the narrowest relevant checks for each task, and ensure no orphan `magit-lsp` processes. For user-visible behavior, retain real native-UI evidence in the affected client using focused scenarios and text/structured state only; Neovim-only evidence is not a substitute for VSCode changes, and unrelated client suites are not required. Never capture or inspect images.
-- Validate protocol input, user configuration and Git output at their boundaries. Once internal values are validated, trust their invariants: do not reparse canonical keys, invent fallback command statuses, reconstruct displayed selections from fresh diffs, or maintain alternate production paths solely for tests. Keep recovery where failure is genuinely external: lost render acknowledgements, editor buffer lifetime, Git failures and client disconnects.
-
-- **Proposed orchestration configuration replacement (not active enforcement):** Run a review at each named roadmap phase boundary, or earlier when a substantial body of work has accumulated. Use architectural judgment rather than a fixed task count. Consider scope, changed-code volume, shared interfaces, risk and verification results. Small tickets, implementation slices and review fixes do not independently justify a checkpoint. Record why an intermediate review is warranted. Activating this proposal requires an orchestration-instruction update. Until then, the active higher-priority rule still requires review after eight completed tasks since `Last review:`. Named roadmap phase groups, not named Txxx tickets, slices or review-fix batches, are actual phase boundaries.
+  JSON-RPC errors. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md#35-commands-and-effects) and `src/errors.rs`.
+- Validate protocol input, user configuration and Git output at their boundaries.
+  Once internal values are validated, trust their invariants: do not reparse
+  canonical keys, invent fallback command statuses, reconstruct displayed
+  selections from fresh diffs, or maintain alternate production paths solely for
+  tests. Keep recovery where failure is genuinely external: lost render
+  acknowledgements, editor buffer lifetime, Git failures and client disconnects.
+- **Verified vs inferred.** Label only claims that gate a decision or an acceptance item. VERIFIED needs file:line or command output; without it the claim is INFERRED. Research external behavior (Magit, other backends, the LSP spec) before building on it.
+- **Reuse before adding.** Before adding a test, scenario or helper, search for existing ones and extend the nearest where fixture and setup match; a distinct behavior gets its own. A test must exercise the stated requirement directly, not an adjacent path.
+- **Skills** hold task-type guidance. Load every skill your ticket lists:
+  `native-ui-verification`, `golden-and-snapshots`, `protocol-and-capabilities`,
+  `retirement-sweep` (workers); `phase-gate`, `failure-triage` (orchestrator).
 
 ## Verification
 
@@ -119,48 +134,31 @@ Start in these components:
   command. Inspect the generated diff; never refresh output merely to silence a
   failing behavior test.
 
-### Phase end and review
+### Make targets
 
-- Run `make hygiene` at actual named phase ends and required review checkpoints, not for each ticket. The phase gate applies only when the last unchecked item in that named phase completes; the independent review checkpoint remains after eight completed tasks since `Last review:`.
-- For each finding, fix it, delete dead code, allowlist it with a concrete reason, or assign an exact owner task. A report-only exit code of 0 is not clean-debt acceptance. Report missing tools and launch failures honestly; do not treat them as a clean report.
+Targets log to `build/test-logs/` and print a short digest (`ok:` or the failure
+tail plus the log path). Use `V=1` only when the digest is insufficient and
+`LOG_TAIL=n` for more of a failure.
+
+- `make test`: Rust, Neovim and VSCode suites. Narrower: `make test-rust
+  FILTER="--test menu"`, `make test-file FILE=tests/<file>.lua`,
+  `make vscode-test`.
+- `make ui-unit`: real-UI harness tests. `make ui-file FILE=<scenario>.scn`: one
+  scenario. `make ui-test`: all scenarios. `make ui-tour`: writes
+  `build/ui/tour.md`.
+- `make update-snapshots`: rewrites stale snapshots (see `golden-and-snapshots`).
+- `make hygiene` and `make format-check`.
+
+Rules:
+
+- Run the narrowest relevant target and rerun only failed cases while
+  diagnosing. Run one build/test command at a time; never background them and
+  never start a build while another command is running.
+- The orchestrator decides when to run full `make test`, `make hygiene`,
+  `make ui-tour` and reviews (see `phase-gate`); workers do not.
 - Local execution and verification target Linux only. Do not block Linux work
-  because Windows or macOS hosts are unavailable; record platform-specific
-  risks and retain explicit Windows/macOS CI checks as follow-ups. Keep code,
-  tests and behavior portable across supported platforms, and claim cross-platform
-  verification only after the corresponding CI evidence exists.
-
-- Plain-mode evidence requires the fake-editor harness plus focused native
-  Neovim runs using a plain LSP setup without the magit-lsp plugin. Helix is a
-  manual smoke checklist, not a harness or first-party support promise.
-
-- `make test` runs Rust and Neovim integration tests.
-- Prefer the narrowest relevant check for the task: for example,
-  `make test-rust FILTER="--test menu"` or
-  `make test-file FILE=tests/<file>.lua`. Rerun only failed cases while
-  diagnosing; use `V=1` only when the default compact output is insufficient.
-  Run the full `make test` regression gate about every three completed
-  implementation tasks and at phase/handoff boundaries. Run the phase gate when
-  the last unchecked item in a named roadmap phase completes; completing an
-  individual ticket, implementation slice or review-fix batch is not itself a
-  phase boundary. Independently, stop for the required review after eight
-  completed tasks since `Last review:`. Also run full `make
-  test` when changes are broad or shared, or a regression is suspected.
-- `make ui-unit` tests the real-UI harness; `make ui-test` runs scripted real-UI
-  scenarios; `make ui-tour` writes `build/ui/tour.md`.
-- Snapshot tests use `expect_file!` with one update command:
-  `UPDATE_EXPECT=1 cargo test --test manifest --test parity --test menu --test
-  menus` rewrites stale snapshots in `tests/snapshots/` (six files: manifest
-  and keybindings JSON per profile, the commit menu at 60/140 columns) and the
-  README parity block in place, preserving surrounding prose.
-- User-visible changes are not done until focused scripted native-UI scenario(s)
-  drive the affected client's real UI and text/structured output is checked; do not run
-  every scenario by default. VSCode-only changes require VSCode native evidence,
-  not unrelated Neovim runs. Use the full UI suite for broad UI/shared lifecycle
-  changes, phase completion, or suspected regressions. Follow inspect → act →
-  inspect: `scripts/ui start <fixture>`, inspect with `scripts/ui screen` and/or
-  `scripts/ui state`, act with `scripts/ui keys <key>…`, use `scripts/ui wait`
-  (polls idle; never sleep), inspect again, and always `scripts/ui stop`. Use
-  plain `scripts/ui screen`, not `--ansi`. See `ui-test-plan.md` §A and TASKS.md
-  §8.8. At phase completion, run `make ui-tour` and inspect only relevant
-  headings/excerpts in `build/ui/tour.md`; never read the entire file. Read a
-  scenario's `failure.screen` only if its inline text output is insufficient. Never use screenshot/image output.
+  because Windows or macOS hosts are unavailable; record platform-specific risks
+  and retain explicit Windows/macOS CI checks as follow-ups. Keep code, tests and
+  behavior portable, and claim cross-platform verification only after the
+  corresponding CI evidence exists.
+- Ensure no orphan `magit-lsp` processes remain after native runs.

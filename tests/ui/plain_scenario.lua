@@ -36,7 +36,7 @@ function PlainUI.snapshot()
     text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'),
     modified = vim.bo.modified,
     draft = vim.api.nvim_buf_get_name(0):match('/COMMIT_EDITMSG$') ~= nil,
-    cursor = { row = cursor[1], col = cursor[2] },
+    cursor = { row = cursor[1] - 1, col = cursor[2] },
     project_modules = modules,
     rich_notifications = vim.g.plain_smoke_rich_notifications,
     applied_edits = applied,

@@ -158,6 +158,142 @@ class WaitScreenTest(unittest.TestCase):
                 )
 
 
+class WaitBarrierTest(unittest.TestCase):
+    def test_polls_again_until_all_barriers_hold_in_one_iteration(self) -> None:
+        ready = {"cursor": {"row": 1, "col": 0}, "view_stack": [{"id": "v1"}]}
+        with (
+            patch.object(driver, "capture", side_effect=["ready", "missing", "ready"]),
+            patch.object(driver, "snapshot", side_effect=[{}, ready, ready]) as snapshot,
+            patch.object(driver.time, "monotonic", return_value=0),
+            patch.object(driver.time, "sleep") as sleep,
+        ):
+            self.assertEqual(driver.wait_barriers(
+                object(), text="ready", cursor=(1, 0), view="v1",
+            ), [])
+        self.assertEqual(snapshot.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_barriers_share_one_deadline(self) -> None:
+        with (
+            patch.object(driver, "capture", return_value="missing") as capture,
+            patch.object(driver, "snapshot", return_value={}),
+            patch.object(driver.time, "monotonic", side_effect=[0, 0.01, 0.02]),
+            patch.object(driver.time, "sleep") as sleep,
+        ):
+            pending = driver.wait_barriers(
+                object(), text="ready", cursor=(1, 0), view="v1", timeout_ms=20,
+            )
+        self.assertEqual(len(pending), 3)
+        self.assertEqual(capture.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_text_barrier_returns_empty_when_visible(self) -> None:
+        with patch.object(driver, "capture", return_value="a prompt here"):
+            self.assertEqual(
+                driver.wait_barriers(object(), text="prompt", timeout_ms=0), []
+            )
+
+    def test_cursor_barrier_matches_row_and_optional_column(self) -> None:
+        state = {"cursor": {"row": 4, "col": 7}}
+        with patch.object(driver, "snapshot", return_value=state):
+            self.assertEqual(
+                driver.wait_barriers(object(), cursor=(4, None), timeout_ms=0), []
+            )
+            self.assertEqual(
+                driver.wait_barriers(object(), cursor=(4, 7), timeout_ms=0), []
+            )
+            self.assertTrue(
+                driver.wait_barriers(object(), cursor=(4, 8), timeout_ms=0)
+            )
+
+    def test_view_barrier_matches_id_suffix_title_and_kind(self) -> None:
+        state = {
+            "view_stack": [
+                {"id": "7\0v1", "kind": "menu.commit", "title": "Commit"},
+            ]
+        }
+        with patch.object(driver, "snapshot", return_value=state):
+            for wanted in ("7\0v1", "v1", "Commit", "menu.commit"):
+                with self.subTest(wanted=wanted):
+                    self.assertEqual(
+                        driver.wait_barriers(
+                            object(), view=wanted, timeout_ms=0
+                        ),
+                        [],
+                    )
+            self.assertTrue(
+                driver.wait_barriers(object(), view="status", timeout_ms=0)
+            )
+
+    def test_all_barriers_must_hold_together(self) -> None:
+        state = {
+            "cursor": {"row": 1, "col": 0},
+            "view_stack": [{"id": "v1", "kind": "status", "title": "Status"}],
+        }
+        with (
+            patch.object(driver, "capture", return_value="main text"),
+            patch.object(driver, "snapshot", return_value=state),
+        ):
+            self.assertEqual(
+                driver.wait_barriers(
+                    object(),
+                    text="main",
+                    cursor=(1, 0),
+                    view="Status",
+                    timeout_ms=0,
+                ),
+                [],
+            )
+            self.assertTrue(
+                driver.wait_barriers(
+                    object(),
+                    text="missing",
+                    cursor=(1, 0),
+                    view="Status",
+                    timeout_ms=0,
+                )
+            )
+
+    def test_timeout_reports_every_unmet_barrier(self) -> None:
+        state = {"cursor": {"row": 0, "col": 0}, "view_stack": []}
+        with (
+            patch.object(driver, "capture", return_value="nothing"),
+            patch.object(driver, "snapshot", return_value=state),
+        ):
+            pending = driver.wait_barriers(
+                object(),
+                text="prompt",
+                cursor=(3, None),
+                view="status",
+                timeout_ms=0,
+            )
+        self.assertEqual(len(pending), 3)
+        self.assertIn("screen text 'prompt'", pending[0])
+        self.assertIn("cursor (0, 0)", pending[1])
+        self.assertIn("view 'status'", pending[2])
+
+    def test_missing_view_stack_is_reported(self) -> None:
+        with patch.object(driver, "snapshot", return_value={"cursor": {}}):
+            pending = driver.wait_barriers(object(), view="v1", timeout_ms=0)
+        self.assertEqual(pending, ["view 'v1' (snapshot has no view_stack)"])
+
+    def test_parse_cursor(self) -> None:
+        self.assertEqual(driver.parse_cursor("3"), (3, None))
+        self.assertEqual(driver.parse_cursor("3:7"), (3, 7))
+        for value in ("", "3:", "x", "-1", "1:2:3"):
+            with self.subTest(value=value):
+                with self.assertRaises(driver.DriverError):
+                    driver.parse_cursor(value)
+
+    def test_screen_excerpt_keeps_head_and_tail(self) -> None:
+        screen = "\n".join(f"line {number}" for number in range(20)) + "\n\n"
+        excerpt = driver.screen_excerpt(screen, limit=6)
+        self.assertIn("line 0", excerpt)
+        self.assertIn("line 19", excerpt)
+        self.assertIn("…", excerpt)
+        self.assertNotIn("line 9", excerpt)
+
+
 class WaitPromptTest(unittest.TestCase):
     def test_input_and_textlist_prompts_count(self) -> None:
         for kind in ("@", "-"):
@@ -202,13 +338,13 @@ class KeyNameTest(unittest.TestCase):
 class CsiUKeyTest(unittest.TestCase):
     def test_ctrl_shift_character_becomes_csi_u_bytes(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("C-S-x"),
+            driver.keys.csi_u_bytes("C-S-x"),
             ["1b", "5b", "31", "32", "30", "3b", "36", "75"],
         )
 
     def test_ctrl_enter_becomes_csi_u_bytes(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("C-Enter"),
+            driver.keys.csi_u_bytes("C-Enter"),
             ["1b", "5b", "31", "33", "3b", "35", "75"],
         )
 
@@ -216,45 +352,45 @@ class CsiUKeyTest(unittest.TestCase):
         expected = ["1b", "5b", "31", "33", "3b", "35", "75"]
         for token in ("C-Enter", "ctrl+Enter", "Ctrl+Enter", "control-Enter"):
             with self.subTest(token=token):
-                self.assertEqual(driver._csi_u_bytes(token), expected)
+                self.assertEqual(driver.keys.csi_u_bytes(token), expected)
 
     def test_shifted_tab_stays_on_the_terminal_backtab(self) -> None:
         for token in ("shift+Tab", "S-Tab", "Shift+Tab", "shift+tab"):
             with self.subTest(token=token):
-                self.assertIsNone(driver._csi_u_bytes(token))
+                self.assertIsNone(driver.keys.csi_u_bytes(token))
                 self.assertFalse(driver.is_key_name(token))
 
     def test_ctrl_shift_tab_keeps_csi_u_bytes(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("C-S-Tab"),
+            driver.keys.csi_u_bytes("C-S-Tab"),
             ["1b", "5b", "39", "3b", "36", "75"],
         )
 
     def test_ctrl_arrow_uses_the_legacy_form(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("C-Left"), ["1b", "5b", "31", "3b", "35", "44"]
+            driver.keys.csi_u_bytes("C-Left"), ["1b", "5b", "31", "3b", "35", "44"]
         )
 
     def test_arrow_aliases(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("ctrl+ArrowDown"),
+            driver.keys.csi_u_bytes("ctrl+ArrowDown"),
             ["1b", "5b", "31", "3b", "35", "42"],
         )
 
     def test_modified_page_keys_use_tilde_form(self) -> None:
         self.assertEqual(
-            driver._csi_u_bytes("C-PPage"), ["1b", "5b", "35", "3b", "35", "7e"]
+            driver.keys.csi_u_bytes("C-PPage"), ["1b", "5b", "35", "3b", "35", "7e"]
         )
 
     def test_alt_stays_on_tmux_named_keys(self) -> None:
         for token in ("M-3", "M-4", "alt+ArrowDown", "alt+x"):
             with self.subTest(token=token):
-                self.assertIsNone(driver._csi_u_bytes(token))
+                self.assertIsNone(driver.keys.csi_u_bytes(token))
 
     def test_untranslated_tokens_keep_their_existing_path(self) -> None:
         for token in ("Enter", "Tab", "BTab", "Escape", "C-t", "C-a", "x", "-", "Z"):
             with self.subTest(token=token):
-                self.assertIsNone(driver._csi_u_bytes(token))
+                self.assertIsNone(driver.keys.csi_u_bytes(token))
 
 
 class SendKeysTest(unittest.TestCase):
