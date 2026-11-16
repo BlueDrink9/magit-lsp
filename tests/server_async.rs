@@ -32,7 +32,7 @@ fn opening_multirow_rebase_todo_batches_object_resolution_once() {
         let trace = tmp.path().join("trace.jsonl");
         let trace_path = trace.to_str().unwrap();
         let mut server = TestServer::spawn(&[("GIT_TRACE2_EVENT", trace_path)]);
-        assert!(server.initialize(json!({})) ["error"].is_null());
+        assert!(server.initialize_rich(json!({})) ["error"].is_null());
         server.send(json!({"jsonrpc":"2.0","id":2,"method":"view/open",
             "params":{"kind":"rebase-todo","args":{"repo_path":repo_param(tmp.path())},
             "viewport":{"cols":80,"rows":24}}}));
@@ -1865,6 +1865,13 @@ fn open_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
     view_id
 }
 
+/// Open a Plain logical view without waiting for Rich-only render/keymap pushes.
+fn open_plain_view(server: &mut TestServer, id: i64, repo: &Value) -> String {
+    server.send(open_view_message(id, repo));
+    let opened = server.response_with_id(id);
+    opened["result"]["id"].as_str().expect("view id").to_string()
+}
+
 /// A `view/open` request for a status view of `repo`.
 fn open_view_message(id: i64, repo: &Value) -> Value {
     json!({
@@ -1925,6 +1932,8 @@ fn repository_configuration_is_trusted_isolated_canonical_and_reloaded() {
     for trusted in [false, true] {
         let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", user.to_str().unwrap())]);
         let mut init = initialize_message();
+        init["params"]["capabilities"]["experimental"] =
+            limited_rich(json!([]), json!([]))["experimental"].clone();
         init["params"]["initializationOptions"] = json!({
             "trust_repo_config": trusted, "keys": {"status": {"stage": ["Q"]}}
         });
@@ -2022,7 +2031,7 @@ fn nested_user_close_and_reopen_does_not_retain_views_or_parents() {
     let (tmp, _repo) = init_repo();
     let (other_tmp, _other_repo) = init_repo();
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize_rich(json!({}));
     let root = open_view(&mut server, 2, &repo_param(tmp.path()));
     let other = open_view(&mut server, 3, &repo_param(other_tmp.path()));
     let mut request_id = 10;
@@ -2176,7 +2185,7 @@ fn a_mutation_blocked_in_git_does_not_delay_a_later_read() {
     let gate = GatedGit::arm("add");
     let mut server = spawn_with_env(&gate.child_env());
     server.auto_respond_to_progress_create();
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     let view_id = open_view(&mut server, 2, &repo);
 
     server.send(json!({
@@ -2266,7 +2275,7 @@ fn blocked_repository_does_not_serialize_unrelated_repository_operations() {
     let gate = GatedGit::arm("add");
     let mut server = spawn_with_env(&gate.child_env());
     server.auto_respond_to_progress_create();
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     let a = open_view(&mut server, 2, &repo_a);
     let b = open_view(&mut server, 3, &repo_b);
 
@@ -2326,7 +2335,7 @@ fn outbound_request_responses_are_correlated_without_blocking_intake() {
     let (tmp, _repo) = init_repo();
     write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
     let mut server = spawn_with_env(&[]);
-    server.initialize(json!({"window":{"workDoneProgress":true}}));
+    server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     let view = open_view(&mut server, 2, &repo_param(tmp.path()));
     server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
 
@@ -2364,7 +2373,7 @@ fn absent_or_false_progress_capability_emits_no_create_or_progress() {
         write(&tmp.path().join("f.txt"), "line1\nCHANGED\nline3\n");
         let gate = GatedGit::arm("add");
         let mut server = spawn_with_env(&gate.child_env());
-        server.initialize(capabilities);
+        server.initialize_rich(capabilities);
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         gate.wait_entered();
@@ -2397,7 +2406,7 @@ fn delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsiv
         let mut server = spawn_with_env(&gate.child_env());
         // Raw receive must permit withholding even with the convenience pump on.
         server.auto_respond_to_progress_create();
-        server.initialize(json!({"window":{"workDoneProgress":true}}));
+        server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
         let view = open_view(&mut server, 2, &repo_param(tmp.path()));
         server.send(json!({"jsonrpc":"2.0","id":3,"method":"view/invoke","params":{"viewId":view,"command":"status.stage-all"}}));
         let create = loop {
@@ -2487,7 +2496,7 @@ fn mutations_for_one_repository_apply_in_request_order() {
     let gate = GatedGit::arm("add");
     let mut server = spawn_with_env(&gate.child_env());
     server.auto_respond_to_progress_create();
-    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
+    let response = server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -2657,7 +2666,7 @@ fn view_open_then_invoke_stage_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -2753,7 +2762,7 @@ fn view_resize_notification_reflows_an_acked_menu_incrementally() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -2950,7 +2959,7 @@ fn view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio() {
         .build();
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -3218,7 +3227,7 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
     let mut server = TestServer::spawn(&[]);
     server.initialize(json!({}));
 
-    let view_id = open_view(&mut server, 2, &repo);
+    let view_id = open_plain_view(&mut server, 2, &repo);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -3235,10 +3244,11 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
         .and_then(|effect| effect["descriptor"]["id"].as_str())
         .expect("the pushed menu")
         .to_string();
-    let menu_render = server.recv();
-    assert_eq!(menu_render["method"], json!("view/render"), "{menu_render}");
-    let menu_keymap = server.recv();
-    assert_eq!(menu_keymap["method"], json!("view/keymap"), "{menu_keymap}");
+    server.send(json!({"jsonrpc":"2.0","id":30,"method":"view/resync",
+        "params":{"viewId":menu_id}}));
+    let menu_render = server.response_with_id(30);
+    assert_eq!(menu_render["result"]["viewId"], menu_id, "{menu_render}");
+    assert!(menu_render["result"]["text"].is_array(), "{menu_render}");
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -3285,21 +3295,15 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
         "{answer}"
     );
 
-    let mut observed = server.notifications.clone();
-    let prompt_render = loop {
-        let message = server.recv();
-        if message["method"] == json!("view/keymap") {
-            observed.push(message);
-            continue;
-        }
-        break message;
-    };
-    assert_eq!(prompt_render["method"], json!("view/render"), "{prompt_render}");
+    server.send(json!({"jsonrpc":"2.0","id":31,"method":"view/resync",
+        "params":{"viewId":prompt_view}}));
+    let prompt_render = server.response_with_id(31);
     assert_eq!(
-        prompt_render["params"]["viewId"],
+        prompt_render["result"]["viewId"],
         json!(prompt_view),
         "{prompt_render}"
     );
+    assert!(prompt_render["result"]["text"].is_array(), "{prompt_render}");
 
     // The pending document prompt refuses the next command without answering it.
     let refused = invoke_rich(&mut server, 6, &view_id, "status.stage-all");
@@ -3310,15 +3314,16 @@ fn plain_menu_option_prompt_opens_a_document_without_a_native_request() {
         "{refused}"
     );
 
-    observed.extend(server.notifications.clone());
+    shutdown_and_exit(&mut server);
+    let observed = &server.notifications;
     assert!(
         !observed
             .iter()
-            .any(|message| message["method"] == json!("view/prompt")),
-        "a Plain client must never receive a native prompt: {observed:?}"
+            .any(|message| matches!(message["method"].as_str(),
+                Some("view/prompt" | "view/render" | "view/keymap"))),
+        "a Plain client must never receive Rich UI pushes: {observed:?}"
     );
 
-    shutdown_and_exit(&mut server);
     let status = server.finish(Duration::from_secs(10));
     assert!(status.success(), "server exited: {status:?}");
 }
@@ -3335,7 +3340,7 @@ fn a_config_reload_repushes_the_view_keymap() {
     let repo = repo_param(tmp.path());
     let config = config_path.to_string_lossy().to_string();
     let mut server = TestServer::spawn(&[("MAGIT_LSP_CONFIG", config.as_str())]);
-    let response = server.initialize(json!({}));
+    let response = server.initialize_rich(json!({}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -3513,7 +3518,7 @@ fn a12_selection_stage_reports_index_lock_as_successful_error_effect() {
     let before_worktree = std::fs::read(&file).unwrap();
     let before_index = std::fs::read(tmp.path().join(".git/index")).unwrap();
     let mut server = TestServer::spawn(&[]);
-    server.initialize(json!({}));
+    server.initialize_rich(json!({}));
     server.send(open_view_message(2, &repo_param(tmp.path())));
     let opened = server.response_with_id(2);
     let view = opened["result"]["id"].as_str().unwrap().to_string();
@@ -3607,7 +3612,7 @@ fn a_mutation_reports_work_done_progress() {
     let repo = repo_param(tmp.path());
     let mut server = TestServer::spawn(&[]);
     server.auto_respond_to_progress_create();
-    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
+    let response = server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),
@@ -3706,7 +3711,7 @@ fn a_failed_commit_ends_its_progress_with_an_error() {
         json!(true),
         "initialize response: {response}"
     );
-    let view_id = open_view(&mut server, 2, &repo);
+    let view_id = open_plain_view(&mut server, 2, &repo);
 
     server.send(json!({
         "jsonrpc": "2.0",
@@ -3779,7 +3784,7 @@ fn a_cancel_notification_aborts_a_slow_mutation() {
     let repo = repo_param(tmp.path());
     let mut server = spawn_with_env(&gate.child_env());
     server.auto_respond_to_progress_create();
-    let response = server.initialize(json!({"window":{"workDoneProgress":true}}));
+    let response = server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
     assert_eq!(
         response["result"]["capabilities"]["foldingRangeProvider"],
         json!(true),

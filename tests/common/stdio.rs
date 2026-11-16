@@ -116,6 +116,7 @@ impl TestServer {
     }
 
     /// Receive the next frame with a bounded wait.
+    #[track_caller]
     pub fn recv(&mut self) -> Value {
         let message = self.recv_raw();
         if self.auto_respond_progress_create
@@ -128,6 +129,7 @@ impl TestServer {
     }
 
     /// Receive a frame without replying, even when automatic replies are enabled.
+    #[track_caller]
     pub fn recv_raw(&mut self) -> Value {
         let message = match self.responses.recv_timeout(self.recv_timeout) {
             Ok(Ok(message)) => message,
@@ -140,7 +142,9 @@ impl TestServer {
                 let tail: Vec<&str> = log.lines().rev().take(40).collect();
                 let status = self.child.try_wait();
                 panic!(
-                    "no response from server: {error}\nserver exit: {status:?}\nserver stderr:\n{}",
+                    "no response from server: {error}\nlast sent: {:?}\nlast observed notifications: {:?}\nserver exit: {status:?}\nserver stderr:\n{}",
+                    self.sent.last(),
+                    &self.notifications[self.notifications.len().saturating_sub(4)..],
                     tail.into_iter().rev().collect::<Vec<_>>().join("\n")
                 )
             }
