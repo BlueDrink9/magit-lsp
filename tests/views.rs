@@ -35,9 +35,8 @@ fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
     else {
         panic!("discard prompt");
     };
-    test.session.resize(&view, WIDE_VIEWPORT).unwrap();
-    let render = test.session.refresh(&view).unwrap().unwrap();
-    test.session.ack(&view, render.version).unwrap();
+    assert!(test.session.resize(&view, WIDE_VIEWPORT).unwrap().is_none());
+    assert!(test.session.refresh(&view).unwrap().is_none());
     let Execution::Done(result) = test
         .session
         .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true)))
@@ -289,7 +288,14 @@ fn positional_requests_after_a_newer_ack_never_stage_the_replacement_row() {
             test.press_at_version("s", initial.version)
         };
         assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
-        assert!(outcome.render.is_none());
+        let recovery = outcome
+            .render
+            .as_ref()
+            .expect("stale positional request emits recovery render");
+        assert!(
+            recovery.text.is_some() || recovery.edits.is_some(),
+            "recovery must contain rendered content"
+        );
         assert_eq!(cached_diff(tmp.path()), "");
         assert_eq!(
             tmp.git(&["ls-files", "--stage"]),
@@ -365,9 +371,21 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
     let cursor = Cursor { line, column: 0 };
     for ack in [false, true] {
         if ack {
-            test.ack();
+            let version = test
+                .session
+                .views()
+                .get(&test.view_id().to_string())
+                .expect("status view")
+                .version();
+            test.session.ack(&test.view_id().to_string(), version).unwrap();
         }
-        for version in [0, test.version() + 1, u64::MAX] {
+        let current_version = test
+            .session
+            .views()
+            .get(&test.view_id().to_string())
+            .expect("status view")
+            .version();
+        for version in [0, current_version + 1, u64::MAX] {
             for invoke in [false, true] {
                 let outcome = if invoke {
                     test.invoke_at_version(
@@ -384,7 +402,14 @@ fn positional_requests_require_a_known_version_including_before_the_first_ack() 
                     test.press_at_version("s", version)
                 };
                 assert_eq!(message_texts(&outcome.effects), vec![errors::STALE_VIEW]);
-                assert!(outcome.render.is_none());
+                let recovery = outcome
+                    .render
+                    .as_ref()
+                    .expect("unknown positional version emits recovery render");
+                assert!(
+                    recovery.text.is_some() || recovery.edits.is_some(),
+                    "recovery must contain rendered content"
+                );
             }
         }
         let view_id = test.view_id().to_string();
