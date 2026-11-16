@@ -256,6 +256,10 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **BUG-PHASE6-STALE-RENDER — Preserve stale-target render recovery.** Phase 6 full gate at `e0566d1` failed five `tests/commands.rs` stale-target tests asserting `result.render.is_some()` (`build/test-logs/rust.1kt8cI`). Diagnosis: `9a8372a` made ordinary `Session::refresh` return `None` for unchanged trees, which is correct for background todo isolation but drops required stale-action recovery renders. Stale target/version rejection now calls `refresh_and_render` directly, preserving rejection and its render without changing ordinary refresh generation behavior. Existing command regressions retain exact Git oracles; the Plain gate tests assert unchanged todo offers/generation and no Rich notifications. Done: containing commit.
+  - Verified: `make test-rust FILTER="--test commands"` → `ok: rust`; stale-target regressions pass with exact Git-state assertions.
+  - Verified: `make test-rust FILTER="--test plain_harness plain_gate"` → `ok: rust`; Plain gate isolation and unchanged-todo cases pass.
+
 - [x] **BUG-PHASE6-BRIDGE — Repair full-gate bridge test prerequisites.** Done: `b4f5d87`. Full Rust log `build/test-logs/rust.C0VyLi`: EOF test initialized Plain capabilities then waited for a Rich keymap; cancellation test treated a retained zombie `/proc` entry as a running descendant. Declare the actual Rich test client and assert no executing hook, without claiming PID1 reaped zombies. `make test-rust FILTER="--test editor_bridge r_edit_2_"` passed.
 
 - [x] **BUG-PHASE6-PROC — Remove procps-only test prerequisite.** Full `make test` failed at `src/runner/owned.rs:652` because host BusyBox `ps` rejects `-p`. Preserve the Linux process-group/session/no-TTY oracle using kernel `/proc` metadata. Done: `04907d4`; focused owned-runner test passed through Make, and subsequent full run passed all 68 library tests.
