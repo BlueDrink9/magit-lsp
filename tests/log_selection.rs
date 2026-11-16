@@ -428,7 +428,12 @@ fn selection_rejects_current_unacked_and_discarded_ack_versions() {
                     )
                 };
                 assert_eq!(message_texts(&result.effects), vec![errors::STALE_VIEW]);
-                assert!(result.render.is_none());
+                let recovery = result
+                    .render
+                    .as_ref()
+                    .expect("stale selection refusal recovers with a render");
+                assert_eq!(recovery.view_id, picker);
+                assert_eq!(recovery.version, test.version());
                 let view = test
                     .session()
                     .views()

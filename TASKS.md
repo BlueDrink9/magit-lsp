@@ -256,6 +256,9 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [x] **BUG-PHASE6-LOG-SELECTION — Reconcile stale-selection recovery oracle.** test: Phase 6 `make test` at `c4e3c2b` failed `selection_rejects_current_unacked_and_discarded_ack_versions` because it expected no render. `Session::invoke` rejects invalid positional coordinates with `STALE_VIEW` and `refresh_and_render` (`src/session.rs:2901-2925`); the prior stale-target regression establishes recovery renders are required. Corrected the oracle to require the recovery render for the picker at the current version; existing assertions retain selection refusal, ack tree, and exact HEAD/index/worktree invariants (`tests/log_selection.rs:430-447`). No production change: ordinary identical-tree refresh suppression remains in `src/session.rs:3539-3561`. Verification: `make test-rust FILTER="--test log_selection"` → `ok: rust`.
+  - Done: containing commit.
+
 - [x] **BUG-PHASE6-KEY-VERSION — Restore obsolete-version key regression.** test: Phase 6 `make test` at `6fdb9a2` failed because the regression refreshed an unchanged authoritative tree; `Session::refresh_view` intentionally suppresses identical tree/menu renders (`src/session.rs:3557-3561`). The test now adds an untracked file to produce a genuine status-tree change, advances and acknowledges that render, then removes the fixture file so the clean Git-state oracle remains intact. The original older-than-current version checks for non-positional keys and menu options remain unchanged; production and background-isolation behavior are unchanged. Verification: `make test-rust FILTER="--test keys_protocol"`.
   - Verified: `make test-rust FILTER="--test keys_protocol"` → `ok: rust`; the regression and all keys_protocol tests pass.
   - Done: d2ad536.
