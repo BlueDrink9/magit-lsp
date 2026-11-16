@@ -853,6 +853,104 @@ fn execute_plain_action(client: &mut ClientPump, args: Value) -> Value {
 }
 
 #[test]
+fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft() {
+    let original = fixtures::TEN_LINES;
+    let changed = original.replace("line1\n", "first-change\n").replace("line10\n", "last-change\n");
+    let partial = original.replace("line1\n", "first-change\n");
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("a.txt", "before\n"), ("f.txt", original)])
+        .modify("a.txt", "after\n")
+        .modify("f.txt", &changed)
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let uri = format!("file://{}/.magit", repo.path().display());
+    let model = editor_model::EditorModel::new(editor_model::PLAIN_MIN)
+        .with_module(editor_model::EXTRA_DECLARATIONS);
+    let mut client = ClientPump::with_model(stdio::TestServer::spawn(&[]), Profile::Standard, &model);
+    let open = client.editor.open(&uri, "stale\n");
+    client.send(open);
+    client.until(|c| c.editor.text(&uri).contains("last-change"));
+
+    // Find UI rows only to place the cursor. Execute the server's opaque target,
+    // never reconstruct a node or hunk identity from the rendered text.
+    let action = |client: &mut ClientPump, row_text: &str, command: &str| {
+        let line = client.editor.text(&uri).lines()
+            .position(|line| line.contains(row_text)).expect("rendered cursor row") as u32;
+        plain_code_actions(client, &uri, line).into_iter()
+            .find(|action| action["command"]["arguments"][0]["command"] == command)
+            .unwrap_or_else(|| panic!("missing {command} on {row_text}"))["command"]["arguments"][0].clone()
+    };
+    let file = action(&mut client, "a.txt", "status.stage");
+    assert!(execute_plain_action(&mut client, file)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":a.txt"]), "after\n");
+    assert_eq!(repo.git(&["show", ":f.txt"]), original);
+
+    let hunk = action(&mut client, "first-change", "status.stage");
+    let staged = execute_plain_action(&mut client, hunk.clone());
+    assert!(staged["error"].is_null(), "{staged}");
+    assert_eq!(repo.git(&["show", ":f.txt"]), partial, "only the addressed hunk is staged");
+    assert_eq!(fs::read_to_string(repo.path().join("f.txt")).unwrap(), changed);
+    let index = repo.git(&["write-tree"]);
+    let stale = execute_plain_action(&mut client, hunk);
+    assert!(stale["error"].is_null(), "{stale}");
+    assert!(stale["result"]["effects"].as_array().unwrap().iter().any(|effect|
+        effect["type"] == "message" && effect["text"] == magit_lsp::errors::STALE_VIEW), "{stale}");
+    assert_eq!(repo.git(&["write-tree"]), index, "stale action must not mutate the index");
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(fs::read_to_string(repo.path().join("f.txt")).unwrap(), changed);
+
+    let unstage = action(&mut client, "first-change", "status.unstage");
+    assert!(execute_plain_action(&mut client, unstage)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f.txt"]), original);
+    assert_eq!(repo.git(&["show", ":a.txt"]), "after\n", "unstaging the hunk keeps the staged file");
+    let restage = action(&mut client, "f.txt", "status.stage");
+    assert!(execute_plain_action(&mut client, restage)["error"].is_null());
+    assert_eq!(repo.git(&["show", ":f.txt"]), changed);
+
+    let menu = action(&mut client, "f.txt", "open.commit");
+    assert!(execute_plain_action(&mut client, menu)["error"].is_null());
+    let menu_line = client.editor.text(&uri).lines()
+        .position(|line| line.contains("Commit")).expect("commit menu") as u32;
+    let create = plain_code_actions(&mut client, &uri, menu_line).into_iter()
+        .find(|action| action["command"]["arguments"][0]["command"] == "menu.run-action"
+            && action["command"]["arguments"][0]["target"]["itemKey"] == "c")
+        .expect("commit creation row")["command"]["arguments"][0].clone();
+    assert!(execute_plain_action(&mut client, create)["error"].is_null());
+    let draft_path = repo.path().join(".git/COMMIT_EDITMSG");
+    let draft_uri = format!("file://{}", draft_path.display());
+    client.until(|c| c.editor.outbound.iter().any(|message|
+        message["method"] == "window/showDocument" && message["params"]["uri"] == draft_uri));
+    let template = fs::read_to_string(&draft_path).unwrap();
+    let open = client.editor.open(&draft_uri, &template);
+    client.send(open);
+    let message = "Plain end-to-end commit\n\nSaved and closed through standard LSP.\n";
+    let edit = client.editor.edit(&draft_uri, message);
+    client.send(edit);
+    fs::write(&draft_path, message).unwrap();
+    let save = client.editor.save(&draft_uri);
+    client.send(save);
+    // A code-action response is a synchronization barrier after didSave. Saving
+    // alone must not finish the Git operation; closing confirms the disk text.
+    assert!(!plain_code_actions(&mut client, &draft_uri, 0).is_empty());
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    let close = client.editor.close(&draft_uri);
+    client.send(close);
+    client.until(|c| !c.editor.text(&uri).contains("COMMIT_EDITMSG"));
+    let commit = repo.git(&["cat-file", "commit", "HEAD"]);
+    assert_eq!(commit.split_once("\n\n").unwrap().1, message);
+    assert_eq!(repo.git(&["rev-parse", "HEAD^"]), head);
+    assert_eq!(repo.git(&["show", "HEAD:a.txt"]), "after\n");
+    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), changed);
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+    assert!(client.server.notifications.iter().all(|message|
+        !message["method"].as_str().is_some_and(|method| method.starts_with("view/"))),
+        "unexpected custom notifications: {:?}", client.server.notifications.iter()
+            .filter(|message| message["method"].as_str().is_some_and(|method| method.starts_with("view/")))
+            .collect::<Vec<_>>());
+    client.finish();
+}
+
+#[test]
 fn plain_commit_editor_manual_instructions_cancel_pending_git_run() {
     for (case, declared, profile, succeeds) in [
         ("absent support", false, Profile::Standard, None),

@@ -8,7 +8,7 @@ Follow the authoritative [no-vision policy in AGENTS.md](./AGENTS.md#working-con
 
 ### Retained native Plain Neovim workflow
 
-Run `make plain-neovim` to build a fresh server binary and exercise both final-newline variants. Set `PLAIN_ARGS` to pass runner arguments; it overrides Make's `--binary`, `--evidence` and `--size` defaults. Use `TMPDIR` to select a portable temporary root. The maintained driver uses finite waits and shared role-aware teardown. Evidence is JSON, `.screen` and logs only; never use images. Linux was verified; Windows/macOS remain CI follow-ups. No Helix harness exists.
+Run `make plain-neovim` to build a fresh server binary and exercise both final-newline variants. Set `PLAIN_ARGS` to pass runner arguments; it overrides Make's `--binary`, `--evidence` and `--size` defaults. Use `TMPDIR` to select a portable temporary root. The maintained driver uses finite waits and shared role-aware teardown. Evidence is JSON, `.screen` and logs only; never use images. Current acceptance and follow-ups are tracked under T020 in [the queue](TASKS.md); Windows/macOS remain CI follow-ups. No Helix harness exists.
 
 **Status of the causes below.** The "suspected cause" lines are hypotheses written without reading the current code. Confirm each with a failing test before changing anything.
 
@@ -332,6 +332,7 @@ Plain text, one statement per line, `#` comments. Header before `---`:
 fixture: modified-two-files
 size: 100x30            # runner also runs 80x24 unless "size-only: true"
 profile: vim            # runner also runs "standard" unless "profile-only: true"
+client: rich            # optional rich | plain; independent of the keymap profile
 xfail: bug-2            # optional; see Rules
 env: MAGIT_LSP_PLACEMENT=vsplit   # optional extra Neovim environment
 ---
@@ -354,6 +355,10 @@ snapshot: name                          # writes build/ui/<scenario>/<name>.scre
 `style` predicates use the ANSI decoder on the run containing the quoted text. `latency` uses the trace. A failed `expect` prints the expectation, the actual value, and the full current screen, then continues to the next scenario.
 
 `goto "<text>"` moves the cursor to the first character of the first buffer line containing the quoted text (a literal match, no regex). It fails when the text is absent. It is an RPC call rather than a key press, so it neither appears in the trace nor contributes to a `latency` measurement; scenarios use it to name a target instead of counting motion keys.
+
+`wait state <path> == <value>` polls structured native state with the same bounded timeout as `wait`; it does not infer readiness from document text. For example, `wait state draft == true` waits until Plain Neovim has actually opened `COMMIT_EDITMSG`, not merely displayed its pending URI.
+
+`client: plain` uses `tests/ui/plain_init.lua` and stock `vim.lsp.start`, without loading `lua/magit-lsp/`. The test-only `PlainUI` observations expose native buffer/client state, not fabricated Rich view metadata; `PlainUI.action` selects a server-returned command through Neovim's built-in code-action API. Plain snapshots also write `.json` state, and each combination retains `lsp.log` plus `cleanup.json` with owned editor/server PIDs and verified teardown. Run `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn` and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` for the focused 80x24 scenarios. These do not replace the retained `make plain-neovim` workflow or its distinct 120x100 coverage.
 
 `sh: <command>` runs a POSIX shell command in the fixture repo with the deterministic Git environment and `/dev/null` stdin, between key batches. Scenarios use it to change the repository outside Neovim (the `auto-refresh` watcher test modifies a tracked file this way); any direct Neovim RPC command must include `--headless`. A failed, timed-out or unlaunchable shell step is reported with its statement number, command and bounded detail as a failed combination; remaining size/profile combinations still run, and that run is always stopped.
 

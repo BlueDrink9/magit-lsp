@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import shlex
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from . import fixtures, startup
-from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, RUNS, run_dir
+from .paths import BUILD_UI, LAST_RUN, MINIMAL_INIT, NATIVE_SHUTDOWN, PLAIN_INIT, RUNS, run_dir
 
 SESSION = "magit"
 DEFAULT_SIZE = (100, 30)
@@ -61,6 +62,7 @@ class Run:
     socket: str
     trace: str
     tmux: str
+    client: str = "rich"
 
     @property
     def dir(self) -> Path:
@@ -241,7 +243,9 @@ _GOTO_EXPR = (
 
 def snapshot(run: Run) -> dict:
     """Return the live `snapshot()` object."""
-    output = _expr(run, _SNAPSHOT_EXPR)
+    expression = ('luaeval("vim.json.encode(PlainUI.snapshot())")'
+                  if run.client == "plain" else _SNAPSHOT_EXPR)
+    output = _expr(run, expression)
     if not output:
         raise DriverError("Neovim did not answer the state request")
     try:
@@ -259,14 +263,16 @@ def state_json(run: Run, indent: int | None = 2) -> str:
 
 
 def idle(run: Run) -> bool:
-    """Poll the client's `debug.idle()`."""
+    """Poll the selected client's native idle observation."""
     return _idle_probe(run).outcome == "true"
 
 
 def _idle_probe(run: Run) -> startup.IdleProbe:
     """Run one bounded idle expression and preserve its complete outcome."""
     try:
-        result = _nvim(run, "--remote-expr", _IDLE_EXPR, timeout=2.0)
+        expression = ('luaeval("PlainUI.idle()")'
+                      if run.client == "plain" else _IDLE_EXPR)
+        result = _nvim(run, "--remote-expr", expression, timeout=2.0)
     except subprocess.TimeoutExpired as error:
         return startup.IdleProbe(
             "timeout",
@@ -312,7 +318,9 @@ def _decode_output(output: str | bytes | None) -> str:
 def _client_startup_state(run: Run) -> list[str]:
     """Read and format bounded client busy state after startup has failed."""
     try:
-        result = _nvim(run, "--remote-expr", _STARTUP_DEBUG_EXPR, timeout=2.0)
+        expression = ('luaeval("vim.json.encode(PlainUI.snapshot())")'
+                      if run.client == "plain" else _STARTUP_DEBUG_EXPR)
+        result = _nvim(run, "--remote-expr", expression, timeout=2.0)
     except (OSError, subprocess.TimeoutExpired) as error:
         return [f"client debug state: unavailable ({_safe_text(error)})"]
     if result.returncode != 0:
@@ -327,6 +335,12 @@ def _client_startup_state(run: Run) -> list[str]:
         data = json.loads(result.stdout)
     except (TypeError, ValueError):
         return ["client debug state: unavailable (invalid diagnostic response)"]
+    if run.client == "plain" and isinstance(data, dict):
+        lines = [f"Plain client: ready={data.get('ready')}, idle={data.get('idle')}, "
+                 f"applied edits={data.get('applied_edits')}",
+                 f"active buffer: {_safe_text(data.get('uri', 'unknown'))}"]
+        lines.extend(f"  {_safe_text(message)}" for message in data.get("messages", [])[-5:] if message.strip())
+        return lines
     state = data.get("state", {}) if isinstance(data, dict) else {}
     progress = state.get("progress", 0)
     lines = [
@@ -636,8 +650,8 @@ def _wait_for_view(run: Run, timeout_ms: int = START_TIMEOUT_MS) -> None:
             state = None
         if (
             state
-            and state.get("view_stack")
-            and (state.get("render") or {}).get("version", 0) > 0
+            and (state.get("ready") if run.client == "plain" else
+                 state.get("view_stack") and (state.get("render") or {}).get("version", 0) > 0)
             and state.get("idle")
         ):
             return
@@ -652,12 +666,7 @@ def _wait_for_view(run: Run, timeout_ms: int = START_TIMEOUT_MS) -> None:
 
 def _cleanup(run: Run) -> None:
     """Remove every resource a run created; safe to call repeatedly."""
-    try:
-        _tmux(run, "kill-server", check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    shutil.rmtree(run.dir, ignore_errors=True)
-    _forget_last_run(run.id)
+    stop(run)
 
 
 def _launcher_path(run: Run) -> Path:
@@ -793,13 +802,17 @@ def start(
     profile: str = DEFAULT_PROFILE,
     color: str = "ansi",
     extra_env: dict[str, str] | None = None,
+    client: str = "rich",
 ) -> Run:
     """Build a fixture, start Neovim in tmux and wait for the first render.
 
     `extra_env` adds scenario-specific variables (such as
     `MAGIT_LSP_PLACEMENT`) to Neovim's otherwise cleared environment.
+    `client` selects the Rich adapter or the plugin-free Plain initialization.
     """
     check_tools()
+    if client not in ("rich", "plain"):
+        raise DriverError(f"unknown client `{client}`; expected rich or plain")
     if profile not in ("standard", "vim"):
         raise DriverError(f"unknown profile `{profile}`; expected standard or vim")
     cols, rows = parse_size(size)
@@ -818,6 +831,7 @@ def start(
         socket=str(directory / "nvim.sock"),
         trace=str(directory / "trace.jsonl"),
         tmux=f"magit-ui-{run_id}",
+        client=client,
     )
     try:
         directory.mkdir(parents=True)
@@ -860,7 +874,19 @@ def start(
                     stderr=[],
                 )
             )
-        _launcher_script(run, env)
+        if client == "plain":
+            initial_file = run.repo_path / ".magit"
+            initial_file.touch()
+            with (run.repo_path / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+                exclude.write("\n/.magit\n")
+            env.update({"PLAIN_REPO": str(run.repo_path), "PLAIN_SERVER": env["MAGIT_LSP_BIN"],
+                        "MAGIT_LSP_UI_CLIENT": "plain", "XDG_STATE_HOME": str(run.home_path / "state")})
+            roles = {role: run.dir / f"{role}.pid" for role in ("editor", "server")}
+            wrapper = _role_wrapper(run, "server", roles["server"], [env["PLAIN_SERVER"]])
+            env["MAGIT_LSP_SERVER_WRAPPER"] = str(wrapper)
+            _launcher_script(run, env, PLAIN_INIT, initial_file, roles)
+        else:
+            _launcher_script(run, env)
 
         _tmux(
             run,
@@ -960,27 +986,84 @@ def native_session(
             temporary.cleanup()
 
 
-def stop(run: Run) -> None:
+def _stop_roles(run: Run) -> dict:
+    """Bound teardown of recorded process roles and report any surviving owner."""
+    ownership = {}
+    for role in ("editor", "server"):
+        path = run.dir / f"{role}.pid"
+        if path.exists():
+            ownership[role] = int(path.read_text(encoding="utf-8").strip())
+
+    def running(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    remaining = []
+    # Stop the child first, while the editor can still reap it. Never signal a
+    # process discovered by name: ownership comes only from the exec wrappers.
+    for role in ("server", "editor"):
+        pid = ownership.get(role)
+        if pid is None:
+            continue
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            if not running(pid):
+                break
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                break
+            deadline = time.monotonic() + 2.0
+            while running(pid) and time.monotonic() < deadline:
+                time.sleep(0.02)
+        if running(pid):
+            remaining.append(pid)
+    return {"ownership": ownership, "remaining_owned_pids": remaining}
+
+
+def stop(run: Run) -> dict:
     """Attempt bounded Neovim and tmux teardown, then delete run files."""
+    role_file = run.dir / "server.pid"
+    command = ":qa!"
+    if role_file.is_file():
+        pid = int(role_file.read_text(encoding="utf-8").strip())
+        script = json.dumps(str(NATIVE_SHUTDOWN), ensure_ascii=False)
+        command = f":lua dofile({script})({pid})"
     if run.socket_path.exists():
         try:
             _nvim(
                 run,
                 "--remote-send",
-                "<C-\\><C-N>:qa!<CR>",
+                f"<C-\\><C-N>{command}<CR>",
                 timeout=3.0,
             )
         except (OSError, subprocess.TimeoutExpired):
             pass
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + (4.0 if role_file.is_file() else 2.0)
         while run.socket_path.exists() and time.monotonic() < deadline:
             time.sleep(0.02)
+    report = _stop_roles(run)
     try:
         _tmux(run, "kill-server", check=False)
     except (OSError, subprocess.TimeoutExpired):
         pass
-    shutil.rmtree(run.dir, ignore_errors=True)
-    _forget_last_run(run.id)
+    report["socket_remains"] = run.socket_path.exists()
+    try:
+        report["tmux_session_remains"] = _tmux(run, "has-session", "-t", SESSION, check=False).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        report["tmux_session_remains"] = None
+    report["cleanup_verified"] = (
+        set(report["ownership"]) == {"editor", "server"}
+        and not report["remaining_owned_pids"]
+        and not report["socket_remains"]
+        and report["tmux_session_remains"] is False
+    )
+    if not report["remaining_owned_pids"]:
+        shutil.rmtree(run.dir, ignore_errors=True)
+        _forget_last_run(run.id)
+    return report
 
 
 def _read_events(path: Path) -> list[dict]:

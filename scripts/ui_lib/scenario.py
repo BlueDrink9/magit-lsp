@@ -5,7 +5,7 @@ statement per line. The runner turns each scenario into one real UI run per
 size and profile, checks the statements against the live screen, state and
 trace, and writes artefacts below `build/ui/<scenario>/`.
 
-Nothing in this module sleeps: every wait polls the client's `debug.idle()`.
+Every wait polls native client state with a finite deadline.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -85,6 +86,7 @@ class Scenario:
     # Extra environment variables for Neovim, e.g. MAGIT_LSP_PLACEMENT=vsplit.
     env: dict[str, str] = field(default_factory=dict)
     statements: list[Statement] = field(default_factory=list)
+    client: str = "rich"
 
 
 @dataclass
@@ -298,6 +300,11 @@ def parse_statement(line: str, where: str) -> Statement:
         return Statement(kind="wait")
     if line == "wait prompt":
         return Statement(kind="wait-prompt")
+    if line.startswith("wait state "):
+        expectation = parse_expectation("expect " + line[len("wait state "):])
+        if expectation.kind != "path":
+            raise ScenarioError(f"{where}: `wait state` needs a path equality")
+        return Statement(kind="wait-state", expectation=expectation)
     match = re.match(r"^wait\s+screen\s+contains\s+(.+)$", line)
     if match:
         text = unquote(match.group(1))
@@ -368,6 +375,7 @@ def parse_scenario(path: Path) -> Scenario:
                 "fixture",
                 "size",
                 "profile",
+                "client",
                 "size-only",
                 "profile-only",
                 "xfail",
@@ -390,6 +398,7 @@ def parse_scenario(path: Path) -> Scenario:
         name=path.stem,
         path=path,
         fixture=fixture,
+        client=header.get("client", "rich"),
         size=header.get("size") or None,
         profile=header.get("profile") or None,
         size_only=parse_bool(header["size-only"]) if "size-only" in header else False,
@@ -402,6 +411,8 @@ def parse_scenario(path: Path) -> Scenario:
     )
     if scenario.size:
         driver.parse_size(scenario.size)
+    if scenario.client not in ("rich", "plain"):
+        raise ScenarioError(f"{path.name}: unknown client `{scenario.client}`; expected rich or plain")
     if scenario.profile and scenario.profile not in ("standard", "vim"):
         raise ScenarioError(
             f"{path.name}: unknown profile `{scenario.profile}`; expected standard or vim"
@@ -795,6 +806,9 @@ def _write_snapshot(
     for stem in (variant, canonical):
         Path(f"{stem}.screen").write_text(screen + "\n", encoding="utf-8")
         Path(f"{stem}.ansi").write_text(ansi, encoding="utf-8")
+        if scenario.client == "plain":
+            Path(f"{stem}.json").write_text(
+                json.dumps(driver.snapshot(run), indent=2) + "\n", encoding="utf-8")
     snapshots.append((scenario.name, profile, size, name, screen))
 
 
@@ -866,7 +880,8 @@ def _run_combo(
 ) -> ComboResult:
     try:
         run = driver.start(
-            scenario.fixture, size=size, profile=profile, extra_env=scenario.env
+            scenario.fixture, size=size, profile=profile, extra_env=scenario.env,
+            client=scenario.client,
         )
     except driver.StartupError as error:
         return ComboResult(
@@ -882,6 +897,32 @@ def _run_combo(
             ok=False, reason=str(error), screen="", profile=profile, size=size
         )
 
+    try:
+        result = _run_live(run, scenario, size, profile, snapshots, verbose)
+    finally:
+        try:
+            if scenario.client == "plain":
+                log = run.home_path / "state/magit-ui/lsp.log"
+                if log.is_file():
+                    variant, _ = _snapshot_paths(scenario, profile, size, "lsp.log")
+                    variant.write_bytes(log.read_bytes())
+        finally:
+            cleanup = driver.stop(run)
+        if scenario.client == "plain":
+            variant, canonical = _snapshot_paths(scenario, profile, size, "cleanup.json")
+            for path in (variant, canonical):
+                path.write_text(json.dumps(cleanup, indent=2) + "\n", encoding="utf-8")
+    if scenario.client == "plain" and not cleanup["cleanup_verified"]:
+        return ComboResult(ok=False, reason=f"{result.reason}; Plain cleanup unproven: {cleanup}",
+                           screen=result.screen, profile=profile, size=size)
+    return result
+
+
+def _run_live(
+    run: driver.Run, scenario: Scenario, size: str, profile: str,
+    snapshots: list[tuple[str, str, str, str, str]], verbose: bool,
+) -> ComboResult:
+    """Execute statements while the caller owns unconditional native teardown."""
     documents: dict[str, str] = {}
     try:
         _clear_command_line(run)
@@ -908,6 +949,20 @@ def _run_combo(
                         profile=profile,
                         size=size,
                     )
+            elif statement.kind == "wait-state":
+                expectation = statement.expectation
+                assert expectation is not None
+                deadline = time.monotonic() + WAIT_TIMEOUT_MS / 1000
+                while True:
+                    ok, actual = evaluate(expectation, screen="", ansi="",
+                                          snapshot=driver.snapshot(run), events=[])
+                    if ok:
+                        break
+                    if time.monotonic() >= deadline:
+                        return ComboResult(ok=False,
+                            reason=f"{scenario.path.name}:{statement.line}: wait state {expectation.path}: {actual!r}",
+                            screen=driver.capture(run), profile=profile, size=size)
+                    time.sleep(0.02)
             elif statement.kind == "wait-screen":
                 if not driver.wait_screen(
                     run, statement.text or "", timeout_ms=WAIT_TIMEOUT_MS
@@ -1002,8 +1057,6 @@ def _run_combo(
         return ComboResult(
             ok=False, reason=str(error), screen=screen, profile=profile, size=size
         )
-    finally:
-        driver.stop(run)
 
 
 def _trim_screen(screen: str) -> str:

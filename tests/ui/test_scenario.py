@@ -105,6 +105,7 @@ class ParserTest(unittest.TestCase):
         )
         self.assertIsNone(parsed.size)
         self.assertIsNone(parsed.profile)
+        self.assertEqual(parsed.client, "rich")
         self.assertFalse(parsed.size_only)
         self.assertFalse(parsed.profile_only)
         self.assertIsNone(parsed.xfail)
@@ -150,6 +151,65 @@ class ParserTest(unittest.TestCase):
             scenario.parse_scenario(
                 write_temp("fixture: clean\nprofile: emacs\n---\n")
             )
+
+    def test_plain_client_does_not_replace_keymap_profile(self) -> None:
+        parsed = scenario.parse_scenario(write_temp(
+            "fixture: clean\nclient: plain\nprofile: vim\n---\nwait\n"))
+        self.assertEqual(parsed.client, "plain")
+        self.assertEqual(parsed.profile, "vim")
+        with self.assertRaisesRegex(scenario.ScenarioError, "unknown client"):
+            scenario.parse_scenario(write_temp("fixture: clean\nclient: helix\n---\nwait\n"))
+
+    def test_wait_state_requires_a_structured_path_equality(self) -> None:
+        statement = scenario.parse_statement("wait state draft == true", "case:1")
+        self.assertEqual(statement.kind, "wait-state")
+        self.assertEqual(statement.expectation.path, "draft")
+        self.assertIs(statement.expectation.value, True)
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.parse_statement('wait state screen contains "draft"', "case:1")
+
+    def test_wait_state_polls_native_state_and_times_out_on_missing_paths(self) -> None:
+        case = scenario.parse_scenario(write_temp(
+            "fixture: clean\nclient: plain\n---\nwait state draft == true\n"))
+        with (
+            patch.object(scenario, "_clear_command_line"),
+            patch.object(driver, "snapshot", side_effect=[{"draft": False}, {"draft": True}]) as snapshot,
+            patch.object(scenario.time, "sleep"),
+        ):
+            result = scenario._run_live(object(), case, "80x24", "standard", [], False)
+        self.assertTrue(result.ok)
+        self.assertEqual(snapshot.call_count, 2)
+        with (
+            patch.object(scenario, "_clear_command_line"),
+            patch.object(driver, "snapshot", return_value={}),
+            patch.object(driver, "capture", return_value="actual screen"),
+            patch.object(scenario.time, "monotonic", side_effect=[0, 3]),
+        ):
+            result = scenario._run_live(object(), case, "80x24", "standard", [], False)
+        self.assertFalse(result.ok)
+        self.assertIn("snapshot has no path", result.reason)
+        self.assertEqual(result.screen, "actual screen")
+
+    def test_plain_cleanup_failure_keeps_the_original_native_failure(self) -> None:
+        case = scenario.parse_scenario(write_temp("fixture: clean\nclient: plain\n---\nwait\n"))
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            cleanup = {"cleanup_verified": False, "remaining_owned_pids": [123]}
+            with (
+                patch.object(driver, "start", return_value=SimpleNamespace(home_path=base)) as start,
+                patch.object(scenario, "_run_live", return_value=scenario.ComboResult(
+                    ok=False, reason="original native assertion", screen="actual screen")),
+                patch.object(driver, "stop", return_value=cleanup) as stop,
+                patch.object(scenario, "_snapshot_paths", return_value=(base / "variant.json", base / "cleanup.json")),
+            ):
+                result = scenario._run_combo(case, "80x24", "standard", [])
+            self.assertIn('"remaining_owned_pids"', (base / "cleanup.json").read_text())
+        self.assertEqual(start.call_args.kwargs["client"], "plain")
+        stop.assert_called_once()
+        self.assertFalse(result.ok)
+        self.assertIn("original native assertion", result.reason)
+        self.assertIn("cleanup unproven", result.reason)
+        self.assertEqual(result.screen, "actual screen")
 
     def test_invalid_size_is_rejected(self) -> None:
         with self.assertRaises(driver.DriverError):

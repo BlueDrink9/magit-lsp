@@ -1,0 +1,40 @@
+# Plugin-free standard LSP code actions at the minimum native acceptance size.
+fixture: two-hunk-siblings
+client: plain
+size: 80x24
+size-only: true
+profile: standard
+profile-only: true
+---
+expect project_modules == 0
+expect rich_notifications == 0
+goto "Unstaged changes (2)"
+expect screen contains "Unstaged changes (2)"
+snapshot: initial
+sh: git rev-parse HEAD > .git/before-head; git write-tree > .git/before-index; cp f.txt .git/worktree-f; cp g.txt .git/worktree-g; git show HEAD:f.txt > .git/base-f
+goto "g.txt"
+keys: ":lua PlainUI.action('status.stage')" Enter
+wait
+sh: test "$(git diff --cached --name-only)" = g.txt; git show :g.txt > .git/staged-g; cmp .git/staged-g g.txt
+goto "Staged changes (1)"
+expect screen contains "Staged changes (1)"
+snapshot: staged-file
+goto "+line5 CHANGED"
+keys: ":lua PlainUI.action('status.stage')" Enter
+wait
+sh: sed '5s/$/ CHANGED/' .git/base-f > .git/partial-f; git show :f.txt > .git/staged-f; cmp .git/partial-f .git/staged-f; cmp .git/worktree-f f.txt
+goto "+line5 CHANGED"
+snapshot: staged-hunk
+keys: ":lua PlainUI.action('status.unstage')" Enter
+wait
+sh: git show :f.txt > .git/staged-f; cmp .git/base-f .git/staged-f; test "$(git diff --cached --name-only)" = g.txt
+goto "Staged changes (1)"
+keys: j
+keys: ":lua PlainUI.action('status.unstage')" Enter
+wait
+sh: git rev-parse HEAD > .git/after-head; git write-tree > .git/after-index; cmp .git/before-head .git/after-head; cmp .git/before-index .git/after-index; cmp .git/worktree-f f.txt; cmp .git/worktree-g g.txt; test -z "$(git diff --cached --name-only)"
+goto "Unstaged changes (2)"
+expect screen contains "Unstaged changes (2)"
+expect project_modules == 0
+expect rich_notifications == 0
+snapshot: restored

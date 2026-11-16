@@ -19,7 +19,7 @@ vim.api.nvim_create_autocmd('VimEnter', {
   once = true,
   callback = function()
     local capabilities = vim.lsp.protocol.make_client_capabilities()
-    capabilities.window.showDocument = { support = false }
+    capabilities.window.showDocument = { support = vim.env.MAGIT_LSP_UI_CLIENT == 'plain' }
     local client_id = vim.lsp.start({
       name = 'magit-lsp-plain-smoke',
       cmd = { server },
@@ -36,3 +36,8 @@ vim.api.nvim_create_autocmd('VimEnter', {
     })
   end,
 })
+
+-- The standalone smoke deliberately keeps its original declarations and setup.
+if vim.env.MAGIT_LSP_UI_CLIENT == 'plain' then
+  dofile(vim.fn.fnamemodify(debug.getinfo(1, 'S').source:sub(2), ':h') .. '/plain_scenario.lua')
+end

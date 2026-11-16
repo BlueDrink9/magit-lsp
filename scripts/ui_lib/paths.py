@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 MINIMAL_INIT = SCRIPTS / "minimal_init.lua"
+PLAIN_INIT = ROOT / "tests" / "ui" / "plain_init.lua"
+NATIVE_SHUTDOWN = SCRIPTS / "ui_shutdown.lua"
 BUILD_UI = ROOT / "build" / "ui"
 RUNS = BUILD_UI / "runs"
 LAST_RUN = BUILD_UI / "last_run"

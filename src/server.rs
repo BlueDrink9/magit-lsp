@@ -114,7 +114,6 @@ pub struct ServerOptions {
 /// Client capabilities that affect key delivery (§3.9).
 #[derive(Debug, Clone)]
 struct ClientCaps {
-    delivery: KeymapDelivery,
     key_modifiers: KeyModifiers,
     /// Selected presentation recorded from initialize; routing is a later slice.
     presentation: Option<Presentation>,
@@ -131,7 +130,6 @@ struct ClientCaps {
 impl Default for ClientCaps {
     fn default() -> Self {
         Self {
-            delivery: KeymapDelivery::Dynamic,
             key_modifiers: KeyModifiers::Full,
             presentation: None,
             close_confirms: true,
@@ -757,12 +755,9 @@ impl Shared {
         self.picks.respond(params)
     }
 
-    /// How the client wants keymaps delivered.
-    fn delivery(&self) -> KeymapDelivery {
-        self.client
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .delivery
+    /// Whether this rich client requested pushed keymaps.
+    fn dynamic_keymaps(&self) -> bool {
+        dynamic_delivery(&self.client)
     }
 
     /// The repository root that owns `uri`, found through its open view.
@@ -1680,11 +1675,11 @@ fn deliver_plain_close_outcome(shared: &Shared, close: Option<(String, InvokeRes
 
 /// Whether the client wants the server to push every view's keymap.
 fn dynamic_delivery(client: &Arc<Mutex<ClientCaps>>) -> bool {
-    client
+    let client = client
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .delivery
-        == KeymapDelivery::Dynamic
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    matches!(client.presentation.as_ref(), Some(Presentation::Rich(rich))
+        if rich.keys == KeymapDelivery::Dynamic)
 }
 
 fn custom_ui(client: &Arc<Mutex<ClientCaps>>) -> CustomRender {
@@ -1967,7 +1962,7 @@ impl PromptUi for ServerUi {
 
 /// Recompute and push `view/keymap` for every open view after a config reload.
 fn refresh_view_keymaps(shared: &Shared, sender: &mpsc::UnboundedSender<Message>) {
-    if shared.delivery() != KeymapDelivery::Dynamic {
+    if !shared.dynamic_keymaps() {
         return;
     }
     let sessions: Vec<_> = shared
@@ -3415,16 +3410,15 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                     }
                 }
             }
-            let (delivery, key_modifiers) = match &presentation {
-                Presentation::Rich(rich) => (rich.keys, rich.modifiers),
-                Presentation::Plain(_) => (KeymapDelivery::Dynamic, KeyModifiers::Full),
+            let key_modifiers = match &presentation {
+                Presentation::Rich(rich) => rich.modifiers,
+                Presentation::Plain(_) => KeyModifiers::Full,
             };
             {
                 let mut client = shared
                     .client
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                client.delivery = delivery;
                 client.key_modifiers = key_modifiers;
                 client.presentation = Some(presentation.clone());
                 client.plain = match client.presentation.as_ref() {
@@ -3463,7 +3457,7 @@ fn dispatch(request: &Request, shared: &Shared) -> Result<Dispatched> {
                             || name.to_ascii_lowercase().contains("codium")
                     });
             }
-            tracing::debug!(?delivery, ?key_modifiers, "client key capabilities");
+            tracing::debug!(?key_modifiers, "client key capabilities");
             if let Some(error) = &shared.startup_error {
                 notifications.push(show_message(1, format!("magit-lsp config: {error}")));
             }
@@ -4533,7 +4527,7 @@ fn open_view(shared: &Shared, params: Value) -> Result<Dispatched> {
     if let Some(error) = config.last_error() {
         notifications.push(show_message(1, format!("magit-lsp config: {error}")));
     }
-    if shared.delivery() == KeymapDelivery::Dynamic {
+    if shared.dynamic_keymaps() {
         if let Some(keymap) = keymap {
             notifications.push(Message::Notification(Notification::new(
                 VIEW_KEYMAP.to_string(),
@@ -4976,7 +4970,7 @@ fn dispatched_outcome(
     // A mode change replaces the binding set, so the client must see it even
     // when the scope's ordinary keymap would not change. Keep the established
     // render-before-keymap order for rich clients.
-    if shared.delivery() == KeymapDelivery::Dynamic {
+    if shared.dynamic_keymaps() {
         if let Some(keymap) = outcome.keymap {
             notifications.push(Message::Notification(Notification::new(
                 VIEW_KEYMAP.to_string(),
@@ -4995,7 +4989,7 @@ fn dispatched_outcome(
 
     for (render, keymap) in outcome.opened {
         notifications.extend(deliver_render(shared, render));
-        if shared.delivery() == KeymapDelivery::Dynamic {
+        if shared.dynamic_keymaps() {
             if let Some(keymap) = keymap {
                 notifications.push(Message::Notification(Notification::new(
                     VIEW_KEYMAP.to_string(),

@@ -1,0 +1,36 @@
+# Plain commit delivery, native edit/save/close and exact resulting Git state.
+fixture: staged-one-file
+client: plain
+size: 80x24
+size-only: true
+profile: standard
+profile-only: true
+---
+expect project_modules == 0
+expect rich_notifications == 0
+sh: git rev-parse HEAD > .git/before-head; cp f.txt .git/expected-file
+goto "f.txt"
+keys: ":lua PlainUI.action('open.commit')" Enter
+wait
+expect screen contains "Commit"
+snapshot: commit-menu
+keys: ":lua PlainUI.action('menu.run-action','c')" Enter
+wait state draft == true
+wait
+snapshot: opened-draft
+keys: g g d G i "Plain native commit" Enter Enter "Saved and closed with stock LSP."
+keys: Escape
+snapshot: edited-draft
+keys: :write Enter
+wait
+expect modified == false
+sh: git rev-parse HEAD > .git/saved-head; cmp .git/before-head .git/saved-head
+snapshot: saved-draft
+keys: :bdelete Enter
+wait state draft == false
+wait screen contains "Plain native commit"
+wait
+sh: git rev-parse HEAD^ > .git/parent; cmp .git/before-head .git/parent; printf 'Plain native commit\n\nSaved and closed with stock LSP.\n' > .git/expected-message; git cat-file commit HEAD | sed '1,/^$/d' > .git/actual-message; cmp .git/expected-message .git/actual-message; git show HEAD:f.txt > .git/committed-file; cmp .git/expected-file .git/committed-file; test -z "$(git status --porcelain)"; test ! -e .git/index.lock
+expect project_modules == 0
+expect rich_notifications == 0
+snapshot: committed-status

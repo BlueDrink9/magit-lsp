@@ -390,7 +390,7 @@ class WaitSocketTest(unittest.TestCase):
                     [], 0, stdout=stdout, stderr=""
                 )
                 with patch.object(driver, "_nvim", return_value=result):
-                    probe = driver._idle_probe(object())
+                    probe = driver._idle_probe(make_run("/tmp/test-run"))
                 self.assertEqual(probe.outcome, outcome)
                 self.assertEqual(probe.stdout, stdout.strip())
 
@@ -399,7 +399,7 @@ class WaitSocketTest(unittest.TestCase):
             [], 2, stdout="", stderr="Lua: E5108: debug unavailable\n"
         )
         with patch.object(driver, "_nvim", return_value=result):
-            probe = driver._idle_probe(object())
+            probe = driver._idle_probe(make_run("/tmp/test-run"))
         self.assertEqual(probe.outcome, "error")
         self.assertEqual(probe.returncode, 2)
         self.assertIn("debug unavailable", probe.stderr)
@@ -407,7 +407,7 @@ class WaitSocketTest(unittest.TestCase):
     def test_idle_probe_preserves_rpc_timeout(self) -> None:
         timeout = subprocess.TimeoutExpired([], 2.0, output=b"", stderr=b"late")
         with patch.object(driver, "_nvim", side_effect=timeout):
-            probe = driver._idle_probe(object())
+            probe = driver._idle_probe(make_run("/tmp/test-run"))
         self.assertEqual(probe.outcome, "timeout")
         self.assertEqual(probe.stderr, "late")
 
@@ -427,7 +427,7 @@ class WaitSocketTest(unittest.TestCase):
             [], 0, stdout=json.dumps(payload), stderr=""
         )
         with patch.object(driver, "_nvim", return_value=result):
-            lines = driver._client_startup_state(object())
+            lines = driver._client_startup_state(make_run("/tmp/test-run"))
         report = "\n".join(lines)
         self.assertIn("requests=2, queued=1, prompts=0, scheduled=3, progress=1", report)
         self.assertIn("version=4, acked=3", report)
@@ -592,6 +592,54 @@ class RpcHelperTtyTest(unittest.TestCase):
 
 
 class StartPathTest(unittest.TestCase):
+    def test_plain_launch_uses_plugin_free_init_file_and_role_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+
+            def build(_fixture, repo, home):
+                repo.mkdir()
+                (repo / ".git/info").mkdir(parents=True)
+                home.mkdir()
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "run_dir", return_value=run_dir),
+                patch.object(driver.fixtures, "build", side_effect=build),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "_wait_for_view"),
+                patch.object(driver, "_update_last_run"),
+            ):
+                run = driver.start("clean", client="plain", size="80x24")
+            self.assertEqual(run.client, "plain")
+            self.assertEqual(json.loads((run.dir / "state.json").read_text())["client"], "plain")
+            launcher = (run.dir / "launch-nvim.sh").read_text()
+            editor = (run.dir / "editor-exec.sh").read_text()
+            self.assertIn("MAGIT_LSP_UI_CLIENT=plain", launcher)
+            self.assertIn(f"PLAIN_REPO={run.repo}", launcher)
+            self.assertIn(str(driver.PLAIN_INIT), editor)
+            self.assertIn(str(run.repo_path / ".magit"), editor)
+            self.assertNotIn(str(driver.MINIMAL_INIT), editor)
+            self.assertIn("server-exec.sh", launcher)
+            self.assertIn("target/debug/magit-lsp", (run.dir / "server-exec.sh").read_text())
+
+    def test_plain_probes_do_not_load_the_rich_adapter(self) -> None:
+        run = make_run("/tmp/test-run")
+        run.client = "plain"
+        with patch.object(driver, "_expr", return_value='{"ready":true}') as expr:
+            self.assertTrue(driver.snapshot(run)["ready"])
+        self.assertIn("PlainUI.snapshot()", expr.call_args.args[1])
+        with patch.object(driver, "_nvim", return_value=subprocess.CompletedProcess([], 0, "true", "")) as nvim:
+            self.assertTrue(driver.idle(run))
+        self.assertIn("PlainUI.idle()", nvim.call_args.args[2])
+        payload = json.dumps({"ready": False, "idle": True, "applied_edits": 0,
+                              "uri": "file:///repo/.magit", "messages": ["startup warning"]})
+        with patch.object(driver, "_nvim", return_value=subprocess.CompletedProcess([], 0, payload, "")):
+            report = "\n".join(driver._client_startup_state(run))
+        self.assertIn("applied edits=0", report)
+        self.assertIn("startup warning", report)
+        self.assertNotIn("acked", report)
+
     def test_server_binary_defaults_to_checkout_debug_build(self) -> None:
         self._assert_server_binary(None, Path(driver.__file__).resolve().parents[2] / "target/debug/magit-lsp")
 
@@ -642,6 +690,58 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeSessionTest(unittest.TestCase):
+    def test_recorded_native_roles_use_shared_shutdown_before_editor_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            run.socket_path.touch()
+            (run.dir / "server.pid").write_text("123\n")
+
+            def send(*_args, **_kwargs):
+                run.socket_path.unlink()
+
+            with (
+                patch.object(driver, "_nvim", side_effect=send) as nvim,
+                patch.object(driver, "_stop_roles", return_value={
+                    "ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": []}),
+                patch.object(driver, "_tmux", return_value=subprocess.CompletedProcess([], 1)),
+                patch.object(driver, "_forget_last_run"),
+            ):
+                report = driver.stop(run)
+        self.assertIn(str(driver.NATIVE_SHUTDOWN), nvim.call_args.args[2])
+        self.assertIn("(123)", nvim.call_args.args[2])
+        self.assertTrue(report["cleanup_verified"])
+
+    def test_recorded_child_is_stopped_before_editor_without_process_name_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            (run.dir / "server.pid").write_text("123\n")
+            (run.dir / "editor.pid").write_text("456\n")
+            live = {123, 456}
+            terminated = []
+
+            def kill(pid, sig):
+                if pid not in live:
+                    raise ProcessLookupError()
+                if sig:
+                    terminated.append(pid)
+                    live.remove(pid)
+
+            with patch.object(driver.os, "kill", side_effect=kill):
+                report = driver._stop_roles(run)
+        self.assertEqual(terminated, [123, 456])
+        self.assertEqual(report, {"ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": []})
+
+    def test_missing_roles_cannot_claim_verified_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            with (
+                patch.object(driver, "_tmux", return_value=subprocess.CompletedProcess([], 1)),
+                patch.object(driver, "_forget_last_run"),
+            ):
+                report = driver.stop(run)
+        self.assertFalse(report["cleanup_verified"])
+        self.assertEqual(report["ownership"], {})
+
     def test_exec_wrappers_record_roles_and_missing_server_stays_unproven(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run = make_run(directory)
