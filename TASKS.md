@@ -255,6 +255,8 @@ Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](d
 
 ## Bugfix
 
+- [ ] **BUG-PHASE6-PROC — Remove procps-only test prerequisite.** Full `make test` failed at `src/runner/owned.rs:652` because host BusyBox `ps` rejects `-p`. Keep the Linux process-group/session/no-TTY oracle using kernel `/proc` metadata rather than weakening assertions or requiring another tool. Verify the focused owned-runner test through Make, then resume the phase gate.
+
 - [x] **Refresh instant-autosquash generated references.** check: T019 closure gate `make docs-artifacts-check` failed stale `docs/schema/worked-exchanges.md` at `63c8bd3` (`build/test-logs/schema-check.64UYhw`). Regenerated causal schema/registry references through `make docs-generate`, inspected diffs, committed generated files separately, then passed `make docs-artifacts-check && make docs-check`. Full `make test`, `make ui-test`, and `make ui-tour` passed at `63c8bd3`; hygiene ran but missing checkers and deferred debt prevent a clean claim.
   - Verified: `make docs-generate && make docs-artifacts-check && make docs-check` @ 63c8bd3 → `ok: update-schema`, `ok: registry-docs-generate`, `ok: schema-check`, `ok: registry-docs-check`, `ok: docs-check`; generated reference commit: `f2f7cd0`.
 

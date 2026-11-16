@@ -645,17 +645,18 @@ mod unix {
             let result = run_owned(
                 Command::new("sh")
                     .arg("-c")
-                    .arg("ps -o pid=,pgid=,sid=,tty= -p $$"),
+                    .arg("cat /proc/$$/stat"),
                 None,
             )
             .unwrap();
             assert!(result.status.unwrap().success());
             let text = String::from_utf8(result.stdout).unwrap();
-            let fields: Vec<_> = text.split_whitespace().collect();
-            assert_eq!(fields.len(), 4, "{text}");
-            assert_eq!(fields[0], fields[1], "new process group before exec");
-            assert_eq!(fields[0], fields[2], "new session before exec");
-            assert_eq!(fields[3], "?", "no controlling terminal");
+            let pid = text.split_whitespace().next().unwrap();
+            let (_, tail) = text.rsplit_once(')').expect("Linux proc stat command terminator");
+            let fields: Vec<_> = tail.split_whitespace().collect();
+            assert_eq!(pid, fields[2], "new process group before exec");
+            assert_eq!(pid, fields[3], "new session before exec");
+            assert_eq!(fields[4], "0", "no controlling terminal");
         }
 
         #[test]
