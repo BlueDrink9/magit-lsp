@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from ui_lib import fixtures
+from ui_lib.process_identity import record_command, signal_owned
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,7 +57,8 @@ def main() -> None:
             for sig in (None, signal.SIGTERM, signal.SIGKILL):
                 if sig is not None:
                     try:
-                        os.kill(pid, sig)
+                        if not signal_owned(pid, pid_file, sig):
+                            raise RuntimeError(f"refusing to signal mismatched process identity: {pid}")
                     except ProcessLookupError:
                         break
                 deadline = time.monotonic() + 2
@@ -97,7 +99,7 @@ def main() -> None:
     tools = directory / "bin"
     tools.mkdir()
     server = tools / "magit-lsp"
-    server.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$$\" > {shlex.quote(str(directory / 'server.pid'))}\nexec {shlex.quote(str(args.binary.resolve()))}\n")
+    server.write_text("#!/bin/sh\nset -e\n" + record_command(directory / "server.pid") + f"exec {shlex.quote(str(args.binary.resolve()))}\n")
     server.chmod(0o700)
     env = fixtures.determinism_env(home)
     env.update(PATH=f"{tools}:{os.environ['PATH']}", TERM="xterm-256color", XDG_CACHE_HOME=str(home / "cache"))

@@ -862,10 +862,23 @@ class NativeSessionTest(unittest.TestCase):
                     terminated.append(pid)
                     live.remove(pid)
 
-            with patch.object(driver.os, "kill", side_effect=kill):
+            def signal_owned(pid, record, sig):
+                kill(pid, sig)
+                return True
+
+            with patch.object(driver.os, "kill", side_effect=kill), patch("ui_lib.process_identity.signal_owned", side_effect=signal_owned):
                 report = driver._stop_roles(run)
         self.assertEqual(terminated, [123, 456])
         self.assertEqual(report, {"ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": []})
+
+    def test_recycled_role_pid_is_never_signaled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = make_run(directory)
+            (run.dir / "server.pid").write_text("123\n")
+            with patch.object(driver.os, "kill") as kill, patch("ui_lib.process_identity.signal_owned", return_value=False):
+                report = driver._stop_roles(run)
+            self.assertTrue(all(call.args[1] == 0 for call in kill.call_args_list))
+            self.assertEqual(report["remaining_owned_pids"], [123])
 
     def test_missing_roles_cannot_claim_verified_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

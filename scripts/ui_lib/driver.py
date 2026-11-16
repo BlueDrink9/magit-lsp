@@ -771,12 +771,12 @@ def _launcher_script(run: Run, env: dict[str, str], init: Path = MINIMAL_INIT, i
 def _role_wrapper(run: Run, role: str, pid_file: Path, command: list[str]) -> Path:
     """Write an exec-safe wrapper that atomically records one process role."""
     wrapper = run.dir / f"{role}-exec.sh"
-    record = shlex.quote(str(pid_file))
+    from .process_identity import record_command
     wrapper.write_text(
         "#!/bin/sh\n"
-        f"printf '%s\\n' \"$$\" > {record}.tmp\n"
-        f"mv {record}.tmp {record}\n"
-        f"exec {shlex.join(command)}\n",
+        "set -e\n"
+        + record_command(pid_file)
+        + f"exec {shlex.join(command)}\n",
         encoding="utf-8",
     )
     wrapper.chmod(0o700)
@@ -1015,6 +1015,7 @@ def native_session(
 
 def _stop_roles(run: Run) -> dict:
     """Bound teardown of recorded process roles and report any surviving owner."""
+    from .process_identity import signal_owned
     ownership = {}
     for role in ("editor", "server"):
         path = run.dir / f"{role}.pid"
@@ -1039,7 +1040,8 @@ def _stop_roles(run: Run) -> dict:
             if not running(pid):
                 break
             try:
-                os.kill(pid, sig)
+                if not signal_owned(pid, run.dir / f"{role}.pid", sig):
+                    break
             except ProcessLookupError:
                 break
             deadline = time.monotonic() + 2.0

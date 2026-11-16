@@ -129,7 +129,7 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
             raise RuntimeError(f"required executable not found: {executable}")
     if not binary.exists():
         raise RuntimeError(f"debug binary missing: {binary}")
-    run_evidence = evidence / ("with-final-newline" if final_newline else "without-final-newline")
+    run_evidence = evidence.resolve() / ("with-final-newline" if final_newline else "without-final-newline")
     if run_evidence.exists():
         # Keep the complete prior wire/state/Git evidence, including failures.
         run_evidence.rename(run_evidence.with_name(f"{run_evidence.name}-{time.time_ns()}"))
