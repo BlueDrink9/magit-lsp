@@ -35,7 +35,25 @@ fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
     else {
         panic!("discard prompt");
     };
+    assert_eq!(
+        test.session
+            .views()
+            .get(&view)
+            .expect("status view")
+            .descriptor()
+            .viewport,
+        STATUS_VIEWPORT
+    );
     assert!(test.session.resize(&view, WIDE_VIEWPORT).unwrap().is_none());
+    assert_eq!(
+        test.session
+            .views()
+            .get(&view)
+            .expect("status view")
+            .descriptor()
+            .viewport,
+        WIDE_VIEWPORT
+    );
     assert!(test.session.refresh(&view).unwrap().is_none());
     let Execution::Done(result) = test
         .session
@@ -46,6 +64,10 @@ fn a_discard_continuation_keeps_its_hunk_across_refresh_ack_and_resize() {
     };
     assert!(result.effects.is_empty(), "{:?}", result.effects);
     assert_eq!(hunk_count(&tmp.git(&["diff", "--", "f.txt"])), 1);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+        lines(40).with(35, "line35 CHANGED").to_string()
+    );
     assert!(cached_diff(tmp.path()).is_empty());
 }
 
