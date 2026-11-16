@@ -349,7 +349,6 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
                 offered = sorted(offered_by_number.items(), key=lambda item: int(item[0]))
                 assert offered, screen
                 discard = [text for _, text in offered if "discard" in text.lower()]
-                assert all("(disabled)" in text for text in discard), screen
                 matches = [(number, text) for number, text in offered if title and title in text and "(disabled)" not in text]
                 if title:
                     assert len(matches) == 1, (title, offered)
@@ -382,7 +381,38 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
 
             before = snapshot()
             assert before["index"] == base and before["head_text"] == base and before["worktree"] == changed
-            picker("file-discard-unavailable", file_keys(rendered), None)
+            picker("file-actions-cancel", file_keys(rendered), None)
+            assert "Discard the change at point" in actions[-1]["discard"], actions[-1]
+            assert snapshot() == before
+
+            # Discard is available through a server-owned document confirm.
+            # Opening and cancelling it must preserve every observed Git value.
+            picker("file-discard-cancel-open", file_keys(rendered), "Discard the change at point")
+            cancel_prompt = wait_text("Discard changes to tracked.txt?")
+            assert snapshot() == before
+            no_row = cancel_prompt["text"].splitlines().index("No") + 1
+            picker("file-discard-cancel", f"{no_row}G0", "No")
+            cancelled = wait_state("discard cancel restores the caller", lambda current:
+                                   current["text"] == rendered["text"])
+            after_cancel = snapshot()
+            assert after_cancel == before
+
+            # Confirm through the same native picker, then restore the fixture
+            # explicitly so every retained menu/stage/provider assertion follows.
+            picker("file-discard-confirm-open", file_keys(cancelled), "Discard the change at point")
+            confirm_prompt = wait_text("Discard changes to tracked.txt?")
+            assert snapshot() == before
+            yes_row = confirm_prompt["text"].splitlines().index("Yes") + 1
+            picker("file-discard-confirm", f"{yes_row}G0", "Yes")
+            confirmed_discard = wait_text("Unstaged changes (0)")
+            after_discard = snapshot()
+            assert after_discard == {**before, "worktree": base}, (before, after_discard)
+            report["discard"] = {"cancel_prompt": cancel_prompt, "cancelled": cancelled,
+                                 "confirm_prompt": confirm_prompt, "confirmed": confirmed_discard,
+                                 "git_before": before, "git_cancelled": after_cancel,
+                                 "git_confirmed": after_discard}
+            (repo / "tracked.txt").write_text(changed)
+            rendered = wait_text("+THREE")
             assert snapshot() == before
 
             # Exercise the server-owned menu through stock Neovim code actions.
@@ -831,9 +861,11 @@ if __name__ == "__main__":
     parser.add_argument("--binary", type=Path, default=DEFAULT_BINARY)
     parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     parser.add_argument("--size", default="120x100")
+    parser.add_argument("--final-newline", choices=("both", "with", "without"), default="both")
     args = parser.parse_args()
     errors: list[str] = []
-    for with_final_newline in (False, True):
+    variants = {"both": (False, True), "with": (True,), "without": (False,)}
+    for with_final_newline in variants[args.final_newline]:
         try:
             run_variant(with_final_newline, args.binary, args.evidence, args.size)
         except BaseException as error:

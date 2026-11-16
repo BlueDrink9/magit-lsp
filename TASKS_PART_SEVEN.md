@@ -419,7 +419,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 ### T020 plain-e2e (L)
 
 - **Depends on:** T009, T010. Old ticket: R-PLAIN-E2E.
-- **Target Files:** `tests/plain_e2e.rs`, `scripts/ui_lib/*`, `scripts/test_plain_neovim.py`, `tests/ui/plain_init.lua`, `tests/ui/scenarios/plain-status-stage.scn` and `plain-commit.scn`, `ui-test-plan.md`.
+- **Target Files:** `tests/plain_harness.rs`, `scripts/ui_lib/*`, `scripts/test_plain_neovim.py`, `tests/ui/plain_init.lua`, `tests/ui/scenarios/plain-status-stage.scn` and `plain-commit.scn`, `ui-test-plan.md`.
 - **Reference Files:** `scripts/ui_lib/cli.py`, `driver.py`, `scenario.py`; section A.5 of `ui-test-plan.md`.
 - **Constraints:** Shared configurable native lifecycle now exists. Retain `scripts/test_plain_neovim.py` and reuse `make plain-neovim` with role-aware bounded teardown; do not recreate lifecycle support. The init file uses `vim.lsp.start` and no code from `lua/magit-lsp`. The header `profile:` in a `.scn` file already means the keymap profile. The header `client: rich | plain` selects the client.
 - **Acceptance:**
@@ -427,7 +427,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
   2. Add a harness test on a disposable repository: open, status, stage a file, stage a hunk, reject a stale action, unstage, commit menu, commit file, save, close. The commit must exist with the exact message.
   3. Add native plain scenarios for status/stage and commit editing. Run at 80x24 and record text evidence. Keep this distinct from verified 120x100 coverage. No owned process may remain.
   4. Delete the standalone script only after replacement coverage demonstrates all its existing assertions.
-- **Verify:** Future acceptance commands: `make test-rust FILTER="--test plain_e2e"`, `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn`, and `make ui-file FILE=tests/ui/scenarios/plain-commit.scn`. These checks have not run for this ticket.
+- **Verify:** `make test-rust FILTER="--test plain_harness plain_e2e"`, `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn`, `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` and the retained `make plain-neovim`. Current results belong only in the queue.
 
 ### T021 helix-smoke (S)
 
