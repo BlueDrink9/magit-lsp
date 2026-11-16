@@ -1697,7 +1697,6 @@ fn capability_levels_pin_the_plain_capability_fields() {
         .collect();
     let mut implemented = plain_capability_fields();
     // Runtime state, not a client declaration; the table documents declarations.
-    implemented.retain(|field| field != "commit_draft_expired");
     assert_eq!(
         implemented, documented,
         "capability table must document every PlainCapabilities declaration field exactly"

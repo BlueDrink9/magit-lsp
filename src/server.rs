@@ -956,7 +956,7 @@ fn draft_open_timeout() -> std::time::Duration {
         .unwrap_or(DRAFT_OPEN_TIMEOUT)
 }
 
-/// Cancel a commit draft run the client never opened and disable commit commands.
+/// Cancel a commit draft run the client never opened, allowing a new attempt.
 ///
 /// The wait runs as a runtime task so it never blocks the edit emitter, which
 /// calls `deliver_plain_effects` while the registry lock is held. It holds only a
@@ -978,7 +978,6 @@ fn arm_draft_open_timeout(shared: &Arc<Shared>, run_id: String) {
         if shared.closing.load(Ordering::SeqCst) || !editor::registry().expire_unopened(&run_id) {
             return;
         }
-        set_plain_commit_expired(&shared, true);
         deliver_plain_effects(
             &shared,
             vec![Effect::message(
@@ -987,17 +986,6 @@ fn arm_draft_open_timeout(shared: &Arc<Shared>, run_id: String) {
             )],
         );
     });
-}
-
-/// Record whether Plain commit commands are disabled after a draft expiry.
-fn set_plain_commit_expired(shared: &Shared, expired: bool) {
-    let mut client = shared.client.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(plain) = client.plain.as_mut() {
-        plain.commit_draft_expired = expired;
-    }
-    if let Some(Presentation::Plain(caps)) = client.presentation.as_mut() {
-        caps.commit_draft_expired = expired;
-    }
 }
 
 /// Deliver effects to a Plain client through standard LSP notifications only.
@@ -1086,10 +1074,6 @@ fn send_plain_edit_document(
         editor::registry().resolve(&run_id, editor::Reply::Abort);
         return;
     }
-    if !capabilities.show_document {
-        send_manual_edit_instructions(&shared, &uri, &title);
-        return;
-    }
     // An already-open buffer is replaced with the new template by a versioned
     // whole-document edit. The version comes from the document store so the
     // client can reject the edit if its buffer has moved independently.
@@ -1116,15 +1100,6 @@ fn send_plain_edit_document(
             .register_outbound("workspace/applyEdit", serde_json::json!({ "edit": edit }))
             .ok()
     });
-    let Ok((pending, receiver)) = shared.register_outbound(
-        "window/showDocument",
-        serde_json::json!({"uri":uri,"external":false,"takeFocus":true}),
-    ) else {
-        if !shared.closing.load(Ordering::SeqCst) {
-            send_manual_edit_instructions(&shared, &uri, &title);
-        }
-        return;
-    };
     let runtime = shared
         .runtime
         .clone()
@@ -1162,6 +1137,19 @@ fn send_plain_edit_document(
             }
         });
     }
+    if !capabilities.show_document {
+        send_manual_edit_instructions(&shared, &uri, &title);
+        return;
+    }
+    let Ok((pending, receiver)) = shared.register_outbound(
+        "window/showDocument",
+        serde_json::json!({"uri":uri,"external":false,"takeFocus":true}),
+    ) else {
+        if !shared.closing.load(Ordering::SeqCst) {
+            send_manual_edit_instructions(&shared, &uri, &title);
+        }
+        return;
+    };
     runtime.spawn(async move {
         let opened = shared
             .await_outbound(pending, receiver)
@@ -2690,14 +2678,14 @@ fn plain_execute_params(request: &Request) -> Option<crate::dispatch::PlainActio
 
 /// Stale Plain action feedback without running the command or touching Git.
 fn plain_stale_message() -> Result<Dispatched> {
-    Ok(Dispatched::value(serde_json::to_value(
+    Ok(Dispatched::with(serde_json::to_value(
         ViewInvokeResponse {
             effects: vec![Effect::message(
                 MessageLevel::Warn,
                 crate::errors::STALE_VIEW,
             )],
         },
-    )?))
+    )?, vec![show_message(2, crate::errors::STALE_VIEW.to_string())]))
 }
 
 /// Refuse an unsupported Plain action without entering dispatch or registering prompts.
@@ -3208,7 +3196,14 @@ fn draft_notification(shared: &Shared, notification: &Notification) -> Result<()
             let text = candidate.text.clone();
             if let Ok(run) = editor::registry().run_for_uri(&shared.draft_owner, uri) {
                 editor::registry().apply(&shared.draft_owner, &run, uri, |draft, context| {
-                    draft.did_change(context, p.text_document.version, text.as_bytes())
+                    if draft.opened() {
+                        draft.did_change(context, p.text_document.version, text.as_bytes())
+                    } else {
+                        // A preopened buffer has no second didOpen. Attach only
+                        // after its synchronized echo matches the new template;
+                        // an applyEdit success alone never proves delivery.
+                        draft.did_open(context, p.text_document.version, text.as_bytes())
+                    }
                 })?;
             }
             docs.replace(uri, candidate).map_err(|_| Error::new("Document is not open"))?;
@@ -5112,7 +5107,6 @@ fn spawn_repository_operation(
         return;
     }
     let sender = shared.sender.clone();
-    set_plain_commit_expired(&shared, false);
     // The begin is sent before the invoke response, so the client is not idle
     // until the editor (or the failure) has been answered.
     let (edit, edit_id, edit_scope) = match &operation {

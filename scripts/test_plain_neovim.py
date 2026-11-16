@@ -130,14 +130,13 @@ def run_variant(final_newline: bool, binary: Path, evidence: Path, size: str) ->
     if not binary.exists():
         raise RuntimeError(f"debug binary missing: {binary}")
     run_evidence = evidence / ("with-final-newline" if final_newline else "without-final-newline")
+    if run_evidence.exists():
+        # Keep the complete prior wire/state/Git evidence, including failures.
+        run_evidence.rename(run_evidence.with_name(f"{run_evidence.name}-{time.time_ns()}"))
     run_evidence.mkdir(parents=True, exist_ok=True)
-    # A previous run must not leave success/failure artifacts behind.
-    for artifact in ("native.json", "failure.json"):
-        (run_evidence / artifact).unlink(missing_ok=True)
     trace_path = run_evidence / "state/nvim/lsp.log"
     # Neovim appends to its shared state log; isolate this run's trace before launch.
     trace_path.parent.mkdir(parents=True, exist_ok=True)
-    trace_path.unlink(missing_ok=True)
     socket = ""
     server_id = ""
     report: dict[str, object] = {"final_newline": final_newline}

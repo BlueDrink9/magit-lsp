@@ -895,6 +895,8 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
     assert!(stale["error"].is_null(), "{stale}");
     assert!(stale["result"]["effects"].as_array().unwrap().iter().any(|effect|
         effect["type"] == "message" && effect["text"] == magit_lsp::errors::STALE_VIEW), "{stale}");
+    client.until(|c| c.server.notifications.iter().any(|m|
+        m["method"] == "window/showMessage" && m["params"]["message"] == magit_lsp::errors::STALE_VIEW));
     assert_eq!(repo.git(&["write-tree"]), index, "stale action must not mutate the index");
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     assert_eq!(fs::read_to_string(repo.path().join("f.txt")).unwrap(), changed);

@@ -1046,6 +1046,41 @@ fn manual_plain_commit_instructions_have_no_apply_edit() {
     assert!(status.success());
 }
 
+#[test]
+fn manual_preopened_draft_attaches_on_exact_template_echo() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("initial", [("f.txt", "before\n")])
+        .modify_standard()
+        .build();
+    let head = repo.git(&["rev-parse", "HEAD"]);
+    let (mut server, mut editor, uri) = open_plain_with_env(
+        &repo, caps(false), &[("MAGIT_LSP_DRAFT_OPEN_TIMEOUT_MS", "800")],
+    );
+    let draft_uri = format!("file://{}/.git/COMMIT_EDITMSG", repo.path().display());
+    server.send(editor.open(&draft_uri, "Previous message\n"));
+    let mut seen = Vec::new();
+    let create = prepare_commit(&mut server, &mut editor, &draft_uri, &mut seen, &uri);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, create, 95)["error"].is_null());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !seen.iter().any(|m| m["method"] == "workspace/applyEdit" && draft_edit(m, &draft_uri)) {
+        assert!(Instant::now() < deadline, "preopened manual draft needs template delivery: {seen:#?}");
+        // Querying ensures bounded progress even when no template is delivered.
+        code_actions(&mut server, &mut editor, &draft_uri, &mut seen, &draft_uri, 0, 96);
+    }
+    let template = editor.text(&draft_uri).to_owned();
+    server.send(editor.edit(&draft_uri, &template));
+    std::thread::sleep(Duration::from_millis(1100));
+    server.send(editor.edit(&draft_uri, "Preopened manual commit\n"));
+    let confirm = wait_for_draft_confirm(&mut server, &mut editor, &draft_uri, &mut seen, 1100);
+    assert!(execute_action(&mut server, &mut editor, &draft_uri, &mut seen, confirm, 97)["error"].is_null());
+    wait_for_head_change(&repo, &head);
+    assert_eq!(repo.git(&["log", "-1", "--format=%B"]).trim(), "Preopened manual commit");
+    assert_eq!(repo.git(&["show", "HEAD:f.txt"]), fixtures::standard_changes());
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+    server.shutdown_and_exit();
+    assert!(server.finish_with_messages(Duration::from_secs(10)).0.success());
+}
+
 /// A commit menu queued behind an in-flight status render stays reachable.
 ///
 /// The client holds one status `workspace/applyEdit` reply and echo while the
@@ -1179,7 +1214,7 @@ fn commit_command_actions(
 }
 
 #[test]
-fn unopened_plain_commit_draft_expires_and_disables_commit_commands() {
+fn unopened_plain_commit_draft_expires_and_allows_retry() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("initial", [("f.txt", "before\n")])
         .modify_standard()
@@ -1212,12 +1247,11 @@ fn unopened_plain_commit_draft_expires_and_disables_commit_commands() {
     assert_eq!(actions.len(), 4, "all commit commands offered: {actions:#?}");
     for action in &actions {
         assert!(
-            action["disabled"]["reason"]
+            !action["disabled"]["reason"]
                 .as_str()
                 .is_some_and(|reason| reason.contains("not opened in time")),
-            "commit command must be unavailable: {action:#?}"
+            "expiry must not permanently disable retry: {action:#?}"
         );
-        assert!(action["command"].is_null(), "disabled rows carry no command: {action:#?}");
     }
     server.shutdown_and_exit();
     let (status, _) = server.finish_with_messages(Duration::from_secs(10));

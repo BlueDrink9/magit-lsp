@@ -39,8 +39,7 @@ pub struct CapabilityLevel {
 ///
 /// The field list is pinned against the implemented struct by
 /// `tests/schema.rs`; a new capability field fails the pin until this table
-/// documents it. `commit_draft_expired` is runtime state, not a client
-/// declaration, so it has no row.
+/// documents it.
 pub const CAPABILITY_LEVELS: &[CapabilityLevel] = &[
     CapabilityLevel {
         field: "apply_edit",

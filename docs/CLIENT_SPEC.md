@@ -1058,10 +1058,14 @@ roots = [".git"]
 language-servers = ["magit-lsp"]
 ```
 
-This is a reference configuration, not a support claim or verified smoke test.
-The editor helper is required; repository resolution has no launcher.
-Commit-file LSP attachment and reuse of an existing connection remain unverified
-smoke requirements; this configuration does not claim they work. No native
-Helix run is claimed here: the recorded Helix initialize capture is exercised by
-`tests/plain_harness.rs::recorded_presets_and_named_profiles_bind_declarations_and_registry_behaviors`.
-For a working minimal Plain client, follow `tests/ui/plain_init.lua`.
+The editor helper is required; repository resolution has no launcher. With this
+generic configuration, `COMMIT_EDITMSG` does not attach automatically. Follow the
+server's manual open instruction, then run `:set-language magit` promptly on the
+first draft (the unopened-draft deadline is 30 seconds). Use the native Confirm
+commit or Abort commit code action. An already-attached draft buffer can be reused
+for the next run; its new template is synchronized through a versioned edit.
+
+The [manual Helix 25.07.1 checklist](evidence/plain-helix.md) records Linux
+open/status/stage/menu/log, Confirm, Abort and connection reuse. Helix did not
+declare `window.showDocument`; no automatic attachment or general Helix support
+promise follows. For a minimal Plain Neovim client, follow `tests/ui/plain_init.lua`.

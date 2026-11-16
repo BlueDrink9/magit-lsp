@@ -43,3 +43,16 @@ No fully reaped-process or non-Linux verification claim is made.
 Follow-ups are tracked as **R-T021-ATTACH** and **R-T021-DRAFT** in the
 [authoritative queue](../../TASKS.md#review). Abort remains part of the latter's
 acceptance, rather than being silently substituted by timeout cancellation.
+
+## Follow-up verification after lifecycle fixes
+
+On the same Linux/Helix version and date, `build/ui/helix-t021-fixed/helix.log`
+records successful manual Confirm and Abort. The generic TOML was unchanged;
+`:set-language magit` attached the first draft promptly. Confirm created
+`e928ce0ca5a846378110156f481e70f37f6c342a` with message
+`Helix native smoke commit`; Git status then contained only unstaged `g.txt`.
+The next run reused the open draft, received its new template, and offered Abort.
+`abort-before.json` and `abort-after.json` match exactly for HEAD, index tree
+`2d605f6ee74dbaebd2c4abfcffd8b563ef4f6c36` and SHA-256 of both worktree files.
+Cleanup through the Make stop target succeeded. Thus Confirm/Abort now pass with
+explicit manual first attachment; the earlier failures above remain provenance.
