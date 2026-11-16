@@ -214,12 +214,15 @@ fn hierarchy_targets_use_retained_ids_after_refresh_and_reject_stale_coordinates
         test.set_cursor(result.render.unwrap().cursor.unwrap());
         assert_eq!(test.focused_node().id, target, "{command}");
         test.ack();
+        let status_before_stale = tmp.git(&["status", "--porcelain"]);
         let result = test.invoke_at_version(command, initial.version, Some(cursor), None, None);
-        assert!(result.render.is_none());
+        let recovery = result.render.expect("stale positional request refreshes the view");
+        assert_eq!(recovery.version, test.version());
         assert_eq!(
             message_texts(&result.effects),
             vec![magit_lsp::errors::STALE_VIEW]
         );
+        assert_eq!(tmp.git(&["status", "--porcelain"]), status_before_stale);
     }
 }
 
@@ -569,7 +572,8 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
         .commit("init", [("f.txt", TEN_LINES)])
         .build();
     let mut server = TestServer::spawn(&[]);
-    let initialized = server.initialize(json!({}));
+    server.auto_respond_to_progress_create();
+    let initialized = server.initialize_rich(json!({}));
     assert!(initialized["error"].is_null(), "{initialized}");
     server.send(json!({
         "jsonrpc": "2.0", "id": 2, "method": "view/open",
@@ -586,12 +590,17 @@ fn positional_lsp_requests_use_only_the_acknowledged_render() {
         .expect("view URI")
         .to_string();
     let v1_symbols = status_view::build(&repo.status().expect("initial status")).document_symbols();
-    let initial_render = loop {
-        let message = server.recv();
-        if message["method"] == json!("view/render") {
-            break message;
-        }
-    };
+    let initial_render = server
+        .notifications
+        .iter()
+        .find(|message| message["method"] == json!("view/render"))
+        .cloned()
+        .unwrap_or_else(|| loop {
+            let message = server.recv();
+            if message["method"] == json!("view/render") {
+                break message;
+            }
+        });
     let v1 = initial_render["params"]["version"]
         .as_u64()
         .expect("v1 version");
