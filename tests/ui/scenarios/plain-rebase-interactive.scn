@@ -10,11 +10,9 @@ wait screen contains "Rebase"
 snapshot: rebase-menu
 keys: ":lua PlainUI.action('menu.run-action','i')" Enter
 wait screen contains "Log — initial rebase base"
-# Locate a unique commit subject, then move natively to the exclusive base.
-# Only the cursor moves; the offered server action retains commit identity.
-goto "three"
-keys: j j j
-expect cursor on "base"
+# Locate the unique commit row without confusing the selection header or
+# comparing buffer coordinates to wrapped terminal rows. The action owns identity.
+goto "base  Test User"
 snapshot: selected-base
 keys: ":lua PlainUI.action('common.confirm')" Enter
 wait
