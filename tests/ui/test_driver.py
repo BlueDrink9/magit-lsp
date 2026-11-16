@@ -826,6 +826,109 @@ class StartPathTest(unittest.TestCase):
 
 
 class NativeSessionTest(unittest.TestCase):
+    def test_native_session_preserves_records_when_owned_process_survives(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo, home, init, initial = (base / name for name in ("repo", "home", "init.lua", "start.txt"))
+            repo.mkdir()
+            home.mkdir()
+            init.touch()
+            initial.touch()
+            observed = {}
+
+            def launcher(run, _env, _config, _file, roles=None):
+                observed["run"] = run
+                for role, pid in (("editor", 456), ("server", 123)):
+                    roles[role].write_text(f"{pid}\n", encoding="utf-8")
+                    roles[role].with_suffix(".identity").write_text(
+                        json.dumps({"pid": pid, "identity": f"birth-{pid}"}), encoding="utf-8")
+
+            report = {"ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": [123]}
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "_launcher_script", side_effect=launcher),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "stop", return_value=report),
+            ):
+                with driver.native_session(repo, home, init, initial, {}):
+                    pass
+            run = observed["run"]
+            self.assertTrue(run.dir.is_dir())
+            self.assertEqual((run.dir / "server.pid").read_text(encoding="utf-8"), "123\n")
+            self.assertEqual(json.loads((run.dir / "server.identity").read_text(encoding="utf-8")),
+                             {"pid": 123, "identity": "birth-123"})
+            driver.shutil.rmtree(run.dir)
+
+    def test_native_session_defers_directory_deletion_to_successful_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo, home, init, initial = (base / name for name in ("repo", "home", "init.lua", "start.txt"))
+            repo.mkdir()
+            home.mkdir()
+            init.touch()
+            initial.touch()
+            observed = {}
+
+            def launcher(run, *_args, **_kwargs):
+                observed["run"] = run
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "_launcher_script", side_effect=launcher),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "_stop_roles", return_value={
+                    "ownership": {"editor": 456, "server": 123}, "remaining_owned_pids": []}),
+                patch.object(driver, "_forget_last_run"),
+            ):
+                with driver.native_session(repo, home, init, initial, {}):
+                    pass
+            self.assertFalse(observed["run"].dir.exists())
+
+    def test_native_session_teardown_error_preserves_directory_and_body_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo, home, init, initial = (base / name for name in ("repo", "home", "init.lua", "start.txt"))
+            repo.mkdir()
+            home.mkdir()
+            init.touch()
+            initial.touch()
+            observed = {}
+
+            def launcher(run, *_args, **_kwargs):
+                observed["run"] = run
+                (run.dir / "editor.pid").write_text("456\n", encoding="utf-8")
+                (run.dir / "editor.identity").write_text('{"pid":456,"identity":"birth-456"}', encoding="utf-8")
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "_launcher_script", side_effect=launcher),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "stop", side_effect=RuntimeError("teardown failed")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "teardown failed"):
+                    with driver.native_session(repo, home, init, initial, {}):
+                        pass
+            run = observed["run"]
+            self.assertTrue(run.dir.is_dir())
+            self.assertTrue((run.dir / "editor.pid").is_file())
+            self.assertTrue((run.dir / "editor.identity").is_file())
+            driver.shutil.rmtree(run.dir)
+
+            with (
+                patch.object(driver, "check_tools"),
+                patch.object(driver, "_launcher_script", side_effect=launcher),
+                patch.object(driver, "_tmux"),
+                patch.object(driver, "_wait_for_socket"),
+                patch.object(driver, "stop", side_effect=RuntimeError("teardown failed")),
+            ):
+                with self.assertRaisesRegex(ValueError, "body failed"):
+                    with driver.native_session(repo, home, init, initial, {}):
+                        raise ValueError("body failed")
+            driver.shutil.rmtree(observed["run"].dir)
+
     def test_recorded_native_roles_use_shared_shutdown_before_editor_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run = make_run(directory)

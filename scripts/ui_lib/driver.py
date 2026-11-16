@@ -12,6 +12,7 @@ import signal
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import tempfile
 from dataclasses import asdict, dataclass
@@ -976,8 +977,7 @@ def native_session(
     """
     cols, rows = parse_size(size)
     check_tools()
-    temporary = tempfile.TemporaryDirectory(prefix="magit-ui-")
-    directory = Path(temporary.name)
+    directory = Path(tempfile.mkdtemp(prefix="magit-ui-"))
     run_id = new_run_id()
     run = Run(run_id, "external", "native", cols, rows, "ansi",
               str(directory), str(repo), str(home), str(directory / "nvim.sock"),
@@ -1000,6 +1000,7 @@ def native_session(
         _wait_for_socket(run, readiness_probe=_rpc_probe)
         yield run
     finally:
+        body_failed = sys.exc_info()[0] is not None
         if ownership is not None:
             for role in ("editor", "server"):
                 path = directory / f"{role}.pid"
@@ -1008,9 +1009,10 @@ def native_session(
                 except (OSError, ValueError):
                     ownership[role] = None
         try:
-            stop(run)
-        finally:
-            temporary.cleanup()
+            report = stop(run)
+        except BaseException:
+            if not body_failed:
+                raise
 
 
 def _stop_roles(run: Run) -> dict:
