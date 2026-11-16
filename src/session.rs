@@ -392,8 +392,12 @@ impl OpenView {
         forced: Option<Cursor>,
         delivery: RenderDelivery,
     ) -> Result<ViewRender> {
-        let old = self.tree.clone();
-        let old_version = self.version;
+        let tree = self.render_tree();
+        self.render_tree_with_delivery(tree, cursor, forced, delivery)
+    }
+
+    /// Render authoritative structure without advancing the delivery version.
+    fn render_tree(&mut self) -> Tree {
         let pending = self.menu_pending.clone();
         let mut tree = self.view.render(&Ctx {
             viewport: self.descriptor.viewport,
@@ -404,6 +408,19 @@ impl OpenView {
             let drafts = crate::editor::registry().pending_for(owner, &self.repo_path);
             tree.append_pending_drafts(&drafts);
         }
+        tree
+    }
+
+    /// Deliver an already rendered tree through the normal diff/ack lifecycle.
+    fn render_tree_with_delivery(
+        &mut self,
+        mut tree: Tree,
+        cursor: Option<Cursor>,
+        forced: Option<Cursor>,
+        delivery: RenderDelivery,
+    ) -> Result<ViewRender> {
+        let old = self.tree.clone();
+        let old_version = self.version;
         let version = old_version + 1;
         tree.version = version;
 
@@ -3625,7 +3642,22 @@ impl Session {
             view.queue_refresh();
             return Ok(None);
         }
-        Ok(Some(view.refresh_and_render(None)?))
+        let menu = view.view.menu();
+        view.view.on_refresh()?;
+        let mut tree = view.render_tree();
+        tree.version = view.version;
+        // A watcher burst may change another open view without changing this
+        // one's text or action metadata. Do not invalidate outstanding offers
+        // for an identical authoritative tree (including mutation identities).
+        if tree == view.tree && menu == view.view.menu() {
+            return Ok(None);
+        }
+        Ok(Some(view.render_tree_with_delivery(
+            tree,
+            None,
+            None,
+            RenderDelivery::Acknowledged,
+        )?))
     }
 
     /// Re-read every open view's backing state and collect the new renders.

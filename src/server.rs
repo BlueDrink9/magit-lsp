@@ -846,6 +846,15 @@ fn route_plain_render(
     view_id: &str,
     snapshot: Option<(crate::tree::Tree, u64, String, Option<crate::menu::Menu>)>,
 ) -> bool {
+    if shared
+        .client
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .plain
+        .is_none()
+    {
+        return false;
+    }
     let _plain = shared
         .plain_lifecycle
         .lock()
@@ -862,7 +871,10 @@ fn route_plain_render(
             .iter_mut()
             .find(|(_, entry)| entry.view_id == view_id)
         else {
-            return false;
+            // The inactive views still belong to this Plain session. A watcher
+            // refresh must not turn their absence from the active document map
+            // into permission to send the rich protocol.
+            return true;
         };
         snapshot.and_then(|(tree, generation, scope, menu)| {
             entry
@@ -2760,6 +2772,14 @@ fn execute_plain_action(
             return plain_stale_message();
         };
         if view_id != entry.view_id || generation != params.view_generation {
+            tracing::warn!(
+                view_id,
+                active_view = entry.view_id,
+                generation,
+                offered_generation = params.view_generation,
+                command = params.command,
+                "Plain action retained snapshot identity/generation mismatch"
+            );
             return plain_stale_message();
         }
         let line = match &params.target {

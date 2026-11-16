@@ -1405,6 +1405,91 @@ fn plain_gate_plan(client: &mut ClientPump, uri: &str, base_subject: &str) {
 }
 
 #[test]
+fn plain_gate_background_refresh_preserves_todo_offer_without_rich_notifications() {
+    let (repo, _) = fixtures::RepoFixture::new()
+        .commit("watcher base", [("f.txt", "base\n")])
+        .commit("keep replay", [("keep", "keep\n")])
+        .commit("drop replay", [("drop", "drop\n")])
+        .build();
+    let base = repo.git(&["rev-parse", "HEAD~2"]);
+    let (mut client, uri) = plain_gate_open(&repo);
+    let open = plain_gate_action(&mut client, &uri, "", "open.rebase", None);
+    let status = open["target"]["viewId"].as_str().unwrap().to_owned();
+    assert!(execute_plain_action(&mut client, open)["error"].is_null());
+    plain_gate_run(&mut client, &uri, "Rebase", "menu.run-action", Some("i"));
+    plain_gate_run(&mut client, &uri, "watcher base", "common.confirm", None);
+    plain_gate_run(&mut client, &uri, "drop replay", "rebase.todo-drop", None);
+    let submit = plain_gate_action(&mut client, &uri, "keep replay", "rebase.todo-submit", None);
+    let todo = client.editor.text(&uri).to_owned();
+
+    // Observe the background status through the production resync endpoint as
+    // a barrier for a real watcher burst, not a timer or a fabricated render.
+    for present in [true, false] {
+        let marker = repo.path().join("watcher-proof");
+        if present {
+            fs::write(&marker, "background refresh\n").unwrap();
+        } else {
+            fs::remove_file(&marker).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            let id = client.send(
+                json!({"jsonrpc":"2.0","id":0,"method":"view/resync","params":{"viewId":status}}),
+            );
+            let response = client.until_response(id);
+            let lines = response["result"]["text"]
+                .as_array()
+                .expect("full status resync");
+            if lines.iter().any(|line| {
+                line.as_str()
+                    .is_some_and(|line| line.contains("watcher-proof"))
+            }) == present
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "watcher did not refresh background status"
+            );
+        }
+    }
+    assert_eq!(
+        client.editor.text(&uri),
+        todo,
+        "background status must not replace todo"
+    );
+    assert!(
+        client
+            .server
+            .notifications
+            .iter()
+            .all(|message| !message["method"]
+                .as_str()
+                .is_some_and(|method| method.starts_with("view/"))),
+        "background refresh leaked a rich notification: {:?}",
+        client.server.notifications
+    );
+    let result = execute_plain_action(&mut client, submit);
+    assert!(
+        !result["result"]["effects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|effect| effect["text"] == magit_lsp::errors::STALE_VIEW),
+        "unchanged todo offer rejected: {result}\n{}",
+        client.server.stderr_text()
+    );
+    assert!(result["error"].is_null(), "{result}");
+    assert_eq!(
+        repo.git(&["log", "--reverse", "--format=%s"]),
+        "watcher base\nkeep replay\n"
+    );
+    assert_eq!(repo.git(&["rev-parse", "HEAD^"]), base);
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+    plain_gate_finish(client);
+}
+
+#[test]
 fn plain_gate_fixup_selected_target_cancel_confirm_and_readable_failure() {
     let (repo, _) = fixtures::RepoFixture::new()
         .commit("chosen target", [("f.txt", "base\n")])
