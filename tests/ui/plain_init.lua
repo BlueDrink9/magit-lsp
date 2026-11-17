@@ -18,10 +18,17 @@ if vim.env.MAGIT_LSP_UI_PROBE_FILE then
         autocmds[#autocmds + 1] = { event = event, desc = autocmd.desc, command = autocmd.command }
       end
     end
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local messages = vim.fn.execute('messages')
+    local mode_state = vim.api.nvim_get_mode()
     local record = {
       time_ns = vim.uv.hrtime(), event = event, key = key,
+      keytrans = key and vim.fn.keytrans(key) or nil,
       text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n'),
-      mode = vim.api.nvim_get_mode().mode, changedtick = vim.api.nvim_buf_get_changedtick(buf),
+      mode = mode_state.mode, blocking = mode_state.blocking,
+      cursor = { row = cursor[1] - 1, col = cursor[2] },
+      cmdtype = vim.fn.getcmdtype(), messages = messages,
+      changedtick = vim.api.nvim_buf_get_changedtick(buf),
       uri = vim.uri_from_bufnr(buf), version = client and vim.lsp.util.buf_versions[buf],
       insert_enter = vim.fn.maparg('<CR>', 'i', false, true),
       normal_enter = vim.fn.maparg('<CR>', 'n', false, true),
