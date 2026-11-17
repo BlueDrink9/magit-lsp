@@ -1660,14 +1660,16 @@ Editing/synchronization review (2026-11-13; base `1ccb038adc2b9e9633f394ca1fea78
   - **Constraints:** Do not scan or signal by process name, signal unrelated processes, add tmux to this preset harness, weaken native assertions, use unbounded waits, or claim Windows/macOS verification.
   - Verified: `make ui-unit` → exit 0; `test_plain_preset_teardown_reaps_owned_descendant` starts an owned child/descendant, waits on readiness with a deadline, tears down the group and asserts the descendant is gone; `test_plain_preset_cleanup_failure_preserves_primary_exception` injects cleanup failure during a primary assertion and asserts original exception identity/message plus retained cleanup diagnostic. `make plain-presets` → exit 0; five presets retain the native graceful-shutdown assertions. Linux only; Windows/macOS unverified.
   - Decision: updated `test_log_history_has_commits_and_decorations` to assert `tag-only` and `v1`, exactly matching `_log_history`'s two intentional tags and the T041 distinct tag-only tip.
-  - Done: 64767e0 plus coverage correction.
+  - Done: `64767e0`, `0065277` (coverage correction).
 
-- [ ] **[P2] Align UI matrix documentation with opt-in execution** (`docs/TESTING.md:210-219`, real-UI scenario guidance; `ui-test-plan.md:54-57,385-395`, `U0.6`, Scenario DSL header)
+- [x] **[P2] Align UI matrix documentation with opt-in execution** (`docs/TESTING.md:210-219`, real-UI scenario guidance; `ui-test-plan.md:54-57,385-395`, `U0.6`, Scenario DSL header)
   - **Problem:** Current execution defaults to one `standard`/`80x24` combination unless a scenario declares `matrix: true`, but maintained docs still state that every menu scenario or all scenarios run under both profiles and both sizes, and the DSL comments describe implicit secondary combinations controlled by retired `size-only`/`profile-only` behavior.
   - **Why it matters:** Contract drift and readability — scenario authors and reviewers are told that four-way coverage happens automatically when it now requires an explicit header.
   - **Change:** Update the current testing guide, U0.6 description, and DSL header example to state the one-combination default, `matrix: true` four-way opt-in, and the compatibility meaning of explicit `size`/`profile` headers. Remove only the retired implicit-secondary/opt-out claims; preserve dated or explicitly historical outcomes as history.
   - **Done when:** The two maintained documents describe the same matrix rules implemented by `scripts/ui_lib/scenario.py` and covered by `tests/ui/test_scenario.py`, no current text promises implicit four-way execution, and `make docs-check` passes.
   - **Constraints:** Do not change runner behavior, scenario headers, historical result counts, or generated documentation.
+  - Verified: A1 retirement sweep examined `docs/TESTING.md:210-219` and `ui-test-plan.md:22,54-57,64-68,385-395`; removed the current implicit-matrix/retired opt-out claims, retained the dated/historical four-way outcomes and counts, and `rg -n -i 'every menu scenario|all scenarios under both|runs under both profiles|runner also runs|size-only.*opt out|profile-only.*opt out|implicit.*(matrix|secondary)|secondary combinations' docs/TESTING.md ui-test-plan.md` found only the explicitly historical U0.6 note. A2: `make docs-check` → exit 0 (`ok: docs-check`).
+  - Done: pending commit.
 
 ### P3
 

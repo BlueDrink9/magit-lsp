@@ -215,5 +215,9 @@ the command line and real colours.
   passing `xfail` fails the run until the tag is removed.
 - `make ui-test` runs every scenario; `make ui-tour` writes
   `build/ui/tour.md`; `make ui-unit` runs the harness's own Python tests.
-- Every menu scenario runs under both profiles (`standard`, `vim`) at 100x30
-  and 80x24; `size-only`/`profile-only` opt out for latency and the tour.
+- Each scenario runs once by default at `80x24` with the `standard` profile.
+  Add `matrix: true` to opt into all four combinations of `80x24`/`100x30` and
+  `standard`/`vim`. An explicit `size` or `profile` selects that value first
+  (and, with `matrix: true`, its other standard matrix value is also run).
+  Existing `size-only: true` and `profile-only: true` headers restrict matrix
+  expansion to the explicitly selected size or profile, respectively.

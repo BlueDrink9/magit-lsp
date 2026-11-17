@@ -19,7 +19,7 @@ To rerun only one newline variant, use `make plain-neovim PLAIN_ARGS="--final-ne
 - [ ] Write the failing scenario first, commit nothing that "fixes" a bug without one.
 - [ ] Never use `sleep` in a test. Wait for the client's `idle` state (§A.3).
 - [ ] Every test runs against deterministic fixtures ([§8.2 Git environment](docs/TESTING.md#82-determinism)) and fixed terminal sizes.
-- [ ] Scenario headers use `matrix: true` when the full **100x30 and 80x24** × (`standard`, `vim`) matrix is required; otherwise one 80x24/standard combination runs. Explicit `size`, `profile`, `size-only` and `profile-only` headers remain supported.
+- [ ] Scenarios run once by default at `80x24` with the `standard` profile. Set `matrix: true` to opt into all four combinations of **100x30 and 80x24** × (`standard`, `vim`). An explicit `size` or `profile` selects that value first and remains compatible with matrix expansion, which adds the other standard matrix value. In matrix mode, `size-only: true` or `profile-only: true` restricts expansion of that dimension to its explicit value.
 - [ ] Scenario runs write `.screen` and `.ansi` only for an explicit `snapshot:` statement or a failed combination. Failure artifacts retain quiet-`xfail` diagnostics; successful scenarios without snapshots create neither file.
 - [ ] The final report for a task lists the scenario files, their results, and the paths of the saved `.screen` files.
 - [ ] Known bugs are tracked as scenarios marked `xfail: <bug id>`. The runner reports them as XFAIL. If an `xfail` scenario passes, the runner **fails** until the tag is removed (this forces the fix to remove it).
@@ -54,7 +54,7 @@ To rerun only one newline variant, use `make plain-neovim PLAIN_ARGS="--final-ne
 - [x] **U0.3 Fixtures** `clean`, `modified-two-files`, `staged-one-file`, `staged-and-unstaged`, `untracked`, `unborn`, `in-progress-rebase`, `in-progress-cherry-pick`. Each built by a script using the deterministic environment.
 - [x] **U0.4 ANSI decoder:** converts `tmux capture-pane -p -e` output into runs `{row, col, text, fg, bg, bold, dim, reverse}`. Unit tests with hand-written escape strings covering 16-colour, 256-colour and truecolor sequences.
 - [x] **U0.5 Scenario runner** `scripts/ui run <file>…` implementing the DSL in §A.5, writing artefacts to `build/ui/<scenario>/`. Unit tests for the predicate evaluator.
-- [x] **U0.6 Make target** `make ui-test` (runs all scenarios under both profiles and both sizes) and `make ui-tour` (§U2.2).
+- [x] **U0.6 Make target** `make ui-test` and `make ui-tour` (§U2.2). Historical completion note: the original U0.6 requirement described running all scenarios under both profiles and both sizes; current scenarios opt into that matrix with `matrix: true`.
 - [x] **U0.7 Fix the render-before-open race** the R-3.2 worker reported: the Neovim client buffers `view/render` by `viewId` until the view exists. *Done when:* an L2 test that delays the `view/open` response still ends with the correct buffer text, and 50 consecutive `ui start` runs show no missing first render.
   - [x] `view/render` and `view/keymap` are buffered per `viewId` and applied in order once the view/buffer exists (L2 test `buffers renders that beat the view/open response`).
   - [x] 50 consecutive `ui start` runs show no missing first render (driver U0.2).
@@ -388,8 +388,9 @@ Plain text, one statement per line, `#` comments. Header before `---`:
 
 ```
 fixture: modified-two-files
-size: 100x30            # runner also runs 80x24 unless "size-only: true"
-profile: vim            # runner also runs "standard" unless "profile-only: true"
+matrix: true            # opt into all four standard size/profile combinations
+size: 100x30            # with matrix:true, this size is tried first
+profile: vim            # with matrix:true, this profile is tried first
 client: rich            # optional rich | plain; independent of the keymap profile
 xfail: bug-2            # optional; see Rules
 env: MAGIT_LSP_PLACEMENT=vsplit   # optional extra Neovim environment
