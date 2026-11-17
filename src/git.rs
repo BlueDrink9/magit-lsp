@@ -760,7 +760,13 @@ impl GitRepo {
         if options.no_merges { args.push("--no-merges".into()); }
         if options.first_parent { args.push("--first-parent".into()); }
         let revision = options.revision.as_deref().unwrap_or("HEAD");
+        if let Some(selection) = &options.ref_selection {
+            if selection != "local" && selection != "branches" && selection != "all" {
+                return Err(Error::new("Unsupported log ref selection."));
+            }
+        }
         if options.revision.is_none()
+            && options.ref_selection.is_none()
             && self
                 .run(&["rev-parse", "--verify", "HEAD^{commit}"])
                 .is_err()
@@ -784,9 +790,6 @@ impl GitRepo {
             });
         }
         if let Some(selection) = &options.ref_selection {
-            if selection != "local" && selection != "branches" && selection != "all" {
-                return Err(Error::new("Unsupported log ref selection."));
-            }
             if selection == "all" {
                 args.push("--all".into());
             } else {

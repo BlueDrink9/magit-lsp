@@ -216,6 +216,26 @@ fn ref_variants_have_distinct_reachability_sets() {
 }
 
 #[test]
+fn ref_wide_logs_work_with_unborn_current_branch() {
+    let (fixture, repo) = common::log_variants_fixture();
+    common::git(fixture.path(), &["symbolic-ref", "HEAD", "refs/heads/unborn"]);
+    let default_page = repo.log(&GitLogOptions::default()).unwrap();
+    assert!(default_page.commits.is_empty());
+    assert!(!default_page.has_more);
+    assert!(repo.log(&GitLogOptions { ref_selection: Some("invalid".into()), ..Default::default() }).is_err());
+
+    for (selection, expected) in [
+        ("local", ["base history", "main history", "side history", "merge history", "local only"].as_slice()),
+        ("branches", ["base history", "main history", "side history", "merge history", "local only", "remote only"].as_slice()),
+        ("all", ["base history", "main history", "side history", "merge history", "local only", "remote only", "tag only"].as_slice()),
+    ] {
+        let page = repo.log(&GitLogOptions { ref_selection: Some(selection.into()), ..Default::default() }).unwrap();
+        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|commit| commit.subject.as_str()).collect();
+        assert_eq!(subjects, expected.iter().copied().collect(), "{selection}");
+    }
+}
+
+#[test]
 fn loading_a_larger_page_keeps_all_earlier_commit_oids() {
     let mut fixture = RepoFixture::new();
     for i in 0..105 {
