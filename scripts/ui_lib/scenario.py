@@ -24,8 +24,8 @@ from typing import Any, Iterable
 from . import decoder, driver, fixtures
 from .paths import BUILD_UI
 
-DEFAULT_SIZE = "100x30"
-SECONDARY_SIZE = "80x24"
+DEFAULT_SIZE = "80x24"
+SECONDARY_SIZE = "100x30"
 DEFAULT_PROFILE = "standard"
 SECONDARY_PROFILE = "vim"
 STYLE_MODES = ("dim", "bold", "coloured", "plain")
@@ -82,6 +82,7 @@ class Scenario:
     profile: str | None = None
     size_only: bool = False
     profile_only: bool = False
+    matrix: bool = False
     xfail: str | None = None
     # Extra environment variables for Neovim, e.g. MAGIT_LSP_PLACEMENT=vsplit.
     env: dict[str, str] = field(default_factory=dict)
@@ -99,6 +100,7 @@ class ComboResult:
     profile: str = ""
     size: str = ""
     startup: bool = False
+    ansi: str = ""
 
 
 @dataclass
@@ -378,6 +380,7 @@ def parse_scenario(path: Path) -> Scenario:
                 "client",
                 "size-only",
                 "profile-only",
+                "matrix",
                 "xfail",
                 "env",
             ):
@@ -405,6 +408,7 @@ def parse_scenario(path: Path) -> Scenario:
         profile_only=parse_bool(header["profile-only"])
         if "profile-only" in header
         else False,
+        matrix=parse_bool(header["matrix"]) if "matrix" in header else False,
         xfail=header.get("xfail") or None,
         env=parse_env(header["env"]) if "env" in header else {},
         statements=statements,
@@ -757,12 +761,12 @@ def combinations(scenario: Scenario) -> list[tuple[str, str]]:
     under both profiles.
     """
     sizes = [scenario.size or DEFAULT_SIZE]
-    if not scenario.size_only:
-        other = SECONDARY_SIZE if sizes[0] != SECONDARY_SIZE else DEFAULT_SIZE
+    if scenario.matrix and not scenario.size_only:
+        other = SECONDARY_SIZE if sizes[0] != SECONDARY_SIZE else "80x24"
         if other not in sizes:
             sizes.append(other)
     profiles = [scenario.profile or DEFAULT_PROFILE]
-    if not scenario.profile_only:
+    if scenario.matrix and not scenario.profile_only:
         other = (
             SECONDARY_PROFILE
             if profiles[0] != SECONDARY_PROFILE
@@ -899,6 +903,11 @@ def _run_combo(
 
     try:
         result = _run_live(run, scenario, size, profile, snapshots, verbose)
+        if not result.ok:
+            try:
+                result.ansi = driver.capture(run, ansi=True)
+            except driver.DriverError as error:
+                result.ansi = f"(ANSI capture unavailable: {error})"
     finally:
         try:
             if scenario.client == "plain":
@@ -1072,6 +1081,8 @@ def _save_failure_screen(scenario: Scenario, result: ComboResult) -> Path:
     path = BUILD_UI / scenario.name / f"{result.profile}-{result.size}" / "failure.screen"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_trim_screen(result.screen) + "\n", encoding="utf-8")
+    ansi_path = path.with_suffix(".ansi")
+    ansi_path.write_text(result.ansi + "\n", encoding="utf-8")
     return path
 
 

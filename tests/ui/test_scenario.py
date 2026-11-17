@@ -199,6 +199,7 @@ class ParserTest(unittest.TestCase):
                 patch.object(driver, "start", return_value=SimpleNamespace(home_path=base)) as start,
                 patch.object(scenario, "_run_live", return_value=scenario.ComboResult(
                     ok=False, reason="original native assertion", screen="actual screen")),
+                patch.object(driver, "capture", return_value="ansi failure"),
                 patch.object(driver, "stop", return_value=cleanup) as stop,
                 patch.object(scenario, "_snapshot_paths", return_value=(base / "variant.json", base / "cleanup.json")),
             ):
@@ -709,19 +710,23 @@ class LatencyPredicateTest(unittest.TestCase):
 
 
 class CombinationsTest(unittest.TestCase):
-    def test_default_matrix(self) -> None:
+    def test_default_is_one_combination(self) -> None:
         parsed = scenario.parse_scenario(
             write_temp("fixture: clean\n---\n", "matrix.scn")
         )
         self.assertEqual(
             scenario.combinations(parsed),
-            [
-                ("100x30", "standard"),
-                ("100x30", "vim"),
-                ("80x24", "standard"),
-                ("80x24", "vim"),
-            ],
+            [("80x24", "standard")],
         )
+
+    def test_matrix_true_expands_all_combinations(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\nmatrix: true\n---\n", "matrix.scn")
+        )
+        self.assertEqual(scenario.combinations(parsed), [
+            ("80x24", "standard"), ("80x24", "vim"),
+            ("100x30", "standard"), ("100x30", "vim"),
+        ])
 
     def test_size_only(self) -> None:
         parsed = scenario.parse_scenario(
@@ -732,7 +737,7 @@ class CombinationsTest(unittest.TestCase):
         )
         self.assertEqual(
             scenario.combinations(parsed),
-            [("120x40", "standard"), ("120x40", "vim")],
+            [("120x40", "standard")],
         )
 
     def test_profile_only(self) -> None:
@@ -744,13 +749,13 @@ class CombinationsTest(unittest.TestCase):
         )
         self.assertEqual(
             scenario.combinations(parsed),
-            [("100x30", "vim"), ("80x24", "vim")],
+            [("80x24", "vim")],
         )
 
     def test_header_values_come_first(self) -> None:
         parsed = scenario.parse_scenario(
             write_temp(
-                "fixture: clean\nsize: 90x20\nprofile: vim\n---\n",
+                "fixture: clean\nmatrix: true\nsize: 90x20\nprofile: vim\n---\n",
                 "order.scn",
             )
         )
@@ -759,8 +764,8 @@ class CombinationsTest(unittest.TestCase):
             [
                 ("90x20", "vim"),
                 ("90x20", "standard"),
-                ("80x24", "vim"),
-                ("80x24", "standard"),
+                ("100x30", "vim"),
+                ("100x30", "standard"),
             ],
         )
 
@@ -854,7 +859,7 @@ class ShellStepTest(unittest.TestCase):
                 self.assertIn(detail, str(caught.exception))
 
     def test_shell_failure_is_reported_and_later_combinations_run(self) -> None:
-        path = write_temp("fixture: clean\n---\nsh: check-register\n", "shell-fail.scn")
+        path = write_temp("fixture: clean\nmatrix: true\n---\nsh: check-register\n", "shell-fail.scn")
         directory = tempfile.mkdtemp()
         run = driver.Run(
             id="shell-fail",
@@ -917,13 +922,42 @@ class ShellStepTest(unittest.TestCase):
 
 
 class StartupReportingTest(unittest.TestCase):
+    def test_success_without_snapshot_writes_no_screen_or_ansi(self) -> None:
+        path = write_temp("fixture: clean\n---\n", "no-capture.scn")
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(scenario, "BUILD_UI", Path(directory)),
+                patch.object(scenario, "_run_combo", return_value=scenario.ComboResult(ok=True)),
+                patch.object(scenario.driver, "check_tools"),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(scenario.run([str(path)]), 0)
+            self.assertEqual(list(Path(directory).rglob("*.screen")), [])
+            self.assertEqual(list(Path(directory).rglob("*.ansi")), [])
+
+    def test_explicit_snapshot_writes_screen_and_ansi(self) -> None:
+        parsed = scenario.parse_scenario(
+            write_temp("fixture: clean\n---\nsnapshot: requested\n", "capture.scn")
+        )
+        run = SimpleNamespace()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(scenario, "BUILD_UI", Path(directory)),
+                patch.object(driver, "capture", side_effect=["screen text", "ansi text"]),
+                patch.object(driver, "snapshot", return_value={}),
+            ):
+                scenario._write_snapshot(run, parsed, "standard", "80x24", "requested", [])
+            base = Path(directory) / "capture"
+            self.assertEqual((base / "requested.screen").read_text(), "screen text\n")
+            self.assertEqual((base / "requested.ansi").read_text(), "ansi text")
+
     def test_four_combo_failure_reports_reason_once_and_keeps_all_artifacts(self) -> None:
         path = write_temp("fixture: clean\n---\n", "four-fail.scn")
         combos = [("100x30", "standard"), ("100x30", "vim"),
                   ("80x24", "standard"), ("80x24", "vim")]
         failure = scenario.ComboResult(
             ok=False, reason="case.scn:4: expect screen contains 'missing': absent",
-            screen="trimmed failure screen", profile="", size="",
+            screen="trimmed failure screen", ansi="failure ansi", profile="", size="",
         )
         with tempfile.TemporaryDirectory() as directory:
             def fail(scenario_arg, size, profile, snapshots, verbose=False):
@@ -950,6 +984,9 @@ class StartupReportingTest(unittest.TestCase):
             self.assertEqual(
                 len(list((Path(directory) / "four-fail").glob("*/failure.screen"))),
                 4,
+            )
+            self.assertEqual(
+                len(list((Path(directory) / "four-fail").glob("*/failure.ansi"))), 4
             )
 
     def test_distinct_combo_causes_are_each_reported_once(self) -> None:
@@ -1026,7 +1063,7 @@ class StartupReportingTest(unittest.TestCase):
         path = write_temp("fixture: clean\nxfail: known\n---\n", "quiet-xfail.scn")
         result = scenario.ComboResult(
             ok=False, reason="failure detail", screen="screen row   \n   \n",
-            profile="standard", size="100x30",
+            profile="standard", size="100x30", ansi="ansi diagnostic",
         )
         with tempfile.TemporaryDirectory() as directory:
             output = io.StringIO()
@@ -1040,6 +1077,10 @@ class StartupReportingTest(unittest.TestCase):
                 self.assertEqual(scenario.run([str(path)]), 0)
             artifact = Path(directory) / "quiet-xfail/standard-100x30/failure.screen"
             self.assertEqual(artifact.read_text(encoding="utf-8"), "screen row\n")
+            self.assertEqual(
+                artifact.with_suffix(".ansi").read_text(encoding="utf-8"),
+                "ansi diagnostic\n",
+            )
             text = output.getvalue()
             self.assertNotIn("screen row", text)
             self.assertNotIn("failure detail", text)

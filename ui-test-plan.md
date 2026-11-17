@@ -19,7 +19,8 @@ To rerun only one newline variant, use `make plain-neovim PLAIN_ARGS="--final-ne
 - [ ] Write the failing scenario first, commit nothing that "fixes" a bug without one.
 - [ ] Never use `sleep` in a test. Wait for the client's `idle` state (§A.3).
 - [ ] Every test runs against deterministic fixtures ([§8.2 Git environment](docs/TESTING.md#82-determinism)) and fixed terminal sizes.
-- [ ] Every scenario that touches menus runs at **100x30 and 80x24**, under both profiles (`standard`, `vim`).
+- [ ] Scenario headers use `matrix: true` when the full **100x30 and 80x24** × (`standard`, `vim`) matrix is required; otherwise one 80x24/standard combination runs. Explicit `size`, `profile`, `size-only` and `profile-only` headers remain supported.
+- [ ] Scenario runs write `.screen` and `.ansi` only for an explicit `snapshot:` statement or a failed combination. Failure artifacts retain quiet-`xfail` diagnostics; successful scenarios without snapshots create neither file.
 - [ ] The final report for a task lists the scenario files, their results, and the paths of the saved `.screen` files.
 - [ ] Known bugs are tracked as scenarios marked `xfail: <bug id>`. The runner reports them as XFAIL. If an `xfail` scenario passes, the runner **fails** until the tag is removed (this forces the fix to remove it).
 

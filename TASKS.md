@@ -1021,13 +1021,16 @@ T005 is complete through its authoritative [completed children](#completed-work)
   - Part 2 VERIFIED: `make plain-presets` → ok: build, ok: plain-presets. Five isolated child-Neovim LSP/RPC presets (minimal, showDocument, completion, progress, full), no plugin/tmux: exact initialize declarations; real status and Git commit-draft opening (native showDocument or readable manual-open fallback); attached draft didOpen and edited didChange versions equal the server-retained action versions; native progress create/begin/cancel/end for progress/full, acknowledged document Abort otherwise; restored status, preserved unsaved draft edit, detached draft actions, unchanged HEAD/index/status/worktree and graceful client shutdown. Completion is declared in completion/full but the server does not advertise completionProvider; working completion is not claimed. Native scenario red run skipped; strengthened synchronization assertions passed. `pgrep -af '[m]agit-lsp'` → no processes after verification.
   - Verified: `make update-capability-presets` → ok; deterministic fixed-preset table (12 lines, under 100k), linked from T013's CLIENT_SPEC feature-to-capability section; generated artifact committed separately.
   - Verified: `make test-rust FILTER="--test capability_lattice"` → ok: rust; `make docs-check` → 3 tests OK, ok: docs-check. Combined evidence: 56 fake-editor combinations plus 3 all-capability baselines and 5 native presets. No Phase 6A changes.
-  - Done: containing commit of this final queue record (Part 1: `9933272`; Part 2 implementation and generated table in preceding commits).
+  - Done: `9e6111e` (Part 1: `9933272`; Part 2 implementation: `dcdabfe`; generated table: `6d1c37d`).
 - [ ] **T024 — host-spike.** [Scope](./TASKS_PART_SEVEN.md#t024-host-spike-s).
+  - Deferred: existing real-host path lacks a Make entry point and remains behind BUG-PHASE6-PNPM (`Makefile:101-107`; `clients/vscode/package.json:23-29`). Existing historical observations do not satisfy the ten-run spike. T025/T026 depend on this decision; T027/T028 retain their blocked VSCode verification requirements.
 - [ ] **T025 — e2e-runner.** [Scope](./TASKS_PART_SEVEN.md#t025-e2e-runner-m).
 - [ ] **T026 — host-cases.** [Scope](./TASKS_PART_SEVEN.md#t026-host-cases-l).
 - [ ] **T027 — keybinding-compaction.** [Scope](./TASKS_PART_SEVEN.md#t027-keybinding-compaction-m).
 - [ ] **T028 — colour-roles.** [Scope](./TASKS_PART_SEVEN.md#t028-colour-roles-s).
 - [ ] **T029 — scenario-slimming.** [Scope](./TASKS_PART_SEVEN.md#t029-scenario-slimming-m).
+  - Part 1/2: independently verify scenario matrix/artifact defaults through `make ui-unit`; keep parent unchecked. Part 2/2 retains the shared conformance interpreters, fake/native comparisons and driver coverage matrix, including real-host requirements; no acceptance is waived.
+  - Part 1 evidence: `make ui-unit` → exit 0 (`ok: ui-unit`). `tests/ui/test_scenario.py` directly checks one default combination, all four `matrix: true` pairs, explicit size/profile and size-only/profile-only compatibility, no `.screen`/`.ansi` on an unrequested success, both files for explicit snapshots and failures (including quiet XFAIL). Parent remains unchecked; Part 2 scope is outstanding.
 
 ### Feature — Phase 8: Release
 
