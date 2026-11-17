@@ -30,6 +30,10 @@ hygiene:
 split-server-async:
 	PYTHONDONTWRITEBYTECODE=1 APPLY="$(APPLY)" python3 scripts/split_server_async.py
 
+.PHONY: split-server-async-check
+split-server-async-check:
+	PYTHONDONTWRITEBYTECODE=1 APPLY= python3 scripts/split_server_async.py --check-applied
+
 DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md docs/parity.md docs/plain-support.md docs/known-client-behaviors.md docs/schema/payload-tables.md docs/schema/worked-exchanges.md docs/schema/capability-levels.md
 
 docs-check:
