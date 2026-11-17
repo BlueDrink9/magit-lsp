@@ -85,6 +85,8 @@
 
             packages = with pkgs; [
               vscodium
+            ] ++ lib.optionals stdenv.isLinux [
+              xdotool # X11 input for the A06 e2e scenario
             ];
           };
         in
