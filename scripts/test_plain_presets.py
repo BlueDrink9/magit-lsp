@@ -6,8 +6,10 @@ import argparse
 import json
 import os
 import subprocess
+import signal
 import tempfile
 import time
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +20,41 @@ PRESETS = {
     "progress": {"workspace": {"applyEdit": True}, "textDocument": {"codeAction": {}}, "window": {"workDoneProgress": True}},
     "full": {"workspace": {"applyEdit": True, "workspaceEdit": {"documentChanges": True}}, "textDocument": {"codeAction": {}, "completion": {"completionItem": {"snippetSupport": True}}}, "window": {"showDocument": {"support": True}, "workDoneProgress": True}},
 }
+
+
+def teardown(child: subprocess.Popen[bytes], deadline_seconds: float = 5) -> None:
+    """Stop and reap an editor and every process in its owned session."""
+    pgid = child.pid
+    deadline = time.monotonic() + deadline_seconds
+    errors = []
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(min(.02, max(0, deadline - time.monotonic())))
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        pass
+    else:
+        os.killpg(pgid, signal.SIGKILL)
+    try:
+        child.wait(timeout=max(.01, deadline_seconds))
+    except subprocess.TimeoutExpired:
+        errors.append("editor child was not reaped")
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        pass
+    else:
+        errors.append("owned process group remains alive")
+    if errors:
+        raise RuntimeError("; ".join(errors))
 
 
 def table() -> str:
@@ -72,7 +109,7 @@ def main() -> None:
                 return [subprocess.check_output(["git", *cmd], cwd=repo, env=env, text=True) for cmd in
                         [("rev-parse", "HEAD"), ("write-tree",), ("status", "--porcelain")]] + [(repo / "tracked.txt").read_text()]
             before = snapshot()
-            child = subprocess.Popen(["nvim", "--headless", "--noplugin", "-u", str(ROOT / "tests/ui/plain-presets/init.lua")], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            child = subprocess.Popen(["nvim", "--headless", "--noplugin", "-u", str(ROOT / "tests/ui/plain-presets/init.lua")], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
             try:
                 deadline = time.monotonic() + 90
                 result_file = root / "result.json"
@@ -95,9 +132,13 @@ def main() -> None:
                 assert child.returncode == 0, (preset, child.stderr.read().decode())
                 print(f"PASS {preset}: native status/draft, user edit synchronization, cancel restores document and Git state, clean shutdown")
             finally:
-                child.terminate()
-                try: child.wait(timeout=5)
-                except subprocess.TimeoutExpired: child.kill(); child.wait()
+                primary = sys.exc_info()[1]
+                try:
+                    teardown(child)
+                except Exception as cleanup_error:
+                    if primary is None:
+                        raise
+                    primary.add_note(f"process cleanup also failed: {cleanup_error}")
 
 
 if __name__ == "__main__":

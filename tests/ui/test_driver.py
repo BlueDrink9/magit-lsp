@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from ui_lib import driver, startup  # noqa: E402
+import test_plain_presets  # noqa: E402
 
 
 def make_run(directory: str) -> driver.Run:
@@ -634,6 +635,22 @@ class WaitSocketTest(unittest.TestCase):
 
 
 class NvimHelperCommandTest(unittest.TestCase):
+    def test_plain_preset_teardown_reaps_owned_descendant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "ready"
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import subprocess,sys,time,pathlib; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(60)", str(marker)],
+                start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            deadline = time.monotonic() + 5
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(marker.exists(), "descendant readiness deadline expired")
+            descendant = int(marker.read_text())
+            test_plain_presets.teardown(child)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(descendant, 0)
+
     def test_rpc_helper_is_headless_and_has_no_terminal_input(self) -> None:
         result = subprocess.CompletedProcess([], 0, stdout="1", stderr="")
         with patch.object(driver.subprocess, "run", return_value=result) as run:

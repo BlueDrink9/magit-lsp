@@ -1650,12 +1650,17 @@ Editing/synchronization review (2026-11-13; base `1ccb038adc2b9e9633f394ca1fea78
   - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → ok: rust; `make update-schema` → ok: update-schema; `make schema-check` → ok: schema-check.
   - Done: `255f2e9`.
 
-- [ ] **[P2] Reap every Plain preset process on failure** (`scripts/test_plain_presets.py:58-100`, `main`; `tests/ui/test_driver.py`, `NativeSessionTest` and process-cleanup tests)
+  - Done: `255f2e9` (implementation), `e302639` (completion).
+
+- [x] **[P2] Reap every Plain preset process on failure** (`scripts/test_plain_presets.py:58-100`, `main`; `tests/ui/test_driver.py`, `NativeSessionTest` and process-cleanup tests)
   - **Problem:** The preset harness owns only the direct Neovim child. Its `finally` block terminates and waits for Neovim, but on timeout, assertion failure, or forced editor termination it neither owns nor verifies the descendant `magit-lsp` process, so a failed native run can return with an orphan server.
   - **Why it matters:** Correctness and cleanliness — native verification must leave no owned server behind on precisely the failure paths where Neovim does not perform its graceful LSP shutdown.
   - **Change:** Launch each preset editor in its own owned process group/session and centralize bounded teardown that terminates the whole group, escalates to kill only after the deadline, waits/reaps the direct child, and verifies the group is empty while preserving the original test failure and useful stderr. Add a controlled `ui-unit` regression using a child that spawns a descendant: force the failure cleanup path and prove both owned processes are gone; also retain the healthy graceful-shutdown path. Use readiness files or process state with deadlines, not blind sleeps.
   - **Done when:** Success still proves graceful Neovim/LSP shutdown for all five presets; forced failure cannot leave either the editor or descendant alive; cleanup errors do not mask the primary assertion; `make ui-unit` and `make plain-presets` pass with no orphan `magit-lsp` process.
   - **Constraints:** Do not scan or signal by process name, signal unrelated processes, add tmux to this preset harness, weaken native assertions, use unbounded waits, or claim Windows/macOS verification.
+  - Verified: `make ui-unit` → exit 0; `test_plain_preset_teardown_reaps_owned_descendant` starts an owned child/descendant, waits on readiness with a deadline, tears down the group and asserts the descendant is gone. `make plain-presets` → exit 0; five presets retain the native graceful-shutdown assertions. Cleanup failure is attached as a note when preserving a primary exception. Linux only; Windows/macOS unverified.
+  - Decision: updated `test_log_history_has_commits_and_decorations` to assert `tag-only` and `v1`, exactly matching `_log_history`'s two intentional tags and the T041 distinct tag-only tip.
+  - Done: containing commit.
 
 - [ ] **[P2] Align UI matrix documentation with opt-in execution** (`docs/TESTING.md:210-219`, real-UI scenario guidance; `ui-test-plan.md:54-57,385-395`, `U0.6`, Scenario DSL header)
   - **Problem:** Current execution defaults to one `standard`/`80x24` combination unless a scenario declares `matrix: true`, but maintained docs still state that every menu scenario or all scenarios run under both profiles and both sizes, and the DSL comments describe implicit secondary combinations controlled by retired `size-only`/`profile-only` behavior.
