@@ -150,6 +150,7 @@ struct Line {
     dir: Dir,
     message: Map<String, Value>,
     source: String,
+    raw: String,
 }
 
 /// Parse and shape-check one JSONL line.
@@ -188,6 +189,7 @@ fn parse_line(text: &str) -> Result<Line, String> {
         dir,
         message,
         source: source.to_owned(),
+        raw: text.to_owned(),
     })
 }
 
@@ -1123,7 +1125,9 @@ fn json_excerpt(value: Option<&Value>) -> String {
 /// independent, `view/render` and `view/keymap` for a newly opened view, is
 /// ordered by the server: `send_outcome` emits every render before its keymap,
 /// so the rich recording keeps that order and needs no phase grouping.
-fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
+fn replay_example(name: &str, lines: &[Line]) -> Result<Vec<String>, String> {
+    let regenerate = std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some();
+    let mut regenerated = Vec::with_capacity(lines.len());
     let fixture = replay_fixture(name.strip_suffix(".jsonl").unwrap_or(name));
     let (repo, _git) = fixture.build();
     let root = repo.path().to_string_lossy().to_string();
@@ -1148,6 +1152,7 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
     });
 
     for (index, line) in lines.iter().enumerate() {
+        regenerated.push(line.raw.clone());
         let where_ = format!("{name}:{}", index + 1);
         match line.dir {
             Dir::ClientToServer => {
@@ -1197,13 +1202,33 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
                     RECORDED_BINARY,
                     &mut recorded_hashes,
                 );
-                if observed != expected {
+                let response_id = actual.get("id");
+                let intentional_action_registry_change = regenerate && response_id.is_some_and(|id| {
+                    lines[..index].iter().any(|request| request.dir == Dir::ClientToServer
+                        && request.message.get("id") == Some(id)
+                        && request.message.get("method").and_then(Value::as_str) == Some("textDocument/codeAction"))
+                });
+                if intentional_action_registry_change {
+                    validate_action_capture(&expected, &observed).map_err(|error| format!("{where_}: {error}"))?;
+                }
+                let action_envelope_matches = intentional_action_registry_change;
+                if observed != expected && !action_envelope_matches {
                     let (path, expected_value, observed_value) = first_difference(&expected, &observed)
                         .unwrap_or_else(|| ("<unknown>".to_owned(), None, None));
                     return Err(format!(
                         "{where_}: recorded s2c frame mismatch at {path}\n  expected: {}\n  observed: {}\n  observed frame: {}",
                         json_excerpt(expected_value), json_excerpt(observed_value), json_excerpt(Some(&observed))
                     ));
+                }
+                if intentional_action_registry_change && expected != observed {
+                    // Keep recorded hashes and metadata, never persist temporary fixture values.
+                    let mut value: Value = serde_json::from_str(&line.raw).map_err(|error| error.to_string())?;
+                    value["message"]["result"] = Value::Array(observed["result"].as_array().unwrap().iter().map(|action| {
+                        expected["result"].as_array().unwrap().iter().position(|old| old == action)
+                            .map(|position| line.message["result"][position].clone())
+                            .unwrap_or_else(|| action.clone())
+                    }).collect());
+                    regenerated[index] = serde_json::to_string(&value).map_err(|error| error.to_string())?;
                 }
             }
         }
@@ -1219,22 +1244,183 @@ fn replay_example(name: &str, lines: &[Line]) -> Result<(), String> {
             extra.len()
         ));
     }
+    Ok(regenerated)
+}
+
+/// Validate the narrowly allowed T041 action-registry recording delta.
+fn validate_action_capture(expected: &Value, observed: &Value) -> Result<(), String> {
+    if expected == observed { return Ok(()); }
+    let permitted = t041_action_update(expected)?;
+    if permitted != *observed {
+        let (path, expected, observed) = first_difference(&permitted, observed).unwrap();
+        return Err(format!("capture differs beyond the exact T041 log actions at {path}: expected {}, observed {}", json_excerpt(expected), json_excerpt(observed)));
+    }
     Ok(())
+}
+
+/// Promote the three planned status-visible log commands at registry order.
+fn t041_action_update(frame: &Value) -> Result<Value, String> {
+    const PROMOTIONS: [(&str, &str, &str); 3] = [
+        ("log.local-branches", "local branches", "Show commits reachable from local branches"),
+        ("log.all-branches", "all branches", "Show commits reachable from branches"),
+        ("log.all-references", "all references", "Show commits reachable from all refs"),
+    ];
+    let actions = frame["result"].as_array().ok_or("expected action array")?;
+    let current = actions.iter().find(|action| action["data"]["command"] == "log.current")
+        .ok_or("missing log.current anchor")?;
+    let uri = current["data"]["documentUri"].as_str().ok_or("missing document URI")?;
+    let generation = current["data"]["viewGeneration"].as_u64().ok_or("missing view generation")?;
+    let action = |id: &str, title: &str, reason: &str| serde_json::json!({
+        "data":{"command":id,"documentUri":uri,"viewGeneration":generation},
+        "disabled":{"reason":reason},"title":title
+    });
+    let mut updated = Vec::new();
+    let mut removed = Vec::new();
+    let mut anchors = 0;
+    for entry in actions {
+        if let Some((id, old_title, _)) = PROMOTIONS.iter().find(|(id, _, _)| entry["data"]["command"] == *id) {
+            if *entry != action(id, old_title, "Planned: roadmap R-5.1") {
+                return Err(format!("unexpected old log action {id}"));
+            }
+            removed.push(*id);
+            continue;
+        }
+        updated.push(entry.clone());
+        if entry["data"]["command"] == "log.current" {
+            anchors += 1;
+            updated.extend(PROMOTIONS.iter().map(|(id, _, title)| action(id, title, "Unavailable: Plain client adapter is not implemented")));
+        }
+    }
+    if anchors != 1 || removed != PROMOTIONS.iter().map(|(id, _, _)| *id).collect::<Vec<_>>() {
+        return Err("expected exactly three ordered planned log actions".into());
+    }
+    let mut result = frame.clone();
+    result["result"] = Value::Array(updated);
+    Ok(result)
+}
+
+/// Minimal old/new registry fixtures, independently specified from T041's commands.
+fn action_capture_frames() -> (Value, Value) {
+    let action = |id: &str, title: &str, reason: &str| serde_json::json!({
+        "data":{"command":id,"documentUri":"file:///repo/.magit","viewGeneration":1},
+        "disabled":{"reason":reason},"title":title
+    });
+    let unavailable = "Unavailable: Plain client adapter is not implemented";
+    let before = action("log.current", "Show the current log", unavailable);
+    let after = action("log.select-and-copy", "Select commits and copy their object IDs", "Unavailable: the clipboard effect is not available in Plain mode");
+    let expected = serde_json::json!({"id":2,"jsonrpc":"2.0","result":[before, after,
+        action("log.local-branches", "local branches", "Planned: roadmap R-5.1"),
+        action("log.all-branches", "all branches", "Planned: roadmap R-5.1"),
+        action("log.all-references", "all references", "Planned: roadmap R-5.1")
+    ]});
+    let observed = serde_json::json!({"id":2,"jsonrpc":"2.0","result":[before,
+        action("log.local-branches", "Show commits reachable from local branches", unavailable),
+        action("log.all-branches", "Show commits reachable from branches", unavailable),
+        action("log.all-references", "Show commits reachable from all refs", unavailable),
+        after
+    ]});
+    (expected, observed)
+}
+
+/// Reject unrelated payload drift even in explicit capture mode.
+#[test]
+fn action_capture_rejects_unrelated_payload_changes() {
+    let (expected, valid) = action_capture_frames();
+    assert!(validate_action_capture(&expected, &valid).is_ok(), "exact T041 update is allowed");
+    for (key, value) in [("viewGeneration", serde_json::json!(2)), ("documentUri", serde_json::json!("file:///tmp/leak/.magit")), ("command", serde_json::json!("unrelated.action"))] {
+        let mut observed = valid.clone();
+        observed["result"][0]["data"][key] = value;
+        assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted changed {key}");
+    }
+    let mut observed = valid.clone();
+    observed["result"].as_array_mut().unwrap().pop();
+    assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted deleted action");
+    let mut observed = valid.clone();
+    observed["result"].as_array_mut().unwrap().swap(0, 4);
+    assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted reordered actions");
+    let mut observed = valid.clone();
+    observed["result"][1]["title"] = serde_json::json!("guessed title");
+    assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted changed new log action");
+    let mut observed = valid.clone();
+    observed["result"].as_array_mut().unwrap().push(valid["result"][1].clone());
+    assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted duplicate action");
+    let mut observed = valid;
+    observed["id"] = serde_json::json!(99);
+    assert!(validate_action_capture(&expected, &observed).is_err(), "capture accepted changed response ID");
+}
+
+/// Prepare both fragments without changing their existing line boundaries.
+fn regenerated_fragments(name: &str, lines: &[String]) -> Result<Vec<(std::path::PathBuf, String)>, String> {
+    if !matches!(name, "commit-edit-abort.jsonl" | "commit-edit-confirm.jsonl") {
+        return Err(format!("refusing to regenerate unrelated recording {name}"));
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLES_DIR);
+    let stem = name.strip_suffix(".jsonl").unwrap();
+    let mut fragments = Vec::new();
+    let mut offset = 0;
+    for index in 1..=2 {
+        let path = root.join(format!("{stem}-{index:02}.jsonl"));
+        let original = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+        let end = offset + original.lines().count();
+        let content = lines.get(offset..end).ok_or("missing fragment lines")?.join("\n") + "\n";
+        if content.len() >= 100_000 { return Err(format!("fragment too large: {} bytes", content.len())); }
+        fragments.push((path, content));
+        offset = end;
+    }
+    if offset != lines.len() { return Err("unrecorded fragment lines".into()); }
+    Ok(fragments)
+}
+
+/// Capture preserves source bytes and fragment boundaries, and rejects overflow.
+#[test]
+fn capture_preserves_fragments_and_rejects_overflow() {
+    for name in ["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"] {
+        let mut lines: Vec<String> = example_lines(name).into_iter().map(|line| line.raw).collect();
+        for (path, content) in regenerated_fragments(name, &lines).unwrap() {
+            assert_eq!(content, fs::read_to_string(path).unwrap(), "unchanged source bytes and fragment boundaries");
+        }
+        lines[0] = "x".repeat(100_000);
+        assert!(regenerated_fragments(name, &lines).unwrap_err().contains("fragment too large"));
+    }
+    assert!(regenerated_fragments("plain-open.jsonl", &[]).is_err());
 }
 
 /// Replay every example file, Plain and rich, against a real server and fixture.
 #[test]
 fn plain_examples_replay_against_the_real_binary() {
-    for name in [
+    let names = if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
+        vec!["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"]
+    } else { vec![
         "plain-open.jsonl",
         "rich-lifecycle.jsonl",
         "plain-code-action.jsonl",
         "plain-document-prompt.jsonl",
         "commit-edit-abort.jsonl",
         "commit-edit-confirm.jsonl",
-    ] {
+    ] };
+    let mut fragments = Vec::new();
+    for name in names {
         let lines = example_lines(name);
-        replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
+        let captured = replay_example(name, &lines).unwrap_or_else(|error| panic!("{error}"));
+        if std::env::var_os("MAGIT_LSP_REGENERATE_EXAMPLES").is_some() {
+            fragments.extend(regenerated_fragments(name, &captured).unwrap_or_else(|error| panic!("{error}")));
+        }
+    }
+    // Validate every exchange and fragment before writing any recording.
+    for (path, content) in fragments {
+        fs::write(path, content).expect("write validated capture");
+    }
+}
+
+/// Neither commit recording may sort away a changed code-action order.
+#[test]
+fn commit_edit_action_order_is_strict() {
+    for name in ["commit-edit-abort.jsonl", "commit-edit-confirm.jsonl"] {
+        let mut lines = example_lines(name);
+        let response = lines.iter_mut().find(|line| line.dir == Dir::ServerToClient && line.message.get("result").is_some_and(Value::is_array)).unwrap();
+        response.message["result"].as_array_mut().unwrap().swap(0, 1);
+        let error = replay_example(name, &lines).expect_err("reordered actions must fail normal replay");
+        assert!(error.contains("recorded s2c frame mismatch at $.result[0]"), "{error}");
     }
 }
 

@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -57,6 +57,10 @@ vscode-keybindings-generate:
 
 test-rust:
 	$(call run,rust,cargo test -q $(FILTER))
+
+# Regenerate only the two commit-edit exchanges from the real-server replay.
+update-examples:
+	$(call run,update-examples,MAGIT_LSP_REGENERATE_EXAMPLES=1 cargo test -q --test examples plain_examples_replay_against_the_real_binary)
 
 test-lua: build
 	$(call run,lua,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()")

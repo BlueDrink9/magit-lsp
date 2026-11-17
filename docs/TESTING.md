@@ -22,6 +22,27 @@ a temp `HOME`, `XDG_CONFIG_HOME` to a temp dir, `LC_ALL=C`, fixed author and
 committer, so hashes are stable and appear verbatim in snapshots. Normalise
 only temp paths and timings.
 
+### Protocol example replay and capture
+
+`make test-rust FILTER="--test examples"` replays the committed exchanges
+against the real binary. Server frames and action arrays remain strictly
+ordered; only the path, binary, outbound-id, run-id and commit-hash
+canonicalization documented in `tests/examples.rs` is allowed.
+
+`make update-examples` captures only the two Plain commit-edit exchanges.
+It permits exactly T041's promotion of `log.local-branches`,
+`log.all-branches` and `log.all-references` from planned rows to implemented
+registry positions (`log.load-more` is log-scoped, not offered here). Titles,
+disabled reasons, URI, generation and the ordered remainder must match exactly. Every other frame
+must match normal replay before any recording is written. New entries come
+from validated real-server responses; retained entries keep their recorded
+values, not temporary fixture paths. Unchanged lines (including requests and
+metadata) remain byte-identical, existing fragment boundaries are preserved,
+and fragments must stay below 100000 bytes. Capture fails rather than
+refreshing unrelated drift. Inspect the diff, rerun normal replay, and commit
+recordings separately; then run `make update-schema`, `make schema-check`
+and `make docs-check`, committing generated worked exchanges separately.
+
 ### Fixtures and oracles
 
 #### Commit identity
