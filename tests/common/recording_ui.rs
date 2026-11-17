@@ -12,6 +12,13 @@ use std::sync::Mutex;
 #[derive(Default)]
 pub struct RecordingUi(pub Mutex<Vec<(&'static str, Value)>>);
 
+impl RecordingUi {
+    /// Return a snapshot of ordered UI events for contract assertions.
+    pub fn events(&self) -> Vec<(&'static str, Value)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 impl Ui for RecordingUi {
     fn render(&self, value: ViewRender) -> Message {
         self.0

@@ -12,6 +12,9 @@ pub enum NamedProfile { Plain, RichNative, RichDoc }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preset { StockNeovim, Helix, BundledNeovim, BundledVsCode }
 
+/// Every recorded initialize declaration used by the capability lattice.
+pub const RECORDED_PRESETS: &[Preset] = &[Preset::StockNeovim, Preset::Helix, Preset::BundledNeovim, Preset::BundledVsCode];
+
 /// Build a composable model from captured capability declarations and identity.
 pub fn model(preset: Preset) -> (EditorModel, Value) {
     let (base, capabilities, identity) = match preset {

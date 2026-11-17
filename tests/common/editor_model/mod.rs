@@ -29,6 +29,25 @@ pub const PLAIN_MIN: &str = "plain-min";
 /// Minimum rich protocol features needed by a rendered client.
 pub const RICH_MIN: &str = "rich-min";
 
+/// A named scenario's declared requirements and permitted fallback contract.
+#[derive(Clone, Copy, Debug)]
+pub struct ScenarioRequirement {
+    /// Stable scenario label used in lattice diagnostics.
+    pub name: &'static str,
+    /// LSP capability paths required for direct delivery.
+    pub required: &'static [&'static str],
+    /// Whether the design permits a readable refusal when requirements are absent.
+    pub refusal_allowed: bool,
+}
+
+/// Explicit requirements for the core plain-mode capability contract.
+pub const CAPABILITY_SCENARIOS: &[ScenarioRequirement] = &[
+    ScenarioRequirement { name: "status-render", required: &[], refusal_allowed: false },
+    ScenarioRequirement { name: "workspace-edit", required: &["workspace.applyEdit"], refusal_allowed: true },
+    ScenarioRequirement { name: "document-changes", required: &["workspace.workspaceEdit.documentChanges"], refusal_allowed: true },
+    ScenarioRequirement { name: "show-document", required: &["window.showDocument.support"], refusal_allowed: true },
+];
+
 /// Neovim's explicitly modeled documentChanges acceptance behavior.
 // anchor: Neovim 0.12.6 trace contract in tests/fixtures/lsp_traces/README.md.
 pub const NEOVIM_UNDECLARED_CHANGES: Module = Module { declares: std::borrow::Cow::Borrowed("{}"), behaves: &["neovim-accepts-undeclared-documentChanges"] };
