@@ -1181,7 +1181,9 @@ fn plain_e2e_stages_file_and_hunk_rejects_stale_unstages_and_commits_saved_draft
     assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
     let close = client.editor.close(&draft_uri);
     client.send(close);
-    client.until(|c| !c.editor.text(&uri).contains("COMMIT_EDITMSG"));
+    client.until(|c| {
+        !c.editor.text(&uri).contains("COMMIT_EDITMSG") && repo.git(&["rev-parse", "HEAD"]) != head
+    });
     let commit = repo.git(&["cat-file", "commit", "HEAD"]);
     assert_eq!(commit.split_once("\n\n").unwrap().1, message);
     assert_eq!(repo.git(&["rev-parse", "HEAD^"]), head);
