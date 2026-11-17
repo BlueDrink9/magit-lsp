@@ -46,7 +46,7 @@
               lua5_4
               lua-language-server
               nodejs
-              pnpm
+              pnpm_10
               python3
               pyright
               rust-analyzer
@@ -63,6 +63,7 @@
             shellHook = ''
               export RUST_SRC_PATH="${pkgs.rustPlatform.rustLibSrc}"
               echo "magit-lsp dev shell"
+              export pnpm_config_pm_on_fail=ignore
             '';
           };
 
