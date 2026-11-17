@@ -546,6 +546,12 @@ pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
     while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
         prefix -= 1;
     }
+    // Keep a shared final newline in the suffix, rather than inserting at
+    // virtual EOF. Native editors may expose an intermediate extra line while
+    // applying an EOF edit, then echo its removal after the applyEdit result.
+    if old.ends_with('\n') && new.ends_with('\n') {
+        prefix = prefix.min(old.len() - 1).min(new.len() - 1);
+    }
     while splits_crlf(old, prefix) || splits_crlf(new, prefix) {
         prefix -= 1;
     }

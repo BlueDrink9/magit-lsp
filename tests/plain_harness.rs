@@ -560,6 +560,49 @@ fn registry_models_drive_fake_editor_observable_behavior() {
 }
 
 #[test]
+fn plain_eof_append_does_not_repair_a_native_intermediate_echo_with_a_stale_version() {
+    use magit_lsp::docstore::Encoding;
+    use magit_lsp::presentation::plain::{hash_text, DocumentFormat, PlainDocument};
+
+    let uri = "file:///repo/.magit";
+    let before = "Head: main\n\nUntracked files (0)\n";
+    let target = format!("{before}file:///repo/.git/COMMIT_EDITMSG\n");
+    let mut editor = FakeEditor::new(Profile::Standard);
+    let opened = editor.open(uri, before);
+    let mut document = PlainDocument::new(uri, Encoding::Utf8, true, DocumentFormat::from_text(before));
+    assert!(document.open(opened["params"]["textDocument"]["version"].as_i64().unwrap() as i32, before).is_none());
+    let edit = document.render(&target).unwrap();
+    let range = &edit.edit["documentChanges"][0]["edits"][0]["range"];
+    // Native Neovim util.apply_text_edits appends at virtual EOF with
+    // nvim_buf_set_lines, then removes the extra final line. Its first
+    // didChange can precede the result and its cleanup didChange follow it
+    // (plain-commit lsp.log, 20261117-073832-04b2ec, lines 78–85).
+    let virtual_eof = range["start"]["line"].as_u64().unwrap() == before.lines().count() as u64;
+    let echo = if virtual_eof {
+        editor.edit(uri, &format!("{target}\n"))
+    } else {
+        let frames = editor.dispatch(&json!({"jsonrpc":"2.0","id":edit.id,"method":"workspace/applyEdit","params":{"edit":edit.edit}}));
+        assert_eq!(frames.last().unwrap()["result"]["applied"], true);
+        frames.into_iter().find(|frame| frame["method"] == "textDocument/didChange").expect("the applied edit is echoed")
+    };
+    let observed = editor.text(uri).to_owned();
+    assert!(document.change(echo["params"]["textDocument"]["version"].as_i64().unwrap() as i32, observed).is_none());
+    // Local EOF cleanup has already advanced the editor before a repair
+    // based on the intermediate echo could be delivered. No guessed version.
+    let cleanup = virtual_eof.then(|| editor.edit(uri, &target));
+    let repair = document.response(edit.id, true);
+    if let Some(repair) = repair {
+        assert_eq!(editor.apply_edit(&repair.edit)["applied"], true,
+            "an intermediate EOF echo must not produce a stale versioned repair: {}", repair.edit);
+    }
+    if let Some(cleanup) = cleanup {
+        assert!(document.change(cleanup["params"]["textDocument"]["version"].as_i64().unwrap() as i32, &target).is_none());
+    }
+    assert_eq!(hash_text(editor.text(uri)), hash_text(&target));
+    assert!(!document.take_format_warning());
+}
+
+#[test]
 fn versioned_apply_edit_validates_before_mutating_and_supports_multiple_changes() {
     let mut e = FakeEditor::new(Profile::Standard);
     let u = "file:///d";
