@@ -436,6 +436,8 @@ fn assert_unconstrained_json(schema: &Value) {
 #[test]
 fn prompt_unions_stay_any_of() {
     let respond = read_schema("view-prompt-respond-params.json");
+    assert_eq!(respond["properties"]["value"]["anyOf"][0]["$ref"], "#/$defs/PromptValue");
+    assert_eq!(respond["properties"]["value"]["anyOf"][1]["type"], "null");
     let prompt_value = &respond["$defs"]["PromptValue"];
     assert!(
         prompt_value.get("oneOf").is_none(),
@@ -447,6 +449,10 @@ fn prompt_unions_stay_any_of() {
     assert_eq!(variants.len(), 4, "PromptValue keeps every variant: {variants:?}");
     assert_eq!(variants[0]["type"], "boolean");
     assert_eq!(variants[1]["type"], "string");
+    assert_eq!(variants[2]["$ref"], "#/$defs/PromptChoiceAnswer");
+    assert_eq!(variants[3]["type"], "object");
+    assert_eq!(variants[3]["properties"]["ids"]["type"], "array");
+    assert_eq!(variants[3]["properties"]["ids"]["items"]["type"], "string");
 
     let choice = &respond["$defs"]["PromptChoiceAnswer"];
     assert!(choice.get("oneOf").is_none());
@@ -1426,9 +1432,15 @@ fn luals_annotations_preserve_directional_contracts() {
         "---@alias ViewPromptRespondParams.PromptValue ",
     );
     assert!(
-        prompt_value.contains("boolean|string|ViewPromptRespondParams.PromptChoiceAnswer|"),
+        prompt_value.contains("boolean|string|ViewPromptRespondParams.PromptChoiceAnswer")
+            && prompt_value.contains("ViewPromptRespondParams.PromptValue.Variant4"),
         "untagged unions stay unions: {prompt_value}"
     );
+    let multi_answer = lua_declaration(
+        &text,
+        "---@class ViewPromptRespondParams.PromptValue.Variant4",
+    );
+    assert!(multi_answer.contains("---@field ids string[]"), "multi-choice answer: {multi_answer}");
     assert!(
         !prompt_value.contains("&"),
         "anyOf must not become an intersection: {prompt_value}"
