@@ -295,9 +295,9 @@
 | `magit-log-head` | `l h` | `log.head` | Planned R-5.1 | log |
 | `magit-log-related` | `l u` | `log.related` | Planned R-5.1 | log |
 | `magit-log-select` | `l c` | `log.select-and-copy` | Implemented | log |
-| `magit-log-branches` | `l L` | `log.local-branches` | Planned R-5.1 | log |
-| `magit-log-all-branches` | `l b` | `log.all-branches` | Planned R-5.1 | log |
-| `magit-log-all` | `l a` | `log.all-references` | Planned R-5.1 | log |
+| `magit-log-branches` | `l L` | `log.local-branches` | Implemented | log |
+| `magit-log-all-branches` | `l b` | `log.all-branches` | Implemented | log |
+| `magit-log-all` | `l a` | `log.all-references` | Implemented | log |
 | `magit-log-reflog` | `l R` | `log.reflog-objects` | Planned R-5.1 | log |
 | `magit-log-matching-branches` | `l B` | `log.matching-branches` | Planned R-5.1 | log |
 | `magit-log-matching-tags` | `l T` | `log.matching-tags` | Planned R-5.1 | log |

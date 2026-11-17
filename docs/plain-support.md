@@ -111,12 +111,12 @@ This table is generated from command registry metadata (`Command::effects`, `Com
 | `ignore.subdir` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
 | `ignore.system` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
 | `ignore.topdir` | menu-action | Planned (R-8.2) | — | — | Planned (R-8.2) | Planned (R-8.2) | Planned (R-8.2) | — |
-| `log.all-branches` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
-| `log.all-references` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
+| `log.all-branches` | menu-action | Implemented | — | — | Available | Available | Available | — |
+| `log.all-references` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.current` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.head` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
 | `log.load-more` | log | Implemented | — | — | Available | Available | Available | — |
-| `log.local-branches` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
+| `log.local-branches` | menu-action | Implemented | — | — | Available | Available | Available | — |
 | `log.matching-branches` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
 | `log.matching-tags` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
 | `log.merged` | menu-action | Planned (R-5.1) | — | — | Planned (R-5.1) | Planned (R-5.1) | Planned (R-5.1) | — |
