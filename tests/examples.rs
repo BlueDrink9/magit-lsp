@@ -147,8 +147,6 @@ fn schema_name(block: &Value) -> Option<String> {
 struct Line {
     dir: Dir,
     message: Map<String, Value>,
-    #[allow(dead_code)]
-    note: Option<String>,
     source: String,
 }
 
@@ -174,11 +172,11 @@ fn parse_line(text: &str) -> Result<Line, String> {
             "source must be \"recorded\" or \"written\", found {source:?}"
         ));
     }
-    let note = match object.get("note") {
-        None => None,
-        Some(Value::String(note)) => Some(note.clone()),
-        Some(other) => return Err(format!("note must be a string, found {other}")),
-    };
+    if let Some(note) = object.get("note") {
+        if !note.is_string() {
+            return Err(format!("note must be a string, found {note}"));
+        }
+    }
     let message = object
         .get("message")
         .and_then(Value::as_object)
@@ -187,7 +185,6 @@ fn parse_line(text: &str) -> Result<Line, String> {
     Ok(Line {
         dir,
         message,
-        note,
         source: source.to_owned(),
     })
 }

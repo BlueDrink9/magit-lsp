@@ -137,6 +137,7 @@ fn serialize_items<S: serde::Serializer>(items: &[Item], serializer: S) -> Resul
 /// Input schema model for [`Group`]: items are the plain `Vec<Item>` a client sends.
 #[derive(schemars::JsonSchema)]
 #[schemars(rename = "Group", inline, description = "A titled group of items.")]
+// Schema-only input model; constructed by schemars through `Group::json_schema`.
 #[allow(dead_code)]
 struct GroupInput {
     title: String,
@@ -146,6 +147,7 @@ struct GroupInput {
 /// Output schema model for [`Group`]: items carry the computed `activationSteps`.
 #[derive(schemars::JsonSchema)]
 #[schemars(rename = "Group", inline, description = "A titled group of items.")]
+// Schema-only output model; constructed by schemars through `Group::json_schema`.
 #[allow(dead_code)]
 struct GroupOutput<'a> {
     title: String,
