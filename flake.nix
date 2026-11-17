@@ -52,6 +52,7 @@
               rust-analyzer
               rustc
               rustfmt
+              stylua
               typescript-language-server
 
               # Development-only checking tools
