@@ -1669,7 +1669,7 @@ Editing/synchronization review (2026-11-13; base `1ccb038adc2b9e9633f394ca1fea78
   - **Done when:** The two maintained documents describe the same matrix rules implemented by `scripts/ui_lib/scenario.py` and covered by `tests/ui/test_scenario.py`, no current text promises implicit four-way execution, and `make docs-check` passes.
   - **Constraints:** Do not change runner behavior, scenario headers, historical result counts, or generated documentation.
   - Verified: A1 retirement sweep examined `docs/TESTING.md:210-219` and `ui-test-plan.md:22,54-57,64-68,385-395`; removed the current implicit-matrix/retired opt-out claims, retained the dated/historical four-way outcomes and counts, and `rg -n -i 'every menu scenario|all scenarios under both|runs under both profiles|runner also runs|size-only.*opt out|profile-only.*opt out|implicit.*(matrix|secondary)|secondary combinations' docs/TESTING.md ui-test-plan.md` found only the explicitly historical U0.6 note. A2: `make docs-check` → exit 0 (`ok: docs-check`).
-  - Done: pending commit.
+  - Done: `04b4834`.
 
 ### P3
 
