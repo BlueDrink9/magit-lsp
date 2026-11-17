@@ -199,6 +199,8 @@ fn log_query_applies_until_merge_and_first_parent_filters() {
         let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, expected.into_iter().collect(), "{options:?}");
     }
+    let error = repo.log(&GitLogOptions { merges_only: true, no_merges: true, ..Default::default() }).unwrap_err();
+    assert!(error.to_string().contains("cannot include and exclude merges"), "{error}");
 }
 
 #[test]

@@ -339,3 +339,29 @@ fn invalid_log_arguments_return_effects_and_keep_the_menu_stack_consistent() {
         .get(&render.view_id)
         .is_some_and(|view| view.descriptor().kind == ViewKind::Log)));
 }
+
+#[test]
+fn contradictory_merge_filters_report_error_and_leave_menu_usable() {
+    use magit_lsp::protocol::{Effect, MessageLevel};
+
+    let (tmp, _) = log_variants_fixture();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.press("l");
+    let menu = test.view_id().to_string();
+    for key in ["M", "m"] {
+        test.press("=");
+        test.press_ui(key);
+    }
+    let result = test.press("l");
+    assert!(result.effects.iter().any(|effect| matches!(effect, Effect::Message { level: MessageLevel::Error, text, .. } if text.contains("cannot include and exclude merges"))), "{:?}", result.effects);
+    assert!(!result.effects.iter().any(|effect| matches!(effect, Effect::PushView { descriptor, .. } if descriptor.kind == ViewKind::Log)), "{:?}", result.effects);
+    assert_ne!(test.view_id(), menu);
+    assert_eq!(test.view_id(), "v1");
+    assert!(test.session().views().get(&test.view_id()).is_some());
+
+    test.press("l");
+    test.press("=");
+    test.press_ui("m");
+    test.press("l");
+    assert_eq!(test.session().views().get(test.view_id()).unwrap().descriptor().kind, ViewKind::Log);
+}

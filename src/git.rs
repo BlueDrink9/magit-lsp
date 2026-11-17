@@ -721,6 +721,9 @@ impl GitRepo {
     /// Return a coherent page of log records; filtering values are individual
     /// argv entries and paths are separated from revisions by `--`.
     pub fn log(&self, options: &GitLogOptions) -> Result<GitLogPage> {
+        if options.merges_only && options.no_merges {
+            return Err(Error::new("Log filters cannot include and exclude merges at the same time."));
+        }
         let size = if options.page_size == 0 {
             100
         } else {
