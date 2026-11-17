@@ -4,6 +4,8 @@
 mod generate_schema;
 #[path = "common/mod.rs"]
 mod fixtures;
+#[path = "../scripts/example_recordings.rs"]
+mod example_recordings;
 
 use fixtures::schema::{read_schema, schema_errors};
 use serde_json::Value;
@@ -1691,6 +1693,19 @@ fn worked_exchanges_render_identically_for_grouped_fragments() {
             .expect("render fragmented recording"),
         "equivalent logical recordings render byte-identically"
     );
+}
+
+#[test]
+fn recordings_reject_mixed_monolithic_and_fragments() {
+    let dir = tempfile::tempdir().expect("mixed examples dir");
+    std::fs::write(dir.path().join("confirm.jsonl"), b"monolithic\n")
+        .expect("write monolithic recording");
+    std::fs::write(dir.path().join("confirm-01.jsonl"), b"fragment\n")
+        .expect("write first fragment");
+
+    let error = example_recordings::recordings(dir.path()).expect_err("mixed representation rejected");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("confirm.jsonl"));
 }
 
 #[test]
