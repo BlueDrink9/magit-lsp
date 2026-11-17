@@ -2,7 +2,31 @@
 local applied = 0
 local apply = vim.lsp.handlers['workspace/applyEdit']
 vim.lsp.handlers['workspace/applyEdit'] = function(...)
+  local params = select(2, ...)
+  local changes = params and params.edit and params.edit.documentChanges or {}
+  local buf, uri, incoming_version
+  for _, change in ipairs(changes) do
+    local document = change.textDocument
+    if document and (document.uri:match('/%.magit$') or document.uri:match('/COMMIT_EDITMSG$')) then
+      uri, incoming_version = document.uri, document.version
+      buf = vim.uri_to_bufnr(uri)
+      break
+    end
+  end
+  local function log(event, result)
+    if not buf or not vim.env.MAGIT_LSP_UI_PROBE_FILE then return end
+    local file = assert(io.open(vim.env.MAGIT_LSP_UI_PROBE_FILE, 'a'))
+    _G.plain_probe_sequence = (_G.plain_probe_sequence or 0) + 1
+    file:write(vim.json.encode({ sequence = _G.plain_probe_sequence,
+      time_ns = vim.uv.hrtime(), event = event, uri = uri,
+      incoming_version = incoming_version, current_version = vim.lsp.util.buf_versions[buf],
+      result = result, traceback = debug.traceback(), mode = vim.api.nvim_get_mode(),
+      cmdtype = vim.fn.getcmdtype() }), '\n')
+    file:close()
+  end
+  log('applyEdit-before')
   local result = apply(...)
+  log('applyEdit-after', result)
   if result and result.applied then applied = applied + 1 end
   return result
 end

@@ -7,6 +7,44 @@ vim.g.plain_smoke_rich_notifications = 0
 vim.lsp.log.set_level('trace')
 if vim.env.MAGIT_LSP_UI_PROBE_FILE then
   local probe_path = vim.env.MAGIT_LSP_UI_PROBE_FILE
+  local function write_probe(record)
+    _G.plain_probe_sequence = (_G.plain_probe_sequence or 0) + 1
+    record.sequence = _G.plain_probe_sequence
+    record.time_ns = vim.uv.hrtime()
+    local file = assert(io.open(probe_path, 'a'))
+    file:write(vim.json.encode(record), '\n')
+    file:close()
+  end
+  local function diagnostic_buffer(buf)
+    local name = vim.api.nvim_buf_get_name(buf or vim.api.nvim_get_current_buf())
+    return name:match('/%.magit$') or name:match('/COMMIT_EDITMSG$')
+  end
+  local original_print = print
+  _G.print = function(...)
+    local message = table.concat(vim.tbl_map(tostring, { ... }), '\t')
+    local buf = vim.api.nvim_get_current_buf()
+    if diagnostic_buffer(buf) and message:find('Buffer .* newer than edits%.') then
+      write_probe({ event = 'warning-print-before', message = message,
+        traceback = debug.traceback(), mode = vim.api.nvim_get_mode(), cmdtype = vim.fn.getcmdtype() })
+    end
+    local result = original_print(...)
+    if diagnostic_buffer(buf) and message:find('Buffer .* newer than edits%.') then
+      write_probe({ event = 'warning-print-after', message = message,
+        mode = vim.api.nvim_get_mode(), cmdtype = vim.fn.getcmdtype() })
+    end
+    return result
+  end
+  local original_notify = vim.notify
+  vim.notify = function(message, ...)
+    local buf = vim.api.nvim_get_current_buf()
+    local scoped = diagnostic_buffer(buf) and tostring(message):find('Buffer .* newer than edits%.')
+    if scoped then write_probe({ event = 'warning-notify-before', message = tostring(message),
+      traceback = debug.traceback(), mode = vim.api.nvim_get_mode(), cmdtype = vim.fn.getcmdtype() }) end
+    local result = original_notify(message, ...)
+    if scoped then write_probe({ event = 'warning-notify-after', message = tostring(message),
+      mode = vim.api.nvim_get_mode(), cmdtype = vim.fn.getcmdtype() }) end
+    return result
+  end
   local function probe(event, key)
     local buf = vim.api.nvim_get_current_buf()
     local name = vim.api.nvim_buf_get_name(buf)
@@ -35,12 +73,11 @@ if vim.env.MAGIT_LSP_UI_PROBE_FILE then
       paste = vim.o.paste, formatoptions = vim.bo[buf].formatoptions,
       autocmds = autocmds,
     }
-    local file = assert(io.open(probe_path, 'a'))
-    file:write(vim.json.encode(record), '\n')
-    file:close()
+    record.sequence = nil
+    write_probe(record)
   end
   vim.on_key(function(key) if key == '\r' or key == '\n' then probe('native-key', key) end end)
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertEnter', 'InsertLeave' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'InsertEnter', 'InsertLeave', 'ModeChanged' }, {
     callback = function(event) probe(event.event) end,
   })
 end
