@@ -1660,6 +1660,28 @@ fn standalone_worked_exchanges_include_provenance_and_examples() {
 }
 
 #[test]
+fn worked_exchanges_render_identically_for_grouped_fragments() {
+    let monolithic = tempfile::tempdir().expect("monolithic examples dir");
+    let fragmented = tempfile::tempdir().expect("fragmented examples dir");
+    let recording = b"{\"source\":\"recorded\",\"message\":{\"id\":1}}\n{\"source\":\"recorded\",\"message\":{\"id\":2}}\n";
+    std::fs::write(monolithic.path().join("confirm.jsonl"), recording)
+        .expect("write monolithic recording");
+    let split = recording.iter().position(|byte| *byte == b'\n').unwrap() + 1;
+    std::fs::write(fragmented.path().join("confirm-01.jsonl"), &recording[..split])
+        .expect("write first fragment");
+    std::fs::write(fragmented.path().join("confirm-02.jsonl"), &recording[split..])
+        .expect("write second fragment");
+
+    assert_eq!(
+        generate_schema::schema_markdown::worked_exchanges_block_from(monolithic.path())
+            .expect("render monolithic recording"),
+        generate_schema::schema_markdown::worked_exchanges_block_from(fragmented.path())
+            .expect("render fragmented recording"),
+        "equivalent logical recordings render byte-identically"
+    );
+}
+
+#[test]
 fn standalone_worked_exchanges_detect_tamper_and_missing_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     generate_schema::write_all(dir.path()).expect("write schemas");
