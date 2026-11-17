@@ -118,6 +118,29 @@ revert is `-`, stash is `Z` (since `z` is the fold prefix), reset is `X`
 | `menu.reset-args` | `ctrl+r` | `ctrl+r` |
 | `open.dispatch` (toggle help) | `?` | `?` |
 
+#### 5.4.1 Log menu: supported subset
+
+Open the log menu with `l` from status. These menu keys are identical in both
+profiles; set filters before choosing an action.
+
+| Keys | Supported action or filter |
+| --- | --- |
+| `l` | Current history (`HEAD`) |
+| `L` | Local branches (`--branches`) |
+| `b` | All local and remote-tracking branches (`--branches --remotes`) |
+| `a` | All references (`--all`, including tags) |
+| `c` | Select and copy commit IDs |
+| `= n` | Commit limit |
+| `= a`, `= s`, `= u` | Author, since, until (Git date expressions) |
+| `= g`, `= S`, `= G`, `= f` | Message grep, string/regex pickaxe, literal path |
+| `= M`, `= m`, `= p` | Toggle merges only, omit merges, first-parent traversal |
+| `- g`, `- d` | Toggle graph and ref decorations |
+
+Filters compose with each supported history variant. Other displayed log menu
+entries remain planned, including reflogs, other/related revisions and matching
+refs. In a normal log, `/` and motion keys stay native to Neovim; `q` returns to
+the caller. No new revision or reflog view is implied by these variants.
+
 ### 5.5 Commit-message scope
 
 | Command | `standard` | `vim` |

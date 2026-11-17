@@ -9,8 +9,8 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 | View | Magit analog | Contents | Key commands | §7 parent task |
 | --- | --- | --- | --- | --- |
 | **Status** | `magit-status` | Header lines (Head, Merge, Push, Tag); sections: in-progress operation, Untracked, Unstaged, Staged, Unmerged, Stashes, Unpulled, Unpushed, Recent commits, Submodules | stage/unstage/discard/apply/reverse, visit, toggle, refresh, all menus | Completed (§10/archive); R-3.6; R-6 |
-| **Log** | `magit-log` | Commit list with graph, decorations, author, date; options (`-n`, `--graph`, `--decorate`, `--author`, `--since`, `--grep`, `-S`, `-G`, path limits); lazy "load more"; **select mode** | show commit, checkout/reset/branch/rebase/cherry-pick/revert from the commit at point, confirm/cancel | R-5.1 (completed; archive) |
-| **Log variants** | `l` menu | current, other, all, local branches, reflog, file log, line-range log (`-L`), `HEAD..upstream`, `upstream..HEAD` | same | R-5.3 |
+| **Log** | `magit-log` | Commit list with graph, decorations, author, date; options (`-n`, `--graph`, `--decorate`, `--author`, `--since`, `--until`, `--grep`, `-S`, `-G`, path limits, `--merges`, `--no-merges`, `--first-parent`); lazy "load more"; commit-ID selection | load more, select/copy commit IDs, native search/motion, close | R-5.1 (completed; archive); T041 |
+| **Log variants** | `l` menu | current (`HEAD`), local branches (`--branches`), all branches (`--branches --remotes`), all references (`--all`, including tags) | same log navigation and filters | T041; remaining variants R-5.3 |
 | **Revision** | `magit-revision` | Header (hash, parents, author, committer, dates, refs, message), diffstat, full diff with hunks; parent/child navigation; combined diff for merges | visit file, apply/reverse hunk, copy hash | R-5.2 |
 | **Diff** | `magit-diff` | Any range `a..b`, `a...b`, worktree vs index vs revision, path-limited, stash vs parent, stat-only; context/whitespace/rename/word-diff options | visit, stage/unstage when applicable | R-5.2 |
 | **Refs** | `magit-show-refs` | Local branches, remotes, tags with ahead/behind vs a base; also select mode | checkout, create, delete, rename, reset, merge, rebase onto, log | R-5.3 |
@@ -18,6 +18,13 @@ implemented and verified by R-NAV (§7); these are server-tree operations.
 | **Stash list / show** | `magit-stash-list` | Stashes; show = diff view of a stash | apply, pop, drop, branch | R-6.5 |
 | **Rebase todo** | `git-rebase-mode` | Structured paused or prepared initial todo with pick/reword/edit/squash/fixup/drop and full-OID commit rows | `p`/`r`/`e`/`s`/`f`/`d` change action; `K`/`J` move row; `ctrl+s` submits; `Escape` cancels | R-TODO / R-7.3 |
 | **Rebase in progress** | status section | Todo position, stopped commit, conflicts | continue, skip, abort, edit todo | R-OP-STATE / R-7.3 |
+
+Log filters compose with the selected ref set and with author, message and literal
+path limits. Dates use Git date expressions. `--first-parent` follows only the
+first parent at merges; `--merges` and `--no-merges` restrict commit membership.
+Other log menu actions (including other/related revisions, reflogs and matching
+refs), line-range history and log-to-revision actions remain planned; visible
+menu entries are not a support promise. See [log menu keys](./KEYMAPS.md#541-log-menu-supported-subset).
 
 The paused merge-backend todo editor rejects `update-ref` commands; repositories using `rebase.updateRefs=true` cannot use it. A prepared initial todo is removed after execution starts, including when `edit` pauses Git or replay conflicts; the caller remains usable for refresh, conflict resolution and explicit `rebase.continue` or abort. A started execution failure reports its readable Git effect without restoring the prepared editor or automatically aborting the real operation.
 

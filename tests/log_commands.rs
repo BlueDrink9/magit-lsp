@@ -167,6 +167,58 @@ fn path_filter_is_reachable_through_individual_menu_keys() {
 }
 
 #[test]
+fn branch_variants_open_distinct_visible_logs_from_menu_keys() {
+    let (tmp, _) = log_variants_fixture();
+    for (key, extra) in [("l", vec![]), ("L", vec!["local only"]), ("b", vec!["local only", "remote only"]), ("a", vec!["local only", "remote only", "tag only"])] {
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+        test.press("l");
+        test.press(key);
+        let log = test.session().views().get(test.view_id()).unwrap();
+        assert_eq!(log.descriptor().kind, ViewKind::Log);
+        let text = test.text_of(test.view_id()).join("\n");
+        let expected: Vec<_> = ["base history", "main history", "side history", "merge history"].into_iter().chain(extra).collect();
+        for subject in ["base history", "main history", "side history", "merge history", "local only", "remote only", "tag only"] {
+            assert_eq!(text.contains(subject), expected.contains(&subject), "{key}: {subject}: {text}");
+        }
+        assert!(text.contains("main"), "{text}");
+        assert!(text.contains('*'), "{text}");
+        assert_eq!(log.tree().nodes.iter().filter(|n| n.commit.is_some()).count(), expected.len());
+    }
+}
+
+#[test]
+fn history_filters_and_composition_reach_visible_log_through_menu() {
+    let (tmp, _) = log_variants_fixture();
+    for (switches, until, compose, expected) in [
+        (vec![], true, false, vec!["base history", "main history", "side history"]),
+        (vec!["M"], false, false, vec!["merge history"]),
+        (vec!["m"], false, false, vec!["base history", "main history", "side history"]),
+        (vec!["p"], false, false, vec!["base history", "main history", "merge history"]),
+        (vec!["p", "m"], false, true, vec!["main history"]),
+    ] {
+        let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+        test.press("l");
+        for switch in switches { test.press("="); test.press(switch); }
+        let mut options = vec![];
+        if until { options.push(("u", "2000-01-01T23:59:59+0000")); }
+        if compose { options.extend([("a", "Test User"), ("g", "main history"), ("f", "main.txt")]); }
+        for (key, value) in options {
+            test.ui().reply_text(Some(value.into()));
+            test.press_ui("=");
+            test.press_ui(key);
+        }
+        test.press("l");
+        let log = test.session().views().get(test.view_id()).unwrap();
+        assert_eq!(log.descriptor().kind, ViewKind::Log);
+        let text = test.text_of(test.view_id()).join("\n");
+        for subject in ["base history", "main history", "side history", "merge history", "local only", "remote only", "tag only"] {
+            assert_eq!(text.contains(subject), expected.contains(&subject), "{subject}: {text}");
+        }
+        assert_eq!(log.tree().nodes.iter().filter(|n| n.commit.is_some()).count(), expected.len());
+    }
+}
+
+#[test]
 fn log_native_search_and_motion_keys_pass_through_and_are_unbound_in_select_scope() {
     use magit_lsp::protocol::Effect;
 

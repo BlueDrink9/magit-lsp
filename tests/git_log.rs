@@ -186,6 +186,36 @@ fn typed_options_support_page_size_graph_decoration_grep_and_literal_paths() {
 }
 
 #[test]
+fn log_query_applies_until_merge_and_first_parent_filters() {
+    let (_fixture, repo) = common::log_variants_fixture();
+    for (options, expected) in [
+        (GitLogOptions { until: Some("2000-01-01T23:59:59+0000".into()), ..Default::default() }, vec!["base history", "main history", "side history"]),
+        (GitLogOptions { merges_only: true, ..Default::default() }, vec!["merge history"]),
+        (GitLogOptions { no_merges: true, ..Default::default() }, vec!["base history", "main history", "side history"]),
+        (GitLogOptions { first_parent: true, ..Default::default() }, vec!["base history", "main history", "merge history"]),
+        (GitLogOptions { first_parent: true, no_merges: true, author: Some("Test User".into()), grep: Some("main history".into()), paths: vec!["main.txt".into()], ..Default::default() }, vec!["main history"]),
+    ] {
+        let page = repo.log(&options).unwrap();
+        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, expected.into_iter().collect(), "{options:?}");
+    }
+}
+
+#[test]
+fn ref_variants_have_distinct_reachability_sets() {
+    let (_fixture, repo) = common::log_variants_fixture();
+    for (selection, extra) in [(None, vec![]), (Some("local"), vec!["local only"]), (Some("branches"), vec!["local only", "remote only"]), (Some("all"), vec!["local only", "remote only", "tag only"])] {
+        let page = repo.log(&GitLogOptions { ref_selection: selection.map(str::to_owned), ..Default::default() }).unwrap();
+        let subjects: std::collections::BTreeSet<_> = page.commits.iter().map(|c| c.subject.as_str()).collect();
+        let expected = ["base history", "main history", "side history", "merge history"].into_iter().chain(extra).collect();
+        assert_eq!(subjects, expected, "{selection:?}");
+        assert!(page.commits.iter().any(|c| !c.graph_prefix.is_empty()));
+        assert!(page.commits.iter().any(|c| c.decorations.iter().any(|decoration| decoration.contains("main"))));
+    }
+    assert!(repo.log(&GitLogOptions { ref_selection: Some("--evil".into()), ..Default::default() }).is_err());
+}
+
+#[test]
 fn loading_a_larger_page_keeps_all_earlier_commit_oids() {
     let mut fixture = RepoFixture::new();
     for i in 0..105 {

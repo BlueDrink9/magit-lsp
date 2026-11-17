@@ -277,6 +277,41 @@ impl RepoFixture {
     }
 }
 
+/// A merge dated January 2 over January 1 parents, plus unmerged local,
+/// remote-only and tag-only tips, for backend and visible log assertions.
+pub fn log_variants_fixture() -> (RepoFixture, GitRepo) {
+    let (fixture, repo) = RepoFixture::new()
+        .commit("base history", [("base.txt", "base\n")])
+        .commit("main history", [("main.txt", "main\n")])
+        .build();
+    fixture.git(&["checkout", "-b", "side", "HEAD~1"]);
+    write(&fixture.path().join("side.txt"), "side\n");
+    fixture.git(&["add", "."]);
+    fixture.git(&["commit", "-m", "side history"]);
+    fixture.git(&["checkout", "main"]);
+    let merge = Command::new("git")
+        .args(["merge", "--no-ff", "side", "-m", "merge history"])
+        .env("GIT_AUTHOR_DATE", "2000-01-02T00:00:00+0000")
+        .env("GIT_COMMITTER_DATE", "2000-01-02T00:00:00+0000")
+        .current_dir(fixture.path()).output().unwrap();
+    assert!(merge.status.success(), "{}", String::from_utf8_lossy(&merge.stderr));
+    fixture.git(&["branch", "-d", "side"]);
+    for (branch, subject) in [("independent", "local only"), ("remote-tip", "remote only"), ("tag-tip", "tag only")] {
+        fixture.git(&["checkout", "-b", branch, "main~2"]);
+        write(&fixture.path().join("extra.txt"), subject);
+        fixture.git(&["add", "."]);
+        fixture.git(&["commit", "-m", subject]);
+        match branch {
+            "remote-tip" => { fixture.git(&["update-ref", "refs/remotes/origin/remote", "HEAD"]); }
+            "tag-tip" => { fixture.git(&["tag", "tag-only"]); }
+            _ => {}
+        }
+        fixture.git(&["checkout", "main"]);
+        if branch != "independent" { fixture.git(&["branch", "-D", branch]); }
+    }
+    (fixture, repo)
+}
+
 /// A repository with a ten-line tracked `f.txt`.
 pub fn init_repo() -> (RepoFixture, GitRepo) {
     RepoFixture::new()

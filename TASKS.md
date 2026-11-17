@@ -1054,11 +1054,15 @@ Starts after phases 1–6 and the Phase 6A 0.2 gate subset (T105/T112/T113/T114/
 
 Each ticket below retains its row's full scope and dependencies in the [Phase 10 specification table](./TASKS_PART_SEVEN.md#phase-10-small-features).
 
-- [x] **T040 — commit-signing.** Done: commit adding signing lifecycle coverage and external signer setup documentation.
+- [x] **T040 — commit-signing.** Done: `7ce9dd3`.
   - Verified: `make test-rust FILTER="--test commands --test errors"` (prior worker, unchanged) covers the existing `=S` mapping and exact `--gpg-sign=` argv at `tests/commands.rs:137-173`.
   - Verified: `make test-rust FILTER="--test server_async signing"` (prior worker, unchanged) passed `repository::signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery`: configured signer and inherited environment, readable failure/cancellation effects, progress lifecycle, preserved HEAD/index/patch/worktree/draft, refresh and unsigned recovery in both modes.
   - Verified: `make docs-check` → exit 0; `docs/KEYMAPS.md` documents default/explicit keys and external signer/agent/pinentry setup. Deterministic signer coverage only; no real-key, native pinentry or cryptographic verification claimed.
-- [ ] **T041 — log-variants.**
+- [x] **T041 — log-variants.** Done: commit implementing branch/ref log variants, filters and focused coverage.
+  - Scope: existing local-branches, all-branches (local and remote-tracking), all-references actions; until, merges-only, no-merges and first-parent filters. Remaining log stubs/new views are not included.
+  - Verified: `make test-rust FILTER="--test log_commands --test git_log"` → exit 0; distinct ref reachability, dated merge/filter membership, author/grep/path composition, visible menu output and commit-tree metadata.
+  - Verified: `make ui-file FILE=tests/ui/scenarios/log-view.scn` → exit 0 under standard/vim at 100x30 and 80x24; native variant membership/exclusions, until reader, log view kind/stack and return-to-status cleanup. `pgrep -af '[m]agit-lsp'` returned no matches after native runs.
+  - Verified: `make docs-check` → exit 0; `docs/VIEWS.md` and `docs/KEYMAPS.md` describe the supported subset, keys and remaining limits.
 - [ ] **T042 — remote-config-tags.**
 - [ ] **T043 — branch-basics.**
 - [ ] **T044 — notes-ignore.**

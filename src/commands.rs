@@ -1002,6 +1002,9 @@ fn build() -> Registry {
             run: open_current_log,
             effects: &[],
         },
+        Command { id: "log.local-branches", scope: Scope::MenuAction, doc: "Show commits reachable from local branches", status: CommandStatus::Implemented, run: open_local_branch_log, effects: &[] },
+        Command { id: "log.all-branches", scope: Scope::MenuAction, doc: "Show commits reachable from branches", status: CommandStatus::Implemented, run: open_all_branch_log, effects: &[] },
+        Command { id: "log.all-references", scope: Scope::MenuAction, doc: "Show commits reachable from all refs", status: CommandStatus::Implemented, run: open_all_reference_log, effects: &[] },
         Command {
             id: "log.load-more",
             scope: Scope::Log,
@@ -1625,6 +1628,24 @@ fn open_current_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
         open_args: ctx.args.cloned(),
         ..Default::default()
     })
+}
+
+fn open_local_branch_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    open_log_with_refs(ctx, "local")
+}
+
+fn open_all_branch_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    open_log_with_refs(ctx, "branches")
+}
+
+fn open_all_reference_log(ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
+    open_log_with_refs(ctx, "all")
+}
+
+fn open_log_with_refs(ctx: &mut CommandCtx<'_>, refs: &str) -> Result<CommandOutcome> {
+    let mut args = crate::session::log_options_from_args(ctx.args)?;
+    args.ref_selection = Some(refs.into());
+    Ok(CommandOutcome { open_view: Some((ViewKind::Log, Placement::Main)), open_args: Some(serde_json::to_value(args)?), ..Default::default() })
 }
 
 /// Push a commit-selection log used to copy one or more commit IDs.

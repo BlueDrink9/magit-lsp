@@ -124,6 +124,16 @@ pub struct GitLogOptions {
     pub author: Option<String>,
     /// Restrict commits since this Git date expression.
     pub since: Option<String>,
+    /// Restrict commits until this Git date expression.
+    pub until: Option<String>,
+    /// Include only merge commits.
+    pub merges_only: bool,
+    /// Exclude merge commits.
+    pub no_merges: bool,
+    /// Follow only first parents.
+    pub first_parent: bool,
+    /// Select local branches, local and remote branches, or all refs.
+    pub ref_selection: Option<String>,
     /// Restrict commit messages using Git's grep expression.
     pub grep: Option<String>,
     /// Pickaxe string search (-S).
@@ -144,6 +154,11 @@ impl Default for GitLogOptions {
             decorate: true,
             author: None,
             since: None,
+            until: None,
+            merges_only: false,
+            no_merges: false,
+            first_parent: false,
+            ref_selection: None,
             grep: None,
             pickaxe: None,
             pickaxe_regex: None,
@@ -728,6 +743,7 @@ impl GitRepo {
         for (flag, value) in [
             ("--author", options.author.as_ref()),
             ("--since", options.since.as_ref()),
+            ("--until", options.until.as_ref()),
             ("--grep", options.grep.as_ref()),
             ("-S", options.pickaxe.as_ref()),
             ("-G", options.pickaxe_regex.as_ref()),
@@ -740,6 +756,9 @@ impl GitRepo {
                 });
             }
         }
+        if options.merges_only { args.push("--merges".into()); }
+        if options.no_merges { args.push("--no-merges".into()); }
+        if options.first_parent { args.push("--first-parent".into()); }
         let revision = options.revision.as_deref().unwrap_or("HEAD");
         if options.revision.is_none()
             && self
@@ -764,8 +783,19 @@ impl GitRepo {
                 rows: Vec::new(),
             });
         }
+        if let Some(selection) = &options.ref_selection {
+            if selection != "local" && selection != "branches" && selection != "all" {
+                return Err(Error::new("Unsupported log ref selection."));
+            }
+            if selection == "all" {
+                args.push("--all".into());
+            } else {
+                args.push("--branches".into());
+                if selection == "branches" { args.push("--remotes".into()); }
+            }
+        }
         args.push("--end-of-options".into());
-        args.push(revision.to_string());
+        if options.ref_selection.is_none() { args.push(revision.to_string()); }
         if !options.paths.is_empty() {
             args.push("--".into());
             args.extend(options.paths.iter().map(|path| format!(":(literal){path}")));

@@ -285,12 +285,23 @@ def _in_progress_cherry_pick(repo: Path, env: dict[str, str]) -> None:
 
 
 def _log_history(repo: Path, env: dict[str, str]) -> None:
-    """Create a decorated three-commit history for log UI scenarios."""
+    """Create decorated history and distinct local, remote and tag-only tips."""
     commit(repo, env, "old searchable subject", {"f.txt": "old\n"})
     commit(repo, env, "middle graph subject", {"f.txt": "middle\n"})
     commit(repo, env, "latest decorated subject", {"f.txt": "latest\n"})
-    git(repo, env, "branch", "topic")
     git(repo, env, "tag", "v1", "HEAD~1")
+    later = {**env, "GIT_AUTHOR_DATE": "2001-01-01T00:00:00+0000",
+             "GIT_COMMITTER_DATE": "2001-01-01T00:00:00+0000"}
+    git(repo, env, "checkout", "-q", "-b", "topic")
+    commit(repo, later, "local-only subject", {"local.txt": "local\n"})
+    git(repo, env, "checkout", "-q", "-b", "scratch", "main")
+    remote = commit(repo, later, "remote-only subject", {"remote.txt": "remote\n"})
+    git(repo, env, "update-ref", "refs/remotes/origin/topic", remote)
+    git(repo, env, "checkout", "-q", "--detach", "main")
+    commit(repo, later, "tag-only subject", {"tag.txt": "tag\n"})
+    git(repo, env, "tag", "tag-only")
+    git(repo, env, "checkout", "-q", "main")
+    git(repo, env, "branch", "-D", "scratch")
 
 
 _BUILDERS = {

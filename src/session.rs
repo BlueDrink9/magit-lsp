@@ -2386,6 +2386,7 @@ pub(crate) fn log_options_from_args(args: Option<&Value>) -> Result<GitLogOption
             }
             "=a" => options.author = Some(value),
             "=s" => options.since = Some(value),
+            "=u" => options.until = Some(value),
             "=g" => options.grep = Some(value),
             "=S" => options.pickaxe = Some(value),
             "=G" => options.pickaxe_regex = Some(value),
@@ -2393,6 +2394,9 @@ pub(crate) fn log_options_from_args(args: Option<&Value>) -> Result<GitLogOption
             _ => return Err(Error::new(format!("Unsupported log option: {key}"))),
         }
     }
+    options.merges_only = values.switches.iter().any(|s| s == "=M");
+    options.no_merges = values.switches.iter().any(|s| s == "=m");
+    options.first_parent = values.switches.iter().any(|s| s == "=p");
     options.graph = values.switches.iter().any(|s| s == "-g");
     options.decorate = values.switches.iter().any(|s| s == "-d");
     Ok(options)

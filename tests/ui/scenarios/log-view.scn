@@ -18,3 +18,60 @@ keys: q
 wait
 expect screen contains "Unstaged changes"
 expect view_stack.count == 1
+
+# Local branches include topic, but not remote-only or tag-only commits.
+keys: l
+wait state view_stack.menus == 1
+keys: L
+wait screen contains "local-only subject"
+expect screen not-contains "remote-only subject"
+expect screen not-contains "tag-only subject"
+expect view_stack.count == 2
+expect view_stack.1.kind == "log"
+keys: q
+wait
+expect view_stack.count == 1
+
+# All branches adds remote-tracking refs, but not tags.
+keys: l
+wait state view_stack.menus == 1
+keys: b
+wait screen contains "remote-only subject"
+expect screen contains "local-only subject"
+expect screen not-contains "tag-only subject"
+expect view_stack.count == 2
+expect view_stack.1.kind == "log"
+keys: q
+wait
+
+# All references adds tag-only history.
+keys: l
+wait state view_stack.menus == 1
+keys: a
+wait screen contains "tag-only subject"
+expect screen contains "local-only subject"
+expect screen contains "remote-only subject"
+expect view_stack.count == 2
+expect view_stack.1.kind == "log"
+keys: q
+wait
+
+# Until is passed through the native reader and filters the all-refs query.
+keys: l
+wait state view_stack.menus == 1
+keys: = u
+wait prompt
+keys: "2000-01-02" Enter
+wait
+keys: a
+wait screen contains "latest decorated subject"
+expect screen not-contains "local-only subject"
+expect screen not-contains "remote-only subject"
+expect screen not-contains "tag-only subject"
+expect view_stack.count == 2
+expect view_stack.1.kind == "log"
+keys: q
+wait
+expect screen contains "Unstaged changes"
+expect view_stack.count == 1
+expect view_stack.menus == 0
