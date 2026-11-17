@@ -621,13 +621,18 @@ def send_keys(run: Run, tokens: list[str]) -> None:
     for token in tokens:
         encoding = keys.encode(token)
         if encoding.kind == "backtab":
-            _tmux(run, "send-keys", "-t", SESSION, str(encoding.value))
+            args = ("send-keys", "-t", SESSION, str(encoding.value))
         elif encoding.kind == "csi-u":
-            _tmux(run, "send-keys", "-t", SESSION, "-H", *encoding.value)
+            args = ("send-keys", "-t", SESSION, "-H", *encoding.value)
         elif encoding.kind == "tmux":
-            _tmux(run, "send-keys", "-t", SESSION, str(encoding.value))
+            args = ("send-keys", "-t", SESSION, str(encoding.value))
         else:
-            _tmux(run, "send-keys", "-t", SESSION, "-l", "--", token)
+            args = ("send-keys", "-t", SESSION, "-l", "--", token)
+        if os.environ.get("MAGIT_LSP_UI_PROBE") == "1" and token == "Enter":
+            with (run.dir / "input-probe.jsonl").open("a") as probe:
+                probe.write(json.dumps({"time_ns": time.time_ns(), "token": token,
+                                        "tmux_args": args}) + "\n")
+        _tmux(run, *args)
 
 
 def _pane_dead(run: Run) -> bool:
@@ -909,6 +914,8 @@ def start(
                 exclude.write("\n/.magit\n")
             env.update({"PLAIN_REPO": str(run.repo_path), "PLAIN_SERVER": env["MAGIT_LSP_BIN"],
                         "MAGIT_LSP_UI_CLIENT": "plain", "XDG_STATE_HOME": str(run.home_path / "state")})
+            if os.environ.get("MAGIT_LSP_UI_PROBE") == "1":
+                env["MAGIT_LSP_UI_PROBE_FILE"] = str(run.dir / "native-input-probe.jsonl")
             roles = {role: run.dir / f"{role}.pid" for role in ("editor", "server")}
             wrapper = _role_wrapper(run, "server", roles["server"], [env["PLAIN_SERVER"]])
             env["MAGIT_LSP_SERVER_WRAPPER"] = str(wrapper)
@@ -1092,6 +1099,13 @@ def stop(run: Run) -> dict:
         and report["tmux_session_remains"] is False
     )
     if not report["remaining_owned_pids"]:
+        if os.environ.get("MAGIT_LSP_UI_PROBE") == "1":
+            probe_dir = BUILD_UI / "probes"
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            for name in ("input-probe.jsonl", "native-input-probe.jsonl"):
+                source = run.dir / name
+                if source.is_file():
+                    shutil.copy2(source, probe_dir / f"{run.id}-{name}")
         shutil.rmtree(run.dir, ignore_errors=True)
         _forget_last_run(run.id)
     return report

@@ -394,6 +394,20 @@ class CsiUKeyTest(unittest.TestCase):
 
 
 class SendKeysTest(unittest.TestCase):
+    def test_opt_in_probe_records_each_token_and_exact_tmux_arguments(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"MAGIT_LSP_UI_PROBE": "1"}):
+            run = SimpleNamespace(dir=Path(directory))
+            with patch.object(driver, "_tmux") as tmux:
+                driver.send_keys(run, ["Enter", "Enter"])
+            records = [json.loads(line) for line in (Path(directory) / "input-probe.jsonl").read_text().splitlines()]
+        self.assertEqual([record["token"] for record in records], ["Enter", "Enter"])
+        self.assertEqual([record["tmux_args"] for record in records], [
+            ["send-keys", "-t", "magit", "Enter"], ["send-keys", "-t", "magit", "Enter"]])
+        self.assertEqual([call.args[1:] for call in tmux.call_args_list], [tuple(r["tmux_args"]) for r in records])
+
     def test_ctrl_shift_character_goes_through_hex_mode(self) -> None:
         with patch.object(driver, "_tmux") as tmux:
             driver.send_keys(object(), ["C-S-x"])

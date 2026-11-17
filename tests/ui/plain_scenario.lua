@@ -24,6 +24,7 @@ end
 
 --- Observe native buffer/client state without synthesizing server structure.
 function PlainUI.snapshot()
+  local buf = vim.api.nvim_get_current_buf()
   local client = vim.lsp.get_client_by_id(vim.g.plain_smoke_client_id or -1)
   local modules = 0
   for name in pairs(package.loaded) do
@@ -36,6 +37,9 @@ function PlainUI.snapshot()
     uri = vim.uri_from_bufnr(0),
     text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n'),
     modified = vim.bo.modified,
+    mode = vim.api.nvim_get_mode().mode,
+    changedtick = vim.api.nvim_buf_get_changedtick(0),
+    document_version = vim.lsp.util.buf_versions[buf],
     draft = vim.api.nvim_buf_get_name(0):match('/COMMIT_EDITMSG$') ~= nil,
     cursor = { row = cursor[1] - 1, col = cursor[2] },
     project_modules = modules,
