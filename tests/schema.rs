@@ -1684,6 +1684,36 @@ fn standalone_worked_exchanges_include_provenance_and_examples() {
 }
 
 #[test]
+fn worked_exchange_limits_include_writer_newline() {
+    let full = generate_schema::schema_markdown::worked_exchanges_block().unwrap();
+    let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, 100_000)
+        .expect("bounded split");
+    let largest = artifacts.iter().skip(1).map(|(_, text)| text.len() + 1).max().unwrap();
+    assert!(artifacts.iter().skip(1).all(|(_, text)| text.len() + 1 < 100_000));
+    assert!(generate_schema::schema_markdown::worked_exchanges_artifacts_from(&full, largest)
+        .is_err(), "limit equal to emitted bytes must reject");
+}
+
+#[test]
+fn worked_exchange_unexpected_numeric_parts_are_stale_and_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    generate_schema::write_all(dir.path()).unwrap();
+    let schema = dir.path().join("docs/schema");
+    std::fs::write(schema.join("worked-exchanges-99.md"), "obsolete\n").unwrap();
+    std::fs::write(schema.join("worked-exchanges-98.md"), "obsolete\n").unwrap();
+    std::fs::write(schema.join("worked-exchanges-notes.md"), "authored\n").unwrap();
+    assert_eq!(generate_schema::stale_files(dir.path()).unwrap(), vec![
+        PathBuf::from("docs/schema/worked-exchanges-98.md"),
+        PathBuf::from("docs/schema/worked-exchanges-99.md"),
+    ]);
+    generate_schema::write_all(dir.path()).unwrap();
+    assert!(!schema.join("worked-exchanges-99.md").exists());
+    assert!(!schema.join("worked-exchanges-98.md").exists());
+    assert_eq!(std::fs::read_to_string(schema.join("worked-exchanges-notes.md")).unwrap(), "authored\n");
+    assert!(generate_schema::stale_files(dir.path()).unwrap().is_empty());
+}
+
+#[test]
 fn worked_exchanges_render_identically_for_grouped_fragments() {
     let monolithic = tempfile::tempdir().expect("monolithic examples dir");
     let fragmented = tempfile::tempdir().expect("fragmented examples dir");

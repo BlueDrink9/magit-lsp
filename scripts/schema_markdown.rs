@@ -224,6 +224,10 @@ pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
 /// Render the generated worked-exchange index and its numbered transcript parts.
 pub fn worked_exchanges_artifacts() -> Result<Vec<(String, String)>, String> {
     let full = worked_exchanges_block()?;
+    worked_exchanges_artifacts_from(&full, EXCHANGES_LIMIT)
+}
+
+pub(crate) fn worked_exchanges_artifacts_from(full: &str, limit: usize) -> Result<Vec<(String, String)>, String> {
     let sections: Vec<_> = full.split("\n##### ").skip(1).collect();
     let mut parts = Vec::new();
     let mut current = String::from("# Worked exchanges\n\n");
@@ -234,12 +238,12 @@ pub fn worked_exchanges_artifacts() -> Result<Vec<(String, String)>, String> {
         let mut exchange_part = format!("{prefix}```jsonl\n");
         for message in messages.lines() {
             let addition = format!("{message}\n");
-            if current.len() + exchange_part.len() + addition.len() + 5 > EXCHANGES_LIMIT {
-                if current.len() > "# Worked exchanges\n\n".len() && current.len() + exchange_part.len() + 5 > EXCHANGES_LIMIT {
+            if current.len() + exchange_part.len() + addition.len() + 5 > limit {
+                if current.len() > "# Worked exchanges\n\n".len() && current.len() + exchange_part.len() + 5 > limit {
                     parts.push(current);
                     current = String::from("# Worked exchanges (continued)\n\n");
                 }
-                if current.len() + exchange_part.len() + addition.len() + 5 > EXCHANGES_LIMIT {
+                if current.len() + exchange_part.len() + addition.len() + 5 > limit {
                     if exchange_part.ends_with("```jsonl\n") { return Err("one worked message exceeds the generated part size limit".into()); }
                     exchange_part.push_str("```\n");
                     current.push_str(&exchange_part);
@@ -259,7 +263,9 @@ pub fn worked_exchanges_artifacts() -> Result<Vec<(String, String)>, String> {
     for (number, _) in paths.iter().enumerate() {
         index.push_str(&format!("- [Part {:02}](worked-exchanges-{:02}.md)\n", number + 1, number + 1));
         parts[number] = format!("{}\n", parts[number]);
-        debug_assert!(parts[number].len() < EXCHANGES_LIMIT);
+        if parts[number].len() + 1 >= limit {
+            return Err("worked exchange part exceeds the generated part size limit".into());
+        }
     }
     let mut artifacts = vec![(EXCHANGES_DOC_PATH.to_string(), index)];
     artifacts.extend(paths.into_iter().zip(parts));
@@ -283,6 +289,10 @@ pub fn write(root: &Path) -> io::Result<()> {
     let mut files = vec![(DOC_PATH.to_string(), block().map_err(invalid_data)?),
         (CAPABILITY_DOC_PATH.to_string(), capability_levels_block())];
     files.extend(worked_exchanges_artifacts().map_err(invalid_data)?);
+    let expected: BTreeSet<_> = files.iter().filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned)).collect();
+    for path in numbered_exchange_paths(root)? {
+        if !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned()) { fs::remove_file(path)?; }
+    }
     for (relative, text) in files {
         let path = root.join(relative);
         if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
@@ -303,7 +313,31 @@ pub fn stale_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
             stale.push(PathBuf::from(relative));
         }
     }
+    let expected: BTreeSet<_> = worked_exchanges_artifacts().map_err(invalid_data)?.iter()
+        .filter_map(|(relative, _)| numbered_exchange(relative).map(str::to_owned)).collect();
+    stale.extend(numbered_exchange_paths(root)?.into_iter().filter(|path| {
+        !expected.contains(&path.file_name().unwrap().to_string_lossy().into_owned())
+    }).map(|path| path.strip_prefix(root).unwrap().to_path_buf()));
+    stale.sort();
     Ok(stale)
+}
+
+fn numbered_exchange(path: &str) -> Option<&str> {
+    let name = Path::new(path).file_name()?.to_str()?;
+    let number = name.strip_prefix("worked-exchanges-")?.strip_suffix(".md")?;
+    (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then_some(name)
+}
+
+fn numbered_exchange_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
+    let dir = root.join("docs/schema");
+    let mut paths = Vec::new();
+    if !dir.exists() { return Ok(paths); }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_file() && path.file_name().and_then(|name| name.to_str()).and_then(numbered_exchange).is_some() { paths.push(path); }
+    }
+    paths.sort();
+    Ok(paths)
 }
 
 fn invalid_data(message: String) -> io::Error { io::Error::new(io::ErrorKind::InvalidData, message) }
