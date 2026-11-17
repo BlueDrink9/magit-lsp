@@ -21,8 +21,14 @@ pub struct ClientPump {
     prompt_inputs: VecDeque<super::editor_model::prompts::PromptInput>,
 }
 impl ClientPump {
-    fn initialized(mut server: TestServer, capabilities: Value, mut editor: FakeEditor) -> Self {
-        let init = server.initialize(capabilities.clone());
+    fn initialized(server: TestServer, capabilities: Value, editor: FakeEditor) -> Self {
+        let mut params = crate::stdio::initialize_message()["params"].take();
+        params["capabilities"] = capabilities;
+        Self::initialized_params(server, params, editor)
+    }
+    fn initialized_params(mut server: TestServer, params: Value, mut editor: FakeEditor) -> Self {
+        let capabilities = params["capabilities"].clone();
+        let init = server.initialize_params(params);
         assert!(init["result"]["capabilities"].is_object());
         editor.encoding = match init["result"]["capabilities"]["positionEncoding"].as_str().unwrap_or("utf-16") {
             "utf-8" => "utf-8", "utf-16" => "utf-16", "utf-32" => "utf-32",
@@ -39,6 +45,14 @@ impl ClientPump {
     pub fn with_model(server: TestServer, profile: Profile, model: &EditorModel) -> Self {
         let resolution = magit_lsp::quirks::Resolution { enabled: Default::default() };
         let mut pump = Self::initialized(server, model.capabilities(), FakeEditor::from_model(profile, model, &resolution));
+        pump.strict = model.strict;
+        pump
+    }
+    /// Start a modeled client with additional initialize parameters such as roots.
+    pub fn with_model_params(server: TestServer, profile: Profile, model: &EditorModel, mut params: Value) -> Self {
+        params["capabilities"] = model.capabilities();
+        let resolution = magit_lsp::quirks::Resolution { enabled: Default::default() };
+        let mut pump = Self::initialized_params(server, params, FakeEditor::from_model(profile, model, &resolution));
         pump.strict = model.strict;
         pump
     }

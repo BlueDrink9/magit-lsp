@@ -167,6 +167,13 @@ impl TestServer {
     pub fn initialize(&mut self, capabilities: Value) -> Value {
         let mut message = initialize_message();
         message["params"]["capabilities"] = capabilities;
+        self.initialize_params(message["params"].take())
+    }
+
+    /// Initialize with complete parameters, including optional workspace roots.
+    pub fn initialize_params(&mut self, params: Value) -> Value {
+        let mut message = initialize_message();
+        message["params"] = params;
         self.send(message);
         self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
         self.response_with_id(1)

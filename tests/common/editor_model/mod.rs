@@ -36,16 +36,40 @@ pub struct ScenarioRequirement {
     pub name: &'static str,
     /// LSP capability paths required for direct delivery.
     pub required: &'static [&'static str],
-    /// Whether the design permits a readable refusal when requirements are absent.
-    pub refusal_allowed: bool,
+    /// An alternative rich delivery contract for the same operation.
+    pub alternative: &'static [&'static str],
 }
 
 /// Explicit requirements for the core plain-mode capability contract.
 pub const CAPABILITY_SCENARIOS: &[ScenarioRequirement] = &[
-    ScenarioRequirement { name: "status-render", required: &[], refusal_allowed: false },
-    ScenarioRequirement { name: "workspace-edit", required: &["workspace.applyEdit"], refusal_allowed: true },
-    ScenarioRequirement { name: "document-changes", required: &["workspace.workspaceEdit.documentChanges"], refusal_allowed: true },
-    ScenarioRequirement { name: "show-document", required: &["window.showDocument.support"], refusal_allowed: true },
+    ScenarioRequirement { name: "stage-file", required: &["workspace.applyEdit", "textDocument.codeAction"], alternative: &["experimental.magit"] },
+];
+
+/// Contractual fallback when an optional draft delivery channel is undeclared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DraftFallback {
+    /// Keep preopened text intact and reopen Git's disk template explicitly.
+    ReopenFromDisk,
+    /// Read the instruction message and open the named real file manually.
+    ManualOpen,
+    /// Use the synchronized draft's Abort code action instead of progress cancel.
+    DocumentAbort,
+}
+
+/// An optional draft capability and its independently specified fallback.
+pub struct DraftRequirement {
+    /// Capability whose absence selects the fallback.
+    pub capability: &'static str,
+    /// Expected client path, not inferred from a server response.
+    pub fallback: DraftFallback,
+}
+
+/// Plain draft contracts: versioned refresh, manual open, and semantic Abort.
+// anchor: src/server/plain.rs send_plain_edit_document; docs/CLIENT_SPEC.md real-file commit editing.
+pub const DRAFT_REQUIREMENTS: &[DraftRequirement] = &[
+    DraftRequirement { capability: "workspace.workspaceEdit.documentChanges", fallback: DraftFallback::ReopenFromDisk },
+    DraftRequirement { capability: "window.showDocument.support", fallback: DraftFallback::ManualOpen },
+    DraftRequirement { capability: "window.workDoneProgress", fallback: DraftFallback::DocumentAbort },
 ];
 
 /// Neovim's explicitly modeled documentChanges acceptance behavior.

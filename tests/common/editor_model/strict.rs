@@ -5,10 +5,17 @@ pub fn check(capabilities: &Value, message: &Value) -> Result<(), String> {
     let method = message["method"].as_str().unwrap_or("");
     if method.is_empty() {
         let result = &message["result"];
-        if result["effects"].is_array() {
+        if result["effects"].as_array().is_some_and(|effects| !effects.is_empty()) {
             let rich = &capabilities["experimental"]["magit"];
-            require(rich.is_object(), "rich response effects", method)?;
-            check_effects(rich, &result["effects"])?;
+            if rich.is_object() {
+                check_effects(rich, &result["effects"])?;
+            } else {
+                // Standard executeCommand returns the shared outcome envelope;
+                // Plain consumes stack transitions server-side (view_execution.rs).
+                for effect in result["effects"].as_array().unwrap() {
+                    require(matches!(effect["type"].as_str(), Some("message" | "pushView" | "popView" | "focusView" | "quit")), "rich response effects", method)?;
+                }
+            }
         }
         if let Some(placement) = result["placement"].as_str().or(result["descriptor"]["placement"].as_str()) {
             check_placement(&capabilities["experimental"]["magit"], placement)?;
