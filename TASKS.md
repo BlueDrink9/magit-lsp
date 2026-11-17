@@ -1054,7 +1054,10 @@ Starts after phases 1–6 and the Phase 6A 0.2 gate subset (T105/T112/T113/T114/
 
 Each ticket below retains its row's full scope and dependencies in the [Phase 10 specification table](./TASKS_PART_SEVEN.md#phase-10-small-features).
 
-- [ ] **T040 — commit-signing.**
+- [x] **T040 — commit-signing.** Done: commit adding signing lifecycle coverage and external signer setup documentation.
+  - Verified: `make test-rust FILTER="--test commands --test errors"` (prior worker, unchanged) covers the existing `=S` mapping and exact `--gpg-sign=` argv at `tests/commands.rs:137-173`.
+  - Verified: `make test-rust FILTER="--test server_async signing"` (prior worker, unchanged) passed `repository::signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery`: configured signer and inherited environment, readable failure/cancellation effects, progress lifecycle, preserved HEAD/index/patch/worktree/draft, refresh and unsigned recovery in both modes.
+  - Verified: `make docs-check` → exit 0; `docs/KEYMAPS.md` documents default/explicit keys and external signer/agent/pinentry setup. Deterministic signer coverage only; no real-key, native pinentry or cryptographic verification claimed.
 - [ ] **T041 — log-variants.**
 - [ ] **T042 — remote-config-tags.**
 - [ ] **T043 — branch-basics.**

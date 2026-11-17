@@ -133,6 +133,16 @@ because it is copy in non-modal editors.
 The current bridge emits this scope for commit messages; merge/tag message
 support is not emitted yet.
 
+The commit menu's `=S` option selects Git commit signing. An empty value passes
+`--gpg-sign=` and asks Git to use the committer's default signing key; a
+non-empty value selects that key. Signing is performed by the user's Git
+signing backend/agent. Configure its key and pinentry in Git and the signing
+environment; this client does not collect passphrases, create a terminal, or
+configure loopback pinentry. Interactive pinentry requires a working user
+environment (for example, an appropriate `GPG_TTY` in terminal sessions).
+See [`git commit --gpg-sign`](https://git-scm.com/docs/git-commit#Documentation/git-commit.txt---gpg-signltkey-idgt)
+and [GnuPG agent invocation](https://www.gnupg.org/documentation/manuals/gnupg/Invoking-GPG_002dAGENT.html).
+
 ### 5.6 Rebase todo (structured view)
 
 The rebase menu's `i` action (`rebase.interactive`) opens a single-base

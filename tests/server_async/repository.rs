@@ -1759,6 +1759,138 @@ fn a_mutation_reports_work_done_progress() {
     assert!(status.success(), "server exited: {status:?}");
 }
 
+#[cfg(unix)]
+#[test]
+fn signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for cancel in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("f.txt", TEN_LINES)])
+            .staged_file("f.txt", standard_changes())
+            .build();
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = tmp.git(&["ls-files", "--stage", "-z"]);
+        let patch = tmp.git(&["diff", "--cached", "--binary"]);
+        let worktree = read(&tmp.path().join("f.txt"));
+        let signer = tmp.path().join("signer");
+        let observed = tmp.path().join("signer.env");
+        let home = tmp.path().join("gnupg");
+        std::fs::create_dir(&home).unwrap();
+        write(&signer, &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$GNUPGHOME\" \"$PINENTRY_USER_DATA\" \"$@\" > '{}'\necho 'deterministic signer refused' >&2\n{}\nexit 1\n",
+            observed.display(), if cancel { "exec sleep 60" } else { ":" }
+        ));
+        std::fs::set_permissions(&signer, std::fs::Permissions::from_mode(0o755)).unwrap();
+        tmp.git(&["config", "gpg.program", signer.to_str().unwrap()]);
+        tmp.git(&["config", "gpg.format", "openpgp"]);
+        tmp.git(&["config", "user.signingkey", "deterministic-test-key"]);
+        tmp.git(&["config", "commit.gpgsign", "false"]);
+        let mut server = TestServer::spawn(&[
+            ("GNUPGHOME", home.to_str().unwrap()),
+            ("PINENTRY_USER_DATA", "signing-test-context"),
+        ]);
+        server.auto_respond_to_progress_create();
+        server.initialize_rich(json!({"window":{"workDoneProgress":true}}));
+        let view = open_view(&mut server, 2, &repo_param(tmp.path()));
+
+        for (attempt, signed) in [(0, true), (1, false)] {
+            let id = 10 + attempt * 10;
+            let mut progress = Vec::new();
+            server.send(json!({"jsonrpc":"2.0","id":id,"method":"view/invoke",
+                "params":{"viewId":view,"command":"commit.create",
+                    "args": if signed { json!({"switches":[],"options":{"=S":""}}) } else { json!({"switches":[],"options":{}}) }}}));
+            let edit = loop {
+                let message = server.recv();
+                if let Some(event) = progress_event(&message) {
+                    progress.push(event);
+                }
+                if message["id"] == id {
+                    assert!(message.get("error").is_none(), "{message}");
+                    assert!(!message["result"]["effects"].as_array().unwrap().iter()
+                        .any(|effect| effect["type"] == "message" && effect["level"] == "error"), "{message}");
+                }
+                if message["method"] == "view/effects" {
+                    if let Some(edit) = message["params"]["effects"].as_array().unwrap()
+                        .iter().find(|effect| effect["type"] == "editDocument") {
+                        break edit.clone();
+                    }
+                }
+            };
+            server.send(json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+                "textDocument":{"uri":edit["uri"],"languageId":"gitcommit","version":1,"text":edit["text"]}}}));
+            server.send(json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                "textDocument":{"uri":edit["uri"],"version":2},"contentChanges":[{"text":"Retained signing draft\n"}]}}));
+            server.send(json!({"jsonrpc":"2.0","id":id+1,"method":"workspace/executeCommand","params":{
+                "command":"magit.command","arguments":[{"command":"common.confirm","runId":edit["runId"],
+                    "uri":edit["uri"],"version":2,"source":"synchronized"}]}}));
+            let mut failure = None;
+            let mut cancelled = false;
+            loop {
+                if signed && cancel && !cancelled {
+                    if let Some((token, _)) = progress.iter().find(|(_, phase)| phase == "begin") {
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        while !observed.exists() {
+                            assert!(Instant::now() < deadline, "configured signer did not start");
+                            thread::sleep(Duration::from_millis(20));
+                        }
+                        server.send(json!({"jsonrpc":"2.0","method":"window/workDoneProgress/cancel",
+                            "params":{"token":token}}));
+                        cancelled = true;
+                    }
+                }
+                let message = server.recv();
+                if let Some(event) = progress_event(&message) {
+                    progress.push(event);
+                }
+                if message["method"] == "view/effects" {
+                    if let Some(effect) = message["params"]["effects"].as_array().unwrap().iter()
+                        .find(|effect| effect["type"] == "message" && effect["level"] == "error") {
+                        failure = Some(effect.clone());
+                    }
+                }
+                if progress.iter().any(|(_, phase)| phase == "end") && (!signed || failure.is_some()) {
+                    break;
+                }
+            }
+            assert_eq!(progress.iter().map(|(_, phase)| phase.as_str()).filter(|phase| *phase != "report").collect::<Vec<_>>(),
+                ["create", "begin", "end"]);
+            assert!(progress.windows(2).all(|pair| pair[0].0 == pair[1].0));
+            if signed {
+                assert_eq!(cancelled, cancel);
+                let failure = failure.expect("readable signing failure");
+                assert_eq!(failure["text"], "`git commit` failed.", "{failure}");
+                if cancel {
+                    assert!(failure["hint"].as_str().unwrap().contains("Cancellation may leave Git lock files"), "{failure}");
+                } else {
+                    assert!(failure["detail"].as_str().unwrap().contains("deterministic signer refused"), "{failure}");
+                }
+                let env = read(&observed);
+                assert!(env.starts_with(&format!("{}\nsigning-test-context\n", home.display())), "{env}");
+                assert!(env.lines().any(|line| line.contains("deterministic-test-key")), "{env}");
+                assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+                assert_eq!(tmp.git(&["ls-files", "--stage", "-z"]), index);
+                assert_eq!(tmp.git(&["diff", "--cached", "--binary"]), patch);
+                assert_eq!(read(&tmp.path().join("f.txt")), worktree);
+                assert_eq!(read(&tmp.path().join(".git/COMMIT_EDITMSG")), "Retained signing draft\n");
+                assert!(!tmp.path().join(".git/index.lock").exists());
+                server.send(json!({"jsonrpc":"2.0","method":"textDocument/didClose",
+                    "params":{"textDocument":{"uri":edit["uri"]}}}));
+                let refreshed = invoke_rich(&mut server, id+2, &view, "common.refresh");
+                assert!(refreshed.get("error").is_none(), "{refreshed}");
+            } else {
+                assert!(failure.is_none(), "unsigned recovery failed: {failure:?}");
+                assert_ne!(tmp.git(&["rev-parse", "HEAD"]), head);
+                assert_eq!(tmp.git(&["log", "-1", "--format=%B"]).trim(), "Retained signing draft");
+                assert_eq!(tmp.git(&["diff", "--cached"]), "");
+                assert_eq!(tmp.git(&["cat-file", "commit", "HEAD"]).lines().filter(|line| line.starts_with("gpgsig ")).count(), 0);
+            }
+        }
+        shutdown_and_exit(&mut server);
+        assert!(server.finish(Duration::from_secs(10)).success());
+    }
+}
+
 /// Make the next `git commit` fail in its pre-commit hook.
 #[cfg(unix)]
 fn install_failing_pre_commit_hook(repo: &RepoFixture) {
