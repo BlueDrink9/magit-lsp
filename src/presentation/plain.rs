@@ -533,7 +533,9 @@ pub fn whole_document_edit(
     }]})
 }
 
-/// Produce a single minimal valid edit using negotiated LSP position units.
+/// Produce one valid edit using negotiated LSP position units. When both
+/// strings end in LF, preserve their shared terminal newline in the suffix so
+/// the edit does not insert at virtual EOF.
 pub fn text_edits(old: &str, new: &str, encoding: Encoding) -> Vec<Value> {
     if old == new {
         return Vec::new();

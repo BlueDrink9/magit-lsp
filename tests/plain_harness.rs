@@ -577,29 +577,61 @@ fn plain_eof_append_does_not_repair_a_native_intermediate_echo_with_a_stale_vers
     // nvim_buf_set_lines, then removes the extra final line. Its first
     // didChange can precede the result and its cleanup didChange follow it
     // (plain-commit lsp.log, 20261117-073832-04b2ec, lines 78–85).
-    let virtual_eof = range["start"]["line"].as_u64().unwrap() == before.lines().count() as u64;
-    let echo = if virtual_eof {
-        editor.edit(uri, &format!("{target}\n"))
-    } else {
-        let frames = editor.dispatch(&json!({"jsonrpc":"2.0","id":edit.id,"method":"workspace/applyEdit","params":{"edit":edit.edit}}));
-        assert_eq!(frames.last().unwrap()["result"]["applied"], true);
-        frames.into_iter().find(|frame| frame["method"] == "textDocument/didChange").expect("the applied edit is echoed")
-    };
+    assert_ne!(range["start"]["line"].as_u64().unwrap(), before.lines().count() as u64);
+    let frames = editor.dispatch(&json!({"jsonrpc":"2.0","id":edit.id,"method":"workspace/applyEdit","params":{"edit":edit.edit}}));
+    assert_eq!(frames.last().unwrap()["result"]["applied"], true);
+    let echo = frames.into_iter().find(|frame| frame["method"] == "textDocument/didChange").expect("the applied edit is echoed");
     let observed = editor.text(uri).to_owned();
     assert!(document.change(echo["params"]["textDocument"]["version"].as_i64().unwrap() as i32, observed).is_none());
-    // Local EOF cleanup has already advanced the editor before a repair
-    // based on the intermediate echo could be delivered. No guessed version.
-    let cleanup = virtual_eof.then(|| editor.edit(uri, &target));
     let repair = document.response(edit.id, true);
-    if let Some(repair) = repair {
-        assert_eq!(editor.apply_edit(&repair.edit)["applied"], true,
-            "an intermediate EOF echo must not produce a stale versioned repair: {}", repair.edit);
-    }
-    if let Some(cleanup) = cleanup {
-        assert!(document.change(cleanup["params"]["textDocument"]["version"].as_i64().unwrap() as i32, &target).is_none());
-    }
+    assert!(repair.is_none(), "the applied edit must not produce a repair");
+    assert_eq!(editor.text(uri), target);
     assert_eq!(hash_text(editor.text(uri)), hash_text(&target));
     assert!(!document.take_format_warning());
+}
+
+#[test]
+fn text_edits_preserve_terminal_newlines_and_unicode_boundaries() {
+    use magit_lsp::docstore::Encoding;
+    use magit_lsp::presentation::plain::text_edits;
+
+    for (old, new) in [
+        ("alpha\n", "alpha\nbeta\n"),
+        ("alpha\r\n", "alpha\r\nbeta\r\n"),
+        ("alpha\r\nbeta\r\n", "alpha\nbeta\n"),
+        ("alpha\nbeta\n", "alpha\r\nbeta\r\n"),
+        ("x😀\n", "x🧪\n"),
+        ("", "X\n"),
+        ("X\n", ""),
+    ] {
+        let edit = &text_edits(old, new, Encoding::Utf16)[0];
+        let range = &edit["range"];
+        let start_line = range["start"]["line"].as_u64().unwrap() as usize;
+        let start_char = range["start"]["character"].as_u64().unwrap() as usize;
+        let end_line = range["end"]["line"].as_u64().unwrap() as usize;
+        let end_char = range["end"]["character"].as_u64().unwrap() as usize;
+        if old.ends_with('\n') && new.ends_with('\n') {
+            assert_ne!(start_line, old.lines().count(), "{old:?} -> {new:?}");
+        }
+        let offset = |text: &str, line: usize, character: usize| {
+            let mut lines = text.split_inclusive('\n');
+            let prefix: usize = lines.by_ref().take(line).map(str::len).sum();
+            let row = text[prefix..].split('\n').next().unwrap();
+            let mut units = 0;
+            let mut bytes = 0;
+            for ch in row.chars() {
+                if units == character { break; }
+                units += ch.len_utf16();
+                bytes += ch.len_utf8();
+            }
+            assert_eq!(units, character);
+            prefix + bytes
+        };
+        let start = offset(old, start_line, start_char);
+        let end = offset(old, end_line, end_char);
+        let reconstructed = format!("{}{}{}", &old[..start], edit["newText"].as_str().unwrap(), &old[end..]);
+        assert_eq!(reconstructed, new, "{old:?} -> {new:?}");
+    }
 }
 
 #[test]
