@@ -362,16 +362,20 @@ fn committed_example_files_parse_and_validate_against_the_method_catalog() {
 }
 
 #[test]
-fn numbered_confirm_fragments_load_as_the_original_logical_recording() {
+fn numbered_large_recording_fragments_load_as_the_original_logical_recording() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let examples = example_recordings::recordings(&root.join(EXAMPLES_DIR)).expect("examples");
-    let matches: Vec<_> = examples.iter().filter(|(name, _)| name == "commit-edit-confirm.jsonl").collect();
-    assert_eq!(matches.len(), 1, "fragments expose one original logical name");
     let dir = root.join(EXAMPLES_DIR);
-    let expected = ["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"]
-        .iter().map(|name| fs::read(dir.join(name)).unwrap()).flatten().collect::<Vec<_>>();
-    assert_eq!(matches[0].1.as_slice(), expected.as_slice(), "ordered fragments form the logical bytes");
-    assert!(matches[0].1.len() > 100_000, "validation sees the whole recording");
+    for (logical, fragments) in [
+        ("commit-edit-confirm.jsonl", ["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"]),
+        ("commit-edit-abort.jsonl", ["commit-edit-abort-01.jsonl", "commit-edit-abort-02.jsonl"]),
+    ] {
+        let matches: Vec<_> = examples.iter().filter(|(name, _)| name == logical).collect();
+        assert_eq!(matches.len(), 1, "fragments expose one original logical name");
+        let expected = fragments.iter().map(|name| fs::read(dir.join(name)).unwrap()).flatten().collect::<Vec<_>>();
+        assert_eq!(matches[0].1.as_slice(), expected.as_slice(), "ordered fragments form the logical bytes");
+        assert!(matches[0].1.len() > 100_000, "validation sees the whole recording");
+    }
 }
 
 #[test]
