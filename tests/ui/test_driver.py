@@ -635,6 +635,17 @@ class WaitSocketTest(unittest.TestCase):
 
 
 class NvimHelperCommandTest(unittest.TestCase):
+    def test_plain_preset_cleanup_failure_preserves_primary_exception(self) -> None:
+        primary = AssertionError("primary assertion failed")
+        with patch.object(
+            test_plain_presets, "teardown", side_effect=RuntimeError("cleanup failed")
+        ):
+            with self.assertRaises(AssertionError) as caught:
+                test_plain_presets.teardown_preserving_primary(object(), primary)
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(str(caught.exception), "primary assertion failed")
+        self.assertIn("process cleanup also failed: cleanup failed", caught.exception.__notes__)
+
     def test_plain_preset_teardown_reaps_owned_descendant(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "ready"
