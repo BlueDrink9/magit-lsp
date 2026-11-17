@@ -1233,12 +1233,15 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not duplicate the function, alter production behavior, or weaken any matrix cases or assertions.
   - **Verified:** `make test-rust FILTER="--test commands complete_file_stage_identity_fresh_and_stale_matrix" V=1` → 1 passed; `make test-rust FILTER="--test commands" V=1` → 47 passed, including adjacent unstage/discard matrices. Done: containing commit.
 
-- [ ] **[P2] Point extracted rich-client links back to the client specification** (`docs/client-implementation-levels.md:248-258`, `Level 4 — Rich protocol`)
+  - Done: 009e610
+
+- [x] **[P2] Point extracted rich-client links back to the client specification** (`docs/client-implementation-levels.md:248-258`, `Level 4 — Rich protocol`)
   - **Problem:** Seven links retained same-file `#...` targets after this section was extracted, but `client-implementation-levels.md` contains none of those headings; all seven targets remain in `docs/CLIENT_SPEC.md`.
   - **Why it matters:** Readability/cohesion — the extracted reference sends readers to nonexistent anchors and contradicts the document split's claim that implementation details remain in the client specification.
   - **Change:** Prefix the capability map, methods/lifecycle, descriptors, input/navigation, prompts/effects, real-file editing, and feature-to-capability anchors with `CLIENT_SPEC.md`, preserving their existing anchor fragments and link text.
   - **Done when:** Every link in the Level 4 detail list resolves to the corresponding heading in `docs/CLIENT_SPEC.md`, and `make docs-check` passes.
   - **Constraints:** Do not duplicate those sections into the extracted document, move headings, or edit generated documentation.
+  - Verified: `make docs-check` → ok: docs-check (3 tests passed).
 
 - [ ] **R-PLAIN-EDIT-EOF-RISK — Investigate intermediate-echo repair and terminator-changing edits.** **Verified fixed case:** the original both-LF-terminated EOF append used a virtual-EOF edit, followed by an intermediate native echo and cleanup that could leave a stale repair; current `text_edits` preserves the shared final LF, and `tests/plain_harness.rs` asserts the generated range avoids virtual EOF and applies without repair. **Residual risk (unverified):** controller behavior for intermediate echoes on other edit shapes and exposure of edits that change final-terminator policy have not been established as general bugs. **Investigation boundary:** inspect the edit delivery/acknowledgement and controller echo/repair path, then enumerate which shapes can produce an intermediate editor echo before response; do not prescribe a redesign before reproducing or proving exposure. **Done when:** test: add only a reproduced stable regression for any confirmed exposed shape; check: document the exact shape boundary and whether terminator-changing edits are exposed without claiming broader behavior than evidence supports.
 

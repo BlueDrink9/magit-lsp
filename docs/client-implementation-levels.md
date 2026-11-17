@@ -245,16 +245,16 @@ picks, text mode, and the real-file commit draft. All payloads, ordering rules
 and failure handling are specified earlier in this document; do not duplicate
 them here:
 
-- [Capability map (`customRender`)](#capability-map-customrender),
-  [Methods and lifecycle](#methods-and-lifecycle) and
-  [Descriptors, URIs and view lifetime](#descriptors-uris-and-view-lifetime) for
+- [Capability map (`customRender`)](CLIENT_SPEC.md#capability-map-customrender),
+  [Methods and lifecycle](CLIENT_SPEC.md#methods-and-lifecycle) and
+  [Descriptors, URIs and view lifetime](CLIENT_SPEC.md#descriptors-uris-and-view-lifetime) for
   the declaration, full message set and view identity.
-- [Input, navigation and presentation](#input-navigation-and-presentation) for
-  keys, modes and folding; [Prompts, effects and drafts](#prompts-effects-and-drafts)
+- [Input, navigation and presentation](CLIENT_SPEC.md#input-navigation-and-presentation) for
+  keys, modes and folding; [Prompts, effects and drafts](CLIENT_SPEC.md#prompts-effects-and-drafts)
   for prompt/effect handling and work-done progress.
-- [Current real-file commit editing](#current-real-file-commit-editing) for the
+- [Current real-file commit editing](CLIENT_SPEC.md#current-real-file-commit-editing) for the
   draft, confirmation and abort contract.
-- [Feature-to-capability mapping and clients (`customRender`)](#feature-to-capability-mapping-and-clients-customrender)
+- [Feature-to-capability mapping and clients (`customRender`)](CLIENT_SPEC.md#feature-to-capability-mapping-and-clients-customrender)
   for per-workflow client behavior.
 
 Capabilities and degradation: absent `effects`, `prompts` or `layout` entries
@@ -284,4 +284,3 @@ checklist: `tests/ui/scenarios/status-basics.scn`,
 `unsupported_view_placement_falls_back_to_main_without_changing_descriptor`), and
 `tests/examples.rs::plain_examples_replay_against_the_real_binary` (replays every
 recorded exchange, including `rich-lifecycle.jsonl`).
-
