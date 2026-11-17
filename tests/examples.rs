@@ -25,12 +25,14 @@
 
 #[path = "common/mod.rs"]
 mod fixtures;
+#[path = "../scripts/example_recordings.rs"]
+mod example_recordings;
 
 use fixtures::schema::{read_schema, schema_errors};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 /// Directory holding the committed example exchanges.
@@ -336,18 +338,6 @@ fn validate_exchange(
     Ok(count)
 }
 
-/// Every committed example file, sorted by path.
-fn example_files(root: &Path) -> Vec<PathBuf> {
-    let dir = root.join(EXAMPLES_DIR);
-    let mut files: Vec<PathBuf> = fs::read_dir(&dir)
-        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
-        .map(|entry| entry.expect("example entry").path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
-        .collect();
-    files.sort();
-    files
-}
-
 #[test]
 fn committed_example_files_parse_and_validate_against_the_method_catalog() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -356,18 +346,32 @@ fn committed_example_files_parse_and_validate_against_the_method_catalog() {
         catalog.methods.len() >= 10,
         "the method catalog is unexpectedly small"
     );
-    let files = example_files(root);
+    let files = example_recordings::recordings(&root.join(EXAMPLES_DIR))
+        .unwrap_or_else(|error| panic!("load examples: {error}"));
     assert!(
         !files.is_empty(),
         "expected at least one example under {EXAMPLES_DIR}"
     );
-    for path in files {
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    for (name, bytes) in files {
+        let path = root.join(EXAMPLES_DIR).join(&name);
+        let text = String::from_utf8(bytes).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         let count = validate_exchange(&path, &text, &catalog)
             .unwrap_or_else(|error| panic!("{error}"));
         assert!(count > 0, "{} has no lines", path.display());
     }
+}
+
+#[test]
+fn numbered_confirm_fragments_load_as_the_original_logical_recording() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let examples = example_recordings::recordings(&root.join(EXAMPLES_DIR)).expect("examples");
+    let matches: Vec<_> = examples.iter().filter(|(name, _)| name == "commit-edit-confirm.jsonl").collect();
+    assert_eq!(matches.len(), 1, "fragments expose one original logical name");
+    let dir = root.join(EXAMPLES_DIR);
+    let expected = ["commit-edit-confirm-01.jsonl", "commit-edit-confirm-02.jsonl"]
+        .iter().map(|name| fs::read(dir.join(name)).unwrap()).flatten().collect::<Vec<_>>();
+    assert_eq!(matches[0].1.as_slice(), expected.as_slice(), "ordered fragments form the logical bytes");
+    assert!(matches[0].1.len() > 100_000, "validation sees the whole recording");
 }
 
 #[test]
@@ -405,9 +409,10 @@ fn plain_open_example_records_initialize_and_a_plain_document_open() {
 /// Parse one committed example file into its validated line shapes.
 fn example_lines(name: &str) -> Vec<Line> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join(EXAMPLES_DIR).join(name);
-    let text = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let path = root.join(EXAMPLES_DIR);
+    let text = example_recordings::recordings(&path).unwrap().into_iter()
+        .find(|(logical, _)| logical == name).unwrap_or_else(|| panic!("missing example {name}"));
+    let text = String::from_utf8(text.1).expect("example is UTF-8");
     text.lines()
         .map(|raw| parse_line(raw).unwrap_or_else(|error| panic!("{error}")))
         .collect()

@@ -6,6 +6,8 @@ pub mod schema_luals;
 pub mod schema_markdown;
 #[path = "schema_typescript.rs"]
 pub mod schema_typescript;
+#[path = "example_recordings.rs"]
+pub mod example_recordings;
 
 use lsp_types::request::Request;
 use magit_lsp::presentation::{OPTIONAL_EFFECTS, OPTIONAL_PROMPT_KINDS};

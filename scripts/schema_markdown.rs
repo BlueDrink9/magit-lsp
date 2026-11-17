@@ -174,27 +174,16 @@ pub fn block() -> Result<String, String> {
 /// recorded `message` is rendered as compact JSON without changing any value.
 pub fn worked_exchanges_block() -> Result<String, String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLES_DIR);
-    let mut files = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|error| format!("{}: {error}", dir.display()))? {
-        let path = entry.map_err(|error| error.to_string())?.path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("jsonl") {
-            files.push(path);
-        }
-    }
-    files.sort();
+    let files = super::example_recordings::recordings(&dir)
+        .map_err(|error| format!("{}: {error}", dir.display()))?;
     if files.is_empty() {
         return Err(format!("{}: no JSONL examples found", dir.display()));
     }
     let mut out = String::new();
     out.push_str("#### Worked exchanges\n\n");
     out.push_str("Recorded end-to-end exchanges from the example files, one subsection per file.\n");
-    for path in &files {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| format!("{}: invalid file name", path.display()))?;
-        let text = fs::read_to_string(path)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
+    for (name, bytes) in &files {
+        let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
         let mut lines = Vec::new();
         for (index, line) in text.lines().enumerate() {
             if line.trim().is_empty() {
@@ -202,7 +191,7 @@ pub fn worked_exchanges_block() -> Result<String, String> {
             }
             lines.push(
                 serde_json::from_str::<Value>(line).map_err(|error| {
-                    format!("{}:{}: {error}", path.display(), index + 1)
+                    format!("{}:{}: {error}", name, index + 1)
                 })?,
             );
         }
@@ -213,10 +202,10 @@ pub fn worked_exchanges_block() -> Result<String, String> {
         for line in &lines {
             let message = line
                 .get("message")
-                .ok_or_else(|| format!("{}: frame lacks `message`", path.display()))?;
+                .ok_or_else(|| format!("{}: frame lacks `message`", name))?;
             out.push_str(
                 &serde_json::to_string(message)
-                    .map_err(|error| format!("{}: {error}", path.display()))?,
+                    .map_err(|error| format!("{}: {error}", name))?,
             );
             out.push('\n');
         }
