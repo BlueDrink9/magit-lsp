@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check split-server-async
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -25,6 +25,10 @@ release:
 
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
+
+# Dry-run unless explicitly approved with APPLY=1.
+split-server-async:
+	PYTHONDONTWRITEBYTECODE=1 APPLY="$(APPLY)" python3 scripts/split_server_async.py
 
 DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md docs/parity.md docs/plain-support.md docs/known-client-behaviors.md docs/schema/payload-tables.md docs/schema/worked-exchanges.md docs/schema/capability-levels.md
 
