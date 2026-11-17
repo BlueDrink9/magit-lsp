@@ -1,0 +1,478 @@
+use super::*;
+use super::additional::{change_identity_file, file_identity_matrix};
+
+fn complete_file_stage_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("stage", false, selection);
+        file_identity_matrix("stage", true, selection);
+    }
+}
+
+#[test]
+fn complete_file_unstage_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("unstage", false, selection);
+        file_identity_matrix("unstage", true, selection);
+    }
+}
+
+#[test]
+fn complete_file_discard_identity_fresh_and_stale_matrix() {
+    for selection in [false, true] {
+        file_identity_matrix("discard", false, selection);
+        file_identity_matrix("discard", true, selection);
+    }
+}
+
+#[test]
+fn file_discard_decline_and_open_prompt_changes_preserve_exact_state() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for kind in [
+        "binary",
+        "mode",
+        "added-mode",
+        "type",
+        "collapsed",
+        "untracked",
+        "untracked-link",
+        "directory",
+    ] {
+        for accept in [false, true] {
+            let (tmp, _) = RepoFixture::new()
+                .commit("init", [("base.txt", "base\n")])
+                .build();
+            tmp.git(&["config", "core.fileMode", "true"]);
+            let untracked = matches!(kind, "untracked" | "untracked-link" | "directory");
+            if !untracked {
+                std::fs::write(tmp.path().join("f.txt"), "base\n").unwrap();
+                tmp.git(&["add", "f.txt"]);
+                tmp.git(&["commit", "-m", "base"]);
+            }
+            change_identity_file(tmp.path(), kind, false);
+            let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+            test.ack();
+            let line = test.goto_file(
+                if untracked { "untracked" } else { "unstaged" },
+                if kind == "directory" {
+                    "f.txt/"
+                } else {
+                    "f.txt"
+                },
+            );
+            let Execution::Prompt(prompt) = test
+                .session
+                .start_invoke(&ViewInvokeParams {
+                    view_id: test.view_id().to_string(),
+                    command: "status.discard".into(),
+                    version: Some(test.version()),
+                    cursor: Some(Cursor { line, column: 0 }),
+                    selection: None,
+                    args: None,
+                })
+                .unwrap()
+            else {
+                panic!("{kind}: expected confirmation");
+            };
+            if accept {
+                change_identity_file(tmp.path(), kind, true);
+            }
+            let head = tmp.git(&["rev-parse", "HEAD"]);
+            let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+            let worktree = identity_worktree(tmp.path());
+            let Execution::Done(result) = test
+                .session
+                .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(accept)))
+                .unwrap()
+            else {
+                panic!("{kind}: completion");
+            };
+            if accept {
+                assert!(
+                    message_texts(&result.effects)
+                        .iter()
+                        .any(|text| text.contains("changed")),
+                    "{kind}"
+                );
+            }
+            assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{kind}");
+            assert_eq!(
+                std::fs::read(tmp.path().join(".git/index")).unwrap(),
+                index,
+                "{kind}"
+            );
+            assert_eq!(identity_worktree(tmp.path()), worktree, "{kind}");
+            assert!(!test.session.has_pending_prompt());
+        }
+    }
+}
+
+#[test]
+fn stale_binary_whole_file_selection_validates_all_members_before_mutation() {
+    use magit_lsp::protocol::{PromptValue, Selection, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    for action in ["stage", "unstage", "discard"] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("a.bin", "base\0a"), ("b.bin", "base\0b")])
+            .build();
+        write(&tmp.path().join("a.bin"), "shown\0a");
+        write(&tmp.path().join("b.bin"), "shown\0b");
+        if action == "unstage" {
+            tmp.git(&["add", "."]);
+        }
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let section = if action == "unstage" {
+            "staged"
+        } else {
+            "unstaged"
+        };
+        let start_line = test.goto_file(section, "a.bin");
+        let end_line = test.goto_file(section, "b.bin");
+        let version = test.version();
+        write(&tmp.path().join("b.bin"), "later\0b");
+        if action == "unstage" {
+            tmp.git(&["add", "b.bin"]);
+        }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+        let worktree = identity_worktree(tmp.path());
+        let step = test
+            .session
+            .start_invoke(&ViewInvokeParams {
+                view_id: test.view_id().to_string(),
+                command: format!("status.{action}"),
+                version: Some(version),
+                cursor: None,
+                selection: Some(Selection {
+                    start_line,
+                    end_line,
+                }),
+                args: None,
+            })
+            .unwrap();
+        let result = match step {
+            Execution::Done(result) => result,
+            Execution::Prompt(prompt) => {
+                let Execution::Done(result) = test
+                    .session
+                    .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true)))
+                    .unwrap()
+                else {
+                    panic!("expected completion");
+                };
+                result
+            }
+            Execution::Pick(pick) => panic!("unexpected pick for {action}: {pick:?}"),
+        };
+        assert!(
+            message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("changed")),
+            "{action}"
+        );
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head, "{action}");
+        assert_eq!(
+            std::fs::read(tmp.path().join(".git/index")).unwrap(),
+            index,
+            "{action}"
+        );
+        assert_eq!(identity_worktree(tmp.path()), worktree, "{action}");
+    }
+}
+
+#[test]
+fn discarding_an_untracked_directory_symlink_never_deletes_its_target() {
+    use magit_lsp::protocol::{PromptValue, ViewInvokeParams};
+    use magit_lsp::session::Execution;
+    use std::os::unix::fs::symlink;
+    let (tmp, _) = RepoFixture::new()
+        .commit("init", [("target/kept", "keep\n")])
+        .build();
+    symlink("target", tmp.path().join("link")).unwrap();
+    let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+    let line = test.goto_file("untracked", "link");
+    let Execution::Prompt(prompt) = test
+        .session
+        .start_invoke(&ViewInvokeParams {
+            view_id: test.view_id().to_string(),
+            command: "status.discard".into(),
+            version: Some(test.version()),
+            cursor: Some(Cursor { line, column: 0 }),
+            selection: None,
+            args: None,
+        })
+        .unwrap()
+    else {
+        panic!("expected confirmation");
+    };
+    test.session
+        .resume_prompt(&prompt.prompt_id, Some(PromptValue::Bool(true)))
+        .unwrap();
+    assert!(std::fs::symlink_metadata(tmp.path().join("link")).is_err());
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("target/kept")).unwrap(),
+        "keep\n"
+    );
+    assert_eq!(tmp.git(&["status", "--porcelain"]), "");
+}
+
+#[test]
+fn renamed_file_unstage_validates_the_source_index_but_ignores_source_worktree_edits() {
+    for stale in [false, true] {
+        let (tmp, _) = RepoFixture::new()
+            .commit("init", [("old.txt", "rename bytes\n")])
+            .rename("old.txt", "new.txt")
+            .build();
+        let (mut test, _) = TestSession::open_status(&tmp, Profile::Vim);
+        test.ack();
+        let line = test.goto_file("staged", "new.txt");
+        let version = test.version();
+        write(&tmp.path().join("old.txt"), "external source\n");
+        if stale {
+            tmp.git(&["add", "old.txt"]);
+        }
+        let head = tmp.git(&["rev-parse", "HEAD"]);
+        let index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+        let worktree = identity_worktree(tmp.path());
+        let result = test.invoke_at_version(
+            "status.unstage",
+            version,
+            Some(Cursor { line, column: 0 }),
+            None,
+            None,
+        );
+        assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head);
+        assert_eq!(identity_worktree(tmp.path()), worktree);
+        if stale {
+            assert!(message_texts(&result.effects)
+                .iter()
+                .any(|text| text.contains("changed")));
+            assert_eq!(std::fs::read(tmp.path().join(".git/index")).unwrap(), index);
+        } else {
+            assert!(message_texts(&result.effects).is_empty());
+            assert_eq!(tmp.git(&["ls-files"]), "old.txt\n");
+            assert_eq!(tmp.git(&["show", ":old.txt"]), "rename bytes\n");
+            assert_eq!(
+                tmp.git(&["write-tree"]),
+                tmp.git(&["rev-parse", "HEAD^{tree}"])
+            );
+        }
+    }
+}
+
+#[test]
+fn status_command_in_menu_reports_scope_mismatch_without_changing_anything() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("init", [("f.txt", TEN_LINES)])
+        .modify_standard()
+        .build();
+    let (mut test, _initial) = TestSession::open_status(&tmp, Profile::Vim);
+    test.ack();
+
+    let head_before = tmp.git(&["rev-parse", "HEAD"]);
+    let index_before = tmp.git(&["write-tree"]);
+    let status_before = tmp.git(&["status", "--porcelain=v2", "-z"]);
+    let worktree_before = std::fs::read(tmp.path().join("f.txt")).unwrap();
+
+    let (menu_descriptor, menu_render) = test.open_via_command("open.commit");
+    test.focus(menu_descriptor.id.clone());
+    test.ack();
+    let menu_before = test.text_of(&menu_descriptor.id);
+    let menu_model_before = test.menu(&menu_descriptor.id).expect("commit menu");
+    let views_before = test.view_ids();
+
+    let result = test.invoke("status.stage");
+    assert_eq!(
+        result.effects,
+        vec![Effect::message(
+            MessageLevel::Info,
+            "Not available in this view"
+        )]
+    );
+    assert!(result.render.is_none());
+    assert!(result.opened.is_empty());
+    assert_eq!(test.view_id(), menu_descriptor.id);
+    assert_eq!(test.view_ids(), views_before);
+    assert_eq!(test.text_of(&menu_descriptor.id), menu_before);
+    assert_eq!(
+        test.menu(&menu_descriptor.id).as_ref(),
+        Some(&menu_model_before)
+    );
+    assert_eq!(test.version_of(&menu_descriptor.id), menu_render.version);
+
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), head_before);
+    assert_eq!(tmp.git(&["write-tree"]), index_before);
+    assert_eq!(tmp.git(&["status", "--porcelain=v2", "-z"]), status_before);
+    assert_eq!(
+        std::fs::read(tmp.path().join("f.txt")).unwrap(),
+        worktree_before
+    );
+}
+
+#[test]
+fn rich_dispatch_opens_commit_menu_from_log_without_widening_status_scope() {
+    let (tmp, _) = RepoFixture::new()
+        .commit("first log entry", [("f.txt", TEN_LINES)])
+        .commit("second log entry", [("f.txt", "changed\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Vim, WIDE_VIEWPORT);
+    test.ack();
+    test.press("g l");
+    test.invoke("log.current");
+    let log = test.text_of(test.view_id()).join("\n");
+    assert!(
+        log.contains("first log entry"),
+        "expected concrete log before dispatch: {log}"
+    );
+    let log_id = test.view_id().to_owned();
+    let refused = test.invoke("status.stage");
+    assert!(message_texts(&refused.effects)
+        .iter()
+        .any(|message| message.contains("Not available")));
+    assert_eq!(test.view_id(), log_id);
+
+    let (commit, _) = test.open_via_command("open.commit");
+    assert!(test.text_of(&commit.id).join("\n").contains("git commit"));
+}
+
+/// Confirm on a select-and-copy picker delivers the full structured commit id
+/// and restores the caller that started the selection.
+#[test]
+fn select_mode_confirm_copies_the_full_oid_and_restores_the_caller() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let (oid, line) = {
+        let node = test
+            .tree()
+            .nodes
+            .iter()
+            .find(|node| node.kind == magit_lsp::tree::NodeKind::Commit)
+            .expect("a commit row");
+        (
+            node.commit.clone().expect("the full commit id"),
+            node.start_line,
+        )
+    };
+    let result = test.invoke_at("common.confirm", Cursor { line, column: 0 });
+    assert!(
+        result
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Clipboard { text } if text == &oid)),
+        "expected the full {} oid in {:?}",
+        oid,
+        result.effects
+    );
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert!(!test.view_ids().contains(&picker));
+}
+
+/// Cancel on a select-and-copy picker restores the caller and changes nothing.
+#[test]
+fn select_mode_cancel_restores_the_caller_without_mutation() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let before_head = tmp.git(&["rev-parse", "HEAD"]);
+    let before_status = tmp.git(&["status", "--porcelain"]);
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    let result = test.invoke("common.cancel");
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { view_id } if view_id == &picker)));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { view_id } if view_id == &caller)));
+    assert_eq!(test.view_id(), caller);
+    assert!(!test.view_ids().contains(&picker));
+    assert_eq!(tmp.git(&["rev-parse", "HEAD"]), before_head);
+    assert_eq!(tmp.git(&["status", "--porcelain"]), before_status);
+}
+
+/// A commit that vanished from the repository is refused readably: the picker
+/// stays open with the caller intact and nothing is copied.
+#[test]
+fn select_mode_stale_selection_keeps_the_picker_and_refuses() {
+    let (tmp, _repo) = RepoFixture::new()
+        .commit("old commit", [("f.txt", "old\n")])
+        .commit("new commit", [("f.txt", "new\n")])
+        .build();
+    let (mut test, _) = TestSession::open_status_at(&tmp, Profile::Standard, WIDE_VIEWPORT);
+    test.ack();
+    let caller = test.view_id().to_string();
+    test.invoke("log.select-and-copy");
+    let picker = test.view_id().to_string();
+    test.ack();
+    // The oldest row: deleting the newest commit shortens the refreshed tree,
+    // so the stale cursor no longer resolves to any loaded commit.
+    let line = test
+        .tree()
+        .nodes
+        .iter()
+        .rev()
+        .find(|node| node.kind == magit_lsp::tree::NodeKind::Commit)
+        .expect("a commit row")
+        .start_line;
+    tmp.git(&["reset", "--hard", "HEAD~1"]);
+    tmp.git(&["reflog", "expire", "--expire=now", "--all"]);
+    tmp.git(&["gc", "--prune=now"]);
+    test.refresh();
+    test.ack();
+    let result = test.invoke_at("common.confirm", Cursor { line, column: 0 });
+    let messages: Vec<_> = result
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Message { level, text, .. } => Some((*level, text.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 1, "{:?}", result.effects);
+    assert_eq!(messages[0].0, MessageLevel::Info, "{:?}", result.effects);
+    assert_eq!(
+        messages[0].1, "Place the cursor on a commit to confirm the selection",
+        "{:?}",
+        result.effects
+    );
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PopView { .. })));
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::FocusView { .. })));
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::Clipboard { .. })));
+    assert_eq!(test.view_id(), picker);
+    assert!(test.view_ids().contains(&picker));
+    assert!(test.view_ids().contains(&caller));
+}
