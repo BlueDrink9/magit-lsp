@@ -71,6 +71,13 @@ PLAIN_ARGS ?=
 plain-neovim: build
 	$(call run,plain-neovim,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" python3 scripts/test_plain_neovim.py --binary "$(CURDIR)/target/debug/magit-lsp" --evidence "$(CURDIR)/build/ui/plain-render" --size 120x100 $(PLAIN_ARGS))
 
+.PHONY: plain-presets update-capability-presets
+plain-presets: build
+	$(call run,plain-presets,MAGIT_LSP_BIN="$(CURDIR)/target/debug/magit-lsp" python3 scripts/test_plain_presets.py --binary "$(CURDIR)/target/debug/magit-lsp")
+
+update-capability-presets:
+	$(call run,update-capability-presets,PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_plain_presets.py --generate)
+
 .PHONY: helix-smoke helix-smoke-stop
 HELIX_BIN ?= hx
 HELIX_ARGS ?=

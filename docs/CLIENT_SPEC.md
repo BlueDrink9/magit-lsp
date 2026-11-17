@@ -156,6 +156,8 @@ JSON-RPC request IDs; errors must remain readable and must not resurrect termina
 
 ## Feature-to-capability mapping and clients (`customRender`)
 
+The generated capability declaration summary is [what you get for what you declare](schema/capability-presets.md). It is generated from the five native Plain presets by `make update-capability-presets`.
+
 | Workflow | Required client behavior | Present implementation / gap |
 |---|---|---|
 | Status, menus, stage/unstage | Core view/render/key or invoke, structured context, messages/prompts/effects used | Both clients implement status rendering and command routing (`lua/magit-lsp/view.lua`, `keymap.lua`, `keys.lua`; VS Code `render.js`, `views.js`, `requests.js`, `commands.js`). |
