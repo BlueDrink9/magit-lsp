@@ -1,6 +1,7 @@
 use super::*;
 use super::additional::{change_identity_file, file_identity_matrix};
 
+#[test]
 fn complete_file_stage_identity_fresh_and_stale_matrix() {
     for selection in [false, true] {
         file_identity_matrix("stage", false, selection);

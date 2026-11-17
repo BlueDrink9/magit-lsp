@@ -1223,12 +1223,15 @@ See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
   - **Constraints:** Do not change the public return shape of `recordings`, the `-NN.jsonl` naming convention, committed example bytes, or generated references.
   - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → `ok: rust`; `make test-rust FILTER="--test examples"` → `ok: rust`.
 
-- [ ] **[P1] Restore the stage identity matrix test registration** (`tests/commands/more.rs:4-9`, `complete_file_stage_identity_fresh_and_stale_matrix`)
+  - Done: 9081251
+
+- [x] **[P1] Restore the stage identity matrix test registration** (`tests/commands/more.rs:4-9`, `complete_file_stage_identity_fresh_and_stale_matrix`)
   - **Problem:** The command-suite split moved `complete_file_stage_identity_fresh_and_stale_matrix` without its former `#[test]` attribute. Nothing calls the private function, so the complete fresh/stale stage matrix no longer runs while the adjacent unstage and discard matrices do.
   - **Why it matters:** Test validity — a substantive mutation-safety regression test was silently removed from the harness during a file-only extraction.
   - **Change:** Restore `#[test]` directly on `complete_file_stage_identity_fresh_and_stale_matrix`; keep its matrix and the shared `file_identity_matrix` helper unchanged.
   - **Done when:** `make test-rust FILTER="--test commands complete_file_stage_identity_fresh_and_stale_matrix"` runs and passes the named test, and the commands suite still discovers the adjacent unstage/discard tests.
   - **Constraints:** Do not duplicate the function, alter production behavior, or weaken any matrix cases or assertions.
+  - **Verified:** `make test-rust FILTER="--test commands complete_file_stage_identity_fresh_and_stale_matrix" V=1` → 1 passed; `make test-rust FILTER="--test commands" V=1` → 47 passed, including adjacent unstage/discard matrices. Done: containing commit.
 
 - [ ] **[P2] Point extracted rich-client links back to the client specification** (`docs/client-implementation-levels.md:248-258`, `Level 4 — Rich protocol`)
   - **Problem:** Seven links retained same-file `#...` targets after this section was extracted, but `client-implementation-levels.md` contains none of those headings; all seven targets remain in `docs/CLIENT_SPEC.md`.
