@@ -489,7 +489,7 @@ fn log_argument_statuses_and_select_copy_action_are_exact() {
         let key = item.key();
         let implemented = matches!(
             key,
-            "=n" | "=a" | "=s" | "=g" | "=S" | "=G" | "=f" | "-g" | "-d"
+            "=n" | "=a" | "=s" | "=u" | "=g" | "=S" | "=G" | "=f" | "=M" | "=m" | "=p" | "-g" | "-d"
         );
         if key.starts_with('=') || key.starts_with('-') {
             assert_eq!(
