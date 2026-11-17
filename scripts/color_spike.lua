@@ -54,9 +54,7 @@ local function make_fixture()
   for i = 1, #lines do
     if i == 3 then
       changed[#changed + 1] = 'line3 CHANGED'
-    elseif i == 8 then
-      -- drop line8
-    else
+    elseif i ~= 8 then
       changed[#changed + 1] = lines[i]
     end
     if i == 5 then

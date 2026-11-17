@@ -87,8 +87,7 @@ end
 
 --- Called once by the main client before it opens any view.
 ---@param opts table|nil
-function M.configure(opts)
-  opts = opts or {}
+function M.configure(_opts)
   if M.notify_wrapped then
     return
   end

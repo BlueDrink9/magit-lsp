@@ -38,36 +38,31 @@ end
 --- Record a `view/render` notification.
 ---@param id string
 ---@param version integer
-function M.render_received(id, version)
-  local _ = id, version
+function M.render_received(_id, _version)
 end
 
 --- Record a render the client applied to a buffer.
 ---@param id string
 ---@param version integer
-function M.render_applied(id, version)
-  local _ = id, version
+function M.render_applied(_id, _version)
 end
 
 --- Record the version the client acknowledged to the server.
 ---@param id string
 ---@param version integer
-function M.render_acked(id, version)
-  local _ = id, version
+function M.render_acked(_id, _version)
 end
 
 --- Record the server's pending menu step for a view.
 ---@param id string
 ---@param pending string|nil
-function M.set_pending(id, pending)
-  local _ = id, pending
+function M.set_pending(_id, _pending)
 end
 
 --- Record the keymap the server sent for a view.
 ---@param id string
 ---@param notice table `view/keymap` params
-function M.keymap_received(id, notice)
-  local _ = id, notice
+function M.keymap_received(_id, _notice)
 end
 
 --- Record a view the client opened.
@@ -75,20 +70,17 @@ end
 ---@param kind string
 ---@param buf integer|nil
 ---@param title string|nil
-function M.view_open(id, kind, buf, title)
-  local _ = id, kind, buf, title
+function M.view_open(_id, _kind, _buf, _title)
 end
 
 --- Record that a view is gone.
 ---@param id string
-function M.view_close(id)
-  local _ = id
+function M.view_close(_id)
 end
 
 --- Start a new trace id for one key press.
 ---@param steps string[]
-function M.key_pressed(steps)
-  local _ = steps
+function M.key_pressed(_steps)
 end
 
 --- The trace id sent with the keys of one press; opaque to the server.
@@ -100,8 +92,7 @@ end
 --- Record one canonical key step being sent to the server.
 ---@param step string
 ---@param id string|nil
-function M.key_sent(step, id)
-  local _ = step, id
+function M.key_sent(_step, _id)
 end
 
 return M

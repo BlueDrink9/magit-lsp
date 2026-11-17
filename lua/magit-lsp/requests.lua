@@ -176,7 +176,8 @@ end
 --- `on_result` runs in queue order; `spec.on_send` (optional) runs just before
 --- the request leaves the client, for tracing.
 ---@param client_id integer
----@param spec table { method: string, params: table, buf: integer, on_result: fun(result: any, err: any), on_send: fun()|nil }
+---@param spec table { method: string, params: table, buf: integer,
+---  on_result: fun(result: any, err: any), on_send: fun()|nil }
 function M.enqueue(client_id, spec)
   local state = queue(client_id)
   state.items[#state.items + 1] = spec

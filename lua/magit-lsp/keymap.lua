@@ -80,7 +80,8 @@ end
 ---@param bufnr integer
 ---@param notice table `view/keymap` params
 ---@param handlers table { press: fun(steps: string[]), command: fun(command: string, args: table|nil) }
----@param opts table|nil { fold_keys?: table<string, string>, folds?: boolean, commands?: table<string, function>, only_commands?: boolean }
+---@param opts table|nil { fold_keys?: table<string, string>, folds?: boolean,
+---  commands?: table<string, function>, only_commands?: boolean }
 ---@return table[] applied entries
 function M.apply(bufnr, notice, handlers, opts)
   opts = opts or {}

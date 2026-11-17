@@ -42,9 +42,7 @@ local function make_repo(with_changes, path)
     for i = 1, #lines do
       if i == 3 then
         table.insert(changed, 'line3 CHANGED')
-      elseif i == 8 then
-        -- drop line8
-      else
+      elseif i ~= 8 then
         table.insert(changed, lines[i])
       end
       if i == 5 then
@@ -547,7 +545,9 @@ T['staging a visual line range stages only those lines'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, 'V', 's')
 
-  local staged = child.lua_get("HELPERS.wait_for(function() return HELPERS.find_line('+', 'NEW line', 'staged') ~= nil end)")
+  local staged = child.lua_get(
+    "HELPERS.wait_for(function() return HELPERS.find_line('+', 'NEW line', 'staged') ~= nil end)"
+  )
   MiniTest.expect.equality(staged, true)
   MiniTest.expect.equality(child.lua_get('HELPERS.wait_idle()'), true)
 
@@ -927,7 +927,9 @@ T['<CR> on a change line opens the real file at the new-side line'] = function()
   child.api.nvim_win_set_cursor(0, { target, 0 })
   child.type_keys(50, '<CR>')
 
-  local opened = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)")
+  local opened = child.lua_get(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)"
+  )
   MiniTest.expect.equality(opened, true, 'the worktree file opened')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
 end
@@ -1176,7 +1178,9 @@ T['Enter visits the file and new-side line from the server effect'] = function()
   -- `common.visit` is a server command now: the effect names the file and line,
   -- and the client only opens it. No rendered text is parsed.
   child.type_keys(50, '<CR>')
-  local opened = child.lua_get("HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)")
+  local opened = child.lua_get(
+    "HELPERS.wait_for(function() return vim.api.nvim_buf_get_name(0):match('f%.txt$') ~= nil end)"
+  )
   MiniTest.expect.equality(opened, true, 'Enter opened the visited file')
   MiniTest.expect.equality(child.lua_get('vim.fn.line(".")'), 3)
   MiniTest.expect.equality(
@@ -1559,7 +1563,11 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
     if vector.response == vim.NIL then
       scenario.selectAnswers = {}
     elseif vector.params.kind == 'confirm' then
-      scenario.selectAnswers = { (vector.focus and vector.focus[1] or 'Yes') == 'Yes' and (vector.response == 'yes' and 1 or 2) or (vector.response == 'yes' and 2 or 1) }
+      scenario.selectAnswers = {
+        (vector.focus and vector.focus[1] or 'Yes') == 'Yes'
+          and (vector.response == 'yes' and 1 or 2)
+          or (vector.response == 'yes' and 2 or 1),
+      }
     elseif vector.params.kind == 'choice' then
       scenario.selectAnswers = { vector.response }
       if vector.response == '__custom__' then
@@ -1588,14 +1596,37 @@ T['every prompt kind answers view/promptRespond with its §3.6 shape'] = functio
   }
   scenarios[#scenarios + 1] = {
     name = 'multiChoice renders and toggles checklist',
-    params = { promptId = 'local-multi', kind = 'multiChoice', title = 'Pick branches', items = multi_items, preselected = { 'a' } },
+    params = {
+      promptId = 'local-multi', kind = 'multiChoice', title = 'Pick branches',
+      items = multi_items, preselected = { 'a' },
+    },
     selectAnswers = { 'b', 'a', '__done__' },
     want = { promptId = 'local-multi', cancelled = false, value = { ids = { 'b' } } },
-    want_select_steps = { { '[x] a', '[ ] b — desc b', '[ ] c', 'Done' }, { '[x] a', '[x] b — desc b', '[ ] c', 'Done' }, { '[ ] a', '[x] b — desc b', '[ ] c', 'Done' } },
+    want_select_steps = {
+      { '[x] a', '[ ] b — desc b', '[ ] c', 'Done' },
+      { '[x] a', '[x] b — desc b', '[ ] c', 'Done' },
+      { '[ ] a', '[x] b — desc b', '[ ] c', 'Done' },
+    },
   }
-  scenarios[#scenarios + 1] = { name = 'secret success', params = { promptId = 'p-secret-ok', kind = 'text', title = 'SSH passphrase', secret = true }, secretAnswer = 'correct horse battery', secret = 'correct horse battery', want = { promptId = 'p-secret-ok', cancelled = false, value = '<redacted>' }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
-  scenarios[#scenarios + 1] = { name = 'secret empty answer cancels', params = { promptId = 'p-secret-empty', kind = 'text', title = 'SSH passphrase', secret = true }, secretAnswer = '', want = { promptId = 'p-secret-empty', cancelled = true, value = nil }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
-  scenarios[#scenarios + 1] = { name = 'secret cancel', params = { promptId = 'p-secret-cancel', kind = 'text', title = 'SSH passphrase', secret = true }, want = { promptId = 'p-secret-cancel', cancelled = true, value = nil }, want_secret_titles = { 'SSH passphrase' }, want_no_input = true }
+  scenarios[#scenarios + 1] = {
+    name = 'secret success',
+    params = { promptId = 'p-secret-ok', kind = 'text', title = 'SSH passphrase', secret = true },
+    secretAnswer = 'correct horse battery', secret = 'correct horse battery',
+    want = { promptId = 'p-secret-ok', cancelled = false, value = '<redacted>' },
+    want_secret_titles = { 'SSH passphrase' }, want_no_input = true,
+  }
+  scenarios[#scenarios + 1] = {
+    name = 'secret empty answer cancels',
+    params = { promptId = 'p-secret-empty', kind = 'text', title = 'SSH passphrase', secret = true },
+    secretAnswer = '', want = { promptId = 'p-secret-empty', cancelled = true, value = nil },
+    want_secret_titles = { 'SSH passphrase' }, want_no_input = true,
+  }
+  scenarios[#scenarios + 1] = {
+    name = 'secret cancel',
+    params = { promptId = 'p-secret-cancel', kind = 'text', title = 'SSH passphrase', secret = true },
+    want = { promptId = 'p-secret-cancel', cancelled = true, value = nil },
+    want_secret_titles = { 'SSH passphrase' }, want_no_input = true,
+  }
 
   for _, scenario in ipairs(scenarios) do
     local label = scenario.name
@@ -1781,7 +1812,7 @@ T['a menu option prompt asks through vim.ui.input and lands the value'] = functi
 end
 
 --- Compatibility alias for `unpack` across Lua versions.
-local unpack = table.unpack or unpack
+local unpack = unpack
 
 --- Fetch the structured menu model of the view `state` from the server via
 --- `view/resync`. The wire request uses the actual `record.id`; the composite

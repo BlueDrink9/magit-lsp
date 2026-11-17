@@ -121,7 +121,7 @@ end
 --- asynchronous: the record appears when the descriptor does, and the render
 --- and keymap that follow it are applied by the view manager.
 ---@param session table
-function open_status(session)
+local function open_status(session)
   if not vim.api.nvim_buf_is_valid(session.buf) then session.buf = buffer.fresh() end
   vim.lsp.buf_attach_client(session.buf, session.client_id)
   view.request(session.buf, session.client_id, 'view/open', {

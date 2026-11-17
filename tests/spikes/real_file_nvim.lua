@@ -11,7 +11,10 @@ vim.api.nvim_create_autocmd('BufReadPost', {
     vim.bo.bufhidden = 'wipe'
     vim.bo.filetype = 'gitcommit'
     client_id = vim.lsp.start({ name = 'real-file-spike',
-      cmd = { 'python3', vim.env.MAGIT_REAL_FILE_ROOT .. '/tests/spikes/real_file_lsp.py', '--record', base .. '/wire.jsonl' },
+      cmd = {
+        'python3', vim.env.MAGIT_REAL_FILE_ROOT .. '/tests/spikes/real_file_lsp.py',
+        '--record', base .. '/wire.jsonl',
+      },
       root_dir = vim.fn.fnamemodify(target, ':h:h'),
     })
   end,
@@ -24,7 +27,7 @@ vim.api.nvim_create_autocmd('VimEnter', { nested = true, callback = function()
 end })
 
 --- Return native buffer/client state to the isolated tmux driver.
-function SpikeState()
+_G.SpikeState = function()
   local buf = vim.fn.bufnr(target)
   local valid = buf ~= -1 and vim.api.nvim_buf_is_valid(buf)
   local client = client_id and vim.lsp.get_client_by_id(client_id)
@@ -37,14 +40,14 @@ function SpikeState()
 end
 
 --- Ask the observer to exercise the client's standard showDocument handler.
-function SpikeShow()
+_G.SpikeShow = function()
   return vim.lsp.get_client_by_id(client_id):request_sync('spike/show', {
     uri = vim.uri_from_fname(target), takeFocus = true,
   }, 3000)
 end
 
 --- Ask the observer to refresh through standard versioned workspace/applyEdit.
-function SpikeRefresh()
+_G.SpikeRefresh = function()
   return vim.lsp.get_client_by_id(client_id):request_sync('spike/apply', {
     edit = { documentChanges = { { textDocument = {
       uri = vim.uri_from_fname(target), version = vim.lsp.util.buf_versions[vim.fn.bufnr(target)],

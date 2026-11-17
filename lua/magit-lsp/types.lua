@@ -17,14 +17,18 @@
 --- The wire object always carries a camelCase `kind` discriminator so clients
 --- can forward an offered target without inspecting its fields.
 --- Exactly one of the alternative shapes applies.
----@alias PlainActionParams.PlainActionTarget PlainActionParams.PlainActionTarget.Variant1|PlainActionParams.PlainActionTarget.Variant2|PlainActionParams.PlainActionTarget.Variant3|PlainActionParams.PlainActionTarget.Variant4
+---@alias PlainActionParams.PlainActionTarget PlainActionParams.PlainActionTarget.Variant1
+---| PlainActionParams.PlainActionTarget.Variant2|PlainActionParams.PlainActionTarget.Variant3
+---| PlainActionParams.PlainActionTarget.Variant4
 
 --- Content-addressed target from a status tree.
 ---@class PlainActionParams.PlainActionTarget.Variant1
 ---@field kind "content"
 ---@field mutationHash string # Hash of the exact content the action is permitted to mutate.
 ---@field nodeId string # Existing path/content-derived tree node identity.
----@field selection? PlainActionParams.SelectionIntent|nil # Exact inclusive document rows selected in the offered render, when this action represents a visual selection rather than a cursor action.
+---@field selection? PlainActionParams.SelectionIntent|nil # Exact inclusive document rows selected
+---  in the offered render,
+---  when this action represents a visual selection rather than a cursor action.
 
 --- Identity of the exact logical view that offered a semantic transition.
 ---@class PlainActionParams.PlainActionTarget.Variant2
@@ -53,7 +57,8 @@
 ---@class EditConfirmParams.Root
 ---@field command string # Semantic command; only common.confirm is accepted by this dispatcher.
 ---@field runId string # Server-issued run, protecting a reused COMMIT_EDITMSG URI.
----@field source EditConfirmParams.EditConfirmSource # Select synchronized writeback versus independently read saved disk text.
+---@field source EditConfirmParams.EditConfirmSource # Select synchronized writeback versus independently read
+---  saved disk text.
 ---@field uri string # Exact server-issued canonical file URI.
 ---@field version integer # Exact synchronized version, or the close event's last observed version.; format: "int32"
 
@@ -93,7 +98,8 @@
 
 --- A user-facing consequence of a request.
 --- Exactly one of the alternative shapes applies.
----@alias Effect.Root Effect.Root.Variant1|Effect.Root.Variant2|Effect.Root.Variant3|Effect.Root.Variant4|Effect.Root.Variant5|Effect.Root.Variant6|Effect.Root.Variant7|Effect.Root.Variant8|Effect.Root.Variant9
+---@alias Effect.Root Effect.Root.Variant1|Effect.Root.Variant2|Effect.Root.Variant3|Effect.Root.Variant4
+---| Effect.Root.Variant5|Effect.Root.Variant6|Effect.Root.Variant7|Effect.Root.Variant8|Effect.Root.Variant9
 
 --- How an editor-bridge document is edited.
 --- Exactly one of the alternative shapes applies.
@@ -177,7 +183,8 @@
 ---@field scope Effect.Scope
 ---@field title string
 ---@field uri string
----@field viewport Effect.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view.
+---@field viewport Effect.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor;
+---  clients may use it when creating the view.
 
 --- Whether the client may edit the view or only display it.
 ---@alias Effect.ViewMode "interactive"|"text"
@@ -322,7 +329,8 @@
 --- One menu item as serialized: the item's own fields plus `activationSteps`.
 --- This is both the actual serializer model and the output schema model.
 --- Exactly one of the alternative shapes applies.
----@alias ViewRender.SerializedItem ViewRender.SerializedItem.Variant1|ViewRender.SerializedItem.Variant2|ViewRender.SerializedItem.Variant3
+---@alias ViewRender.SerializedItem ViewRender.SerializedItem.Variant1|ViewRender.SerializedItem.Variant2
+---| ViewRender.SerializedItem.Variant3
 
 --- A boolean flag; its key is `-` plus a letter.
 ---@class ViewRender.SerializedItem.Variant1
@@ -381,7 +389,8 @@
 ---@field scope ViewDescriptor.Scope
 ---@field title string
 ---@field uri string
----@field viewport ViewDescriptor.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view.
+---@field viewport ViewDescriptor.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor;
+---  clients may use it when creating the view.
 
 --- Where the server suggests the client put a view.
 ---@alias ViewDescriptor.Placement "main"|"side"|"bottom"|"float"
@@ -405,7 +414,11 @@
 ---@field command string
 ---@field cursor? ViewInvokeParams.Cursor|nil
 ---@field selection? ViewInvokeParams.Selection|nil
----@field version? integer|nil # Displayed render version; required for commands consuming cursor/selection. Only the current or last acknowledged tree is retained. Other versions (including an omitted version) produce a readable stale-view refusal. Commit selection (`common.confirm` in a selection view and `select.toggle-mark`) requires the exact acknowledged version. Non-positional commands ignore this field.; format: "uint64"; minimum: 0
+---@field version? integer|nil # Displayed render version; required for commands consuming cursor/selection.
+---  Only the current or last acknowledged tree is retained. Other versions (including an omitted version)
+---  produce a readable stale-view refusal. Commit selection (`common.confirm` in a selection view
+---  and `select.toggle-mark`) requires the exact acknowledged version. Non-positional commands
+---  ignore this field.; format: "uint64"; minimum: 0
 ---@field viewId string
 
 --- A cursor position in the rendered view, 0-based.
@@ -427,7 +440,10 @@
 
 --- A user-facing consequence of a request.
 --- Exactly one of the alternative shapes applies.
----@alias ViewInvokeResponse.Effect ViewInvokeResponse.Effect.Variant1|ViewInvokeResponse.Effect.Variant2|ViewInvokeResponse.Effect.Variant3|ViewInvokeResponse.Effect.Variant4|ViewInvokeResponse.Effect.Variant5|ViewInvokeResponse.Effect.Variant6|ViewInvokeResponse.Effect.Variant7|ViewInvokeResponse.Effect.Variant8|ViewInvokeResponse.Effect.Variant9
+---@alias ViewInvokeResponse.Effect ViewInvokeResponse.Effect.Variant1|ViewInvokeResponse.Effect.Variant2
+---| ViewInvokeResponse.Effect.Variant3|ViewInvokeResponse.Effect.Variant4|ViewInvokeResponse.Effect.Variant5
+---| ViewInvokeResponse.Effect.Variant6|ViewInvokeResponse.Effect.Variant7
+---| ViewInvokeResponse.Effect.Variant8|ViewInvokeResponse.Effect.Variant9
 
 --- Show a notification; `hint` and `detail` are optional extras.
 ---@class ViewInvokeResponse.Effect.Variant1
@@ -507,7 +523,8 @@
 ---@field scope ViewInvokeResponse.Scope
 ---@field title string
 ---@field uri string
----@field viewport ViewInvokeResponse.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view.
+---@field viewport ViewInvokeResponse.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor;
+---  clients may use it when creating the view.
 
 --- Whether the client may edit the view or only display it.
 ---@alias ViewInvokeResponse.ViewMode "interactive"|"text"
@@ -522,7 +539,8 @@
 ---@field editorMode ViewKeyParams.EditorMode
 ---@field key string # One canonical key step, e.g. `s`, `g`, `ctrl+c` (§3.8).
 ---@field selection? ViewKeyParams.Selection|nil
----@field version integer # Displayed render version for positional commands, with the same retained tree policy as `view/invoke`. Non-positional/menu keys ignore it.; format: "uint64"; minimum: 0
+---@field version integer # Displayed render version for positional commands, with the same retained tree policy
+---  as `view/invoke`. Non-positional/menu keys ignore it.; format: "uint64"; minimum: 0
 ---@field viewId string
 
 --- A cursor position in the rendered view, 0-based.
@@ -570,7 +588,10 @@
 
 --- A user-facing consequence of a request.
 --- Exactly one of the alternative shapes applies.
----@alias ViewEffectsParams.Effect ViewEffectsParams.Effect.Variant1|ViewEffectsParams.Effect.Variant2|ViewEffectsParams.Effect.Variant3|ViewEffectsParams.Effect.Variant4|ViewEffectsParams.Effect.Variant5|ViewEffectsParams.Effect.Variant6|ViewEffectsParams.Effect.Variant7|ViewEffectsParams.Effect.Variant8|ViewEffectsParams.Effect.Variant9
+---@alias ViewEffectsParams.Effect ViewEffectsParams.Effect.Variant1|ViewEffectsParams.Effect.Variant2
+---| ViewEffectsParams.Effect.Variant3|ViewEffectsParams.Effect.Variant4|ViewEffectsParams.Effect.Variant5
+---| ViewEffectsParams.Effect.Variant6|ViewEffectsParams.Effect.Variant7
+---| ViewEffectsParams.Effect.Variant8|ViewEffectsParams.Effect.Variant9
 
 --- Show a notification; `hint` and `detail` are optional extras.
 ---@class ViewEffectsParams.Effect.Variant1
@@ -650,7 +671,8 @@
 ---@field scope ViewEffectsParams.Scope
 ---@field title string
 ---@field uri string
----@field viewport ViewEffectsParams.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor; clients may use it when creating the view.
+---@field viewport ViewEffectsParams.Viewport # keep-for: TASKS §3.2 records viewport in the descriptor;
+---  clients may use it when creating the view.
 
 --- Whether the client may edit the view or only display it.
 ---@alias ViewEffectsParams.ViewMode "interactive"|"text"
@@ -720,7 +742,8 @@
 
 --- A `choice` answer: one item id, or the text the user typed instead.
 --- Any of the alternative shapes may apply.
----@alias ViewPromptRespondParams.PromptChoiceAnswer ViewPromptRespondParams.PromptChoiceAnswer.Variant1|ViewPromptRespondParams.PromptChoiceAnswer.Variant2
+---@alias ViewPromptRespondParams.PromptChoiceAnswer ViewPromptRespondParams.PromptChoiceAnswer.Variant1
+---| ViewPromptRespondParams.PromptChoiceAnswer.Variant2
 
 ---@class ViewPromptRespondParams.PromptChoiceAnswer.Variant1
 ---@field id string
@@ -730,7 +753,8 @@
 
 --- The value of a prompt answer; its shape follows the prompt kind.
 --- Any of the alternative shapes may apply.
----@alias ViewPromptRespondParams.PromptValue boolean|string|ViewPromptRespondParams.PromptChoiceAnswer|ViewPromptRespondParams.PromptValue.Variant4
+---@alias ViewPromptRespondParams.PromptValue boolean|string|ViewPromptRespondParams.PromptChoiceAnswer
+---| ViewPromptRespondParams.PromptValue.Variant4
 
 ---@class ViewPromptRespondParams.PromptValue.Variant4
 ---@field ids string[]
@@ -738,7 +762,8 @@
 --- `view/pick`: a typed selection request the server is waiting on.
 ---@class ViewPickParams.Root
 ---@field allowFreeText boolean # Whether the user may answer with text that is not an item id.
----@field fallbackView? string|nil # URI of a server-rendered view that offers the same choice when the native picker cannot present the request shape.
+---@field fallbackView? string|nil # URI of a server-rendered view that offers the same choice when the native
+---  picker cannot present the request shape.
 ---@field items ViewPickParams.PickItem[]
 ---@field multi boolean # Whether more than one item may be selected.
 ---@field pickId string # The pick this answer refers back to.
@@ -759,4 +784,3 @@
 ---@field freeText? string|nil
 ---@field pickId string
 ---@field selected string[]
-

@@ -113,7 +113,10 @@ local function apply_case(declares_document_changes, stale, two_entries)
     MiniTest.expect.equality(response_error, nil)
     MiniTest.expect.equality(result.applied, true)
     MiniTest.expect.equality(table.concat(vim.api.nvim_buf_get_lines(first, 0, -1, false), '\n'), expected_first)
-    MiniTest.expect.equality(vim.api.nvim_buf_get_changedtick(first), first_tick + (expected_first == 'before' and 0 or 1))
+    MiniTest.expect.equality(
+      vim.api.nvim_buf_get_changedtick(first),
+      first_tick + (expected_first == 'before' and 0 or 1)
+    )
     MiniTest.expect.equality(vim.lsp.util.buf_versions[first], vim.api.nvim_buf_get_changedtick(first))
     if two_entries then
       MiniTest.expect.equality(table.concat(vim.api.nvim_buf_get_lines(second, 0, -1, false), '\n'), 'second!')

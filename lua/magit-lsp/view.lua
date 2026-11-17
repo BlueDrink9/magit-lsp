@@ -623,7 +623,9 @@ end
 
 --- Open (or focus) the window for a server descriptor.
 ---@param descriptor table `viewDescriptor` from `view/open` or a push effect
----@param opts table|nil { buf?: integer, win?: integer, client_id?: integer, root?: string, placement?: string } `placement` selects a client window implementation and leaves the descriptor's placement advisory
+---@param opts table|nil { buf?: integer, win?: integer, client_id?: integer,
+---  root?: string, placement?: string } `placement` selects a client window
+---  implementation and leaves the descriptor's placement advisory
 ---@return table|nil view
 function M.open(descriptor, opts)
   if not descriptor or not descriptor.id then
@@ -725,7 +727,9 @@ end
 --- The document is not a server view: it has no render stream and is excluded
 --- from the debug view stack. Placement and key handling come from the caller.
 ---@param effect table `editDocument` effect
----@param spec table { placement: string, filetype: string, client_id?: integer, root?: string, base?: string, keymap_options: fun(record, notice): table, table, on_closed: fun(record)|nil }
+---@param spec table { placement: string, filetype: string, client_id?: integer,
+---  root?: string, base?: string, keymap_options: fun(record, notice): table,
+---  table, on_closed: fun(record)|nil }
 ---@return table|nil record
 function M.open_document(effect, spec)
   if type(effect) ~= 'table' or not effect.runId then

@@ -253,9 +253,8 @@ local function special_to_canonical(special)
     return nil, canonical_key
   end
 
-  if canonical_key == '<' or canonical_key == 'Space' or canonical_key == 'Plus' or NAMED[canonical_key] then
-    -- Named keys and the two spelled-out characters.
-  elseif modifiers.shift and not (modifiers.ctrl or modifiers.alt or modifiers.meta) then
+  if canonical_key ~= '<' and canonical_key ~= 'Space' and canonical_key ~= 'Plus'
+    and not NAMED[canonical_key] and modifiers.shift and not (modifiers.ctrl or modifiers.alt or modifiers.meta) then
     return fail('shifted character keys have no `shift+` form')
   end
 

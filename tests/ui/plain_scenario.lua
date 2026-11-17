@@ -13,7 +13,8 @@ for _, method in ipairs({ 'view/render', 'view/keymap', 'view/effects', 'view/pr
 end
 
 --- Test-only standard-LSP observations used by the shared scenario driver.
-PlainUI = {}
+_G.PlainUI = {}
+local PlainUI = _G.PlainUI
 
 --- Return whether the Plain client has initialized and drained its requests.
 function PlainUI.idle()
@@ -41,7 +42,9 @@ function PlainUI.snapshot()
     rich_notifications = vim.g.plain_smoke_rich_notifications,
     applied_edits = applied,
     messages = vim.split(vim.fn.execute('messages'), '\n'),
-    stale_feedback = vim.fn.execute('messages'):find('This view is stale; please retry on the current view.', 1, true) ~= nil,
+  stale_feedback = vim.fn.execute('messages'):find(
+    'This view is stale; please retry on the current view.', 1, true
+  ) ~= nil,
     capabilities = client and client.config.capabilities,
   }
 end

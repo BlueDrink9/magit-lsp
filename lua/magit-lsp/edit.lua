@@ -95,7 +95,9 @@ local function finish(record, reason)
   local payload = params(record, reason == 'confirm' and record.version or record.saved_version)
   payload.command = 'common.confirm'
   payload.source = reason == 'confirm' and 'synchronized' or 'saved-file'
-  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'confirmed', function()
+  barrier(record, 'workspace/executeCommand', {
+    command = 'magit.command', arguments = { payload },
+  }, 'confirmed', function()
     view.close(record.key, false)
     view.focus(record.base)
   end)
@@ -143,7 +145,9 @@ function M.cancel(key)
   vim.bo[record.buf].modifiable = false
   local payload = params(record)
   payload.command = 'common.cancel'
-  barrier(record, 'workspace/executeCommand', { command = 'magit.command', arguments = { payload } }, 'aborted', function()
+  barrier(record, 'workspace/executeCommand', {
+    command = 'magit.command', arguments = { payload },
+  }, 'aborted', function()
     view.close(record.key, false)
     view.focus(record.base)
   end)
