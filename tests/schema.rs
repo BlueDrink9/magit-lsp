@@ -1624,7 +1624,7 @@ fn standalone_payload_tables_detect_tamper_and_missing_file() {
         .is_empty());
 
     let doc = generate_schema::schema_markdown::DOC_PATH;
-    let path = dir.path().join(doc);
+    let path = dir.path().join(&doc);
     let text = std::fs::read_to_string(&path).expect("read generated payload tables");
     std::fs::write(&path, text.replace("Unconstrained JSON", "Anything goes"))
         .expect("tamper payload tables");
@@ -1661,16 +1661,26 @@ fn standalone_worked_exchanges_include_provenance_and_examples() {
         "plain-open.jsonl",
         "rich-lifecycle.jsonl",
     ] {
-        assert!(
-            block.contains(&format!("##### `{name}`")),
-            "worked exchanges must include {name}"
-        );
+        let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts()
+            .expect("render split artifacts");
+        assert!(artifacts.iter().any(|(_, part)| part.contains(&format!("##### `{name}`"))),
+            "worked exchanges must include {name}");
     }
-    assert_eq!(
-        block.matches("```jsonl").count(),
-        6,
-        "each example file gets one fenced jsonl block"
-    );
+    let artifacts = generate_schema::schema_markdown::worked_exchanges_artifacts().unwrap();
+    assert_eq!(artifacts.len(), 4);
+    assert!(artifacts.iter().all(|(_, text)| text.len() < 100_000));
+    let source = example_recordings::recordings(std::path::Path::new("docs/examples"))
+        .expect("load grouped source recordings");
+    let messages: Vec<_> = artifacts.iter().skip(1).flat_map(|(_, part)| {
+        part.split("```jsonl\n").skip(1).filter_map(|block| block.split_once("```\n").map(|(body, _)| body))
+            .flat_map(str::lines).map(str::to_owned).collect::<Vec<_>>()
+    }).collect();
+    let expected: Vec<_> = source.iter().flat_map(|(_, bytes)| std::str::from_utf8(bytes).unwrap().lines()
+        .filter(|line| !line.trim().is_empty()).map(|line| {
+            let frame: serde_json::Value = serde_json::from_str(line).unwrap();
+            serde_json::to_string(frame.get("message").unwrap()).unwrap()
+        }).collect::<Vec<_>>()).collect();
+    assert_eq!(messages, expected, "split parts preserve source message stream and order");
 }
 
 #[test]
@@ -1716,8 +1726,8 @@ fn standalone_worked_exchanges_detect_tamper_and_missing_file() {
         .expect("clean check")
         .is_empty());
 
-    let doc = generate_schema::schema_markdown::EXCHANGES_DOC_PATH;
-    let path = dir.path().join(doc);
+    let doc = generate_schema::schema_markdown::worked_exchanges_artifacts().unwrap()[1].0.clone();
+    let path = dir.path().join(&doc);
     let text = std::fs::read_to_string(&path).expect("read client spec");
     let provenance = "temporary paths are normalized to `/repo`";
     assert!(text.contains(provenance), "worked exchanges carry provenance");
@@ -1725,7 +1735,7 @@ fn standalone_worked_exchanges_detect_tamper_and_missing_file() {
         .expect("tamper worked exchanges");
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("tampered check"),
-        vec![PathBuf::from(doc)],
+        vec![PathBuf::from(&doc)],
         "a modified worked-exchange block is stale"
     );
 
@@ -1733,7 +1743,7 @@ fn standalone_worked_exchanges_detect_tamper_and_missing_file() {
     std::fs::remove_file(&path).expect("remove worked exchanges");
     assert_eq!(
         generate_schema::stale_files(dir.path()).expect("missing check"),
-        vec![PathBuf::from(doc)],
+        vec![PathBuf::from(&doc)],
         "a missing worked-exchange block is stale"
     );
 }

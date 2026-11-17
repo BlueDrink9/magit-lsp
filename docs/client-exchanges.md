@@ -6,7 +6,7 @@ Treat view and descriptor URIs as opaque. Cursor positions are zero-based, selec
 
 Presentation differs: Neovim displays rendered menu buffers; VS Code may present structured menu data via QuickPick. VS Code pass-through replay and placement are limited/concrete client behavior, not universal parity. Buffer render/keymap notifications until the descriptor/effect is registered. Progress notifications may be emitted before the request response; deferred view notifications follow the response and can arrive before client-side view registration. Dynamic keymaps are complete replacements; do not infer new render versions from them.
 
-See generated [worked exchanges](schema/worked-exchanges.md).
+See the generated [worked-exchange index](schema/worked-exchanges.md) and its numbered transcript parts.
 
 ##### `commit-edit-abort.jsonl`
 
@@ -213,4 +213,3 @@ Frames recorded from a real `TestServer` run against a temporary repository; tem
 
 
 Progress creation and notifications are separate from the key result effects and occur for ordinary key requests. The recorded mutation key (`S`, `status.stage-all`) shows the server asking the client to create a progress token, with create, begin and end all preceding the key response; the server does not wait for the create response, so it may arrive after begin. A fast `g` refresh instead emits create only: the refresh finishes and progress ends before the client's create response marks the run visible, so no visible begin or end is reported. Progress end does not always precede the key response. Payload definitions are grounded in `src/view.rs`, `src/keymap.rs`, `src/protocol.rs`; presentation details in `lua/magit-lsp/view.lua`, `lua/magit-lsp/edit.lua`, `clients/vscode/lib/views.js`, `menus.js`, and `effects.js`.
-

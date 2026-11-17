@@ -16,6 +16,7 @@ use super::{Direction, MethodKind, Payload};
 pub const DOC_PATH: &str = "docs/schema/payload-tables.md";
 /// Repository-relative path of the generated worked exchanges.
 pub const EXCHANGES_DOC_PATH: &str = "docs/schema/worked-exchanges.md";
+const EXCHANGES_LIMIT: usize = 100_000;
 /// Repository-relative path of the generated capability levels.
 pub const CAPABILITY_DOC_PATH: &str = "docs/schema/capability-levels.md";
 /// Repository-relative directory holding the recorded exchange files.
@@ -220,6 +221,51 @@ pub fn worked_exchanges_block_from(dir: &Path) -> Result<String, String> {
     Ok(out)
 }
 
+/// Render the generated worked-exchange index and its numbered transcript parts.
+pub fn worked_exchanges_artifacts() -> Result<Vec<(String, String)>, String> {
+    let full = worked_exchanges_block()?;
+    let sections: Vec<_> = full.split("\n##### ").skip(1).collect();
+    let mut parts = Vec::new();
+    let mut current = String::from("# Worked exchanges\n\n");
+    for section in sections {
+        let section = format!("##### {section}");
+        let Some((prefix, body)) = section.split_once("```jsonl\n") else { return Err("worked exchange lacks jsonl fence".into()) };
+        let Some((messages, _)) = body.split_once("```\n") else { return Err("worked exchange has unterminated jsonl fence".into()) };
+        let mut exchange_part = format!("{prefix}```jsonl\n");
+        for message in messages.lines() {
+            let addition = format!("{message}\n");
+            if current.len() + exchange_part.len() + addition.len() + 5 > EXCHANGES_LIMIT {
+                if current.len() > "# Worked exchanges\n\n".len() && current.len() + exchange_part.len() + 5 > EXCHANGES_LIMIT {
+                    parts.push(current);
+                    current = String::from("# Worked exchanges (continued)\n\n");
+                }
+                if current.len() + exchange_part.len() + addition.len() + 5 > EXCHANGES_LIMIT {
+                    if exchange_part.ends_with("```jsonl\n") { return Err("one worked message exceeds the generated part size limit".into()); }
+                    exchange_part.push_str("```\n");
+                    current.push_str(&exchange_part);
+                    parts.push(current);
+                    current = String::from("# Worked exchanges (continued)\n\n");
+                    exchange_part = format!("##### {} (continued)\n\n{}```jsonl\n", prefix.trim_start_matches("##### ").trim(), "Frames continue from the preceding part.\n\n");
+                }
+            }
+            exchange_part.push_str(&addition);
+        }
+        exchange_part.push_str("```\n");
+        current.push_str(&exchange_part);
+    }
+    if !current.is_empty() { parts.push(current); }
+    let mut index = String::from("# Worked exchanges\n\nGenerated transcript parts, in source order:\n\n");
+    let paths: Vec<_> = (1..=parts.len()).map(|number| format!("docs/schema/worked-exchanges-{number:02}.md")).collect();
+    for (number, _) in paths.iter().enumerate() {
+        index.push_str(&format!("- [Part {:02}](worked-exchanges-{:02}.md)\n", number + 1, number + 1));
+        parts[number] = format!("{}\n", parts[number]);
+        debug_assert!(parts[number].len() < EXCHANGES_LIMIT);
+    }
+    let mut artifacts = vec![(EXCHANGES_DOC_PATH.to_string(), index)];
+    artifacts.extend(paths.into_iter().zip(parts));
+    Ok(artifacts)
+}
+
 /// One-sentence provenance derived from a file's recorded `source` labels.
 fn provenance(lines: &[Value]) -> String {
     let recorded = lines.iter().all(|line| {
@@ -234,11 +280,9 @@ fn provenance(lines: &[Value]) -> String {
 
 /// Write all standalone generated references beneath `root`.
 pub fn write(root: &Path) -> io::Result<()> {
-    let files = [
-        (DOC_PATH, block().map_err(invalid_data)?),
-        (EXCHANGES_DOC_PATH, worked_exchanges_block().map_err(invalid_data)?),
-        (CAPABILITY_DOC_PATH, capability_levels_block()),
-    ];
+    let mut files = vec![(DOC_PATH.to_string(), block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block())];
+    files.extend(worked_exchanges_artifacts().map_err(invalid_data)?);
     for (relative, text) in files {
         let path = root.join(relative);
         if let Some(parent) = path.parent() { fs::create_dir_all(parent)?; }
@@ -249,14 +293,12 @@ pub fn write(root: &Path) -> io::Result<()> {
 
 /// Return standalone references that differ from generated content.
 pub fn stale_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
-    let generated = [
-        (DOC_PATH, block().map_err(invalid_data)?),
-        (EXCHANGES_DOC_PATH, worked_exchanges_block().map_err(invalid_data)?),
-        (CAPABILITY_DOC_PATH, capability_levels_block()),
-    ];
+    let mut generated = vec![(DOC_PATH.to_string(), block().map_err(invalid_data)?),
+        (CAPABILITY_DOC_PATH.to_string(), capability_levels_block())];
+    generated.extend(worked_exchanges_artifacts().map_err(invalid_data)?);
     let mut stale = Vec::new();
     for (relative, text) in generated {
-        let path = root.join(relative);
+        let path = root.join(&relative);
         if fs::read_to_string(path).unwrap_or_default() != format!("{text}\n") {
             stale.push(PathBuf::from(relative));
         }

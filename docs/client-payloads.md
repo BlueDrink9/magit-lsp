@@ -2,7 +2,7 @@
 
 ### Core payload quick reference
 
-See generated [payload tables](schema/payload-tables.md) and [worked exchanges](schema/worked-exchanges.md).
+See generated [payload tables](schema/payload-tables.md) and the [worked-exchange index](schema/worked-exchanges.md), which links to the transcript parts.
 | `view/open` | request | clientToServer | `ViewOpenParams` (`view-open-params.json`) | `ViewDescriptor` (`view-descriptor.json`) |
 | `view/close` | request | clientToServer | `ViewCloseParams` (`view-close-params.json`) | unconstrained JSON |
 | `view/invoke` | request | clientToServer | `ViewInvokeParams` (`view-invoke-params.json`) | `ViewInvokeResponse` (`view-invoke-response.json`) |
@@ -353,5 +353,4 @@ Everything a client needs to create the buffer for a view.
 |---|---|---|---|
 | `mode` | ViewMode | required | Whether the client may edit the view or only display it.; One of `"interactive"`, `"text"` |
 | `viewId` | string | required |  |
-
 
