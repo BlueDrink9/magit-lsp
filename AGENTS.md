@@ -148,8 +148,7 @@ tail plus the log path). Use `V=1` only when the digest is insufficient and
   `build/ui/tour.md`.
 - `make update-snapshots`: rewrites stale snapshots (see `golden-and-snapshots`).
 - `make hygiene` and `make format-check`.
-
-Other targets (docs-check, plain-neovim, plain-presets, schema-check, registry-docs-check, vscode-e2e) are in the Makefile .PHONY list; use only those.
+- Other targets (docs-check, plain-neovim, plain-presets, schema-check, registry-docs-check, vscode-e2e) are in the Makefile `.PHONY` lines; use only those.
 
 Rules:
 
