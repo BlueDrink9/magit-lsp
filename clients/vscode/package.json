@@ -33,11 +33,9 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@johnnymorganz/stylua-bin": "2.6.0",
     "@types/node": "^20.19.43",
     "@types/vscode": "^1.145.0",
     "knip": "^6.45.1",
-    "@oxc-parser/binding-wasm32-wasip1": "^0.159.0",
     "prettier": "3.9.10",
     "typescript": "^6.0.3"
   },
