@@ -1,4 +1,4 @@
-.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene hygiene-unit format-check hooks-install hooks-remove hooks-run format docs-check
+.PHONY: build release test test-rust test-lua test-file ui-unit ui-test ui-file ui-tour plain-neovim update-snapshots update-examples registry-docs-generate registry-docs-check color-spike vscode-test readme-shots hygiene format-check hooks-install hooks-remove hooks-run format docs-check
 
 .SILENT:
 MAKEFLAGS += --no-print-directory
@@ -13,6 +13,14 @@ export MAGIT_LSP_BIN := $(CURDIR)/target/debug/magit-lsp
 # export GIT_CONFIG_GLOBAL := /dev/null
 # export GIT_CONFIG_NOSYSTEM := 1
 
+# Machine-local overrides (gitignored), e.g.
+#   export MAGIT_VSCODE_BIN := /opt/env/vscode/bin/codium
+-include local.mk
+
+# Convention: targets that rewrite files must be named update-*, *-generate,
+# hooks-* or format, because .opencode/agents/scout.md denies those patterns.
+# Name any new mutating target to match, or add a deny rule there.
+
 define run
 @if [ -n "$(V)" ]; then $(2); else mkdir -p build/test-logs || exit $$?; log=$$(mktemp build/test-logs/$(1).XXXXXX) || exit $$?; if $(2) >"$$log" 2>&1; then status=0; printf 'ok: $(1)\n'; rm -f "$$log"; else status=$$?; tail -n $(LOG_TAIL) "$$log"; printf 'FAILED: $(1) (full log: %s)\n' "$$log"; fi; exit $$status; fi
 endef
@@ -26,9 +34,6 @@ release:
 hygiene:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/hygiene.py
 
-hygiene-unit:
-	$(call run,hygiene-unit,PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py')
-
 DOC_FILES ?= TASKS.md AGENTS.md README.md ui-test-plan.md hygiene-allowlist.md LICENSING.md docs/ARCHITECTURE.md docs/PROTOCOL.md docs/KEYMAPS.md docs/VIEWS.md docs/TESTING.md docs/OPEN_QUESTIONS.md docs/CLIENT_SPEC.md docs/parity.md docs/plain-support.md docs/known-client-behaviors.md docs/schema/payload-tables.md docs/schema/worked-exchanges.md docs/schema/worked-exchanges-01.md docs/schema/worked-exchanges-02.md docs/schema/worked-exchanges-03.md docs/schema/capability-levels.md
 
 docs-check:
@@ -38,7 +43,7 @@ format:
 	python3 scripts/format.py --working-tree --write
 
 format-check:
-	python3 scripts/format.py --working-tree
+	$(call run,format-check,python3 scripts/format.py --working-tree)
 
 hooks-install:
 	scripts/install-hooks.sh install
@@ -108,6 +113,16 @@ update-snapshots:
 vscode-deps:
 	$(call run,vscode-deps,pnpm --dir clients/vscode install --frozen-lockfile --store-dir "$${PNPM_STORE_PATH:-$${XDG_CACHE_HOME:-$$HOME/.cache}/magit-lsp/pnpm-store}")
 
+# Fast check before the native VSCode targets: names what is missing instead of
+# failing deep inside a run. Set MAGIT_VSCODE_BIN in local.mk. Xvfb is not
+# needed when DISPLAY is already set.
+.PHONY: vscode-prereqs
+vscode-prereqs:
+	missing=""; \
+	command -v Xvfb >/dev/null 2>&1 || missing="$$missing Xvfb"; \
+	{ [ -x "$(MAGIT_VSCODE_BIN)" ] || command -v code >/dev/null 2>&1; } || missing="$$missing code(set MAGIT_VSCODE_BIN in local.mk)"; \
+	[ -z "$$missing" ] || { printf 'MISSING:%s\n' "$$missing"; exit 1; }
+
 vscode-test: build vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode,pnpm --dir clients/vscode test)
@@ -120,14 +135,14 @@ vscode-unit: vscode-deps
 	$(call run,vscode-typecheck,pnpm --dir clients/vscode run typecheck)
 	$(call run,vscode-unit,node clients/vscode/test/test.js)
 
-vscode-version-startup: build vscode-deps
-	MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs
+vscode-version-startup: vscode-prereqs build vscode-deps
+	$(call run,vscode-version-startup,MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 vscode-version-warning: build vscode-deps
-	MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs
+	$(call run,vscode-version-warning,MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 vscode-e2e: build vscode-deps
-	MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs
+	$(call run,vscode-e2e,MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
 update-schema:
 	$(call run,update-schema,cargo run -q --bin generate-schema)
