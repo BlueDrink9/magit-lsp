@@ -206,7 +206,7 @@ Current runtime recorder/security coverage uses `make test-rust FILTER="--test w
 
 ### [x] T003 hygiene-tooling — Complete
 
-Done: `a345a98` (runner/tests), `95c40e5` (tool configs), `741ffa2` (finding dispositions). Enforced by `make hygiene` and `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/hygiene -p 'test_*.py'`.
+Done: `a345a98` (runner/tests), `95c40e5` (tool configs), `741ffa2` (finding dispositions). Enforced by `make hygiene`; the `tests/hygiene` unittest suite and its `hygiene-test` target were later removed by user decision (`f029a4c`).
 Linux report-only baseline: cargo-machete 0.9.2 clean; Knip 5.88.1 reports one unlisted dependency and 69 unused exports; luacheck 1.2.0 reports 34 warnings and 0 errors. Findings have reasons or exact owners; report-only exit 0 does not mean debt-free.
 Windows/macOS execution remains an explicit CI follow-up; no non-Linux run is claimed. T001–T003 and the Linux Phase 1 gate/review are complete; see `TASKS.md`.
 

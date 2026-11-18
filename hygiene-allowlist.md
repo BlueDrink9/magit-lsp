@@ -103,9 +103,7 @@ Tracked marker matches:
 - `docs/evidence/harness-reassessment-inputs.md:6019:27`, `:6107:29`,
   `:6115:37`, `:7598:27`, `:8158:44`, `:8162:48`, `:8230:19`, and
   `:8889:19` are historical evidence text; not live source annotations.
-- `scripts/hygiene.py:72`, `:77` are literal scanner needles. The matching
-  `tests/hygiene/test_hygiene.py:21`, `:72`, `:73`, `:77`, `:79` are literal
-  fixture inputs and assertions enforcing those needles and report formats.
+- `scripts/hygiene.py:84`, `:89` are literal scanner needles and their report label.
 - `src/config.rs:136`, `:143`, `:145`, `:152`, `:159`, `:161`: inactive or
   partially applied configuration schema, with roadmap references in source;
   review against [architecture §3.18](docs/ARCHITECTURE.md#318-configuration) / R-5.5 / R-3.6 / R-5.1.
