@@ -56,9 +56,7 @@ def report(root=ROOT):
     """Print tool status, tracked-file sizes, and tracked source markers."""
     paths = tracked(root)
     run_check("cargo machete", ["cargo", "machete"], root)
-    local_knip = root / "clients/vscode/node_modules/.bin/knip"
-    knip = str(local_knip) if local_knip.exists() else "knip"
-    run_check("knip", [knip], root / "clients/vscode")
+    print("knip: DISABLED (owner: Provision reproducible Knip checker; repair pending)")
     lua_paths = [p for p in paths if p.endswith(".lua")]
     run_check("luacheck", ["luacheck", "--config", str(root / ".luacheckrc")], root, lua_paths)
 

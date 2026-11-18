@@ -70,17 +70,19 @@ class HygieneTests(unittest.TestCase):
         self.assertIn("cargo machete: FINDINGS (exit 1)", output)
         self.assertIn("tool output", output)
         self.assertEqual(calls[0], (["cargo", "machete"], self.root))
-        self.assertEqual(calls[1], (["knip"], self.root / "clients/vscode"))
-        self.assertEqual(calls[2], (["luacheck", "--config", str(self.root / ".luacheckrc")], self.root))
+        self.assertIn("knip: DISABLED (owner: Provision reproducible Knip checker; repair pending)", output)
+        self.assertNotIn("knip", [Path(c[0][0]).name for c in calls])
+        self.assertEqual(calls[1], (["luacheck", "--config", str(self.root / ".luacheckrc")], self.root))
 
     def test_nonzero_is_reported(self):
-        output, _ = self.execute({"cargo": (7, "tool output"), "knip": (1, "config error")})
+        output, _ = self.execute({"cargo": (7, "tool output")})
         self.assertIn("cargo machete: NONZERO (exit 7)", output)
-        self.assertIn("knip: NONZERO (exit 1)", output)
+        self.assertIn("knip: DISABLED", output)
+        self.assertNotIn("knip: CLEAN", output)
 
-    def test_missing_checker_is_distinct(self):
+    def test_knip_disabled_checker_is_not_launched(self):
         output, calls = self.execute(missing={"knip"})
-        self.assertIn("knip: MISSING executable knip", output)
+        self.assertIn("knip: DISABLED", output)
         self.assertNotIn("knip: CLEAN", output)
         self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
 
@@ -117,10 +119,6 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(lua_call[0], ["luacheck", "--config", str(self.root / ".luacheckrc"), "tracked.lua"])
         self.assertNotIn("generated.lua", lua_call[0])
         self.assertNotIn("untracked.lua", lua_call[0])
-
-    def test_invocation_failure_is_reported(self):
-        output, _ = self.execute(failures={"knip"})
-        self.assertIn("knip: INVOCATION FAILURE: cannot execute", output)
 
     def test_missing_cargo_machete_subcommand_is_nonzero(self):
         output, _ = self.execute({"cargo": (101, "no such command: machete")})
