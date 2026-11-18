@@ -145,13 +145,19 @@ Every key action is a **command** in a registry:
 
 ```
 Command { id: "status.stage", scope: "status", doc: "Stage the change at point",
-          status: Implemented, run: async fn(&mut Ctx) -> Result<()> }
+          status: Implemented, run: RunFn }
 ```
 
-Commands are `async fn`s with a `Ui` handle (`ctx.confirm`, `ctx.prompt_text`,
-`ctx.pick`, `ctx.pick_ref`, `ctx.pick_commit`, `ctx.edit_document`). A call
-suspends the command until the client answers; this makes multi-step flows
-ordinary linear code. Tests supply a `ScriptedUi`.
+`RunFn` is a synchronous handler that prepares a `CommandOutcome`, including
+any typed `PromptAction` needed to continue. The session stores that prepared
+continuation and delivers its prompt to the client; when an answer arrives, the
+session resumes the pending operation through `resume_prompt` without rerunning
+command or coordinate resolution. Thus handler preparation, external waiting
+and answer delivery, and continuation resumption are distinct steps. The
+session's prepare/resume/driver boundary owns that lifecycle. Tests use
+`ScriptedUi` as a harness-side answer provider, not as a UI awaited by each
+handler. See `RunFn`, `PromptAction` and `resume_prompt` in `src/commands.rs`,
+and `prepare_prompt`, `execution` and `resume_prompt` in `src/session.rs`.
 
 **Effects** (server → client). All have a `type` field:
 
