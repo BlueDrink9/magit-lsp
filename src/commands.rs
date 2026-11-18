@@ -122,6 +122,26 @@ impl EffectKind {
     }
 }
 
+macro_rules! command {
+    (
+        id: $id:expr,
+        scope: $scope:expr,
+        doc: $doc:expr,
+        status: $status:expr,
+        run: $run:expr,
+        effects: $effects:expr $(,)?
+    ) => {
+        Command {
+            id: $id,
+            scope: $scope,
+            doc: $doc,
+            status: $status,
+            run: $run,
+            effects: $effects,
+        }
+    };
+}
+
 /// A named server operation; see §3.5.
 pub struct Command {
     pub id: &'static str,
@@ -620,10 +640,10 @@ const fn planned(
     doc: &'static str,
     roadmap_id: &'static str,
 ) -> Command {
-    Command {
-        id,
-        scope,
-        doc,
+    command! {
+        id: id,
+        scope: scope,
+        doc: doc,
         status: CommandStatus::Planned { roadmap_id },
         run: planned_run,
         effects: &[],
@@ -632,12 +652,12 @@ const fn planned(
 
 /// An implemented command that opens a menu from the status view.
 const fn menu(id: &'static str, doc: &'static str, run: RunFn) -> Command {
-    Command {
-        id,
+    command! {
+        id: id,
         scope: Scope::Status,
-        doc,
+        doc: doc,
         status: CommandStatus::Implemented,
-        run,
+        run: run,
         effects: &[],
     }
 }
@@ -649,7 +669,7 @@ fn planned_run(_ctx: &mut CommandCtx<'_>) -> Result<CommandOutcome> {
 
 fn build() -> Registry {
     let mut commands = vec![
-        Command {
+        command! {
             id: "common.refresh",
             scope: Scope::Common,
             doc: "Refresh the view",
@@ -657,7 +677,7 @@ fn build() -> Registry {
             run: refresh,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.toggle-section",
             scope: Scope::Common,
             doc: "Fold or unfold the section at point",
@@ -665,7 +685,7 @@ fn build() -> Registry {
             run: toggle_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.show-section",
             scope: Scope::Common,
             doc: "Unfold the section at point",
@@ -673,7 +693,7 @@ fn build() -> Registry {
             run: show_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.hide-section",
             scope: Scope::Common,
             doc: "Fold the section at point",
@@ -681,7 +701,7 @@ fn build() -> Registry {
             run: hide_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.show-all",
             scope: Scope::Common,
             doc: "Unfold every section",
@@ -689,7 +709,7 @@ fn build() -> Registry {
             run: show_all,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.hide-all",
             scope: Scope::Common,
             doc: "Fold every section",
@@ -697,7 +717,7 @@ fn build() -> Registry {
             run: hide_all,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.more-detail",
             scope: Scope::Common,
             doc: "Show one more level of detail",
@@ -705,7 +725,7 @@ fn build() -> Registry {
             run: more_detail,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.less-detail",
             scope: Scope::Common,
             doc: "Show one less level of detail",
@@ -713,7 +733,7 @@ fn build() -> Registry {
             run: less_detail,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.detail-level-1",
             scope: Scope::Common,
             doc: "Show section headers only",
@@ -721,7 +741,7 @@ fn build() -> Registry {
             run: detail_level_1,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.detail-level-2",
             scope: Scope::Common,
             doc: "Show section and file headers",
@@ -729,7 +749,7 @@ fn build() -> Registry {
             run: detail_level_2,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.detail-level-3",
             scope: Scope::Common,
             doc: "Show hunk headers",
@@ -737,7 +757,7 @@ fn build() -> Registry {
             run: detail_level_3,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.detail-level-4",
             scope: Scope::Common,
             doc: "Show hunk bodies",
@@ -745,7 +765,7 @@ fn build() -> Registry {
             run: detail_level_4,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.next-section",
             scope: Scope::Common,
             doc: "Move to the next section",
@@ -753,7 +773,7 @@ fn build() -> Registry {
             run: next_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.prev-section",
             scope: Scope::Common,
             doc: "Move to the previous section",
@@ -761,7 +781,7 @@ fn build() -> Registry {
             run: prev_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.jump",
             scope: Scope::Common,
             doc: "Move to the next or previous visible section, file or hunk",
@@ -769,7 +789,7 @@ fn build() -> Registry {
             run: jump,
             effects: &[],
         },
-        Command {
+        command! {
             id: "status.stage",
             scope: Scope::Status,
             doc: "Stage the change at point",
@@ -777,7 +797,7 @@ fn build() -> Registry {
             run: stage,
             effects: &[],
         },
-        Command {
+        command! {
             id: "status.unstage",
             scope: Scope::Status,
             doc: "Unstage the change at point",
@@ -785,7 +805,7 @@ fn build() -> Registry {
             run: unstage,
             effects: &[],
         },
-        Command {
+        command! {
             id: "status.stage-all",
             scope: Scope::Status,
             doc: "Stage all unstaged changes",
@@ -793,7 +813,7 @@ fn build() -> Registry {
             run: stage_all,
             effects: &[],
         },
-        Command {
+        command! {
             id: "status.unstage-all",
             scope: Scope::Status,
             doc: "Unstage all staged changes",
@@ -804,7 +824,7 @@ fn build() -> Registry {
     ];
 
     commands.extend([
-        Command {
+        command! {
             id: "common.cancel",
             scope: Scope::Common,
             doc: "Cancel the current operation",
@@ -812,7 +832,7 @@ fn build() -> Registry {
             run: cancel,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.confirm",
             scope: Scope::Common,
             doc: "Confirm the current selection",
@@ -820,7 +840,7 @@ fn build() -> Registry {
             run: confirm,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.quit",
             scope: Scope::Common,
             doc: "Close all views",
@@ -828,7 +848,7 @@ fn build() -> Registry {
             run: quit,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.cycle-visibility",
             scope: Scope::Common,
             doc: "Cycle the visibility of every section",
@@ -836,7 +856,7 @@ fn build() -> Registry {
             run: cycle_visibility,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.next-sibling",
             scope: Scope::Common,
             doc: "Move to the next sibling",
@@ -844,7 +864,7 @@ fn build() -> Registry {
             run: next_sibling,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.prev-sibling",
             scope: Scope::Common,
             doc: "Move to the previous sibling",
@@ -852,7 +872,7 @@ fn build() -> Registry {
             run: prev_sibling,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.parent-section",
             scope: Scope::Common,
             doc: "Move to the parent section",
@@ -860,7 +880,7 @@ fn build() -> Registry {
             run: parent_section,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.toggle-text-mode",
             scope: Scope::Common,
             doc: "Toggle text mode",
@@ -868,7 +888,7 @@ fn build() -> Registry {
             run: toggle_text_mode,
             effects: &[],
         },
-        Command {
+        command! {
             id: "common.copy-value",
             scope: Scope::Common,
             doc: "Copy the value at point",
@@ -876,7 +896,7 @@ fn build() -> Registry {
             run: copy_value,
             effects: &[EffectKind::Clipboard],
         },
-        Command {
+        command! {
             id: "common.visit",
             scope: Scope::Common,
             doc: "Visit the thing at point",
@@ -884,7 +904,7 @@ fn build() -> Registry {
             run: visit,
             effects: &[EffectKind::VisitFile],
         },
-        Command {
+        command! {
             id: "status.discard",
             scope: Scope::Status,
             doc: "Discard the change at point",
@@ -904,7 +924,7 @@ fn build() -> Registry {
             "Apply the change at point",
             "R-8.2",
         ),
-        Command {
+        command! {
             id: "open.dispatch",
             scope: Scope::Common,
             doc: "Show the dispatch menu",
@@ -912,7 +932,7 @@ fn build() -> Registry {
             run: open_dispatch,
             effects: &[],
         },
-        Command {
+        command! {
             id: "open.commit",
             scope: Scope::Status,
             doc: "Open the commit menu",
@@ -920,7 +940,7 @@ fn build() -> Registry {
             run: open_commit,
             effects: &[],
         },
-        Command {
+        command! {
             id: "commit.create",
             scope: Scope::MenuAction,
             doc: "Commit",
@@ -928,23 +948,23 @@ fn build() -> Registry {
             run: commit_create,
             effects: &[EffectKind::EditDocument],
         },
-        Command { id: "rebase.continue", scope: Scope::MenuAction, doc: "Continue rebase", status: CommandStatus::Implemented, run: rebase_continue, effects: &[] },
-        Command { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
-        Command { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
-        Command { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
-        Command { id: "rebase.interactive", scope: Scope::MenuAction, doc: "Select base and edit initial rebase plan", status: CommandStatus::Implemented, run: rebase_initial, effects: &[] },
-        Command { id: "rebase.todo-set-action", scope: Scope::RebaseTodo, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
-        Command { id: "rebase.todo-move-before", scope: Scope::RebaseTodo, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
-        Command { id: "rebase.todo-submit", scope: Scope::RebaseTodo, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
-        Command { id: "rebase.todo-pick", scope: Scope::RebaseTodo, doc: "Mark todo commit pick", status: CommandStatus::Implemented, run: rebase_todo_pick, effects: &[] },
-        Command { id: "rebase.todo-reword", scope: Scope::RebaseTodo, doc: "Mark todo commit reword", status: CommandStatus::Implemented, run: rebase_todo_reword, effects: &[] },
-        Command { id: "rebase.todo-edit", scope: Scope::RebaseTodo, doc: "Mark todo commit edit", status: CommandStatus::Implemented, run: rebase_todo_edit, effects: &[] },
-        Command { id: "rebase.todo-squash", scope: Scope::RebaseTodo, doc: "Mark todo commit squash", status: CommandStatus::Implemented, run: rebase_todo_squash, effects: &[] },
-        Command { id: "rebase.todo-fixup", scope: Scope::RebaseTodo, doc: "Mark todo commit fixup", status: CommandStatus::Implemented, run: rebase_todo_fixup, effects: &[] },
-        Command { id: "rebase.todo-drop", scope: Scope::RebaseTodo, doc: "Mark todo commit drop", status: CommandStatus::Implemented, run: rebase_todo_drop, effects: &[] },
-        Command { id: "rebase.todo-up", scope: Scope::RebaseTodo, doc: "Move todo commit up", status: CommandStatus::Implemented, run: rebase_todo_up, effects: &[] },
-        Command { id: "rebase.todo-down", scope: Scope::RebaseTodo, doc: "Move todo commit down", status: CommandStatus::Implemented, run: rebase_todo_down, effects: &[] },
-        Command {
+        command! { id: "rebase.continue", scope: Scope::MenuAction, doc: "Continue rebase", status: CommandStatus::Implemented, run: rebase_continue, effects: &[] },
+        command! { id: "rebase.skip", scope: Scope::MenuAction, doc: "Skip rebase commit", status: CommandStatus::Implemented, run: rebase_skip, effects: &[] },
+        command! { id: "rebase.abort", scope: Scope::MenuAction, doc: "Abort rebase", status: CommandStatus::Implemented, run: rebase_abort, effects: &[] },
+        command! { id: "rebase.edit-todo", scope: Scope::MenuAction, doc: "Edit paused rebase todo", status: CommandStatus::Implemented, run: rebase_edit_todo, effects: &[] },
+        command! { id: "rebase.interactive", scope: Scope::MenuAction, doc: "Select base and edit initial rebase plan", status: CommandStatus::Implemented, run: rebase_initial, effects: &[] },
+        command! { id: "rebase.todo-set-action", scope: Scope::RebaseTodo, doc: "Change todo action", status: CommandStatus::Implemented, run: rebase_todo_set_action, effects: &[] },
+        command! { id: "rebase.todo-move-before", scope: Scope::RebaseTodo, doc: "Move todo commit", status: CommandStatus::Implemented, run: rebase_todo_move_before, effects: &[] },
+        command! { id: "rebase.todo-submit", scope: Scope::RebaseTodo, doc: "Submit rebase todo", status: CommandStatus::Implemented, run: rebase_todo_submit, effects: &[] },
+        command! { id: "rebase.todo-pick", scope: Scope::RebaseTodo, doc: "Mark todo commit pick", status: CommandStatus::Implemented, run: rebase_todo_pick, effects: &[] },
+        command! { id: "rebase.todo-reword", scope: Scope::RebaseTodo, doc: "Mark todo commit reword", status: CommandStatus::Implemented, run: rebase_todo_reword, effects: &[] },
+        command! { id: "rebase.todo-edit", scope: Scope::RebaseTodo, doc: "Mark todo commit edit", status: CommandStatus::Implemented, run: rebase_todo_edit, effects: &[] },
+        command! { id: "rebase.todo-squash", scope: Scope::RebaseTodo, doc: "Mark todo commit squash", status: CommandStatus::Implemented, run: rebase_todo_squash, effects: &[] },
+        command! { id: "rebase.todo-fixup", scope: Scope::RebaseTodo, doc: "Mark todo commit fixup", status: CommandStatus::Implemented, run: rebase_todo_fixup, effects: &[] },
+        command! { id: "rebase.todo-drop", scope: Scope::RebaseTodo, doc: "Mark todo commit drop", status: CommandStatus::Implemented, run: rebase_todo_drop, effects: &[] },
+        command! { id: "rebase.todo-up", scope: Scope::RebaseTodo, doc: "Move todo commit up", status: CommandStatus::Implemented, run: rebase_todo_up, effects: &[] },
+        command! { id: "rebase.todo-down", scope: Scope::RebaseTodo, doc: "Move todo commit down", status: CommandStatus::Implemented, run: rebase_todo_down, effects: &[] },
+        command! {
             id: "commit.amend",
             scope: Scope::MenuAction,
             doc: "Amend HEAD",
@@ -952,7 +972,7 @@ fn build() -> Registry {
             run: commit_amend,
             effects: &[EffectKind::EditDocument],
         },
-        Command {
+        command! {
             id: "commit.extend",
             scope: Scope::MenuAction,
             doc: "Extend HEAD without editing its message",
@@ -960,7 +980,7 @@ fn build() -> Registry {
             run: commit_extend,
             effects: &[EffectKind::EditDocument],
         },
-        Command {
+        command! {
             id: "commit.reword",
             scope: Scope::MenuAction,
             doc: "Reword HEAD",
@@ -968,7 +988,7 @@ fn build() -> Registry {
             run: commit_reword,
             effects: &[EffectKind::EditDocument],
         },
-        Command {
+        command! {
             id: "commit.fixup",
             scope: Scope::MenuAction,
             doc: "Create a fixup commit",
@@ -976,7 +996,7 @@ fn build() -> Registry {
             run: commit_fixup,
             effects: &[],
         },
-        Command {
+        command! {
             id: "commit.instant-fixup",
             scope: Scope::MenuAction,
             doc: "Instantly fix up a selected commit",
@@ -984,7 +1004,7 @@ fn build() -> Registry {
             run: commit_instant_fixup,
             effects: &[],
         },
-        Command {
+        command! {
             id: "commit.instant-squash",
             scope: Scope::MenuAction,
             doc: "Instantly squash into a selected commit",
@@ -994,7 +1014,7 @@ fn build() -> Registry {
         },
         menu("open.branch", "Open the branch menu", open_branch),
         menu("open.log", "Open the log menu", open_log),
-        Command {
+        command! {
             id: "log.current",
             scope: Scope::MenuAction,
             doc: "Show the current log",
@@ -1002,10 +1022,10 @@ fn build() -> Registry {
             run: open_current_log,
             effects: &[],
         },
-        Command { id: "log.local-branches", scope: Scope::MenuAction, doc: "Show commits reachable from local branches", status: CommandStatus::Implemented, run: open_local_branch_log, effects: &[] },
-        Command { id: "log.all-branches", scope: Scope::MenuAction, doc: "Show commits reachable from branches", status: CommandStatus::Implemented, run: open_all_branch_log, effects: &[] },
-        Command { id: "log.all-references", scope: Scope::MenuAction, doc: "Show commits reachable from all refs", status: CommandStatus::Implemented, run: open_all_reference_log, effects: &[] },
-        Command {
+        command! { id: "log.local-branches", scope: Scope::MenuAction, doc: "Show commits reachable from local branches", status: CommandStatus::Implemented, run: open_local_branch_log, effects: &[] },
+        command! { id: "log.all-branches", scope: Scope::MenuAction, doc: "Show commits reachable from branches", status: CommandStatus::Implemented, run: open_all_branch_log, effects: &[] },
+        command! { id: "log.all-references", scope: Scope::MenuAction, doc: "Show commits reachable from all refs", status: CommandStatus::Implemented, run: open_all_reference_log, effects: &[] },
+        command! {
             id: "log.load-more",
             scope: Scope::Log,
             doc: "Load more commits",
@@ -1013,7 +1033,7 @@ fn build() -> Registry {
             run: log_load_more,
             effects: &[],
         },
-        Command {
+        command! {
             id: "log.select-and-copy",
             scope: Scope::MenuAction,
             doc: "Select commits and copy their object IDs",
@@ -1059,7 +1079,7 @@ fn build() -> Registry {
             "R-7.2",
         ),
         planned("open.run", Scope::Status, "Run a Git command", "R-8.2"),
-        Command {
+        command! {
             id: "open.process-log",
             scope: Scope::Status,
             doc: "Open the process log",
@@ -1067,7 +1087,7 @@ fn build() -> Registry {
             run: open_process_log,
             effects: &[],
         },
-        Command {
+        command! {
             id: "process-log.clear",
             scope: Scope::ProcessLog,
             doc: "Clear the process log",
@@ -1075,7 +1095,7 @@ fn build() -> Registry {
             run: clear_process_log,
             effects: &[],
         },
-        Command {
+        command! {
             id: "select.toggle-mark",
             scope: Scope::Select,
             doc: "Toggle the mark on the commit at point",
@@ -1083,7 +1103,7 @@ fn build() -> Registry {
             run: toggle_commit_mark,
             effects: &[],
         },
-        Command {
+        command! {
             id: "select.enter-rev",
             scope: Scope::Select,
             doc: "Enter a revision by hand",
@@ -1091,7 +1111,7 @@ fn build() -> Registry {
             run: enter_revision,
             effects: &[],
         },
-        Command {
+        command! {
             id: "menu.save-args",
             scope: Scope::Menu,
             doc: "Save the menu arguments",
@@ -1099,7 +1119,7 @@ fn build() -> Registry {
             run: save_menu_args,
             effects: &[],
         },
-        Command {
+        command! {
             id: "menu.reset-args",
             scope: Scope::Menu,
             doc: "Reset the menu arguments",
