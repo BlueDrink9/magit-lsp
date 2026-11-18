@@ -4,14 +4,29 @@ vim.opt.shadafile = 'NONE'
 local repo, server = assert(vim.env.PLAIN_REPO), assert(vim.env.PLAIN_SERVER)
 local presets = {
   minimal = { workspace = { applyEdit = true }, textDocument = { codeAction = {} } },
-  showDocument = { workspace = { applyEdit = true }, textDocument = { codeAction = {} }, window = { showDocument = { support = true } } },
-  completion = { workspace = { applyEdit = true }, textDocument = { codeAction = {}, completion = { completionItem = { snippetSupport = true } } } },
-  progress = { workspace = { applyEdit = true }, textDocument = { codeAction = {} }, window = { workDoneProgress = true } },
-  full = { workspace = { applyEdit = true, workspaceEdit = { documentChanges = true } }, textDocument = { codeAction = {}, completion = { completionItem = { snippetSupport = true } } }, window = { showDocument = { support = true }, workDoneProgress = true } },
+  showDocument = {
+    workspace = { applyEdit = true }, textDocument = { codeAction = {} },
+    window = { showDocument = { support = true } },
+  },
+  completion = {
+    workspace = { applyEdit = true },
+    textDocument = { codeAction = {}, completion = { completionItem = { snippetSupport = true } } },
+  },
+  progress = {
+    workspace = { applyEdit = true }, textDocument = { codeAction = {} },
+    window = { workDoneProgress = true },
+  },
+  full = {
+    workspace = { applyEdit = true, workspaceEdit = { documentChanges = true } },
+    textDocument = { codeAction = {}, completion = { completionItem = { snippetSupport = true } } },
+    window = { showDocument = { support = true }, workDoneProgress = true },
+  },
 }
 local preset = assert(presets[vim.env.PLAIN_PRESET])
 local evidence = { shows = {}, messages = {}, progress = {}, creates = {} }
-for _, method in ipairs({ 'window/showDocument', 'window/showMessage', 'window/workDoneProgress/create', '$/progress' }) do
+for _, method in ipairs({
+  'window/showDocument', 'window/showMessage', 'window/workDoneProgress/create', '$/progress',
+}) do
   local native = assert(vim.lsp.handlers[method], method)
   vim.lsp.handlers[method] = function(err, params, ctx, config)
     local key = ({ ['window/showDocument'] = 'shows', ['window/showMessage'] = 'messages',
@@ -38,7 +53,10 @@ local function exercise(client, buf)
   local function actions(target)
     local row = 0
     for index, line in ipairs(vim.api.nvim_buf_get_lines(target, 0, -1, false)) do
-      if line:find(target == buf and (text(buf):find('Commit', 1, true) and 'Commit' or 'tracked.txt') or 'Native draft edit', 1, true) then
+      local wanted = target == buf
+        and (text(buf):find('Commit', 1, true) and 'Commit' or 'tracked.txt')
+        or 'Native draft edit'
+      if line:find(wanted, 1, true) then
         row = index - 1; break
       end
     end
@@ -54,9 +72,11 @@ local function exercise(client, buf)
     error('missing action: ' .. command .. ' ' .. tostring(item))
   end
   request('workspace/executeCommand', find_action(buf, 'open.commit'))
-  local completed, outcome = false, nil
+  local completed = false
   assert(client:request('workspace/executeCommand', find_action(buf, 'menu.run-action', 'c'), function(err, result)
-    assert(not err, vim.inspect(err)); outcome = result; evidence.outcome = result; completed = true
+    assert(not err, vim.inspect(err))
+    evidence.outcome = result
+    completed = true
   end, buf))
   local draft = repo .. '/.git/COMMIT_EDITMSG'
   wait('Git editor draft', function() return vim.fn.filereadable(draft) == 1 end)
@@ -76,10 +96,12 @@ local function exercise(client, buf)
   local draft_buf = vim.api.nvim_get_current_buf()
   assert(vim.lsp.buf_attach_client(draft_buf, client.id), 'attach native draft buffer')
   local template = table.concat(vim.fn.readfile(draft), '\n')
-  assert(text(draft_buf) == template and template:find('tracked.txt', 1, true), 'native draft matches Git template')
+  assert(text(draft_buf) == template and template:find('tracked.txt', 1, true),
+    'native draft matches Git template')
   local opened = find_action(draft_buf, 'common.cancel').arguments[1]
   assert(opened.uri == vim.uri_from_bufnr(draft_buf), 'server owns attached draft URI')
-  assert(opened.version == vim.lsp.util.buf_versions[draft_buf], 'native didOpen version retained by server')
+  assert(opened.version == vim.lsp.util.buf_versions[draft_buf],
+    'native didOpen version retained by server')
   vim.api.nvim_buf_set_lines(draft_buf, 0, 0, false, { 'Native draft edit' })
   local edited = text(draft_buf)
   -- The subsequent request flushes native didChange; Abort must address that version.
@@ -89,7 +111,8 @@ local function exercise(client, buf)
     local synchronized = action.command.arguments[1]
     assert(synchronized.uri == opened.uri and synchronized.version > opened.version,
       'native didChange advances server draft version')
-    assert(synchronized.version == vim.lsp.util.buf_versions[draft_buf], 'server has exact native edited version')
+    assert(synchronized.version == vim.lsp.util.buf_versions[draft_buf],
+      'server has exact native edited version')
   end
   if preset.textDocument.completion then
     assert(not client.server_capabilities.completionProvider, 'completion is not implemented by this server')
@@ -135,7 +158,8 @@ end
 vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()
   vim.api.nvim_buf_set_name(0, repo .. '/.magit')
   local buf = vim.api.nvim_get_current_buf()
-  local client = vim.lsp.start({ name = 'magit-lsp-capability-preset', cmd = { server }, root_dir = repo, capabilities = preset,
+  local client = vim.lsp.start({
+    name = 'magit-lsp-capability-preset', cmd = { server }, root_dir = repo, capabilities = preset,
     before_init = function(params)
       params.capabilities = vim.deepcopy(preset)
       evidence.capabilities = vim.deepcopy(params.capabilities)
@@ -147,7 +171,10 @@ vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()
   vim.lsp.buf_attach_client(0, client)
   vim.schedule(function()
     local ok, err = xpcall(function() exercise(assert(vim.lsp.get_client_by_id(client)), buf) end, debug.traceback)
-    if not ok then evidence.error = err; vim.lsp.stop_client(client, true) end
+    if not ok then
+      evidence.error = err
+      vim.lsp.stop_client(client, true)
+    end
     local f = assert(io.open(vim.env.PLAIN_RESULT, 'w')); f:write(vim.json.encode(evidence)); f:close()
     vim.cmd('qa!')
   end)

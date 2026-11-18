@@ -123,7 +123,7 @@ impl Renderer {
                 Ok(format!(
                     "{}{}",
                     doc_lines(map, combinator_note(map)),
-                    format!("---@alias {name} {expression}\n"),
+                    alias_declaration(name, &expression),
                 ))
             }
             _ => Err(format!("{name}: schema must be an object or a boolean")),
@@ -152,7 +152,7 @@ impl Renderer {
                 fields.push_str(&format!(
                     "---@field {}{optional} {expression}{}\n",
                     field_name(property)?,
-                    field_comment(schema),
+                    field_comment(schema, &format!("---@field {}{optional} {expression}", field_name(property)?)),
                 ));
             }
         }
@@ -689,7 +689,7 @@ fn pascal_case(name: &str) -> Result<String, String> {
 }
 
 /// Render a field description and annotation-only constraints.
-fn field_comment(schema: &Value) -> String {
+fn field_comment(schema: &Value, field_prefix: &str) -> String {
     let Some(map) = schema.as_object() else {
         return String::new();
     };
@@ -722,11 +722,7 @@ fn field_comment(schema: &Value) -> String {
     if !annotations.is_empty() {
         parts.push(annotations.join("; "));
     }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" # {}", parts.join("; "))
-    }
+    wrap_inline_comment(field_prefix, &parts.join("; "))
 }
 
 /// Render description and generated semantic notes as LuaLS doc lines.
@@ -737,13 +733,83 @@ fn doc_lines(map: &Map<String, Value>, note: Option<&str>) -> String {
             if line.is_empty() {
                 out.push_str("---\n");
             } else {
-                out.push_str(&format!("--- {line}\n"));
+            out.push_str(&wrap_doc_line("--- ", line));
             }
         }
     }
     if let Some(note) = note {
-        out.push_str(&format!("--- {note}\n"));
+        out.push_str(&wrap_doc_line("--- ", note));
     }
+    out
+}
+
+/// Wrap generated prose comments without splitting a word or changing text.
+fn wrap_doc_line(prefix: &str, text: &str) -> String {
+    wrap_words(prefix, text, 120)
+}
+
+/// Keep a field's inline description within Luacheck's configured line limit.
+fn wrap_inline_comment(prefix: &str, text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    let first_prefix = format!("{prefix} # ");
+    let mut lines = wrap_words(&first_prefix, text, 120);
+    lines.replace_range(..prefix.len(), "");
+    lines.pop();
+    lines
+}
+
+fn wrap_words(prefix: &str, text: &str, limit: usize) -> String {
+    let mut out = String::new();
+    let mut line = prefix.to_string();
+    let mut line_prefix = prefix;
+    for word in text.split_whitespace() {
+        if line.len() > line_prefix.len() && line.len() + 1 + word.len() > limit {
+            out.push_str(&line);
+            out.push('\n');
+            line = "--- ".to_string();
+            line_prefix = "--- ";
+        }
+        if line.len() > line_prefix.len() && !line.ends_with(' ') {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    out.push_str(&line);
+    out.push('\n');
+    out
+}
+
+fn alias_declaration(name: &str, expression: &str) -> String {
+    let (mut quoted, mut escaped, mut depth) = (false, false, 0usize);
+    let mut alternatives = expression.split(|character| {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                quoted = false;
+            }
+            return false;
+        }
+        match character {
+            '"' => quoted = true,
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            '|' if depth == 0 => return true,
+            _ => {}
+        }
+        false
+    });
+    let first = alternatives.next().unwrap_or_default();
+    let mut out = format!("---@alias {name} {first}");
+    for alternative in alternatives {
+        out.push_str("\n---| ");
+        out.push_str(alternative);
+    }
+    out.push('\n');
     out
 }
 

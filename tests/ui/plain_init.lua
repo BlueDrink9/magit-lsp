@@ -51,9 +51,13 @@ if vim.env.MAGIT_LSP_UI_PROBE_FILE then
     if not name:match('/COMMIT_EDITMSG$') then return end
     local client = vim.lsp.get_client_by_id(vim.g.plain_smoke_client_id or -1)
     local autocmds = {}
-    for _, event in ipairs({ 'InsertEnter', 'InsertLeave', 'TextChanged', 'TextChangedI', 'BufWritePre', 'BufWritePost' }) do
-      for _, autocmd in ipairs(vim.api.nvim_get_autocmds({ event = event })) do
-        autocmds[#autocmds + 1] = { event = event, desc = autocmd.desc, command = autocmd.command }
+    for _, autocmd_event in ipairs({
+      'InsertEnter', 'InsertLeave', 'TextChanged', 'TextChangedI', 'BufWritePre', 'BufWritePost',
+    }) do
+      for _, autocmd in ipairs(vim.api.nvim_get_autocmds({ event = autocmd_event })) do
+        autocmds[#autocmds + 1] = {
+          event = autocmd_event, desc = autocmd.desc, command = autocmd.command,
+        }
       end
     end
     local cursor = vim.api.nvim_win_get_cursor(0)

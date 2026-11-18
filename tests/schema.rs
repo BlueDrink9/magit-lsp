@@ -1338,7 +1338,7 @@ fn lua_declaration<'a>(text: &'a str, header: &str) -> &'a str {
 }
 
 #[test]
-fn luals_annotation_generation_is_deterministic() {
+fn luals_annotations_generation_is_deterministic() {
     let first = schema_luals::protocol_annotations().expect("generate annotations");
     let second = schema_luals::protocol_annotations().expect("regenerate annotations");
     assert_eq!(first.path, "lua/magit-lsp/types.lua");
@@ -1349,6 +1349,10 @@ fn luals_annotation_generation_is_deterministic() {
     assert!(
         first.text.starts_with("---@meta\n"),
         "annotations are a LuaLS meta file"
+    );
+    assert!(
+        first.text.lines().all(|line| line.len() <= 120),
+        "generated annotations stay within Luacheck's 120-column limit"
     );
 }
 
@@ -1434,8 +1438,12 @@ fn luals_annotations_preserve_directional_contracts() {
         "---@alias ViewPromptRespondParams.PromptValue ",
     );
     assert!(
-        prompt_value.contains("boolean|string|ViewPromptRespondParams.PromptChoiceAnswer")
-            && prompt_value.contains("ViewPromptRespondParams.PromptValue.Variant4"),
+        prompt_value.contains(concat!(
+            "---@alias ViewPromptRespondParams.PromptValue boolean\n",
+            "---| string\n",
+            "---| ViewPromptRespondParams.PromptChoiceAnswer\n",
+            "---| ViewPromptRespondParams.PromptValue.Variant4",
+        )),
         "untagged unions stay unions: {prompt_value}"
     );
     let multi_answer = lua_declaration(
@@ -1523,7 +1531,7 @@ fn luals_annotations_preserve_combinator_siblings() {
     let rendered =
         schema_luals::render_root(&schema, "Synthetic").expect("render combinator with siblings");
     assert!(
-        rendered.contains("---@alias Synthetic.Root Synthetic.Root.Variant1|Synthetic.Root.Variant2"),
+        rendered.contains("---@alias Synthetic.Root Synthetic.Root.Variant1\n---| Synthetic.Root.Variant2"),
         "oneOf stays a union: {rendered}"
     );
     for (variant, tag) in [("Variant1", "switch"), ("Variant2", "option")] {
@@ -1551,8 +1559,17 @@ fn luals_annotations_preserve_combinator_siblings() {
     });
     let rendered = schema_luals::render_root(&any_of, "Synthetic").expect("render anyOf");
     assert!(
-        rendered.contains("---@alias Synthetic.Root string|number"),
+        rendered.contains("---@alias Synthetic.Root string\n---| number"),
         "anyOf stays an honest union: {rendered}"
+    );
+    let literal_union = serde_json::json!({
+        "title": "Synthetic",
+        "enum": ["left|right", "other"]
+    });
+    let rendered = schema_luals::render_root(&literal_union, "Synthetic").expect("render literals");
+    assert!(
+        rendered.contains("---@alias Synthetic.Root \"left|right\"\n---| \"other\""),
+        "literal pipes are not union separators: {rendered}"
     );
 }
 
