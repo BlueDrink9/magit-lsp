@@ -59,6 +59,7 @@ Priority work before further feature execution. Earlier checked Review items are
   - **Done when:** The maintained section distinguishes synchronous preparation from waiting/delivery and continuation resumption, contains no claim that registry handlers are async, and `make docs-check` passes when documentation verification is authorized.
   - **Constraints:** Documentation only; do not redesign handlers, add an abstraction, change the protocol or claim runtime verification. Preserve all queue records and statuses, T022's hold, the Phase 6A prohibition and explicit human release approval.
   - Verified: `make docs-check` → exit 0 (`ok: docs-check`); §3.5 now names synchronous preparation, session-owned waiting/delivery and typed resumption.
+  - Done: `58f27d4`.
 
 ### P3
 
