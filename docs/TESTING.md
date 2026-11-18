@@ -43,8 +43,10 @@ must match normal replay before any recording is written. New entries come
 from validated real-server responses; retained entries keep their recorded
 values, not temporary fixture paths. Unchanged lines (including requests and
 metadata) remain byte-identical, existing fragment boundaries are preserved,
-and fragments must stay below 100000 bytes. Capture fails rather than
-refreshing unrelated drift. Inspect the diff, rerun normal replay, and commit
+and each generated capture fragment must stay below 100000 bytes (a bounded
+capture/storage constraint, not a human-readability or authored-transcript
+quota). Capture fails rather than refreshing unrelated drift. Intact authored
+transcripts need not be split solely for size. Inspect the diff, rerun normal replay, and commit
 recordings separately; then run `make update-schema`, `make schema-check`
 and `make docs-check`, committing generated worked exchanges separately.
 

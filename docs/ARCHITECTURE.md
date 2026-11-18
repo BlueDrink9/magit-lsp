@@ -28,7 +28,7 @@ completed correctness contracts and architecture design.
 | Tests | Feature Rust state tests and conformance scenarios; native Neovim only for new visible behavior, VSCode only for changed declared capabilities or client files. |
 | Generated files | Ship only files clients need; mark generated and enforce drift checks. |
 | Capability resolution with quirks | Resolve declarations, then client quirks, then user configuration (T005). |
-| Rich protocol | The rich protocol stays; v1 preview permits additive changes only. |
+| Rich protocol | Before project 1.0, breaking protocol/API/config changes are allowed without compatibility shims or additive-only guarantees. The wire's `v=1` label is not a stability promise; negotiation and validation invariants remain. Stability after 1.0 requires an explicit decision. |
 | Plain presentation (target) | Standard-LSP presentation is VCS-neutral. T008 serving/stacking and parameterized stable-ID picking; T009 provider-file edits; T010 semantic dispatcher and fake-provider independence test. Intended architecture, not current behavior. |
 | Plain support (target) | Generic LSP client selection, sequential URI-keyed sync, safe repository resolution, validated targets and bounded capabilities; deferred/out-of-scope work remains in the numbered queue. |
 

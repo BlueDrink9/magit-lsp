@@ -161,7 +161,7 @@ Last review: `30de40d`; substantial fixture retirement, live synchronization cov
 
 Order for phases 1 to 6: do T001 and T002 first, in parallel. Then do T004 and T005. Then do T006 and T007. Phase 3 follows. Phase 4 runs alongside phase 3. Phase 5 runs in parallel with all other phases. T022 closes the gate.
 
-Current authorization is in TASKS.md, not this historical dependency order. T022 remains unchecked; Phase 6A must not start. T115–T117 are pre-freeze prototypes but do not gate 0.2; T118 stable freeze also does not gate 0.2. Release still requires explicit human approval at T033. Resolve the additive-preview versus pre-stable-breaking-cleanup policy tension through T113 before T114; this documentation audit does not choose either policy. Likewise T022's disposition alternatives below do not override its current hold or decide whether debt must be zero.
+Current authorization is in TASKS.md, not this historical dependency order. T022 remains unchecked; Phase 6A must not start until T022 sign-off. T115–T117 are pre-freeze prototypes but do not gate 0.2; T118 stable freeze also does not gate 0.2. Release still requires explicit human approval at T033. Before project 1.0, breaking changes are allowed without compatibility shims or additive-only guarantees; wire `v=1` alone grants no stability. T113/T114 still decide and implement their assigned protocol work, preserving negotiation and validation invariants. T022 requires disposition of findings, not zero debt: fix/delete, concrete-reason exception, or exact owner task, and disclose missing tools honestly. This policy resolution does not satisfy T022's other acceptance or release approval.
 
 ## Closed umbrella tickets
 
@@ -462,7 +462,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 
 The rich protocol stays. Make it stable early. Before the final freeze, build prototypes for Visual Studio, Zed and JetBrains. A prototype shows which parts of the protocol every client needs. Visual Studio means the Microsoft Visual Studio IDE, not VS Code.
 
-0.2 ships the rich protocol as "v1 preview". Inside v1 preview, only additive changes are allowed. T105, T112, T113, T114 and T119 gate 0.2. T115, T116 and T117 start after T113. T118 freezes v1 as stable. T118 does not gate 0.2.
+0.2's rich protocol is pre-1.0 project software: breaking protocol/API/config changes are allowed without compatibility shims or additive-only guarantees. The wire's `v=1` label is not a stability promise. T105, T112, T113, T114 and T119 gate 0.2. T115, T116 and T117 start after T113. T118 records a deliberate stability/freeze decision; it does not gate 0.2. Preserve protocol negotiation and input-validation invariants throughout.
 
 A second backend (for example jj) reuses the views, key bindings and protocol. It adds new views and commands. It does not need a protocol break or a hard fork (see T046 and T098).
 
