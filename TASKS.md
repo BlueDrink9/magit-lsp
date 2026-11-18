@@ -92,6 +92,8 @@ Historical inventories are inputs to revalidation, not deletion instructions. Ex
   - User now authorizes this bounded audit/compaction/reordering, superseding only first-three-lines/order freeze. Preserve identity/state/Done/corrections, unresolved acceptance/dependencies and anchors; no permanent archive or deletion of obligations to meet the cap. Current contracts remain in `docs/ARCHITECTURE.md`; earlier immutable sources `da4d422:TASKS.md`, `d9ea816:TASKS.md` remain provenance. This audit does not run `make hygiene` or close this broader hygiene item; all unwaived verification and the prior hold remain for any further work.
 - [x] **Waive size-only authored transcript splitting** — policy resolution, not implementation: retain the complete `docs/client-exchanges.md` worked exchanges and their evidence; intact transcripts need not be split solely for size. No generated references or captures were hand-edited.
   - Verified: `make docs-check` → exit 0 (`ok: docs-check`); maintained policy and links pass documentation checks. No runtime/hygiene gate was run or claimed.
+  - Done: `4fa191c` (policy record); follow-up scope reconciliation is recorded separately below.
+  - Verified: follow-up `make docs-check` → exit 0; T113/T118 scope now aligns with pre-1.0 breaking freedom and requires an explicit future stability decision.
 
 ### Host-dependent stabilization
 

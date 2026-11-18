@@ -489,13 +489,13 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 
 ### T113 rich-protocol-decisions (S)
 
-- **Depends on:** T112. Use the stage 1 findings of T115, T116 and T117 when they exist. A later finding changes the record only through an additive change.
+- **Depends on:** T112. Use the stage 1 findings of T115, T116 and T117 when they exist. Later findings may update the record according to the project's then-current stability policy; pre-1.0 breaking changes need not be additive or preserve compatibility.
 - **Target Files:** `docs/design/rich-protocol-v1.md` (new), `docs/ARCHITECTURE.md` sections 3.6 and 3.9, `docs/PROTOCOL.md` section 4.
 - **Reference Files:** `docs/design/rich-protocol-audit.md`.
 - **Constraints:** Decide as little as possible. Choose the simplest rule that works for the clients that exist now.
 - **Acceptance:** The decision record states these decisions:
   1. Core and optional parts. Core (frozen): the capability block; `view/open` and `view/close`; the three render forms; ack and resync; key and invoke; keymap; the basic effects; prompts; progress. Optional (declared): `editDocument`, `visitFile`, `clipboard`, picks, the structured menu model, text mode, and layouts other than `main`.
-  2. The evolution policy. Inside v1, changes are additive only. A new effect or prompt kind needs a declaration. A breaking change raises `v`.
+  2. The evolution policy. Before project 1.0, breaking protocol/API/config changes are permitted without compatibility shims or an additive-only guarantee. The wire's `v=1` label alone grants no stability. Record how capability declarations and version negotiation/validation continue to work, and make an explicit project stability/evolution decision for after 1.0; only that decision may establish future compatibility guarantees.
   3. The version check. The server reports its protocol version in the initialize result. A client reports the minimum version that it needs. Each side shows a readable message when the versions do not match.
   4. A decision for each real wart in T112: fix it, document it, or reject the proposal with a reason.
   5. The prompt transport stays as a notification plus `view/promptRespond`. Write it in section 3.6.
@@ -560,7 +560,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 
 - **Depends on:** T114, and stage 2 of at least two of T115, T116 and T117.
 - **Target Files:** `docs/design/rich-protocol-v1.md`, `docs/CLIENT_SPEC.md` (level 4), `docs/schema/`.
-- **Acceptance:** Review the requests from the prototypes. Apply the additive ones. Decide the others. Mark v1 as stable. Write the evolution policy in level 4 of the spec. Make sure that each prototype passes the conformance scenarios for its declared capabilities. Record which client anchors each optional capability (see rule 6). If no client uses an optional part, delete it (rule 5).
+- **Acceptance:** Review the requests from the prototypes. Apply the additive ones; decide the others under the pre-1.0 policy, which permits breaking changes without compatibility shims or additive-only guarantees. Explicitly decide and document whether/when project stability begins and what evolution guarantees then apply; do not infer a stable compatibility guarantee from the wire's `v=1` label. Write the evolution policy in level 4 of the spec. Make sure that each prototype passes the conformance scenarios for its declared capabilities. Record which client anchors each optional capability (see rule 6). If no client uses an optional part, delete it (rule 5).
 - **Verify:** Run the schema drift check and the conformance set on each client.
 
 ## Phase 7: Test stabilization (runs in parallel; does not gate 0.2)
