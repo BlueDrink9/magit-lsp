@@ -177,7 +177,7 @@ server. `make vscode-test` runs the same node tests plus
 `contributes.keybindings` from the server's static manifest and fails when the
 committed one is stale (e.g. after editing a profile in Rust without running
 the generator). Make installs locked dependency versions from
-`pnpm-lock.yaml` when needed, using a shared pnpm store. `make test` includes
+`clients/vscode/pnpm-lock.yaml` when needed, using a shared pnpm store. `make test` includes
 `vscode-test`; CI uses the same Make bootstrap.
 
 To test the extension in an Extension Development Host, build the server and
