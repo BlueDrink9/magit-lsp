@@ -1,3 +1,5 @@
 /target/
 /build/
 .direnv/
+local.mk
+__pycache__/
