@@ -1,32 +1,22 @@
 # magit-lsp — Roadmap
-Stop after: Continue independent queued backlog work around blocked tickets (user authorization 2026-11-17); retain Phase 6 sign-off blockers and do not start dependent Phase 6A work.
-Last review: `4045289`; accumulated-work review since `f3a036e` found three P1 and two P2, queued under Review; no P0 or P3. Full `make test` passed after the replay/menu oracle repairs, including VSCode dependency setup, typecheck, tests and keybindings. Hygiene owner records remain valid; not Phase 6 sign-off or permission for Phase 6A; Windows/macOS unverified.
-Overnight: until none | parked 0/3
-Phase 6 final gate at `0c667d1`: review findings resolved; `make registry-docs-check`, `make ui-test`, and `make ui-tour` pass. Full `make test` has not passed; T022 remains unchecked. Read-only `pgrep -af magit-lsp` returned no processes. Hygiene remains not clean; do not start Phase 6A.
+Stop after: completion of this user-requested documentation audit/compaction. Do not execute backlog work in this session. Prior standing authorization permits independent work around blocked tickets only; it does not override holds, release approval or the prohibition on starting Phase 6A.
+Last review: `4045289`; documented gate HEAD `ec0bbbc`. T022 remains unchecked; report-only hygiene exit 0 is not sign-off. No release or Phase 6A approval is granted here.
 
-Previous gate: 84fb4bd; Phase 4 end gate over `92c78fb..84fb4bd` (11 commits, 15 paths, +2655/-321) delivering T012 example-files and T013 client-spec: six recorded `docs/examples/*.jsonl` files with loader/schema validation and replay against the real binary (Plain and rich), generated worked-exchanges and capability-levels blocks in `docs/CLIENT_SPEC.md`, the five client implementation levels with checklists keyed only to existing repo identifiers, the classification rule pinned to `negotiate` and recorded initialize traces, the recorded Neovim `documentChanges` fact, and the README Plain-mode statement naming only tested clients. Serial `make test`, `make hygiene` and `make ui-tour` at this HEAD all exited 0 (`make test` digests `build`/`rust`/`lua`/`vscode-typecheck`/`vscode`/`keybindings`; `ui-tour` wrote 32 scenario sections to `build/ui/tour.md`; `pgrep` shows no orphan servers). `make hygiene` exits 0 but reports three optional tools missing on this host — `cargo-machete`, `knip`, `luacheck` — recorded honestly as advisory, not a clean-tool report. Bounded two-scout review (no reviewer tool available) found no P0-P2: all 70 identifiers cited in the levels docs resolve in the tree, schema drift/tamper and replay/divergence assertions are non-vacuous with exact-after-normalization comparison and no sleeps, and the one suspected Helix test claim was disproven (`tests/plain_harness.rs:139` exists; the doc explicitly disclaims native Helix runs). P3 notes: the bundled-Neovim rich classification test asserts only `Ok(Presentation::Rich(_))` without field-level checks; example divergence coverage flips one frame per presentation; divergence tests couple to the mismatch error-string format. Earlier gate scope follows.
+## Audit findings and work order (2026-11-18)
 
-Previous gate: 92c78fb; substantial-chunk gate over `f10d8a0..92c78fb` (16 commits, 69 paths, +10893/-150) delivering T011 schema-generation end to end: tagged Plain action targets, directional payload/method/capability schemas with `update-schema`/`schema-check` drift, generated TypeScript and LuaLS wire types, real client `checkJs` with permanent positive/negative fixtures, generated client-spec payload tables, shared effect/prompt lists consumed by both clients, schema drift in CI, and recorded-fixture validation. Serial `make test` and `make ui-test` at that HEAD both exited 0; success logs deleted, so no per-suite counts are claimed. No P0-P2 found; P3 notes: `RichCapabilityDeclaration` mirrors `MagitCapabilities` (schema-only, constant-bounded); Lua per-client layout list hand-maintained (legitimate).
+This file alone owns checkbox states and Done evidence. [TASKS_PART_SEVEN.md](./TASKS_PART_SEVEN.md) owns detailed numbered scopes/dependencies, not duplicate completion status. Current contracts live in maintained architecture/protocol references, not historical attempt logs.
 
-Gate rationale: the accumulated close-routing, basic-modifier contract, terminal-input and native-fixture repairs since `7fae07c` span 17 paths (+574/-60). Run `make test` and `make ui-test` serially before bounded review; this is a substantial-chunk gate, not a roadmap phase end. Concurrent dirty release/tooling work remains excluded.
-Prior gates: Phase 2 `make test`, report-only `make hygiene`, and `make ui-tour` passed at `5da5d86`; `make test` passed again at `ebf9ed1`. Phase 3 `make test` and `make ui-tour` passed at `b4dae94`; `make hygiene` was report-only, with `cargo machete`, `knip` and `luacheck` absent. Focused verification at `bfb60d1`: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` passed. No new runtime run for this source review. `make ui-test` previously reported 44 PASS / 5 baseline failures (`common-navigation`, `hunk-body-fold`, `log-select`, `log-view`, `process-log`), reproduced at baseline `2e29535`; all five were repaired in the Bugfix slice below.
-Documentation cleanup gate: substantial reference relocation and history reduction warrant a bounded preservation review. Runtime implementation changes belong to a concurrent workstream; this documentation gate uses focused documentation checks, not a redundant runtime/native gate.
+Recommended order (not execution authorization): reopened P1 Review; ready independent work; blocked prerequisites; gated features/release; optional/unscheduled work; completed ledger. Knip provisioning precedes its dependency/export audits. Revalidate old export inventories before deletion. T105 has one Phase 6A scope; T111 routes menu/fold and minimum-Git decisions to T113/T119. T065/T066/T078 may overlap delivered work, but overlap is INFERRED, not completion; compare remaining acceptance when scheduled.
 
-Resolved checkpoint detail: immutable `d9ea816:TASKS.md`; not current instructions. `Source-only` labels mark provenance, not implementation commits. Scripted model checks are not real-server conformance; Linux native evidence does not establish Windows/macOS behavior, which remain CI follow-ups. Hygiene remains report-only; findings have owners/reasons as recorded in the hygiene allowlist. T007.1n had a timeout before a passing rerun; retain this transient timeout/rerun risk.
+Human decisions remain open: whether T022 needs zero hygiene debt or fully dispositioned findings; reproducible Knip provisioning; internal transcript splitting versus a size exception for authored client exchanges; additive-only preview versus pre-stable breaking-cleanup wording before T113/T114. This audit clarifies ownership and conflicts; it does not decide those policies or grant a gate approval. Release go/no-go requires explicit human approval. Optional prototypes, stable freeze and all post-release features are not silently added to the release prerequisite subset.
 
-Gate rationale (2026-11-17): accumulated cleanup since `1e50954` spans 60 files (+15096/-14340), including server/session extraction, client lifecycle changes and shared recording discovery. Run a serial full-test gate and review before continuing; not Phase 6 sign-off or permission for Phase 6A.
+Provenance: **Base** means immutable `a366409749edf0e5591dff34d70500b73ab595b9:TASKS.md`. Ledger `B<number>` maps a retained checkbox occurrence to its exact base line, including its original title, nesting, full acceptance, verification and correction context. Historical closed prose and superseded gates are consolidated into that source, not another archive. `Refs` are historical references, not inferred implementation Done commits. Ambiguous `Done: containing commit` and source-only evidence remain ambiguous; no verification SHA is substituted for implementation evidence. Separate occurrences remain separate ledger rows, even when they concern the same umbrella ID. No unchecked record is consolidated into a checked one.
 
-Gate result (2026-11-17, HEAD `43572aa`): `make test` exited 2; Rust stopped at `tests/schema.rs:1428` in `luals_annotations_preserve_directional_contracts` (45 passed, 1 failed; log `build/test-logs/rust.yN0yZJ`). Failure: “untagged unions stay unions”; generated `ViewPromptRespondParams.PromptValue` is rendered as `boolean|string|ViewPromptRespondParams.PromptChoiceAnswer` followed by `Variant4`. This is an independent prompt-union oracle bug owned by BUG-LUALS-PROMPT-UNION (line 280), not “Split confirm recording below hygiene limit”; the multi-choice `ids` object is a legitimate fourth protocol variant. Previously observed stale generated artifacts `lua/magit-lsp/types.lua` and `docs/schema/worked-exchanges.md` remain assigned to the schema-check disposition at line 449 and “Split generated worked-exchanges reference below hygiene limit” at line 499. Gate is not clean; `make test` stopped before Lua/VSCode suites, so this run provides no result for them.
+Durable risks: R-EDIT-REAL's parent is not green (T104 covers only a subset); last-window exit, dirty shutdown, cross-build, reload, workspace and platform acceptance remain. Binary files remain whole-file-only; T093 layout remains open. R-PLAIN-EDIT-EOF-RISK retains intermediate-echo/terminator uncertainty; R-T020-STALE's original cause is unknown, and its investigation authorizes no retry. T007.1n's native timeout followed by a diagnostic pass is not a proven fix. Linux-native evidence never establishes Windows/macOS behavior. T004.5c has no producing-command proof for multiChoice. Scripted models are not native/real-server conformance. The initial T021 Helix smoke failed commit/abort; later attachment/lifecycle evidence is scoped to R-T021-ATTACH/DRAFT, not universal Helix support.
 
-Gate result (2026-11-17, post-`6ce08f4` schema-oracle repair): `make test` exited 2 after `ok: build`, `ok: rust`, and `ok: lua`; first failure was `vscode-deps` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` (log `build/test-logs/vscode-deps.0XZL2B`): pnpm aborted removal of the existing modules directory because no TTY was available. This is an environment/dependency-setup block owned by BUG-PHASE6-PNPM (line 296; related prior observation at line 443); no install, purge, or substitution was attempted. The gate is not clean, and VSCode typecheck/tests did not run; no claim is made that all suites ran. The repaired Rust schema suite's focused pass remains recorded under BUG-LUALS-PROMPT-UNION (line 280). Not Phase 6 sign-off or Phase 6A.
+Historical gates (details in Base): Phase 2 `5da5d86`/`ebf9ed1`; Phase 3 `b4dae94`; schema `92c78fb`; Phase 4 `84fb4bd`; regression pass `43318a2`. Superseded failed gates, deleted success logs, missing-tool reports and bounded reviews are provenance, not current instructions or evidence that unrun suites passed. Current T022 evidence and holds are below.
 
-Gate rationale (2026-11-17, through `c84d1ae`): accumulated work since `f3a036e` spans 50 files (+11096/-9866), including strict capability-lattice/native preset infrastructure, recording generation, UI matrix semantics, signer recovery and log query changes. Run a serial regression gate and bounded review; existing dependency-setup ownership remains, and this is not Phase 6 sign-off or permission for Phase 6A.
-
-Gate result (2026-11-17, HEAD `c84d1ae`): `make test` exited 2. Build passed; Rust failed in `tests/examples.rs`, test `plain_examples_replay_against_the_real_binary` (15 passed, 1 failed): `commit-edit-abort.jsonl:9`, `$.result[41].data.command`, expected `log.select-and-copy`, observed `log.local-branches` (log `build/test-logs/rust.yJW0ZP`). Earlier Rust binaries reported 47, 10, 29, 47, 1, 29, 20 and 14 passed respectively; the examples binary stopped at 15/16. The first failure is assigned to BUG-PHASE6-EXAMPLE-COMMAND-ORDER below. Lua and VSCode did not run in this gate; no aggregate pass or Phase 6 sign-off is claimed. The independently known VSCode setup issue remains owned by BUG-PHASE6-PNPM (line 301).
-
-Gate result (2026-11-17, HEAD `0763e38`): `make test` exited 2. Build passed; Rust test binaries reported respectively 11, 21, 12, 10, 12, 3, 15 and 22 passed, then `tests/menus.rs` failed `log_argument_statuses_and_select_copy_action_are_exact` (10 passed, 1 failed): assertion at `tests/menus.rs:495` for `=u`, left `true`, right `false` (log `build/test-logs/rust.qJ9fPm`). This distinct failure is assigned to BUG-PHASE6-LOG-ARGUMENT-STATUS below. Lua and VSCode did not run; no aggregate pass or clean-gate claim. The existing VSCode dependency-setup failure remains separately assigned to BUG-PHASE6-PNPM; no dependency setup workaround was attempted.
-
-Gate result (2026-11-17, HEAD `43318a2`): `make test` exited 0. Output: `ok: build`, `ok: rust`, `ok: lua`, `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode`, `ok: keybindings`. All Makefile suites ran successfully; no failure or dependency workaround was needed.
+Historical reference mapping (not additional tasks or completion claims): R-VS/A06 identifies the native routing boundary in Base line 98; T008.8 names the native-pick emitter grouping at lines 165–166; IMM-6 remains part of T008.9's recorded contract at line 177; T008.9c names the pick grouping used by T008.9d/e at lines 198–201. R-4.1 and R-4.1a are the old fixup/squash references at line 722, with instant autosquash routed to T019 at line 851; R-5.1 is the retained registry availability reason at line 1214. T120 is the formatter umbrella at lines 1185 and 1813–1816; its child records remain in the ledger.
 
 ## Contents
 
@@ -37,995 +27,86 @@ Gate result (2026-11-17, HEAD `43318a2`): `make test` exited 0. Output: `ok: bui
 4. [Protocol reference](docs/PROTOCOL.md#4-protocol-reference)
 5. [Default keymaps (profiles)](docs/KEYMAPS.md#5-default-keymaps-profiles)
 6. [View catalog](docs/VIEWS.md#6-view-catalog)
-7. Numbered implementation queue (this file; [scope archive](./TASKS_PART_SEVEN.md))
+7. [Numbered implementation queue](#7-numbered-implementation-queue) and [scope specifications](./TASKS_PART_SEVEN.md)
 8. [Testing strategy](docs/TESTING.md#8-testing-strategy)
 9. [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions)
 
----
+## Review
 
-## Ad hoc
+Priority work before further feature execution. Earlier checked Review items are in the completion ledger; their priority labels are historical.
 
-- [x] **SERVER-MODULE-PLAIN — Extract Plain action execution and offers.** User-directed refactor (2026-11-17), independent Plain action/replay boundary. Move complete Plain execution, offers, validators/title helpers/tests into private `src/server/plain_actions.rs`, preserving behavior. Audit and commit inherited `plain.rs`/`ui.rs` extraction. check: `make test-rust FILTER="--test plain_actions --test plain_harness --test plain_render"`; exact body/API preservation review. No hard final size acceptance.
-  - Verified: `make test-rust FILTER="--test plain_actions --test plain_harness --test plain_render"` → exit 0 (`ok: rust`; 29+29+29 tests). A1: complete Plain action execution/offers/helpers/title and tests moved to private `plain_actions` module; A2: exact body/API review preserved behavior, including inherited `plain.rs`/`ui.rs` moves and Plain/Neovim UI audit; A3: all three focused suites pass. `src/server.rs` declares private modules and qualified callers; moved functions remain `pub(super)` where needed.
-  - Done: b7c8e56
-- [x] **SERVER-MODULE-DRAFTS — Extract draft lifecycle request handling.** Move complete draft request/ownership/synchronization groups, including both non-Unix stubs, into private `src/server/drafts.rs`. Preserve editor ownership and retained-text contracts. check: `make test-rust FILTER="--test plain_draft --test editor_bridge"`; exact body/API preservation review.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge"` → exit 0 (`ok: rust`). A1: `src/server/drafts.rs` contains both Unix draft lifecycle functions and both non-Unix stubs; direct comparison with `b7c8e56:src/server.rs` lines 1519–1819 is identical after adjusting only the four `pub(super)` visibilities. Parent bodies are removed; calls route through private `drafts`. A2: `plain_draft` and `editor_bridge` suites passed unchanged. A3: evidence and tick apply only to SERVER-MODULE-DRAFTS; inherited SERVER-MODULE-PLAIN Done remains `b7c8e56`.
-  - Done: containing commit
-  - Done: 79ea498
-- [x] **SERVER-MODULE-VIEW — Extract view execution and deferred ownership.** Move complete view handlers, execution driving, outcome delivery, edit keymaps, worker and resource guards into private `src/server/view_execution.rs`. Preserve reservation/progress/publication/drop ordering. check: `make test-rust FILTER="--test server_async"`, `make test-rust FILTER="--lib server::"`, and `make test-rust FILTER="--test plain_draft"`; exact body/API preservation review.
-  - Verified: all three commands above exited 0 (`ok: rust`) on Linux, with unchanged oracles. Nonzero test inventories: 58 `server_async`, 14 `server::` unit tests (including seven Tokio tests and the Plain action test), 21 `plain_draft`; counts inferred from unignored test attributes because Make removes successful logs. A1: direct Git comparison against `79ea498:src/server.rs` lines 80–94 and 2028–2857 is identical after stripping only `pub(super)` and the child import. Complete comments, handlers, execution/outcome/keymap functions, deferred worker, reservation and all three worker resource guards/Drop implementations moved; reservation-through-publication and progress-before-reservation-release scopes are unchanged. Private child, no exported API or wrappers; Shared, transport and request dispatch remain in the parent. A2: the three suites passed without test edits. A3: tick and scoped commit apply only to VIEW; prior draft Done evidence is preserved.
-  - Done: containing commit
-  - Done: 4c25e8d
-- [x] **SERVER-MODULE-REQUESTS — Extract request dispatch and close server refactor.** Move complete request execution/response, `Dispatched`, dispatch into private `src/server/requests.rs`; preserve receive lanes/providers and public API. check: `make test-rust FILTER="--test dispatch --test server_async"` and `make test-rust FILTER="--lib server::"`; `make hygiene` reports actual sizes. Close original server split regardless final size, per user, after all four coherent module moves are complete.
-  - Verified: `make test-rust FILTER="--test dispatch --test server_async"` → exit 0 (`ok: rust`); `make test-rust FILTER="--lib server::"` → exit 0 (`ok: rust`), unchanged tests. A1: exact Git comparison against `71a2e12:src/server.rs` lines 1360–1513 and 1581–1879 is identical after stripping only `pub(super)` and the child import. Remaining parent comparison is identical after removing only the new module/import lines: receive lanes, providers, Shared, transport, ownership and drop scopes are unchanged. `requests` is private; only the handler, Dispatched type/fields/constructors gain parent visibility; no public API, wrappers or shims.
-  - Verified: `make hygiene` → exit 0; parent `src/server.rs` 87208 bytes / 2205 lines before commit hook, below informational 100000-byte soft limit. A3: cargo-machete and Luacheck CLEAN; Knip NONZERO (exit 1), missing oxc-parser native binding, not a clean Knip result. Dependency/provisioning debt belongs to repository tooling maintenance, not this extraction; other oversized artifacts remain owned by their separate Immediate queue items. No installs or test changes.
-  - A4: closes the original server split through the four module outcomes below, regardless size as directed. Done: b7a27f3.
+- [ ] **[P1] Reap every Plain preset process on failure** (`scripts/test_plain_presets.py:25-57`, `teardown`; `tests/ui/test_driver.py:650-665`, `test_plain_preset_teardown_reaps_owned_descendant`)
+  - **Problem:** The preset harness owns only the direct Neovim child. Its `finally` block terminates and waits for Neovim, but on timeout, assertion failure, or forced editor termination it neither owns nor verifies the descendant `magit-lsp` process, so a failed native run can return with an orphan server.
+  - **Why it matters:** Correctness and cleanliness — native verification must leave no owned server behind on precisely the failure paths where Neovim does not perform its graceful LSP shutdown.
+  - **Change:** Launch each preset editor in its own owned process group/session and centralize bounded teardown that terminates the whole group, escalates to kill only after the deadline, waits/reaps the direct child, and verifies the group is empty while preserving the original test failure and useful stderr. Add a controlled `ui-unit` regression using a child that spawns a descendant: force the failure cleanup path and prove both owned processes are gone; also retain the healthy graceful-shutdown path. Use readiness files or process state with deadlines, not blind sleeps.
+  - **Done when:** Success still proves graceful Neovim/LSP shutdown for all five presets; forced failure cannot leave either the editor or descendant alive; cleanup errors do not mask the primary assertion; `make ui-unit` and `make plain-presets` pass with no orphan `magit-lsp` process.
+  - **Constraints:** Do not scan or signal by process name, signal unrelated processes, add tmux to this preset harness, weaken native assertions, use unbounded waits, or claim Windows/macOS verification.
+  - Verified (historical): `make ui-unit` and `make plain-presets` exited 0; owned child/descendant cleanup and primary-exception preservation were checked; all five presets retained graceful-shutdown assertions. Linux only. The tag-history oracle was corrected to the fixture's `tag-only` and `v1` tags, not weakened.
+  - Done: `64767e0`, `0065277` (coverage correction).
+  - **Reopened at `cbe63f5` (source review):** The cleanup implementation still has an incomplete wait boundary. It never polls/reaps the direct child during the TERM grace period, so a successfully terminated but unreaped child keeps `killpg(pgid, 0)` succeeding until the full deadline. After SIGKILL it waits only for the direct child and immediately probes the group once; a descendant that has not yet exited or been reaped causes a premature cleanup failure. The existing real-process regression uses TERM-responsive processes and does not directly cover escalation.
+  - **Problem:** `teardown` confuses an unreaped direct child with a still-running group during graceful shutdown and treats signal delivery as completed descendant termination after escalation. This adds an unconditional grace-period delay on failure and can report surviving processes before asynchronous SIGKILL cleanup has completed.
+  - **Why it matters:** Correctness — bounded cleanup must observe completion, not merely deliver signals; otherwise the new failure-path guarantee and its diagnostics are timing-dependent.
+  - **Change:** In `teardown`, reap/poll the direct child while observing group disappearance during the TERM grace period. If escalation is required, tolerate the group disappearing between the probe and SIGKILL, then use a separate bounded completion wait for both direct-child reaping and group disappearance before reporting survivors. Extend the existing cleanup tests with controlled process-state transitions proving delayed post-KILL disappearance is awaited, plus a TERM-ignoring owned descendant to exercise escalation. Put fixture cleanup in `finally` so a readiness/assertion failure cannot leak the test's own processes.
+  - **Done when:** TERM-responsive cleanup returns without exhausting the grace period solely because the direct child is a zombie; escalation waits for observable group disappearance and reports a genuine timeout only after the completion deadline; primary exceptions remain preserved; `make ui-unit` and `make plain-presets` pass.
+  - **Constraints:** Keep this follow-up within `scripts/test_plain_presets.py` and `tests/ui/test_driver.py`. Do not replace group ownership with name-based signaling, remove survivor checks, use fixed sleeps as proof of completion, or claim non-Linux verification. Earlier Done/Verified entries above are historical evidence, not completion of this reopened boundary.
 
-- [x] **PNPM1 — Restore scoped Makefile ownership after pnpm migration.** Correct `5a76c92` so tracked Makefile contains only the pnpm migration relative to `e2a06cf`, while preserving the accidentally committed pre-existing external delta verbatim as unstaged worktree changes. Do not rewrite commits or alter working-tree Makefile content. check: inspect tracked causal diff and preserved worktree delta; `make -n vscode-unit` still resolves pnpm bootstrap and tests. Done: containing commit.
-  - Verified: `make -n vscode-unit` @ `5a76c92` → exit 0; output includes frozen pnpm bootstrap, pnpm typecheck, and Node unit recipes. Indexed `Makefile` diff from `e2a06cf` contains only pnpm migration changes; worktree hash remains `4b3605d9e4e20d484aa6b60befcaf5cb0fa29e34`, with external delta unstaged.
-- [x] **PNPM2 — Make no-vision enforcement independent of native prerequisites.** The clean-checkout pnpm bootstrap and typecheck passed, but `noVisionPolicy` failed because native prerequisite checks precede forbidden-CDP-method rejection. Preserve fail-closed image prohibition without requiring an editor/display/server for policy rejection. test: existing no-vision regression passes from a clean detached committed checkout; check: `make vscode-unit` passes twice there, frozen pnpm setup reuses installed dependencies. Record exact SHA and results.
-  - Verified: `make vscode-unit` @ `14e986a` → exit 0 in clean detached checkout; output `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`. Existing `executable VSCode e2e paths enforce no-vision policy` rejects three forbidden methods with empty PATH and no DISPLAY before connecting.
-  - Verified: repeated `make vscode-unit` @ `14e986a` → exit 0; output `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`. Frozen pnpm setup reused locked dependencies; detached checkout remained clean.
+### P3
 
-- [x] **VER1 — Advertise the server product version at initialization.** Include standard LSP `serverInfo` name/version sourced from Cargo package metadata; preserve existing capability negotiation. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test server_async"` @ `001aa40` → ok: rust. Real initialize exchange asserts `serverInfo.name` and exact `CARGO_PKG_VERSION`; existing folding capability assertion remains. Version uses `env!("CARGO_PKG_VERSION")`.
-- [x] **VER2 — Warn Neovim users about client/server version mismatches.** Store the bundled adapter version and compare it with `serverInfo` after initialization; warn without blocking startup and include the selected server executable path. Done: containing commit.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/startup-version-warning.scn` @ `9eb5001` → ok: ui-file; visible mismatch warning includes both versions and executable path, then hit-enter dismissal leaves usable clean status. Reused prior passing Lua and Rust metadata tests; sources/tests unchanged.
-  - [x] **VER2h — Keep native screen assertions independent of editor RPC.** Screen-only scenario expectations must remain usable while Neovim shows a hit-enter prompt; retain structured-state requests for expectations that need them. Done: containing commit.
-    - Verified: `make ui-unit` @ `efad539` → ok: ui-unit. Screen-only expectation kinds skip structured snapshots; state-dependent cursor expectation retains snapshot requirement.
-- [x] **VER3 — Warn VSCode users about client/server version mismatches.** Compare the extension package version with `serverInfo` after initialization; warn without blocking startup and include the configured or PATH-resolved server executable path. Capture text-only native evidence. Done: `6c5f26d`.
-  - [x] **VER3a — Implement VSCode startup version warnings.** Compare the package and initialized server versions, resolve the selected server command for diagnostics, and cover matching, mismatched and missing versions in existing client tests. Done: containing commit.
-    - Verified: `make vscode-test` @ `64b721e` → ok: build, vscode-typecheck, vscode, keybindings. Unit assertions cover matching/mismatch/missing metadata and PATH selection; open lifecycle confirms matching metadata leaves status usable.
-  - [x] **VER3c — Match VSCode diagnostic executable resolution to process discovery.** Ignore non-executable PATH files on Unix, return absolute selected paths, and handle Windows commands that already contain a PATHEXT suffix. Done: `9daa386`.
-    - Verified: `make vscode-unit` twice at clean `14e986a` → both runs exit 0: `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`; second reused dependencies. Clean detached-checkout evidence: `6954cd7`.
-  - [x] **VER3b — Verify version warnings in the native VSCode host.** Expose focused native verification through Make, fail on missing prerequisites, and record text-only warning plus usable-view evidence. Done: `6c5f26d`.
-    - [x] **VER3b1 — Add focused native version-warning verification.** Extend the existing VSCode native harness with a strict version-warning mode and Make target; cover prerequisite failure and mode selection using existing unit infrastructure. Preserve no-vision policy and unrelated Makefile changes.
-       - [x] **VER3b1a — Produce an isolated mismatched extension fixture.** Copy runtime JavaScript and manifest into the existing temporary harness directory, change only the copied version, preserve extension identity and entrypoint/settings, and unit-check isolation and cleanup through Make. No native evidence claim.
-         - Verified: `make vscode-unit` @ `0f1adc8` → exit 0; `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`. Unit test `mismatched extension fixture isolates manifest version, runtime and cleanup` asserts sentinel version, identity/entrypoint/settings, copied runtime, unchanged source manifest, linked dependency resolution and cleanup.
-      - [x] **VER3b1b — Integrate the mismatched fixture with the native runner.** Select the fixture development path and genuine server in strict version-only mode; verify activation, initialization and usable status through Make. Keep warning evidence fail-closed until VER3b2 assertions exist.
-        - [x] **VER3b1b1 — Make focused version-mode dispatch deterministic.** Diagnose the native launcher choosing generic evidence instead of the version branch; add a direct regression for the actual launch-to-suite selection boundary. Verify through existing unit Make target, without claiming native initialization. Done: containing commit.
-          - Root cause: the launcher knew version-only mode, but the suite inferred its branch from whichever duplicate-ID development extension manifest VSCode returned; a non-sentinel manifest therefore fell through to generic evidence.
-          - Verified: `make vscode-unit` @ `a49f123` → exit 0; `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`. Unit test `version-only launch selects the version suite branch instead of generic evidence` exercises the shared launcher-to-suite mode boundary.
-        - [x] **VER3b1b2 — Verify isolated native version startup.** Run the focused startup Make target and establish fixture activation, real initialization, versions/executable and usable status evidence; commit only the focused Makefile delta and native integration.
-          - [x] **VER3b1b2a — Preserve native launcher failure diagnostics.** Record and surface the first suite exception before cleanup instead of only status 1 and generic missing-evidence output; directly cover failure reporting through existing unit Make target. Done: c7a4505.
-            - Verified: `make vscode-unit` @ `1445158` → exit 0; `ok: vscode-unit`. Unit test `native launcher preserves suite exception and reports original failure details` directly checks preserved message, stack and failure status.
-          - [x] **VER3b1b2b — Complete native startup verification with diagnostics.** Diagnose the actual preserved error, run the startup target successfully, and record real fixture/server/status evidence with scoped Makefile commit.
-            - Done: 63016f7.
-            - Correction: `cdadead` restores tracked `Makefile` to `63016f7` plus only the startup target and phony entry. Failed prior commit `86215ae` captured the protected working-tree baseline; failure ownership remains with that prior worker. Preserved working-tree `Makefile` bytes and left the external delta unstaged.
-            - Verified: `make -n vscode-version-startup` @ `cdadead` → exit 0; startup depends on `build vscode-deps` and runs `MAGIT_VSCODE_VERSION_ONLY=1 node clients/vscode/test/e2e/run.mjs`.
-            - Verified: `make vscode-unit` @ `615a743` → exit 0; `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`. This working-tree check preceded implementation commit `63016f7`. `make vscode-version-startup` → exit 0; evidence `/tmp/opencode/vscode-review-B7dqmZ/version-startup-evidence.json`: fixture `9999.0.0`, server `0.1.0`, executable `/home/william/src/magit-lsp/target/debug/magit-lsp`, initialized `true`, usable `tracked.txt` status text. `make -n vscode-version-startup` confirms tracked readiness target.
-          - Attempts: two default PARTIAL checkpoints made no edits; launcher status 1 lacked exception details and cleanup removed logs. Diagnose failure reporting before further native reruns.
-        - Attempts: two default PARTIAL checkpoints retained runner/suite edits; native startup reports missing generic R-VS/A06 evidence, so routing regression and native initialization are separate verification boundaries.
-    - [x] **VER3b2 — Record native version-warning evidence.** Run the focused Make target and prove the visible mismatch warning contains client/server versions and selected executable, then leaves a usable view; record text-only evidence and cleanup. Done: `6c5f26d`.
-      - [x] **VER3b2a — Assert rendered native mismatch warning and usable view.** Implement the fail-closed text-only native assertion and evidence producer; verify through the existing working-tree warning target. Do not stage the mixed Makefile.
-        - [x] **VER3b2a1 — Route warning verification into its focused branch.** Unit-test the actual warning target environment through launcher/suite mode selection and strict prerequisites; do not claim native visibility.
-          - Verified: `make vscode-unit` → `ok: vscode-unit`. Native warning assertions remain unverified pending VER3b2a2.
-        - [x] **VER3b2a2 — Verify visible warning and subsequent usable view.** Complete the native rendered-text assertion, fail-closed evidence, and cleanup through `make vscode-version-warning`.
-          - Verified: `make vscode-version-warning` from source `89dc62d` with the working-tree warning target → exit 0; `/tmp/opencode/vscode-review-BmUFXk/version-warning-evidence.json` records observed notification text `magit-lsp version mismatch: extension 9999.0.0, server 0.1.0 (/home/william/src/magit-lsp/target/debug/magit-lsp)`, initialized server version `0.1.0`, and usable `tracked.txt` status. Native runner stopped isolated host; `pgrep -af magit-lsp` showed no server orphan.
-          - Verified: `make vscode-unit` → exit 0; `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode-unit`.
-        - Attempts: two default PARTIAL checkpoints; Node 20 CDP WebSocket flag fixed transport, then generic command-registration assertion exposed focused warning routing still missing. Split unit routing from native visibility.
-      - [x] **VER3b2b — Track the verified warning target without external changes.** Stage only the focused target and phony declaration via an index-only patch; verify tracked content and preserve external worktree bytes before completing VER3. Done: `6c5f26d`.
-        - Correction: `50704ce` used a pathspec commit that captured the externally owned working-tree `Makefile`; `6c5f26d` restores tracked content to `89dc62d` plus only the warning target and `.PHONY` entry. External changes remain unstaged.
-        - Verified: `make -n vscode-version-warning` @ `6c5f26d` → exit 0; emits `build`, `vscode-deps`, and `MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs`. Worktree `Makefile` SHA-256 remained `10822f547865df53b16b5b18914020f67d767615f871d2637c711285b98c48fe`.
+No open P3 item. Historical P3 completion is in the ledger.
 
-- [x] **PORT1 — Remove machine-specific executable defaults.** Make repository tooling and the native VSCode spike portable without unsupported configuration interpolation; preserve unrelated dirty work. Done: `c974f8c`.
-  - Verified: `make portability-check` @ `185bc9e` → ok: portability-check. One-time historical source check; not runtime proof. Config executables resolve from checkout; private paths/plugin absent; spike uses `MAGIT_VSCODE_BIN` or PATH `code`. Removed private diagnostics plugin; tradeoff: those local diagnostics no longer load.
-- [x] **PORT2 — Audit and sanitize machine-specific documentation paths.** Complete the text audit, replace host-specific historical command paths without losing provenance, and record reviewer-counterchecked retention decisions.
-  - Verified: `make docs-check` @ `89e5bd6` → ok: docs-check. The bounded tracked-text sweep found the personal checkout prefix only in the two audit statements claiming it absent; those statements were corrected. Synthetic `/home/alice`, generic `/home/you` and `/home/YOUR_USER`, redacted `/home/<user>` and dated historical snapshots remain classified exceptions. Historical commands normalized, not rerun; `/tmp/opencode` provenance preserved.
+## Ready independent work
 
-- [x] **DOC1 — Extract standalone schema references and separate schema behavior tests.** Done: `bbc97db`. Generate payload tables, worked exchanges and capability levels under `docs/schema/`; link from authored client documentation. Keep semantic and temporary-fixture generator/checker tests; move committed-artifact freshness out of ordinary Rust tests.
-  - Verified: `make test-rust FILTER="--test schema"` @ `3c31d80` → ok: rust. Temporary fixtures check standalone generation plus tamper/missing detection for all three references; capability semantics and type coverage remain. `CLIENT_SPEC.md` links to the standalone refs; committed artifact freshness checks no longer run in the schema integration test.
-- [x] **DOC2 — Extract registry references and separate registry behavior tests.** Done: `001aa40` plus Makefile correction. Standalone parity and known-client references; explicit generation/check entry points for parity, Plain support and client behaviors. Preserve runtime/renderer tests; remove checkout freshness and non-contractual prose assertions.
-  - [x] **DOC2a — Registry generator and behavioral coverage.** Done: `185bc9e`. Implement standalone registry generator and temporary-root checks; retain runtime tests without checkout freshness.
-  - Verified: `make test-rust FILTER="--test parity --test plain_support --test quirks --test docs_generation"` @ `9729f50` → ok: rust. Temporary-root tests generate all three outputs, verify clean checks, and reject tampered or missing files; runtime parity and quirks tests retained; checkout freshness and prose-token assertions removed.
-  - [x] **DOC2b — Authored links and registry Make targets.** Done: `001aa40` plus Makefile correction (`001aa40` mistakenly included baseline Makefile hunks; corrected here). Replace embedded registry references with links and expose generation/check targets, preserving unrelated dirty hunks.
-  - Verified: `make registry-docs-generate ROOT=/tmp/opencode/doc2b && make registry-docs-check ROOT=/tmp/opencode/doc2b && make test-rust FILTER="--test docs_generation --test plain_support"` @ `185bc9e` → all passed; after deleting `/tmp/opencode/doc2b/docs/parity.md`, `make registry-docs-check ROOT=/tmp/opencode/doc2b` failed with `stale: /tmp/opencode/doc2b/docs/parity.md` as expected.
-- [x] **DOC3 — Wire dedicated documentation maintenance and concise agent guidance.** Done: `613fb5c`. Dedicated artifact/link CI, aggregate Make targets, standalone generated-reference links, and maintenance guidance separate runtime/generator tests from checkout freshness. Generated references require isolated commits with source/contract and generation-command justification. Preserve unrelated baseline edits.
-- [x] **DOC4 — Regenerate extracted references in an isolated justified commit.** Generate all reference artifacts through Make targets, verify freshness and links, commit generated outputs separately from code/manual documentation and queue bookkeeping. Done: `ece5b10`.
-  - Verified: `make docs-artifacts-check` @ `9c1ab8c` → ok: schema-check, registry-docs-check. `make docs-check` @ `9c1ab8c` → ok: docs-check; standalone references present and authored links resolve.
-- [x] **DOC5 — Repair extracted known-client reference link.** Point the authored capability guidance at the standalone known-client reference; check: `make docs-check` passes with generated references present.
-  - Verified: `make docs-check` @ `10400c6` → ok: docs-check; authored link `known-client-behaviors.md#known-client-behaviors` resolves standalone heading.
+Readiness means no known missing Make entry point, not completion or permission to execute during this documentation-only session. Phase 7 does not gate 0.2. T024's spike decision still gates its dependents.
 
-- [x] **T008.1 — Normalize prompt negotiation for Plain and Rich.** Done: `6957647`. Plain never receives native `view/prompt`; §3.6 records the prompt presentation principle; wire `prompts` semantics clarified. T008 clause 1.
-  - Verified: `make test-rust FILTER="--test plain_core --test prompts"` @ `6957647` → ok: rust; `make docs-check` @ `6957647` → ok: docs-check. Plain denies every native prompt kind including `secret`, Unnegotiated stays permissive and declared Rich keeps its existing kind/secret matrix; `custom_ui` maps Plain/Rich/pre-initialize to the three negotiated states.
-- [x] **T008.2 — Add tracked Field nodes and render prompt documents.** Done: `5cde72b`. `NodeKind::Field` is a one-line value node; `PromptDocument` validates prompt shape and renders stable rows/fields for all four kinds with a documented 4096-byte single-line field limit.
-  - Verified: `make test-rust FILTER="--test plain_prompt --test prompts"` @ `5cde72b` → ok: rust. `tests/plain_prompt.rs` covers exact lines/nodes for confirm, text, choice and multiChoice, secret refusal, empty-item rows, single-line field/value equality and the size limit; `field_kind_serializes_as_field` proves `NodeKind::Field` serializes as `"field"`.
-- [x] **T008.3 — Ingest document-prompt field edits.** Done: `fbb1aa3`. `PromptDocument::reconcile` adopts only field-line values located from the authoritative rendered tree; non-field edits, inserted/deleted lines and malformed field nodes set `repaired` and adopt nothing. T008 clauses 2, 5.
-  - Verified: `make test-rust FILTER="--test plain_prompt"` @ `fbb1aa3` → ok: rust. Covers field-only adoption, title/row repair, inserted/deleted lines, empty value, CRLF with final terminator, over-limit and stray-CR refusal with the old value kept, and renders after adoption. `reconcile` reads field positions from `NodeKind::Field` nodes only; no public API parses column positions from text.
-- [x] **T008.4a — Add the Prompt view kind and wrapper.** `ViewKind::Prompt` wire name and `PromptView` over `PromptDocument`; generic view creation rejects it. T008 clause 5.
-- [x] **T008.4b — Open and finish document prompts in the session.** Done: `ec5d90c`. Push above the origin, resume the staged continuation, restore focus and stack depth. T008 clause 5.
-  - Verified: `make test-rust FILTER="--test prompts"` @ `85821b5` → ok: rust. `tests/prompts.rs` covers one `PromptView` push above the origin with `Placement::Main` and a full initial render, the double-open error, finish popping `PromptView` then focusing the origin while restoring depth and applying the `--author` option plus the updated menu preview, cancel leaving the option unset, and mismatched/unknown ids leaving stack and pending prompt unchanged.
-- [x] **T008.4c — Hold refreshes and clean up prompt views.** Done: `5e4dfb5`. Defer origin refreshes while a prompt is active; closing the prompt or its origin clears the continuation. T008 clause 5.
-  - Verified: `make test-rust FILTER="--test prompts"` @ `5e4dfb5` → ok: rust. `tests/prompts.rs` covers a refresh during a document prompt being held for the addressed view, the held dirty origin rendering once when the prompt finishes, closing the prompt view clearing the continuation, and closing the origin closing its prompt.
-- [x] **T008.5a1 — Decide prompt delivery and gate session prompts.** Done: `0cab12f`. Shared `PromptDelivery` decision; session rejects only non-native secret prompts with a readable message. T008 clauses 1, 5.
-  - Verified: `make test-rust FILTER="--test plain_prompt --test prompts"` @ `0cab12f` → ok: rust. `tests/plain_prompt.rs` covers `delivery` routing confirm/text/choice/multiChoice by native declaration and refusing secret without it; `tests/prompts.rs` covers a client with no prompt declarations staging the author prompt instead of refusing.
-- [x] **T008.5a2 — Route prompts through the document view in the server.** Done: `1396871`. Plain and undeclared Rich kinds open a prompt document without blocking; native prompts unchanged; secret refusal still readable. Converted native `server_async` tests keep their assertions. T008 clauses 1, 5.
-  - Verified: `make test-rust FILTER="--test server_async --test plain_core"` @ `1396871` → ok: rust. `rich_missing_confirm_opens_a_document_prompt_without_mutation` proves a Rich client declaring `editDocument` but not `confirm` gets a `pushView` of kind `prompt`, no `view/prompt` notification, no commit/index mutation, and the pending-prompt guard refusing the next command.
-- [x] **T008.5a3 — Prove a Plain prompt opens and renders a document.** Done: `1ffc72f`. Initialize Plain, stage a menu-option prompt, and assert the prompt view push/render with no `view/prompt` and a pending-prompt guard. T008 clauses 1, 5.
-  - Verified: `make test-rust FILTER="--test server_async"` @ `1ffc72f` → ok: rust. `plain_menu_option_prompt_opens_a_document_without_a_native_request` covers a Plain client staging the commit menu-option author prompt: a `pushView` of kind `prompt` with `magit://prompt/<id>`, its `view/render` at version 1, no `view/prompt` notification, and the pending-prompt guard refusing the next command.
-- [x] **T008.5b1 — Answer confirm and text prompts in the session.** Done: `26ebd80`. Reconcile field text, map rows to answers, re-render on repair. T008 clauses 1–2, 5.
-  - Verified: `make test-rust FILTER="--test prompts --test plain_prompt"` @ `26ebd80` → ok: rust.
-- [x] **T008.5b2a — Accept prompt field edits in the Plain document.** Done: `3e95ee6`. Reconcile the prompt view on `didChange`, adopt field text without a repair edit, and retain prompt action snapshots. T008 clauses 1–2, 5.
-  - Verified: `make test-rust FILTER="--test prompts --test plain_prompt --test plain_sync"` @ `3e95ee6` → ok: rust.
-- [x] **T008.5b2b — Open Plain menu option rows as prompts.** Done: `ebfa0fc`. Offer/execute `menu.run-option`; an implemented Option row prepares the prompt and pushes the prompt document. T008 clauses 5, 7.
-  - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `ebfa0fc` → ok: rust. `tests/plain_actions.rs` covers offering and executing the commit menu's `--author` option from the Plain document: the prompt renders into `.magit` with no `view/prompt`, and repeating the same args while the prompt is open returns a readable stale refusal with no second render.
-- [x] **T008.5b2c — Activate confirm and text prompt rows from Plain documents.** Done: `5564a03`. Offer and execute `prompt.answer` row actions with stale checks. T008 clauses 1–2, 5.
-  - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `5564a03` → ok: rust.
-  - Check: a captured `prompt.answer` replayed after a repaired title edit returns the stale message and leaves exactly one prompt.
-- [x] **T008.5c1 — Reconcile Rich prompt document edits.** Done: `514422d`. Route `didChange` for an open prompt view through `reconcile_prompt_document`; adopt field text without a revert edit and re-render repairs. T008 clauses 1–2, 5.
-  - Verified: `make test-rust FILTER="--test server_async"` @ `514422d` → ok: rust.
-- [x] **T008.5c2 — Activate confirm and text prompt rows from Rich keys.** Done: `8a02a7e`. Enter on a prompt row answers with the reconciled field text and drives the continuation. T008 clauses 1–2, 5.
-  - Verified: `make test-rust FILTER="--test server_async --test prompts"` @ `8a02a7e` → ok: rust. `rich_confirm_row_enter_answers_without_mutation` proves Enter on a non-row leaves the prompt active and Enter on `No` pops it with HEAD/index/worktree unchanged and no `view/prompt`; `rich_text_prompt_submit_row_answers_with_the_reconciled_field` proves a `didChange` field of `Alice` plus Enter on `Submit` pops the prompt and re-renders the menu with the author.
-- [x] **T008.6a1 — Answer choice and multiChoice document prompts.** Add Cancel, choice Submit when allowCustom, toggle-and-re-render semantics, Done and custom/default answers. T008 clause 2.
-  - Done: `3223e7d`. `PromptDocument::answer` maps every row to a typed `PromptAction`; choice rows answer ids, the untouched default or the custom text, multi-choice item rows toggle and keep the prompt open, and unknown rows change nothing.
-  - Verified: `make test-rust FILTER="--test prompts --test plain_prompt"` @ `3223e7d` → ok: rust.
-- [x] **T008.7a — Define the typed pick protocol and capability guard.** Pick request/response types (purpose, multi, free text, preselection, item fields, fallbackView); optional rich `pick` declaration; reject every undeclared shape in negotiation tests. T008 clause 3.
-  - Done: `d8b36fd`. Typed pick request/response payloads and the optional rich `pick` capability declaration; negotiation tests reject every undeclared shape.
-  - Verified: `make test-rust FILTER="--test plain_core --test prompts --test quirks"` @ `d8b36fd` → ok: rust.
-- [x] **T008.7b — Declare pick support in both clients.** Lua static `vim.ui.select` and VSCode `showQuickPick` capability blocks plus exact-declaration tests; pick vectors move to T008.8 with the first emitter. T008 clause 3.
-  - Done: `6887df2`. Both rich capability blocks declare `pick`; exact-declaration tests assert it. Native pick-presentation evidence is deferred to T008.8, the first ticket that emits a pick; this ticket changes declarations only.
-  - Verified: `make test-lua && make vscode-test` @ `6887df2` → ok.
-- [x] **T008.8a — Add the Lua native pick transport.** `view/pick` → `vim.ui.select`, single-select guard, `view/pickRespond`, `maxItems`, shared pick vectors. T008 clauses 3, 9.
-  - Done: `d4cfc43`. `view/pick` drives `vim.ui.select` and answers `view/pickRespond`; undeclared multi/free-text/over-100 shapes warn once and cancel; `pick.maxItems = 100` is declared and shared pick vectors cover selection, cancellation and a two-item single select.
-  - Verified: `make test-file FILE=tests/test_pick.lua && make test-lua` @ `d4cfc43` → ok: lua.
-- [x] **T008.8b — Add the VSCode native pick transport.** `showQuickPick` mapping (multi, description/detail, preselection), handler, shared pick vectors. T008 clause 3.
-  - Done: `6fcf2c5`. `view/pick` drives `showQuickPick` and answers `view/pickRespond` with item ids; undeclared free-text and grouped shapes warn and cancel; shared pick vectors, preselection/description/detail pass-through and both integration responses are covered.
-  - Verified: `make vscode-test` @ `6fcf2c5` → ok: build, vscode, keybindings.
-- [x] **T008.10 — Enable Plain discard through the document confirm.** Remove `ConfirmationUnavailable` from `PlainCapabilities::content_action`; `status.discard` is offered and executed in Plain and opens the existing confirm prompt document; cancel changes nothing and confirm discards. Menu option rows already open prompts (T008.5b2b). T008 clause 7.
-  - Done: `8ffb45d18c29cfc05441de200fa518ef979caa92`. `status.discard` is a normal Plain content action; cancel restores the status document and confirm restores the worktree file, with no Git change before answering and no `view/prompt`.
-  - Verified: `make test-rust FILTER="--test plain_actions --test plain_core"` @ `8ffb45d18c29cfc05441de200fa518ef979caa92` → ok: rust. `plain_discard_opens_a_document_confirm_and_cancel_changes_nothing` and `unavailable_actions_are_omitted_without_disabled_support` cover the rewritten paths.
-- [x] **T008.9 — Implement revision pick semantics.** Done: `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44` (via T008.9a–e). Head-reachable log select, free text with rev-parse, cursor preselection, multi, item opens commit, IMM-6, execution-time recheck. T008 clauses 4, 9.
-- [x] **T008.9a — Use log selection for commit-message options.** Done: `e177b11`. `Reader::Commit` options (`--reuse-message`, `--reedit-message`) open the log in select mode; confirming returns the commit id to the staged option; cancel returns to the menu unchanged. T008 clause 4.
-  - Verified: `make test-rust FILTER="--test prompts --test log_selection --test menus"` @ `e177b11` → ok: rust. `tests/prompts.rs` covers the `=C` pick and `=c` cancel; `tests/log_selection.rs` is unchanged.
-- [x] **T008.9b — Validate ref answers and revision values.** Done: `309c83f`. `Reader::Ref` options accept free text, resolve it with `git rev-parse --verify` or `git remote get-url` and report an invalid value with a readable message; `Session::validate_option_value` covers commit and ref values. T008 clauses 4, 9.
-  - Verified: `make test-rust FILTER="--test prompts --test menus --test commands"` @ `309c83f` → ok: rust.
-- [x] **T008.9b2 — Recheck stored revision values before dispatch.** Done: `60edee5`. A set `Reader::Commit` or `Reader::Ref` menu option that no longer resolves is refused with a warn message and no dispatch. T008 clause 9.
-  - Verified: `make test-rust FILTER="--test prompts --test menus --test commands"` @ `60edee5` → ok: rust; `a_stale_commit_option_is_refused_before_dispatch` covers an unreachable picked commit after `reset`/reflog expiry/`gc`.
-- [x] **T008.9c1 — Stage ref and remote picks with a document fallback.** `Execution::Pick`, `PendingPrompt.pick`, derived choice prompt, `Reader::Remote`, repo ref/remote item enumeration, and document delivery. T008 clauses 3, 4. Done: `200c5532b4c4ce6b59bb712c7bab82fcaada7c04`. Verified: make test-rust FILTER="--test prompts --test plain_actions --test menus" @ `200c5532b4c4ce6b59bb712c7bab82fcaada7c04` → ok.
-- [x] **T008.9c2 — Deliver native picks when declared.** `view/pick` notification, `view/pickRespond` handling, native/document rung order, `maxItems` cut marker, and one-side shape filtering. T008 clauses 3, 9.
-  - Done: `0b54901`. A declared pick is delivered as `view/pick` and the answer resumes the staged prompt; undeclared clients keep the document fallback. Two `server_async` tests cover the native answer and the fallback.
-  - Verified: `make test-rust FILTER="--test server_async --test plain_core --test prompts"` @ `0b54901` → ok: rust.
-- [x] **T008.9c3 — Apply pick preference limits per client.** Done: `fb721e576dfb3d7027fece1856a0c020f3a9f32e` (via T008.9c3a–b2). A user preference inside the declared shape wins; beyond it needs the explicit per-client config key by `clientInfo.name`, otherwise fallback plus a readable message. T008 clause 6.
-- [x] **T008.9c3a — Add pick preference configuration.** `PickSettings` with a global `max_items` and per-client `clients`, parsed and layered from `[pick]`; invalid values are rejected with file and line. T008 clause 6.
-  - Done: `c7dadc3`.
-  - Verified: `make test-rust FILTER="--test config"` @ `c7dadc3` → ok.
-- [x] **T008.9c3b1 — Honour the global pick item preference.** Truncate the staged pick to `pick.max_items` when it is inside the declared limit; when it exceeds the limit, use the document picker and report the reason. T008 clause 6.
-  - Done: `5f3de54`.
-  - Verified: `make test-rust FILTER="--test server_async --test config"` @ `5f3de54` → ok.
-- [x] **T008.9c3b2 — Allow a per-client pick limit override.** Use `pick.clients[clientInfo.name]` to allow a native pick beyond the declared limit when explicitly configured; otherwise keep the document fallback and message. T008 clause 6.
-  - Done: `fb721e576dfb3d7027fece1856a0c020f3a9f32e`.
-  - Verified: `make test-rust FILTER="--test server_async --test config"` @ `fb721e576dfb3d7027fece1856a0c020f3a9f32e` → ok.
-- [x] **T008.9d — Activate choice and multiChoice rows from Plain documents.** Offer and execute item, Submit, Done and Cancel rows with stale checks; end-to-end via the T008.9c pick. T008 clause 2.
-  - Done: `9f0a70e20eb7a60c6049dc271c860fcd51db4f36`.
-  - Verified: `make test-rust FILTER="--test plain_actions --test prompts"` @ `9f0a70e20eb7a60c6049dc271c860fcd51db4f36` → ok.
-- [x] **T008.9e — Activate choice and multiChoice rows from Rich keys.** Enter on item rows toggles, Done/Cancel closes, Submit returns the custom field; end-to-end via the T008.9c pick. T008 clause 2.
-  - Done: `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44`.
-  - Verified: `make test-rust FILTER="--test server_async --test prompts"` @ `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44` → ok.
-- [x] **T008.11 — Align client prompt behavior with shared vectors.** Lua custom-choice prefill and empty-secret decision; VSCode parity. T008 clause 8.
-  - Done: `98a0a4c`. Custom choice clears the item-id default before the text prompt; empty secret answers cancel in both clients.
-  - Verified: `make test-lua && make vscode-test && make docs-check` @ `98a0a4c` → ok.
-- [x] **T008.12 — Generate docs/plain-support.md from the command registry.** Done: `ebe11b7` (via T008.12a–c). Recording-Ui matrix, `Unavailable` reasons, maintained target and staleness check. T008 clause 10.
-- [x] **T008.12a — Type command effect declarations and add plain_availability.** Replace `required_effect` with `effects: &'static [EffectKind]`; one availability function folds the content-action rule and drives both Rich and Plain gating. T008 clause 10.
-  - Done: `f717778`.
-  - Verified: `make test-rust FILTER="--test plain_core --test plain_actions --test commands --test editor_bridge --test log_selection"` @ `f717778` → ok.
-- [x] **T008.12b — Generate and check docs/plain-support.md.** Done: `e87a50c0eaabaa35384eb50628aabde5ab8ecc88`. Registry-derived table across minimal/edits/full capability profiles, a maintained update target, and a staleness test. Verified: `make test-rust FILTER="--test plain_support"` @ `e87a50c` → ok. T008 clause 10.
-- [x] **T008.12c — Enforce declarations and test unsupported effects.** Assert emitted optional effects are declared; exercise each effect-declaring command against RecordingUi with and without the capability, expecting `Unavailable{reason}` or a readable message and clean cancel. T008 clause 10. Done: `ebe11b7`.
-  - Verified: `make test-rust FILTER="--test commands --test plain_core --test plain_actions --test editor_bridge"` @ `ebe11b7` → ok.
-- [x] **T008.13 — Add the mixed-rung conformance test.** Done: `b549480` (T008.13a), `6179b54` (T008.13b). Cancel at each step; no Git/index change; caller returns; view-stack depth unchanged. T008 clause 11.
-- [x] **T008.13a — Test native-pick cancellation in the mixed-rung flow.** Declare native `pick` without native `confirm`; cancel the `=u` upstream native `view/pick` via `view/pickRespond`; assert caller returns, option stays unset, no Git/index change and view-stack depth is unchanged. T008 clause 11.
-  - Done: `b549480`. `cancelled_native_pick_on_the_mixed_rung_leaves_the_menu_and_repo_unchanged` in `tests/server_async.rs` covers the cancel, the unchanged option, HEAD/index/worktree/lock, and the usable menu view.
-  - Verified: `make test-rust FILTER="--test server_async cancelled_native_pick_on_the_mixed_rung" V=1` @ `b01ce98` → 1 passed.
-- [x] **T008.13b — Test document-confirm cancellation after a native pick in the mixed-rung flow.** In the same mixed-rung client (`pick` declared, `confirm` undeclared), answer the `=u` native `view/pick`, trigger `commit.create` to open the document `confirm` prompt, and cancel it on the `No` row; assert the prompt pops, caller returns, no Git/index change and view-stack depth is unchanged. T008 clause 11.
-  - Done: `6179b54`. `cancelled_document_confirm_after_a_native_pick_on_the_mixed_rung_leaves_the_repo_unchanged` in `tests/server_async.rs` answers the native pick, opens the document confirm, cancels on the `No` row, and checks the pop, no `editDocument`/`view/prompt`, HEAD/index/worktree/lock, and the usable status view.
-  - Verified: `make test-rust FILTER="--test server_async mixed_rung" V=1` @ `6179b54` → 2 passed.
-- [x] **T009.1 — Render the log select view as a Plain document.** The `log.select` scope renders into the single Plain document URI with its header, prompt and commit rows; `Reader::Commit` menu options open the same selection in Plain mode, and an already-set option is cleared as in Rich mode. T009 clauses 1, 5.
-- [x] **T009.2 — Offer confirm, cancel and toggle-mark as code actions.** `common.confirm`, `common.cancel` and `select.toggle-mark` are offered on `log.select` documents; the commit identity comes from `ActionTarget` (`node_id` + `mutation_hash`) over structured commit nodes, never from rendered text. T009 clauses 2, 4.
-  - Done: `plain_log_select_offers_commit_code_actions` in `tests/plain_select.rs` offers `common.confirm`, `common.cancel` and `select.toggle-mark` on a `log.select` document; the confirm target carries the structured `log:commit:<oid>` node id and a mutation hash, and confirming copies the commit id to the clipboard.
-  - Verified: `make test-rust FILTER="--test plain_select" V=1` @ `8280e85` → 3 passed.
-- [x] **T009.3 — Use a field for free-text revisions.** `log.select` renders a one-line `NodeKind::Field` for the revision; document edits to that field are reconciled with the existing field rules (single line, 4096-byte limit, no stray CR), and confirming resolves the revision with `git rev-parse --verify`. T009 clause 3.
-  - Done: `plain_log_select_revision_field_drives_confirm` and `plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker` in `tests/plain_select.rs` edit the `log:field:rev` field via `textDocument/didChange`; a symbolic revision resolves to the full commit id and an invalid revision changes nothing.
-  - Verified: `make test-rust FILTER="--test plain_select" V=1` → 5 passed.
-- [x] **T009.4 — Return the caller on confirm and cancel.** Confirming a selection returns the chosen commit ids to the staged continuation and restores the caller view; cancelling restores the caller without mutation. T009 clause 5.
-  - Done: `plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit` and `plain_log_select_cancel_returns_the_caller_without_changes` in `tests/plain_select.rs` stage the `=C` menu option through a Plain `log.select`, confirm a commit row back into `--reuse-message=<oid>` and cancel back to the unchanged, usable menu.
-  - Verified: `make test-rust FILTER="--test plain_select" V=1` @ `70d617d` → 7 passed; `--test log_selection` → 12 passed.
-- [x] **T009.5 — Reject a stale selection without changes.** A `log.select` action carrying a stale `view_generation`, `node_id` or `mutation_hash` is refused with a readable message and changes nothing. T009 clause 6.
-- [x] **T009.6 — Add the Plain select conformance tests.** `tests/plain_select.rs` covers the Plain log select document, code actions, the free-text field, stale rejection, and the fixup scenario: select a fixup target, then in a second run cancel; the second run changes nothing. T009 clause 7.
-  - Done: `plain_log_select_fixup_target_survives_a_cancelled_second_run` in `tests/plain_select.rs` confirms a fixup-purpose `log.select` target, then opens a second fixup-purpose selection and cancels it; the cancel emits no clipboard, restores the caller document and leaves HEAD, the index and the worktree untouched while the first chosen commit id stays the same.
-  - Covering tests: clause 1 document `plain_commit_menu_option_renders_the_log_select_document`; clause 2 code actions `plain_log_select_offers_commit_code_actions`; clause 3 free-text field `plain_log_select_revision_field_drives_confirm`, `plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker`; clause 4 `ActionTarget` identity `plain_log_select_offers_commit_code_actions`, `plain_log_select_tampered_target_is_refused_without_changes`; clause 5 caller return `plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit`, `plain_log_select_cancel_returns_the_caller_without_changes`, `plain_already_set_commit_option_clears_and_restores_the_menu`; clause 6 stale rejection `plain_log_select_stale_generation_is_refused_without_changes`, `plain_log_select_tampered_target_is_refused_without_changes`; clause 7 fixup `plain_log_select_fixup_target_survives_a_cancelled_second_run`.
-  - Verified: `make test-rust FILTER="--test plain_select" V=1` @ `838203a` → 10 passed.
-- [x] **T010.1 — Replace an open Plain commit buffer with the new template.** When the client declares `showDocument` and the document store shows the `COMMIT_EDITMSG` URI is already open, send a versioned `applyEdit` that replaces the whole buffer with the new template before sending `window/showDocument` with `takeFocus`; when the URI is not open, send `window/showDocument` only. Identify the document by its canonical path and URI, never by `languageId`. T010 clause 1.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `d4f8e09` → ok: rust (27 editor_bridge + 3 plain_draft passed; manual instructions path asserted in `manual_plain_commit_instructions_have_no_apply_edit`).
-- [x] **T010.2 — Cancel a Plain commit run when no document opens.** If no `didOpen` arrives for the issued `COMMIT_EDITMSG` URI in a fixed time, cancel the run and show a readable message; mark the commit commands `Unavailable`. T010 clause 3. Done: `9537e52`. Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `9537e52` → ok: rust (27 editor_bridge + 5 plain_draft).
-- [x] **T010.3 — Bind Plain commit Confirm and Abort to the exact version.** Confirm is a code action that uses the latest synchronized content at the exact version; a close confirms the saved file; Abort is a code action running `common.cancel {runId}` and showing the status view; a close that arrives after an abort is ignored; unrelated documents are rejected. T010 clause 4.
-  - Done: `stale_explicit_confirm_is_refused_and_keeps_the_draft_pending`, `explicit_abort_creates_no_commit_and_restores_the_status_view`, `close_after_abort_is_ignored` and `unrelated_document_notifications_are_rejected_without_touching_the_draft` in `tests/plain_draft.rs`; a Plain client's unrelated document notifications are refused, while its workspace repository's commit message file stays ownable before a run.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `51da1b7` → ok: rust (27 editor_bridge + 9 plain_draft).
-- [x] **T010.4a — Cover save-then-close and dirty Discard.** `tests/plain_draft.rs` covers a saved file confirmed by close, and a dirty buffer discarded on close using the prior saved content. T010 clause 5 (save then close; dirty Discard).
-  - Done: `saved_file_close_commits_the_disk_text` and `dirty_close_commits_the_prior_saved_disk_text` in `tests/plain_draft.rs`.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `f930ff7` → ok: rust (27 editor_bridge + 11 plain_draft).
-- [x] **T010.4b — Cover dirty Save and dirty Cancel.** `tests/plain_draft.rs` covers a dirty buffer saved without a commit, and a dirty buffer cancelled on close while the buffer stays open. T010 clause 5 (dirty Save; dirty Cancel).
-  - Done: `dirty_save_creates_no_commit_and_keeps_the_draft_pending` and `dirty_cancel_keeps_the_draft_pending_and_the_editor_open` in `tests/plain_draft.rs`.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `829eceb` → ok: rust (27 editor_bridge + 13 plain_draft).
-- [x] **T010.4c — Cover an empty commit message.** `tests/plain_draft.rs` covers an empty saved message where Git aborts the commit and the server reports it. T010 clause 5 (empty text saved).
-  - Done: `empty_saved_message_is_refused_by_git_and_reported` in `tests/plain_draft.rs`.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `aeb7ec7` → ok: rust (27 editor_bridge + 14 plain_draft).
-- [x] **T010.4d — Cover a second session.** `tests/plain_draft.rs` covers a second Plain session getting no draft actions for another session's draft. T010 clause 5 (a second session gets no actions).
-  - Done: `second_session_gets_no_draft_actions_and_cannot_forge_confirm` in `tests/plain_draft.rs`; a second Plain session pointed at the same repository offers no Confirm/Abort for the first session's draft, and a forged Confirm/Abort carrying that run's identity is refused without a commit.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `0345fff` → ok: rust (27 editor_bridge + 15 plain_draft).
+### Feature — Phase 7: Test stabilization (does not gate 0.2)
 
-- [x] **T007.4c2 — Abort manually attached Plain commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Owner/run/URI/version-bound Abort rejects stale input, preserves Git state and retires rows/actions. Verified: `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust on the implementation diff; same scenario retains Confirm and declared opening paths.
-- [x] **T007.4c — Confirm or abort manually attached commit drafts.** Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. Attached issued URI through didOpen and exposed Confirm/Abort actions. Exact Confirm body and stale-version rejection landed in `ccf6cbbe055ccb157b59aed525537cdef48f6171`; the existing single scenario enforces both outcomes, terminal retirement and readable guidance.
-- [x] **T007.4n1 — Extend the existing Plain native runner for manual commits.** Add no-showDocument Confirm/Abort flows and structured evidence fields to the maintained runner, without adding test/scenario files. Verify runner helpers; native execution belongs to T007.4n2.
-  - Done: `41ff608` (runner foundations: `7e1d814`).
-  - Verified: `make ui-unit` @ `41ff608` → ok: ui-unit. Runner check: Confirm and Abort each use the numbered picker, ordinary `:edit`, issued URI/row, attached buffer, selected action and Git-state assertions; no new scenario files or mocked production path.
-- [x] **T007.4n1a — Disable native showDocument support on the wire.** Done: `c361960`. Explicit support=false survives Neovim's default capability merge; the runner checks both configured and server-effective false. Verified: `make ui-unit` → ok: ui-unit. Prior native failure: `build/test-logs/plain-neovim.UWQ5TW`.
-- [x] **T007.4n1b — Stage native manual-commit input after visibility setup.** Done: `eb56e16`. The runner stages through the native picker after visibility setup, requires a nonempty cached diff, and compares Confirm's tree to that captured tree. Verified: `make ui-unit` → ok: ui-unit; native verification remains T007.4n2.
-- [x] **T007.4n1c — Acknowledge observed native message prompts before state reads.** Keep native LSP handlers unchanged. Bound state-read retries, capture text evidence, and acknowledge only a concrete hit-enter or more prompt; unrelated RPC failures remain failures.
-  - Done: `49cc25f`; recovery follow-up: `82d59c8`.
-  - Verified: `make ui-unit` on `82d59c8` plus the added regression tests → ok: ui-unit. Tests cover unchanged non-timeout RPC errors and final timeout preservation without final acknowledgement; prior observed-prompt and text-evidence checks remain enforced.
-- [x] **T007.4n1d — Normalize native Git scalar output without changing blob evidence.** Done: `78f98eb`. Strip command line endings only from revision, tree and count scalars; preserve blob, body and diff output.
-  - Verified: `make ui-unit` @ `f6a7832` → ok: ui-unit. Subprocess-wrapper tests cover scalar normalization and blob output with either newline form. Earlier native failure: `build/test-logs/plain-neovim.7zVWEw`; fixed before final native gate.
-- [x] **T007.4n1e — Preserve exact native commit-body evidence.** Done: `431af86`. Read raw commit object and preserve body bytes; mismatch reports actual and expected representations.
-  - Verified: `make ui-unit` @ `78f98eb` → ok: ui-unit. Earlier native failure `build/test-logs/plain-neovim.OhJwJd` reached Confirm but stalled at fresh Abort attachment; n1f addresses buffer retirement.
-- [x] **T007.4n1f — Retire the confirmed native draft buffer before reopening.** Done: `9187cae`. Force-wipe only terminal confirmed buffer after exact Git checks and row retirement; assert deletion and fresh Abort attachment.
-  - Verified: `make ui-unit` @ `9187cae` → ok: ui-unit. Source inspection verifies lifecycle order and distinct buffer assertion.
-- [x] **T007.4n1g — Budget synchronization for the added manual native transitions.** Done: `20c7f9c`. Keep 30 applyEdit cap before manual setup; allow 16 for manual flows; retain global request/no-op limits and primary failures.
-  - Verified: `make ui-unit` @ `20c7f9c` → ok: ui-unit. Tests reject both phase overages, request/no-op excess and preserve workflow failures; report records both phase counts.
-- [x] **T007.4n2 — Verify native Plain manual commit editing.** Done: `c407a1d`. Both newline variants passed explicit no-showDocument, URI instructions/rows, ordinary attachment, native Confirm/Abort, exact body/tree/worktree and abort Git invariants, row retirement, no custom notifications and cleanup.
-  - Verified: `make plain-neovim` → ok: plain-neovim. Evidence: `build/ui/plain-render/without-final-newline/native.json`, `build/ui/plain-render/with-final-newline/native.json`. Earlier native failures are recorded above and in prior evidence; final run passed.
-- [x] **T007.4 — Attach manual commit editing without showDocument.** Done: `2fd2683`. The single real-stdio scenario `plain_commit_editor_manual_instructions_cancel_pending_git_run` was expanded; no additional scenario added.
-  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `2fd2683` → ok: rust. Scenario tests absent and declared/rejected showDocument, exact URI row, Confirm body, Abort invariance and terminal retirement.
-- [x] **T007.5 — Audit Plain capability acceptance.** Done: containing commit. All six original T007 clauses map to current source and enforcing tests below; no new test or scenario added.
-  - 1. Code-action-only clients: `src/presentation/mod.rs:244-261`; `plain_actions::code_actions_work_without_execute_command_declaration` and `code_actions_are_unsupported_without_declaration`; `70eca61`.
-  - 2. Neovim `documentChanges` quirk: `src/quirks.rs:78-92`; `quirks::real_server_reports_effective_plain_resolution_and_overrides` and `plain_render::actual_plain_did_open_applies_authoritative_status_without_writing_presentation_file`; quirk resolution and outgoing-format enforcement: `6646086`, `11d1c8b`.
-  - 3. Capability declaration comments: `src/presentation/mod.rs:271-289`; all `from_lsp` reads label feature declarations versus sub-features; `70eca61`.
-  - 4. Missing-echo recovery: `src/server.rs:849-856`, `src/presentation/plain.rs:294`; `plain_render::silent_stale_success_without_echo_recovers_after_watcher_render` and `accepted_unconfirmed_edit_expires_and_repairs_only_on_new_evidence`; `33230ec`, `53483b9`, `5209f6e`.
-  - 5. Standard `workspace/applyEdit`: `tests/test_plain_apply_edit.lua:4-140`; in-process stock handler covers all declaration/version combinations plus a stale second entry; `338b9de`. This is scripted editor evidence, not native evidence.
-  - 6. Manual/declared commit editing: current `src/server.rs`; the single real-stdio `plain_commit_editor_manual_instructions_cancel_pending_git_run` scenario retains no-showDocument and declared paths; `0e9223a`, `c3f5a42`, `2264616`, `ccf6cbb`, `2fd2683`. Native evidence is the two `native.json` files recorded under T007.4n2.
-  - Verified: `make ui-unit` @ `20c7f9c` → ok: ui-unit (reused; source unchanged since). Native verification: `make plain-neovim` @ `c407a1d` → ok: plain-neovim. Both JSON reports show declared/effective `showDocument=false`, exact URI and commit body, successful Confirm/Abort oracles, zero custom notifications, and complete cleanup.
+- [ ] **T024 — host-spike.** [Scope](./TASKS_PART_SEVEN.md#t024-host-spike-s).
+  - The obsolete missing-Make-target blocker is removed: `make vscode-e2e` exists, with native A06 evidence in the completed E2E split. That evidence does not satisfy the ten-run spike or choose the host. T025/T026 depend on this decision; T027/T028 retain their native VSCode verification requirements.
 
-Canonical roadmap and queue; architecture and glossary: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [AGENTS.md](./AGENTS.md). Behaviour claims require current source/tests. Project status: early stage; backward compatibility is not a goal.
+## Blocked prerequisites
 
+### Deferred hygiene follow-ups
 
-## Bugfix
-
-- [x] **BUG-LUALS-PROMPT-UNION — Restore directional prompt union generation.** test: `make test` at `43572aa` stops in `luals_annotations_preserve_directional_contracts` (`tests/schema.rs:1428`, `build/test-logs/rust.yN0yZJ`), “untagged unions stay unions”. Preserve the validated protocol contract and exact union semantics; diagnose generator versus obsolete test expectation without weakening coverage. Verify `make test-rust FILTER="--test schema"`. Generated artifact regeneration, if necessary, must be a separate causal commit via `make update-schema`; verify `make schema-check` and assign any unrelated stale output explicitly. This issue predates the recording split and is not owned by that completed task.
-  - Diagnosis: VERIFIED `src/protocol.rs:497-505` defines `PromptValue` as bool, text, choice, and `{ ids: Vec<String> }`; `src/protocol.rs:511-515` wraps it as optional. The current generator correctly renders the fourth object as `.Variant4` with `ids string[]`; the old assertion in `tests/schema.rs:1429` mistook that line break/declaration for an extra unwanted variant. No generator or generated-artifact change is needed.
-  - Verified: `make test-rust FILTER="--test schema"` → `ok: rust`; prompt JSON Schema retains all four answer variants and LuaLS retains the boolean, string, choice, structured multi-choice, and nullable field.
-  - Done: 6ce08f4
-
-- [x] **BUG-PLAIN-COMMIT-BARRIER — Require actual commit completion before inspecting HEAD.** The exact Plain gate repeatedly fails at `tests/plain_harness.rs:1186` with initial rather than expected commit message (`build/test-logs/rust.v72kNB`). VERIFIED `tests/common/client_pump.rs:146-150`: `until` checks its predicate before pumping; `tests/plain_harness.rs:1178-1184` never establishes draft-marker presence, so absence is not a causal Git-completion barrier. This does not yet establish historical provenance or a production regression. Preserve all exact final message/parent/file/index/worktree assertions; require observed HEAD advancement as well as existing view state using the same bounded message pump, not sleeps/retries or weaker assertions. check: `make test-rust FILTER="--test plain_harness"`. Independent test-oracle boundary; server extraction stays unaccepted until its original focused gate passes.
-  - Verified: `make test-rust FILTER="--test plain_harness"` → exit 0 (`ok: rust`); predicate waits for both observed HEAD advance and prior view-state condition before unchanged exact Git assertions.
-  - Done: f1a43d1
-
-- [x] **BUG-PHASE6-INSTANT-REBASE — Restore native instant-rebase final Git invariants.** test: UI gate at `9320f09` fails `tests/ui/scenarios/instant-rebase.scn:53`, statement 49 combined tree/index/clean-status/no-rebase-state oracle (`build/test-logs/ui-test.y3djYL:1-2`). Diagnose the failing invariant without weakening exact Git checks. Verify: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn`.
-  - VERIFIED cause/evidence: the supplied failure records only the combined command failing, so it does not identify which conjunct failed (`build/test-logs/ui-test.y3djYL:1-2`). Kept all four exact checks and added failure labels; the focused scenario now passes, with no failing conjunct reported (`make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` → `ok: build`, `ok: ui-file`). The prior failure is not reproducible from available evidence; no Git invariant was weakened.
-  - Done: `dc43535`.
-- [x] **BUG-PHASE6-PLAIN-COMMIT — Restore native Plain exact commit-message workflow.** test: UI gate at `9320f09` fails `tests/ui/scenarios/plain-commit.scn:33`, statement 25 expected/actual message comparison, char 21 line 2 (`build/test-logs/ui-test.y3djYL:42-43`). Preserve exact intended message and Git outcome. Verify: `make ui-file FILE=tests/ui/scenarios/plain-commit.scn`.
-  - VERIFIED diagnosis/change: the supplied failure shows the second message line differs beginning at character 21 but does not expose its actual contents (`build/test-logs/ui-test.y3djYL:42-43`). Re-ran the existing native Plain workflow unchanged; it passed its exact commit-object message comparison and parent, committed-file, clean-status and no-lock Git checks (`tests/ui/scenarios/plain-commit.scn:21-33`; `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` → `ok: build`, `ok: ui-file`). The reported discrepancy is not reproducible; preserved the strong intended-message/Git-state oracle rather than weakening it.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/plain-commit.scn` → exit 0. Done: `0d70795`; inherited Done: `dc43535`.
-
-- [x] **BUG-PHASE6-PNPM — Resolve VSCode dependency setup failure.** Historical failures: missing pnpm wrapper executable (`build/test-logs/vscode-deps.1RJk1D`), then `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` (`build/test-logs/vscode-deps.jfnNE1`). Verified: full `make test` at `43318a2` exited 0, including dependency setup, typecheck, VSCode tests and keybindings; no workaround was used. This resolves the observed dependency gate, not Knip hygiene or native-host coverage. Done: `4045289`.
-  - Verified: Follow-up regular `make vscode-test` after the user ran with `CI=true` exited 0: `ok: build`, `vscode-deps`, `vscode-typecheck`, `vscode`, `keybindings`. The regular rerun required no `CI=true` override; the dependency-setup blocker is cleared.
-
-- [x] **BUG-PHASE6-LOG-ARGUMENT-STATUS — Restore exact log argument status behavior.** Regression surfaced by full `make test` at HEAD `0763e38`: `tests/menus.rs::log_argument_statuses_and_select_copy_action_are_exact` failed at `tests/menus.rs:495` for `=u`, because its strict allowlist omitted four filters intentionally promoted by T041. Updated the exact allowlist only: `=u`, `=M`, `=m`, and `=p` now expect Implemented; every other filter/status and the select-and-copy action assertions remain strict. Verified promotion exemptions in `src/menus/mod.rs:157-175`; this was a stale test oracle, not a production regression. Verify: `make test-rust FILTER="--test menus"`.
-  - Verified: `make test-rust FILTER="--test menus"` → exit 0. Diagnosis: the test oracle did not reflect T041's four promoted filters; production behavior was correct. Done: `43318a2`.
-
-- [x] **BUG-PHASE6-VISIBILITY — Restore stale visibility-cycle refusal regression.** test: `make test` at `53942dc` fails `cycle_visibility_preserves_the_retained_cursor_identity_and_refuses_stale_input`, `tests/visibility.rs:142`, obsolete no-render assertion (`build/test-logs/rust.pP3147`). Verify current refusal/recovery contract and preserve retained cursor identity, stale-input refusal and unchanged Git/visibility state. Verify: `make test-rust FILTER="--test visibility"`.
-  - VERIFIED cause: stale positional requests return `STALE_VIEW` with `refresh_and_render` (`src/session.rs:2901-2925`); this test's stale request follows a successful visibility cycle while retaining `section:untracked`. Direct assertions verify refusal/recovery content and version, unchanged focused identity/visible lines and unchanged Git status (`tests/visibility.rs:112-163`).
-  - Verified: `make test-rust FILTER="--test visibility"` → exit 0 (`ok: rust`). Done: containing commit; inherited Done: `53942dc`.
-  - Done: `9320f09`.
-
-- [x] **BUG-PHASE6-VIEWS — Restore retained-view stale-request and continuation regressions.** test: At `b48187d`, `make test` fails `tests/views.rs` stale-request no-render assertions at 292 and 387 and discard continuation refresh unwrap at 39 (`build/test-logs/rust.MirrQ3`). Preserve positional refusal, replacement-row safety and retained-hunk confirmation through reachable refresh/resize behavior; do not require a newer status render while confirmation is pending. Verify: `make test-rust FILTER="--test views"`.
-  - VERIFIED causes: stale positional requests intentionally return `STALE_VIEW` with `refresh_and_render` (`src/session.rs:2901-2925`), so tests require recovery content and unchanged staged/index/worktree state (`tests/views.rs:283-318,380-452`). Direct session calls use current session versions for subsequent invalid versions and acknowledgement (`tests/views.rs:393-417`). Status resize updates viewport but renders only menus (`src/session.rs:1001-1025`). Active document prompts queue refresh and return `None` (`src/session.rs:3539-3547`), but this discard confirmation is not a document prompt; its unchanged refresh returns `None` through ordinary identical-refresh suppression (`src/session.rs:3539-3561`). The original test workflow makes no worktree changes while confirmation is pending, checks viewport/no-render refresh semantics, then asserts the exact remaining content (`line35 CHANGED`) and empty index (`tests/views.rs:13-71`). No newer-render/ack claim is made. This corrects the unreachable post-prompt worktree-change premise.
-  - Verified: `make test-rust FILTER="--test views"` → exit 0 (`ok: rust`), all 14 tests. Done: containing commit; premise correction: `35a7dfd`; inherited Phase 6 Done: `b48187d`.
-
-- [x] **BUG-PHASE6-SERVER-ASYNC — Restore async protocol regression suite.** test: Phase 6 `make test` at `f15fa55` failed 18 of 58 `server_async` tests with live-server receive timeouts (`build/test-logs/rust.ngSU1T:953-975`). Restored explicit per-test presentation contracts without production changes, sleeps, retries, longer timeouts or changes to progress/Git/concurrency assertions. Done: containing commit; inherited Phase 6 Done: `f15fa55`.
-  - VERIFIED cause: absent `experimental.magit` selects Plain (`docs/PROTOCOL.md:8`); Plain suppresses custom renders (`src/server.rs:823-836`) and dynamic keymaps (`src/server.rs:4988-4995`). Caller-aware bounded receive diagnostics located the exact initial `view/render` wait at `tests/server_async.rs:1861` in `build/test-logs/rust.06jcQs`, before progress or mutation. The earlier `rust.YQdD0c` run exercised `a_mutation_reports_work_done_progress`, but its inherited initialization edit was in `mutations_for_one_repository_apply_in_request_order`, not that test.
-  - Original failure mapping, shared Rich open helper (9): `a_mutation_reports_work_done_progress`, `a_cancel_notification_aborts_a_slow_mutation`, `a_mutation_blocked_in_git_does_not_delay_a_later_read`, `absent_or_false_progress_capability_emits_no_create_or_progress`, `blocked_repository_does_not_serialize_unrelated_repository_operations`, `delayed_failed_unanswered_and_completed_progress_create_keep_intake_responsive`, `mutations_for_one_repository_apply_in_request_order`, `outbound_request_responses_are_correlated_without_blocking_intake`, `nested_user_close_and_reopen_does_not_retain_views_or_parents`. Pending initial render/keymap pair in `open_view`; explicitly negotiate Rich while preserving each original progress capability and all operation oracles.
-  - Original failure mapping, direct Rich render/keymap waits (7): `opening_multirow_rebase_todo_batches_object_resolution_once`, `repository_configuration_is_trusted_isolated_canonical_and_reloaded`, `view_open_then_invoke_stage_round_trips_over_stdio`, `view_resize_notification_reflows_an_acked_menu_incrementally`, `view_open_pushes_a_keymap_and_view_key_round_trips_over_stdio`, `a_config_reload_repushes_the_view_keymap`, `a12_selection_stage_reports_index_lock_as_successful_error_effect`. Explicit Rich declarations restore the intended pushed-render/keymap contracts; configuration, incremental edits, object batching, exact effects and index/worktree assertions are unchanged. Evidence for both Rich groups: initialization-only changes produced 56/58 passing tests (`build/test-logs/rust.RjuvuC`).
-  - Original failure mapping, intentional Plain paths (2): `plain_menu_option_prompt_opens_a_document_without_a_native_request` and `a_failed_commit_ends_its_progress_with_an_error` also blocked in the Rich-only `open_view` helper. Keep Plain and open without awaiting custom pushes. The prompt test checks authoritative menu/prompt snapshots via `view/resync`, exact prompt descriptor/URI and pending-prompt refusal, and forbids native prompts plus Rich render/keymap pushes through shutdown. The failed-commit test retains exact `window/showMessage` hook-error text, announcement effect and correlated create/begin/end phases. Trying Rich there instead blocked at the error-notification wait (`rust.RjuvuC`, line 3724), consistent with Rich errors using `view/effects` (`src/server.rs:5306-5316`). Both focused Plain tests and the full suite subsequently passed.
-  - Verified: `make test-rust FILTER="--test server_async"` → exit 0 (`ok: rust`), all 58 tests; the original gate failed before these changes. Existing regression tests were repaired, not replaced; no new test fixture or native UI behavior/capability change.
-  - Done: `b48187d`.
-
-- [x] **BUG-PHASE6-PROMPT-RENDER — Restore menu-option prompt regression.** Cause: an active document prompt queues `Session::refresh` and returns `None` before the ordinary render path (`src/session.rs:3529-3547`), so requiring that refresh to render was invalid. The test uses the genuine resize render (which advances and acknowledges the menu version), proves `=f` remains unset across that version advance and queued refresh, then accepts the original prompt and proves the captured menu option becomes `f.txt`. The prompt suite had no changed-options refusal assertion to remove; adjacent stale commit-option refusal remains covered at `tests/prompts.rs:1468`. No production change or forced background render. Done: containing commit; inherited Phase 6 Done: `b63fe3a`.
-  - Verified: `make test-rust FILTER="--test prompts"` → exit 0 (`ok: rust`); `log_path_prompt_binds_the_menu_options_not_a_render_version` exercises the resize version advance, unchanged `=f` state through queued refresh, and accepted original prompt.
-  - Done: `f15fa55`.
-
-- [x] **BUG-PHASE6-PLAIN-OFFER-BOUND — Reconcile retained-view action bound.** The prior file-row bound omitted `open.rebase`: the status-scope semantic offer is explicit in `src/server.rs:4033-4073`, and is declared Implemented/Available for Plain status in `docs/plain-support.md:158`. The fixture asserts exactly ten offers for file rows (including `open.rebase`) and nine for hunk rows; those are distinct target-applicability contracts, not a relaxed maximum. Existing repeated payload, latency reporting, duplicate prevention, content-target, selection-target, and HEAD/index/worktree invariants remain asserted by `large_retained_view_repeated_code_actions_report_latency_without_mutation` (`tests/plain_actions.rs:1090-1215`). Done: containing commit; inherited Phase 6 Done: `a0e9e91`.
-  - Verified: `make test-rust FILTER="--test plain_actions"` → `ok: rust` (29 tests; full plain_actions suite).
-  - Done: `b63fe3a`.
-
-- [x] **BUG-PHASE6-NAVIGATION — Restore navigation render-contract regressions.** At base `e2472ac`, the hierarchy test incorrectly expected no render on stale refusal; it now requires the recovery render at the current version, preserves `STALE_VIEW`, and proves Git status is unchanged (`tests/navigation.rs:217-227`). The positional test initialized with empty capabilities, which selects Plain (`docs/PROTOCOL.md:8`), then waited for Rich-only `view/render`; it now declares Rich via `initialize_rich` to exercise its intended render/ack contract (`tests/navigation.rs:570-608`). A1 stale refusal/recovery and unchanged mutation state are asserted directly. A2 proves unacknowledged v2 leaves definition null and symbols equal to v1, then acknowledges v2 and proves definition and symbols use v2 (`tests/navigation.rs:641-674`); it checks already-received renders before waiting, avoiding a wait for a suppressed duplicate refresh. No production change; identical-tree refresh suppression remains at `src/session.rs:3539-3565`. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test navigation"` → `ok: rust` (full navigation suite).
-  - Done: `a0e9e91`.
-
-- [x] **BUG-PHASE6-LOG-SELECTION — Reconcile stale-selection recovery oracle.** test: Phase 6 `make test` at `c4e3c2b` failed `selection_rejects_current_unacked_and_discarded_ack_versions` because it expected no render. `Session::invoke` rejects invalid positional coordinates with `STALE_VIEW` and `refresh_and_render` (`src/session.rs:2901-2925`); the prior stale-target regression establishes recovery renders are required. Corrected the oracle to require the recovery render for the picker at the current version; existing assertions retain selection refusal, ack tree, and exact HEAD/index/worktree invariants (`tests/log_selection.rs:430-447`). No production change: ordinary identical-tree refresh suppression remains in `src/session.rs:3539-3561`. Verification: `make test-rust FILTER="--test log_selection"` → `ok: rust`.
-  - Done: `e2472ac`.
-
-- [x] **BUG-PHASE6-KEY-VERSION — Restore obsolete-version key regression.** test: Phase 6 `make test` at `6fdb9a2` failed because the regression refreshed an unchanged authoritative tree; `Session::refresh_view` intentionally suppresses identical tree/menu renders (`src/session.rs:3557-3561`). The test now adds an untracked file to produce a genuine status-tree change, advances and acknowledges that render, then removes the fixture file so the clean Git-state oracle remains intact. The original older-than-current version checks for non-positional keys and menu options remain unchanged; production and background-isolation behavior are unchanged. Verification: `make test-rust FILTER="--test keys_protocol"`.
-  - Verified: `make test-rust FILTER="--test keys_protocol"` → `ok: rust`; the regression and all keys_protocol tests pass.
-  - Done: d2ad536.
-
-- [x] **BUG-PHASE6-SECOND-DRAFT — Restore abort offers for a second Plain draft.** test: `plain_commit_editor_manual_instructions_cancel_pending_git_run` received no actions on the second draft (`tests/plain_harness.rs:1314`, full stderr in `build/test-logs/rust.Ce1BWF:94-95`). The test previously opened the reused `COMMIT_EDITMSG` URI again without first closing the prior document; `fake_editor.open` resets each open to version 1 (`tests/common/fake_editor.rs:85-94`), while the server models attachment and close as distinct lifecycle events (`src/server.rs:3153-3172,3229-3244`; `src/editor/draft.rs:186-203,225-232`). Fix the test lifecycle by sending `didClose` after the first run, before reopening that URI for the second run; no readiness polling or production change. Verification: `make test-rust FILTER="--test plain_harness"`.
-  - Verified: `make test-rust FILTER="--test plain_harness"` → `ok: rust`; second-run Abort, exact version/foreign/stale refusals and Git-state invariants pass.
-  - Done: `6fdb9a2`.
-
-- [x] **BUG-PHASE6-EXAMPLE-TIMEOUT — Diagnose exact-replay gate timeout.** check: The historical `315b905` timeout (`build/test-logs/rust.zL2rYF`) is obsolete after causal authored-recording corrections: all 15 exact examples and 47 command tests passed in `build/test-logs/rust.R3oajw`, with production unchanged. Subsequent gate could not spawn Git (`Resource temporarily unavailable`, `build/test-logs/rust.1fYTTn`); diagnostics found 1,967 PID-1-owned zombies and `pids.current=1992/2048`, identifying resource exhaustion rather than replay mismatch. Current headroom was `pids.current=33/2048`; the combined gate below passes. Exact replay and bounded readiness remain unchanged; the independent Plain second-draft lifecycle correction is recorded under BUG-PHASE6-SECOND-DRAFT.
-  - Verified: `make test-rust FILTER="--test examples --test commands"` → `ok: rust`; 15 exact example tests and 47 command tests pass. Current resource headroom: `pids.current=33`, `pids.max=2048`.
-  - Done: `100c541`.
-
-- [x] **BUG-PHASE6-STALE-RENDER — Preserve stale-target render recovery.** Phase 6 full gate at `e0566d1` failed five `tests/commands.rs` stale-target tests asserting `result.render.is_some()` (`build/test-logs/rust.1kt8cI`). Diagnosis: `9a8372a` made ordinary `Session::refresh` return `None` for unchanged trees, which is correct for background todo isolation but drops required stale-action recovery renders. Stale target/version rejection now calls `refresh_and_render` directly, preserving rejection and its render without changing ordinary refresh generation behavior. Existing command regressions retain exact Git oracles; the Plain gate tests assert unchanged todo offers/generation and no Rich notifications. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test commands"` → `ok: rust`; stale-target regressions pass with exact Git-state assertions.
-  - Verified: `make test-rust FILTER="--test plain_harness plain_gate"` → `ok: rust`; Plain gate isolation and unchanged-todo cases pass.
-
-- [x] **BUG-PHASE6-BRIDGE — Repair full-gate bridge test prerequisites.** Done: `b4f5d87`. Full Rust log `build/test-logs/rust.C0VyLi`: EOF test initialized Plain capabilities then waited for a Rich keymap; cancellation test treated a retained zombie `/proc` entry as a running descendant. Declare the actual Rich test client and assert no executing hook, without claiming PID1 reaped zombies. `make test-rust FILTER="--test editor_bridge r_edit_2_"` passed.
-
-- [x] **BUG-PHASE6-PROC — Remove procps-only test prerequisite.** Full `make test` failed at `src/runner/owned.rs:652` because host BusyBox `ps` rejects `-p`. Preserve the Linux process-group/session/no-TTY oracle using kernel `/proc` metadata. Done: `04907d4`; focused owned-runner test passed through Make, and subsequent full run passed all 68 library tests.
-
-- [x] **Refresh instant-autosquash generated references.** check: T019 closure gate `make docs-artifacts-check` failed stale `docs/schema/worked-exchanges.md` at `63c8bd3` (`build/test-logs/schema-check.64UYhw`). Regenerated causal schema/registry references through `make docs-generate`, inspected diffs, committed generated files separately, then passed `make docs-artifacts-check && make docs-check`. Full `make test`, `make ui-test`, and `make ui-tour` passed at `63c8bd3`; hygiene ran but missing checkers and deferred debt prevent a clean claim.
-  - Verified: `make docs-generate && make docs-artifacts-check && make docs-check` @ 63c8bd3 → `ok: update-schema`, `ok: registry-docs-generate`, `ok: schema-check`, `ok: registry-docs-check`, `ok: docs-check`; generated reference commit: `f2f7cd0`.
-
-- [x] **Refresh instant-autosquash recorded registry responses.** check: Repair only causal observed command-response changes after F/S promotion in existing commit-edit recordings. T019 closure gate fails `plain_examples_replay_against_the_real_binary` at `commit-edit-abort.jsonl:9`, `$.result[36].command` (`build/test-logs/rust.dGy3vS`). Preserve exact replay assertions and unrelated frames. Verification: `make test-rust FILTER="--test examples"`.
-  - [x] **Refresh instant abort recording.** check: Exact abort replay advances to confirm recording; frames 9/16 copied from observed responses without unrelated changes.
-    - Verified: `make test-rust FILTER="--test examples"` @ f3767f3 → `ok: rust`; exact abort and confirm recordings replay with unchanged assertions; abort frames 9/16 and confirm frames 9/16 use observed registry responses with recorded request IDs retained.
-  - [x] **Refresh instant confirm recording.** check: Exact complete examples replay passes after confirm response repair; commit both verified recording outcomes and evidence.
-    - Verified: `make test-rust FILTER="--test examples"` @ f3767f3 → `ok: rust`; `plain_examples_replay_against_the_real_binary` compares all s2c frames for both commit examples; recorded command request IDs retained.
-  - Verified: `make test-rust FILTER="--test examples"` @ f3767f3 → `ok: rust`; full replay passes after causal registry-only response refresh. T019 closure gate evidence retained above.
-
-- [x] **Stabilize the instant-conflict readiness assertion.** check: Diagnose `dispatched_instant_fixup_conflict_is_left_for_explicit_recovery` failing its bounded stopped-state wait under the full server suite (`build/test-logs/rust.6kr04f`); retain genuine conflict-state assertions and use observed readiness rather than blind retries. Verification: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"`. This blocks T019 closure; finish with the pending cancellation regression. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"` @ `4da5eb0` → `ok: rust`; the conflict regression drains queued and incoming transport frames to independently observe the caller render and exact autosquash stopped effect under one bounded deadline, then preserves exact conflict, marker and abort assertions. `instant_squash_registered_editor_abort_retains_marker_and_releases_worker` proves real registered-editor cancellation retains exact Git/index/worktree state, closes progress, rejects the stale run and leaves caller recovery usable.
-
-- [x] **Refresh initial-rebase generated references.** Done: `b2c99d3`. Gate `make test` passes at `0680cdb`; `make docs-artifacts-check` fails stale `docs/schema/worked-exchanges.md` (`build/test-logs/schema-check.i0tOdS`). Regenerate registry/schema references through Make and inspect only causal initial-rebase deltas.
-  - check: `make docs-generate && make docs-artifacts-check && make docs-check` passes. Generated artifacts must be committed separately from queue bookkeeping, naming the promotion and generation command.
-  - Verified: `make test` @ `0680cdb` → passed; `make docs-generate && make docs-artifacts-check && make docs-check` @ `b2c99d3` → passed; generated reference commit: `b2c99d3`.
-
-- [x] **Repair initial-rebase command replay fixtures.** Done: `3ebfadc`. Substantial-chunk gate at `cea53d3` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.Yt68Il`). Refresh only causally changed recorded code-action frames from real-server output; preserve exact replay assertions and unrelated frames.
-  - check: `make test-rust FILTER="--test examples"` passes with inspected fixture-only causal diff. Generated standalone references remain separate.
-  - Attempts: Two default orientation checkpoints, no edits; observed enabled `rebase.interactive` moves within code-action ordering. Split first causal recording repair from complete replay.
-  - [x] **Repair initial-rebase abort recording.** Update causally changed abort code-action frames from exact observed server output; check: replay advances beyond this fixture (a later fixture failure is recorded, not mistaken for this item failing).
-    - Verified: `make test-rust FILTER="--test examples"` @ `cea53d3` → exit 2 after abort replay passed; later expected mismatch at `commit-edit-confirm.jsonl:9`, `$.result[31].data.command` (`build/test-logs/rust.5RfXtK`).
-  - [x] **Complete initial-rebase recording replay.** Done: `3ebfadc`. Refresh remaining causally changed frames; check: full `make test-rust FILTER="--test examples"` passes with exact assertions unchanged.
-    - Reopened: Full gate at `23bbd5f` fails the unchanged confirm frame 9 (`build/test-logs/rust.imGsLe`); prior narrow pass predates the worker's restoration of frame 9 and does not verify committed state. Update both causal frames, then verify after the final edit.
-    - Verified: `make test-rust FILTER="--test examples"` @ `3ebfadc` → passed; `commit-edit-confirm.jsonl:9` re-recorded from exact observed response in `build/test-logs/rust.imGsLe` (promotion action precedes amend); `:16` retains context-specific request id 4, as refreshed from `build/test-logs/rust.dTxiHZ`.
-
-- [x] **Refresh generated references for scoped todo commands.** Done: `8beb859`. The substantial-chunk gate at `46dc360` fails `schema-check` on `docs/schema/worked-exchanges.md` after registry recording changes; check registry reference freshness too. Regenerated via Make; causal todo command/keymap/exchange deltas inspected.
-  - check: `make docs-generate && make docs-artifacts-check && make docs-check` passes; generated diff is causal and committed separately with source/command rationale.
-  - Verified: `make docs-generate && make docs-artifacts-check && make docs-check` @ `46dc360` → passed; schema, registry artifacts and authored links fresh.
-  - Record queue evidence in a separate bookkeeping commit; never hand-edit generated references.
-
-- [x] **Regenerate VSCode todo keybindings through Make.** The resumed gate at `656ddd7` passes Rust/Neovim/VSCode behavior suites but fails committed keybinding freshness (`build/test-logs/keybindings.qX4K5z`). Add a narrow Make generation target because only the checker is exposed; preserve unrelated dirty Makefile edits, then regenerate and inspect the causal todo bindings.
-  - check: generation and freshness verification run through Make; generated VSCode binding artifact changes only for intentional todo bindings.
-  - Verified: `make vscode-keybindings-generate && make vscode-test` @ `760ad60` → generation and freshness checker passed; VSCode typecheck and tests passed.
-  - test: VSCode tests pass with current generated bindings.
-  - Verification: `make vscode-keybindings-generate && make vscode-test` (new generation target).
-  - Commit generated artifact separately from target and queue bookkeeping; stage only the new Make target hunk.
-
-- [x] **Align recorded actions with todo editor scope.** The gate at `e30a080` fails `commit-edit-abort.jsonl:9` at `$.result[31].data.command` after correcting contextual todo command scope. Update only causally affected code-action frames; retain exact replay checks.
-  - check: real-server replay passes and recorded status actions no longer advertise editor-only todo commands.
-  - Verification: `make test-rust FILTER="--test examples"`.
-  - Verified: `make test-rust FILTER="--test examples"` @ `e30a080` → passed; real-server replay matches both recorded examples and status frames omit the 11 `rebase.todo-*` actions while retaining `rebase.edit-todo`.
-
-- [x] **Refresh snapshots after todo scope correction.** Regenerate intentional manifest/keybinding changes caused by `e30a080` and inspect only causal scope changes.
-  - check: generated snapshots accurately represent editor-scoped todo commands; manifest/parity checks pass unchanged.
-  - Verification: `make update-snapshots && make test-rust FILTER="--test manifest --test parity"`.
-  - Verified: `make update-snapshots && make test-rust FILTER="--test manifest --test parity"` @ `30ba485` → ok: update-snapshots; ok: rust. Regeneration produced no snapshot diff; generated files already match corrected scopes. No generated-snapshot commit needed.
-
-- [x] **Reconcile todo keymap manifests and shortcut policy.** The resumed gate at `8b9f2f6` fails manifest/keybinding snapshots and reports `rebase-todo` `ctrl+s` / `rebase.todo-submit` shadowing a workbench shortcut without an allow entry. Preserve intentional scoped native submit behavior and reconcile the explicit shortcut policy and generated snapshots without weakening checks. Done: containing commit.
-  - test: shipped profiles pass shortcut policy and exact manifest/keybinding snapshot assertions with the todo bindings present.
-  - check: inspect regenerated snapshot changes for causal todo bindings only.
-  - Verification: regenerate with `make update-snapshots`; validate using `make test-rust FILTER="--test manifest"`. Record any unrelated aggregate-generator failure separately.
-  - Verified: `make test-rust FILTER="--test manifest"` → ok: rust; includes `json_matches_snapshots_and_has_the_documented_shape`, `vscode_matches_snapshots`, and `shipped_profiles_never_shadow_workbench_shortcuts_without_allow`.
-  - Snapshot check: four snapshots add the `rebase-todo` scope and its bindings/metadata; keybinding snapshots add scoped entries for that view. No pre-existing binding or metadata changed. `make update-snapshots` generated these files but exited 2 because `tests/parity.rs:129` failed: `the walk covered every registered menu action: rebase.todo-set-action`; tracked separately.
-
-- [x] **Restore menu registry parity for contextual todo actions.** Diagnosis: the eleven todo-editor actions were incorrectly classified as `MenuAction`, although they are context-bound to `rebase-todo`; `rebase.edit-todo` remains the real menu opener. Added `RebaseTodo` scope and limited dispatch to that view. Parity walk again covers every actual menu action; todo session/key invocation regressions remain passing. Done: containing commit.
-  - test: todo contextual commands remain reachable and all registered menu actions satisfy the registry walk.
-  - Verification: `make test-rust FILTER="--test parity --test rebase_todo --test commands --test menus --test keymap"`.
-  - Verified: `make test-rust FILTER="--test parity --test rebase_todo --test commands --test menus --test keymap"` @ `61c9022` → ok: rust (47 parity, 21 rebase_todo, plus commands, menus and keymap suites).
-
-- [x] **Repair todo command registry example replay.** The substantial-chunk gate at `180dfce` fails `plain_examples_replay_against_the_real_binary`: `commit-edit-abort.jsonl:9: recorded s2c frame mismatch at $.result[30].data.command` after adding todo commands. Diagnose the causal registry difference and update recorded exchanges without weakening replay assertions.
-  - check: recorded command responses match the current intentional registry; inspect changes and preserve unrelated frames.
-  - Verification: `make test-rust FILTER="--test examples"`.
-  - [x] **Repair commit abort registry frame.** Update only `docs/examples/commit-edit-abort.jsonl` to the intentional todo registry response, retaining exact replay.
-    - check: `make test-rust FILTER="--test examples plain_examples_replay_against_the_real_binary"` advances past this fixture or passes; inspect the causal frame delta.
-    - Verified: `make test-rust FILTER="--test examples"` → ok: rust. Replay passes through the abort fixture's registry response; causal additions are the 12 registered rebase todo actions.
-    - Attempts: two orientation-only default checkpoints verified the registry delta but made no edits; narrow to the first failing fixture.
-  - [x] **Complete remaining todo registry replay.** Repair any later affected example frames and restore passing examples verification; record parent completion separately from generated-only artifacts.
-    - check: `make test-rust FILTER="--test examples"` passes without relaxed replay assertions.
-    - Verified: `make test-rust FILTER="--test examples"` → ok: rust. Exact Plain replay passes with the unstaged and staged command responses updated; unrelated frame payloads and replay assertions unchanged.
-
-- [x] **Refresh worked exchanges for initialize identity.** VER1 (`4e7521a`) and the recorded initialize-frame correction (`efad539`) add `serverInfo`; the resumed docs gate reports `docs/schema/worked-exchanges.md` stale. Done: `f393248`.
-  - check: regenerate through Make; inspect causal initialize identity diff and commit generated references alone with source/command justification. Record queue completion separately.
-  - Verification: `make update-schema && make docs-artifacts-check && make docs-check`.
-  - Verified: `make update-schema && make docs-artifacts-check && make docs-check` @ `ebe9ac6` → all passed; initialize responses now include `serverInfo` name `magit-lsp`, version `0.1.0`; generated artifact committed alone in `f393248`.
-
-- [x] **Repair initialize serverInfo replay fixtures.** The resumed gate at `6d626a5` fails three examples tests at `$.result.serverInfo` after VER1 (`4e7521a`) added package identity to initialize responses. Update six recorded initialize frames without relaxing exact replay or divergence assertions. Done: containing commit.
-  - test: all recorded examples replay exactly after normalization; both intentional divergence tests reach their intended altered frame.
-  - Verification: `make test-rust FILTER="--test examples"`.
-  - Verified: `make test-rust FILTER="--test examples"` @ `6d626a5` → ok: rust; all recorded examples replay exactly after normalization and both intentional divergence tests reach their altered frame.
-
-- [x] **Repair Phase 5 recorded example drift.** Done: `d34d9ac`, `c21eda6`. The substantial-chunk gate at `4e25db9` failed `plain_examples_replay_against_the_real_binary` (`build/test-logs/rust.ZfjZ4r`). Reconcile recorded examples with intentional command registry changes without weakening exact replay validation.
-  - test: recorded examples replay against the real binary with exact normalized frame equality.
-  - Verification: `make test-rust FILTER="--test examples"`.
-  - Verified: `make test-rust FILTER="--test examples"` with the changes committed in `d34d9ac`, `c21eda6` → ok: rust. Updated intentional code-action ordering and `commit.fixup` title (`Create a fixup commit`) in both fixtures; exact normalized frame equality retained. Mismatch diagnostics report first JSON path.
-
-## Deferred hygiene follow-ups
-
-Keep this debt open. Run tools through `make hygiene` and focused suites through `make vscode-test`, `make test-rust FILTER="..."`, or `make test-file FILE=...`; a report-only exit is not a clean bill of health. Any additional executable check needs its own Make target before execution.
-
-T019 closure disposition: `make hygiene` at `63c8bd3` exited 0 but did not establish clean dependency/export/Lua checks: `cargo machete` was unavailable, as were `knip` and `luacheck`. Existing findings remain owned below; additional size/suppression/tooling findings have explicit owners. No checker was installed or substituted. Report: `/tmp/opencode/make-hygiene.log`; it has no embedded revision stamp, so this records the gate invocation rather than an independently revision-stamped report.
+Historical inventories are inputs to revalidation, not deletion instructions. Existing independent-work authorization cannot bypass provisioning approval or transcript constraints. The roadmap's historical order/header freeze is superseded only by this user-authorized documentation compaction/reordering; no other restriction is waived.
 
 - [ ] **Provision reproducible Knip checker** — check: Arrange user-approved provisioning/pinning for Knip through the supported environment; `make hygiene` must execute it, not report a missing binary. Cargo-machete and Luacheck execute currently; installation needs human approval and no clean-hygiene claim is permitted while Knip is unavailable or Luacheck reports warnings.
-  - Temporary user-authorized status (ad hoc attempt 1): Knip invocation is disabled because it remains broken; `make hygiene` reports `knip: DISABLED`, not clean or missing. Repair/provisioning remains owned by this unchecked item; downstream Knip findings remain open.
-  - Current ad hoc check: `make vscode-test` stops in `vscode-deps` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` (`build/test-logs/vscode-deps.zqWsus`); `make hygiene` reports Knip `NONZERO` because `clients/vscode/node_modules/knip/bin/knip.js` is absent, while cargo-machete and Luacheck are clean. Checker provisioning is not verified; no clean-hygiene claim.
-  - Current host check at `b7a27f3`: Knip executes but exits 1 because the oxc-parser native binding is missing; not a clean result. Dependency repair remains environment-owned. VSCode check now reaches pnpm but aborts with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` (`build/test-logs/vscode-deps.33EUWi`); no purge of protected `node_modules/` was authorized or attempted.
-  - Current T022 check: Knip executes but exits 1 because oxc-parser cannot load its native binding (`@oxc-parser/binding-wasm32-wasip1` / `parser.wasi.cjs`); this is not a missing executable and no dependency repair was attempted.
-- [x] **Split client specification below hygiene limit** — check: Reduce `docs/CLIENT_SPEC.md` below 100000 bytes without losing contract detail; verify `make docs-check` and `make hygiene`.
-  - Verified: `make docs-check` → exit 0; extracted-section links and authored Markdown anchors resolve.
-  - Done: 32be945
-  - Verified: `make hygiene` → exit 0; `docs/CLIENT_SPEC.md` is 24,376 bytes and absent from the over-100,000-byte report. Knip remains missing and Luacheck reports 61 warnings/0 errors in 29 files; hygiene is not clean.
-- [x] **Split session implementation below hygiene limit** — check: Reduce `src/session.rs` below 100000 bytes, preserving behavior; verify focused Rust suites and `make hygiene`.
-  - Done: 2d72f7b
-  - Verified: `make test-rust FILTER="--test menu --test commands --test views --test prompts --test keys_protocol --test navigation --test log_selection --test visibility"` → exit 0 (`ok: rust`); existing tests and oracles unchanged. Git diff review against HEAD confirms extracted bodies unchanged, allowing only parent-visible helper visibility and imports; child modules document their purpose.
-  - Verified: `make hygiene` → exit 0; `src/session.rs` 90318 bytes, `src/session/menu.rs` 25261 bytes, `src/session/commands.rs` 30841 bytes (child sizes from indexed Git blobs); all below 100000 bytes, with no session file in the oversized report. Cargo-machete clean; Knip missing; Luacheck 61 warnings/0 errors in 29 files, so hygiene is not clean.
-  - Independent of blocked pnpm/T022; work authorized 2026-11-17.
-- [x] **Split confirm recording below hygiene limit** — check: Reduce `docs/examples/commit-edit-confirm.jsonl` below 100000 bytes without weakening exact replay; verify `make test-rust FILTER="--test examples"` and `make hygiene`.
-  - Verified: `make test-rust FILTER="--test examples --test schema"` → examples 16/16 passed; schema 44/45, with `luals_annotations_preserve_directional_contracts` failing identically on baseline and changed trees.
-  - Verified: `make hygiene` confirms neither confirm fragment is oversized and each is below 100000 bytes. Target exits 1 for inherited knip native-binding failure, existing luacheck warnings, and unrelated oversized files; confirm abort remains oversized and out of scope.
-  - Verified: `make schema-check` reports exactly the same stale `lua/magit-lsp/types.lua` and `docs/schema/worked-exchanges.md` on baseline and changed trees, so generated reference output is unchanged by this loader change.
-  - Verified: logical recording test in `tests/examples.rs` concatenates ordered fragments byte-for-byte under the original logical filename; fragments are 97997 and 15965 bytes (total 113962).
-  - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → exit 0; `worked_exchanges_render_identically_for_grouped_fragments` compares exact generated worked-exchange strings for equivalent monolithic and split temporary recordings. Existing evidence above retains lossless fragments, exact replay, and explicitly records inherited schema/hygiene failures.
-  - Done: 5625c94; coverage completion e522e31.
-- [x] **Split abort recording below hygiene limit** — check: Reduce `docs/examples/commit-edit-abort.jsonl` below 100000 bytes without weakening exact replay; verify `make test-rust FILTER="--test examples"` and `make hygiene`.
-  - Verified: original `HEAD:docs/examples/commit-edit-abort.jsonl` was 113060 bytes; ordered record-boundary fragments reconstruct it byte-for-byte; fragments are 50669 and 62391 bytes, each below 100000.
-  - Verified: `make test-rust FILTER="--test examples"` → exit 0 (`ok: rust`). `committed_example_files_parse_and_validate_against_the_method_catalog` validates the logical recording; `plain_examples_replay_against_the_real_binary` replays abort under its original logical name; `commit_edit_abort_example_records_the_cancellation` checks the offered/executed abort; `numbered_large_recording_fragments_load_as_the_original_logical_recording` checks ordered grouping for both abort and confirm.
-  - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → exit 0 (`ok: rust`); existing `worked_exchanges_render_identically_for_grouped_fragments` checks shared-loader generator equivalence.
-  - Verified: `make hygiene` → exit 0; cargo-machete CLEAN, Knip NONZERO (missing oxc-parser native binding), Luacheck FINDINGS (2 warnings / 0 errors). Top-20 size report contains no abort fragment; both are below the 100000-byte limit. Other oversized files remain unrelated.
-  - Done: 520d811.
-- [x] **Disposition newly reported dead-code suppressions** — check: Audit `src/menu.rs:140,149` and `tests/examples.rs:150` `#[allow(dead_code)]`; remove unused code or record concrete retained-use rationale; verify relevant Rust suites and `make hygiene`.
-  - Done: e0a5317
-  - Verified: old identifiers `GroupInput` and `GroupOutput` remain, now at `src/menu.rs:142,152`: rg found their only direct uses in `Group::json_schema` at `src/menu.rs:168,170`; retained as schemars-only input/output schema models, with rationale beside each allow. Old `Line.note` at `tests/examples.rs:151` removed; rg found no consumers, while parser string validation remains. Reference sweep: `rg -n '\b(GroupInput|GroupOutput|note)\b' src tests --glob '*.rs'` shows no stale note field use and only the schema generator uses for those types.
-  - Verified: `make test-rust FILTER="--test menu --test examples"` → `ok: rust` (exit 0).
-  - Verified: `make hygiene` → cargo-machete clean; Knip missing; Luacheck 61 warnings/0 errors in 29 files (exit 1); tracked markers now include only the two documented `src/menu.rs` allows among these targets. Other findings remain assigned to their existing owners; hygiene is not clean.
-
 - [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
 - [ ] **Audit unused VSCode exports: commands and context** — `clients/vscode/lib/commands.js` (`openStatus`, `viewport`, `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`); `context.js` (`deriveContext`, `inactiveContext`, `staticScope`). Verify focused VSCode tests and Knip.
 - [ ] **Audit unused VSCode exports: draft and edit lifecycle** — `clients/vscode/lib/drafts.js` (`cancel`, `close`, `confirm`, `disconnect`, `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`, `setup`); `edit.js` (`KIND`, `SCHEME`, `draftAction`, `isEditEffect`, `languageForKind`); `edits.js` (`onDocumentClosed`, `onActiveEditorChanged`, `confirmEditCommand`, `cancelEditCommand`, `currentEdit`). Verify edit lifecycle tests and Knip.
 - [ ] **Audit unused VSCode exports: effects, fold keys and menus** — `clients/vscode/lib/effects.js` (`showMessage`, `replay`); `foldkeys.js` (`parseJsonc`, `mapFoldCommand`, `mapFoldKeys`); `menu.js` (`quickPickItems`, `quickPickItem`, `describeItem`, `routeTyped`, `charToKey`); `menus.js` (`showMenu`, `menuItems`, `hideMenu`, `queueSteps`). Verify menu/fold/effect tests and Knip.
 - [ ] **Audit unused VSCode exports: prompt, render and requests** — `clients/vscode/lib/prompt.js` (`CUSTOM_ID`, `promptItems`, `answerFor`, `customChoice`); `render.js` (`applyRender`, `applyEdit`); `requests.js` (`press`, `invoke`, `applyRender`, `handlePrompt`, `resync`). Verify prompt/render/request tests and Knip.
 - [ ] **Audit unused VSCode exports: semantic, session and views** — `clients/vscode/lib/semantic.js` (`register`); `session.js` (`activate`, `deactivate`, `createClient`); `views.js` (`stateForUri`, `activeState`, `isMenuKind`, `ensureView`, `showView`, `showDocument`, `applyCursor`, `activateView`, `closeView`, `closeRoot`, `focusView`). Verify VSCode integration tests and Knip.
-- [x] **Resolve Lua warning findings** — resolved the listed Luacheck findings without relaxing checks or changing test oracles. `make hygiene` reports Luacheck 0 warnings/0 errors in 29 files; Knip remains unavailable and hygiene oversize debt is separately owned below.
-  - Verified: `make hygiene` → Luacheck CLEAN (0 warnings/0 errors in 29 files); Knip missing; existing oversize debt remains assigned to its owners.
-  - Verified: `make test-lua` → `ok: lua`.
-  - Verified: `make ui-unit` → `ok: ui-unit`.
-  - Done: 1116c65
-- [x] **Reduce evidence archive size** — `docs/evidence/harness-reassessment-inputs.md`; preserve immutable evidence while reducing tracked file below 100000 bytes. Verify `make hygiene` size report.
-  - Verified: ordered concatenation of `harness-reassessment-inputs-01.md` through `-08.md` equals `HEAD:docs/evidence/harness-reassessment-inputs.md` byte-for-byte (508979 bytes). Parts are respectively 62208, 63273, 88440, 68282, 35685, 56363, 56547 and 78181 bytes; index is below 100000 bytes.
-  - Verified: `make docs-check` → exit 0. `make hygiene` → exit 2; archive and parts no longer reported oversized. Inherited findings: oversized `TASKS.md`, schema/client exchange docs, and VSCode E2E suite remain assigned to their queue owners; Knip lacks its native binding, and Luacheck reports two existing warnings in `tests/ui/plain_init.lua`.
-  - Done: 6175df8
-  - Historical landing path retained as an index with ordered links and section descriptions; old captures and source line markers remain unchanged. No `Plain investigation` queue record exists in `TASKS.md` or `TASKS_PART_SEVEN.md`, so no unrelated completion record was added. Done: containing commit.
-- [x] **Split server implementation below hygiene limit** — Revised by user 2026-11-17: apply Astra's four coherent module refactors, preserve behavior, then mark complete regardless final size and continue the queue. Independently checkable Plain actions, draft lifecycle, deferred view execution, and dispatch boundaries are tracked under `SERVER-MODULE-*` in Ad hoc; size is informational, not acceptance. Verify focused Rust tests and `make hygiene`.
-  - Completed outcomes: [SERVER-MODULE-PLAIN](#ad-hoc) (`b7c8e56`), [SERVER-MODULE-DRAFTS](#ad-hoc) (`79ea498`), [SERVER-MODULE-VIEW](#ad-hoc) (`4c25e8d`), and [SERVER-MODULE-REQUESTS](#ad-hoc) (`b7a27f3`); individual body/API audits and focused checks are recorded there.
-  - Verified: `make test-rust FILTER="--test dispatch --test server_async"`, `make test-rust FILTER="--lib server::"`, and `make hygiene` → exit 0 after fourth extraction. Parent 87208 bytes / 2205 lines before commit hook; Knip still NONZERO due to missing native binding, cargo-machete/Luacheck CLEAN. Size is informational; remaining unrelated size/tooling debt is not claimed resolved. Done: containing commit.
-- [x] **Split async server tests below hygiene limit** — `tests/server_async.rs`; preserve coverage and reduce below 100000 bytes. Verify `make test-rust FILTER="--test server_async"` and `make hygiene`.
-  - Verified: `make split-server-async-check` → exit 0; reads `89dc88c:tests/server_async.rs` with Git and compares planned outputs against applied files entirely in memory. All 58 test names match; exact section reconstruction and byte comparisons preserve every test/helper body, comment, oracle and timing, allowing only module/import/visibility wiring, relocated `include_str!` paths and removal of separating blank lines at child EOF. Snapshot contents are unchanged. The checker rejected actual mismatches before correction, rather than merely compiling the script.
-  - Verified: `make test-rust FILTER="--test server_async"` → exit 0 on the current split, supplied by the preceding repair attempt and reused without rerunning unchanged tests. Earlier `rust.Jsgy8l`, `rust.dZxObs` and `rust.9Akmck` logs are failures, not passing evidence: missing module paths, helper access and resource wiring were repaired, with no behavior fix. Parent 98743 bytes; `tests/server_async/rich.rs` 40215 bytes; `tests/server_async/repository.rs` 79275 bytes, all below 100000.
-  - Verified: preceding `make hygiene` → exit 2, recorded from the repair handoff, not rerun or claimed clean. Knip has a missing native binding; Luacheck reports two warnings in unrelated user-modified `tests/ui/plain_init.lua`. Dependency repair and those warnings remain outside this split; no unrelated files were changed. Authorized user-applied split repaired across the preceding 8-step and 9-step partial attempts and this audit/check completion attempt. Owned commit paths: `tests/server_async.rs`, `tests/server_async/rich.rs`, `tests/server_async/repository.rs`, `scripts/split_server_async.py`, `Makefile`, `TASKS.md`. Done: containing commit.
-  - Done: cb3bb4c
-- [x] **Split Neovim integration tests below hygiene limit** — `tests/test_magit_lsp.lua`; preserve coverage and reduce below 100000 bytes. Verify focused Neovim tests and `make hygiene`.
-  - Verified: `make test-file FILE=tests/test_magit_lsp.lua` → exit 0 (`ok: build`, `ok: lua`). Complete menu/prompt/planned-action group explicitly loaded from non-autodiscovered `tests/magit_lsp/menu.lua`, sharing the original set, child and setup closure; returned `wait_menu` retains the later parent caller. Setup retains the live parent repository, not a copied value.
-  - Verified: read-only `git diff --no-index` comparisons against `32521932:tests/test_magit_lsp.lua` → both exit 0: child payload equals original lines 1300–2082 byte-for-byte, including every helper, test, comment, oracle and timeout; parent without the loader equals original without those lines. Replacing the loader with that payload reconstructs all 53 original tests in order (43 parent, 10 child), with unchanged hooks. Parent 81633 bytes; child 29347 bytes, both below 100000. Only module/dependency wiring added; no new tests or weakened assertions.
-  - Verified: `make hygiene` → exit 0, not a clean-tools claim: cargo-machete CLEAN; Knip NONZERO (missing native binding); Luacheck 2 warnings in unrelated `tests/ui/plain_init.lua`; unrelated oversized files remain assigned to existing queue owners. Initial collection attempt hit the production-module name collision and timed out; explicit file loading fixed it before the passing run. No test/build/server processes remain. Inherited async-test completion `Done: cb3bb4c` preserved. Done: containing commit.
-  - Done: b84baa2
 - [ ] **Split canonical task roadmap below hygiene limit** — `TASKS.md`; retain canonical design while reducing below 100000 bytes. Verify documentation links and `make hygiene`.
-  - HALT (2026-11-17): default orientation-only PARTIAL; stronger classification/compaction PARTIAL with open-ended remainder, so failure-triage stops further attempts. Base `3125ee6`; 543 checked records ranked; protected identity/unchecked skeleton 67879 bytes before Done records and current contracts. Safe Abort-history compaction reduced 373253 to 370614 bytes; another 270615 bytes would need removal. No feasibility claim or completion tick. First three lines, checkbox identities/order, Done records and unchecked blocks audited unchanged; `make docs-check` passes, hygiene remains non-clean (Knip native binding, two Lua warnings). Pending `TASKS.md` diff is sprint-owned; no source changes. Resume only with a bounded approved compaction plan or revised size acceptance.
-  - Measurement at HEAD `b84baa2ee09839676b2c92598c157aadeac3ef2b`: `TASKS.md` is 371887 bytes. Conservative completed-history candidates are contiguous lines 1540–1590 (6074 bytes), 1591–1741 (18244 bytes), and 1742–1801 (6205 bytes): 30523 bytes total; removing them would project 341364 bytes, still 241365 bytes above the 99999-byte maximum. This is not an exhaustive normative audit; substantial savings remain unclassified.
-  - Preserve queue records and all unchecked item text/acceptance/dependencies as canonical task authority. Current contracts/design remain maintained in `docs/ARCHITECTURE.md` (§§0–3); historical completion evidence has immutable provenance at `da4d422:TASKS.md` (completed correctness contracts) and `d9ea816:TASKS.md` (resolved review index). A checked heading alone is not evidence it is obsolete.
-  - Safe next bounded edits: classify completed-work narratives at lines 1540–1590 against the immutable source and retained completion identity; separately classify closed review-index narratives at lines 1742–1801 against `d9ea816:TASKS.md`. Retain any identity, acceptance, or contract detail not proven redundant; do not claim either range meets the limit. First three lines and unchecked task text unchanged. `make docs-check` is the documentation-link verification; broader savings require further classification.
-- [x] **Split editor bridge tests below hygiene limit** — `tests/editor_bridge.rs`; preserve coverage and reduce below 100000 bytes. Verify `make test-rust FILTER="--test editor_bridge"` and `make hygiene`.
-  - Verified: `make test-rust FILTER="--test editor_bridge"` → ok: rust; `make hygiene` size report and `wc -c` show editor bridge files at 11212/58789/55581 bytes, each below 100000. Hygiene remains non-clean from inherited Knip native-binding failure, two `tests/ui/plain_init.lua` luacheck warnings, and other listed size debt.
-  - Done: 8a35f9a
-- [x] **Split generated worked-exchanges reference below hygiene limit** — `docs/schema/worked-exchanges.md`; preserve generated-reference workflow and contract evidence, reduce below 100000 bytes; regenerate/check only through approved Make targets and inspect causal generated diff.
-  - Verified: `make test-rust FILTER="--test schema"` → `ok: rust`; `standalone_worked_exchanges_include_provenance_and_examples` checks deterministic rendering, all six source examples, 4 artifacts each below 100000 bytes, and exact ordered compact `message` streams against grouped source recordings (`tests/schema.rs:1647-1684`). `worked_exchanges_render_identically_for_grouped_fragments` verifies monolithic and fragmented inputs are equivalent (`tests/schema.rs:1687-1705`). `standalone_worked_exchanges_detect_tamper_and_missing_file` checks tamper and missing artifact detection (`tests/schema.rs:1722-1750`).
-  - Verified: `make update-schema` → `ok: update-schema`; `make schema-check` → `ok: schema-check`; `make docs-check` → `ok: docs-check` (3 tests passed). `make hygiene` reported `docs/schema/worked-exchanges.md` absent from oversized files, with parts at 95459 and 94810 bytes; unrelated oversized artifacts retain their listed queue owners. Inherited Knip native-binding failure and Luacheck findings remain, so hygiene is report-only/non-clean.
-  - Done: 4d0c29d
-- [x] **Split command tests below hygiene limit** — `tests/commands.rs`; preserve coverage and reduce below 100000 bytes; verify focused Rust tests and `make hygiene`.
-  - Verified: `make test-rust FILTER="--test commands"` → ok: rust; file sizes (`wc -c`) are tests/commands.rs 40793, cases.rs 24860, additional.rs 19445, more.rs 17582 bytes, all below 100000. `make hygiene` reports these sizes without command-suite size debt; hygiene remains non-clean from Knip missing native binding, two inherited `tests/ui/plain_init.lua` warnings, and listed oversized files.
-  - Done: dd44fb2
-- [x] **Split VSCode E2E suite below hygiene limit** — `clients/vscode/test/e2e/suite.js`; preserve coverage and reduce below 100000 bytes; verify focused VSCode tests and `make hygiene`. check: Existing `make vscode-test` does not execute the real E2E suite; add a maintained `make vscode-e2e` target for the existing real-host runner, with missing host prerequisites a failure rather than a silent passing skip, then verify the extracted scenario through it. No new screenshot/image paths.
-  - Verified: `xvfb-run -a nix develop .#vscode --command env CI=true make vscode-e2e` → PASS native A06 root quit closes menu/tabs and reopens status; `make vscode-test` and `make docs-check` passed; `make hygiene` shows suite.js at 97605 bytes (below 100000), with inherited Knip native-binding and Luacheck findings still reported.
+  - Prior HALT (2026-11-17): orientation and stronger compaction attempts were PARTIAL, then failure-triage halted retries. Base `3125ee6`; 543 checked records; protected skeleton 67879 bytes before Done/contracts. Safe history diet 373253→370614; later measurement `b84baa2ee09839676b2c92598c157aadeac3ef2b` 371887 bytes. Then-classified candidates saved only 30523 bytes, not proof of feasibility. Full measurements/attempts remain in Base B519–522.
+  - User now authorizes this bounded audit/compaction/reordering, superseding only first-three-lines/order freeze. Preserve identity/state/Done/corrections, unresolved acceptance/dependencies and anchors; no permanent archive or deletion of obligations to meet the cap. Current contracts remain in `docs/ARCHITECTURE.md`; earlier immutable sources `da4d422:TASKS.md`, `d9ea816:TASKS.md` remain provenance. This audit does not run `make hygiene` or close this broader hygiene item; all unwaived verification and the prior hold remain for any further work.
 - [ ] **Split authored client exchanges below hygiene limit** — check: `docs/client-exchanges.md` inherited the coherent 257412-byte worked-exchange corpus from the client-spec split (`32be945`). Split at complete transcript boundaries without changing protocol evidence, keep each part below100000 bytes, and preserve links; verify `make docs-check` and `make hygiene`. This is authored documentation, not permission to hand-edit generated references.
   - BLOCKED (2026-11-17): worker reports complete abort/confirm transcripts of 106336/106896 bytes, exceeding the per-part limit without internal transcript splitting. Read-only scout confirms boundaries at `docs/client-exchanges.md:15-59,65-112` but could not independently measure bytes (shell denied). No edits or verification run. Needs permission to split internally or revise size acceptance; evidence must remain intact.
-- [x] **Resolve new Luacheck findings from T022 hygiene run** — check: Address the 26 warnings in `lua/magit-lsp/types.lua`, `tests/ui/plain-presets/init.lua`, and `tests/ui/plain_init.lua` without relaxing Luacheck; verify with `make hygiene`. This owns the current warning set; the completed earlier warning disposition does not cover these newly observed lines. Done: containing commit; implementation `60f439a`, generated annotations `2a583fe`.
-  - A1 (VERIFIED): Exact pre-change warning map: `types.lua` had 16 over-120-column lines (20, 27, 56, 96, 180, 325, 384, 408, 430, 510, 525, 573, 653, 723, 733, 741); `plain-presets/init.lua` had seven overlong lines (7, 8, 9, 10, 14, 41, 138) and unused local `outcome`; `plain_init.lua` had overlong line 54 and shadowed local `event`. Total 16 + 8 + 2 = 26. Root causes were unwrapped generated annotation prose/unions, compact harness setup, a redundant outcome local, and a nested event name. Wrapped only affected prose/setup, removed the redundant local while retaining `evidence.outcome`, and renamed the inner event; no Luacheck configuration, suppression, capability values, or harness assertions changed.
-  - A2 (VERIFIED): `make test-rust FILTER="--test schema luals_annotations"` → `ok: rust` (six tests); `make update-schema` → `ok: update-schema`; `make schema-check` → `ok: schema-check`. Existing deterministic generation test now directly asserts the 120-column limit and is included by the prescribed filter. Directional-contract tests retain `viewGeneration`, nullable/required fields and every union alternative; formatting-sensitive expectations explicitly assert multiline alternatives. A literal-pipe regression first failed with `literal pipes are not union separators` (`build/test-logs/rust.Gg4VlD`), then passed after quote-aware union splitting. Inspected generated diff contains only prose wrapping and equivalent multiline aliases; no schema JSON or wire fields changed.
-  - A3 (VERIFIED): `make plain-presets` → `ok: build`, `ok: plain-presets`; `make plain-neovim` → `ok: build`, `ok: plain-neovim`. Native harness assertions are preserved, including exact draft content and synchronized versions.
-  - A4 (VERIFIED): Direct `make hygiene` → exit 0; Luacheck CLEAN, 0 warnings / 0 errors in 31 files, including all three owned Lua files; cargo-machete CLEAN. Knip remains NONZERO (missing oxc-parser native binding), owned by “Provision reproducible Knip checker”; remaining over-limit `TASKS.md` and `docs/client-exchanges.md` remain owned by their existing split items. This is not an overall clean-tools claim. Hygiene evidence preceded the final quote-aware splitter correction; subsequent generation/check passed with unchanged generated Lua output. No verification was rerun merely to write a custom log.
-  - A5 (VERIFIED): Implementation/authored tests committed in `60f439a`; generated-only `2a583fe` names the renderer change and `make update-schema`. Queue completion/evidence follows in this commit. Protected untracked paths remain untouched; no Knip, size-debt or Phase 6A work included.
 
-These decisions are canonical unless superseded by an explicit later decision
-here. General agent working conventions and verification guidance live in
-`AGENTS.md`.
+### Host-dependent stabilization
 
-[Decisions, glossary and completed correctness contracts](docs/ARCHITECTURE.md) are maintained in the architecture reference.
-
----
-
-## 3. Design decisions (expanded)
-
-Sections 3.1–3.19: see [Architecture and design](docs/ARCHITECTURE.md#3-design-decisions-expanded).
-
-
----
-
-## 4. Protocol reference
-
-The current protocol overview lives in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
-Its detailed client behavior contract lives in [`docs/CLIENT_SPEC.md`](docs/CLIENT_SPEC.md).
-
----
-
-## Keymaps and views
-
-- [Keymap profiles](docs/KEYMAPS.md#5-default-keymaps-profiles)
-- [View catalog](docs/VIEWS.md#6-view-catalog)
-
----
+- [ ] **T025 — e2e-runner.** [Scope](./TASKS_PART_SEVEN.md#t025-e2e-runner-m). T024's host decision remains required; existing target alone does not prove hermetic/non-US-layout acceptance.
+- [ ] **T026 — host-cases.** [Scope](./TASKS_PART_SEVEN.md#t026-host-cases-l). Keep coverage migration and host dependencies.
+- [ ] **T027 — keybinding-compaction.** [Scope](./TASKS_PART_SEVEN.md#t027-keybinding-compaction-m). Native host/keybinding evidence remains required.
+- [ ] **T028 — colour-roles.** [Scope](./TASKS_PART_SEVEN.md#t028-colour-roles-s). Native host verification remains required.
+- [ ] **T029 — scenario-slimming.** [Scope](./TASKS_PART_SEVEN.md#t029-scenario-slimming-m).
+  - Part 1/2 independently verified scenario matrix/artifact defaults through `make ui-unit`; parent stays unchecked. Part 2 retains shared conformance interpreters, fake/native comparisons and driver coverage matrix, including real-host requirements. Defer its integrated driver outcome until T024/T025 supply the host decision/hermetic dependency boundary; a Make target now exists, but existing seams do not establish full acceptance.
+  - Part 1 evidence: `make ui-unit` → exit 0 (`ok: ui-unit`). `tests/ui/test_scenario.py` checks one default combination, four `matrix: true` pairs, explicit size/profile and size-only/profile-only compatibility, no `.screen`/`.ansi` on unrequested success, both for explicit snapshots and failures (including quiet XFAIL). Done: `790d2ce` (Part 1 only).
 
 ## 7. Numbered implementation queue
 
-This checkbox index in TASKS.md is the sole live numbered status queue. [`TASKS_PART_SEVEN.md`](./TASKS_PART_SEVEN.md) is an archived scope and provenance document; its detailed ticket specifications remain linked and do not track status. Original scope and Verify text remain recoverable from immutable `d04dfa2:TASKS.md`; provenance is not completion evidence. See [migration ledger](docs/evidence/task-queue-migration.md).
-
-### Feature — Phase 2 (acceptance and recorded final gate complete)
-
-T005 is complete through its authoritative [completed children](#completed-work); full scope and original acceptance: [T005](./TASKS_PART_SEVEN.md#t005-quirks-table-m).
-- [x] **T006 — fake-editor-model.** [Specification](./TASKS_PART_SEVEN.md#t006-fake-editor-model-l).
-  - Done: containing commit.
-- [x] **T007 — plain-capability-fixes.** [Specification](./TASKS_PART_SEVEN.md#t007-plain-capability-fixes-m). Done: containing commit; all six original clauses and native evidence are audited under T007.5. Gate evidence is recorded above.
-
-### Feature — Phase 3: Plain interaction (complete; gate recorded)
-
-- [x] **T008 — prompts-and-picks.** [Scope](./TASKS_PART_SEVEN.md#t008-prompts-and-picks-l). Done: `6957647`..`6179b54` (via T008.1–T008.13b). T008 clauses 1–11.
-- [x] **T009 — stable-id-selection.** [Scope](./TASKS_PART_SEVEN.md#t009-stable-id-selection-m). Done: `8280e85`..`cb8423c` (via T009.1–T009.6). T009 clauses 1–7.
-- [x] **T010 — plain-commit-editing.** [Scope](./TASKS_PART_SEVEN.md#t010-plain-commit-editing-s). Done: `7c62e6c`..`600411d` (via T010.1–T010.4d). T010 clauses 1–5.
-
-### Feature — Phase 4: Specification
-
-- [x] **T011 — schema-generation.** [Scope](./TASKS_PART_SEVEN.md#t011-schema-generation-m).
-  - Done: 92c78fb (containing commit of the last slice). Delivered across children: tagged Plain action targets (T011.1 `e6db680`), directional Plain payload schemas + `update-schema`/`schema-check` drift targets (T011.2 `f5cd1dc`), effect/menu/render schemas (T011.3 `1fcfce5`), the 16 view payload roots (T011.4 `ba42672`), the hand-maintained method catalog (T011.5 `5887917`), generated TypeScript declarations (T011.6 `c7771d5`/`66b8f9f`), real `checkJs` client checking (T011.7 `2b968a6` + T011.9 `ff550b0`, combinator-sibling fix T011.8 `d5573c2`), generated LuaLS annotations (T011.10 `f33bf3c`), shared effect/prompt lists generated from the typed capability block and consumed by both clients with key translators/token maps still separate (T011.11 `1abac39`, T011.12 `18c9d4a`), schema drift in CI (T011.13 `395541a`), generated client-spec payload tables (T011.14 `db870f0`) and recorded-capability fixture validation against a generated `rich-capabilities.json` schema (T011.15 `92c78fb`). Acceptance 5's example-file half is delivered by T012, which owns the creation of `docs/examples/` and validates each file against these schemas in `tests/examples.rs`; no example files existed before it.
-  - [x] **T011.11 — Generate the shared effect and prompt lists from the typed block.** Expose the optional effect and prompt-kind names from the server's capability validation as public constants, and emit them as drift-checked generated artifacts both clients can consume.
-  - [x] **T011.12 — Consume the generated shared lists in both clients.** Emit client-loadable generated files for the shared optional-effect and prompt-kind lists, and replace each client's hardcoded declaration with them.
-    - test: generated client files participate in drift detection, and each client's capability declaration is proven equal to the server constants through its own existing suite (Lua unit and VSCode checks).
-    - check: `make update-schema`, `make schema-check`, `make test-lua` and `make vscode-test` pass. Key translators and token mappings stay hand-maintained per client; runtime behavior and declared capabilities are unchanged.
-      - Verified: make update-schema && make schema-check && make test-lua && make vscode-test; make test-rust FILTER="--test schema" @ 1abac39 → ok
-    - Done: containing commit.
-    - test: generated artifacts match the typed constants exactly (visitFile/clipboard/editDocument; confirm/text/choice/multiChoice/secret) and missing or modified output fails drift checks.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Client consumption, key translators and token mappings stay separate follow-ups.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ f33bf3c → ok
-  - [x] **T011.13 — Run schema drift checks in CI.** Add the generated-schema drift target to the maintained CI workflow so committed artifacts cannot silently diverge.
-    - check: the tracked CI workflow runs the drift target in the existing test job; the untracked local release workflow and all unrelated user files stay untouched.
-      - Verified: make schema-check @ 18c9d4a → ok
-  - [x] **T011.15 — Validate recorded capability fixtures against generated schemas.** Generate a schema for the `capabilities.experimental.magit` declaration and check every recorded fixture carrying one against it.
-    - test: each recorded fixture's `magit` declaration validates against the generated capability schema, and a deliberately corrupted fixture copy fails validation in a test.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Example-file validation remains owned by T012, which creates those files.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ db870f0 → ok
-  - [x] **T011.14 — Generate client-spec payload tables from the schemas.** Replace the hand-maintained `Core payload quick reference` prose in `docs/CLIENT_SPEC.md` with generated payload tables derived from the committed directional schemas and method catalog.
-    - test: the generated tables are proven current by a drift test that regenerates them and compares the committed block, and a tampered or missing block fails; existing doc checks keep passing.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Keep hand-written non-payload guidance (lifecycle, presentation, checklists) untouched; only payload field/type/required content is generated.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" && make docs-check @ 395541a → ok
-    - Done: containing commit.
-  - [x] **T011.10 — Generate LuaLS wire annotations from directional schemas.** Emit `lua/magit-lsp/types.lua` through the existing schema generation/drift pipeline, with namespaced definitions that preserve input/output contracts.
-    - test: generated annotations cover every payload root and retain literal tags, required/optional fields, refs, union/intersection constraints, arrays and unconstrained JSON; missing or modified output fails drift checks.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Do not alter runtime client behavior or merge independent key/token maps.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 2b968a6 → ok
-  - [x] **T011.9 — Establish checked VSCode wire boundaries.** Commit the production `checkJs` configuration and generated-type annotations as a prerequisite to T011.7's negative fixture and full-suite verification.
-    - check: `make vscode-typecheck` passes over all production JavaScript with real Node/VSCode declaration dependencies and generated payload types in handlers; preserve existing runtime semantics, with no new missing-activation fallback or stricter tab-URI rejection.
-      - Verified: make vscode-typecheck @ d5573c2 → ok
-  - [x] **T011.8 — Preserve schema siblings beside TypeScript combinators.** Fix declaration generation so constraints such as `SerializedItem.activationSteps` beside `oneOf`/`anyOf`/`allOf` are not dropped.
-    - test: real generated menu-item declarations require `activationSteps`, and combinator sibling constraints remain present; deterministic drift checks still cover the regenerated declarations.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Prerequisite discovered while typing the VSCode consumer; do not fold consumer setup into this fix.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 66b8f9f → ok
-  - [x] **T011.7 — Type-check VSCode JavaScript against generated wire declarations.** Add `tsc --checkJs` to `make vscode-test`, including production `extension.js` and `lib/*.js`, with generated payload types at wire boundaries.
-    - test: the maintained client type check accepts valid payloads and rejects a concrete malformed wire payload in a permanent compile-time fixture; generated declarations are consumed by production handlers, not merely checked in isolation.
-    - check: `make vscode-test` passes. Keep runtime behavior and declared capabilities unchanged; use explicit boundary types, not blanket suppressions or hand-maintained duplicate wire interfaces.
-      - Verified: make vscode-test @ ff550b0 → ok: build, vscode-typecheck, vscode, keybindings; `clients/vscode/test/types.js` consumes `ViewRender`/`Menu`/`ViewPromptParams` through `lib/render.js`, `lib/menu.js` and `lib/prompt.js`, and `@ts-expect-error` rejects a menu item without `activationSteps` (TS2578 when it becomes accepted) and an invalid `ViewMode`.
-    - Done: containing commit.
-  - [x] **T011.6 — Generate TypeScript wire declarations from directional schemas.** Emit `clients/vscode/types/protocol.d.ts` through the existing schema generator, preserving per-root directional definitions and including the method catalog's params/result mapping.
-    - test: generated declarations preserve required/optional fields, literal tags, unions/intersections, arrays, refs, arbitrary string view kinds and unconstrained JSON; missing or modified declarations fail drift checks.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass. Wiring `tsc --checkJs` into the client remains the next independently verifiable slice.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ 5887917 → ok
-    - Done: containing commit.
-  - [x] **T011.5 — Catalog custom protocol methods and their payload schemas.** Add the hand-maintained typed method table and generate its deterministic catalog under `docs/schema/`, referencing the existing directional payload roots.
-    - test: cover every custom view request and notification, checking names against protocol trait constants or notification constants, correct directions, payload references and explicit request results. Keep generic `Value` results unconstrained unless the runtime contract proves a narrower shape.
-    - check: `make update-schema`, `make schema-check` and focused schema tests pass; the catalog participates in missing/tampered artifact detection. Standard LSP envelopes and `magit.command` variants remain for the fixture-validation slice.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema" @ ba42672 → ok
-    - Done: containing commit.
-  - [x] **T011.4 — Schema remaining custom view payloads.** Generate directional schemas for the remaining view request/response/notification payloads, including prompt and pick answers and keymap bindings.
-    - test: Prompt unions remain `anyOf`; `Option<Value>` remains unconstrained JSON; custom view kinds remain strings; every custom method payload has an artifact with the correct direction.
-    - check: Schema drift and focused protocol/prompt/pick/keymap suites pass without changing wire behavior.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema --test server_async --test prompts --test plain_prompt --test keymap" @ 1fcfce5 → ok
-    - Done: containing commit.
-  - [x] **T011.3 — Schema server-rendered effects and menus.** Extend generation to `Effect`, `Menu` and `ViewRender`, accounting for string-serialized `ViewKind` and the flattened menu-item `activationSteps` serialization.
-    - test: Schemas describe real serialized menu switch/option/action items and effects; arbitrary view-kind strings stay strings; output activation steps are required without imposing them on deserialization input.
-    - check: Generated artifact drift and focused existing menu/view suites pass without wire changes.
-      - Verified: make update-schema && make schema-check && make test-rust FILTER="--test schema --test menu --test menus --test views" @ f5cd1dc → ok
-    - Done: containing commit.
-  - [x] **T011.2 — Generate directional schemas for Plain command payloads.** Add the typed generator and Make update/drift targets, initially covering `PlainActionParams`, `EditConfirmParams`, `EditAbortParams`, `EditConfirmation` and `EditAbortResult`. This is a schema foundation, not the full method catalog or T011 completion.
-    - Done: containing commit.
-    - test: Deterministic committed JSON Schemas use deserialization contracts for input and serialization contracts for output; required target tags and confirmation names match Rust serde behavior; drift fails without updating artifacts.
-    - check: Update/check targets run through Make; pre-existing Makefile edits remain unstaged and unchanged.
-      - Verified: `make update-schema && make schema-check && make test-rust FILTER="--test schema --test dispatch"` @ `e6db680` → ok: update-schema, schema-check, rust.
-  - [x] **T011.1 — Tag Plain action targets explicitly.** Replace the untagged target union with a required camelCase `kind` discriminator (`content`, `view`, `node`, `menuItem`); migrate every offered target and the maintained client contract without accepting legacy shapes.
-    - Done: containing commit. `PlainActionTarget` is internally tagged with required `kind`; every offered action and the client spec carry it, and untagged input is rejected.
-    - test: Round-trip every variant, reject missing/unknown/mismatched tags, and exercise offered content/view/node/menu actions through existing Plain integration suites.
-    - check: Preserve retained-render identity validation and stale/tampered-target refusal; no client reconstruction or compatibility path.
-      - Verified: `make test-rust FILTER="--test dispatch --test plain_actions --test plain_select --test plain_stack --test plain_harness"` @ `86d12d3` → ok: rust. `plain_action_target_roundtrips_each_tagged_variant` asserts the exact content/view/node/menuItem shapes; `plain_action_target_rejects_missing_unknown_and_mismatched_tags` rejects all three failure classes; existing Plain suites exercise offered actions and stale/tampered refusal unchanged.
-- [x] **T012 — example-files.** [Scope](./TASKS_PART_SEVEN.md#t012-example-files-s).
-  - Done: 1e83443 (containing commit of the last slice). Delivered across children: the JSONL line format, loader and per-line schema validation with the Plain open example (T012.1 `f118882`), the Plain code-action and document-prompt examples (T012.2 `da056e3`), the rich open/render/ack/key recording with progress order (T012.3 `153d57b`), the commit edit confirm and abort examples (T012.4 `a2e06c0`), c2s replay against the real binary for the Plain and commit examples (T012.5 `5f305aa`), and rich replay with deterministic id/URI/version/run-id normalization plus first-seen 40-hex hash mapping, a rich divergence test and no sleeps (T012.6 `1e83443`).
-  - [x] **T012.1 — Example format, loader and schema validation with the Plain open example.** Define the JSONL line format (`dir`, `message`, `note?`, `source`), the loader, per-line validation against the generated schemas, and the first example file covering minimal initialize and a Plain open.
-    - test: every line in every example file parses, `dir`/`source` are legal, custom-method params/results validate against the matching directional schema from the method catalog, and a corrupted example line fails validation.
-    - check: `make test-rust FILTER="--test examples"` passes. Standard LSP framing (initialize, notifications without custom payloads) is envelope-checked only, honestly labeled; the recorded live replay against the real binary is a later slice.
-      - Verified: `make test-rust FILTER="--test examples"` @ `92c78fb` → ok: rust. `committed_example_files_parse_and_validate_against_the_method_catalog` validates `docs/examples/plain-open.jsonl` against the method catalog; `corrupted_example_lines_fail_validation` rejects an illegal `dir`, a missing `source`, schema-violating params, a wrong-direction custom method and a result missing a required field. `make test-rust FILTER="--test schema"` also stayed green after extracting the shared validator.
-  - [x] **T012.2 — Plain code-action and document-prompt examples.** Record the code-action stage (Plain status document, code actions, executeCommand with tagged targets) and a document prompt exchange, each as a `docs/examples/` file validated by the existing suite.
-    - test: every line in each new file passes the T012.1 loader/validator, and the files exercise the tagged `kind` targets and prompt request/response shapes.
-    - check: `make test-rust FILTER="--test examples"` passes. Lines are recorded from a real TestServer run, not invented.
-      - Verified: `make test-rust FILTER="--test examples"` @ `f118882` → ok: rust. The shared loader validates both new files; `plain_code_action_example_records_tagged_targets_and_execution` pins the offered `content`/`node` targets and the `status.stage` executeCommand, and `plain_document_prompt_example_records_the_prompt_document_exchange` pins the prompt document render, the absence of `view/prompt`, the prompt view effect and the `prompt.answer` node target.
-  - [x] **T012.3 — Rich open/render/ack/key loop example with progress order.** Record the rich client lifecycle (initialize with `experimental.magit`, view/open, render, rendered ack, key, progress ordering) as one example file.
-    - test: every line passes the loader/validator, and the file pins the documented progress-before/after-response ordering claims.
-    - check: `make test-rust FILTER="--test examples"` passes. Lines are recorded from a real TestServer run.
-      - Verified: `make test-rust FILTER="--test examples"` @ `da056e3` → ok: rust. `docs/examples/rich-lifecycle.jsonl` is recorded from a real rich TestServer run (`initialize` with the v1 `experimental.magit` declaration, `view/open`, `view/render` v1, `view/rendered` ack, `view/key` `S`/`status.stage-all`, progress handshake, refreshed renders v2/v3, ack v3, shutdown); temporary paths are normalized to `/repo` and outbound frames gain the normalized `jsonrpc`. `rich_lifecycle_example_pins_the_progress_and_render_order` pins create → begin → end → key response → refresh render, the shared `magit-lsp/mutation/1` token, and the `Git`/`view/key` begin payload. Divergence found for T013 review: a fast `g` refresh (`common.refresh`) emits `window/workDoneProgress/create` only — no visible begin/end — because the refresh finishes and `end_progress` runs before the client's create response marks the run visible, so CLIENT_SPEC's "progress end precedes the key response" example does not hold for that key; the recorded file uses a mutation key instead. CLIENT_SPEC prose is left for T013.
-  - [x] **T012.4 — Commit edit confirm and abort example.** Record the real-file commit editing exchange (draft open/applyEdit/confirm and the abort variant) as example files.
-    - test: every line passes the loader/validator, covering both the confirm completion and the abort cancellation paths.
-    - check: `make test-rust FILTER="--test examples"` passes. Lines are recorded from a real TestServer run.
-      - Verified: `make test-rust FILTER="--test examples"` @ `153d57b` → ok: rust (8 tests). `docs/examples/commit-edit-confirm.jsonl` and `docs/examples/commit-edit-abort.jsonl` are recorded from real Plain TestServer runs (status open, `status.stage`, `open.commit`, the Commit menu item, the pre-opened draft replaced by a versioned `workspace/applyEdit` template, `window/showDocument`, draft reopen, the message `didChange`, the offered run-bound `common.confirm`/`common.cancel`, then `type: "confirmed"` with the committed subject or `type: "aborted"` with no commit); temporary paths are normalized to `/repo`, the server binary path to `/magit-lsp/target/debug/magit-lsp`, opaque run ids to `run-1`, and outbound frames gain the omitted `jsonrpc`. `commit_edit_confirm_example_records_the_draft_and_its_confirmation` pins the delivered template, the offered synchronized confirm and its `confirmed` completion; `commit_edit_abort_example_records_the_cancellation` pins the offered abort and its `aborted` completion without a commit report.
-  - [x] **T012.5 — Replay client-to-server example lines against the real binary.** A harness test sends each example's `c2s` lines (with repository fixture substitution) to the real server and compares normalized `s2c` lines.
-    - test: replaying each example reproduces its recorded `s2c` frames after deterministic normalization (ids, URIs, versions), and a deliberately divergent expectation fails.
-    - check: `make test-rust FILTER="--test examples"` passes. Normalization rules are documented in the test; flaky ordering is not papered over with sleeps.
-      - Verified: `make test-rust FILTER="--test examples"` @ `a2e06c0` → ok: rust, four consecutive runs. `plain_examples_replay_against_the_real_binary` sends the recorded `c2s` frames of `plain-open`, `plain-code-action`, `plain-document-prompt`, `commit-edit-abort` and `commit-edit-confirm` to a real `TestServer` over per-file fixtures and compares every `s2c` frame in order; `a_divergent_example_expectation_fails_the_replay` corrupts a recorded status render and asserts the mismatch. Documented normalization: the temporary repository root becomes `/repo`, the server binary path becomes `/magit-lsp/target/debug/magit-lsp`, outbound frames gain the `jsonrpc` member the server omits, the client's replies are retargeted to the actual `magit-lsp/outbound/N` request id and run id, and opaque commit run ids become `run-1`; versions and all other values stay exact. Recordings that exclude the dynamic `view/keymap` push (the code-action and commit files) skip only those notifications; the prompt recording keeps its keymap in strict order. No sleeps: each phase ends when its recorded frames arrive.
-      - `docs/examples/commit-edit-confirm.jsonl` was re-recorded from a fresh run: its old completion tail captured a transient post-confirm status render that only collapsed the diff, which the current server coalesces into one clean-status edit. The replacement lines carry the fresh run's values.
-    - Follow-up: rich replay was delivered by T012.6.
-  - [x] **T012.6 — Replay the rich-lifecycle example against the real binary.** Extend the replay harness to the rich example file (initialize with `experimental.magit`, view/open, render, ack, key with progress ordering).
-    - test: the replay reproduces the recorded rich `s2c` frames after deterministic normalization including commit hashes mapped by position (40-hex → `hash-N`), ids, URIs and versions; a divergent rich expectation fails.
-    - check: `make test-rust FILTER="--test examples"` passes. No sleeps; phase-scoped membership where independent notifications can reorder.
-      - Verified: `make test-rust FILTER="--test examples"` @ `5f305aa` → ok: rust (12 tests). `plain_examples_replay_against_the_real_binary` now replays `docs/examples/rich-lifecycle.jsonl` over the same fixture as `plain-open`, answering `window/workDoneProgress/create` by the observed request id and sending the recorded `view/rendered` acks, and compares every rich `s2c` frame in order. `canonical_frame` normalizes both sides with independent `HashNormalizer` maps that turn standalone 40-hex commit/object hashes into `hash-1`, `hash-2`, ... by first-seen position while leaving the 64-hex patch content hashes exact; ids, URIs and versions keep their recorded form. `a_divergent_rich_expectation_fails_the_replay` corrupts the initial rich render and asserts the mismatch. Frames stay in strict order with no sleeps: the server emits each render before its keymap, so the rich recording needs no phase grouping.
-- [x] **T013 — client-spec.** [Scope](./TASKS_PART_SEVEN.md#t013-client-spec-l).
-  - Done: 7169349 (containing commit of the last slice). Delivered across children: the generated worked exchanges (T013.1 `a62d659`), the five client implementation levels (T013.2 `648b5e3`), and the generated capability-to-level table, classification rule, recorded Neovim `documentChanges` fact and README Plain-mode statement (T013.3 `7169349`).
-  - [x] **T013.1 — Generate the worked exchanges into the client spec.** Replace the hand-written illustrative exchange in `docs/CLIENT_SPEC.md` (~lines 538-559) with a generator-emitted block of all six `docs/examples/*.jsonl` files.
-    - test: a committed `BEGIN/END GENERATED WORKED EXCHANGES` block matches fresh generation from the example files, and tampering with the committed block fails drift.
-    - check: the hand-written jsonl exchange is gone, each generated subsection carries the example name and recorded provenance, the stale progress-order prose after it is rewritten against the recorded evidence (mutation key: create → begin → end before the key response; fast `g` refresh emits create only), and `make docs-check` passes.
-    - Verification: `make update-schema && make schema-check && make test-rust FILTER="--test schema" && make docs-check`.
-      - Verified: `make update-schema && make schema-check && make test-rust FILTER="--test schema" && make docs-check` @ `3bc7a3d` → ok: update-schema, schema-check, rust, docs-check. `committed_worked_exchanges_match_generation` pins the generated block (all six `docs/examples/*.jsonl` files, one fenced `jsonl` block each, deterministic compact `message` lines); `client_spec_worked_exchanges_drift_on_tamper_and_missing_block` fails drift for a modified provenance line and a removed block. `docs/CLIENT_SPEC.md` carries the generated block in place of the hand-written illustration, and the following prose describes the recorded mutation key (`S`/`status.stage-all`: create → begin → end before the key response) and the fast `g` refresh (create only).
-  - [x] **T013.2 — Five-level client structure.** Rewrite the stale "Plain mode: standard-LSP clients (target specification; not yet implemented)" section (and the Plain table rows) as Levels 0-4: connect/sync, Plain read-only, Plain actions, Plain extras, rich.
-    - test: each level documents sends/receives, the capabilities to declare and what fails without them, links its worked exchange from the generated block, and a conformance checklist keyed only to identifiers that exist in the repo (suites, scenario files, editor-model behaviors, example files).
-    - check: stale claims removed (not-yet-implemented header, basic-modifier-filtering pending line, `Plain (target)` table row, target-server voice in the capability table, the seven invented harness profile names); `tests/ui/plain_init.lua` and the Helix TOML referenced; every feature claim names its proving test; no current/target design mixing.
-    - Verification: `make test-rust FILTER="--test schema" && make docs-check`.
-    - Verified: `make test-rust FILTER="--test schema" && make docs-check` @ `a62d659` → ok: rust and docs-check. Levels 0-4 now document sends/receives, capability degradation, a worked-exchange link and a checklist of existing repository identifiers; the stale target claims and invented profile names are removed; `tests/ui/plain_init.lua`, the Helix reference TOML and the generated `docs/plain-support.md` are referenced.
-  - [x] **T013.3 — Capability-to-level classification and README statement.** Add the capability-to-level table, the classification rule (absent `experimental.magit` selects Plain; standard capabilities derive the Plain level; quirks overrides), the Neovim applyEdit/documentChanges facts from the generated quirks appendix and recorded traces, and the README Plain-mode statement.
-    - test: the classification rule and capability-to-level table are pinned against `src/server.rs` capability resolution and the recorded initialize traces; README names only tested clients.
-    - check: `make docs-check` passes and the README states that a general LSP client works in Plain mode when following the spec.
-    - Verification: `make test-rust FILTER="--test schema" && make docs-check`.
-    - Verified: `make test-rust FILTER="--test schema" && make docs-check` @ `648b5e3` → ok: rust (46 tests) and docs-check. `capability_levels_pin_the_plain_capability_fields` pins the generated rows against `PlainCapabilities`' field set (via its `Debug` shape, excluding runtime `commit_draft_expired`) and probes each declaration pointer through `negotiate`; `plain_classification_follows_negotiate_and_recorded_traces` pins absent-selector Plain, invalid-rich rejection, the current bundled Neovim declaration as rich, the recorded plain Neovim and Helix traces, and `assume-document-changes` → `Capability::DocumentChanges`/`neovim-accepts-undeclared-documentChanges`; `client_spec_capability_levels_drift_on_tamper_and_missing_block` fails drift for a tampered or removed block. CLIENT_SPEC documents the classification rule and the recorded Neovim `documentChanges` fact; README states the Plain-mode path and names only the Neovim and VS Code tested clients, with Helix as a reference configuration.
-
-### Feature — Phase 5: Commit selection and rebase
-
-- [x] **T014 — selected-commit-continuation.** [Scope](./TASKS_PART_SEVEN.md#t014-selected-commit-continuation-m).
-  - Done: c9571c6 (containing commit of the last slice). Delivered across children: the confirm/cancel/stale select-mode continuation contract (T014.1 `d479920`) and the native Neovim commit-select confirm/cancel scenarios (T014.2 `c9571c6`).
-  - [x] **T014.1 — Complete and pin the select-mode continuation contract.** Confirm delivers the full selected commit id, the captured operation arguments and the caller to the waiting operation; cancel restores the caller without mutation; a stale selection is refused readably without losing the caller.
-    - test: session/command state tests cover confirm, cancel and a stale selection for the select-mode continuation (menu-argument and command-captured paths as they exist); selection identity is asserted as the full structured-node commit id, never rendered text or a row index.
-    - check: any missing confirm/cancel/stale handling is implemented; `make test-rust FILTER="--test commands --test log_commands"` passes.
-    - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
-    - Verified: `make test-rust FILTER="--test commands --test log_commands"` @ `d479920` → ok: rust.
-  - [x] **T014.2 — Native commit-select scenarios.** Record the select-mode continuation end to end in real Neovim via new `tests/ui/scenarios/commit-select-*.scn` (confirm and cancel at minimum; stale if a deterministic pre-start fixture can produce it).
-    - test: scenarios assert the caller view is restored with the captured argument after confirm and untouched after cancel, using text snapshots.
-    - check: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn` and the cancel counterpart exit 0; no orphan `magit-lsp` processes remain.
-    - Verification: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn && make ui-file FILE=tests/ui/scenarios/commit-select-cancel.scn`.
-    - Verified: `make ui-file FILE=tests/ui/scenarios/commit-select-confirm.scn && make ui-file FILE=tests/ui/scenarios/commit-select-cancel.scn` @ `c9571c6` → ok: ui-file for both. `commit-select-confirm.scn` drives `l` → `c` → search → `Enter`, then asserts the status caller is restored (`Unstaged changes`, `view_stack.count == 1`), the clipboard equals `git rev-parse HEAD~2`, and the tree is clean; `commit-select-cancel.scn` drives `l` → `c` → `Escape` and asserts the status caller restored, the clipboard still `sentinel`, `HEAD` unchanged, and the tree clean. Snapshots `select-picker` and `caller-restored` written for both. `pgrep -af magit-lsp` showed no orphan servers.
-- [x] **T015 — fixup-action.** [Scope](./TASKS_PART_SEVEN.md#t015-fixup-action-m). Research (2026-11-11, fold into children): the commit menu already declares the action (`src/menus/commit.rs:71` `action("f", "commit.fixup", "Fixup", "magit-commit-fixup", "R-4.1")`) with NO handler in src/commands.rs — T015 implements the handler. Mechanism is `git commit --fixup=<target>` (standalone fixup commit on HEAD, no rebase/sequencer), using T014's server-owned log-select to pick the target commit; the captured target + caller must survive the continuation (same Select continuation shape T014.1 delivered). `commit.squash` (`s`, sibling "Edit" group action) is the analogous `git commit --squash=<target>` and is ALSO missing a handler — decide whether T015 covers both fixup and squash or fixup only (Magit R-4.1a covers both). The `commit.instant-fixup`/`instant-squash` (`R`/`S`, "Edit and rebase" group) are autosquash-rebase, NOT here — folded into T019. Exact-repository-state test: staged content becomes a commit whose message is `fixup! <target subject>` and whose parent is unchanged; cancel returns to caller with nothing committed; failures readable.
-  - Scope decision: T015 implements fixup only, as its linked acceptance specifies. `commit.squash` remains outside this ticket; instant-fixup/instant-squash remain T019.
-  - [x] **T015.1 — Fixup selection handler and repository-state tests.** Implement `commit.fixup` through the server-owned log-select continuation, preserving caller and arguments.
-    - test: confirm creates `fixup! <selected subject>` from staged content on the prior HEAD, restores the caller, and targets the full structured commit id; cancel leaves repository state unchanged and restores the caller; failures are readable.
-    - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
-    - [x] **T015.1a — Fixup handler and confirm regression.** Implementation: `ba58ceb`; regression: `37a4e57`. Implement the selected-fixup path and one exact-repository-state confirm test.
-      - test: confirm commits staged content with `fixup! <selected subject>`, prior HEAD as parent, full structured target identity and restored caller.
-      - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
-      - Verified: `make test-rust FILTER="--test commands --test log_commands"` on `ba58ceb` implementation content with `37a4e57` regression → ok: rust.
-    - [x] **T015.1b — Fixup cancellation and failure regressions.** Pin cancellation and readable Git failures, repairing behavior if needed.
-      - test: cancel preserves HEAD/index and restores the caller; Git failure is a readable message and leaves the caller usable.
-      - Verification: `make test-rust FILTER="--test commands --test log_commands"`.
-      - Verified: `make test-rust FILTER="--test commands --test log_commands"` @ `ba58ceb` → ok: rust; cancellation preserves HEAD/index and caller, Git failure emits an error and leaves caller view open.
-  - [x] **T015.2 — Native fixup selection scenario.** Add the real-Neovim fixup scenario using structured/text evidence only. Done: containing commit.
-    - test: select a non-HEAD target, confirm, and assert exact fixup subject, parent, committed staged content and restored caller; cancel preserves HEAD/index and restores the caller.
-    - check: the scenario passes and leaves no orphan server.
-     - Verification: `make ui-file FILE=tests/ui/scenarios/commit-fixup.scn`.
-     - Verified: `make ui-file FILE=tests/ui/scenarios/commit-fixup.scn && make ui-file FILE=tests/ui/scenarios/commit-fixup-cancel.scn` @ `8c25d27` → both `ok: ui-file`; confirm asserts fixup subject, parent, committed index tree/content and restored caller; cancel asserts HEAD/index preservation and caller restoration. `pgrep -af magit-lsp` showed no orphan servers.
-- [x] **T016 — editor-helper-kinds.** [Scope](./TASKS_PART_SEVEN.md#t016-editor-helper-kinds-s). Done: 241d292 plus T016.2.
-  - [x] **T016.1 — Kind-owned draft targets and completion policy.** Separate commit-message and rebase-todo draft validation and finish policy; resolve the worktree-aware todo target through Git.
-    - test: each kind accepts only its expected helper kind/target; todo rejects commit-style close and supports explicit confirmation/cancellation.
-     - Verification: `make test-rust FILTER="--test editor_bridge --test menus"`.
-     - Verified: `make test-rust FILTER="--test editor_bridge --test menus"` @ `2f3c7e1` → ok: rust. Both draft kinds reject wrong helper kind/target; todo rejects close and confirms or aborts explicitly.
-  - [x] **T016.2 — Kind-aware registry integration and history isolation.** Wire kind selection through registry/helper dispatch without adding rebase initiation or todo parsing. Done: containing commit.
-    - test: registry accepts the expected todo helper, rejects wrong kind/target, and cannot expose or retain commit-message history for todo runs; commit-message behavior stays unchanged.
-     - Verification: `make test-rust FILTER="--test editor_bridge"`.
-      - Verified: `make test-rust FILTER="--lib editor_history_tests" && make test-rust FILTER="--test editor_bridge"` @ df88c46 → both ok: rust. `editor_history_tests::todo_registry_runs_never_retain_commit_history` seeds commit history, rejects wrong todo helper kind/target, saves todo and verifies both abort and confirm leave history unchanged; neighboring commit-message retention coverage remains passing. Earlier `--test editor_bridge` did not execute this unit regression.
-- [x] **T017 — rebase-state.** [Scope](./TASKS_PART_SEVEN.md#t017-rebase-state-m).
-  - [x] **T017.1 — Typed Git rebase state detection.** Detect worktree-aware merge/apply rebase state and conflicts through the Git boundary. Done: containing commit.
-    - test: real repositories cover no operation, active rebase and conflict classification without confusing cherry-pick/revert with rebase.
-     - Verification: `make test-rust FILTER="--test rebase_state"`.
-     - Verified: `make test-rust FILTER="--test rebase_state"` @ `02e5e01` → ok: rust. Real Git operations cover idle, merge/apply rebase conflicts, conflicting cherry-pick/revert exclusions, git am exclusion, and linked-worktree isolation; revert asserts `REVERT_HEAD`.
-  - [x] **T017.2 — Rebase state actions and status.** Render server-owned operation state and implement continue, skip and abort with readable failures.
-    - test: exact repository state and rendered structure cover action success, conflict, and invalid operation attempts.
-    - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
-     - [x] **T017.2a — Rebase operation commands.** Implement continue, skip and abort behind the Git boundary; register executable menu actions. Done: `1db0220`, `d31087b`.
-      - test: exact repository state covers continue/skip/abort and readable conflict/no-operation outcomes.
-      - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
-      - [x] **T017.2a1 — Rebase execution and menu contracts.** Complete Git execution, command registration, executable menu metadata and exact-state regression fixtures. Done: containing commit.
-        - test: independent real conflict fixtures cover continue, skip and abort; registry and menu contracts expose implemented operations.
-        - Verification: `make test-rust FILTER="--test rebase_state --test commands --test menus"`.
-      - [x] **T017.2a2 — Rebase command error effects.** Exercise unresolved-conflict and no-operation failures through command dispatch. Done: containing commit.
-         - test: failures emit readable `Effect::Message`, preserve repository state and leave the caller usable.
-         - Verification: `make test-rust FILTER="--test rebase_state"`.
-          - Verified: `make test-rust FILTER="--test rebase_state"` @ 1db0220 → ok: rust. SessionTest dispatch covers idle and unresolved continue failures, message effects, unchanged HEAD/index/conflicts and caller usability. T017.2, .2b and .3 remain open.
-    - [x] **T017.2b — Structured rebase status.** Render active/conflicted rebase state and operation availability using server-owned tree metadata.
-      - test: status state and tree update as operations progress and disappear after abort/completion.
-      - Verification: `make test-rust FILTER="--test rebase_state --test status_render"`.
-      - Verified: `make test-rust FILTER="--test rebase_state --test status_render"` @ 7be7622 → ok: rust. Live session refresh asserts stable section/operation metadata through idle, conflict, staged resolution, completion and abort.
-  - [x] **T017.3 — Native rebase state conformance.** Exercise status and operation actions through real Neovim input using text and Git evidence.
-    - test: `rebase-state.scn` asserts conflict/status, operation outcomes and usable caller state.
-    - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-state.scn`.
-      - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-state.scn` @ 12bdfbb → ok: ui-file. Native text and Git assertions pass; `pgrep -af magit-lsp` shows no orphan server.
-- [x] **T018 — rebase-todo.** [Scope](./TASKS_PART_SEVEN.md#t018-rebase-todo-m). Design (advisor 2026-11-11, fold into children): no dry-run validator exists — `git rebase --edit-todo` mutates in place and leaves a broken file, so the server self-validates a strict closed grammar (reject-by-default) and writes atomically (temp+rename) in `.git/rebase-merge/`. `.git/sequencer/todo` is cherry-pick/revert, NOT rebase — out of scope; every interactive rebase uses `.git/rebase-merge/git-rebase-todo`. Node identity = full SHA via `git cat-file --batch-check` (require `type=commit`, unambiguous, no dupes); subject/command are fields, never the identity. Pre-write checks: first line must not be squash/fixup; emit `drop` rather than delete; SHA set must equal the read set; content-hash stale guard. Reject `exec/break/label/reset/merge/update-ref`. Decide at split: (a) scope edits an already-paused rebase (blocking `GIT_SEQUENCE_EDITOR` at `rebase -i` start is a separate larger ticket); (b) `rebase.updateRefs=true` inserts `update-ref` lines even into linear rebases — accept as an opaque pinned node or document the limitation.
-  - Scope decision: edit an already-paused merge-backend rebase. Initial sequence-editor launch belongs to T019. Reject `update-ref` (including todos produced with `rebase.updateRefs=true`) rather than silently dropping it; explain this limitation to users.
-   - [x] **T018.1 — Typed linear todo model and commit identities.** Parse the closed linear grammar and resolve unique canonical commit identities behind the Git boundary; no file mutation yet.
-    - test: supported actions and abbreviated commit references resolve correctly; invalid grammar, unsupported commands, noncommits, ambiguous/missing objects, duplicate identities and leading squash/fixup are rejected without mutation.
-     - Verification: `make test-rust FILTER="--test rebase_todo"`.
-    - Verified: `make test-rust FILTER="--test rebase_todo"` @ 2e0cb73 → ok: rust. Cat-file stdin resolution, whitespace parsing, repository no-mutation invariants, and Git-proven bounded four-hex ambiguity covered.
-   - [x] **T018.2 — Guarded atomic todo persistence.** Preserve the loaded identity set, represent omission as drop and refuse stale source bytes before same-directory atomic replacement.
-    - test: valid reorder/action changes preserve exact commit identities; stale/invalid writes leave original todo bytes unchanged.
-     - Verification: `make test-rust FILTER="--test rebase_todo"`.
-     - Verified: `make test-rust FILTER="--test rebase_todo"` @ a3ae47f → ok: rust. Real paused edit-rebase fixture covers reorder/action, omission-as-drop, exact identities, stale/injected-byte preservation, parse-only rejection and cross-repository ownership.
-   - [x] **T018.3 — Structured todo view and editing actions.** Render server-owned rows; route action changes, reorder, submit and cancel through model and persistence.
-    - test: tree metadata and session actions edit only captured identities; submit/cancel and readable validation failures preserve caller and repository invariants.
-     - Verification: `make test-rust FILTER="--test rebase_todo"`.
-      - [x] **T018.3a — Todo tree and identity-based edit model.** Add a standalone server-owned todo view model, structured commit rows and identity-addressed action/reorder/save methods; session wiring follows separately. Done: containing commit.
-        - test: tree rows preserve full commit identities across action edits and reorder; valid save changes only the paused todo and invalid edits leave it unchanged.
-        - Verification: `make test-rust FILTER="--test rebase_todo"`.
-        - Verified: `make test-rust FILTER="--test rebase_todo"` @ a1c141e → ok: rust. Paused-rebase fixture covers structured full-OID identity, action/reorder, guarded save and invalid move preservation.
-       - [x] **T018.3b — Todo session and menu wiring.** Connect the todo view model to view creation, commands and key dispatch; submit/cancel restores the caller and failures remain readable.
-       - test: session-dispatched open/edit/reorder/submit/cancel operates on captured tree identities and preserves repository/caller invariants.
-       - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
-        - [x] **T018.3b1 — Open and cancel paused todo views.** Add the view kind, session factory and rebase menu opener; cancel restores the caller without mutation.
-         - test: real paused-rebase session opens structured todo rows through the menu, cancels to its caller with unchanged todo/HEAD/index, and reports idle-open failure readably.
-         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
-        - [x] **T018.3b1a — Paused todo menu open and cancel regression.** Finish the view/menu implementation with real-session identity and no-mutation cancellation coverage.
-          - Attempts: Prior worker stopped before edits/tests requesting ordinary keymap-source clarification; resumed with profile keymaps authorized and added scoped cancel bindings in both profiles. Regression asserts paused menu dispatch, structured 40-character OIDs, caller restoration, and exact todo/HEAD/index preservation.
-          - test: paused-rebase menu dispatch opens full-OID structured rows; cancel restores its caller and preserves todo, HEAD and index.
-          - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
-          - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `3141c6b` → ok: rust. `paused_rebase_menu_opens_todo_and_cancel_preserves_repository` asserts menu open, full 40-character OIDs, caller restoration, and exact todo/HEAD/index preservation; effective `common.cancel` binding resolved for `rebase-todo`.
-        - [x] **T018.3b1b — Idle todo opener error regression.** Verify idle menu opening emits a readable message and keeps the caller usable.
-          - Verified: `make test-rust FILTER="--test rebase_todo"` @ `ef318e1` → ok: rust. `idle_rebase_todo_opener_reports_error_and_keeps_caller_usable` asserts readable `Effect::Message`, caller remains sole focused view and processes refresh, HEAD/index unchanged.
-         - test: idle opener produces readable effects without changing repository or caller state.
-         - Verification: `make test-rust FILTER="--test rebase_todo"`.
-        - [x] **T018.3b2 — Dispatch todo editing and submission.** Bind identity-based action/reorder commands and guarded submit to the todo view.
-         - test: session command/key dispatch edits the captured identities, saves exact todo order/actions and restores caller; invalid/stale submission remains readable and leaves disk unchanged.
-         - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus"`.
-         - Attempts: Default worker reached two checkpoints; dispatch implementation is unverified, with profile command resolution failing. Split at dispatched success versus safety regression boundaries.
-          - [x] **T018.3b2a — Valid dispatched todo edits and submission.** Complete command registration and bindings; prove identity-addressed action/reorder and successful submit restores caller with exact saved todo and unchanged HEAD/index. Document bindings.
-            - test: dispatched success path preserves full-OID identities and writes exact requested order/actions.
-            - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
-            - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `4a3eb72` → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` dispatches identity-addressed edits and submits via `ctrl+s`; keymap suite validates profile binding.
-          - [x] **T018.3b2b — Dispatched todo safety regressions.** Prove invalid/stale submit remains readable and usable without disk replacement, and cancel after edits restores caller with exact todo/HEAD/index unchanged.
-            - test: dispatched invalid/stale submission and edited cancellation preserve repository and caller invariants.
-            - Verification: `make test-rust FILTER="--test rebase_todo"`.
-            - Verified: `make test-rust FILTER="--test rebase_todo"` @ 7893c2b → ok: rust. `dispatched_todo_edits_submit_caller_and_stale_failure_preserves_editor` covers invalid edit rejection without todo replacement and continued editor dispatch, stale external todo preservation and readable refusal; `dispatched_todo_cancel_after_edits_preserves_repository_and_restores_caller` covers an action edit then cancel with exact todo/HEAD/index preservation.
-   - [x] **T018.3c — Native todo editing key affordances.** Add server-owned contextual action/reorder key commands so users can edit without constructing `view/invoke` arguments. Existing argument-based commands remain internal dispatch infrastructure, not a completed native editing affordance.
-     - Research: VERIFIED at `6ff3713`: both profiles bind only cancel/submit (`profiles/standard.toml:94-96`, `profiles/vim.toml:96-98`); action/reorder use explicit args (`src/commands.rs:1144-1163`). Native conformance exposed the missing input path.
-     - test: real session key input changes selected full-OID row actions and moves rows using server tree identity; invalid leading squash/fixup remains readable and safe.
-     - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
-     - Attempts: Two default-worker checkpoints left unverified implementation; test compilation fails because `EditorMode` is private. Split core key dispatch from complete key safety coverage.
-      - [x] **T018.3c1 — Core contextual todo key dispatch.** Finish contextual command/profile wiring and prove selected-identity action and repeated reorder dispatch through session keys; document keys and commit.
-        - test: selected full-OID action and repeated up/down movement through key input; existing dispatch and cancellation regressions pass.
-        - Verification: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"`.
-        - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus --test keymap"` @ `6ff3713` → ok: rust. `todo_key_input_changes_action_and_reorders_full_oid_rows` uses session key input for selected full-OID action and repeated `J`/`K` reorder; the full rebase todo suite retains submit and cancellation regressions, and keymap validation accepts both profile bindings.
-     - [x] **T018.3c2 — Contextual todo key safety coverage.** Extend key tests across all six actions, invalid leading squash/fixup, boundary moves, and subsequent usable submit/cancel.
-       - test: key rejection preserves model/disk and valid subsequent input works; each supported action and boundary behavior directly asserted.
-       - Verification: `make test-rust FILTER="--test rebase_todo"`.
-       - Attempts: Two default checkpoints left test edits unverified; added action transitions disturbed movement preconditions. Separate action safety from movement/caller tests.
-       - [x] **T018.3c2a — Todo action-key safety.** Isolate six-action key assertions and leading squash/fixup rejection from the existing movement regression; prove unchanged disk/model and usable subsequent input.
-         - test: six actions and both leading-fold rejection paths via actual session keys.
-         - Verification: `make test-rust FILTER="--test rebase_todo"`.
-         - Verified: `make test-rust FILTER="--test rebase_todo"` @ `97cf821` → ok: rust. `todo_action_keys_change_captured_full_oid_row` asserts all six action keys on one structured full-OID selection; `todo_key_safety_rejects_leading_folds_without_mutation_and_remains_usable` asserts readable squash/fixup rejection, unchanged tree/todo bytes, and a subsequent valid action key.
-       - [x] **T018.3c2b — Todo movement boundaries and caller safety.** Assert first/last boundary movement and subsequent submit/cancel preserve caller and repository invariants using fresh or restored valid preconditions.
-         - test: boundary moves and subsequent key submit/cancel preserve identity and repository state.
-         - Verification: `make test-rust FILTER="--test rebase_todo"`.
-         - Attempts: Two inherited fixes left the order helper borrowing the session across mutations; passing `&TestSession` at each assertion limited the immutable borrow to the call.
-         - Verified: `make test-rust FILTER="--test rebase_todo"` @ `42bf123` → ok: rust. `todo_key_movement_boundaries_submit_and_cancel_preserve_caller_and_repository` asserts first/last `K`/`J` no-ops, subsequent valid movement and exact submit, edited/moved cancel restoration, usable caller refresh, and unchanged HEAD/index.
-    - [x] **T018.4 — Native todo conformance.** Exercise the paused rebase editor with real Neovim input and text/structured/Git evidence.
-     - test: native scenario proves reorder/action submission, invalid-input safety and usable caller restoration.
-     - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
-     - [x] **T018.4a — Native todo submission.** Add a paused linear-rebase fixture and prove native menu opening, full-OID action/reorder input, exact submitted todo, unchanged HEAD/index, and usable caller restoration.
-       - test: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
-       - Attempts: two default checkpoints established the fixture and corrected a menu-open race; current scenario reaches the editor but combines invalid folding preconditions with submission. Split submission from safety.
-       - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn` @ `15b41e9` → ok: ui-file. Native menu and todo editor assert three full-OID rows; real `J`, `r`, and `C-s` input produces the exact reordered/reworded todo, preserves HEAD/index, and restores a caller that reopens and closes the rebase menu.
-      - [x] **T018.4b — Native todo rejection and cancellation.** Extend the native scenario with isolated invalid-leading-action rejection, subsequent valid input, edited cancellation, exact original todo/HEAD/index preservation, and usable caller restoration.
-        - test: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn`.
-        - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-todo.scn` @ `14c5ce5` → ok: build, ui-file. Native scenario checks readable leading-squash rejection with unchanged disk todo and live editor, subsequent reword input, then reordered Escape cancellation with byte-exact todo plus unchanged HEAD/index and restored caller.
-- [x] **T019 — interactive-rebase.** [Scope](./TASKS_PART_SEVEN.md#t019-interactive-rebase-l). Fold in `commit.instant-fixup`/`commit.instant-squash` (commit-menu "Edit and rebase" group, `F`/`S`, R-4.1) at the end: both run `git rebase -i --autosquash` against a selected target and therefore share T017's failed-rebase/conflict state and the T019 continue/abort/conflict handling — they are NOT T015 (`commit.fixup` `f` = `git commit --fixup=<target>`, a standalone fixup commit with no rebase/sequencer). Add a `commit.instant-*` handler + autosquash invocation + exact-repository-state/conflict tests once T019's interactive-rebase machinery exists; do not schedule them separately.
-  - Done: `6dcebc9`. Final closure evidence and scoped review recorded below; stop boundary intentionally retained for orchestrator confirmation.
-  - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test instant_rebase"` → `ok: rust`; `make docs-check` → `ok: docs-check`.
-  - Design: Prepare and edit a server-owned in-memory linear plan before starting Git. The selected base is the exclusive replay boundary. Prepared launch authority is distinct from paused-todo save authority; cancel drops the plan without repository writes. Reject stale inputs instead of silently regenerating edits. Verify the documented Git sequence-editor transport and autosquash transformation before prescribing the launch adapter.
-  - [x] **T019.1 — Prepared rebase model.** Capture repository identity, exclusive base, HEAD, supported linear commit membership and launch preconditions; share structured todo validation without granting paused-file write authority.
-    - test: Real-repository preparation/edit/cancel changes no repository state; unsupported topology and stale launch inputs are rejected with readable errors while edited instructions remain intact.
-    - Verification: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"`.
-    - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → ok: rust, run with parent `73cdbcd` and dirty working tree (protected unrelated edits present; not a clean checkout claim). `exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only` checks OID membership and unchanged HEAD/index/worktree/refs/operation state; stale, invalid-base, nonlinear and active-operation refusals covered by `invalid_and_stale_inputs_fail_without_losing_plan_or_writing_repository`, `nonlinear_replay_range_is_rejected` and `merge_base_and_active_operation_are_rejected_readably`. Existing paused ownership remains separate: `parse_only_and_cross_repository_models_cannot_write` in `tests/rebase_todo.rs`.
-   - [x] **T019.2 — Select and edit an initial rebase plan.** Connect server-owned base selection and structured todo editing to prepared ownership; cancel restores a usable caller without launching Git.
-    - test: Dispatched selection, full-OID action/reorder and cancel preserve repository state and existing paused-editor behavior.
-    - Attempts: Two default orientation-only PARTIALs; split editor ownership from selection dispatch at separate Rust-test boundaries.
-    - [x] **T019.2a — Prepared todo editor ownership.** Reuse structured rendering and action/reorder operations for an in-memory prepared plan, retaining distinct paused save authority.
-      - test: Prepared editor renders exact full-OID membership, edits/reorders safely and cannot write a paused todo; existing paused editor regressions pass.
-      - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `97b361e` → `ok: rust`.
-     - [x] **T019.2b — Initial base selection and editor dispatch.** Connect the rebase command, validated single-base selection and prepared editor; cancellation restores a usable caller without repository mutation.
-      - test: Menu/selection/key dispatch, invalid selection/factory failure and edited cancellation preserve exact repository state and paused behavior.
-      - Attempts: Two default PARTIALs; selector-request edits exist, confirmation and direct tests remain. Split valid dispatch from cancellation/failure regression coverage. Promote the existing `rebase.interactive` action, not a parallel command or key.
-      - [x] **T019.2b1 — Open the prepared editor from base selection.** Confirm the existing interactive-rebase action's structured single-base selector and open exact prepared rows.
-        - test: Real menu, selector confirmation and full-OID prepared-row membership; registry/menu/keymap suites remain valid.
-        - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test commands --test menus --test keymap"` @ `817e314` → `ok: rust`.
-       - [x] **T019.2b2 — Initial editor cancellation and failure safety.** Exercise edited key cancellation, invalid selection and preparation failure, with exact repository and usable-caller checks.
-        - test: Preserve HEAD/index/worktree/refs/operation state; paused editor regressions pass unchanged.
-        - Attempts: Two default PARTIALs; cancellation coverage added, preparation-error assertion still fails. Split cancellation from failure-path verification.
-         - [x] **T019.2b2a — Verify initial selection and edited cancellation.** Assert selector and edited-plan cancellation preserve exact repository state and restore a usable caller.
-           - test: Key-driven cancellation, HEAD/index/worktree/refs/operation state and caller refresh.
-           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `632dc68` → `ok: rust`.
-        - [x] **T019.2b2b — Verify initial preparation failure safety.** Assert invalid selection and changed preparation preconditions report readable effects, retain usable caller and preserve repository state.
-          - test: Direct failing selection/preparation dispatch and paused-editor regressions.
-          - Attempts: Two default PARTIALs identified preparation errors escaping as `Err`; split invalid-selection coverage from the production readable-error correction.
-          - [x] **T019.2b2b1 — Reject invalid initial selection safely.** Direct invalid-selection regression preserves repository state and usable caller.
-            - test: Readable invalid-selection effect and exact unchanged state.
-           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` → exit 0; `ok: rust`.
-           - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `cf051cb` → `ok: rust`; run with dirty working tree (protected unrelated edits present; not a clean checkout claim).
-           - Done: `cf051cb`.
-           - [x] **T019.2b2b2 — Surface failed initial preparation readably.** Convert actual preparation failure into a readable effect while restoring a usable caller.
-             - test: Changed preconditions after selection opens; exact pre-dispatch repository state preserved, no editor leaked.
-             - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test instant_rebase"` → `ok: rust`; `initial_rebase_preparation_failure_keeps_caller_usable` covers the readable effect, usable caller and unchanged repository.
-    - [x] **T019.3 — Execute the edited initial rebase plan.** Add the verified launch adapter, submission revalidation and readable execution/conflict handling.
-     - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test instant_rebase"` → `ok: rust`; launch/stale refusal and conflict/continue/abort tests recorded under T019.3b–3c2b2.
-    - test: Exact repository histories prove exclusive-base execution, edited order/actions, conflict, continue and abort; stale submission preserves editor and repository.
-    - [x] **T019.3a — Sequence-editor helper transport.** Add a portable early CLI helper that copies the validated external plan into Git's supplied todo path and fails closed on transport errors. UTF-8 CLI paths follow existing CLI limits; non-Linux behavior remains unverified.
-      - test: Exact bytes, paths containing spaces/apostrophes, missing inputs and no server startup; Git shell quoting follows the existing executable-command boundary.
-      - Verified: `make test-rust FILTER="--lib --test rebase_interactive"` @ `a72aaed` → exit 0; binary helper exact-byte test (including NUL), missing env/source/destination and invalid argc fail-closed test, and shell-quoting test all pass.
-    - [x] **T019.3b — Launch the validated initial plan.**
-      - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `8701ed8` → exit 0; edited-plan real Git launch and stale-HEAD refusal pass. Revalidate prepared ownership and launch actual interactive Git with explicit no-autosquash; prove exclusive-base edited-history results and stale-plan refusal.
-      - test: Real Git success and stale refusal retain exact intended instructions/state.
-    - [x] **T019.3c — Dispatch launch and paused outcomes.** Prepared submit launches instead of saving a paused file; conflicts remain real Git state with readable effects and continue/abort support.
-      - test: Key-driven submit, usable caller, conflict/continue/abort and exact repository state.
-      - [x] **T019.3c1 — Submit prepared plans through real server dispatch.** Prepared submit invokes the launch adapter, successful execution restores caller, stale refusal retains editor and instructions; paused submit remains save-only.
-        - test: Real-server key submit, exact resulting history/state and stale refusal.
-        - Attempts: two default PARTIAL checkpoints wired submit, but real-server regression setup remains unverified; split success and stale-refusal regressions.
-        - [x] **T019.3c1a — Prove successful prepared submit through real server keys.** Exact edited replay history and usable caller; paused-save regressions unchanged.
-          - test: Genuine server key-driven initial selection/edit/submit and exact Git result.
-        - [x] **T019.3c1b — Prove stale prepared submit retains editor and edits.** Readable refusal, retained edited action label, and exact pre-dispatch repository state through genuine server dispatch.
-          - test: Changed launch preconditions reject key submit without losing prepared instructions.
-          - Verified: `make test-rust FILTER="--test server_async stale_prepared_rebase_submit_retains_editor_and_edits"` @ `7312e65` → `ok: rust`. Stale render includes `reword` at known edited row; full-OID row identities, unchanged refs/worktree/index/operation state, and caller refresh asserted.
-      - [x] **T019.3c2 — Preserve actual paused and conflicted launch state.** Readable launch outcomes expose real paused/conflicted state without automatic abort; continue and abort remain usable.
-        - test: Exact conflict, resolved continue and abort histories/state.
-        - [x] **T019.3c2a — Verify launch conflict, continue and abort at Git boundary.** Exact replay-conflict state, resolved continuation and abort restoration from edited prepared plans.
-          - test: Real Git paused/conflict histories, index/worktree and operation-state lifecycle.
-          - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `d7b4563` → `ok: rust`; real conflict resolution/continue, conflict abort and intentional edit-pause abort pass.
-        - [x] **T019.3c2b — Present execution outcomes through server dispatch.** Distinguish stale preflight refusal from execution that actually started; expose real operation state and usable caller/actions without automatic abort or retaining a misleading preflight editor.
-          - test: Genuine-server key submit into edit pause and conflict, readable effects, actual state and usable continue/abort dispatch.
-          - [x] **T019.3c2b1 — Dispatch started execution and edit pause.** Typed preflight/started outcomes; real-server edit pause, caller usability and explicit abort restoration, with existing stale/paused-save invariants.
-            - test: Genuine-server edit-pause submit and explicit abort; stale-submit and paused-save regressions.
-            - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `e3a2bab` → `ok: rust`; genuine-server edit pause pops the prepared todo, leaves the caller refreshable, and `rebase.abort` restores HEAD, refs, index tree and worktree; stale-submit and paused-save suites pass.
-            - Incident: Restored the saved seven-hunk protected delta from `/tmp/opencode/commands-baseline.diff` to unstaged `src/commands.rs`. Cause unknown: commit history establishes ownership of the typed submit change, not the operation that removed the protected delta. Evidence: saved patch applied cleanly; normalized restored diff body exactly matches the saved patch; `src/commands.rs` index diff remains empty; HEAD `24c5ceb` retains the typed submit change.
-          - [x] **T019.3c2b2 — Dispatch conflict and resolved continuation.** Actual conflict state and readable effect after key submit, usable caller and explicit resolved continue to exact final history.
-            - test: Genuine-server conflict/continue lifecycle and exact repository-state assertions.
-            - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `d13b123` → `ok: rust`; `prepared_rebase_conflict_can_be_resolved_and_continued_from_caller` checks key submit conflict, stopped HEAD, unmerged index, conflict bytes and live operation, then resolved `rebase.continue`, exact final history/content/index tree and cleared operation. Suite also passes `prepared_rebase_edit_pause_is_abortable_from_usable_caller`, `stale_prepared_rebase_submit_retains_editor_and_edits`, `prepared_todo_view_edits_in_memory_and_cannot_save_paused_file`, and `paused_todo_view_save_does_not_rewrite_git_state`.
-  - [x] **T019.4 — Native initial rebase conformance.** Exercise real Neovim selection, edit, submit/cancel and usable caller through text/structured-state evidence only.
-    - Verification: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn`.
-    - [x] **T019.4a — Native selected-base edit and submission.** Real menu/selector, full-OID edited rows and exact launched history, with usable caller.
-      - test: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` verifies actual edited submission.
-      - [x] **T019.4a1 — Native base selection reaches prepared editor.** Real selector navigation/confirmation opens exact expected membership/order in the intentionally abbreviated display; discard leaves repository unchanged.
-        - test: Native scenario verifies selected base and prepared membership without launching.
-        - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `186931a` → `ok: ui-file`; exact selector-title and per-key cursor barriers drive native selection/confirmation, compare ordered 12-character display rows derived from fixture OIDs, prove exact repository preservation and reopen the caller menu. Full-OID structured ownership remains covered by `exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only` and `todo_key_input_changes_action_and_reorders_full_oid_rows`.
-      - [x] **T019.4a2 — Native prepared submission rewrites expected history.** Extend verified selection path with native edit/reorder/drop/submit and exact Git/caller assertions.
-        - test: Same native scenario proves actual edited launch.
-        - Attempts: Two default checkpoints; second selection reaches prepared editor, but guessed cursor-row assertion fails before edits. Split native editing from execution evidence.
-        - [x] **T019.4a2a — Native prepared keys produce edited plan.** Verify native reorder/drop against exact expected prepared display, then discard without mutation.
-          - test: Same scenario directly asserts native edited plan and unchanged repository on discard.
-        - [x] **T019.4a2b — Native edited plan executes.** Extend the verified native edited plan with submit and exact history, content and usable caller assertions.
-          - test: Same scenario proves actual edited execution.
-          - Attempts: Two default checkpoints; native `C-s` now submits and caller shows clean status. Compound post-submit Git assertion still fails. Split exact Git outcome from caller usability confirmation.
-          - [x] **T019.4a2b1 — Native launch has exact Git outcome.** Diagnose the post-submit oracle and prove exact edited history/content and clean operation state.
-            - test: Same scenario directly verifies actual Git outcome.
-            - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `67b81ba` → `ok: ui-file`; native `C-s` launch produces exact `two`, `one` history above the exclusive base, exact fixture-derived file contents with `three` absent, clean index/worktree, and no rebase operation or orphan server.
-          - [x] **T019.4a2b2 — Native launched caller remains usable.** Confirm meaningful caller interaction after verified launch and consolidate native cancellation evidence.
-            - check: Passing native scenario and direct caller/cancellation assertions recorded with completed ancestor ticks.
-          - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `67b81ba` → `ok: ui-file`; scenario then uncommitted. Implementation committed as `da51e1d`; scenario unchanged in that commit. After submit, native `r` opens caller menu and Escape returns to `Unstaged changes` (lines 97-102); exact post-launch HEAD/branch/refs/index/worktree/clean-status/no-operation invariants hold (lines 96, 105).
-    - [x] **T019.4b — Native edited preflight cancellation.** Real editor edits then cancellation preserve exact repository state and caller usability. Done: `67b81ba`.
-      - check: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` (reuse; scenario unchanged).
-      - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` → `ok: ui-file`. Lines 45-57 drive native reorder/drop; after Escape, line 57 compares HEAD, branch, refs, index, worktree, clean status and both rebase directories against the original captures before the caller menu is reused. Caller stack depth remains 1.
-   - [x] **T019.5 — Shared instant fixup and squash.** Add the commit-menu instant operations using the same interactive autosquash machinery after its ordering semantics are verified.
-     - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo --test instant_rebase"` → `ok: rust`; real server F/S success, conflict recovery, registered squash editing and standalone `f` distinction covered under T019.5c–5e2b.
-    - test: Exact success and conflict state; standalone fixup behavior remains distinct.
-    - Design: One deferred repository-operation worker owns marker creation and autosquash under the existing reservation/editor/progress/cancellation lifecycle. Revalidate captured HEAD attachment, target ancestry/topology and index before marker creation; reject unsupported state before mutation. After execution starts, report actual marker/rebase state without rollback or automatic abort. Preserve Git's transformed autosquash todo with a no-op sequence helper, not the prepared-plan overwrite helper. Squash uses registered real-file message editing; never a terminal editor or `GIT_EDITOR=true`. Source: scout/advisor packet at `58aedcd`; exact Magit parity is not assumed.
-  - [x] **T019.5a — Share the deferred repository-operation boundary.** Replace the commit-only deferred carrier/worker entrypoint with a typed repository-operation carrier while retaining `CommitOperation` as the commit argv model; make the registered editor environment and worker lifecycle reusable. check: Existing commit/edit/cancel behavior passes and all deferred paths use the shared carrier; no parallel execution pipeline.
-      - Attempts: Initial authority-confusion return made no edits; two subsequent orientation checkpoints also made no edits. Split carrier plumbing from editor-environment extraction at separate focused-test boundaries.
-      - [x] **T019.5a1 — Carry typed deferred repository operations.** check: Command/session/server deferred payloads use `RepositoryOperation::Commit`; one shared worker dispatches it while preserving existing commit behavior and `CommitOperation` argv semantics.
-        - Verified: `make test-rust FILTER="--test server_async --test commit_preflight --test log_commands"` @ `58aedcd` → `ok: rust`; command/session carriers hold `RepositoryOperation::Commit`, the shared worker unwraps it only at `editor::commit`, and commit preflight argv assertions pass.
-      - [x] **T019.5a2 — Reuse the registered editor execution environment.** check: Extract the existing editor environment into the shared operation execution scope without changing registered edit, reservation, progress or cancellation ownership; existing editor tests pass.
-        - Verified: `make test-rust FILTER="--test editor_bridge --test editor_drafts --test server_async"` @ `12683de` → `ok: rust`; real-file confirmation/cancel (`real_file_production_helper_rejects_spoofs_and_duplicate_join`, `real_file_stdio_*`), abort/progress (`terminal_during_editor_cancels_with_absent_false_or_unanswered_progress`) and server cancellation (`a_cancel_notification_aborts_a_slow_mutation`) pass. `spawn_repository_operation` (`src/server.rs:4970`) calls `editor::execute_operation` (`src/editor.rs:841`), which routes `RepositoryOperation::Commit` to `editor::commit` (`src/editor.rs:848`); `registered_editor_environment` (`src/editor.rs:857`) installs bridge env; `CommitOperation::argv` remains used at `src/editor.rs:838`.
-    - [x] **T019.5b — Capture instant autosquash authority.** test: Full-OID selected target, HEAD attachment and staged index ownership validate before marker creation; unsupported topology/state and cancellation refuse without mutation. Standalone fixup stays marker-only.
-  - [x] **T019.5c — Execute real instant fixup through shared launch.** test: Marker then actual interactive autosquash preserves Git's transformed todo, exact target message/history/content, and readable post-start conflict state. Verified: `make test-rust FILTER="--test instant_rebase --test editor_bridge --test commit_preflight --test server_async"` → `ok: rust`; shared typed executor coverage and worker/editor regressions pass.
-      - [x] **T019.5c1 — Preserve Git's autosquash todo at shared launch.** test: Explicit prepared-replacement versus autosquash-preservation policy shares one interactive launcher; the preserving sequence helper leaves Git's transformed bytes untouched and real Git folds a marker into its selected target.
-        - Verified: `make test-rust FILTER="--lib --test instant_rebase --test rebase_interactive --test rebase_todo"` @ `95fce1f` → `ok: rust`; helper byte-preservation/malformed-mode and prepared missing-input cases pass; `shared_autosquash_launcher_preserves_git_transformed_fixup_todo` asserts target ancestry/message, following message, content, marker absence and completed rebase. Protected `src/git.rs` baseline hunk unchanged and unstaged.
-    - [x] **T019.5c2 — Execute captured instant fixup in the shared worker.** test: Revalidate before marker creation, verify resulting marker parent/HEAD, then autosquash under existing editor/progress/cancellation ownership; exact success, marker-retained failure and conflict states are reported without rollback. Verified: `make test-rust FILTER="--test instant_rebase --test editor_bridge --test commit_preflight --test server_async"` → `ok: rust`.
-        - [x] **T019.5c2a — Execute captured fixup with explicit phase outcomes.** test: Real Git captured authority revalidates before the marker, verifies its parent/identity, and uses the shared autosquash launcher; stale refusal and post-marker stop preserve actual repository state without rollback.
-          - Verified: `make test-rust FILTER="--test instant_rebase --test log_commands"` @ `fc697b4` → `ok: rust`; `captured_fixup_executes_marker_and_real_autosquash` and `stale_refusal_and_post_marker_launch_failure_preserve_real_state` pass alongside standalone fixup and authority regressions.
-        - [x] **T019.5c2b — Route instant execution through the registered worker.** test: The typed instant operation uses the existing registered editor environment, reservation/progress/cancel lifecycle and readable completion refresh; no parallel commit pipeline.
-          - Verified: `make test-rust FILTER="--test instant_rebase --test editor_bridge --test commit_preflight --test server_async"` → `ok: rust`; `captured_fixup_executes_marker_and_real_autosquash` and `stale_refusal_and_post_marker_launch_failure_preserve_real_state` run through `editor::execute_operation`; `spawn_repository_operation` retains common reservation/progress/cancel cleanup and refreshes/reports each instant phase without commit-success wording.
-    - [x] **T019.5d — Bridge instant squash message editing.** test: Real squash consolidation uses registered editor confirmation/cancellation and exact resulting messages/state, including repeated editor invocations if Git requests them.
-      - [x] **T019.5d1 — Admit fresh editor runs within a bounded operation scope.** test: Authorized sequential real-helper callbacks receive fresh ordinary runs; concurrent callbacks, stale completion, cancellation and revoked-scope admission fail safely. Existing one-shot commit registration remains unchanged.
-        - [x] **T019.5d1a — Confirm sequential fresh scoped editor runs.** test: Two real helper callbacks share bounded admission authority but emit distinct ordinary runs and complete through normal real-file confirmation. Existing one-shot registration behavior remains unchanged.
-        - [x] **T019.5d1b — Reject concurrent and revoked scoped callbacks.** test: Stale signals, concurrent, revoked, invalid and disconnected callbacks fail safely without residual runs/deliveries or a stuck admission gate.
-        - Attempts: First default reported the missing admission path as a blocker; fresh default implemented an unverified scope after two checkpoints. Split sequential confirmation from denial/revocation regressions before committing.
-      - [x] **T019.5d2 — Own editor scope in the shared repository worker.** test: The existing worker owns scope/config/progress/cancellation cleanup; admitted runs use ordinary real-file confirmation and no editor wait holds a repository/session lock.
-        - Verified: `make test-rust FILTER="--test instant_rebase --test editor_bridge --test editor_drafts --test server_async --test commit_preflight"` @ `b88cf0d` → `ok: rust`; the shared worker creates one scoped editor resource with captured repository config, progress cancellation revokes admission before process cancellation, fresh runs install/remove their own config, and the detached worker alone waits for Git/editor completion.
-      - [x] **T019.5d3 — Execute squash through the registered scope.** test: Real squash marker/autosquash confirms exact consolidated messages and content; repeated callbacks and post-marker editor cancellation retain honest Git state without rollback.
-        - Verified: `make test-rust FILTER="--test instant_rebase --test editor_bridge --test editor_drafts --test server_async --test commit_preflight"` @ `b88cf0d` → `ok: rust`; `scoped_real_helpers_confirm_sequential_files_and_reject_unsafe_callbacks` drives a captured typed squash through the real executable and registered helper, independently confirms two Git-requested message editors with exact commit messages/content/clean state, then revokes a post-marker edit and asserts retained marker parent/ref, active rebase, staged index and worktree content. Commit confirm/cancel/fixup and server cancellation regressions pass in the same target.
-        - Integration boundary: Complete 5d2 and 5d3 together. The fixup-only executor has no message wait, so a scope-only adapter cannot independently prove the required real squash lifecycle.
-    - [x] **T019.5e — Dispatch instant menu actions and recovery.** test: Real server `F`/`S` selection/launch, exact success/conflict/continue/abort/cancel outcomes and distinct standalone `f` behavior.
-      - [x] **T019.5e1 — Dispatch selected instant operations through the shared worker.** test: Real server menu `F`/`S`, structured target confirmation, actual autosquash success and registered squash message confirmation; standalone `f` stays marker-only.
-        - Verified: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"` @ `a51d840` → `ok: rust`; existing `instant_fixup_selection_autosquashes_through_real_server_and_restores_caller` plus `instant_squash_selection_edits_message_through_registered_server_callback` cover F/S dispatch, structured full-OID selection, exact autosquashed message/history/content/index and caller refresh; standalone `f` marker-only assertion remains in existing coverage.
-        - [x] **T019.5e1a — Verify dispatched instant fixup success.** test: Genuine server `F` selection produces exact autosquashed history/content and a usable caller; standalone `f` remains marker-only.
-          - Verified: `make test-rust FILTER="--test server_async --test log_commands --test commands --test menus --test menu"` @ `a026823` → `ok: rust`; `instant_fixup_selection_autosquashes_through_real_server_and_restores_caller` confirms server `F`, structured full-OID target, exact ancestry/messages/content/index, completed rebase and refreshed caller; `fixup_selection_confirm_commits_staged_change_for_full_selected_oid` confirms standalone `f` creates only a `fixup!` marker. Registry and menu tests pass.
-        - [x] **T019.5e1b — Verify dispatched instant squash message editing.** test: Genuine server `S` selection, registered real-file message confirmation and exact completed history/content/caller.
-          - Verified: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"` @ `a51d840` → `ok: rust`; `instant_squash_selection_edits_message_through_registered_server_callback` drives c/S, full-OID structured selection, registered editDocument callback, `didOpen`/`didChange` version 2 and synchronized confirmation; asserts exact consolidated message, full subject history, files, clean index/rebase state and caller refresh.
-      - [x] **T019.5e2 — Preserve actual stopped state and explicit recovery.** test: Dispatched instant conflict/continue/abort and cancellation preserve truthful Git state, usable caller and shared worker cleanup without automatic rollback.
-        - [x] **T019.5e2a — Recover dispatched instant conflicts explicitly.** test: Genuine instant conflict retains actual stopped state; explicit continue completes exact expected history/content and explicit abort restores the marker state, with usable caller.
-          - Verified: `make test-rust FILTER="--test server_async --test instant_rebase --test editor_bridge --test editor_drafts"` @ `94d965a` → `ok: rust`; the dedicated abort and continue server regressions pass together.
-          - [x] **T019.5e2a1 — Verify conflict abort retains the marker.** test: Genuine dispatched conflict and explicit abort preserve exact marker ancestry/content and restore a usable caller.
-            - Verified: `dispatched_instant_fixup_conflict_is_left_for_explicit_recovery` drives real `F`, observes the genuine conflict, aborts through the server and asserts exact marker ancestry/tree/content, clean state and usable caller.
-          - [x] **T019.5e2a2 — Complete a dispatched instant conflict.** test: Explicit resolution/staging and normal server continue produce exact final history/content/index and cleared operation.
-            - Verified: `dispatched_instant_fixup_conflict_can_be_resolved_and_continued` explicitly resolves and stages both genuine conflicts through normal server continues, asserting the warning effect, transformed todo, exact final message/history/content/index, cleared rebase and usable caller.
-          - Attempts: Two default continuation checkpoints left the same active-rebase assertion after repeated requests. Abort regression passes; separate continuation diagnosis from that completed behavior and inspect actual effects/Git state before further retries.
-        - [x] **T019.5e2b — Cancel dispatched squash editing without false rollback.** test: Normal registered-editor cancellation retains actual Git state, closes worker/editor/progress ownership and permits a subsequent normal operation.
-          - Verified: `make test-rust FILTER="--test server_async --test editor_bridge --test editor_drafts"` @ `4da5eb0` → `ok: rust`; `instant_squash_registered_editor_abort_retains_marker_and_releases_worker` drives real `S`, full-OID selection and registered edit cancellation, then asserts progress end, retained marker/HEAD/index/worktree/rebase state, stale-run refusal, explicit abort and usable caller refresh.
-    - [x] **T019.5f — Native instant operation conformance.** test: Real native inputs and text/Git evidence prove selected-target execution, registered message editing and usable recovery/caller.
-      - [x] **T019.5f1 — Native instant fixup execution.** test: Native F selection folds staged changes into the selected target, preserves its message, and restores a usable caller with exact Git-state evidence.
-        - [x] **T019.5f1a — Native fixup completion and exact history.** test: Assert actual worker completion and exact selected-target rewrite, content, index and cleared operation state.
-          - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `32b951e` → `ok: ui-file`; native `c`/`F` selection waits for the completed clean caller render, then asserts the selected target and descendant were rewritten, exact messages/history/content/index/branch, clean status and cleared rebase state.
-        - [x] **T019.5f1b — Native fixup caller reuse.** test: Interact with the caller after verified completion and preserve its resulting repository state.
-          - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `6375fc8` → prior recorded pass. Lines 24–31 capture completed HEAD/index/branch/history, invoke native `r`, open menu, Escape to caller, assert caller view, and compare exact repository state with clean status and cleared rebase state.
-      - [x] **T019.5f2 — Native instant squash editing and recovery.** test: Native S selection uses registered message editing and explicit cancellation/recovery; exact resulting Git state and caller usability are asserted.
-        - [x] **T019.5f2a — Native squash message confirmation.** test: Native S and registered message confirmation produce the exact selected-target message, history and content.
-          - Verified: `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `26b5801` → `ok: ui-file`; native S selection and registered real-file confirmation assert exact target message, full history, selected-target ancestry, fixture-derived content including its blank line, clean index/worktree, and cleared rebase operation. No orphan `magit-lsp` process (`pgrep -af magit-lsp` matched only its own shell command).
-        - [x] **T019.5f2b — Native squash cancellation and recovery.** test: Native registered-editor cancellation retains actual post-marker state, followed by explicit native recovery and a usable caller.
-          - [x] **T019.5f2b1 — Modified-letter terminal transport.** test: Driver unit tests assert ctrl+shift+x CSI-u bytes and real tmux hex delivery; no native-cancellation claim until f2b2.
-            - Verified: `make ui-unit` @ `ae1f998` → ok: ui-unit (reused; driver/tests unchanged since latest pass).
-          - [x] **T019.5f2b2 — Native cancellation lifecycle and recovery.** test: Actual native registered-editor cancel stops Git, preserves exact post-marker state, and permits explicit rebase abort and caller reuse.
-            - Verified: `make test-file FILE=tests/test_magit_lsp.lua` and `make ui-file FILE=tests/ui/scenarios/instant-rebase.scn` @ `2307325` → `ok: lua`; `ok: ui-file`. Native cancellation preserves exact open-editor marker/ref/HEAD/index/worktree/rebase state, explicit rebase abort returns the clean attached marker, caller menu reuse preserves it, and `pgrep -af magit-lsp` found no orphan process.
+Detailed acceptance/dependencies: [scope specifications](./TASKS_PART_SEVEN.md#phase-map). Completed umbrellas/children retain separate ledger occurrences. A checkbox is not permission to bypass dependencies or owner approval.
 
 ### Feature — Phase 6: Plain acceptance
 
-Gate resumption (2026-11-17): the dependency gate is observably cleared (`4045289`); resume T022's named Phase 6 final acceptance with serial aggregate/native/hygiene/support checks. This is phase-end acceptance, not a new review or heavy run triggered by the review-fix batch; Phase 6A remains held until sign-off.
-
-- [x] **T020 — plain-e2e.** [Scope](./TASKS_PART_SEVEN.md#t020-plain-e2e-l). Done: containing commit (with `a2fc50e`). The standalone script remains because the two focused scenarios do not replace all its assertions.
-  - [x] **T020.1 — Exercise the complete Plain protocol workflow.** Reuse `tests/plain_harness.rs` and the shared `ClientPump` on a disposable repository: status, file/hunk staging, stale-action refusal, hunk unstaging, commit menu, draft edit/save/close and exact commit message/parent/content/clean state. Fix the discovered `view/keymap` leak by deriving dynamic delivery from negotiated Rich capabilities instead of a duplicate default. Done: `a2fc50e`.
-    - Verified: `make test-rust FILTER="--test plain_harness --test keys_protocol --test plain_actions --test plain_draft"` → `ok: rust` on Linux in the protected-dirty checkout. The new workflow's no-custom-notification assertion failed on `view/keymap` before the gate fix and passed afterward. Internal retirement sweep for `client.delivery`, `delivery: KeymapDelivery` and `.delivery(` in Rust sources: zero remaining hits. Single-slice gate: focused suites only; no phase-end or native acceptance claim.
-  - [x] **T020.2 — Integrate and verify native Plain scenarios.** The shared runner supports `client: plain`, stock `vim.lsp.start`, structured buffer readiness, standard code-action selection, text/state evidence and role-aware teardown. Retained the standalone script and its default declarations. Done: `a2fc50e`.
-    - Verified: `make ui-unit`, `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn`, `make ui-file FILE=tests/ui/scenarios/plain-commit.scn`, the Rich regression `make ui-file FILE=tests/ui/smoke.scn` and `make docs-check` → `ok` on Linux in the protected-dirty checkout. Focused Plain evidence: `build/ui/plain-status-stage/standard-80x24/` and `build/ui/plain-commit/standard-80x24/`; screen/state snapshots prove file/hunk staging and unstaging, saved-draft close, exact commit message/parent/content and clean status, zero project adapter modules and zero Rich notifications. Both `cleanup.json` files prove recorded editor/server ownership with no remaining PID/socket/tmux session. This is 80x24 evidence, not a new 120x100 pass or a phase-end gate.
-  - [x] **T020.3 — Reconcile retained standalone acceptance before retirement.** Replace the obsolete discard-disabled expectation with native offer/open/No/Yes assertions and exact Git-state checks; restore the fixture before all retained menu, selection, provider, manual-confirm/abort, synchronization-budget and cleanup assertions. Add `--final-newline` selection for focused reruns without changing the default two-variant run. Done: containing commit.
-    - Verified: `make plain-neovim` → `ok: build`, `ok: plain-neovim` for both 120x100 newline variants; `make plain-neovim PLAIN_ARGS="--final-newline without"`, `make ui-unit` and `make docs-check` also passed. Evidence: `build/ui/plain-render/{with,without}-final-newline/native.json` plus `file-discard-{cancel,confirm}*.screen`; both reports verify owned-process cleanup. One earlier attempt returned a stale-action refusal during selected-lines staging; the focused rerun and subsequent default run passed without added retries or sleeps. Retain that transient risk. PID 1 retains defunct entries from earlier failed runs, not running servers.
-- [x] **T021 — helix-smoke.** [Scope](./TASKS_PART_SEVEN.md#t021-helix-smoke-s).
-  Done: `6f98336`. [Manual evidence](docs/evidence/plain-helix.md): Helix 25.07.1, Linux; open/status/stage/menu/log passed, commit failed and abort blocked. Failures tracked below; no complete Helix support claim.
-- [ ] **T022 — plain-gate.** [Scope](./TASKS_PART_SEVEN.md#t022-plain-gate-s). Current gate (2026-11-18, HEAD `ec0bbbc`): initial `make test` attempts did not complete: first failed in `tests/server_async.rs::dispatched_instant_fixup_conflict_can_be_resolved_and_continued` (`instant rebase did not stop in bounded wait`; `build/test-logs/rust.e8LBtb`); the rerun passed Rust but stopped at `vscode-deps` with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` (`build/test-logs/vscode-deps.9exi03`), because pnpm refused to remove the protected main-worktree `node_modules/` without a TTY. Root cause of that setup stop: dependency setup ran in a worktree sharing the protected modules directory. Final serial `make test` in the clean verification worktree `/home/opencode/.local/share/opencode/worktree/c43be0/t022-gate-verify` at the same HEAD exited 0: `ok: build`, `ok: rust`, `ok: lua`, `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode`, `ok: keybindings`. `make ui-test`, `make ui-tour`, and `make registry-docs-check` passed. `make hygiene` exited 0 report-only with open findings. Hold; do not start Phase 6A. Inherited completion: `0c667d1`.
-  Proofs: `9ba3c0d` extends existing `tests/plain_harness.rs` (no duplicate `plain_e2e` harness) for T015/T019 exact-state workflows, and `tests/dispatch.rs` for a non-Git provider through real dispatch/refresh/ack/copy. Focused tests passed. The earlier native-rebase defect note is stale: `make ui-test` and `make ui-tour` passed at inherited `0c667d1`; `build/ui/tour.md` includes `menu-rebase` and fixup-capable commit menus. Native fixup proof `6066f46` remains valid; native rebase scenarios are recorded under T019 below. At final `0c667d1` (historical), `make test` remained incomplete because the configured pnpm wrapper failed (`exec82` missing `../node_modules/@pnpm/exe/pnpm`); registry docs check passed, and T022 stays unchecked.
-- A1: State-proof pointers remain `9ba3c0d` (`tests/plain_harness.rs` exact-state workflows; `tests/dispatch.rs` non-Git provider), with existing support-row proof at `docs/plain-support.md:52,55-56,62,67,89,254,256,258`. Serial Make checks at HEAD `ec0bbbc`: final `make test` in the clean verification worktree `/home/opencode/.local/share/opencode/worktree/c43be0/t022-gate-verify` exited 0 (`ok: build`, `ok: rust`, `ok: lua`, `ok: vscode-deps`, `ok: vscode-typecheck`, `ok: vscode`, `ok: keybindings`). The two earlier attempts and causes are retained in the gate note above; no protected file was modified. `make ui-test` exit 0 (`ok: build`, `ok: ui-test`); `make hygiene` exit 0 report-only; `make ui-tour` exit 0 (`ok: build`, `ok: ui-tour`); `make registry-docs-check` exit 0 (`ok: registry-docs-check`).
-- A2: `make hygiene` at HEAD `ec0bbbc` reported cargo-machete CLEAN (exit 0), Knip NONZERO (exit 1; oxc-parser native binding unavailable), Luacheck CLEAN (0 warnings / 0 errors in 31 files), and oversized tracked files `TASKS.md` (414922 bytes) and `docs/client-exchanges.md` (257454 bytes). Knip belongs to “Provision reproducible Knip checker” (line 456); `TASKS.md` size debt belongs to “Split canonical task roadmap below hygiene limit” (line 517; its prior HALT remains binding); `docs/client-exchanges.md` belongs to “Split authored client exchanges below hygiene limit” (lines 533-534; its transcript-boundary BLOCKED remains binding). `clients/vscode/test/e2e/suite.js` is 97605 bytes and below the 100000-byte limit, not a current size finding. No finding is called clean by report-only exit.
-   - A3: Review base `2001ec4`; `2001ec4..HEAD` is 81 files changed, 4950 insertions(+), 1000 deletions(-). Changed paths: `AGENTS.md`, `HANDOFF.md`, `Makefile`, `TASKS.md`, `TASKS_PART_SEVEN.md`, `clients/vscode/lib/drafts.js`, `clients/vscode/test/integration.js`, `docs/CLIENT_INSTALL.md`, `docs/CLIENT_SPEC.md`, `docs/TESTING.md`, `docs/evidence/plain-helix.md`, `docs/examples/commit-edit-abort.jsonl`, `docs/examples/commit-edit-confirm.jsonl`, `docs/examples/plain-code-action.jsonl`, `docs/examples/plain-document-prompt.jsonl`, `docs/examples/rich-lifecycle.jsonl`, `flake.nix`, `lua/magit-lsp/debug.lua`, `lua/magit-lsp/hooks.lua`, `lua/magit-lsp/view.lua`, `package.json`, `pnpm-lock.yaml`, `scripts/format.py`, `scripts/generate_plain_support.rs`, `scripts/helix_smoke.py`, `scripts/schema_markdown.rs`, `scripts/test_plain_neovim.py`, `scripts/ui_lib/cli.py`, `scripts/ui_lib/driver.py`, `scripts/ui_lib/keys.py`, `scripts/ui_lib/paths.py`, `scripts/ui_lib/process_identity.py`, `scripts/ui_lib/scenario.py`, `scripts/ui_shutdown.lua`, `src/commands.rs`, `src/dispatch.rs`, `src/docstore.rs`, `src/editor.rs`, `src/git.rs`, `src/instant_rebase.rs`, `src/log_view.rs`, `src/menu.rs`, `src/presentation/mod.rs`, `src/presentation/prompt.rs`, `src/process_log.rs`, `src/runner.rs`, `src/runner/owned.rs`, `src/server.rs`, `src/session.rs`, `src/status_view.rs`, `src/tree.rs`, `src/view.rs`, `src/watcher.rs`, `tests/common/stdio.rs`, `tests/dispatch.rs`, `tests/editor_bridge.rs`, `tests/examples.rs`, `tests/instant_rebase.rs`, `tests/keys_protocol.rs`, `tests/log_selection.rs`, `tests/navigation.rs`, `tests/plain_actions.rs`, `tests/plain_draft.rs`, `tests/plain_harness.rs`, `tests/prompts.rs`, `tests/runner.rs`, `tests/schema.rs`, `tests/server_async.rs`, `tests/ui/plain_init.lua`, `tests/ui/plain_scenario.lua`, `tests/ui/scenarios/instant-rebase.scn`, `tests/ui/scenarios/plain-commit.scn`, `tests/ui/scenarios/plain-fixup.scn`, `tests/ui/scenarios/plain-rebase-interactive.scn`, `tests/ui/scenarios/plain-status-stage.scn`, `tests/ui/test_cli.py`, `tests/ui/test_driver.py`, `tests/ui/test_scenario.py`, `tests/views.rs`, `tests/visibility.rs`, `ui-test-plan.md`. T022 state evidence: `tests/ui/scenarios/plain-rebase-interactive.scn` is included in the passing `make ui-test` at `0d70795`; `tests/ui/scenarios/plain-fixup.scn` has passing native proof `6066f46`; exact-state focused work is recorded at `9ba3c0d`. Current A1/A2 results above leave T022 on hold; no sign-off inferred.
-- A4: Reconciled at HEAD `ec0bbbc`: `build/ui/tour.md` contains `### menu-rebase` and commit-menu entries `f Fixup`, `F Instant fixup`; `make ui-tour` passed. `pgrep -af '[m]agit-lsp'` returned no processes. Protected untracked files were not touched; generated tour output is supporting evidence only and is not committed. T022 remains unchecked because hygiene findings remain open; aggregate `make test` and registry-docs check passed.
+- [ ] **T022 — plain-gate.** [Scope](./TASKS_PART_SEVEN.md#t022-plain-gate-s). **HOLD; Phase 6A prohibited.** Inherited completion: `0c667d1` is historical, not a tick for this gate.
+  - Documented HEAD `ec0bbbc`: serial final `make test` in clean `/home/opencode/.local/share/opencode/worktree/c43be0/t022-gate-verify` exited 0 (`build`, `rust`, `lua`, `vscode-deps`, `vscode-typecheck`, `vscode`, `keybindings` all OK). `make ui-test`, `make ui-tour`, `make registry-docs-check` passed. `make hygiene` exited 0 report-only: cargo-machete CLEAN, Luacheck CLEAN (0 warnings/errors, 31 files), Knip NONZERO (oxc-parser native binding unavailable); `TASKS.md` 414922 and authored exchanges 257454 bytes then exceeded the size cap. Current audit measurements supersede only the roadmap byte count, not that gate's result.
+  - Earlier attempts: instant-rebase bounded-wait assertion failed (`build/test-logs/rust.e8LBtb`); rerun passed Rust then pnpm refused protected main-worktree `node_modules/` removal without TTY (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, `build/test-logs/vscode-deps.9exi03`). Root cause of setup stop: a verification worktree shared the protected dependency directory. No permission to modify protected files or bypass setup was granted. At historical `0c667d1`, `make test` was incomplete (`exec82` wrapper missing `../node_modules/@pnpm/exe/pnpm`); later final pass does not turn those attempts into passes.
+  - State proofs: `9ba3c0d` extends existing `tests/plain_harness.rs` for exact T015/T019 workflows and `tests/dispatch.rs` for real dispatch/refresh/ack/copy of a non-Git provider; no duplicate harness. Support rows: `docs/plain-support.md:52,55-56,62,67,89,254,256,258`. Native fixup `6066f46`; `plain-rebase-interactive.scn` passed in `make ui-test` at `0d70795`; T019 records native rebase proofs. At `ec0bbbc`, tour includes `menu-rebase`, `f Fixup`, `F Instant fixup`, and no `magit-lsp` process remained. No native defect is inferred from an obsolete tour note.
+  - Review provenance: base `2001ec4`, range to then-HEAD: 81 files, +4950/-1000; full path inventory retained in Base B1024. Knip owner is provisioning above; roadmap size owner is its unchecked split; authored-exchange owner retains transcript BLOCKED. VSCode `suite.js` 97605 bytes was not an open size finding. Aggregate passing tests do not disposition findings or approve sign-off. T022 stays unchecked pending disposition/policy and review.
 
 ### Feature — Phase 6A: Rich protocol v1 and client prototypes
 
-0.2 gate subset: T105, T112, T113, T114 and T119. T115/T116/T117 are non-gating prototypes; T118 stable freeze is non-gating.
+**Do not start.** Requires T022 sign-off; follow the specification's internal dependency order. Release requires only its explicitly defined protocol subset, not every prototype or stable freeze. T113/T119 resolve designated questions, not this audit.
 
 - [ ] **T112 — rich-protocol-audit.** [Scope](./TASKS_PART_SEVEN.md#t112-rich-protocol-audit-s).
 - [ ] **T113 — rich-protocol-decisions.** [Scope](./TASKS_PART_SEVEN.md#t113-rich-protocol-decisions-s).
@@ -1037,34 +118,16 @@ Gate resumption (2026-11-17): the dependency gate is observably cleared (`404528
 - [ ] **T117 — jetbrains-client.** [Scope](./TASKS_PART_SEVEN.md#t117-jetbrains-client-l).
 - [ ] **T118 — rich-protocol-freeze.** [Scope](./TASKS_PART_SEVEN.md#t118-rich-protocol-freeze-s).
 
-### Feature — Phase 7: Test stabilization (does not gate 0.2)
-
-- [x] **T023 — capability-lattice.** [Scope](./TASKS_PART_SEVEN.md#t023-capability-lattice-m).
-  - Part 1/2: strict fake-editor lattice and scenario/state oracles; verify with the focused Rust target. Part 2/2: native child-Neovim presets and the T013 capability table; verify through a dedicated Make target. Keep the parent unchecked until both outcomes are verified.
-  - Part 1 VERIFIED: `make test-rust FILTER="--test capability_lattice"` → 3 passed. Three real server scenarios: staging across 4 recorded presets plus 32 constrained pairwise declarations (36 runs); encoding/render edits across 3 encodings × documentChanges × echo order (12); preopened commit-template refresh/manual open/progress-or-document-Abort mixed chains (8). Total: 56 combinations plus 3 independently executed all-capability baselines. Explicit requirement alternatives and draft fallback contracts predict baseline Git-state equality, or unchanged HEAD/index/status/worktree with readable refusal and unchanged document. Assertions cover actual edit ranges, echo order, template text and ordering, Abort acknowledgement, cancelled-draft detachment, and post-cancel document equality. Workspace-root initialization enables ownership of preopened drafts without changing default initializer parameters; strict validation still rejects optional/custom Plain effects and undeclared wire channels.
-  - Part 1 commit: `9933272`.
-  - Part 2 VERIFIED: `make plain-presets` → ok: build, ok: plain-presets. Five isolated child-Neovim LSP/RPC presets (minimal, showDocument, completion, progress, full), no plugin/tmux: exact initialize declarations; real status and Git commit-draft opening (native showDocument or readable manual-open fallback); attached draft didOpen and edited didChange versions equal the server-retained action versions; native progress create/begin/cancel/end for progress/full, acknowledged document Abort otherwise; restored status, preserved unsaved draft edit, detached draft actions, unchanged HEAD/index/status/worktree and graceful client shutdown. Completion is declared in completion/full but the server does not advertise completionProvider; working completion is not claimed. Native scenario red run skipped; strengthened synchronization assertions passed. `pgrep -af '[m]agit-lsp'` → no processes after verification.
-  - Verified: `make update-capability-presets` → ok; deterministic fixed-preset table (12 lines, under 100k), linked from T013's CLIENT_SPEC feature-to-capability section; generated artifact committed separately.
-  - Verified: `make test-rust FILTER="--test capability_lattice"` → ok: rust; `make docs-check` → 3 tests OK, ok: docs-check. Combined evidence: 56 fake-editor combinations plus 3 all-capability baselines and 5 native presets. No Phase 6A changes.
-  - Done: `9e6111e` (Part 1: `9933272`; Part 2 implementation: `dcdabfe`; generated table: `6d1c37d`).
-- [ ] **T024 — host-spike.** [Scope](./TASKS_PART_SEVEN.md#t024-host-spike-s).
-  - Deferred: existing real-host path lacks a Make entry point (`Makefile:101-107`; `clients/vscode/package.json:23-29`). Existing historical observations do not satisfy the ten-run spike. T025/T026 depend on this decision; T027/T028 retain their blocked VSCode verification requirements.
-- [ ] **T025 — e2e-runner.** [Scope](./TASKS_PART_SEVEN.md#t025-e2e-runner-m).
-- [ ] **T026 — host-cases.** [Scope](./TASKS_PART_SEVEN.md#t026-host-cases-l).
-- [ ] **T027 — keybinding-compaction.** [Scope](./TASKS_PART_SEVEN.md#t027-keybinding-compaction-m).
-- [ ] **T028 — colour-roles.** [Scope](./TASKS_PART_SEVEN.md#t028-colour-roles-s).
-- [ ] **T029 — scenario-slimming.** [Scope](./TASKS_PART_SEVEN.md#t029-scenario-slimming-m).
-  - Part 1/2: independently verify scenario matrix/artifact defaults through `make ui-unit`; keep parent unchecked. Part 2/2 retains the shared conformance interpreters, fake/native comparisons and driver coverage matrix, including real-host requirements; no acceptance is waived. Defer Part 2's integrated driver outcome until the real-host Make/dependency boundary is available (T024/T025); existing fake/native seams alone are not full acceptance.
-  - Part 1 evidence: `make ui-unit` → exit 0 (`ok: ui-unit`). `tests/ui/test_scenario.py` directly checks one default combination, all four `matrix: true` pairs, explicit size/profile and size-only/profile-only compatibility, no `.screen`/`.ansi` on an unrequested success, both files for explicit snapshots and failures (including quiet XFAIL). Parent remains unchecked; Part 2 scope is outstanding. Done: `790d2ce` (Part 1 only).
-
 ### Feature — Phase 8: Release
 
-Starts after phases 1–6 and the Phase 6A 0.2 gate subset (T105/T112/T113/T114/T119), not the non-gating prototypes or T118 stable freeze. Do not insert unrelated features between release gates and release. Evidence remains required.
+Release prerequisites include phases 1–6 and the specified Phase 6A protocol subset; preserve [the phase map](./TASKS_PART_SEVEN.md#phase-map). Human approval is mandatory; this documentation audit cannot grant it.
 
 - [ ] **T030 — release-artifacts.** [Scope](./TASKS_PART_SEVEN.md#t030-release-artifacts-m).
 - [ ] **T031 — client-install-docs.** [Scope](./TASKS_PART_SEVEN.md#t031-client-install-docs-s).
 - [ ] **T032 — release-readme.** [Scope](./TASKS_PART_SEVEN.md#t032-release-readme-m).
 - [ ] **T033 — release-go-no-go.** [Scope](./TASKS_PART_SEVEN.md#t033-release-go-no-go-m); explicit human approval remains required.
+
+## Optional and unscheduled
 
 ### Feature — Phase 9: Plain keys (optional; starts after T022)
 
@@ -1077,17 +140,8 @@ Starts after phases 1–6 and the Phase 6A 0.2 gate subset (T105/T112/T113/T114/
 
 ### Feature — Phase 10: Small features
 
-Each ticket below retains its row's full scope and dependencies in the [Phase 10 specification table](./TASKS_PART_SEVEN.md#phase-10-small-features).
+Post-release; scopes for phases 10–13 remain mandatory in [specifications](./TASKS_PART_SEVEN.md#phases-10-to-13-post-release-tickets), not fresh completion claims. T040/T041 are already in the ledger; their delivered subsets do not close other feature scopes.
 
-- [x] **T040 — commit-signing.** Done: `7ce9dd3`.
-  - Verified: `make test-rust FILTER="--test commands --test errors"` (prior worker, unchanged) covers the existing `=S` mapping and exact `--gpg-sign=` argv at `tests/commands.rs:137-173`.
-  - Verified: `make test-rust FILTER="--test server_async signing"` (prior worker, unchanged) passed `repository::signing_failure_and_cancellation_preserve_draft_and_allow_unsigned_recovery`: configured signer and inherited environment, readable failure/cancellation effects, progress lifecycle, preserved HEAD/index/patch/worktree/draft, refresh and unsigned recovery in both modes.
-  - Verified: `make docs-check` → exit 0; `docs/KEYMAPS.md` documents default/explicit keys and external signer/agent/pinentry setup. Deterministic signer coverage only; no real-key, native pinentry or cryptographic verification claimed.
-- [x] **T041 — log-variants.** Done: `c84d1ae`.
-  - Scope: existing local-branches, all-branches (local and remote-tracking), all-references actions; until, merges-only, no-merges and first-parent filters. Remaining log stubs/new views are not included.
-  - Verified: `make test-rust FILTER="--test log_commands --test git_log"` → exit 0; distinct ref reachability, dated merge/filter membership, author/grep/path composition, visible menu output and commit-tree metadata.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/log-view.scn` → exit 0 under standard/vim at 100x30 and 80x24; native variant membership/exclusions, until reader, log view kind/stack and return-to-status cleanup. `pgrep -af '[m]agit-lsp'` returned no matches after native runs.
-  - Verified: `make docs-check` → exit 0; `docs/VIEWS.md` and `docs/KEYMAPS.md` describe the supported subset, keys and remaining limits.
 - [ ] **T042 — remote-config-tags.**
 - [ ] **T043 — branch-basics.**
 - [ ] **T044 — notes-ignore.**
@@ -1096,8 +150,6 @@ Each ticket below retains its row's full scope and dependencies in the [Phase 10
 - [ ] **T047 — config-location-edit.**
 
 ### Feature — Phase 11: Read views
-
-Each ticket below retains its row's full scope and dependencies in the [Phase 11 specification table](./TASKS_PART_SEVEN.md#phase-11-read-views).
 
 - [ ] **T048 — view-data.**
 - [ ] **T049 — revision-view.**
@@ -1111,8 +163,6 @@ Each ticket below retains its row's full scope and dependencies in the [Phase 11
 - [ ] **T057 — log-semantic-styling.**
 
 ### Feature — Phase 12: Shared Git workflows
-
-Each ticket below retains its row's full scope and dependencies in the [Phase 12 specification table](./TASKS_PART_SEVEN.md#phase-12-shared-git-workflows).
 
 - [ ] **T058 — diff-arguments.**
 - [ ] **T059 — push-baseline.**
@@ -1132,8 +182,6 @@ Each ticket below retains its row's full scope and dependencies in the [Phase 12
 - [ ] **T073 — stash-operations.**
 
 ### Feature — Phase 13: Advanced workflows
-
-Each ticket below retains its row's full scope and dependencies in the [Phase 13 specification table](./TASKS_PART_SEVEN.md#phase-13-advanced-workflows).
 
 - [ ] **T074 — merge-conflicts.**
 - [ ] **T075 — mergetool-effect.**
@@ -1167,7 +215,7 @@ Each ticket below retains its row's full scope and dependencies in the [Phase 13
 
 ### Deferred — Phase 14: Not scheduled
 
-DO NOT START these tickets until the owner asks. Each retains its row's full scope and constraints in the [deferred specification table](./TASKS_PART_SEVEN.md#phase-14-deferred-not-scheduled). T105 is rescheduled to Phase 6A, not duplicated here.
+Owner-request-only; not independent-ready work. [Scopes](./TASKS_PART_SEVEN.md#phase-14-deferred-not-scheduled). T105 is scheduled only under gated Phase 6A. T096 needs profiling; T106 needs an actual command need before scheduling.
 
 - [ ] **T099 — edit-history.**
 - [ ] **T100 — windows-editor-bridge.**
@@ -1182,789 +230,642 @@ DO NOT START these tickets until the owner asks. Each retains its row's full sco
 - [ ] **T110 — rich-protocol-form.**
 - [ ] **T111 — open-design-questions.**
 
-T001–T004 and T120 are complete and excluded from this unchecked index. A checkbox is not permission to bypass dependencies or deferred owner approval. Each linked specification remains mandatory acceptance, not a fresh completion claim.
-
 ### Retained gaps
 
-- **A12:** real-dispatch Git-failure handling and removal of `server::mutation`; completed; see the enforcing record in Completed work. T103 remains the separate deferred same-session reader-lock redesign.
-- **R-EDIT-REAL:** parent acceptance is not green. T104 is only a subset; last-window exit, dirty shutdown, cross-build, reload, workspace and platform limits remain. Broad fallback review is not comprehensive acceptance.
-- Binary files remain whole-file-only; T093 layout work remains open.
-- The macOS config-directory choice is resolved; only the root config-edit command and runtime config-location verification remain open. Escape caveat remains.
+- A12 real-dispatch Git-failure handling/removal of `server::mutation` is documented closed (ledger); T103 remains the distinct same-session reader-lock redesign. The old “ownerless A12” statement was stale, not a new implementation finding.
+- R-EDIT-REAL remains ungreen beyond T104, as above. Binary/platform limits remain; macOS config-directory choice is resolved, but root config-edit command and runtime location verification remain open. Escape caveat remains.
 
 ### Task ticket template and UI rule
 
-Every ticket states **Target Files** (exclusive write boundary), **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, and exact **Verification Command**; also state dependencies and size. Each ticket inherits its applicable phase gate from its enclosing named phase and the phase map. The phase gate applies when the last unchecked item in a named phase group completes, not when an individual ticket, slice or review-fix batch completes. Follow current review and orchestration instructions in [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
+Every ticket states **Target Files**, **Reference Files**, **Architectural Constraints**, **Acceptance Criteria**, exact **Verification Command**, dependencies and size. Enclosing named phase/phase map supplies the phase gate when its last unchecked item completes, not at every slice/review batch. Follow [AGENTS.md](./AGENTS.md#working-conventions). User-visible changes require observable text/structured outcomes and focused native evidence; never images.
 
----
+## Ad hoc
 
-## 8. Testing strategy
+### Documentation-only backlog audit (2026-11-18)
 
-See [Testing strategy](docs/TESTING.md#8-testing-strategy).
-
-## 9. Open questions
-
-See [Open questions](docs/OPEN_QUESTIONS.md#9-open-questions).
-
----
-
-## Bugfix
-
-- [x] **BUG-PHASE6-REGISTRY-DOCS — Diagnose stale Plain registry references at T022 gate.** `make registry-docs-check` on 2026-11-17 exited 2 with stale `docs/parity.md` and `docs/plain-support.md` (`build/test-logs/registry-docs-check.qONZZK`); `src/server/view_execution.rs:728` also emitted an unused-variable warning during the check. Determine whether tracked references or the generator inputs drifted, repair through the approved Make generation/check workflow, and verify `make registry-docs-check` without staging generated artifacts in a mixed commit. Do not alter generated files by hand.
-  - A1 (VERIFIED): Generator maps parity and Plain docs to `parity::markdown()` and `plain_support::render()` (`src/bin/generate-docs.rs:22-24`). The only diff is those functions' reflection of three already-implemented T041 registry entries: `src/commands.rs:1005-1007` declares `log.local-branches`, `log.all-branches`, and `log.all-references` implemented; parity and Plain tables had stale planned status/availability. No other generated differences appeared.
-  - A2 (VERIFIED): `make registry-docs-generate` exited 0 (`ok: registry-docs-generate`); inspected diff updates exactly those three registry rows in both scoped references. Other planned Plain rows and their existing `(R-5.1)` reasons are unchanged; no other output was modified.
-  - A3 (VERIFIED): `make registry-docs-check` exited 0 (`ok: registry-docs-check`); `make test-rust FILTER="--test plain_support --test parity"` exited 0 (`ok: rust`).
-  - A4 (VERIFIED): Generated docs committed separately as `d1a3591` (`docs: refresh registry references from T041 statuses`), naming source change and generation command. Queue/evidence recorded in follow-up commit; T022 remains held pending other acceptance.
-  - Done: `d1a3591`; queue evidence: `3620357`.
-- [x] **BUG-PHASE6-EXAMPLE-COMMAND-ORDER — Diagnose Plain commit-edit-abort replay command order.** `make test` at `c84d1ae` failed `tests/examples.rs::plain_examples_replay_against_the_real_binary`: `recordings/examples/commit-edit-abort.jsonl:9`, `$.result[41].data.command`, expected `log.select-and-copy`, observed `log.local-branches` (log `build/test-logs/rust.yJW0ZP`). Determine the contract/recording cause without changing source in this gate. Done when the exact replay has a stable justified oracle and `make test-rust FILTER="--test examples plain_examples_replay_against_the_real_binary"` passes. Full Lua/VSCode coverage remains unverified by the failed aggregate run; the existing dependency setup failure remains assigned to BUG-PHASE6-PNPM.
-  - A1 (VERIFIED): T041 (`c84d1ae`) promoted `log.local-branches`, `log.all-branches` and `log.all-references` from planned rows to implemented registry positions immediately after `log.current` (`src/commands.rs:1005-1007`). The two Plain commit recordings retained the old order/titles/reasons; this was recording drift, not permission to sort action arrays. `log.load-more` is log-scoped and correctly absent from these status responses. No production source or replay canonicalization was changed.
-  - A2 (VERIFIED): `b902634` adds explicit `make update-examples` capture limited to the two commit exchanges and exact three promotions, validating every other action, metadata field and frame before writing either exchange. Tests reject changed generation/URI/command, missing/reordered/duplicate actions, changed titles/response IDs, unrelated recordings and fragment overflow; retained lines and fragment boundaries remain byte-identical. Test-first red: `build/test-logs/rust.wmc4fS:43`, `capture accepted changed viewGeneration`; the strengthened capture validator passes the regression.
-  - A3 (VERIFIED): `make update-examples`, `make test-rust FILTER="--test examples"` (including `plain_examples_replay_against_the_real_binary`), `make update-schema` and `make schema-check` exited 0 in the implementation session; unchanged successful commands were not repeated at finalization. Final `make docs-check` after the prose wrap exited 0 (`ok: docs-check`, three checker tests passed). Normal replay remains strictly ordered and `commit_edit_action_order_is_strict` rejects swapped actions in both commit recordings. These focused results do not establish a clean aggregate gate or Lua/VSCode coverage.
-  - A4 (VERIFIED): scoped commits separate implementation/authored documentation (`b902634`), generated recordings (`944d571`, `make update-examples`) and generated references (`39bccb2`, `make update-schema`), with causal generation messages. Recording diffs change only four codeAction responses across three fragments; worked exchanges mirror those promotions. Queue evidence/tick is isolated in this final commit; protected untracked files are untouched.
-  - Done: b902634, 944d571, 39bccb2; queue completion: `0763e38`.
-
-- [x] **Target restored status content explicitly in process-log UI regression.** Slice of five-scenario repair. Native failure follows process-log search and pop: status cursor/viewport is below the staged header, not missing staged Git state (the pre-open staged assertion passes). The client contract restores view identity/focus, not topline. test: retain staging, process recording, stack/pop and commit-menu checks; after pop/refresh explicitly target the staged header in the restored buffer before screen assertions and independently assert staged patch content through Git. Do not add client viewport behavior or weaken existing expectations. Verification: `make ui-file FILE=tests/ui/scenarios/process-log.scn`. Done: containing commit.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/process-log.scn` @ adac686 → `ok: ui-file`; PASS for `standard` and `vim` at 100x30 and 80x24. Staging, `git apply` process recording, `view_stack.count == 2` then `1`, commit menu, floating-window close and `no_message` assertions all ran unchanged; after the refresh `goto "Staged changes (1)"` targets the restored header and the new `sh: git diff --cached -- f.txt | grep -F -- '+line3 CHANGED'` oracle passes in every combination. `back-to-status.screen` now starts at `Staged changes (1)` with `+line3 CHANGED` at all four profile/size pairs; no orphan native processes after the run.
-  - Check: base `build/ui/process-log/standard-80x24/failure.screen` shows the restored status viewport starting mid-hunk at `-line3`/`+line3 CHANGED` (f.txt body) with the statusline reading `19,1` at `Unstaged changes (1)` while `Staged changes (1)` sits at buffer line 3 above the viewport; the preceding line-15 assertion on that header had already passed, so staging was intact and only the viewport was offscreen. Pop restores view identity/focus, not topline (`docs/CLIENT_SPEC.md` main view push/pop), and the explicit `goto` now scrolls the supported header into view instead of adding client viewport behavior.
-
-- [x] **Preserve terminal backtab for basic modifier clients.** Prerequisite for native shifted-Tab delivery. test: `basic` keymap delivery and capture retain exact `shift+Tab` while still omitting arbitrary Shift/Meta chords, including wire-level keymap coverage. Update the capability contract to name terminal backtab explicitly; never claim full modifiers or spoof terminal identity. Verification: `make test-rust FILTER="--test keymap --test server_async"`. Native verification remains in the shifted-Tab harness slice below. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test keymap --test server_async"` @ b02d98f → ok (21 keymap + 47 server_async tests passed); `basic` delivers and captures `shift+Tab`, drops `ctrl+shift+Tab`, `meta+c` and `k meta+c` while `full` keeps them.
-  - Check: `docs/CLIENT_SPEC.md` names the lone portable terminal backtab exception and states basic implies no full modifier support or terminal-identity spoofing. Native Neovim delivery acceptance is delegated to the shifted-Tab harness slice; no VSCode runtime evidence claimed.
-
-- [x] **Deliver shifted Tab as terminal backtab in native UI harness.** Slice of the five-scenario repair. test: canonical `shift+Tab` reaches the existing `<S-Tab>` mapping via terminal backtab, and `common-navigation` exercises the unchanged visibility sequence at both vim sizes. Keep CSI-u handling for other modified keys intact. check: record native text evidence and process cleanup. Verification: `make ui-unit`; `make ui-file FILE=tests/ui/scenarios/common-navigation.scn`. Done: containing commit.
-  - Verified: `make ui-unit` → `ok: ui-unit` (shifted Tab stays on `BTab`; `C-S-Tab`, `C-Enter`, ctrl-arrow and modified page keys keep their CSI-u bytes). `make ui-file FILE=tests/ui/scenarios/common-navigation.scn` → `PASS common-navigation vim *`, `1 PASS, 0 XFAIL, 0 FAIL` at both vim sizes (100x30 and 80x24).
-  - Check: native text evidence is the unchanged hierarchy/sections-only/folded-siblings/hunk-headers/expanded sequence printed by the passing scenario; `pgrep -af "magit-lsp|nvim"` shows no leftover native processes after the run.
-  - Cause: the harness terminal declares basic modifiers, so the delivered keymap only retains exact `shift+Tab` (previous slice); the remaining gap was encoding, and the driver now sends shifted Tab as terminal backtab (`BTab`) so the existing `<S-Tab>` mapping receives it. No isolated evidence that CSI-u shifted Tab is undecoded; the portable backtab route is used instead.
-
-- [x] **Build two-hunk UI repository before client startup.** Prerequisite for the hunk-body-fold repair. test: the registered `two-hunk-siblings` fixture creates exactly two unstaged hunks in `f.txt` at lines 5 and 35 plus an independent modified `g.txt`, before any client or watcher starts. Verification: `make ui-unit`. Done: 1fc9fa3.
-  - Verified: `make ui-unit` @ b888574 → ok; `test_two_hunk_siblings` asserts f.txt hunk headers `@@ -2,7 +2,7 @@` and `@@ -32,7 +32,7 @@` with `+line5 CHANGED`/`+line35 CHANGED` and g.txt `+line2 CHANGED`.
-
-- [x] **Repair vim hunk-body folding UI regression.** Slice of the five-scenario repair. test: `hunk-body-fold` folds the containing hunk from a body line, preserves its sibling across refresh, and unfolds/refolds from the title at both declared sizes without stale-view messages. check: record the proven cause and native text/structured evidence; do not weaken version validation or add arbitrary sleeps. Verification: `make ui-file FILE=tests/ui/scenarios/hunk-body-fold.scn`. Done: a8bd4e0.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/hunk-body-fold.scn` @ 1fc9fa3 → PASS for vim at 100x30 and 80x24; `body-folded` and `refreshed-fold` snapshots hide `+line5 CHANGED` while keeping the sibling `+line35 CHANGED`, `M f.txt` and `M g.txt`; `title-unfolded` restores the body; `title-folded` refolds it; both `no_message /stale/` expectations passed and no stale message appeared.
-  - Check: the failing trace (`/tmp/opencode/hunk-post.jsonl`, `.server.jsonl`) shows the client receiving and applying an unsolicited newer render v5 at `t_unix_ms` 1794310251020.610/…021.076 around the second Tab, while the server logged `view/key` id 4 at …020.681 and emitted no `render_sent` for that id; the handler thus refused the key against a newer acknowledged version and the view showed `This view is stale; please retry on the current view.` That refusal is lawful, so version validation was left intact and no sleep was added. The scenario now uses the pre-built `two-hunk-siblings` fixture instead of an `sh` rewrite plus `git commit`, removing the out-of-band repository write that preceded the refresh. The extra unsolicited refresh being caused by that write racing the watcher is inferred from the ordering, not directly observed.
-
-- [x] **Repair log UI scenarios for current vim bindings and selection behavior.** Prerequisite slice of the five-scenario repair below. test: `log-view` and `log-select` drive the real current keymap in both profiles and assert server-owned log/selection behavior. Diagnose stale `g l` and `Select` expectations against the current contract rather than weakening assertions. Verification: `make ui-file FILE=tests/ui/scenarios/log-view.scn` and `make ui-file FILE=tests/ui/scenarios/log-select.scn`. Done: b888574.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/log-view.scn` @ 16d725e → PASS across `standard` 100x30/80x24 and `vim` 100x30/80x24; `log-header` snapshots show `Log`, `latest decorated subject`, `middle graph subject`, `main` and `v1`, and `log-search` shows `old searchable subject` with `/old searchable subject [1/1]`.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/log-select.scn` @ 16d725e → PASS across both profiles and sizes; `select-log` snapshots show `Log — copy commits` and `Select commit(s) to copy`, and the scenario's clipboard assertions confirm `getreg('"')` equals `git rev-parse HEAD~2` for the old searchable subject and stays `sentinel` after `Escape`.
-  - Check: the stale assumption was the `vim` opener `g l`; `profiles/vim.toml:54` and `profiles/standard.toml:52` both bind `open.log` to `l`, and the status log menu's `l` action opens `log.current`. `Select` was not stale in effect (it matched the prompt substring) but is now the exact server-owned prompt `Select commit(s) to copy`. Baseline at `16d725e`: both scenarios failed only in the vim combos at `wait timed out for screen text 'Log'`; standard combos passed. No orphan `magit-lsp` processes after the runs (`pgrep -x magit-lsp` empty).
-
-- [x] **Pin queued Plain renders across echo/response ordering.** Diagnostic prerequisite for the flaky `plain_draft` ticket below. test: deterministically queue a newer authoritative render while an older edit is in flight, complete echo and response in both orders, and assert the newer edit targets the latest observed client version and converges to the newer retained action snapshot. check: record whether either schedule demonstrates a lost render; passing schedules narrow the investigation but do not establish the original flake's cause. Verification: `make test-rust FILTER="--test plain_sync"`. Done: containing commit.
-  - Verified: `make test-rust FILTER="--test plain_sync"` @ `555560a` → 11 passed; `queued_render_survives_echo_and_response_in_either_order`.
-  - Check: neither schedule lost a render. Echo-before-response releases the queued edit on the confirmed echo; response-before-echo releases it on the late echo. Both emit an edit targeting the latest observed client version (2) and replace the echoed text with the newer authoritative text, converging to the newer retained snapshot (`view-new`, generation 2). This narrows the historical `plain_draft` flake to paths outside this controller ordering (transport, generation metadata or readiness), but does not prove the original cause.
-
-- [x] **Phase 2 gate — Declare a rich client in editor-bridge commit tests.** `make test` at `eb8bb1e` fails 18/27 `editor_bridge` tests (`log build/test-logs/rust.zuIHJG`) because they initialize with `json!({})` and still expect the `view/effects` `editDocument` frame. Plain clients now intentionally get `window/showMessage` with the exact `COMMIT_EDITMSG` URI plus a pending draft row (T007.4), and Plain delivery is already enforced by `plain_commit_editor_manual_instructions_cancel_pending_git_run`; the editor-bridge suite owns the rich in-place editor contract instead. Give those 18 tests a rich `experimental.magit` declaration (keys, modifiers, layout, `editDocument` effect, prompts) and keep every sync/cancel/checkpoint assertion unchanged. Done: 5da5d86. Verified: make test-rust FILTER="--test editor_bridge" (27 passed).
-
-- [x] **Fix the flaky `tests/plain_draft.rs` suite (commit menu never offered).** `make test-rust FILTER="--test plain_draft" V=1` fails intermittently at `bfb60d1` (about 2 of 10 runs; also reproduced at `f53b4b6`, so it predates the `bfb60d1` P1 fix). Two symptoms: (a) `commit menu timed out` — the structural wait finds no `menu.run-action` code action with a string `target.itemKey` on any rendered line, and the client text at timeout is the post-stage status view with no menu (generation 3); (b) a 10 s `recv` timeout at `tests/common/stdio.rs:142` right after `open.commit` is executed (id 93), with the last Git activity being `diff --cached f.txt` and the commit-menu render never reaching the client. The menu render therefore either never leaves the server or arrives with a `textDocument.version` that `FakeEditor::apply_edit` rejects; `PlainDocument::expire` (`src/presentation/plain.rs:344-357`) then marks that `(authoritative.hash, client.hash)` pair `rejected` and never retries it, while `PlainDocument::prepare` (`410-451`) refuses new renders while `in_flight` is `Some`. `plain_code_actions` (`src/server.rs:3584-3618`) only offers actions once the client text and the server's synced document text both equal a retained render hash, so a dropped render makes the menu unreachable. Determine which of the two it is before changing anything, then fix the cause.
-  - **Observed trace; root cause unproven (2026-11-08, `/tmp/opencode/diag_fail.log`).** The trace lists one status-document `workspace/applyEdit` targeting version 2, client version 3, and actions carrying `viewGeneration: 3`. Client document versions and view generations are separate counters. This observation does not establish a stale edit, rejection, or the missing-menu cause.
-    - Observed evidence, not diagnosis: targeting v2 normally advances the client to v3; this alone proves neither a second stale edit nor a rejection. `/tmp/opencode/diag_fail.log` (run 7) retains `status edits=` and server stderr evidence; symptoms and artifact remain useful, but mechanism is unproven.
-    - Instrumentation plan: correlate run/URI/incarnation, generation, render creation, prepare suppression/in-flight state, outbound request ID/version, response, `didChange` echo and expiry. Diagnose before production changes or retry masking; ten consecutive passes are supplementary, not regression proof.
-  - Diagnostic artifact: `/tmp/opencode/diag_fail.log` (run 7); the `status edits=` block near line 335 lists observed status-document edits. Correlate it with server/controller events before assigning cause. The server stderr tail is in the same log.
-  - test: add a deterministic regression for the diagnosed cause without weakening real Git commit, HEAD, message, status, or offered-action assertions. check: `make test-rust FILTER="--test plain_draft" V=1` passes 10 consecutive runs; repetition supplements, not replaces, the regression.
-  - check: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` and `make test-rust FILTER="--test plain_actions --test plain_sync" V=1` still pass.
-  - Constraints: no arbitrary sleeps and no fixed retry loops that hide a real failure — every wait needs a deadline and a clear panic message. Do not change `src/` production code unless the captured evidence proves a production defect. Identify the commit menu structurally (offered `menu.run-action` with a string `target.itemKey`), never by grepping the text: the status view contains `Committing…` during a run, so a `"Commit"` grep matches the wrong line.
-  - Partial harness work is uncommitted in `tests/plain_draft.rs`: `wait_for_commit_menu` rewritten as a structural poll, `wait_for_head_change` added and used before the confirm assertions, and the `f.txt` line lookups changed from `unwrap_or(0)` to `.expect(...)`. That work took the flake from about 50% to about 20% but did not eliminate it. It also still contains temporary diagnostic instrumentation in the `wait_for_commit_menu` timeout branch (dumps `status_edits`, the client version, the last 20 frames and an 80-line server stderr tail) — replace it with a clean deadline assertion before committing.
-  - Check: diagnosis and fix are harness-side. The menu render is legal but delayed: while one status `workspace/applyEdit` awaits its reply/echo, `PlainDocument::prepare` (`src/presentation/plain.rs:410-451`) refuses the queued menu render, and `plain_code_actions` (`src/server.rs:3584-3618`) offers no menu until the client text and synced document match a retained snapshot. The old wait queried one line immediately after `open.commit` and missed that render. No production defect was found, so no `src/` change is made; the timeout dumps are removed, `wait_for_commit_menu` and the new `wait_for_status_action` poll structurally with deadlines, and `commit_menu_is_offered_after_a_queued_status_render_is_released` holds an applyEdit reply/echo, proves no menu is offered, releases the client frames, then asserts the structural wait finds the menu and completes a real commit with unchanged Git/HEAD/message/status assertions.
-  - Verified: `make test-rust FILTER="--test plain_draft" V=1` @ `d70ee3c` → 10 consecutive runs, 17 passed each.
-  - Verified: `make test-rust FILTER="--test plain_draft --test editor_bridge" V=1` @ `d70ee3c` → 27 + 17 passed.
-  - Verified: `make test-rust FILTER="--test plain_actions --test plain_sync" V=1` @ `d70ee3c` → 29 + 11 passed.
-  - Verification: `make test-rust FILTER="--test plain_draft" V=1`.
-
-- [x] **Repair the five failing UI scenarios (`vim` profile and `process-log`).** `make ui-test` at `5da5d86` reports 44 PASS / 5 FAIL: `common-navigation` and `hunk-body-fold` (vim profile assertions about staged state and hunk bodies), `log-select` and `log-view` (wait for `Log` times out), `process-log` (expects `Staged changes (1)`, screen shows none). A clean extraction of reviewed baseline `2e29535` under `make ui-test` fails the same five scenarios with the same expectations, so this predates the Phase 2 work. Establish whether the `vim` profile setup or the shared fixtures are wrong (a fixture that silently builds an empty or unstageable repository would explain all five), then fix the cause rather than the expectations, or delete a scenario that no longer matches the server-owned contract. Done: f10d8a0.
-  - Verified: serial `make test` then `make ui-test` @ f10d8a0 → both exit 0 (Rust, Lua, VSCode, keybindings digests and `build/ui-test`). The success logs were deleted, so no per-suite or scenario counts are claimed here; all five previously failing scenarios pass and no orphan `magit-lsp` processes remain. Per-slice native PASS evidence is recorded on the child Bugfix entries above.
-  - Commits: `b888574` log-view/log-select current `l` opener and exact `Select commit(s) to copy` prompt; `1fc9fa3` `two-hunk-siblings` fixture built before client startup; `a8bd4e0` hunk-body-fold on that fixture plus `no_message /stale/` assertions; `8202c9e` basic-mode lone `shift+Tab` retention; `adac686` shifted-Tab terminal-backtab delivery; `f10d8a0` explicit process-log header target with an independent staged-patch oracle.
-  - Cause: not an empty or unstageable fixture. `log-view`/`log-select` kept the stale `g l` opener and an inexact `Select` match; `hunk-body-fold` rewrote the repository out of band after client startup, racing the watcher into an unsolicited newer render (lawfully refused as stale); `common-navigation` delivered shifted Tab as CSI-u that the basic terminal did not turn into `<S-Tab>`; `process-log` restored view identity/focus but not the viewport topline. Each was fixed at the cause; no scenario was deleted and no server-owned expectation was weakened.
-
-
-## Review
-
-- [x] **[P1] Reject ambiguous logical recording inputs** (`scripts/example_recordings.rs:8-25`, `recordings`; `tests/schema.rs:1674-1694`, `worked_exchanges_render_identically_for_grouped_fragments`)
-  - **Problem:** `recordings` maps both `confirm.jsonl` and `confirm-01.jsonl` to the same `confirm.jsonl` entry and appends both byte streams, so accidentally retaining a monolithic file beside its fragments silently fabricates a logical exchange instead of rejecting the duplicate representation.
-  - **Why it matters:** Correctness — this shared loader feeds both exact example replay and generated worked exchanges, so ambiguous inputs can make validation and documentation consume bytes that belong to neither source recording.
-  - **Change:** Track whether each logical name was introduced by one monolithic file or by numbered fragments and return a readable `InvalidData` error before extending the bytes when the other representation is encountered. Preserve the existing consecutive `-01`, `-02`, … validation. Add a focused temporary-directory regression beside the grouped-fragment worked-exchange test that creates `confirm.jsonl` plus `confirm-01.jsonl` and proves the collision is rejected rather than concatenated.
-  - **Done when:** Mixed monolithic/fragment inputs fail closed with the conflicting logical name in the error; monolithic-only and consecutive-fragment-only recordings still render identically; `make test-rust FILTER="--test schema worked_exchanges"` and `make test-rust FILTER="--test examples"` pass.
-  - **Constraints:** Do not change the public return shape of `recordings`, the `-NN.jsonl` naming convention, committed example bytes, or generated references.
-  - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → `ok: rust`; `make test-rust FILTER="--test examples"` → `ok: rust`.
-
-  - Done: 9081251
-
-- [x] **[P1] Restore the stage identity matrix test registration** (`tests/commands/more.rs:4-9`, `complete_file_stage_identity_fresh_and_stale_matrix`)
-  - **Problem:** The command-suite split moved `complete_file_stage_identity_fresh_and_stale_matrix` without its former `#[test]` attribute. Nothing calls the private function, so the complete fresh/stale stage matrix no longer runs while the adjacent unstage and discard matrices do.
-  - **Why it matters:** Test validity — a substantive mutation-safety regression test was silently removed from the harness during a file-only extraction.
-  - **Change:** Restore `#[test]` directly on `complete_file_stage_identity_fresh_and_stale_matrix`; keep its matrix and the shared `file_identity_matrix` helper unchanged.
-  - **Done when:** `make test-rust FILTER="--test commands complete_file_stage_identity_fresh_and_stale_matrix"` runs and passes the named test, and the commands suite still discovers the adjacent unstage/discard tests.
-  - **Constraints:** Do not duplicate the function, alter production behavior, or weaken any matrix cases or assertions.
-  - **Verified:** `make test-rust FILTER="--test commands complete_file_stage_identity_fresh_and_stale_matrix" V=1` → 1 passed; `make test-rust FILTER="--test commands" V=1` → 47 passed, including adjacent unstage/discard matrices. Done: containing commit.
-
-  - Done: 009e610
-
-- [x] **[P2] Point extracted rich-client links back to the client specification** (`docs/client-implementation-levels.md:248-258`, `Level 4 — Rich protocol`)
-  - **Problem:** Seven links retained same-file `#...` targets after this section was extracted, but `client-implementation-levels.md` contains none of those headings; all seven targets remain in `docs/CLIENT_SPEC.md`.
-  - **Why it matters:** Readability/cohesion — the extracted reference sends readers to nonexistent anchors and contradicts the document split's claim that implementation details remain in the client specification.
-  - **Change:** Prefix the capability map, methods/lifecycle, descriptors, input/navigation, prompts/effects, real-file editing, and feature-to-capability anchors with `CLIENT_SPEC.md`, preserving their existing anchor fragments and link text.
-  - **Done when:** Every link in the Level 4 detail list resolves to the corresponding heading in `docs/CLIENT_SPEC.md`, and `make docs-check` passes.
-  - **Constraints:** Do not duplicate those sections into the extracted document, move headings, or edit generated documentation.
-  - Done: afa7ec1
-  - Verified: `make docs-check` → ok: docs-check (3 tests passed).
-
-- [x] **R-PLAIN-EDIT-EOF-RISK — Investigate intermediate-echo repair and terminator-changing edits.** **Verified ordinary-render boundary:** Plain open captures `DocumentFormat` from the current didOpen text (`src/server/plain.rs:6-13`), then constructs the controller with that format and opens the later current snapshot (`plain.rs:124-147`). Every server target thereafter serializes the rendered tree by joining its rows and appending the captured final terminator policy (`src/presentation/plain.rs:37-55, 369-378`); this preserves the initial policy for render targets, not necessarily the latest client text. The controller compares its observed client snapshot with that target and calls `text_edits(client, authoritative, ...)` (`plain.rs:261-269, 410-432`), so a client snapshot whose final-LF state differs from the captured policy **does reach a terminator-changing applyEdit**. This is a reachable correction shape, not merely an arbitrary `text_edits` string pair. Fixed-policy renders where both sides retain LF still get the virtual-EOF protection (`plain.rs:551-556`). **Prompt/log boundary:** `plain_change` routes prompt/log snapshots through session reconciliation before ordinary `controller.change` (`src/server/plain.rs:254-348`); valid edits are adopted, while repaired edits observe the client snapshot and render an authoritative tree through the same captured-format serializer (`src/session.rs:1557-1621, 1624-1654`, `src/server/plain.rs:295-309`). Thus terminator-changing correction is also reachable for a repaired prompt/log snapshot with a changed terminator; normal accepted prompt/log edits are adopted rather than corrected. **Echo evidence:** `plain_eof_append_does_not_repair_a_native_intermediate_echo_with_a_stale_version` proves only the fixed both-LF append's intermediate didChange and no-repair response (`tests/plain_harness.rs:562-591`). The neighboring terminator-edit test checks edit application/line-ending preservation, not the controller or intermediate echoes (`tests/plain_harness.rs:593-607`). Intermediate-echo/repair behavior for the reachable terminator-changing correction shape remains unverified; no stable faulty outcome was reproduced, so no speculative test was added. **Done:** investigation complete with this evidence boundary and residual echo uncertainty; sprint-owned Done note retained.
-
-- [x] **R-T020-STALE — Investigate intermittent Plain selection-staging refusal (Phase 6).** Historical cause remains unknown: the original wire log was overwritten, and the later generation-2-vs-retained-4 rebase refusal was a separate observed path; unchanged watcher refresh resolved that path, not proof of this original failure. Do not claim the original defect fixed. Disposition: close investigation with residual unknown-cause risk; evidence retained by `69bd3dd`.
-  - **Observed:** During T020's 120x100 no-final-newline smoke, native code actions offered `status.stage` for the `-one` / `+ONE` selection (zero-based rows 7–8, `viewGeneration: 8`). Execution returned `This view is stale; please retry on the current view.` and the test timed out waiting for `Staged changes (1)`. The focused variant and subsequent default two-variant run passed without retries, sleeps or a fix for this refusal. Original failed Make output: `build/test-logs/plain-neovim.ufi7Ib`; the original wire log was overwritten by successful reruns.
-  - **Scope:** Start in `src/server.rs` (`execute_plain_action`), `src/dispatch.rs` (`target_is_current`), the Plain document controller/session generation boundary, and `scripts/test_plain_neovim.py`; extend the nearest existing Plain tests. Preserve concurrent user changes. A watcher/reconciliation race is INFERRED; the exact rejecting guard and legitimacy of the refusal remain unverified.
-  - **Verified:** `make ui-unit` @ `9a8372a` → exit 0; `test_process_birth_record_is_required_for_real_signal_probe` in `tests/ui/test_driver.py` checks real self PID signal-0 probes reject missing/wrong birth identity and accept the matching identity.
-  - **Verified:** `make ui-file FILE=tests/ui/scenarios/plain-status-stage.scn` @ `9a8372a` → exit 0; `visible-stale-refusal.json` records stock Neovim message history feedback; scenario asserts unchanged HEAD/index/worktree on refusal and retains exact staging checks. Native evidence: `build/ui/plain-status-stage/standard-80x24/visible-stale-refusal.{json,screen}` and `lsp.log` (wire log shows offered generation 1, active generation 2, stale refusal). Initial run exposed hit-enter prompt blocking state request; scenario now dismisses the prompt before polling state.
-  - **Verified:** `make plain-neovim PLAIN_ARGS="--final-newline without"` @ `9a8372a` → exit 0; `make plain-neovim` @ `9a8372a` → exit 0. No retries, sleeps, or weakened checks. Existing preserved archives: `build/ui/plain-review-fixed` (recorded by `69bd3dd`).
-  - **Done:** `3e29d72`. Historical original cause explicitly unknown; this disposition does not infer that later rebase-path repair fixed it. Retain as residual risk; no further retry authorized by this investigation.
-
-- [x] **R-T021-ATTACH — Complete generic Helix commit-file attachment guidance.** Generic TOML remains unchanged; document explicit `:set-language magit` on first draft. Native Helix 25.07.1 Confirm/Abort and connection reuse passed; [evidence](docs/evidence/plain-helix.md#follow-up-verification-after-lifecycle-fixes). Done: `69bd3dd`.
-
-- [x] **R-T021-DRAFT — Fix already-open draft lifecycle and retry after timeout.** Done: `69bd3dd`. Deliver the new template to preopened manual buffers, attach only on an exact synchronized echo, and remove the permanent expiry latch. Red regressions failed awaiting template delivery and on permanently disabled retry; `make test-rust FILTER="--test plain_draft --test schema"` passed after correction. Native Helix Confirm created the intended message; second-run Abort preserved exact HEAD/index/worktree hashes ([evidence](docs/evidence/plain-helix.md#follow-up-verification-after-lifecycle-fixes)).
-
-- [x] **R-PHASE6-ORACLES — Reject every failed native Git assertion.** Done: `a2c1ae3`. Chain scenario assertions with `&&`, remove a masked pipeline, and check command exit before inspecting output. Both focused Plain native scenarios passed through Make.
-- [x] **R-PHASE6-CLEANUP — Validate native process birth before signaling.** Done: `be609d5`. Record birth identity before exec; reject missing/mismatched identity and use Linux pidfds. Neovim shutdown force-stops its LSP process handles, not raw PIDs. `make ui-unit` and both standalone Plain newline variants passed; non-Linux fallback remains unverified.
-- [x] **BUG-PHASE6-HOOK — Scope Rust staged formatting.** Done: `67cc416`. T022 commit failed because `cargo fmt --all` changed unselected snapshot paths; invoke rustfmt only on selected paths with child traversal disabled, retaining the snapshot mutation guard. `make hooks-run` passed, then T022 proofs committed with hooks in `9ba3c0d`; unrelated dirty source was not staged.
-
-Editing/synchronization review (2026-11-13; base `1ccb038adc2b9e9633f394ca1fea789aed2eabf8` plus a concurrently changing dirty checkout): most semantic ownership is already shared: accepted editor text/version in `DocStore`, commit-message lifecycle in `EditRegistry`/`Draft`, and rendered structure in the session/tree. Rich/Plain primarily differ at delivery and native editor lifetime boundaries. Static review only; no runtime verification or measured sharing percentage. The two actionable findings are the VSCode Abort and single-document staging tasks below; future sequence/todo integration constraints are attached to T080. Preserve synchronized versus independently read saved-file confirmation, render acknowledgements versus editor versions, and structured todo submission versus helper release rather than introducing a universal editor abstraction.
-
-- [x] **[P0] Retain VSCode draft text until Abort is positively acknowledged** (`clients/vscode/lib/drafts.js:529-552`, `cancel`, `forget`; `src/server.rs:3011-3045`, `draft_request`; `lua/magit-lsp/edit.lua:139-149`, `M.cancel`)
-  - Superseded failure narratives and intermediate verification: immutable `3125ee6:TASKS.md` (this item). Current requirements and final evidence remain below; native behavior remains unexecuted.
-  - **Change:** Route VSCode Abort through the existing `workspace/executeCommand` / `magit.command` `common.cancel` envelope containing `runId`, `uri`, and the synchronized `version`. Reuse `acknowledged` to require the exact `aborted` response before `forget`; retain an editable, registered draft and show a readable failure on rejection, missing/mismatched acknowledgement, missing connection, or failed synchronization. Invalidate prior callbacks before sending Abort, but do not set `record.closing` while using helpers that require `live(record)`. Preserve the existing ability to send cancellation without waiting behind an outstanding confirmation. Update the authored Abort description in `docs/CLIENT_SPEC.md:125`, without hand-editing generated tables. Extend the existing managed-draft integration block in `clients/vscode/test/integration.js`, not a new harness.
-  - **Done when:** test: rejected/failed Abort and wrong run/URI/version acknowledgements leave unsaved bytes, the draft registration, and its editable tab intact, with no revert/close; a subsequent valid Abort receives an exact acknowledgement, closes once, and leaves HEAD/index unchanged. test: existing successful abort, finish-versus-cancel, and disconnect coverage remains passing under `make vscode-test`. check: native behavior remains unexecuted unless an existing Make target is identified for the relevant native scenario; do not substitute mocked integration results for native evidence.
-  - **Constraints:** Touch at most `clients/vscode/lib/drafts.js`, `clients/vscode/test/integration.js`, and `docs/CLIENT_SPEC.md`. Do not add a wire method, modify server cancellation policy, infer success from progress end, or discard local text on an unsuccessful barrier. This is ad hoc review work, not authorization to cross the T019 stop boundary.
-  - Remaining change: capture the cancellation generation, owning client, sent version and text snapshot; revalidate ownership, connection, liveness and generation after every asynchronous boundary before sending or accepting cancellation. Validate the acknowledgement against the captured sent version. Do not discard edits made after that snapshot; retain the editor with a readable explanation instead. Keep Abort outside the confirmation queue, invalidate earlier confirmation callbacks immediately, and do not make `live(record)` false during synchronization. Reuse the existing barrier checks where possible rather than leaving a second unguarded response path.
-  - Remaining acceptance: extend the existing integration block with a deferred Abort response; invalidate through disconnect or a later failure before releasing an otherwise exact response, then assert no revert/close and exact retained bytes/registration. Exercise a native edit/version advance while the response is delayed, requiring no lost text and validation against the sent version. A noninvalidated exact response must still close once. This is source-verified remaining risk, not an executed reproduction; prior passing Make results do not cover these interleavings.
-  - **Remaining change:** Keep the captured Abort ownership/generation/version/text guard effective through destructive teardown, not merely through response acceptance. In `cancel`/`forget`, establish the native read-only gate without waiting for the confirmation queue; after awaiting that gate and any pre-revert context work, revalidate the captured ownership and text before reverting. If invalidation or newer text is observed, stop teardown, restore editable retained registration/context, and report the retained-text failure. Release any temporary read-only gate on every exit. Do not rely on `record.closing` to prevent native edits, and do not put Abort behind an outstanding confirmation. Restrict this follow-up to `clients/vscode/lib/drafts.js` and the existing block in `clients/vscode/test/integration.js`.
-  - **Remaining done when:** Extend the existing controlled-promise integration block to delay a pre-revert editor/context command after an exact Abort response, make an edit while it is delayed, then release it and assert exact retained bytes, registration, an editable tab, and no revert/close. Independently invalidate the pending teardown through disconnect and assert no destructive teardown. A healthy exact Abort still closes once, and Abort still bypasses an outstanding confirmation. Run `make vscode-test`; native execution remains unverified unless an existing relevant Make target is available. The reported passing runs at `275bcc2`/`5739f0c` do not exercise this post-acknowledgement interval.
-  - Verified: `make vscode-test` @ `e627b7a` + scoped working tree → `ok: build`, `vscode-deps`, `vscode-typecheck`, `vscode`, `keybindings`; controlled post-acknowledgement edit and disconnect interleavings retain exact bytes/registration/editability without revert/close, while healthy exact Abort reverts once and closes. No relevant native Make target; native behavior unexecuted.
-
-- [x] **[P1] Bind todo saves to the exact rebase operation instance** (`src/git.rs:573-618`, `GitRepo::rebase_todo_identity`, `GitRepo::write_rebase_todo`; `src/rebase_todo.rs:45-80`, `RebaseTodo::load`, `RebaseTodo::save`; `tests/rebase_todo.rs:63-105`)
-  - **Problem:** Todo ownership contains only the canonical Git-directory path plus `orig-head`, `onto`, and `head-name`. Aborting and restarting the same rebase can recreate all four values and byte-identical todo content, so a model loaded from the old operation can pass every current check and overwrite the new operation.
-  - **Why it matters:** Correctness — the stale-write guard does not identify an operation incarnation and can apply edits to a rebase the user never opened.
-  - **Change:** Replace the tuple owner with a private typed owner that records the actual `rebase-merge` directory instance, using stable filesystem identity rather than path or timestamps alone. Capture todo bytes, metadata, and directory identity as one coherent Git-boundary snapshot; revalidate that same directory instance in `write_rebase_todo` immediately before replacement. Add a real-repository regression that loads a model, aborts, recreates the same paused rebase with identical metadata/todo bytes, then proves the old model is rejected and the new todo stays byte-exact.
-  - **Done when:** The abort/restart regression passes, existing stale/cross-repository cases remain enforced, and `make test-rust FILTER="--test rebase_todo"` passes.
-  - **Constraints:** Do not use `HEAD`, path equality, or modification time as the sole incarnation check. Do not weaken exact source-byte, subject, identity-set, or merge-backend validation.
-  - Root cause: canonical Git path and `orig-head`/`onto`/`head-name` repeat across abort/restart; those values and todo bytes did not identify a rebase incarnation. `same-file` binds the captured directory instance. Portability risk: Windows/macOS implementations are provided by `same-file` but only Linux verification ran.
-  - Verified: `make test-rust FILTER="--test rebase_todo"` @ `9a1b69e` → ok: rust; abort/restart regression proves old-model refusal with identical metadata/todo bytes, then new-model save writes expected todo bytes. Existing stale, cross-repository, subject and identity checks remain in the suite.
-
-- [x] **[P1] Serialize todo replacement with the Git lock path** (`src/git.rs:598-618`, `GitRepo::write_rebase_todo`; `tests/rebase_todo.rs:84-105`, `stale_or_invalid_save_leaves_todo_bytes_unchanged`)
-  - **Problem:** Two writers can both complete the final source read before either anonymous temporary file is persisted, then both rename over the todo; the later writer silently wins despite loading stale bytes. The random temporary name does not participate in Git's `git-rebase-todo.lock` exclusion convention.
-  - **Why it matters:** Correctness — concurrent server sessions or Git todo updates can be overwritten after the advertised stale check.
-  - **Change:** Do after: **Bind todo saves to the exact rebase operation instance**. Acquire `rebase-merge/git-rebase-todo.lock` with create-new semantics before the final owner/source validation, hold it through temporary-file flush and atomic replacement, and remove only a lock created by this call on every exit. Keep same-directory replacement and reject an existing lock readably. Extend the existing persistence test to prove a pre-existing lock prevents any todo change and is not removed by the failed save; after releasing it, a valid save still succeeds.
-  - **Done when:** Competing ownership is excluded before the final comparison, lock refusal preserves both todo and foreign lock bytes, cleanup paths leave no owned lock, and `make test-rust FILTER="--test rebase_todo"` passes.
-  - **Constraints:** Do not wait indefinitely, delete a foreign lock, weaken source comparison, or replace atomic rename with truncate-in-place writing.
-  - Verified: `make test-rust FILTER="--test rebase_todo"` @ `9cc6a17` → ok: rust; lock refusal preserves todo and foreign lock bytes, valid save succeeds, owned lock absent after success and stale/validation failures.
-
-- [x] **[P1] Batch todo object resolution into one Git invocation** (`src/rebase_todo.rs:25-43`, `RebaseTodo::parse`; `src/git.rs:784-799`, `GitRepo::resolve_todo_commit`; `src/git.rs:1579-1600`, `GitRepo::command_with_input`)
-  - Attempts: Default worker implemented the batch path; two PARTIAL checkpoints left direct boundary coverage incomplete. Split response correctness from process-count verification at separate Make verification boundaries.
-  - [x] **Todo batch response correctness** — Complete the batch implementation and directly test mixed valid/invalid input with row-specific readable errors, plus malformed/incomplete/extra response rejection; preserve no-mutation guarantees. Verification: `make test-rust FILTER="--lib --test rebase_todo"`.
-    - Verified: `make test-rust FILTER="--lib --test rebase_todo"` @ `972148b` → ok: rust; `mixed_valid_and_invalid_rows_report_the_failing_row_without_mutation`, `rejects_ambiguous_abbreviation`, and `todo_batch_decoder_rejects_malformed_incomplete_and_extra_records` cover row errors, no mutation, and decoder rejection.
-  - [x] **Todo batch single-process evidence** — Verify a multirow parse performs exactly one `cat-file --batch-check` invocation using existing tracing infrastructure; no alternate production execution path solely for tests. Verification: `make test-rust FILTER="--test server_async --test rebase_todo"`; record the named regression or concrete trace check under this item.
-    - Verified: `make test-rust FILTER="--test server_async --test rebase_todo"` @ `955a8b7` → ok: rust. `opening_multirow_rebase_todo_batches_object_resolution_once` opens real paused todo views with 2 and 5 pending rows; spawned-server `GIT_TRACE2_EVENT` records exactly one `cat-file --batch-check` `start` event per open. Existing setup pattern verified: `rich_missing_effects_refuses_before_git_or_editor_and_never_emits_optional_effects`.
-  - **Problem:** `RebaseTodo::parse` starts one `git cat-file --batch-check` process per todo row. Large rebases therefore block the synchronous open path on hundreds of child processes even though the selected Git interface accepts all tokens in one input stream.
-  - **Why it matters:** Simplicity/performance — the implementation uses batch protocol as repeated scalar calls, adding avoidable process and parsing overhead in a user-facing command.
-  - **Change:** Do after: **Serialize todo replacement with the Git lock path**. Parse rows into action/reference/subject records first, add one ordered `GitRepo::resolve_todo_commits` batch-boundary call, validate exactly one complete `objectname objecttype` result per input, then construct entries and run duplicate/leading-action checks. Preserve row-specific readable rejection for missing, ambiguous, malformed, and non-commit objects.
-  - **Done when:** One parse performs one `cat-file --batch-check` invocation regardless of row count; mixed valid/invalid batches fail closed without mutation; `make test-rust FILTER="--test rebase_todo"` passes.
-  - **Constraints:** Do not cache object identities across repository operations, parse rendered text, loosen the minimum hexadecimal token rule, or add a persistent Git subprocess.
-
-- [x] **[P1] Load each todo view exactly once and surface factory failures** (`src/commands.rs:1147-1154`, `rebase_edit_todo`; `src/session.rs:3335-3361`, `Session::finish_command`; `src/session.rs:3529`, `create_view`; `tests/rebase_todo.rs:131-155,370-391`)
-  - **Problem:** The menu handler fully loads and resolves a todo only to discard it, then the session factory loads it again. A change between those loads can make the second failure escape as a request error because `finish_command` converts only log-view factory failures into readable effects.
-  - **Why it matters:** Simplicity/correctness — duplicate Git work creates two snapshots for one open and violates the readable-failure contract on the race path.
-  - **Change:** Remove the preflight `RebaseTodo::load` from `rebase_edit_todo`; let `create_view` own the single load. In `finish_command`, convert `RebaseTodo` factory errors through `Effect::from_error` or a warning message exactly as the caller-preserving log path does. Keep the existing idle-open regression and add direct coverage that a failed todo factory leaves the caller as the sole usable view with a nonempty message.
-  - **Done when:** One menu open has one todo load, idle/disappearing-operation failures return readable effects without pushing a view, successful open/cancel behavior stays unchanged, and `make test-rust FILTER="--test rebase_todo --test commands --test menus"` passes.
-  - **Constraints:** Do not add a client-side preflight, alternate view constructor, or catch unrelated internal rendering failures.
-  - Verified: `make test-rust FILTER="--test rebase_todo --test commands --test menus"` @ `48f17a9` → ok: rust; `failed_todo_factory_keeps_caller_and_reports_readable_message`, `paused_rebase_menu_opens_todo_and_cancel_preserves_repository`.
-  - Source check: `rebase_edit_todo` contains no todo load; `create_view` has sole production `RebaseTodoView::load` call (src/session.rs:3529).
-
-- [x] **[P1] Restore scoped Makefile ownership without discarding external work** (`Makefile:1-15,61-66,84-120`; commits `a3ae47f`, `7ac0630`)
-  - **Problem:** `a3ae47f` accidentally committed the externally owned `ui-tour`/`color-spike`/`readme-shots` relocation, then `7ac0630` captured the rest of that dirty Makefile: `.PHONY` changes, `LOG_TAIL`, global `MAGIT_LSP_BIN`, `ui-file`, `update-snapshots`, and removal of `update-client-behaviors`. Only `.PHONY: vscode-unit` and the `vscode-unit` recipe belong to VER3c; `a8089a3` documents the same external hunk being removed from an earlier DOC2b commit to preserve its ownership.
-  - **Why it matters:** Cohesion/cleanliness — two VSCode commits now own unrelated test-infrastructure work, defeating scoped review and the explicit preserve-unrelated-dirt contract.
-  - **Change:** Add a correction commit whose tracked `Makefile` equals `a3ae47f^:Makefile` plus only `.PHONY: vscode-unit` and the two-command `vscode-unit` target, minus the portability-check target retired by PORT1 (`130f8eb`). Preserve the complete removed external delta verbatim as an unstaged `Makefile` worktree change after the commit; use index-only staging rather than deleting, rewriting, or semantically judging that work. Never resurrect `portability-check`.
-  - **Done when:** `git show HEAD:Makefile` differs from `a3ae47f^:Makefile` only by the `vscode-unit` phony declaration and target, minus retired `portability-check`; `git diff -- Makefile` contains preserved external hunks and no VER3c hunk; concurrent dirty files remain unchanged.
-  - **Constraints:** Do not rewrite `a3ae47f` or `7ac0630`. Do not discard, stage, reformat, or partially restore the externally owned Makefile delta. Do not touch `.opencode`, `AGENTS.md`, release files, or concurrent rebase work.
-  - Verified: `make -n vscode-unit` @ `2b68dda` → ok: prints typecheck and unit-test recipes. Index matches scoped historical base plus target minus retired checker; worktree Makefile unchanged; external delta remains unstaged.
-
-- [x] **[P1] Check Unix executable access instead of any execute bit** (`clients/vscode/lib/version.js:7-29`, `resolveCommand`; `clients/vscode/test/test.js:483-501`, `Unix PATH resolution skips non-executables and returns absolute paths`)
-  - **Problem:** `resolveCommand` accepts a Unix candidate when any `0o111` bit is set. That can select a file the current process cannot execute, such as a current-user-owned file with only the group execute bit, so the warning can name a PATH entry process launch would skip or reject.
-  - **Why it matters:** Correctness — VER3c claims diagnostic resolution matches process discovery, but permission ownership is ignored and the new test covers only `0644` versus `0755`.
-  - **Change:** Keep the regular-file check, then use `fs.accessSync(candidate, fs.constants.X_OK)` for non-Windows candidates before returning them. Extend the existing Unix test with a first PATH candidate owned by the test process but executable only for a non-owner class, followed by a genuinely executable candidate; assert the latter is selected. Preserve Windows PATHEXT and case-insensitive behavior.
-  - **Done when:** Unix resolution skips candidates inaccessible to the current user, still returns an absolute accessible candidate, and `make vscode-unit` passes.
-  - **Constraints:** Do not change launch commands, explicit path handling, warning text, Windows resolution, or add a second resolver.
-  - Verified: `make vscode-unit` @ `89979d8` → ok: vscode-typecheck, vscode-unit; Unix regression skips owner-inaccessible `0010` candidate, selects accessible `0755` candidate, and retains the `0644` skip.
-
-- [x] **[P1] Record truthful VER3c completion evidence** (`TASKS.md:38-43`, `VER3`, `VER3c`, `VER3b`)
-  - **Problem:** VER3c is checked with “`make vscode-unit` @ `473b1de`,” but that commit has neither the `vscode-unit` target nor the resolver/test changes; both first appear later in `a3ae47f`/`7ac0630`. The cited verification therefore cannot be reproduced from the named revision.
-  - **Why it matters:** Test validity/status correctness — the canonical queue claims completion from a command unavailable at its cited commit.
-  - **Change:** Do after: **Restore scoped Makefile ownership without discarding external work** and **Check Unix executable access instead of any execute bit**. Run `make vscode-unit` from a clean detached worktree at the resulting implementation commit so preserved external dirt cannot supply the target or alter its environment. Update VER3c with its actual `Done:` implementation commit and the clean verification SHA/result.
-  - **Done when:** VER3c cites a revision where the resolver, tests, and tracked `vscode-unit` target all exist and the command passes from that clean revision; the old `473b1de` claim is removed.
-  - **Constraints:** Keep parent VER3 and native VER3b unchecked. Do not claim `make vscode-test` passed after these changes, and do not convert the earlier integration timeouts into VER3c failures.
-  - Verified: Historical source check confirms resolver and tests at `9daa386`, tracked `vscode-unit` target at `14e986a`; two clean detached-checkout `make vscode-unit` runs passed, recorded in `6954cd7`.
-
-- [x] **[P1] Resolve the real Git test binary through PATH** (`tests/git_discovery.rs:31-78`, `wrapper`, `recommended_git_queries_discover_and_open_worktrees_and_propagate_failures`)
-  - **Problem:** The discovery regression canonicalizes `/usr/bin/git` before building its compatibility wrapper. Git can be available on PATH without that FHS location, including NixOS and Nix-profile installations, so the ordinary Rust suite fails before exercising the claimed discovery behavior.
-  - **Why it matters:** Correctness/cohesion — the portability work removed editor-layout assumptions but left an executable-layout assumption in maintained non-Markdown test code.
-  - **Change:** Resolve the real Git executable from PATH before prepending `wrapper_dir`, following the existing `command -v git` test-fixture pattern in `tests/common/fake_git.rs::real_git_path`; pass that absolute path to `wrapper`. Keep the wrapper's unsupported-option and simulated-failure behavior unchanged.
-  - **Done when:** `tests/git_discovery.rs` contains no `/usr/bin/git` assumption, still wraps the same PATH-selected Git binary, and `make test-rust FILTER="--test git_discovery"` passes.
-  - **Constraints:** Do not weaken or skip the compatibility/failure assertions. Do not add a production Git resolver or claim Windows/macOS verification.
-  - Verified: `make test-rust FILTER="--test git_discovery"` @ `a242deb` → ok: rust. Fixture locates Git with `command -v` before wrapper PATH prepending; no `/usr/bin/git` dependency remains.
-
-- [x] **[P1] Record reproducible PATH-runner verification** (`TASKS.md:771-777`, `Discover optional VSCode hosts through PATH`; `clients/vscode/test/e2e/run.mjs:13-20`; `clients/vscode/test/test.js:40-67`)
-  - **Problem:** The completed task cites `make vscode-test @ 0122a77`, but the PATH selection change and its test first become tracked in `aeed37f`; the named revision cannot reproduce the asserted coverage. The new test itself is behavioral: it invokes `--select-editor` and checks explicit override, `codium`/`code` precedence, and absence, so no native editor evidence is required.
-  - **Why it matters:** Test validity/status correctness — implementation coverage exists, but the canonical completion evidence points at a revision without that implementation.
-  - **Change:** Record the clean-revision `make vscode-unit` result as harness-only command-selection coverage, not native editor evidence.
-  - **Done when:** The PATH-runner task cites a revision that contains `--select-editor`, its four selection outcomes, and a passing tracked `vscode-unit` target; it makes no native-host claim.
-  - **Constraints:** Keep `aeed37f` as the implementation `Done:` commit. Do not add native evidence, another test file, or another command resolver.
-  - Verified: `make vscode-unit` @ `14e986a` → ok twice: vscode-typecheck, vscode-unit (`6954cd7`); harness covers `--select-editor`, explicit override, PATH `codium` precedence, `code` fallback, and absent-editor outcomes. No native-host evidence claimed.
-
-- [x] **[P1] Discover optional VSCode hosts through PATH** (`clients/vscode/test/e2e/run.mjs:7-20`, `candidates`; `clients/vscode/lib/version.js:6-30`, `resolveCommand`). Done: `aeed37f`.
-  - **Problem:** PORT1 removed the personal editor path from `real-file-spike.mjs`, but the maintained optional E2E runner still defaults only to `/usr/bin/codium` and `/usr/bin/code`. A PATH-installed editor outside `/usr/bin` is reported missing unless `MAGIT_VSCODE_BIN` is set, contradicting the runner and README claim that available `code`/`codium` binaries are discovered.
-  - **Why it matters:** Correctness/cohesion — the completed portability claim leaves the main native runner with a second, Linux-layout-specific executable-discovery policy.
-  - **Change:** In `clients/vscode/test/e2e/run.mjs`, keep `MAGIT_VSCODE_BIN` first, then resolve `codium` and `code` through PATH. Reuse `clients/vscode/lib/version.js::resolveCommand` instead of adding another PATH/PATHEXT implementation; accept an explicit existing path as well as a resolved command. Keep the current skip/fail behavior when no candidate exists.
-  - **Done when:** `run.mjs` contains no `/usr/bin` editor defaults; env override, PATH `codium`, PATH `code`, and no-editor behavior follow the existing precedence and focused-mode rules; existing VSCode tests pass.
-  - **Constraints:** Do not change the production server-command setting, launch arguments, focused-mode prerequisite policy, or `real-file-spike.mjs`'s env-first `code` fallback. Do not add shell interpolation or platform-specific default paths.
-  - Verified: `make vscode-unit` twice @ clean detached `14e986a` → ok: vscode-typecheck, vscode-unit (`6954cd7`). Harness test covers explicit override, PATH `codium` precedence, `code` fallback, and absent editor; no native editor evidence claimed. Done: `aeed37f`.
-
-- [x] **[P2] Exercise Abort synchronization failure and outstanding confirmation directly** (`clients/vscode/test/integration.js:644-667`, managed-draft Abort block; `clients/vscode/lib/drafts.js:529-552`, `cancel`)
-  - **Problem:** The new block only intercepts Abort requests after synchronization succeeds. It does not exercise failed synchronization, cancellation on an unavailable connection, or Abort bypassing an outstanding confirmation; its error assertion searches the entire accumulated message history and therefore passes even if the current failure emits no error.
-  - **Why it matters:** Coverage correctness — these are explicit acceptance requirements of the P0 fix, and the existing disconnect-at-deactivation and ordinary Abort checks do not exercise them.
-  - **Change:** Do after: **Retain VSCode draft text until Abort is positively acknowledged**. Extend the existing managed-draft integration block, using controlled promises rather than sleeps: reject a draft synchronization notification and assert no Abort request or teardown; invoke Abort against an unavailable owner connection and assert retained bytes/tab/registration; hold a confirmation response, invoke Abort, prove its request is sent before releasing confirmation, and prove the late confirmation callback cannot tear down an invalidated draft. Restore intercepted transport functions after each case. Clear or slice notification history per case and assert the expected current error (allow intentional duplicate-error suppression for repeated identical failures). Assert HEAD/index unchanged across the rejected attempts and successful Abort retry.
-  - **Done when:** Each case fails if its named guard is removed, errors are checked per attempt rather than against old notices, and `make vscode-test` passes.
-  - **Constraints:** Touch only `clients/vscode/test/integration.js`; reuse its real-server fixture and mocked editor APIs. Do not claim native execution, change server arbitration, or add another harness.
-  - Verified: `make vscode-test` @ `275bcc2` → `ok: vscode/keybindings`.
-
-- [x] **[P2] Replace the retired Abort envelope in the current client contract** (`docs/CLIENT_SPEC.md:108-125,941-946`, Current real-file commit editing and Plain draft description)
-  - **Problem:** The changed Plain paragraph now requires exact Abort acknowledgement, but the same document's current real-file contract still instructs clients to send `view/invoke common.cancel` with `args:{runId}`. This is the retired, unacknowledged path that the fix removes.
-  - **Why it matters:** Contract correctness — implementers following the primary contract would recreate the unsafe cancellation path.
-  - **Change:** Replace the explicit Abort sentence at line 125 with the existing `workspace/executeCommand` / `magit.command` envelope containing `command:"common.cancel"`, `runId`, `uri`, and synchronized `version`. State the exact `{type:"aborted",runId,uri,version}` response and retention on rejected, missing or mismatched acknowledgement. Clarify the nearby confirmation-only dispatcher wording so it does not exclude Abort. Keep the Plain paragraph consistent without duplicating detailed protocol tables.
-  - **Done when:** The current real-file section documents the same request and response as `src/protocol.rs:90-102,150-157` and `src/server.rs:3020-3045`; `make docs-check` passes.
-  - **Constraints:** Edit only authored `docs/CLIENT_SPEC.md`; do not hand-edit generated references, change protocol, or claim native verification.
-  - Verified: `make docs-check` @ `cc73c59` → exit 0; `ok: docs-check`.
-
-- [x] **[P2] Restore profile coverage for contextual todo commands** (`src/commands.rs:25-79,925-936`, `Scope::RebaseTodo`; `src/manifest.rs:107-138`, `check_coverage`; `tests/keymap.rs:29-59`, `every_profile_parses_and_covers_every_command`)
-  - **Problem:** Both production and test coverage skip every `Scope::RebaseTodo` command, even though nine are profile-bound and only `rebase.todo-set-action` plus `rebase.todo-move-before` are intentionally argument-only. A missing submit/action/movement binding therefore passes the check named “covers every command.”
-  - **Why it matters:** Test validity/cohesion — the new scope weakens the project-wide profile invariant instead of recording its two deliberate exceptions.
-  - **Change:** Add one registry-owned predicate on `Command` that says whether a command requires an explicit profile binding: menu actions and the two argument-only todo commands return false; all other commands return true. Use it from both `manifest::check_coverage` and the keymap regression, removing the blanket `RebaseTodo` exclusion.
-  - **Done when:** Deleting any of the nine user-facing todo bindings makes coverage fail, the two argument-only commands remain intentionally unbound, and `make test-rust FILTER="--test commands --test keymap --test manifest"` passes.
-  - **Constraints:** Do not bind the argument-only commands, duplicate exception lists in profiles/tests, or change generated keybinding output.
-  - Verified: `make test-rust FILTER="--test commands --test keymap --test manifest"` @ `0a98afe` → ok: rust.
-  - Recorded coverage follow-up: `make test-rust FILTER="--lib --test commands --test keymap --test manifest"` @ `dfd6415` passed; nine deletion unit cases and argument-only absence case.
-
-- [x] **[P2] Pin the VSCode adapter version to the server package version** (`tests/client_versions.rs:1-16`, `bundled_adapter_versions_match_cargo_package_version`; `clients/vscode/package.json:1-7`, `version`; `clients/vscode/lib/session.js:15-18`, `extensionVersion`)
-  - **Problem:** The drift test compares Cargo only with the Lua adapter. VSCode reads its own package version for startup negotiation, so an independent package-version edit can make every bundled VSCode checkout report a mismatch without failing any consistency check.
-  - **Why it matters:** Test validity/cohesion — both bundled clients implement the same version contract, but only one is tied to the server release identity.
-  - **Change:** Extend `tests/client_versions.rs` to parse `clients/vscode/package.json` with `serde_json` and assert its `version` equals `CARGO_PKG_VERSION` alongside the Lua assertion; rename the test to cover both adapters and retain failure messages naming the drifting file.
-  - **Done when:** Changing either bundled adapter version alone fails the focused test, matching versions pass, and `make test-rust FILTER="--test client_versions"` passes.
-  - **Constraints:** Do not introduce a generated version file, runtime fallback, compatibility shim, or change warning behavior.
-  - Verified: `make test-rust FILTER="--test client_versions"` @ `dfd6415` → ok: rust.
-
-- [x] **[P2] Make the portability audit claims self-consistent** (`docs/PORTABILITY_AUDIT.md:3-30`, `TASKS.md:47-48`, `PORT2`; `docs/evidence/commit-head-operations.md:188-192,307-311`)
-  - **Problem:** The audit and PORT2 completion note each claim that no literal personal checkout prefix remains while quoting that same literal. The historical evidence also calls two normalized, explicitly unrerun command lines the “exact ticket command,” contradicting its normalization notice.
-  - **Why it matters:** Cleanliness/status correctness — the portability record's own text falsifies its search result and overstates altered historical commands.
-  - **Change:** Reword the audit outcome and PORT2 note to say the bounded sweep found the personal prefix only in those two audit statements, then refer to it without reproducing the literal. In `commit-head-operations.md`, label both displayed lines as normalized forms of the historical passing commands, not exact rerun commands. Record the bounded tracked-text classifications: no `/nix/store`; synthetic `/home/alice`, generic `/home/you` and `/home/YOUR_USER`, redacted `/home/<user>`, and dated historical snapshots are retained; the maintained `/usr/bin/git` dependency is owned by **Resolve the real Git test binary through PATH**. Use `git grep` over tracked text, not dependency/build trees; do not add a permanent scanner.
-  - **Done when:** Tracked text has no literal personal checkout prefix; the audit scope/result and PORT2 note are true when read literally; normalized historical commands are not called exact or rerun; `make docs-check` passes.
-  - **Constraints:** Do not rewrite immutable Git history, generated historical captures, synthetic wirelog fixtures, generic installation examples, or `/tmp/opencode` provenance. Do not touch concurrent rebase or untracked release work.
-  - Verified: `make docs-check` @ `50f6aac` → ok: docs-check; bounded tracked-path `git grep` found no personal checkout prefix. Historical commands labeled normalized, not rerun.
-
-- [x] **[P2] Retire the source-spelling portability checker** (`scripts/check-portable-paths.py:1-23`; `Makefile:32-33`, `portability-check`; `TASKS.md:45-46`, `PORT1`)
-  - **Problem:** `check-portable-paths.py` is a one-off source-token oracle: it requires one exact JavaScript spelling exactly twice, hard-codes the current JSON keys, and proves only that repository-relative files exist, not that OpenCode resolves them at runtime. It is not wired into CI or an aggregate gate, so harmless refactors break it while actual portability outside its two-file allowlist remains unchecked.
-  - **Why it matters:** Simplicity/cleanliness — permanent script and Make surface add brittle maintenance without stable behavioral coverage, while PORT1 incorrectly says to retain the check.
-  - **Change:** Delete `scripts/check-portable-paths.py` and the `portability-check` Make target. Rewrite PORT1's verification note as a one-time historical check and remove the instruction to retain it; keep the actual config/plugin and spike changes recorded without claiming runtime proof from source parsing.
-  - **Done when:** No `portability-check` target or checker reference remains; PORT1 accurately records the one-time verification and current retained behavior; documentation checks pass.
-  - **Constraints:** Do not revert the private-plugin removal, repository-relative OpenCode commands, or `MAGIT_VSCODE_BIN || 'code'`. Do not replace the script with a broader path/token scanner or add source-spelling assertions elsewhere.
-  - **Rationale:** Removed brittle source-token checker and its Make target; PORT1 entry retains only historical one-time source-check evidence, not runtime proof.
-  - Verified: `make docs-check` @ `aeed37f` → ok: docs-check.
-
-- [x] **[P2] Delete the stale temporary handoff transcript** (`tmp-task.md:1-350`). Done: containing commit.
-  - **Problem:** `tmp-task.md` is an unreferenced 2026-10-24 worker handoff that calls itself an “AUTHORITATIVE CURRENT UPDATE,” embeds personal paths and obsolete direct verification recipes, and conflicts with `TASKS.md` as the sole current queue. Git history already preserves the transcript at `326cced`.
-  - **Why it matters:** Cleanliness/cohesion — stale status authority and superseded instructions remain in the repository with no current consumer.
-  - **Change:** Delete `tmp-task.md`; do not sanitize or relocate its contents. Keep any still-live work only where it already exists in the canonical queue.
-  - **Done when:** `tmp-task.md` is absent and no maintained document links to it; current queue and historical commit provenance remain intact.
-  - **Constraints:** Do not copy the transcript into another documentation file, alter current implementation status, or remove dated evidence documents that are explicitly labeled historical.
-  - Git grep sweep: `git grep -n 'tmp-task.md' -- '*.md'` found only references in this removal ticket; no maintained document links to it.
-  - Verified: `make docs-check` @ `130f8eb` → ok: docs-check; `tmp-task.md` absent.
-
-- [x] **[P2] Return deferred sibling refreshes from session prompt closes.** Prerequisite for the server-delivery item below. test: after refresh-all is queued during a document prompt, closing either the prompt view or its origin returns fresh renders for every surviving normal-mode view. Text-mode edits and queued refresh remain intact. Verification: `make test-rust FILTER="--test prompts"`. Done: containing commit.
-  - Verified: make test-rust FILTER="--test prompts" @ 7fae07c → 34 passed, including `closing_a_document_prompt_returns_every_surviving_refresh` and `closing_a_document_prompt_keeps_text_mode_refreshes_queued`.
-
-- [x] **[P2] Resume deferred sibling refreshes when a prompt or its origin closes.** Server-delivery slice; session/text-mode behavior is owned by the prerequisite above. test: queue refresh-all with multiple repository views, then close the prompt view or its origin through the server `view/close` dispatcher; surviving normal-mode views receive fresh render notifications without a later unrelated refresh, and the response stays JSON null. Use a server unit fixture to queue `Session::refresh_all` deterministically: `common.refresh` bypasses this queue, and the watcher has no observable queued-state barrier. This is dispatcher coverage, not stdio/watcher evidence. Verification: `make test-rust FILTER="--lib --test prompts --test server_async"`. Done: containing commit. Verified: make test-rust FILTER="--lib --test prompts --test server_async" @ ff49240 → ok; `closing_a_prompt_view_or_origin_delivers_resumed_sibling_refreshes` covers both close targets.
-
-- [x] **[P2] Verify Plain close routing of resumed prompt refreshes.** Follow-up verification slice for the shared server-close implementation above. check: trace every `close_plain` and `schedule_plain_open` caller; confirm outcomes are delivered only after releasing `plain_lifecycle`, with no discarded pending outcome. Record source-only limits and run the focused Plain suites. Verification: `make test-rust FILTER="--test plain_actions --test plain_sync --test plain_draft"`. Done: 16d725e.
-  - Source audit @ ee220d1: `close_plain` (`src/server.rs:1570`) has exactly three callers — inside `schedule_plain_open` (`:1154`, whose result it returns) and the two Plain `didClose` dispatcher paths (`:2336`, invalid-sync branch; `:2358`, success branch). `schedule_plain_open` has one caller (`:2345`, Plain `didOpen` success branch); no other module or hook calls either. `deliver_plain_close_outcome` (`:1612`) has exactly three callers (`:2340`, `:2347`, `:2360`), each pairing with the close/open immediately above it. All four dispatcher arms take `plain_lifecycle` at `:2278`, call close/open while holding it, drop the guard (`:2339`, `:2346`, `:2359`; `:2354` for the didChange path) and only then deliver, because delivery reacquires the guard through `dispatched_outcome` (`:4777`) and `route_plain_render` (`:788`, guard at `:793`). The didOpen error branch (`:2291-2341`) closes without bootstrapping; `schedule_plain_open`'s early `None` returns (`:1143-1152`) all precede its `close_plain` call, so no pending outcome exists there. No returned `Some` outcome is dropped.
-  - Source-only limit: `close_plain` maps `Session::close` errors to `None` (`src/server.rs:1585-1592`); a `resume_pending`/`resume_prompt` error after the prompt was taken (`src/session.rs:906`, `:922`, `:940`) therefore skips delivery. Queued refreshes stay `dirty` (`src/session.rs:1797-1800`) and resume on a later refresh, so no produced result is lost, but static tracing cannot prove runtime interleaving.
-  - Coverage limit: `plain_actions`/`plain_sync`/`plain_draft` exercise Plain `didClose` and document lifecycle (`tests/plain_actions.rs:1078`, `tests/plain_sync.rs:104`, `tests/plain_draft.rs:933`), but none closes a Plain prompt view with queued sibling refreshes, so resumed-refresh delivery at Plain transport rests on this source audit. Deterministic rich dispatcher coverage is `src/server.rs::commit_tests::closing_a_prompt_view_or_origin_delivers_resumed_sibling_refreshes`; this is not a stdio or watcher test.
-  - Verified: make test-rust FILTER="--test plain_actions --test plain_sync --test plain_draft" @ ee220d1 → 29 + 19 + 11 passed (V=1).
-
-- [x] **[P1] Guard delayed Plain draft delivery failures against accepted or superseded deliveries.** Introduced in `bfb60d1`, `src/server.rs:1071–1085`. Atomically check current delivery identity and unopened draft state before aborting; never check then abort. test: cover both arrival orders; late failure after exact `didOpen` or replacement delivery does not cancel, while failure of current unopened delivery cancels with readable message and no commit. Cover rejection, error and timeout outcomes. Verification: `make test-rust FILTER="--test plain_draft --test editor_bridge"`. Done: containing commit.
-  - Verified: make test-rust FILTER="--lib delivery_guard"; make test-rust FILTER="--test plain_draft --test editor_bridge --test editor_drafts" @ 67db167 → ok.
-  - Replacement-delivery identity is registry-level coverage (`delivery_guard_aborts_only_the_current_unopened_delivery`), not transport evidence; `plain_draft` covers late rejection/error/timeout after the exact `didOpen` and current-unopened cancellation for all three outcomes.
-
-- [x] **[P1] Match empty-secret cancellation in the shared Rust prompt model.** The new `secret-empty` vector expects cancellation, matching clients, but `tests/common/editor_model/prompts.rs` returns an empty value. Done: containing commit. test: shared vector evaluation cancels empty secret input while preserving ordinary empty text. Verification: `make test-rust FILTER="--test plain_harness shared_prompt_vectors_derive_answers_and_focus"`.
-- [x] **[P1] Keep repaired Plain prompt action generations current.** `src/server.rs` captures generation before prompt reconciliation, then ignores the newer repaired render version when rebuilding actions. test: repair protected prompt text, acknowledge the repair, and successfully execute answer/cancel using newly offered actions without a stale-generation rejection. Verification: `make test-rust FILTER="--test plain_sync --test plain_prompt"`. Done: containing commit.
-  - Investigation (2026-11-08; source review, not verified implementation): a second defect prevents the repair regression from completing. The repaired branch of `plain_change` does not record the latest observed client text/version before `render_actions`. `PlainDocument::prepare` therefore either sees the old canonical text and emits no repair, or builds an edit against the previous document version. A later code-action response is a valid synchronization barrier; extra waits do not correct the stale controller snapshot.
-  - Proposed fix: extract the observation and existing in-flight bookkeeping from `PlainDocument::change` into an observe-only operation, leaving edit preparation in `change`. In the repaired prompt branch, after session reconciliation returns, observe the current document snapshot and render the repaired tree under one controller lock and incarnation check. Use the returned `render.version` for action metadata. Preserve existing in-flight behavior; do not discard flights via `adopt`, emit an obsolete edit before updating authority, or change CRLF policy.
-  - Regression plan: replace the CRLF workaround in `tests/plain_actions.rs::repaired_plain_prompt_offers_actions_for_the_repaired_generation` with a valid LF field edit, synchronize through a code-action response while handling any server requests, then damage a protected title. Assert no repair for the valid field edit, repair targeting the damaged notification's document version, successful application preserving the field value, action generation matching the repaired render, and successful Cancel. Guard observation extraction with controller coverage for echo/response ordering and rejected edits using existing infrastructure. Verification: `make test-rust FILTER="--test plain_actions --test plain_sync --test plain_prompt"`; focused diagnosis: `make test-rust FILTER="--test plain_actions repaired_plain_prompt_offers_actions_for_the_repaired_generation"`.
-  - Checkpoint: the two-line `src/server.rs` generation fix and unfinished regression in `tests/plain_actions.rs` remain uncommitted. Prior verification failed (28 passed, 1 failed; `build/test-logs/rust.tDK7TH`). Resolved in the containing commit: `PlainDocument::observe` extracts observation bookkeeping, the repaired branch observes the current snapshot before rendering, and the regression plus controller coverage pass.
-- [x] **[P2] Resume deferred sibling refreshes after document prompts.** `src/session.rs` queues refreshes for every view while a prompt is active but completes only the origin refresh. test: with multiple repository-backed views, defer refresh-all during a prompt, finish/cancel the prompt, and ensure every affected normal-mode view updates without losing text-mode edits. Verification: `make test-rust FILTER="--test prompts --test server_async"`. Done: `15a7158`. Verified: make test-rust FILTER="--test prompts --test server_async" @ 53de88a → ok: rust.
-- [x] **[P1] Report a rejected Plain commit draft edit.** `send_plain_edit_document` in `src/server.rs` sends a versioned whole-buffer `workspace/applyEdit` for an already-open `COMMIT_EDITMSG` buffer, then awaits the reply in a spawned task and discards it. A client that rejects the edit (`applied: false`, an error, or a timeout) leaves the server believing the new template was delivered; the later `didOpen` is then refused by `Draft::did_open` with "Open the commit draft with its current version and exact text" instead of a readable reason. Mirror the existing `send_plain_edit` handling: read `applied`, and on rejection show a readable message and cancel the run instead of leaving a stale-buffer draft pending. test: a Plain client that rejects the draft `applyEdit` sees a readable message, the run is canceled, and no commit happens. Verification: `make test-rust FILTER="--test plain_draft --test editor_bridge"`.
-
-- [x] **[P1] Reconcile relocated architecture with the current wire contract.** Done: `e666f27`.
-- [x] **[P1] Make bare docs-check validate every maintained reference.** Done: `0474efc`; evidence: `9df2075`.
-- [x] **[P2] Stop calling the resolved config-directory choice open.** Done: containing commit.
-
-- [x] **[P1] Route Plain draft-sync failures through standard notifications, not `view/effects`** (`src/server.rs:1828-1840`, `editor::registry().notification_failure` call site) Done: `5fb7977`. Verified: make test-rust FILTER="--test plain_harness --test server_async".
-  - **Problem:** The `textDocument/didOpen|didChange|didClose|didSave` failure handler emits every error (and the failed-close `Effect::EditDocument` reopen) through `custom_ui(&shared.client).effects(...)`, which for a `Presentation::Plain` client serializes a `view/effects` notification — the custom rich protocol a thin Plain client does not understand. The start_listener emitter (`src/server.rs:1514-1549`) already branches on Plain and delivers `Effect::Message` via `window/showMessage` and `Effect::EditDocument` via `send_plain_edit_document`; this second delivery seam does not. Result: a Plain client that closes an unsaved commit buffer (failed native close) or sends a stale `didChange` gets a `view/effects` frame it ignores, loses the readable error and the re-presented editor, and leaves the Git helper blocked in its reply loop until an explicit Abort or shutdown. The `plain_commit_editor_manual_instructions_cancel_pending_git_run` scenario only exercises the happy Confirm/Abort path, so this is un-covered.
-  - **Why it matters:** Correctness/cohesion — it violates the T007.4 contract that Plain delivery is standard LSP only (the native runner asserts zero custom notifications) and breaks the "draft registry as sole authority" recovery path.
-  - **Change:** Extract the Plain-branch body of the start_listener emitter (`src/server.rs:1514-1549`) into one helper, e.g. `fn deliver_plain_effects(shared: &Shared, effects: Vec<Effect>)`, that maps `Effect::Message` through `effect_notifications(&shared.client, …)` and `Effect::EditDocument { run_id, uri, title, .. }` through `send_plain_edit_document` (re-reading `capabilities.show_document` from `shared.client`) followed by the pending-row refresh already done inline at `src/server.rs:1525-1539`. Call that helper from both the listener emitter and the `notification_failure` emit closure at `src/server.rs:1828-1840` (the closure becomes `|effects| deliver_plain_effects(&shared, effects)` for Plain, falling back to `custom_ui(...).effects(...)` for Rich). Do not change `editor::notification_failure`'s signature; keep the "queue while holding the lifecycle lock" comment intact.
-  - **Done when:** A Plain (no `experimental.magit`) real-stdio test sends a stale `didChange` or a failed `didClose` on the issued `COMMIT_EDITMSG` URI and asserts the client receives `window/showMessage` (and, on failed close, a `window/showDocument`/manual instruction for the same run) with no `view/effects` notification on the wire; existing Plain and Rich draft tests still pass.
-  - **Constraints:** Do not touch `src/editor.rs` beyond its existing `notification_failure` contract. Do not add a new scenario file; extend the existing Plain commit-editor scenario or a `plain_harness` test.
-
-- [x] **[P2] Document the registry-lock-during-emit invariant behind the detached refresh thread** (`src/editor.rs:840-876`, `src/server.rs:1531`) Done: `e70f748`. Verified: make test-rust FILTER="--test plain_harness".
-  - **Problem:** `handle_edit` invokes `emitter(...)` while holding `editor::registry().lock()` (the `entries` guard stays alive through the call). The Plain emitter must therefore run `refresh_pending_views` on a separate thread, because that refresh re-enters the registry lock via `render_with_delivery` → `registry().pending_for` and would self-deadlock on the emitter's own thread. The `std::thread::spawn(move || …)` at `src/server.rs:1531` exists precisely to break that cycle, but nothing records it, and the thread is detached (never joined, holds a full `Shared` clone until it finishes).
-  - **Why it matters:** Readability/simplicity — a hidden lock-ordering invariant that a future "simplification" (running the refresh inline) would turn into a deadlock.
-  - **Change:** Add a comment at `src/server.rs:1531` stating why the refresh must run on a separate thread (the emitter is called under `editor::registry().lock()` in `handle_edit`, and an inline refresh would re-acquire that lock through `EditRegistry::pending_for`). Optionally add a matching note at `src/editor.rs:865` that `emitter` runs while the registry lock is held.
-  - **Done when:** Both sites carry a comment that names the lock and the deadlock it prevents; no behavior change and existing Rust tests pass.
-  - **Constraints:** Comment-only change; do not restructure lock ownership in this task.
-
-- [x] **[P1] Bind prepared rebase launch to the captured HEAD attachment** (`src/rebase_plan.rs:9-34,72-86`, `PreparedRebase::prepare`, `PreparedRebase::validate_launch`; `src/git.rs:822-824`, `GitRepo::repository_identity`)
-  - **Problem:** Prepared ownership captures the HEAD commit but not its symbolic ref or detached state. Changing HEAD to another branch at the same commit passes the current identity, membership and clean-state checks, so submitting an old plan can rewrite a different branch than the one on which it was prepared.
-  - **Why it matters:** Correctness — commit identity alone does not identify the branch authorized for a history rewrite.
-  - **Change:** Add a Git-boundary HEAD identity that includes the resolved commit and the exact symbolic ref, or an explicit detached state. Capture it in `PreparedRebase::prepare` and compare it during `validate_launch` before starting Git. Extend `tests/rebase_interactive.rs` with same-OID branch-switch and attached-to-detached cases; use an edited plan whose execution would visibly rewrite history, and assert readable refusal, preserved entries, unchanged refs/index/worktree and no rebase directory.
-  - **Done when:** Switching only HEAD attachment invalidates an existing plan, while an unchanged attachment still launches; `make test-rust FILTER="--test rebase_interactive"` passes.
-  - **Constraints:** Do not pass the captured branch as an extra rebase argument to silently switch back. Do not weaken OID, repository, membership or clean-state checks. Review evidence is committed source at `7f5f74f`; preserve concurrent unstaged `src/git.rs` changes.
-  - Verified: `make test-rust FILTER="--test rebase_interactive"` @ `7f5f74f` → ok: rust
-
-- [x] **[P1] Make prepared-plan edit failures transactional** (`src/rebase_plan.rs:40-68,72-86`, `PreparedRebase::replace_entries`, `PreparedRebase::set_action`, `PreparedRebase::move_before`; `src/rebase_todo_view.rs:30-35`, `RebaseTodoView::edit_entries`)
-  - **Problem:** The public model edit methods duplicate the view's safer implementation. `move_before` removes an entry before validating its target and leaves reordered entries behind when a leading fixup/squash is rejected; `set_action` restores `Pick` rather than the previous action on failure. `validate_launch` does not reject the invalid leading-action state left by a failed move.
-  - **Why it matters:** Correctness and DRY — a rejected edit can lose instructions or leave a launchable invalid plan, depending on which editing API the caller uses.
-  - **Change:** Route both public model edit methods through one clone/edit/validate/commit path, using `replace_entries` as the commit boundary. Validate move targets before committing, preserve every prior entry/action on any error, and remove the independent rollback logic that resets an action to `Pick`. Extend the existing prepared-model tests with unknown target, self target, a move exposing a leading fixup, and an invalid first-action change after the first entry was set to `Reword`; compare the complete entry vectors before and after each rejected edit.
-  - **Done when:** Every failed public edit leaves entries byte-for-byte equivalent at the field level; valid model and view edits retain their existing behavior; `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` passes.
-  - **Constraints:** Do not remove the public methods merely to hide the failing cases, relax todo constraints, or grant prepared plans paused-file save authority.
-  - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `7f5f74f` → ok: rust
-
-- [x] **[P1] Refuse unsupported prepared message-edit actions before launch** (`src/git.rs:841-858`, `GitRepo::launch_interactive_rebase`; `src/rebase_plan.rs:72-102`, `PreparedRebase::validate_launch`, `PreparedRebase::launch_outcome`; `tests/server_async.rs:61-136`, `prepared_rebase_submit_through_real_server_keys_restores_caller`)
-  - **Problem:** Prepared todos offer `Reword` and `Squash`, but the launch adapter supplies only `GIT_SEQUENCE_EDITOR`, not the registered commit-editor bridge. These actions invoke Git's ordinary editor with null stdin and captured output: a configured terminal editor can block invisibly, while an unset/unusable editor fails after replay starts. The server success test masks this boundary by injecting `GIT_EDITOR=true`, so it never proves message editing.
-  - **Why it matters:** Correctness — a visible editing action must not silently use an inaccessible editor or discard the requested message edit.
-  - **Change:** For this bounded chunk, reject prepared plans containing `TodoAction::Reword` or `TodoAction::Squash` in `validate_launch` with a readable explanation that prepared message editing is not supported yet. Keep the prepared editor and all instructions on refusal. Extend the existing prepared-submit coverage in `tests/server_async.rs` to prove both refusals occur before Git mutation and preserve the editor/action labels. Change the successful replay test to use supported actions rather than `Reword`; keep its exact order/drop/history assertions. In `tests/rebase_interactive.rs::exclusive_base_plan_has_full_oid_membership_and_discard_is_read_only`, use `Edit` for the plan expected to pass launch validation; cancellation-only tests can still edit unsupported instructions. Full registered message-editor integration can be a later implementation slice, not an implicit external-editor fallback.
-  - **Done when:** Unsupported message-edit plans fail preflight without a child editor, repository mutation or lost plan; supported actions still execute; `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` passes.
-  - **Constraints:** Do not solve this by setting `GIT_EDITOR=true`, launching a terminal editor, changing paused-todo save semantics, or implementing T019.5. Keep this change within `src/rebase_plan.rs`, `tests/server_async.rs`, and `tests/rebase_interactive.rs`.
-  - Attempts: Two default PARTIAL checkpoints added validation only; split model preflight verification from genuine-server refusal coverage.
-  - [x] **Reject prepared message actions at the model boundary.** test: Both Reword/Squash refuse before Git with unchanged entries and exact repository state; supported direct launch remains valid. check: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"`.
-    - Verified: `make test-rust FILTER="--test rebase_interactive --test rebase_todo"` @ `efa984d` → ok: rust
-  - [x] **Verify prepared message refusals through server submit.** test: Both genuine-server refusals preserve editor labels/order and repository state; supported key replay retains exact history/drop/caller checks. check: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"`.
-    - Verified: `make test-rust FILTER="--test server_async --test rebase_interactive --test rebase_todo"` @ `09fbbda` → ok: rust
-
-- [x] **[P2] Assert native cancellation invariants before the next rebase starts** (`tests/ui/scenarios/rebase-interactive.scn:4,27-28,54-58,96-105`, initial state captures and edited cancellation; `TASKS.md`, `T019.4b`)
-  - **Problem:** The native scenario captures `initial-head`, `initial-branch`, `initial-index`, `initial-refs` and `initial-worktree` but never compares them after either cancellation. Its later state assertions use a new post-launch baseline, so they cannot establish the exact cancellation preservation claimed by T019.4b; three consecutive identical stack assertions also add no coverage.
-  - **Why it matters:** Test validity — a cancellation that mutates the repository could pass the scenario and be hidden by the subsequent successful launch.
-  - **Change:** Immediately after the edited-plan Escape and before reopening another selector, compare current HEAD, branch, refs, index entries and worktree diff with the existing initial captures; assert clean status and absence of both rebase directories. Keep the usable-caller menu interaction after that check. Remove the redundant consecutive stack assertions. Update T019.4b's evidence only after rerunning the scenario through its existing Make target.
-  - **Done when:** Native cancellation directly checks the original repository baseline before any later launch; `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` passes with text/structured evidence.
-  - **Constraints:** Do not add another scenario, snapshots or image capture. Do not substitute the Rust cancellation tests or post-launch baseline for this native acceptance check.
-  - Verified: `make ui-file FILE=tests/ui/scenarios/rebase-interactive.scn` @ `7be7ff2` → `ok: build`, `ok: ui-file`; edited cancellation compares original repo baseline before subsequent selector. `pgrep -af magit-lsp` showed no server orphan.
-
-- [x] **[P2] Reconcile focused version-startup documentation with the shared runner** (`docs/TESTING.md:98-110`, focused version targets; `clients/vscode/test/e2e/run.mjs:47-49,210-214`, `focusedVersion`; `clients/vscode/test/e2e/suite.js:311-350`, version branch)
-  - **Problem:** The documentation promises `version-startup-evidence.json` and says the startup target does not verify warning visibility. Both focused flags now select the same version branch, which requires visible warning text and writes only `version-warning-evidence.json`; the documented startup artifact is no longer produced.
-  - **Why it matters:** Contract drift and simplicity — the maintained verification instructions describe a retired distinction and direct users to a nonexistent artifact.
-  - **Change:** Update `docs/TESTING.md` to state that both existing targets run the shared startup-and-visible-warning check and produce `version-warning-evidence.json`. Remove the claim that the startup target stops short of visibility verification. Keep earlier dated queue evidence historical rather than rewriting successful past runs.
-  - **Done when:** Each documented target's behavior and artifact name match the current shared runner; documentation checks pass.
-  - **Constraints:** Documentation-only correction; do not introduce another runner branch, duplicate evidence producer, or change existing Make target names.
-  - Verified: `make docs-check` @ `27ad2de` → documentation checks passed; both target descriptions name shared startup-and-visible-warning behavior and `version-warning-evidence.json`.
-
-- [x] **[P1] Keep deferred repository ownership until the worker exits** (`src/server.rs:5099-5303`, `spawn_repository_operation`, `DeferredReservation`, `ProgressEnd`)
-  - [x] **Deferred reservation and Rich routing regression.** test: Genuine registered squash wait refuses Rich mutations, preserves read-only key/invoke and other-repository traffic, releases ownership on completion/cancellation, and retains exact Git/index state.
-  - [x] **Plain deferred mutation refusal regression.** test: A valid Plain mutation envelope during the same genuine editor wait receives readable refusal with unchanged repository state; normal draft completion remains available.
-    - Verified: `make test-rust FILTER="--test plain_draft"` @ `b097155` → `ok: rust`; registered commit wait refuses a fresh Plain stage offer without changing HEAD/index, Abort restores status, and subsequent stage succeeds.
-  - **Problem:** The request releases its repository mutex and mutation ticket after spawning the deferred worker, but no running-worker reservation prevents subsequent repository commands. `cancellation_pending` rejects commands only after cancellation is requested. During an instant squash's registered editor wait, another request can stage, commit, or abort the same repository underneath the still-running rebase.
-  - **Why it matters:** Correctness — the new multi-phase instant operation does not retain exclusive server-side mutation authority between validation, marker creation, replay and editor completion.
-  - **Change:** Publish a deferred-worker reservation synchronously before spawning, using the existing progress ownership or a small RAII-owned reservation. Refuse subsequent repository mutation requests for that repository until worker cleanup and outcome publication finish; cover Rich key/invoke and Plain execution entry points. Preserve independently routed draft synchronization/Confirm/Abort, progress cancellation, read requests and requests for other repositories. Release the reservation on setup/spawn failure, normal completion, cancellation and disconnect. Do not hold a session/repository mutex while waiting for an editor.
-  - **Done when:** Extend `tests/server_async.rs` to hold a genuine instant squash at its registered editor, attempt another same-repository mutation and verify readable refusal with unchanged Git/index state, then complete or cancel the draft and prove a subsequent ordinary mutation succeeds. Existing editor and cancellation tests still pass through Make.
-  - **Constraints:** Keep one shared deferred worker. Do not queue requests behind an editor-dependent mutex, block draft completion behind the reservation, or change the protected unstaged source baseline. Review evidence is committed `2001ec405e5501ffca40031244bcca7be46a0c8e` only.
-  - **Reopened (reviewed at `1e50954`):** The original waiting-worker regressions pass, but `spawn_repository_operation` explicitly calls `drop(reservation)` before enqueueing the prepared render/effect messages, and the closure drops `ProgressEnd` only afterward. The checked task's requirement to retain mutation authority through outcome publication is therefore not met.
-  - **Remaining problem:** A same-repository request can acquire mutation authority after Git/refresh cleanup but before the older worker has published its renders, outcome effect, and progress end. The client can then observe an older worker's state after newer work has started.
-  - **Remaining why it matters:** Correctness and cohesion — repository mutation serialization must include the server-owned publication that tells clients which state won, not just the Git subprocess lifetime.
-  - **Remaining change:** In `spawn_repository_operation`, remove the pre-send `drop(reservation)` and make guard ordering explicit for every closure exit: declare the `DeferredReservation` before the `ProgressEnd` guard so reverse lexical drop order ends progress first and releases the reservation last. Enqueue every prepared render/effect before either guard drops. Preserve early-return, error, cancellation, panic-unwind, setup-failure, and spawn-failure cleanup; do not hold a session or repository mutex while sending. A minimal shape is `let reservation = reservation; let _progress = progress; ... send(messages);` with no earlier reservation drop.
-  - **Remaining done when:** Static inspection shows the reservation remains live through all outcome sends and `ProgressEnd::drop` on every worker exit, then releases without leaking on setup/spawn failure. The existing deferred Rich/Plain and progress regressions pass with `make test-rust FILTER="--test server_async --test plain_draft"`; do not add a timing-only race test that can pass without exercising the ordering.
-  - **Remaining constraints:** Keep the current wire messages and progress ordering. Do not delay release until client acknowledgement, add sleeps, introduce another worker reservation, or turn the unbounded sender into a blocking publication path.
-  - Verified: `make test-rust FILTER="--test server_async --test plain_draft"` → `ok: rust`; `spawn_repository_operation` declares reservation before progress guard and sends all prepared messages before either guard drops (`src/server.rs:5184-5185,5295-5299`).
-  - Done: `09119a7`.
-
-- [x] **[P1] Verify the complete autosquash marker subject before replay** (`src/git.rs:933-947`, `GitRepo::verify_autosquash_marker`; `src/instant_rebase.rs:54-64`, `InstantRebaseAuthority::execute`)
-  - **User question / design note:** Selection and `git commit --fixup/--squash` currently use the full target OID, but the generated marker and verification use the target subject (`src/instant_rebase.rs:48-61`, `src/git.rs:938-943`). Git documents autosquash commit specifiers matching a title or hash (https://git-scm.com/docs/git-rebase, `--autosquash`). Prefer full-OID marker identity for instant operations to avoid duplicate-subject ambiguity; verify the supported creation mechanism before prescribing it. Extend acceptance with duplicate-subject targets and exact hook-mutated marker rejection; leave standalone `f` semantics unchanged.
-  - **Problem:** Marker verification accepts any subject starting with the expected marker and target subject. A commit-msg hook changing `fixup! two` to `fixup! two extra` passes verification, although Git cannot match that marker to target `two`; rebase can succeed with a separate marker commit and the server then falsely reports it autosquashed.
-  - **Why it matters:** Correctness — a successful Git exit is not proof of the selected-target autosquash when the marker authority check accepts a different subject.
-  - **Change:** Create instant-only `fixup! <full target OID>` / `squash! <full target OID>` markers using a verified normal Git commit mechanism, then compare the complete marker subject excluding only its command-output line ending. On mismatch, return the existing marker-verification stopped outcome without launching rebase, retaining the actual marker and hook-written message. Keep hooks and ordinary commit machinery enabled; standalone `f` remains unchanged.
-  - **Done when:** Real Git folds into the selected full-OID target even when replay commits have duplicate subjects. A real commit-msg hook appending a suffix leaves HEAD at the created marker with captured parent, reports marker-verification failure rather than Completed, creates no rebase state and preserves actual hook-written content. Existing fixup/squash success and registered editing remain passing.
-  - **Constraints:** Do not disable hooks, rewrite the hook's result, roll back the marker, or replace Git's transformed autosquash todo with a prepared plan. Preserve protected unstaged `src/git.rs` changes.
-  - Verified: `make test-rust FILTER="--test instant_rebase --test log_commands --test editor_bridge --test server_async"` @ `3274dbf` → exit 0; 29 instant_rebase, 10 log_commands, 8 editor_bridge, and 58 server_async tests passed. Duplicate-subject full-OID fixup folded the selected commit; commit-msg suffix mutation retained marker and content, with no rebase state; existing registered editing and standalone fixup tests passed.
-
-- [x] **[P1] Preserve operation cancellation across the marker-to-rebase boundary** (`src/instant_rebase.rs:46-65`, `InstantRebaseAuthority::execute`; `src/runner.rs:236-268`, `CancelHandle`; `src/runner/owned.rs:180-202`, process cancellation consumption)
-  - [x] **Persistent cancellation intent regression.** test: The same handle remembers intent after child-signal consumption; a fresh unrelated handle starts clear.
-    - Verified: `make test-rust FILTER="--test instant_rebase --test runner --test runner_hooks"` @ `1ccb038` → `ok: rust`; `consumed_child_cancellation_retains_operation_intent_only_on_its_handle` directly consumed a running-child signal, retained same-handle intent, and proved a fresh handle clear.
-  - [x] **Post-marker cancellation regression.** test: Real post-commit hook barrier cancellation retains the recorded marker and prevents any autosquash launch.
-    - Verified: `make test-rust FILTER="--test instant_rebase --test runner --test runner_hooks"` @ `1ccb038` → `ok: rust`; `post_commit_cancellation_retains_marker_and_never_launches_autosquash` directly cancelled at the real hook barrier, reaped it, retained exact marker parent/tree/content/HEAD, reported cancellation, and observed no rebase launch.
-  - **Problem:** Cancellation is consumed by the current child owner. If cancellation interrupts a post-commit hook after Git records the marker, `GitRepo::commit` intentionally returns success with a warning; instant execution then verifies the marker and starts autosquash because no durable operation-level cancellation check remains. Revoking the editor scope does not stop an instant fixup rebase that needs no message editor.
-  - **Why it matters:** Correctness — an acknowledged cancellation can initiate a new history rewrite after the requested stop, rather than retaining the already-created marker.
-  - **Change:** Preserve a non-consuming operation-level cancellation-requested observation separately from the runner's consumed per-child signal. Have `InstantRebaseAuthority::execute` check it before starting each mutating phase, especially after marker creation/verification and before launching rebase. Cancellation after a recorded marker must return a truthful stopped outcome retaining that marker, never start another mutation. Keep the existing recorded-commit warning behavior for ordinary commits.
-  - **Done when:** Extend `tests/instant_rebase.rs` with a real post-commit hook held at an observable readiness barrier; cancel after the marker exists, release/reap the hook, and assert the operation stops with HEAD at that marker, exact captured ancestry/content, and no autosquash launch. Existing process-owner cancellation and instant-operation tests pass through Make.
-  - **Constraints:** Do not make cancellation sticky across unrelated operations, remove the sole-child-owner discipline, use blind sleeps as synchronization, or roll back a recorded commit. Keep the change focused on the cancellation observation, instant phase checks and its regression.
-
-- [x] **[P1] Restore the non-Unix scoped-editor compilation boundary** (`src/editor.rs:505-534`, `EditRegistry::scope_with_lifecycle`; `src/server.rs:5044-5066`, `spawn_repository_operation`)
-  - **Problem:** `scope_with_lifecycle` exists only under `#[cfg(unix)]`, but the shared server worker calls it unconditionally. Unlike `EditRegistry::create`, which has a non-Unix error implementation, the new method has no non-Unix counterpart; Windows compilation therefore fails at method resolution before the existing unsupported-editor error can be returned.
-  - **Why it matters:** Correctness/cohesion — the new scoped path breaks the project's existing compile-time platform boundary, independently of native runtime availability.
-  - **Change:** Provide the corresponding non-Unix `scope_with_lifecycle` error implementation with the same signature, following `EditRegistry::create`, or cfg-gate the scoped operation setup with an equivalent readable unsupported-platform result. Keep Unix admission and lifecycle behavior unchanged. Ensure the public `scope` convenience API has a consistent platform boundary as well.
-  - **Done when:** Every unconditional caller resolves on non-Unix builds and Windows CI compiles the server; focused Linux editor/server checks remain passing. Record Windows CI verification as pending if no Windows toolchain is available locally, rather than claiming it ran.
-  - **Constraints:** Do not implement Windows editor transport, introduce a silent no-editor fallback, install toolchains, or block Linux verification on unavailable hosts. This is a source-visible compilation defect, not a request for native Windows acceptance.
-  - Verified: `make test-rust FILTER="--test editor_bridge --test editor_drafts --test server_async"` @ `d7b656f` → `ok: rust`; Windows CI pending, no Windows toolchain verification claimed.
-
-- [x] **[P2] Stage synchronized changes for only the addressed document** (`src/server.rs:3196-3222`, `draft_notification`; `src/docstore.rs:88-136`, `DocStore::change`, `Document`)
-  - [x] **Addressed-document staging structure.** check: One shared change validator and per-URI candidate commit replace the whole-store clone; focused unit checks pass.
-  - [x] **Real draft multi-document isolation regression.** test: Extend the existing incremental editor regression and exercise the actual draft notification path with unrelated document text/version/repair isolation through success and rejection.
-  - Verified: `make test-rust FILTER="--lib --test plain_sync --test editor_bridge --test plain_draft"` @ `46322ce` → `ok: rust`; real multi-URI draft notifications preserve the accepted addressed snapshot and unrelated text/version/repair behavior across success, stale/malformed input and registry rejection.
-  - **Problem:** Every accepted `didChange` clones the complete `DocStore`, including all open document text, to make one document update transactional with the draft registry. The same handler serves Rich and Plain, so editing one commit message, prompt field, or presentation file copies unrelated open documents on the ordered receive lane.
-  - **Why it matters:** Simplicity and cohesion — the transaction concerns one URI, but its implementation snapshots and replaces connection-wide state. The copy is verified in source; no performance measurements were executed or claimed.
-  - **Change:** Extract the existing single-document version/range/text validation into an operation on a candidate `Document`. Have `draft_notification` clone only the addressed document, validate/apply its changes, forward that candidate text/version to the pending `Draft`, then commit only that URI after registry acceptance. Keep `DocStore::change` as the ordinary store entry point using the same validation logic, including its existing repair behavior; do not maintain two change algorithms. Preserve error wording and receive ordering. Extend `tests/editor_bridge.rs::incremental_commit_sync_negotiates_encodings_and_repairs_unknown_client_state` with a second synchronized URI and assertions that successful and rejected draft changes leave the other document's full text/version/repair behavior unchanged, using existing server-unit inspection infrastructure if necessary rather than adding a production inspection API.
-  - **Done when:** check: `draft_notification` contains no whole-store clone or whole-store replacement, and document changes have one version/range application implementation. test: malformed/stale input and draft-level rejection retain the addressed document's last accepted snapshot and require full-text repair as before; unrelated documents remain untouched. Run `make test-rust FILTER="--lib --test plain_sync --test editor_bridge --test plain_draft"`; extend the nearest existing regression rather than creating a test file.
-  - **Constraints:** Touch at most `src/server.rs`, `src/docstore.rs`, and `tests/editor_bridge.rs`. Do not remove the registry/store atomic acceptance boundary, weaken monotonic observed-version checks, conflate server render generations with editor versions, or introduce a general transaction framework. This task has no dependency on the VSCode Abort task and does not authorize work beyond T019.
-
-- [x] **[P1] Guard every effective Plain repository mutation during deferred work** (`src/server.rs:2741-2938`, `execute_plain_action`; `src/server.rs:4689-4710`, `repository_mutation_command`; `tests/plain_draft.rs:628`, `effective_plain_mutations_are_refused_during_registered_commit_wait`)
-  - **Problem:** `execute_plain_action` checks `deferred_pending` only for the four stage/unstage wrapper commands. It therefore admits direct mutations already classified by `repository_mutation_command`, including `status.discard` and `rebase.todo-submit`, and it checks the wrapper name `menu.run-action` rather than the retained menu item's effective command, allowing commit and rebase continue/skip/abort actions through while another worker owns the repository.
-  - **Why it matters:** Correctness and DRY — Plain has a narrower, duplicated mutation list than Rich invoke/key routing, so one client presentation can mutate repository state underneath an active commit or instant-rebase worker.
-  - **Change:** While validating the retained action snapshot in `execute_plain_action`, resolve an effective semantic command: use the retained `Item::Action.command` for a valid `menu.run-action` target and `params.command` for direct actions. After snapshot validation and before session dispatch, gate `shared.deferred_pending(&repo) && repository_mutation_command(effective_command)` through `deferred_operation_response`. Keep toggle/option/read-only menu behavior unchanged and use `repository_mutation_command` as the single mutation classification; do not add another Plain command list. Extend the existing registered-commit-wait fixture and the nearest Plain rebase fixture rather than adding a new harness.
-  - **Done when:** test: during a genuine registered editor wait, a valid offered `status.discard` or `rebase.todo-submit` envelope and a valid retained `menu.run-action` whose underlying command mutates the repository each receive the readable wait response and leave exact HEAD/index/worktree/rebase state unchanged; a read-only Plain action still works, draft Abort/Confirm routing remains available, and the same mutations succeed after ownership releases. `make test-rust FILTER="--test plain_draft --test plain_harness"` passes.
-  - **Constraints:** Touch at most `src/server.rs`, `tests/plain_draft.rs`, and `tests/plain_harness.rs`. Do not classify by action title/item key, block `common.cancel` for the active draft, parse rendered text, queue mutations, or change the Rich command set or public protocol.
-  - Verified: `make test-rust FILTER="--test plain_draft --test plain_harness"` → `ok: rust`. A1: `effective_plain_mutations_are_refused_during_registered_commit_wait` asserts valid direct discard and fresh retained commit-menu refusal with unchanged HEAD/index/binary worktree diff/status and absent rebase directories (`tests/plain_draft.rs:647-654,676-683`). A2: read-only menu open/cancel and draft Abort remain available; after release the same discard restores exact file bytes and the same commit-menu action completes through Confirm with exact commit message/content and clean status (`tests/plain_draft.rs:668-729`). A3: regression and queue evidence committed together; Done: containing commit.
-  - Regression evidence: former stage-only guard failed the direct wait-message assertion at `tests/plain_draft.rs:647`, returning a discard prompt (`build/test-logs/rust.ovvFsa`); wrapper-only classification failed the menu wait-message assertion (then line 674), dispatching the commit (`build/test-logs/rust.YcYo97`). Two current-snapshot queries drain the queued applyEdit/echo and then obtain its acknowledged snapshot; they do not poll for refusal.
-  - Done: d83fcd2
-
-- [x] **[P1] Preserve native teardown identity when owned processes survive** (`scripts/ui_lib/driver.py:959-1013`, `native_session`; `scripts/ui_lib/driver.py:1016-1095`, `_stop_roles`, `stop`; `tests/ui/test_driver.py:828-980`, `NativeSessionTest`)
-  - **Problem:** `stop` intentionally retains `run.dir` when `remaining_owned_pids` is nonempty, but `native_session` ignores that report and unconditionally calls `TemporaryDirectory.cleanup()`. This deletes the PID and birth-identity records for a still-running owned process, defeating the safe signaling checks and making retry or diagnosis impossible.
-  - **Why it matters:** Correctness and cleanliness — teardown destroys the only evidence that authorizes a later signal precisely on the failure path where that evidence is required.
-  - **Change:** Give `stop` sole authority over native-session directory deletion. Replace the self-deleting `TemporaryDirectory` ownership in `native_session` with a preservation-capable temporary directory (for example `Path(tempfile.mkdtemp(prefix="magit-ui-"))`), retain the stop report, and leave the directory plus role PID/identity files intact whenever owned PIDs survive or teardown raises before proving they are gone. Successful teardown should still remove the directory through `stop`; do not weaken `signal_owned` identity validation. Extend `NativeSessionTest` with controlled stop reports for both surviving and fully stopped roles, including a retry/diagnostic assertion against the preserved record path.
-  - **Done when:** test: a reported surviving owned PID leaves `run.dir`, its role `.pid`, and matching `.identity` files present and discoverable after the context exits; a clean report removes the directory; a teardown exception does not erase ownership evidence or mask a session-body exception. `make ui-unit` passes.
-  - **Constraints:** Touch only `scripts/ui_lib/driver.py` and `tests/ui/test_driver.py`. Do not signal by process name, delete foreign/recycled PID records, mask an exception raised by the session body, add an image-based check, or leave successful runs behind.
-  - Verified: `make ui-unit` → `ok: ui-unit`; context tests assert preserved role PID/identity records after survivor report, stop-owned clean deletion, and preservation on teardown error with body exception precedence (`tests/ui/test_driver.py`, `NativeSessionTest`).
-  - Done: 0c667d1
-
-- [x] **[P1] Honor ref-wide logs when the current branch is unborn** (`src/git.rs:762-798`, `GitRepo::log`; `tests/git_log.rs:62-69,204-216`, `default_log_is_empty_for_unborn_repository`, `ref_variants_have_distinct_reachability_sets`)
-  - **Problem:** `GitRepo::log` returns an empty page as soon as the current `HEAD` is unborn, before it applies `ref_selection`. A repository can have an unborn current branch while other local branches, remote refs, or tags contain commits, so the `local`, `branches`, and `all` log variants incorrectly hide reachable history; an invalid ref selection is also accepted as an empty result on this path.
-  - **Why it matters:** Correctness — ref-wide queries must be governed by their selected ref set, not by whether the currently checked-out branch has a commit.
-  - **Change:** Validate `ref_selection` before any missing-`HEAD` shortcut. Restrict the empty-unborn result to the default current-log query (`revision.is_none()` and `ref_selection.is_none()`); ref-wide queries must still append their existing `--branches`/`--remotes`/`--all` arguments and run Git. Add a real-repository regression that creates local, remote, and tagged history, repoints symbolic `HEAD` to a nonexistent branch, and asserts the exact distinct reachability sets for `local`, `branches`, and `all`; retain a default-current assertion that this same checkout returns an empty page and an unsupported selection returns an error.
-  - **Done when:** All three ref-wide variants return their existing commits with unborn current `HEAD`, default current log remains empty only for the genuinely unborn current branch, invalid selection still fails closed, and `make test-rust FILTER="--test git_log"` passes.
-  - **Constraints:** Do not create a fallback current revision, change the meanings of `local`/`branches`/`all`, parse `show-ref` output, or weaken the existing empty brand-new-repository behavior.
-  - Verified: `make test-rust FILTER="--test git_log"` → `ok: rust`; `ref_wide_logs_work_with_unborn_current_branch` asserts exact reachability sets and default/invalid behavior.
-  - Done: `00ef0f4`.
-
-- [x] **[P1] Reject contradictory merge filters at the Git boundary** (`src/git.rs:759-760`, `GitRepo::log`; `src/session.rs:2397-2402`, `log_options_from_args`; `tests/git_log.rs:188-201`, `log_query_applies_until_merge_and_first_parent_filters`)
-  - **Problem:** `merges_only` and `no_merges` may both be true, and `GitRepo::log` then invokes Git with both `--merges` and `--no-merges`. The menu path permits both switches and typed options can construct the same invalid state, which silently produces a misleading empty log instead of rejecting contradictory input.
-  - **Why it matters:** Correctness and cohesion — user input must be validated once at the repository boundary so every caller sees the same supported query contract.
-  - **Change:** Add one `GitRepo::log` validation before command construction that returns a readable error when both flags are set; do not rely on a menu-only toggle rule. Extend `tests/git_log.rs` with direct boundary coverage and the nearest existing log-menu command test with both switches enabled, asserting a readable message, no log view push, and the caller/menu remains usable. Keep each individual merge filter and `first_parent` combinations unchanged.
-  - **Done when:** Direct and menu-originated contradictory filters fail before Git log execution, each filter alone retains its existing result set, the failed menu open leaves a usable caller rather than an empty log, and `make test-rust FILTER="--test git_log --test log_commands"` passes.
-  - **Constraints:** Do not make the two menu switches implicitly clear each other, add a second validation list in `session.rs`, change public option fields, or treat a valid empty result as an error.
-  - Verified: `make test-rust FILTER="--test git_log --test log_commands"` → exit 0 (`ok: rust`); direct contradiction error and menu failure/recovery are asserted, existing individual-filter result sets pass.
-  - Done: `0384b01`.
-
-- [x] **[P1] Enforce the exact bounded worked-exchange artifact set** (`scripts/schema_markdown.rs:224-266`, `worked_exchanges_artifacts`; `scripts/schema_markdown.rs:281-306`, `write`, `stale_paths`; `tests/schema.rs:1647-1749`, standalone worked-exchange tests)
-  - **Problem:** The generated-part size contract ends in `debug_assert!`, so release generation does not fail closed if splitting produces an oversized emitted file. The writer and freshness checker also consider only the newly expected paths; if generation shrinks, an obsolete `worked-exchanges-NN.md` remains committed while `schema-check` reports clean.
-  - **Why it matters:** Correctness and contract cleanliness — generated references must have a deterministic, hard size bound and an exact file set, not debug-only enforcement plus undetected retired transcript parts.
-  - **Change:** Replace the debug assertion with ordinary error validation against the exact bytes written to disk, including the writer's trailing newline. Treat files in the generated numeric `docs/schema/worked-exchanges-NN.md` namespace as a set: `stale_paths` must report unexpected numbered parts in deterministic order, and `write` must remove only obsolete files in that namespace while preserving expected parts and unrelated authored files. If boundary testing needs parameterization, extract one production-used split helper accepting a limit rather than adding a test-only generation path. Extend the existing schema tests with a small-limit oversize/boundary case and an extra numbered part that is detected, removed by regeneration, and then yields a clean freshness check.
-  - **Done when:** No debug-only size guard remains; every emitted part is strictly below the configured limit in all builds; extra numbered parts make the checker stale and are removed by generation; tamper/missing/order checks still pass under `make test-rust FILTER="--test schema worked_exchanges"`, `make update-schema`, and `make schema-check`.
-  - **Constraints:** Do not hand-edit generated Markdown, delete nonnumeric similarly prefixed files, relax `EXCHANGES_LIMIT`, change transcript content/order, or refresh unrelated generated artifacts merely to silence a failure.
-  - Verified: `make test-rust FILTER="--test schema worked_exchanges"` → ok: rust; `make update-schema` → ok: update-schema; `make schema-check` → ok: schema-check.
-  - Done: `255f2e9`.
-
-  - Done: `255f2e9` (implementation), `e302639` (completion).
-
-- [ ] **[P1] Reap every Plain preset process on failure** (`scripts/test_plain_presets.py:25-57`, `teardown`; `tests/ui/test_driver.py:650-665`, `test_plain_preset_teardown_reaps_owned_descendant`)
-  - **Problem:** The preset harness owns only the direct Neovim child. Its `finally` block terminates and waits for Neovim, but on timeout, assertion failure, or forced editor termination it neither owns nor verifies the descendant `magit-lsp` process, so a failed native run can return with an orphan server.
-  - **Why it matters:** Correctness and cleanliness — native verification must leave no owned server behind on precisely the failure paths where Neovim does not perform its graceful LSP shutdown.
-  - **Change:** Launch each preset editor in its own owned process group/session and centralize bounded teardown that terminates the whole group, escalates to kill only after the deadline, waits/reaps the direct child, and verifies the group is empty while preserving the original test failure and useful stderr. Add a controlled `ui-unit` regression using a child that spawns a descendant: force the failure cleanup path and prove both owned processes are gone; also retain the healthy graceful-shutdown path. Use readiness files or process state with deadlines, not blind sleeps.
-  - **Done when:** Success still proves graceful Neovim/LSP shutdown for all five presets; forced failure cannot leave either the editor or descendant alive; cleanup errors do not mask the primary assertion; `make ui-unit` and `make plain-presets` pass with no orphan `magit-lsp` process.
-  - **Constraints:** Do not scan or signal by process name, signal unrelated processes, add tmux to this preset harness, weaken native assertions, use unbounded waits, or claim Windows/macOS verification.
-  - Verified: `make ui-unit` → exit 0; `test_plain_preset_teardown_reaps_owned_descendant` starts an owned child/descendant, waits on readiness with a deadline, tears down the group and asserts the descendant is gone; `test_plain_preset_cleanup_failure_preserves_primary_exception` injects cleanup failure during a primary assertion and asserts original exception identity/message plus retained cleanup diagnostic. `make plain-presets` → exit 0; five presets retain the native graceful-shutdown assertions. Linux only; Windows/macOS unverified.
-  - Decision: updated `test_log_history_has_commits_and_decorations` to assert `tag-only` and `v1`, exactly matching `_log_history`'s two intentional tags and the T041 distinct tag-only tip.
-  - Done: `64767e0`, `0065277` (coverage correction).
-  - **Reopened at `cbe63f5` (source review):** The cleanup implementation still has an incomplete wait boundary. It never polls/reaps the direct child during the TERM grace period, so a successfully terminated but unreaped child keeps `killpg(pgid, 0)` succeeding until the full deadline. After SIGKILL it waits only for the direct child and immediately probes the group once; a descendant that has not yet exited or been reaped causes a premature cleanup failure. The existing real-process regression uses TERM-responsive processes and does not directly cover escalation.
-  - **Problem:** `teardown` confuses an unreaped direct child with a still-running group during graceful shutdown and treats signal delivery as completed descendant termination after escalation. This adds an unconditional grace-period delay on failure and can report surviving processes before asynchronous SIGKILL cleanup has completed.
-  - **Why it matters:** Correctness — bounded cleanup must observe completion, not merely deliver signals; otherwise the new failure-path guarantee and its diagnostics are timing-dependent.
-  - **Change:** In `teardown`, reap/poll the direct child while observing group disappearance during the TERM grace period. If escalation is required, tolerate the group disappearing between the probe and SIGKILL, then use a separate bounded completion wait for both direct-child reaping and group disappearance before reporting survivors. Extend the existing cleanup tests with controlled process-state transitions proving delayed post-KILL disappearance is awaited, plus a TERM-ignoring owned descendant to exercise escalation. Put fixture cleanup in `finally` so a readiness/assertion failure cannot leak the test's own processes.
-  - **Done when:** TERM-responsive cleanup returns without exhausting the grace period solely because the direct child is a zombie; escalation waits for observable group disappearance and reports a genuine timeout only after the completion deadline; primary exceptions remain preserved; `make ui-unit` and `make plain-presets` pass.
-  - **Constraints:** Keep this follow-up within `scripts/test_plain_presets.py` and `tests/ui/test_driver.py`. Do not replace group ownership with name-based signaling, remove survivor checks, use fixed sleeps as proof of completion, or claim non-Linux verification. Earlier Done/Verified entries above are historical evidence, not completion of this reopened boundary.
-
-- [x] **[P2] Align UI matrix documentation with opt-in execution** (`docs/TESTING.md:210-219`, real-UI scenario guidance; `ui-test-plan.md:54-57,385-395`, `U0.6`, Scenario DSL header)
-  - **Problem:** Current execution defaults to one `standard`/`80x24` combination unless a scenario declares `matrix: true`, but maintained docs still state that every menu scenario or all scenarios run under both profiles and both sizes, and the DSL comments describe implicit secondary combinations controlled by retired `size-only`/`profile-only` behavior.
-  - **Why it matters:** Contract drift and readability — scenario authors and reviewers are told that four-way coverage happens automatically when it now requires an explicit header.
-  - **Change:** Update the current testing guide, U0.6 description, and DSL header example to state the one-combination default, `matrix: true` four-way opt-in, and the compatibility meaning of explicit `size`/`profile` headers. Remove only the retired implicit-secondary/opt-out claims; preserve dated or explicitly historical outcomes as history.
-  - **Done when:** The two maintained documents describe the same matrix rules implemented by `scripts/ui_lib/scenario.py` and covered by `tests/ui/test_scenario.py`, no current text promises implicit four-way execution, and `make docs-check` passes.
-  - **Constraints:** Do not change runner behavior, scenario headers, historical result counts, or generated documentation.
-  - Verified: A1 retirement sweep examined `docs/TESTING.md:210-219` and `ui-test-plan.md:22,54-57,64-68,385-395`; removed the current implicit-matrix/retired opt-out claims, retained the dated/historical four-way outcomes and counts, and `rg -n -i 'every menu scenario|all scenarios under both|runs under both profiles|runner also runs|size-only.*opt out|profile-only.*opt out|implicit.*(matrix|secondary)|secondary combinations' docs/TESTING.md ui-test-plan.md` found only the explicitly historical U0.6 note. A2: `make docs-check` → exit 0 (`ok: docs-check`).
-  - Done: `04b4834`.
-
-### P3
-
-- [x] **[P3] Remove the duplicate tempfile dependency declaration** (`Cargo.toml:26,34`, `[dependencies]`, `[dev-dependencies]`)
-  - **Problem:** `tempfile = "3"` is declared in both normal and development dependencies after todo persistence began using it in production.
-  - **Why it matters:** Cleanliness — one dependency now has two identical ownership declarations with no distinct development feature set.
-  - **Change:** Keep the normal dependency and remove the redundant development declaration; leave the resolved version and production persistence implementation unchanged.
-  - **Done when:** `Cargo.toml` declares `tempfile` once, `Cargo.lock` has no unrelated delta, and `make test-rust FILTER="--test rebase_todo"` passes.
-  - Verified: `make test-rust FILTER="--test rebase_todo"` @ `6c00f60` → `ok: rust`; one normal `tempfile` declaration; Cargo.lock unchanged.
-  - **Constraints:** Do not replace `tempfile`, change features, or regenerate unrelated dependencies.
+- [x] **DOC-AUDIT-COMPACT — Audit, compact and prioritize the backlog without executing it.** check: preserve all base checkbox occurrences/states, unique IDs, exact authoritative Done/corrections and unresolved obligations; compare inventories and sizes; retain anchors and scope ownership; `make docs-check`. Four attempts total (two default, two strong): reconciliation; stalled orientation; substantive compaction/inventory; final reference reconciliation and verification. No gate approval, runtime work or protected untracked files included. Done: containing commit.
+  - Verified A1 — base/final inventory against `a366409749edf0e5591dff34d70500b73ab595b9`: all 672 original checkbox occurrences retained (567 closed, unique B-line mappings; 105 original unchecked identities/states); only this audit adds a checkbox. Numbered IDs 401/401; all eight historical references restored; all 268 distinct SHA references in 289 original Done-bearing rows retained. Original B-line context preserves exact Done/correction ownership and ambiguous evidence; B1572's trailing parent `09119a7` is recorded at parent B1570, not claimed as child implementation.
+  - Verified A2 — UTF-8 bytes: TASKS.md 418966 → 74872; TASKS_PART_SEVEN.md 96642 → 99062. Closed narratives/gate chronologies consolidate into explicit immutable Base mappings, not another archive; open scopes/dependencies remain here or in linked specifications. Priority Review → ready → blocked → gated → optional → completed ordering is documentation-only; neither hygiene-size checkbox is closed.
+  - Verified A3 — base/final heading inventories retain every original heading text and duplicate occurrence in both targets, including the superseded Phase 3 landing anchor. Seven stale design/protocol references and T022 harness ownership now name maintained files; T105/T111 routing and the release subset have one documented owner. No runtime completion inferred.
+  - Verified A4 — T022 remains unchecked; Phase 6A is prohibited; explicit human release approval is required. The temporary plan is replaced by durable risks, decision ownership and recommended order. Policy questions remain unresolved; Stop applies after this audit, prior authorization/restrictions remain separate, and no Overnight directive remains.
+  - Verified A5 — `make docs-check` → exit 0 (`Ran 3 tests`, `OK`, `ok: docs-check`); it also passed before compaction, so the A1–A4 before/after inventory checks above separately exercise the new preservation/reconciliation work. Only the two sprint-owned Markdown paths are eligible for this audit commit; user-owned untracked paths remain untouched.
 
 ## Completed work
 
-- [x] **Documentation cleanup — Compact capability and recorder completion records.** Done: containing commit.
-- [x] **Documentation cleanup — Compact legacy completion records.** Done: containing commit.
-- [x] **Documentation cleanup — Condense completed-task records.** Done: containing commit.
-- [x] **Documentation cleanup — Condense obsolete history and preserve live work.** Done: containing commit.
-- [x] **Documentation cleanup — Restore moved completion records.** Done: `16f4d11`.
-- [x] **Documentation cleanup — Finish queue navigation and preservation audit.** Done: `2e051e3`.
-  - Bounded audit: commit `16f4d11` compared source titles and references (122/122 checked titles; 102/102 refs; 9/9 original unchecked titles); bounded reviewer confirmed all original pre-cleanup unfinished tasks and requirements remain. T007 worktree-only changes are excluded from staged source comparison.
-  - Scope: queue navigation and owned cleanup/review metadata only; no runtime/native acceptance claim. Final line count: 546.
-  - Verified: `make docs-check` → ok: docs-check.
+Completion ledger: identity/state plus exact Done evidence or Base provenance. Each B marker maps one original checkbox, not a new claim of implementation acceptance. Titles shortened to stable IDs retain their full identity at that base line. Unlabeled historical refs are not upgrades to Done. For nested slices, the original indentation/context at B remains authoritative; a trailing parent's historical evidence is not a new child implementation claim. Duplicate checked narratives are consolidated only through their explicit B mapping; every original checkbox occurrence remains present.
 
-- [x] **Documentation cleanup — Add focused documentation verification.** Done: `93bb9ab` (Makefile ownership correction `4c83d0d`).
-- [x] **Documentation cleanup — Move decisions and glossary reference.** Done: `3186a69`.
-- [x] **Documentation cleanup — Move core design reference.** Done: `9f8f28f`.
-- [x] **Documentation cleanup — Move workflow design reference.** Done: `338b9de`.
-- [x] **Documentation cleanup — Move expanded design reference.** Done: `338b9de`.
-- [x] **Documentation cleanup — Move architecture and glossary reference.** Done: `338b9de`.
-- [x] **Documentation cleanup — Move protocol reference.** Done: `0d663c7`.
-- [x] **Documentation cleanup — Preserve inline-code heading anchors in link checks.** Done: `7d4bee4`.
-- [x] **Documentation cleanup — Move keymaps and view reference.** Done: `e4f259d`.
-- [x] **Documentation cleanup — Move testing and open questions reference.** Done: `4537ef1`.
-- [x] **Documentation cleanup — Finish maintained reference navigation.** Done: `d9ea816`.
-- [x] **Documentation cleanup — Move durable reference material into docs.** Done: `d9ea816`.
-- [x] **Documentation cleanup — Repair recent review completion pointers.** Done: `f13dbc1`.
-- [x] **Documentation cleanup — Repair older review completion pointers.** Done: `e464429`.
-- [x] **Documentation cleanup — Remove resolved review and checkpoint narratives.** Done: `3ec4751`; provenance correction: `f13dbc1`, `e464429`.
-- [x] **Documentation cleanup — Compact documentation completion records.** Done: `a45fcde`.
-- [x] **Documentation cleanup — Compact T006 and T007 completion records.** Done: `bceb82d`.
-- [x] **Documentation cleanup — Compact formatter completion records.** Done: `eb87a14`.
-- [x] **Documentation cleanup — Compact quirk completion records.** Done: `5f5f308`.
-- [x] **Documentation cleanup — Compact typed-capability completion records.** Done: `3787c66`.
-- [x] **Documentation cleanup — Compact recorder and migration completion records.** Done: `408148f`.
-- [x] **T006.1a — Extract the pump and allocate fake-editor requests dynamically.** Done `1570ec0`; `make test-rust FILTER="--test plain_harness --test plain_actions"` passed; no real-server didOpen claim.
-- [x] **T006.1b — Prove Plain didOpen applyEdit through the pump.** Done `2e60210`; `make test-rust FILTER="--test plain_harness"` passed; real-server pump regression.
-- [x] **T006.1 — Extract the configurable client pump and dynamic request IDs.** Done `2e60210` (completes `1570ec0`); original clauses 1 and 7.
-- [x] **T006.2a1 — Commit valid minimum model bases and pump initialization.** Done `2e1f392`; focused Rust suite passed.
-- [x] **T006.2a2 — Prove module composition and unify registry behavior selection.** Done `219f8e8`; verified at `2e1f392`; exact RichMin declaration and observable behavior covered.
-- [x] **T006.2a — Compose minimum bases and anchored behavior modules.** Done `219f8e8` (completes `2e1f392`).
-- [x] **T006.2b1 — Guard strict requests and notifications through the pump.** Done `27c8a70790926b0ebdd6c807db9977b477cc9c90`; verified at `219f8e8`.
-- [x] **T006.2b2 — Complete response-effect guards and strict feature matrix.** Done `96504c60fde13587bb69f38e2d66f8dd0758366a`; verified at `27c8a70`.
-- [x] **T006.2b — Enforce strict server feature declarations in the pump.** Done `96504c60fde13587bb69f38e2d66f8dd0758366a`.
-- [x] **T006.2 — Compose declared editor models and strict feature checks.** Done `96504c60fde13587bb69f38e2d66f8dd0758366a`; original clauses 2–4.
-- [x] **T006.3a — Apply rich render state from shared vectors.** Done `53483b9`; focused `plain_harness` test passed.
-- [x] **T006.3b — Route rich render acknowledgements and resync through the pump.** Done `a4578fe956998619de708c2aee8ee93da20a17dc` (preceded by `7e4c26cf15b95c3e9715b45b3876e4fa92c05f58`); focused suite passed, including real-server ack/resync.
-- [x] **T006.3c — Model shared prompt-vector responses.** Done: source-only provenance `e50d516:TASKS.md`; verified at `a4578fe`; dynamic IDs, cancellation, empty/default/custom/secret cases.
-- [x] **T006.3 — Model rich renders, acknowledgements and prompt vectors.** Done: source-only provenance `e50d516:TASKS.md`; original clause 5.
-- [x] **T006.4a — Bind recorded client presets and named profiles.** Done `cf74f8911d474b5f63c5def41b10864248c8f67e` (preceded by `158692e8c5e09ea3f24c0daf225fcf977152f1ef`); declarations are not native behavior proof.
-- [x] **T006.4b — Audit original fake-editor acceptance.** Done: source-only provenance `e50d516:TASKS.md`; verified at `cf74f89`. Tests cover all seven clauses, including real-server didOpen; 12 baseline tests remain and historical trace smoke test was retired (`864f58c`, fixture removed `37fb07d`).
-- [x] **T006.4 — Bind recorded client presets and audit T006 acceptance.** Done: source-only provenance `e50d516:TASKS.md`; original clause 6 and final audit.
+- [x] SERVER-MODULE-PLAIN — Done: b7c8e56. (B48)
+- [x] SERVER-MODULE-DRAFTS — Done: containing commit; 79ea498. Refs: b7c8e56. (B51)
+- [x] SERVER-MODULE-VIEW — Done: containing commit; 4c25e8d. Refs: 79ea498. (B55)
+- [x] SERVER-MODULE-REQUESTS — Done: b7a27f3. Refs: 71a2e12. (B59)
+- [x] PNPM1 — Done: containing commit. Refs: 5a76c92, e2a06cf, 4b3605d9e4e20d484aa6b60befcaf5cb0fa29e34. (B64)
+- [x] PNPM2 Refs: 14e986a. (B66)
+- [x] VER1 — Done: containing commit. Refs: 001aa40. (B70)
+- [x] VER2 — Done: containing commit. Refs: 9eb5001. (B72)
+- [x] VER2h — Done: containing commit. Refs: efad539. (B74)
+- [x] VER3 — Done: `6c5f26d`. (B76)
+- [x] VER3a — Done: containing commit. Refs: 64b721e. (B77)
+- [x] VER3c — Done: `9daa386`. Refs: 14e986a, 6954cd7. (B79)
+- [x] VER3b — Done: `6c5f26d`. (B81)
+- [x] VER3b1 (B82)
+- [x] VER3b1a Refs: 0f1adc8. (B83)
+- [x] VER3b1b (B85)
+- [x] VER3b1b1 — Done: containing commit. Refs: a49f123. (B86)
+- [x] VER3b1b2 (B89)
+- [x] VER3b1b2a — Done: c7a4505. Refs: 1445158. (B90)
+- [x] VER3b1b2b — Done: 63016f7. Refs: cdadead, 86215ae, 615a743. (B92)
+- [x] VER3b2 — Done: `6c5f26d`. (B99)
+- [x] VER3b2a (B100)
+- [x] VER3b2a1 (B101)
+- [x] VER3b2a2 Refs: 89dc62d. (B103)
+- [x] VER3b2b — Done: `6c5f26d`. Refs: 50704ce, 89dc62d. (B107)
+- [x] PORT1 — Done: `c974f8c`. Refs: 185bc9e. (B111)
+- [x] PORT2 Refs: 89e5bd6. (B113)
+- [x] DOC1 — Done: `bbc97db`. Refs: 3c31d80. (B116)
+- [x] DOC2 — Done: `001aa40` plus Makefile correction. (B118)
+- [x] DOC2a — Done: `185bc9e`. Refs: 9729f50. (B119)
+- [x] DOC2b — Done: `001aa40` plus Makefile correction (`001aa40` mistakenly included baseline Makefile hunks; corrected here). Refs: 185bc9e. (B121)
+- [x] DOC3 — Done: `613fb5c`. (B123)
+- [x] DOC4 — Done: `ece5b10`. Refs: 9c1ab8c. (B124)
+- [x] DOC5 Refs: 10400c6. (B126)
+- [x] T008.1 — Done: `6957647`. (B129)
+- [x] T008.2 — Done: `5cde72b`. (B131)
+- [x] T008.3 — Done: `fbb1aa3`. (B133)
+- [x] T008.4a (B135)
+- [x] T008.4b — Done: `ec5d90c`. Refs: 85821b5. (B136)
+- [x] T008.4c — Done: `5e4dfb5`. (B138)
+- [x] T008.5a1 — Done: `0cab12f`. (B140)
+- [x] T008.5a2 — Done: `1396871`. (B142)
+- [x] T008.5a3 — Done: `1ffc72f`. (B144)
+- [x] T008.5b1 — Done: `26ebd80`. (B146)
+- [x] T008.5b2a — Done: `3e95ee6`. (B148)
+- [x] T008.5b2b — Done: `ebfa0fc`. (B150)
+- [x] T008.5b2c — Done: `5564a03`. (B152)
+- [x] T008.5c1 — Done: `514422d`. (B155)
+- [x] T008.5c2 — Done: `8a02a7e`. (B157)
+- [x] T008.6a1 — Done: `3223e7d`. (B159)
+- [x] T008.7a — Done: `d8b36fd`. (B162)
+- [x] T008.7b — Done: `6887df2`. (B165)
+- [x] T008.8a — Done: `d4cfc43`. (B168)
+- [x] T008.8b — Done: `6fcf2c5`. (B171)
+- [x] T008.10 — Done: `8ffb45d18c29cfc05441de200fa518ef979caa92`. (B174)
+- [x] T008.9 — Done: `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44` (via T008.9a–e). (B177)
+- [x] T008.9a — Done: `e177b11`. (B178)
+- [x] T008.9b — Done: `309c83f`. (B180)
+- [x] T008.9b2 — Done: `60edee5`. (B182)
+- [x] T008.9c1 — Done: `200c5532b4c4ce6b59bb712c7bab82fcaada7c04`. (B184)
+- [x] T008.9c2 — Done: `0b54901`. (B185)
+- [x] T008.9c3 — Done: `fb721e576dfb3d7027fece1856a0c020f3a9f32e` (via T008.9c3a–b2). (B188)
+- [x] T008.9c3a — Done: `c7dadc3`. (B189)
+- [x] T008.9c3b1 — Done: `5f3de54`. (B192)
+- [x] T008.9c3b2 — Done: `fb721e576dfb3d7027fece1856a0c020f3a9f32e`. (B195)
+- [x] T008.9d — Done: `9f0a70e20eb7a60c6049dc271c860fcd51db4f36`. (B198)
+- [x] T008.9e — Done: `2c3cf0f5f61159cd7a39272616ecf0abceb9ee44`. (B201)
+- [x] T008.11 — Done: `98a0a4c`. (B204)
+- [x] T008.12 — Done: `ebe11b7` (via T008.12a–c). (B207)
+- [x] T008.12a — Done: `f717778`. (B208)
+- [x] T008.12b — Done: `e87a50c0eaabaa35384eb50628aabde5ab8ecc88`. Refs: e87a50c. (B211)
+- [x] T008.12c — Done: `ebe11b7`. (B212)
+- [x] T008.13 — Done: `b549480` (T008.13a), `6179b54` (T008.13b). (B214)
+- [x] T008.13a — Done: `b549480`. Refs: b01ce98. (B215)
+- [x] T008.13b — Done: `6179b54`. (B218)
+- [x] T009.1 (B221)
+- [x] T009.2 — Done: `plain_log_select_offers_commit_code_actions` in `tests/plain_select.rs`; full original assertion evidence at B222. Refs: 8280e85. (B222)
+- [x] T009.3 — Done: `plain_log_select_revision_field_drives_confirm` and `plain_log_select_invalid_revision_changes_nothing_and_keeps_the_picker` in `tests/plain_select.rs`. (B225)
+- [x] T009.4 — Done: `plain_log_select_confirm_returns_the_caller_menu_with_the_chosen_commit` and `plain_log_select_cancel_returns_the_caller_without_changes` in `tests/plain_select.rs`. Refs: 70d617d. (B228)
+- [x] T009.5 (B231)
+- [x] T009.6 — Done: `plain_log_select_fixup_target_survives_a_cancelled_second_run` in `tests/plain_select.rs`. Refs: 838203a. (B232)
+- [x] T010.1 Refs: d4f8e09. (B236)
+- [x] T010.2 — Done: `9537e52`. (B238)
+- [x] T010.3 — Done: `stale_explicit_confirm_is_refused_and_keeps_the_draft_pending`, `explicit_abort_creates_no_commit_and_restores_the_status_view`, `close_after_abort_is_ignored`, `unrelated_document_notifications_are_rejected_without_touching_the_draft` in `tests/plain_draft.rs`. Refs: 51da1b7. (B239)
+- [x] T010.4a — Done: `saved_file_close_commits_the_disk_text` and `dirty_close_commits_the_prior_saved_disk_text` in `tests/plain_draft.rs`. Refs: f930ff7. (B242)
+- [x] T010.4b — Done: `dirty_save_creates_no_commit_and_keeps_the_draft_pending` and `dirty_cancel_keeps_the_draft_pending_and_the_editor_open` in `tests/plain_draft.rs`. Refs: 829eceb. (B245)
+- [x] T010.4c — Done: `empty_saved_message_is_refused_by_git_and_reported` in `tests/plain_draft.rs`. Refs: aeb7ec7. (B248)
+- [x] T010.4d — Done: `second_session_gets_no_draft_actions_and_cannot_forge_confirm` in `tests/plain_draft.rs`. Refs: 0345fff. (B251)
+- [x] T007.4c2 — Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`. (B255)
+- [x] T007.4c — Done: `2fd268371f92fbdec3b8ef1db60668d7a66ebd83`; exact Confirm body/stale-version correction `ccf6cbbe055ccb157b59aed525537cdef48f6171`. (B256)
+- [x] T007.4n1 — Done: `41ff608` (runner foundations: `7e1d814`). (B257)
+- [x] T007.4n1a — Done: `c361960`. (B260)
+- [x] T007.4n1b — Done: `eb56e16`. (B261)
+- [x] T007.4n1c — Done: `49cc25f`; recovery follow-up: `82d59c8`. (B262)
+- [x] T007.4n1d — Done: `78f98eb`. Refs: f6a7832. (B265)
+- [x] T007.4n1e — Done: `431af86`. Refs: 78f98eb. (B267)
+- [x] T007.4n1f — Done: `9187cae`. (B269)
+- [x] T007.4n1g — Done: `20c7f9c`. (B271)
+- [x] T007.4n2 — Done: `c407a1d`. (B273)
+- [x] T007.4 — Done: `2fd2683`. (B275)
+- [x] T007.5 — Done: containing commit. Refs: 70eca61, 6646086, 11d1c8b, 33230ec, 53483b9, 5209f6e, 338b9de, 0e9223a, c3f5a42, 2264616, ccf6cbb, 2fd2683, 20c7f9c, c407a1d. (B277)
 
-- T006/T007 prerequisite audit: detailed historical verification is immutable `e50d516:TASKS.md` provenance, not an implementation Done hash. “Containing commit” entries have no exact recorded implementation hash; exact Done and Verified refs remain above. Original T006 clauses: 1/7 T006.1, 2–4 T006.2, 5 T006.3, 6/final audit T006.4. Scripted model checks are not real-server conformance; recorded declarations are not native evidence. T007.1n evidence paths are `build/ui/plain-render/{without-final-newline,with-final-newline}/native.json`; timeout then passing rerun remains a risk. T007.5 requires all six original clauses and native evidence before T007 closes.
+## Bugfix
 
-- [x] **T007.1 — Gate Plain actions on code-action support.** Done: source-only provenance `e50d516:TASKS.md`; verified on `70eca6154ce29951c05e1f5ae632cfd146e8e6b8`; original clauses 1–3, no executeCommand declaration requirement.
-- [x] **T007.1n — Remove the native Plain executeCommand workaround.** Done: source-only provenance `e50d516:TASKS.md`; `make plain-neovim` on `1d0422e9fa600c50b5015de4798b3269b856779d` passed; both variants prove declaration absence, action/render/Git state and cleanup. Evidence: `build/ui/plain-render/{without-final-newline,with-final-newline}/native.json`; timeout after unstage, diagnostic rerun passed without behavior fix.
-- [x] **T007.2a — Expire unconfirmed Plain edits safely.** Done: source-only provenance `e50d516:TASKS.md`; `make test-rust FILTER="--test plain_render"` on `53483b9` passed.
-- [x] **T007.2b1 — Schedule the correlated echo watchdog.** Done: source-only provenance `e50d516:TASKS.md`; focused Rust suite passed; real-server silent-stale success without echo triggers fresh edit; one-second grace and lifecycle guards covered.
-- [x] **T007.2b2 — Prove post-watchdog convergence and readiness.** Done `5209f6e76623db5965983b202f0708fa8e09eb6e`; implementation-current diff based on `33230ec` passed; real-server convergence, second watcher update and safety covered.
-- [x] **T007.2b — Schedule and prove missing-echo recovery.** Done `5209f6e76623db5965983b202f0708fa8e09eb6e`; tests in T007.2b1–b2.
-- [x] **T007.2 — Recover Plain Applying state after a missing echo.** Done `5209f6e76623db5965983b202f0708fa8e09eb6e`; original clause 4; tests in T007.2a–b.
-- [x] **T007.3 — Exercise Neovim applyEdit in process.** Done `338b9de`; `make test-file FILE=tests/test_plain_apply_edit.lua` @ `338b9de` passed; five stock-handler cases cover declaration/version combinations and stale second entry with exact text/tick/results. Original clause 5.
-- [x] **T007.4a1 — Present manual Plain commit instructions.** Finish the weak-lifetime Plain delivery branch and start the single real-server scenario proving manual instructions without custom notifications.
-  - Done: `0e9223a`.
-  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `0e9223a` → ok: rust. One real Plain scenario stages and opens commit through standard code actions, receives the exact COMMIT_EDITMSG path by window/showMessage, cancels the active progress token, confirms HEAD unchanged and shuts down cleanly.
-- [x] **T007.4a2 — Prove declared Plain editor opening.** Extend that same scenario to prove a correlated standard showDocument request and readable fallback on rejection.
-  - Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`.
-  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` passed on the committed implementation diff. The single scenario covers absent support, correlated successful opening, rejected opening with manual fallback, cancellation, unchanged HEAD and bounded shutdown.
-- [x] **T007.4a — Deliver pending Plain commit editors through LSP.** Route managed edit effects to declared showDocument or readable manual-open instructions. Start the single real-server T007.4 scenario; later children extend that same scenario. Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`; enforcing scenario recorded under T007.4a1–T007.4a2.
-- [x] **T007.4b1 — Expose owner-bound pending draft snapshots.** Add a read-only registry snapshot keyed by owner and repository, with stable run/URI identities and deterministic ordering. Extend existing coverage, not the number of test cases.
-  - Done: `8dd8bcf`.
-  - Verified: `make test-rust FILTER="--test editor_bridge early_commit_cancellation_does_not_kill_repository_discovery"` → ok: rust. `EditRegistry::pending_for` filters owner, canonical repository and nonterminal registry entries, then sorts by run ID; `early_commit_cancellation_does_not_kill_repository_discovery` asserts exact run/issued URI resolution, owner/repository isolation and removal after cancellation.
-- [x] **T007.4b2 — Wire pending draft identities into Plain rendering.** Propagate only owner identity into server rendering; display registry-derived structured URI rows in the active Plain presentation and refresh their lifecycle. Extend the existing T007.4 scenario only.
-  - Done: `2264616`.
-  - Verified: `make test-rust FILTER="--test plain_harness plain_commit_editor_manual_instructions_cancel_pending_git_run"` and `make test-rust FILTER="--test plain_harness --test server_async"` → ok: rust. `EditRegistry::pending_for` supplies owner/repository-filtered rows; `Tree::append_pending_drafts` sets stable `pending-draft:<run>` identity and exact URI path metadata; `OpenView::render_with_delivery`, `refresh_pending_views` and editor delivery/commit completion refresh the owner’s Plain views without shadow state.
-- [x] **T007.4c1 — Confirm manually attached Plain commit drafts.** Offer synchronized version-bound Confirm on the issued draft URI through standard code actions. Extend the existing scenario to prove exact committed text and row removal.
-  - Verified: `make test-rust FILTER="--test plain_harness --test server_async"` @ `cd2d152` → ok: rust. Real LSP didOpen/didChange, stale-version rejection, exact commit body, pending-row removal and terminal action retirement; declared opening/cancellation cases retained.
-- [x] **T007.4b — Render pending manual commit paths as structured rows.** Derive pending draft rows from trusted registry state and refresh their lifecycle without parsing rendered text. Extend the existing T007.4 scenario only. Done: `2264616`; enforcing snapshot and lifecycle checks recorded under T007.4b1–T007.4b2.
-- [x] **Roadmap reconciliation — Restore one authoritative queue.**
-  Done: `6d08d85`.
-- [x] **Roadmap reconciliation — Index individual unfinished numbered tickets.**
-  Done: `6d08d85`.
-- [x] **Roadmap reconciliation — Refresh protocol and evidence guidance.**
-  Done: `6d08d85`.
-- [x] **Roadmap reconciliation — Route active verification through Make.**
-  Done: `6d08d85`.
+Closed fixes from both former Bugfix sections share this ledger; no distinct identity is merged away.
 
-- [x] **Investigate and rationalize trace/capture test infrastructure.**
-  Done: `5025937`. Current workflow: [fixture guide](tests/fixtures/lsp_traces/README.md), [UI test plan](ui-test-plan.md).
-- [x] **Autofix staged formatting through shared hook and Make commands.**
-  Done: `9702973`; final index-publication fix `fa5c3de`. Current guide: [formatting guide](docs/FORMATTING.md).
+- [x] BUG-LUALS-PROMPT-UNION — Done: 6ce08f4. Refs: 43572aa. (B291)
+- [x] BUG-PLAIN-COMMIT-BARRIER — Done: f1a43d1. (B296)
+- [x] BUG-PHASE6-INSTANT-REBASE — Done: `dc43535`. Refs: 9320f09. (B300)
+- [x] BUG-PHASE6-PLAIN-COMMIT — Done: `0d70795`; inherited Done: `dc43535`. Refs: 9320f09. (B303)
+- [x] BUG-PHASE6-PNPM — Done: `4045289`. Refs: 43318a2. (B307)
+- [x] BUG-PHASE6-LOG-ARGUMENT-STATUS — Done: `43318a2`. Refs: 0763e38. (B310)
+- [x] BUG-PHASE6-VISIBILITY — Done: containing commit; inherited Done: `53942dc`; `9320f09`. (B313)
+- [x] BUG-PHASE6-VIEWS — Done: containing commit; premise correction: `35a7dfd`; inherited Phase 6 Done: `b48187d`. (B318)
+- [x] BUG-PHASE6-SERVER-ASYNC — Done: containing commit; inherited Phase 6 Done: `f15fa55`; `b48187d`. (B322)
+- [x] BUG-PHASE6-PROMPT-RENDER — Done: containing commit; inherited Phase 6 Done: `b63fe3a`; `f15fa55`. (B330)
+- [x] BUG-PHASE6-PLAIN-OFFER-BOUND — Done: containing commit; inherited Phase 6 Done: `a0e9e91`; `b63fe3a`. (B334)
+- [x] BUG-PHASE6-NAVIGATION — Done: containing commit; `a0e9e91`. Refs: e2472ac. (B338)
+- [x] BUG-PHASE6-LOG-SELECTION — Done: `e2472ac`. Refs: c4e3c2b. (B342)
+- [x] BUG-PHASE6-KEY-VERSION — Done: d2ad536. Refs: 6fdb9a2. (B345)
+- [x] BUG-PHASE6-SECOND-DRAFT — Done: `6fdb9a2`. (B349)
+- [x] BUG-PHASE6-EXAMPLE-TIMEOUT — Done: `100c541`. Refs: 315b905. (B353)
+- [x] BUG-PHASE6-STALE-RENDER — Done: containing commit. Refs: e0566d1, 9a8372a. (B357)
+- [x] BUG-PHASE6-BRIDGE — Done: `b4f5d87`. (B361)
+- [x] BUG-PHASE6-PROC — Done: `04907d4`; focused owned-runner test passed through Make, and subsequent full run passed all 68 library tests. (B363)
+- [x] Refresh instant-autosquash generated references. Refs: 63c8bd3, f2f7cd0. (B365)
+- [x] Refresh instant-autosquash recorded registry responses. (B368)
+- [x] Refresh instant abort recording. Refs: f3767f3. (B369)
+- [x] Refresh instant confirm recording. Refs: f3767f3. (B371)
+- [x] Stabilize the instant-conflict readiness assertion. — Done: containing commit. Refs: 4da5eb0. (B375)
+- [x] Refresh initial-rebase generated references. — Done: `b2c99d3`. Refs: 0680cdb. (B378)
+- [x] Repair initial-rebase command replay fixtures. — Done: `3ebfadc`. Refs: cea53d3. (B382)
+- [x] Repair initial-rebase abort recording. Refs: cea53d3. (B385)
+- [x] Complete initial-rebase recording replay. — Done: `3ebfadc`. Refs: 23bbd5f. (B387)
+- [x] Refresh generated references for scoped todo commands. — Done: `8beb859`. Refs: 46dc360. (B391)
+- [x] Regenerate VSCode todo keybindings through Make. Refs: 656ddd7, 760ad60. (B396)
+- [x] Align recorded actions with todo editor scope. Refs: e30a080. (B403)
+- [x] Refresh snapshots after todo scope correction. Refs: e30a080, 30ba485. (B408)
+- [x] Reconcile todo keymap manifests and shortcut policy. — Done: containing commit. Refs: 8b9f2f6. (B413)
+- [x] Restore menu registry parity for contextual todo actions. — Done: containing commit. Refs: 61c9022. (B420)
+- [x] Repair todo command registry example replay. Refs: 180dfce. (B425)
+- [x] Repair commit abort registry frame. (B428)
+- [x] Complete remaining todo registry replay. (B432)
+- [x] Refresh worked exchanges for initialize identity. — Done: `f393248`. Refs: 4e7521a, efad539, ebe9ac6. (B436)
+- [x] Repair initialize serverInfo replay fixtures. — Done: containing commit. Refs: 6d626a5, 4e7521a. (B441)
+- [x] Repair Phase 5 recorded example drift. — Done: `d34d9ac`, `c21eda6`. Refs: 4e25db9. (B446)
+- [x] Split client specification below hygiene limit — Done: 32be945. (B462)
+- [x] Split session implementation below hygiene limit — Done: 2d72f7b. (B466)
+- [x] Split confirm recording below hygiene limit — Done: 5625c94; coverage completion e522e31. (B471)
+- [x] Split abort recording below hygiene limit — Done: 520d811. (B478)
+- [x] Disposition newly reported dead-code suppressions — Done: e0a5317. (B484)
+- [x] Resolve Lua warning findings — Done: 1116c65. (B496)
+- [x] Reduce evidence archive size — Done: 6175df8; containing commit. (B501)
+- [x] Split server implementation below hygiene limit — Done: containing commit. Refs: b7c8e56, 79ea498, 4c25e8d, b7a27f3. (B506)
+- [x] Split async server tests below hygiene limit — Done: containing commit; cb3bb4c. Refs: 89dc88c. (B509)
+- [x] Split Neovim integration tests below hygiene limit — Done: b84baa2; containing commit. Inherited async-test `Done: cb3bb4c` preserved, not Neovim implementation. Refs: 32521932. (B514)
+- [x] Split editor bridge tests below hygiene limit — Done: 8a35f9a. (B524)
+- [x] Split generated worked-exchanges reference below hygiene limit — Done: 4d0c29d. (B527)
+- [x] Split command tests below hygiene limit — Done: dd44fb2. (B531)
+- [x] Split VSCode E2E suite below hygiene limit — native A06 via `make vscode-e2e`; no Done SHA supplied in Base. (B534)
+- [x] Resolve new Luacheck findings from T022 hygiene run — Done: containing commit; implementation `60f439a`, generated annotations `2a583fe`. (B538)
 
-- [x] **Remove permanent formatter tests and retain one-time verification.**
-  Source-only: `bceb82d:TASKS.md`.
+### Feature — Phase 2 (acceptance and recorded final gate complete)
 
-Historical references are provenance, not current instructions. Current workflow: [fixture guide](tests/fixtures/lsp_traces/README.md), [UI test plan](ui-test-plan.md), [formatting guide](docs/FORMATTING.md).
-This file remains the sole queue; Part Seven is scope/provenance, not a competing queue. T011 owns schema-drift integration; T025 owns native-host integration.
+- [x] T006 — Done: containing commit. (B581)
+- [x] T007 — Done: containing commit; all six original clauses and native evidence audited under T007.5. (B583)
 
-- [x] **T120.1 — Configure pinned Lua and JavaScript/TypeScript formatters.**
-- [x] **T120.2 — Implement staged-safe formatter checks.**
-- [x] **T120.3a — Add opt-in formatter hook installation.**
-- [x] **T120.3a1 — Isolate missing-tool tests and preserve existing hook locations.**
-- [x] **T120.3b — Integrate formatter CI checks and contributor commands.**
-- [x] **T120.3 — Wire formatter hooks, installation and CI.**
+### Feature — Phase 3: Plain interaction (complete; gate recorded)
 
-T120 completion details and one-time verification: immutable `bceb82d:TASKS.md`.
+- [x] T008 — Done: `6957647`..`6179b54` (via T008.1–T008.13b). (B587)
+- [x] T009 — Done: `8280e85`..`cb8423c` (via T009.1–T009.6). (B588)
+- [x] T010 — Done: `7c62e6c`..`600411d` (via T010.1–T010.4d). (B589)
 
-- [x] **Record formatter pre-commit hooks and resolve reported Rust formatting errors.**
-  Historical formatting checkpoint; superseded by completed T120 and the staged-only hook follow-up above. Use [current formatting guidance](docs/FORMATTING.md), not this record as a workspace-wide formatting claim.
+### Feature — Phase 4: Specification
 
-- [x] **T005.1 — Define the evidence-backed quirk registry and resolver.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2a — Add validated layered quirk settings.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2b1 — Finish and commit initialize quirk resolution.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2b2a — Commit real initialize quirk acceptance tests.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2b2b — Prove quirk-controlled outgoing edit format.** Source-only: `eb87a14:TASKS.md`. Verified: `d2faf01`.
-- [x] **T005.2b2 — Prove effective quirk resolution through the real server.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2b — Resolve and report production initialize quirks.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.2 — Integrate quirk configuration and effective initialize reporting.** Source-only: `eb87a14:TASKS.md`.
-- [x] **T005.3a — Drive fake-editor behavior from quirk registry models.** Source-only: `eb87a14:TASKS.md`. Verified: `f224f94`.
-- [x] **T005.3b — Prove named server workarounds and universal safety.** Done: `65ee6d9`. Verified: `65ee6d9`.
-- [x] **T005.3c — Generate the known-client appendix and audit T005.** Done: `6c95b50`. Verified: `65ee6d9`.
-- [x] **T005.3 — Enforce quirk behaviors and generate the client appendix.** Helix showDocument remains explicit-override-only pending positive evidence; scripted models and declaration captures are not new native evidence. Universal echo/hash and one-document safety remain contracts. Other details: immutable `eb87a14:TASKS.md`.
-- [x] **Record the approved judgment-based review policy and clarify current phase boundaries.** Current review and orchestration policy: [AGENTS.md](./AGENTS.md#working-conventions); named roadmap phase groups are phase boundaries.
-- [x] **Limit local verification to Linux and retain cross-platform CI follow-ups.**
-  Local execution is Linux-only for now. Record Windows/macOS risks and required CI checks explicitly; do not claim those platforms were executed locally or block Linux progress solely for unavailable non-Linux hosts.
-- [x] **Update execution limits and future reviewer selection.** Current execution limits are in [AGENTS.md](./AGENTS.md); obsolete model-selection and skip-review directions removed.
-- [x] **T004.final — Audit and close typed capability declaration acceptance.**
-  Source-only: `5f5f308:TASKS.md`. T004 remains closed; Phase 2 remains open through T007.
-- [x] **T004.7 — Check presentation emissions against negotiated declarations.**
-  Source-only: `5f5f308:TASKS.md`. Preserve production warning-message and main-placement fallbacks; probes do not fail.
-- [x] **T004.7a — Complete strict-emitter rejection and placement-fallback tests.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.7b — Cover both secret dependencies and declared optional effects.**
-  Done: `b89bf60`; review correction: `78b6f49`.
-- [x] **T004.6 — Derive capability requirements from command metadata.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.6a — Derive the optional-effect requirement table from the registry.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.6b — Cover actual optional-effect producers against command requirements.**
-  Source-only: `5f5f308:TASKS.md`. Exercised producers, not exhaustive; deferred effects map to initiators.
-- [x] **T004.1 — Use camelCase content-action targets on the wire.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.2 — Remove unconsumed rich rendering and key-delivery modes.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.2a — Finish server mode removal and validate supported-mode coverage.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.3 — Deserialize strict typed rich capability declarations.**
-  Source-only: `5f5f308:TASKS.md`; verification: `7678242`. Immutable captures remain provenance.
-- [x] **T004.3a — Pin Lua verification to the server built by Make.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.3b — Pin native UI verification to the freshly built server.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.4 — Verify real client declarations and repair VSCode initialization wiring.**
-  Source-only: `5f5f308:TASKS.md`. Source equality/causality manually checked, not live recapture.
-- [x] **T004.4a — Register and natively verify the real VSCode declaration feature.**
-  Source-only: `5f5f308:TASKS.md`. Native evidence provenance retained; declaration source equality/causality manually checked.
-- [x] **T004.4b — Validate both current native client declarations against the typed schema.**
-  Source-only: `5f5f308:TASKS.md`. Immutable captures remain provenance.
-- [x] **T004.4b1 — Retain current native Neovim declaration evidence.**
-  Source-only: `5f5f308:TASKS.md`. Native evidence provenance retained.
-- [x] **T004.4b2 — Test the actual native client blocks against strict deserialization.**
-  Source-only: `5f5f308:TASKS.md`. Source equality/causality manually checked, not live recapture.
-- [x] **T004.5a — Remove unused process-log identifiers from readable errors.**
-  Source-only: `5f5f308:TASKS.md`.
-- [x] **T004.5b — Remove the unproduced OpenView effect alias.**
-  Done: `3627f46` (implementation: `b16685d`, `f6a859d`).
-- [x] **T004.5b1 — Remove the unproduced Rust OpenView effect variant.**
-  Done: `b16685d`.
-- [x] **T004.5b2 — Remove client OpenView aliases and reconcile the public contract.**
-  Done: `3627f46`.
-- [x] **T004.5b2a — Delete client effect aliases and verify native stack behavior.**
-  Done: `f6a859d`.
-- [x] **T004.5b2b — Reconcile remaining public view-effect documentation.**
-  Done: source-only `5f5f308:TASKS.md`; native evidence provenance retained.
-- [x] **T004.5c — Consolidate the duplicate recording UI test helper.**
-  Done: `b5eb865`. `multiChoice` has consumers, but no producing-command proof; native evidence remains provenance.
-- [x] **T002 wire-recorder — Complete.** Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Original acceptance: immutable `61370ad:TASKS_PART_SEVEN.md`; capture/native provenance: `83f79f5:TASKS.md`, `8476a8e`. Runtime regressions: `tests/wirelog.rs` (`make test-rust FILTER="--test wirelog"`); three quirk initialize inputs remain, no old JSONL parser gate. Linux evidence is not Windows/macOS or full native-client proof; see [fixture guide](tests/fixtures/lsp_traces/README.md).
-- [x] **T003.1 — Configure Lua and VSCode hygiene entry points.**
-  Source-only: `3787c66:TASKS.md`.
-- [x] **T003.2 — Add the report-only hygiene runner and focused tests.**
-  Source-only: `3787c66:TASKS.md`.
-- [x] **T003.3 — Audit hygiene findings and validate unused-dependency detection.**
-  Source-only: `3787c66:TASKS.md`.
-- [x] **T003.2a — Enforce generated-file filtering and hermetic reporter tests.**
-  Source-only: `3787c66:TASKS.md`.
-- [x] **T003.4 — Document phase hygiene and complete the tooling contract.**
-  Source-only: `3787c66:TASKS.md`; report-only hygiene; Linux evidence only, non-Linux CI follow-ups retained.
-  Historical T002 recorder integration, append/restart fixes and native capture records: immutable `83f79f5:TASKS.md` (`15a8f63`, `1563bbb`). Fixture consumers retain three quirk initialize inputs; client declarations are tested separately. No old JSONL/sidecar parser gate remains.
-- [x] **T001.5b2 — Replace superseded task and history sections.** Source-only: `3787c66:TASKS.md`.
-- [x] **T001.5c — Remove duplicate top matter and retired Plain plans.** Source-only: `3787c66:TASKS.md`; original Plain scope T004–T010/T013/T020–T022, keys T034–T039, deferred T099–T111; immutable sources `2ff1ee7:magit-lsp-plain-client-tasks.md` and `2ff1ee7:magit-lsp-plain-keys-tasks.md`; mapping: [migration ledger](docs/evidence/task-queue-migration.md).
-- [x] **T001.4b — Qualify historical visual evidence.** Source-only: `3787c66:TASKS.md`.
-- [x] **T001.4c — Isolate human-only README image guidance.** Source-only: `3787c66:TASKS.md`.
-- [x] **T001 docs-diet — Complete.**
-  Done: `d12d5a4`. Enforced by `git diff --check` and bounded migration assertions. Residuals: A12 ownerless ([ledger](docs/evidence/task-queue-migration.md)); R-EDIT-REAL not green, T104 subset only; binary-platform limits and immutable provenance retained (`cbec0bf:TASKS.md`).
-- [x] **Retained gap — A12 real-dispatch Git failure handling.** Original scope and acceptance: `da4d422^:REVIEW_REPORT.md` A12. Migrated to `Session`/stdio seams; `server::mutation` and its callers are absent. `tests/server_async.rs::a12_selection_stage_reports_index_lock_as_successful_error_effect` verifies readable real-dispatch failure effects, unchanged Git state, malformed-input JSON-RPC errors and stderr; `tests/errors.rs` and `tests/dispatch.rs` cover error conversion and dispatch. T103 remains the distinct deferred same-session reader-lock redesign. Immutable provenance: `d04dfa2:TASKS.md`; implementation: `4395f73`, `5bb9903`.
-  - Verified: `make test-rust FILTER="--test errors --test dispatch --test views --test server_async"` @ `6688ed1` → ok: rust
-- [x] **Retained decision — R-NAV.** Four tree-owned commands verified; immutable evidence: `da4d422:TASKS.md`.
-- [x] **T001.3b — Compress completed correctness and editor contracts.** Immutable evidence and enforcing checks retained in `da4d422:TASKS.md`.
-- [x] **T001.4a — Migrate versioned VSCode host facts and retire NOTES.** Evidence: `docs/evidence/vscode-host-behaviours.md`.
-- [x] **T001.5a — Align design and test documents with the replacement queue.** Source-only: `3787c66:TASKS.md`.
-- [x] **T001.5b1 — Preserve immutable per-ticket scope and verification provenance.** Source-only: `3787c66:TASKS.md`; [migration ledger](docs/evidence/task-queue-migration.md).
+- [x] T011 — Done: 92c78fb (containing commit of the last slice). Child implementation mapping: T011.1 `e6db680`, .2 `f5cd1dc`, .3 `1fcfce5`, .4 `ba42672`, .5 `5887917`, .6 `c7771d5`/`66b8f9f`, .7 `2b968a6`, .8 `d5573c2`, .9 `ff550b0`, .10 `f33bf3c`, .11 `1abac39`, .12 `18c9d4a`, .13 `395541a`, .14 `db870f0`, .15 `92c78fb`. Acceptance 5's example-file half belongs to T012. (B593)
+- [x] T011.11 (B595)
+- [x] T011.12 — Done: containing commit. Refs: 1abac39, f33bf3c. (B596)
+- [x] T011.13 Refs: 18c9d4a. (B604)
+- [x] T011.15 Refs: db870f0. (B607)
+- [x] T011.14 — Done: containing commit. Refs: 395541a. (B611)
+- [x] T011.10 Refs: 2b968a6. (B616)
+- [x] T011.9 Refs: d5573c2. (B620)
+- [x] T011.8 Refs: 66b8f9f. (B623)
+- [x] T011.7 — Done: containing commit. Refs: ff550b0. (B627)
+- [x] T011.6 — Done: containing commit. Refs: 5887917. (B632)
+- [x] T011.5 — Done: containing commit. Refs: ba42672. (B637)
+- [x] T011.4 — Done: containing commit. Refs: 1fcfce5. (B642)
+- [x] T011.3 — Done: containing commit. Refs: f5cd1dc. (B647)
+- [x] T011.2 — Done: containing commit. Refs: e6db680. (B652)
+- [x] T011.1 — Done: containing commit. Refs: 86d12d3. (B657)
+- [x] T012 — Done: 1e83443 (containing commit of the last slice). Child mapping: .1 `f118882`, .2 `da056e3`, .3 `153d57b`, .4 `a2e06c0`, .5 `5f305aa`, .6 `1e83443`. (B662)
+- [x] T012.1 Refs: 92c78fb. (B664)
+- [x] T012.2 Refs: f118882. (B668)
+- [x] T012.3 Refs: da056e3. (B672)
+- [x] T012.4 Refs: 153d57b. (B676)
+- [x] T012.5 Refs: a2e06c0. (B680)
+- [x] T012.6 Refs: 5f305aa. (B686)
+- [x] T013 — Done: 7169349 (containing commit of the last slice). Child mapping: .1 `a62d659`, .2 `648b5e3`, .3 `7169349`. (B690)
+- [x] T013.1 Refs: 3bc7a3d. (B692)
+- [x] T013.2 Refs: a62d659. (B697)
+- [x] T013.3 Refs: 648b5e3. (B702)
 
+### Feature — Phase 5: Commit selection and rebase
+
+- [x] T014 — Done: c9571c6 (containing commit of the last slice). Child mapping: .1 `d479920`, .2 `c9571c6`. (B710)
+- [x] T014.1 Refs: d479920. (B712)
+- [x] T014.2 Refs: c9571c6. (B717)
+- [x] T015 (B722)
+- [x] T015.1 (B724)
+- [x] T015.1a Refs: ba58ceb, 37a4e57. (B727)
+- [x] T015.1b Refs: ba58ceb. (B731)
+- [x] T015.2 — Done: containing commit. Refs: 8c25d27. (B735)
+- [x] T016 — Done: 241d292 plus T016.2. (B740)
+- [x] T016.1 Refs: 2f3c7e1. (B741)
+- [x] T016.2 — Done: containing commit. Refs: df88c46. (B745)
+- [x] T017 (B749)
+- [x] T017.1 — Done: containing commit. Refs: 02e5e01. (B750)
+- [x] T017.2 (B754)
+- [x] T017.2a — Done: `1db0220`, `d31087b`. (B757)
+- [x] T017.2a1 — Done: containing commit. (B760)
+- [x] T017.2a2 — Done: containing commit. Refs: 1db0220. (B763)
+- [x] T017.2b Refs: 7be7622. (B767)
+- [x] T017.3 Refs: 12bdfbb. (B771)
+- [x] T018 (B775)
+- [x] T018.1 Refs: 2e0cb73. (B777)
+- [x] T018.2 Refs: a3ae47f. (B781)
+- [x] T018.3 (B785)
+- [x] T018.3a — Done: containing commit. Refs: a1c141e. (B788)
+- [x] T018.3b (B792)
+- [x] T018.3b1 (B795)
+- [x] T018.3b1a Refs: 3141c6b. (B798)
+- [x] T018.3b1b Refs: ef318e1. (B803)
+- [x] T018.3b2 (B807)
+- [x] T018.3b2a Refs: 4a3eb72. (B811)
+- [x] T018.3b2b Refs: 7893c2b. (B815)
+- [x] T018.3c Refs: 6ff3713. (B819)
+- [x] T018.3c1 Refs: 6ff3713. (B824)
+- [x] T018.3c2 (B828)
+- [x] T018.3c2a Refs: 97cf821. (B832)
+- [x] T018.3c2b Refs: 42bf123. (B836)
+- [x] T018.4 (B841)
+- [x] T018.4a Refs: 15b41e9. (B844)
+- [x] T018.4b Refs: 14c5ce5. (B848)
+- [x] T019 — Done: `6dcebc9`. (B851)
+- [x] T019.1 Refs: 73cdbcd. (B855)
+- [x] T019.2 (B859)
+- [x] T019.2a Refs: 97b361e. (B862)
+- [x] T019.2b (B865)
+- [x] T019.2b1 Refs: 817e314. (B868)
+- [x] T019.2b2 (B871)
+- [x] T019.2b2a Refs: 632dc68. (B874)
+- [x] T019.2b2b (B877)
+- [x] T019.2b2b1 — Done: `cf051cb`. (B880)
+- [x] T019.2b2b2 (B885)
+- [x] T019.3 (B888)
+- [x] T019.3a Refs: a72aaed. (B891)
+- [x] T019.3b Refs: 8701ed8. (B894)
+- [x] T019.3c (B897)
+- [x] T019.3c1 (B899)
+- [x] T019.3c1a (B902)
+- [x] T019.3c1b Refs: 7312e65. (B904)
+- [x] T019.3c2 (B907)
+- [x] T019.3c2a Refs: d7b4563. (B909)
+- [x] T019.3c2b (B912)
+- [x] T019.3c2b1 Refs: e3a2bab, 24c5ceb. (B914)
+- [x] T019.3c2b2 Refs: d13b123. (B918)
+- [x] T019.4 (B921)
+- [x] T019.4a (B923)
+- [x] T019.4a1 Refs: 186931a. (B925)
+- [x] T019.4a2 (B928)
+- [x] T019.4a2a (B931)
+- [x] T019.4a2b (B933)
+- [x] T019.4a2b1 Refs: 67b81ba. (B936)
+- [x] T019.4a2b2 Refs: 67b81ba, da51e1d. (B939)
+- [x] T019.4b — Done: `67b81ba`. (B942)
+- [x] T019.5 Refs: 58aedcd. (B945)
+- [x] T019.5a (B949)
+- [x] T019.5a1 Refs: 58aedcd. (B951)
+- [x] T019.5a2 Refs: 12683de. (B953)
+- [x] T019.5b (B955)
+- [x] T019.5c (B956)
+- [x] T019.5c1 Refs: 95fce1f. (B957)
+- [x] T019.5c2 (B959)
+- [x] T019.5c2a Refs: fc697b4. (B960)
+- [x] T019.5c2b (B962)
+- [x] T019.5d (B964)
+- [x] T019.5d1 (B965)
+- [x] T019.5d1a (B966)
+- [x] T019.5d1b (B967)
+- [x] T019.5d2 Refs: b88cf0d. (B969)
+- [x] T019.5d3 Refs: b88cf0d. (B971)
+- [x] T019.5e (B974)
+- [x] T019.5e1 Refs: a51d840. (B975)
+- [x] T019.5e1a Refs: a026823. (B977)
+- [x] T019.5e1b Refs: a51d840. (B979)
+- [x] T019.5e2 (B981)
+- [x] T019.5e2a Refs: 94d965a. (B982)
+- [x] T019.5e2a1 (B984)
+- [x] T019.5e2a2 (B986)
+- [x] T019.5e2b Refs: 4da5eb0. (B989)
+- [x] T019.5f (B991)
+- [x] T019.5f1 (B992)
+- [x] T019.5f1a Refs: 32b951e. (B993)
+- [x] T019.5f1b Refs: 6375fc8. (B995)
+- [x] T019.5f2 (B997)
+- [x] T019.5f2a Refs: 26b5801. (B998)
+- [x] T019.5f2b (B1000)
+- [x] T019.5f2b1 Refs: ae1f998. (B1001)
+- [x] T019.5f2b2 Refs: 2307325. (B1003)
+- [x] T020 — Done: containing commit (with `a2fc50e`). Standalone script retained because focused scenarios do not replace all assertions. (B1010)
+- [x] T020.1 — Done: `a2fc50e`. (B1011)
+- [x] T020.2 — Done: `a2fc50e`. (B1013)
+- [x] T020.3 — Done: containing commit. (B1015)
+- [x] T021 — Done: `6f98336`. Scoped initial/follow-up limits remain in risks and [manual evidence](docs/evidence/plain-helix.md). (B1017)
+- [x] T023 — Done: `9e6111e` (Part 1: `9933272`; Part 2 implementation: `dcdabfe`; generated table: `6d1c37d`). Completion declaration is not completionProvider support. (B1042)
+- [x] T040 — Done: `7ce9dd3`. Deterministic signer evidence only; no real-key/native pinentry/cryptographic claim. (B1082)
+- [x] T041 — Done: `c84d1ae`. Existing branch/ref variants and filters only; remaining stubs/new views excluded. (B1086)
+
+## Bugfix
+
+Legacy second Bugfix landing anchor retained; all closed fixes are in this completion ledger.
+
+- [x] BUG-PHASE6-REGISTRY-DOCS — Done: `d1a3591`; queue evidence: `3620357`. (B1212)
+- [x] BUG-PHASE6-EXAMPLE-COMMAND-ORDER — Done: b902634, 944d571, 39bccb2; queue completion: `0763e38`. Refs: c84d1ae. (B1218)
+- [x] Target restored status content explicitly in process-log UI regression. — Done: containing commit. Refs: adac686. (B1225)
+- [x] Preserve terminal backtab for basic modifier clients. — Done: containing commit. Refs: b02d98f. (B1229)
+- [x] Deliver shifted Tab as terminal backtab in native UI harness. — Done: containing commit. (B1233)
+- [x] Build two-hunk UI repository before client startup. — Done: 1fc9fa3. Refs: b888574. (B1238)
+- [x] Repair vim hunk-body folding UI regression. — Done: a8bd4e0. Refs: 1fc9fa3, 1794310251020. (B1241)
+- [x] Repair log UI scenarios for current vim bindings and selection behavior. — Done: b888574. Refs: 16d725e. (B1245)
+- [x] Pin queued Plain renders across echo/response ordering. — Done: containing commit. Refs: 555560a. (B1250)
+- [x] Phase 2 gate — Declare a rich client in editor-bridge commit tests. — Done: 5da5d86. Refs: eb8bb1e. (B1254)
+- [x] Fix the flaky `tests/plain_draft.rs` suite (commit menu never offered). Refs: bfb60d1, f53b4b6, d70ee3c. (B1256)
+- [x] Repair the five failing UI scenarios (`vim` profile and `process-log`). — Done: f10d8a0. Refs: 5da5d86, 2e29535, b888574, 1fc9fa3, a8bd4e0, 8202c9e, adac686. (B1271)
+- [x] [P1] Reject ambiguous logical recording inputs — Done: 9081251. (B1279)
+- [x] [P1] Restore the stage identity matrix test registration — Done: containing commit; 009e610. (B1289)
+- [x] [P2] Point extracted rich-client links back to the client specification — Done: afa7ec1. (B1299)
+- [x] R-PLAIN-EDIT-EOF-RISK — Done: investigation complete with this evidence boundary and residual echo uncertainty; sprint-owned Done note retained. (B1308)
+- [x] R-T020-STALE — Done: `3e29d72`. Refs: 69bd3dd, 9a8372a. (B1310)
+- [x] R-T021-ATTACH — Done: `69bd3dd`. (B1318)
+- [x] R-T021-DRAFT — Done: `69bd3dd`. Native Confirm/Abort follow-up in [evidence](docs/evidence/plain-helix.md#follow-up-verification-after-lifecycle-fixes). (B1320)
+- [x] R-PHASE6-ORACLES — Done: `a2c1ae3`. (B1322)
+- [x] R-PHASE6-CLEANUP — Done: `be609d5`. Non-Linux fallback unverified. (B1323)
+- [x] BUG-PHASE6-HOOK — Done: `67cc416`. Refs: 9ba3c0d, 1ccb038adc2b9e9633f394ca1fea789aed2eabf8. (B1324)
+- [x] [P0] Retain VSCode draft text until Abort is positively acknowledged Refs: 3125ee6, 275bcc2, 5739f0c, e627b7a. (B1328)
+- [x] [P1] Bind todo saves to the exact rebase operation instance Refs: 9a1b69e. (B1339)
+- [x] [P1] Serialize todo replacement with the Git lock path Refs: 9cc6a17. (B1348)
+- [x] [P1] Batch todo object resolution into one Git invocation (B1356)
+- [x] Todo batch response correctness Refs: 972148b. (B1358)
+- [x] Todo batch single-process evidence Refs: 955a8b7. (B1360)
+- [x] [P1] Load each todo view exactly once and surface factory failures Refs: 48f17a9. (B1368)
+- [x] [P1] Restore scoped Makefile ownership without discarding external work Refs: a3ae47f, 7ac0630, a8089a3, 130f8eb, 2b68dda. (B1377)
+- [x] [P1] Check Unix executable access instead of any execute bit Refs: 89979d8. (B1385)
+- [x] [P1] Record truthful VER3c completion evidence Refs: 473b1de, a3ae47f, 7ac0630, 9daa386, 14e986a, 6954cd7. (B1393)
+- [x] [P1] Resolve the real Git test binary through PATH Refs: a242deb. (B1401)
+- [x] [P1] Record reproducible PATH-runner verification Refs: 0122a77, aeed37f, 14e986a, 6954cd7. (B1409)
+- [x] [P1] Discover optional VSCode hosts through PATH — Done: `aeed37f`. Refs: 14e986a, 6954cd7. (B1417)
+- [x] [P2] Exercise Abort synchronization failure and outstanding confirmation directly Refs: 275bcc2. (B1425)
+- [x] [P2] Replace the retired Abort envelope in the current client contract Refs: cc73c59. (B1433)
+- [x] [P2] Restore profile coverage for contextual todo commands Refs: 0a98afe, dfd6415. (B1441)
+- [x] [P2] Pin the VSCode adapter version to the server package version Refs: dfd6415. (B1450)
+- [x] [P2] Make the portability audit claims self-consistent Refs: 50f6aac. (B1458)
+- [x] [P2] Retire the source-spelling portability checker Refs: aeed37f. (B1466)
+- [x] [P2] Delete the stale temporary handoff transcript — Done: containing commit. Refs: 326cced, 130f8eb. (B1475)
+- [x] [P2] Return deferred sibling refreshes from session prompt closes. — Done: containing commit. Refs: 7fae07c. (B1484)
+- [x] [P2] Resume deferred sibling refreshes when a prompt or its origin closes. — Done: containing commit. Refs: ff49240. (B1487)
+- [x] [P2] Verify Plain close routing of resumed prompt refreshes. — Done: 16d725e. Refs: ee220d1. (B1489)
+- [x] [P1] Guard delayed Plain draft delivery failures against accepted or superseded deliveries. — Done: containing commit. Refs: bfb60d1, 67db167. (B1495)
+- [x] [P1] Match empty-secret cancellation in the shared Rust prompt model. — Done: containing commit. (B1499)
+- [x] [P1] Keep repaired Plain prompt action generations current. — Done: containing commit. (B1500)
+- [x] [P2] Resume deferred sibling refreshes after document prompts. — Done: `15a7158`. Refs: 53de88a. (B1505)
+- [x] [P1] Report a rejected Plain commit draft edit. (B1506)
+- [x] [P1] Reconcile relocated architecture with the current wire contract. — Done: `e666f27`. (B1508)
+- [x] [P1] Make bare docs-check validate every maintained reference. — Done: `0474efc`; evidence: `9df2075`. (B1509)
+- [x] [P2] Stop calling the resolved config-directory choice open. — Done: containing commit. (B1510)
+- [x] [P1] Route Plain draft-sync failures through standard notifications, not `view/effects` — Done: `5fb7977`. (B1512)
+- [x] [P2] Document the registry-lock-during-emit invariant behind the detached refresh thread — Done: `e70f748`. (B1519)
+- [x] [P1] Bind prepared rebase launch to the captured HEAD attachment Refs: 7f5f74f. (B1526)
+- [x] [P1] Make prepared-plan edit failures transactional Refs: 7f5f74f. (B1534)
+- [x] [P1] Refuse unsupported prepared message-edit actions before launch (B1542)
+- [x] Reject prepared message actions at the model boundary. Refs: efa984d. (B1549)
+- [x] Verify prepared message refusals through server submit. Refs: 09fbbda. (B1551)
+- [x] [P2] Assert native cancellation invariants before the next rebase starts Refs: 7be7ff2. (B1554)
+- [x] [P2] Reconcile focused version-startup documentation with the shared runner Refs: 27ad2de. (B1562)
+- [x] [P1] Keep deferred repository ownership until the worker exits — Done: `09119a7`; reopened publication/progress boundary corrected after `1e50954`. Refs: b097155, 2001ec405e5501ffca40031244bcca7be46a0c8e. (B1570)
+- [x] Deferred reservation and Rich routing regression. (B1571)
+- [x] Plain deferred mutation refusal regression. (B1572)
+- [x] [P1] Verify the complete autosquash marker subject before replay Refs: 3274dbf. (B1588)
+- [x] [P1] Preserve operation cancellation across the marker-to-rebase boundary (B1597)
+- [x] Persistent cancellation intent regression. Refs: 1ccb038. (B1598)
+- [x] Post-marker cancellation regression. Refs: 1ccb038. (B1600)
+- [x] [P1] Restore the non-Unix scoped-editor compilation boundary Refs: d7b656f. (B1608)
+- [x] [P2] Stage synchronized changes for only the addressed document (B1616)
+- [x] Addressed-document staging structure. (B1617)
+- [x] Real draft multi-document isolation regression. Refs: 46322ce. (B1618)
+- [x] [P1] Guard every effective Plain repository mutation during deferred work — Done: containing commit; d83fcd2. (B1626)
+- [x] [P1] Preserve native teardown identity when owned processes survive — Done: 0c667d1. (B1636)
+- [x] [P1] Honor ref-wide logs when the current branch is unborn — Done: `00ef0f4`. (B1645)
+- [x] [P1] Reject contradictory merge filters at the Git boundary — Done: `0384b01`. (B1654)
+- [x] [P1] Enforce the exact bounded worked-exchange artifact set — Done: `255f2e9` (implementation), `e302639` (completion). (B1663)
+- [x] [P2] Align UI matrix documentation with opt-in execution — Done: `04b4834`. (B1690)
+- [x] [P3] Remove the duplicate tempfile dependency declaration Refs: 6c00f60. (B1701)
+- [x] Documentation cleanup — Compact capability and recorder completion records. — Done: containing commit. (B1711)
+- [x] Documentation cleanup — Compact legacy completion records. — Done: containing commit. (B1712)
+- [x] Documentation cleanup — Condense completed-task records. — Done: containing commit. (B1713)
+- [x] Documentation cleanup — Condense obsolete history and preserve live work. — Done: containing commit. (B1714)
+- [x] Documentation cleanup — Restore moved completion records. — Done: `16f4d11`. (B1715)
+- [x] Documentation cleanup — Finish queue navigation and preservation audit. — Done: `2e051e3`. Refs: 16f4d11. (B1716)
+- [x] Documentation cleanup — Add focused documentation verification. — Done: `93bb9ab` (Makefile ownership correction `4c83d0d`). (B1721)
+- [x] Documentation cleanup — Move decisions and glossary reference. — Done: `3186a69`. (B1722)
+- [x] Documentation cleanup — Move core design reference. — Done: `9f8f28f`. (B1723)
+- [x] Documentation cleanup — Move workflow design reference. — Done: `338b9de`. (B1724)
+- [x] Documentation cleanup — Move expanded design reference. — Done: `338b9de`. (B1725)
+- [x] Documentation cleanup — Move architecture and glossary reference. — Done: `338b9de`. (B1726)
+- [x] Documentation cleanup — Move protocol reference. — Done: `0d663c7`. (B1727)
+- [x] Documentation cleanup — Preserve inline-code heading anchors in link checks. — Done: `7d4bee4`. (B1728)
+- [x] Documentation cleanup — Move keymaps and view reference. — Done: `e4f259d`. (B1729)
+- [x] Documentation cleanup — Move testing and open questions reference. — Done: `4537ef1`. (B1730)
+- [x] Documentation cleanup — Finish maintained reference navigation. — Done: `d9ea816`. (B1731)
+- [x] Documentation cleanup — Move durable reference material into docs. — Done: `d9ea816`. (B1732)
+- [x] Documentation cleanup — Repair recent review completion pointers. — Done: `f13dbc1`. (B1733)
+- [x] Documentation cleanup — Repair older review completion pointers. — Done: `e464429`. (B1734)
+- [x] Documentation cleanup — Remove resolved review and checkpoint narratives. — Done: `3ec4751`; provenance correction: `f13dbc1`, `e464429`. (B1735)
+- [x] Documentation cleanup — Compact documentation completion records. — Done: `a45fcde`. (B1736)
+- [x] Documentation cleanup — Compact T006 and T007 completion records. — Done: `bceb82d`. (B1737)
+- [x] Documentation cleanup — Compact formatter completion records. — Done: `eb87a14`. (B1738)
+- [x] Documentation cleanup — Compact quirk completion records. — Done: `5f5f308`. (B1739)
+- [x] Documentation cleanup — Compact typed-capability completion records. — Done: `3787c66`. (B1740)
+- [x] Documentation cleanup — Compact recorder and migration completion records. — Done: `408148f`. (B1741)
+- [x] T006.1a Refs: 1570ec0. (B1742)
+- [x] T006.1b Refs: 2e60210. (B1743)
+- [x] T006.1 Refs: 2e60210, 1570ec0. (B1744)
+- [x] T006.2a1 Refs: 2e1f392. (B1745)
+- [x] T006.2a2 Refs: 219f8e8, 2e1f392. (B1746)
+- [x] T006.2a Refs: 219f8e8, 2e1f392. (B1747)
+- [x] T006.2b1 Refs: 27c8a70790926b0ebdd6c807db9977b477cc9c90, 219f8e8. (B1748)
+- [x] T006.2b2 Refs: 96504c60fde13587bb69f38e2d66f8dd0758366a, 27c8a70. (B1749)
+- [x] T006.2b Refs: 96504c60fde13587bb69f38e2d66f8dd0758366a. (B1750)
+- [x] T006.2 Refs: 96504c60fde13587bb69f38e2d66f8dd0758366a. (B1751)
+- [x] T006.3a Refs: 53483b9. (B1752)
+- [x] T006.3b Refs: a4578fe956998619de708c2aee8ee93da20a17dc, 7e4c26cf15b95c3e9715b45b3876e4fa92c05f58. (B1753)
+- [x] T006.3c — Done: source-only provenance `e50d516:TASKS.md`; verified at `a4578fe`; dynamic IDs, cancellation, empty/default/custom/secret cases. (B1754)
+- [x] T006.3 — Done: source-only provenance `e50d516:TASKS.md`; original clause 5. (B1755)
+- [x] T006.4a Refs: cf74f8911d474b5f63c5def41b10864248c8f67e, 158692e8c5e09ea3f24c0daf225fcf977152f1ef. (B1756)
+- [x] T006.4b — Done: source-only provenance `e50d516:TASKS.md`; verified at `cf74f89`. Refs: 864f58c, 37fb07d. (B1757)
+- [x] T006.4 — Done: source-only provenance `e50d516:TASKS.md`; original clause 6 and final audit. (B1758)
+- [x] T007.1 — Done: source-only provenance `e50d516:TASKS.md`; verified on `70eca6154ce29951c05e1f5ae632cfd146e8e6b8`; original clauses 1–3, no executeCommand declaration requirement. (B1762)
+- [x] T007.1n — Done: source-only provenance `e50d516:TASKS.md`; `make plain-neovim` on `1d0422e9fa600c50b5015de4798b3269b856779d` passed; both variants prove declaration absence, action/render/Git state and cleanup. (B1763)
+- [x] T007.2a — Done: source-only provenance `e50d516:TASKS.md`; `make test-rust FILTER="--test plain_render"` on `53483b9` passed. (B1764)
+- [x] T007.2b1 — Done: source-only provenance `e50d516:TASKS.md`; focused Rust suite passed; real-server silent-stale success without echo triggers fresh edit; one-second grace and lifecycle guards covered. (B1765)
+- [x] T007.2b2 Refs: 5209f6e76623db5965983b202f0708fa8e09eb6e, 33230ec. (B1766)
+- [x] T007.2b Refs: 5209f6e76623db5965983b202f0708fa8e09eb6e. (B1767)
+- [x] T007.2 Refs: 5209f6e76623db5965983b202f0708fa8e09eb6e. (B1768)
+- [x] T007.3 Refs: 338b9de. (B1769)
+- [x] T007.4a1 — Done: `0e9223a`. (B1770)
+- [x] T007.4a2 — Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`. (B1773)
+- [x] T007.4a — Done: `c3f5a422c6c1eac2066c44ee815f66ab392c3105`; enforcing scenario recorded under T007.4a1–T007.4a2. (B1776)
+- [x] T007.4b1 — Done: `8dd8bcf`. (B1777)
+- [x] T007.4b2 — Done: `2264616`. (B1780)
+- [x] T007.4c1 Refs: cd2d152. (B1783)
+- [x] T007.4b — Done: `2264616`; enforcing snapshot and lifecycle checks recorded under T007.4b1–T007.4b2. (B1785)
+- [x] Roadmap reconciliation — Restore one authoritative queue. — Done: `6d08d85`. (B1786)
+- [x] Roadmap reconciliation — Index individual unfinished numbered tickets. — Done: `6d08d85`. (B1788)
+- [x] Roadmap reconciliation — Refresh protocol and evidence guidance. — Done: `6d08d85`. (B1790)
+- [x] Roadmap reconciliation — Route active verification through Make. — Done: `6d08d85`. (B1792)
+- [x] Investigate and rationalize trace/capture test infrastructure. — Done: `5025937`. [Fixture guide](tests/fixtures/lsp_traces/README.md), [UI test plan](ui-test-plan.md). (B1795)
+- [x] Autofix staged formatting through shared hook and Make commands. — Done: `9702973`; final index-publication fix `fa5c3de`. [Formatting guide](docs/FORMATTING.md). (B1797)
+- [x] Remove permanent formatter tests and retain one-time verification. Refs: bceb82d. (B1800)
+- [x] T120.1 (B1806)
+- [x] T120.2 (B1807)
+- [x] T120.3a (B1808)
+- [x] T120.3a1 (B1809)
+- [x] T120.3b (B1810)
+- [x] T120.3 Refs: bceb82d. (B1811)
+- [x] Record formatter pre-commit hooks and resolve reported Rust formatting errors. (B1815)
+- [x] T005.1 Refs: eb87a14. (B1818)
+- [x] T005.2a Refs: eb87a14. (B1819)
+- [x] T005.2b1 Refs: eb87a14. (B1820)
+- [x] T005.2b2a Refs: eb87a14. (B1821)
+- [x] T005.2b2b Refs: eb87a14, d2faf01. (B1822)
+- [x] T005.2b2 Refs: eb87a14. (B1823)
+- [x] T005.2b Refs: eb87a14. (B1824)
+- [x] T005.2 Refs: eb87a14. (B1825)
+- [x] T005.3a Refs: eb87a14, f224f94. (B1826)
+- [x] T005.3b — Done: `65ee6d9`. (B1827)
+- [x] T005.3c — Done: `6c95b50`. Refs: 65ee6d9. (B1828)
+- [x] T005.3 Refs: eb87a14. (B1829)
+- [x] Record the approved judgment-based review policy and clarify current phase boundaries. (B1830)
+- [x] Limit local verification to Linux and retain cross-platform CI follow-ups. (B1831)
+- [x] Update execution limits and future reviewer selection. (B1833)
+- [x] T004.final Refs: 5f5f308. (B1834)
+- [x] T004.7 Refs: 5f5f308. (B1836)
+- [x] T004.7a Refs: 5f5f308. (B1838)
+- [x] T004.7b — Done: `b89bf60`; review correction: `78b6f49`. (B1840)
+- [x] T004.6 Refs: 5f5f308. (B1842)
+- [x] T004.6a Refs: 5f5f308. (B1844)
+- [x] T004.6b Refs: 5f5f308. (B1846)
+- [x] T004.1 Refs: 5f5f308. (B1848)
+- [x] T004.2 Refs: 5f5f308. (B1850)
+- [x] T004.2a Refs: 5f5f308. (B1852)
+- [x] T004.3 Refs: 5f5f308, 7678242. (B1854)
+- [x] T004.3a Refs: 5f5f308. (B1856)
+- [x] T004.3b Refs: 5f5f308. (B1858)
+- [x] T004.4 Refs: 5f5f308. (B1860)
+- [x] T004.4a Refs: 5f5f308. (B1862)
+- [x] T004.4b Refs: 5f5f308. (B1864)
+- [x] T004.4b1 Refs: 5f5f308. (B1866)
+- [x] T004.4b2 Refs: 5f5f308. (B1868)
+- [x] T004.5a Refs: 5f5f308. (B1870)
+- [x] T004.5b — Done: `3627f46` (implementation: `b16685d`, `f6a859d`). (B1872)
+- [x] T004.5b1 — Done: `b16685d`. (B1874)
+- [x] T004.5b2 — Done: `3627f46`. (B1876)
+- [x] T004.5b2a — Done: `f6a859d`. (B1878)
+- [x] T004.5b2b — Done: source-only `5f5f308:TASKS.md`; native evidence provenance retained. (B1880)
+- [x] T004.5c — Done: `b5eb865`. Producing-command/native limits remain above. (B1882)
+- [x] T002 — Done: `77bc34d`; portable logger `e34ce5a`/`f7d4bea`; Unicode redaction `6dd4f7e`. Refs: 61370ad, 83f79f5, 8476a8e. (B1884)
+- [x] T003.1 Refs: 3787c66. (B1885)
+- [x] T003.2 Refs: 3787c66. (B1887)
+- [x] T003.3 Refs: 3787c66. (B1889)
+- [x] T003.2a Refs: 3787c66. (B1891)
+- [x] T003.4 Refs: 3787c66, 83f79f5, 15a8f63, 1563bbb. (B1893)
+- [x] T001.5b2 Refs: 3787c66. (B1896)
+- [x] T001.5c Refs: 3787c66, 2ff1ee7. (B1897)
+- [x] T001.4b Refs: 3787c66. (B1898)
+- [x] T001.4c Refs: 3787c66. (B1899)
+- [x] T001 — Done: `d12d5a4`. Refs: cbec0bf. A12's old ownerless wording superseded by its retained closure below. (B1900)
+- [x] Retained gap — A12 real-dispatch Git failure handling. Refs: da4d422, d04dfa2, 4395f73, 5bb9903, 6688ed1. (B1902)
+- [x] Retained decision — R-NAV. Refs: da4d422. (B1904)
+- [x] T001.3b Refs: da4d422. (B1905)
+- [x] T001.4a (B1906)
+- [x] T001.5a Refs: 3787c66. (B1907)
+- [x] T001.5b1 Refs: 3787c66. (B1908)
 
 ## Resolved review and bugfix index
 
-Immutable detail and original verification: `d9ea816:TASKS.md`. These records are closed, not execution instructions.
+Historical source-only records retain that classification; no source SHA below is reclassified as implementation Done.
 
-- [x] T006 gate — Wire shared editor models into all fake-editor consumers. — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
-- [x] Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint — Restore full regressions after strict wire migration. — Done: `d996e19`.
-- [x] Checkpoint — Establish the staged-successor failure cause. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint — Align staging-cursor regression with the source-successor contract. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint — Restore log-menu key routing and native passthrough. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint — Restore full Git-backend hunk comparisons. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint — Resolve Rust formatting-gate drift. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Correlate scripted prompt responses with real server replies — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
-- [x] [P1] Enforce static keymap delivery in the strict checker — Source-only: `d9ea816:TASKS.md`; Verified refs: `02b7d19`.
-- [x] [P2] Put metadata-only rich rendering in the shared contract vectors — Source-only: `d9ea816:TASKS.md`; Verified refs: `43480bc`.
-- [x] [P2] Refresh the T006 accumulated-work gate totals — Source-only: `d9ea816:TASKS.md`; Verified refs: `2e29535`.
-- [x] [P1] Pin Neovim stale-apply entry ordering — Source-only: `d9ea816:TASKS.md`; Verified refs: `6c95b50`.
-- [x] [P1] Prove the real Plain apply pipeline becomes ready — Source-only: `d9ea816:TASKS.md`; Verified refs: `e46632b`.
-- [x] [P2] Repair T005 completion provenance and open-phase wording — Source-only: `d9ea816:TASKS.md`; Verified refs: `ae5b78d`.
-- [x] [P2] Make capability-match appendix generation exhaustive — Source-only: `d9ea816:TASKS.md`; Verified refs: `5e61d9f`.
-- [x] [P1] Make the secret-only declaration test exercise prompt capabilities — Done: `78b6f49`.
-- [x] [P1] Remove retired capability modes from current client contracts — Done: `db288e4`.
-- [x] [P1] Report checker failures without calling them findings — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Model the real VSCode entry graph in Knip — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Check Lua against Neovim's actual LuaJIT standard — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Complete marker ownership and baseline reconciliation. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Give every retained hygiene finding an owner or reason — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Make hygiene tests portable and prove checker working directories — Done: `caf5588`, `0550f36`, `33d0554`.
-- [x] [P1] Finish native Helix smoke shutdown and recipe verification. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Make the Helix capture recipe preserve verifiable evidence — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Enforce trace and initialize-preset consistency — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] State that five T034 action classes remain missing — Original ref: `e34ce5a`.
-- [x] [P1] Serialize shared wirelogs on every tested platform — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Open shared logs with Windows lock-compatible access — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Make identity replacement byte-index safe — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Retain the claimed bundled-Neovim native edit — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint review — Opt-in wire recorder and completed documentation cutover. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Correlated secret-prompt errors are recorded without redaction. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint review — Git mutation identities and structured successors. — Reviewed ref: `dd92f90cdb11d827606a689a88a280f480d7508d`.
-- [x] Checkpoint review — Plain protocol versions and process ownership. — Source-only: `d9ea816:TASKS.md`.
-- [x] Checkpoint review — Roadmap migration preserves open requirements. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] A12 is marked complete in the queue index while its sole retained issue remains open. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Enforce exact action-fixture metadata and source-row mappings — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Add a self-contained Neovim selection-and-paste recipe — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Harden the Helix action recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Harden the Neovim selection recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Repair rapid-recipe syntax without claiming cleanup acceptance. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Harden the Neovim rapid-repair recipe cleanup. — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Make capture-recipe cleanup survive failures — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Make the phase-gate schema match the actual queue — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Restore hygiene-test environment isolation — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Remove duplicate Linux verification policy — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Remove stale planned-navigation marker claims — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Finish terminating the owned Helix recipe server — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Isolate Helix recipe repository setup from host Git config — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Finish migrating shared test wire fixtures to the strict schema — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Test duplicate entries in every typed capability set — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence — Source-only: `d9ea816:TASKS.md`.
-- [x] [P1] Remove retired fields from the public rich-protocol contract — Source-only: `d9ea816:TASKS.md`.
-- [x] [P2] Pin the bundled Neovim declaration at its producer boundary — Source-only: `d9ea816:TASKS.md`.
+- [x] T006 gate — Wire shared editor models into all fake-editor consumers. Refs: d9ea816, 2e29535. (B1915)
+- [x] Checkpoint — Revalidate VSCode regressions without overlapping server rebuilds. Refs: d9ea816. (B1916)
+- [x] Checkpoint — Restore full regressions after strict wire migration. — Done: `d996e19`. (B1917)
+- [x] Checkpoint — Establish the staged-successor failure cause. Refs: d9ea816. (B1918)
+- [x] Checkpoint — Align staging-cursor regression with the source-successor contract. Refs: d9ea816. (B1919)
+- [x] Checkpoint — Restore log-menu key routing and native passthrough. Refs: d9ea816. (B1920)
+- [x] Checkpoint — Restore full Git-backend hunk comparisons. Refs: d9ea816. (B1921)
+- [x] Checkpoint — Resolve Rust formatting-gate drift. Refs: d9ea816. (B1922)
+- [x] [P1] Correlate scripted prompt responses with real server replies Refs: d9ea816, 2e29535. (B1923)
+- [x] [P1] Enforce static keymap delivery in the strict checker Refs: d9ea816, 02b7d19. (B1924)
+- [x] [P2] Put metadata-only rich rendering in the shared contract vectors Refs: d9ea816, 43480bc. (B1925)
+- [x] [P2] Refresh the T006 accumulated-work gate totals Refs: d9ea816, 2e29535. (B1926)
+- [x] [P1] Pin Neovim stale-apply entry ordering Refs: d9ea816, 6c95b50. (B1927)
+- [x] [P1] Prove the real Plain apply pipeline becomes ready Refs: d9ea816, e46632b. (B1928)
+- [x] [P2] Repair T005 completion provenance and open-phase wording Refs: d9ea816, ae5b78d. (B1929)
+- [x] [P2] Make capability-match appendix generation exhaustive Refs: d9ea816, 5e61d9f. (B1930)
+- [x] [P1] Make the secret-only declaration test exercise prompt capabilities — Done: `78b6f49`. (B1931)
+- [x] [P1] Remove retired capability modes from current client contracts — Done: `db288e4`. (B1932)
+- [x] [P1] Report checker failures without calling them findings Refs: d9ea816. (B1933)
+- [x] [P1] Model the real VSCode entry graph in Knip Refs: d9ea816. (B1934)
+- [x] [P1] Check Lua against Neovim's actual LuaJIT standard Refs: d9ea816. (B1935)
+- [x] [P1] Complete marker ownership and baseline reconciliation. Refs: d9ea816. (B1936)
+- [x] [P1] Give every retained hygiene finding an owner or reason Refs: d9ea816. (B1937)
+- [x] [P2] Make hygiene tests portable and prove checker working directories — Done: `caf5588`, `0550f36`, `33d0554`. (B1938)
+- [x] [P1] Finish native Helix smoke shutdown and recipe verification. Refs: d9ea816. (B1939)
+- [x] [P1] Make the Helix capture recipe preserve verifiable evidence Refs: d9ea816. (B1940)
+- [x] [P2] Enforce trace and initialize-preset consistency Refs: d9ea816. (B1941)
+- [x] [P2] State that five T034 action classes remain missing Refs: e34ce5a. (B1942)
+- [x] [P1] Serialize shared wirelogs on every tested platform Refs: d9ea816. (B1943)
+- [x] [P1] Open shared logs with Windows lock-compatible access Refs: d9ea816. (B1944)
+- [x] [P1] Make identity replacement byte-index safe Refs: d9ea816. (B1945)
+- [x] [P1] Retain the claimed bundled-Neovim native edit Refs: d9ea816. (B1946)
+- [x] Checkpoint review — Opt-in wire recorder and completed documentation cutover. Refs: d9ea816. (B1947)
+- [x] [P2] Correlated secret-prompt errors are recorded without redaction. Refs: d9ea816. (B1948)
+- [x] Checkpoint review — Git mutation identities and structured successors. Refs: dd92f90cdb11d827606a689a88a280f480d7508d. (B1949)
+- [x] Checkpoint review — Plain protocol versions and process ownership. Refs: d9ea816. (B1950)
+- [x] Checkpoint review — Roadmap migration preserves open requirements. Refs: d9ea816. (B1951)
+- [x] [P2] A12 is marked complete in the queue index while its sole retained issue remains open. Refs: d9ea816. (B1952)
+- [x] [P1] Enforce exact action-fixture metadata and source-row mappings Refs: d9ea816. (B1953)
+- [x] [P1] Add a self-contained Neovim selection-and-paste recipe Refs: d9ea816. (B1954)
+- [x] [P2] Harden the Helix action recipe cleanup. Refs: d9ea816. (B1955)
+- [x] [P2] Harden the Neovim selection recipe cleanup. Refs: d9ea816. (B1956)
+- [x] [P2] Repair rapid-recipe syntax without claiming cleanup acceptance. Refs: d9ea816. (B1957)
+- [x] [P2] Harden the Neovim rapid-repair recipe cleanup. Refs: d9ea816. (B1958)
+- [x] [P2] Make capture-recipe cleanup survive failures Refs: d9ea816. (B1959)
+- [x] [P1] Make the phase-gate schema match the actual queue Refs: d9ea816. (B1960)
+- [x] [P2] Restore hygiene-test environment isolation Refs: d9ea816. (B1961)
+- [x] [P2] Remove duplicate Linux verification policy Refs: d9ea816. (B1962)
+- [x] [P2] Remove stale planned-navigation marker claims Refs: d9ea816. (B1963)
+- [x] [P1] Finish terminating the owned Helix recipe server Refs: d9ea816. (B1964)
+- [x] [P2] Isolate Helix recipe repository setup from host Git config Refs: d9ea816. (B1965)
+- [x] [P1] Finish migrating shared test wire fixtures to the strict schema Refs: d9ea816. (B1966)
+- [x] [P2] Test duplicate entries in every typed capability set Refs: d9ea816. (B1967)
+- [x] [P2] Anchor the fake StaticFeature APIs to real VSCode evidence Refs: d9ea816. (B1968)
+- [x] [P1] Remove retired fields from the public rich-protocol contract Refs: d9ea816. (B1969)
+- [x] [P2] Pin the bundled Neovim declaration at its producer boundary Refs: d9ea816. (B1970)
+
+## 3. Design decisions (expanded)
+
+[Maintained design](docs/ARCHITECTURE.md#3-design-decisions-expanded); general conventions in [AGENTS.md](./AGENTS.md).
+
+## 4. Protocol reference
+
+[Maintained protocol](docs/PROTOCOL.md#4-protocol-reference).
+
+## Keymaps and views
+
+- [Keymap profiles](docs/KEYMAPS.md#5-default-keymaps-profiles)
+- [View catalog](docs/VIEWS.md#6-view-catalog)
+
+## 8. Testing strategy
+
+[Maintained strategy](docs/TESTING.md#8-testing-strategy).
+
+## 9. Open questions
+
+[Maintained questions](docs/OPEN_QUESTIONS.md#9-open-questions); this audit does not resolve policy questions.

@@ -2,7 +2,7 @@
 
 > Historical commands normalized for portability; evidence was not rerun. `/tmp/opencode` paths remain provenance.
 
-This archive preserves detailed ticket scope and provenance. TASKS.md owns live status and its §7 checkbox index; this document is not a status queue. Each ticket has a number and a short name, for example `T008 prompts-and-picks`. The tickets are in phases. The text follows ASD-STE100 style. No automatic STE checker has validated it.
+This document preserves detailed ticket scope and provenance. TASKS.md alone owns checkbox states and authoritative Done/correction evidence; this is not a second status queue. Historical checked headings and quoted completion records below are archival context, not current instructions or independent completion authority. Each numbered scope has a short name, for example `T008 prompts-and-picks`. The text follows ASD-STE100 style; no automatic STE checker has validated it.
 
 ## How to read this document
 
@@ -25,6 +25,8 @@ This archive preserves detailed ticket scope and provenance. TASKS.md owns live 
 9. Compress completed tickets to 12 lines or less: requirement, `Done: <commit>`, and enforcing test. Put evidence narrative in commit message.
 
 ## Immediate
+
+Historical section (closed trace/capture cleanup): not an instruction to resume these tasks. Current ownership and retained native/platform limits are in [the canonical completion ledger](./TASKS.md#completed-work); immutable `a366409749edf0e5591dff34d70500b73ab595b9:TASKS.md` preserves the aggregate trace/capture record. The dated details below quote the original scope/evidence only.
 
 Last review: `30de40d`; substantial fixture retirement, live synchronization coverage and shared native launch/teardown warranted full verification and scoped review. `make test` passed at `6825e11` (build, Rust, Lua, VSCode, keybindings); P1/P2 resolved in `944d823`/`30de40d`, with focused `make ui-unit` and native success/failure checks. No named roadmap phase ended; no additional heavy run for review fixes.
 
@@ -147,20 +149,23 @@ Last review: `30de40d`; substantial fixture retirement, live synchronization cov
 | 4 | Specification | T011 to T013 | Yes |
 | 5 | Commit selection and rebase | T014 to T019 | Yes |
 | 6 | Plain acceptance | T020 to T022 | Yes |
+| 6A | Rich v1 preview and prototypes | T105, T112 to T119 | T105, T112, T113, T114, T119 only; starts after T022 sign-off |
 | 7 | Test stabilization | T023 to T029, T120 | No (runs in parallel) |
-| 8 | Release | T030 to T033 | Starts after phases 1 to 6 |
+| 8 | Release | T030 to T033 | Starts after phases 1 to 6 and the Phase 6A release subset |
 | 9 | Plain keys | T034 to T039 | No (starts after T022) |
 | 10 | Small features | T040 to T047 | No |
 | 11 | Read views | T048 to T057 | No |
 | 12 | Shared Git workflows | T058 to T073 | No |
 | 13 | Advanced workflows | T074 to T098 | No |
-| 14 | Deferred | T099 to T111 | No |
+| 14 | Deferred | T099 to T111, except T105 (moved to 6A) | No; owner-request-only |
 
 Order for phases 1 to 6: do T001 and T002 first, in parallel. Then do T004 and T005. Then do T006 and T007. Phase 3 follows. Phase 4 runs alongside phase 3. Phase 5 runs in parallel with all other phases. T022 closes the gate.
 
+Current authorization is in TASKS.md, not this historical dependency order. T022 remains unchecked; Phase 6A must not start. T115–T117 are pre-freeze prototypes but do not gate 0.2; T118 stable freeze also does not gate 0.2. Release still requires explicit human approval at T033. Resolve the additive-preview versus pre-stable-breaking-cleanup policy tension through T113 before T114; this documentation audit does not choose either policy. Likewise T022's disposition alternatives below do not override its current hold or decide whether debt must be zero.
+
 ## Closed umbrella tickets
 
-All child tickets of these four tickets are done. Close each umbrella now. Move the remaining work as shown.
+Historical umbrella ownership mapping, not an instruction to close tasks. The first three umbrellas' delivered foundation slices have canonical queue evidence; remaining scopes route as below. R-EDIT-REAL's parent acceptance is explicitly not green: T104 is only a subset, not closure of that parent.
 
 | Old ticket | What is done | Remaining work goes to |
 | --- | --- | --- |
@@ -189,7 +194,7 @@ Complete on Linux; verification and review closure are recorded at the top of `T
 ### [x] T001 docs-diet — Complete
 
 Done: `d12d5a4`. Enforced by bounded migration assertions and `git diff --check`.
-Residuals: A12 remains ownerless; R-EDIT-REAL remains not green and T104 tracks
+Residuals: A12 is closed in the authoritative queue (see [migration ledger](docs/evidence/task-queue-migration.md#review-findings)); R-EDIT-REAL remains not green and T104 tracks
 only a subset. Binary-platform limits and immutable provenance remain documented
 in `TASKS.md` and [migration ledger](docs/evidence/task-queue-migration.md).
 
@@ -215,7 +220,7 @@ Immutable original acceptance: `b89bf60:TASKS_PART_SEVEN.md`; [clause audit and 
 Enforced by `tests/plain_core.rs`, `tests/plain_actions.rs`, `tests/commands.rs`, `tests/log_selection.rs`, `tests/editor_bridge.rs` and library custom-emitter tests; full serialized Linux `make test FILTER=--no-fail-fast` passed.
 `multiChoice` retains real client/shared-vector consumers; no producing command is claimed. One shared test `RecordingUi` remains.
 Native provenance/source equality are manually audited; automated tests cover stored declarations and exercised producers, not live recapture or exhaustive future discovery.
-T006–T007 implementation acceptance is complete; final Phase 2 orchestrator gate remains pending. Windows/macOS verification remains for CI.
+T006–T007 implementation acceptance is complete; phase implementation is complete. Windows/macOS verification remains for CI.
 
 ### T005 quirks-table (M)
 
@@ -266,11 +271,15 @@ T006–T007 implementation acceptance is complete; final Phase 2 orchestrator ga
 
 ## Phase 3: Plain interaction (not started; gates 0.2)
 
+Historical landing anchor only: “not started” is superseded by the recorded Phase 3 closure in TASKS.md, not current status or an instruction to restart work.
+
+### Phase 3: Plain interaction (complete; see authoritative queue)
+
 ### T008 prompts-and-picks (L)
 
 - **Depends on:** T004, T007. Old ticket: R-PLAIN-PROMPT (with the pick ladder and the option rows of R-PLAIN-STACK).
 - **Target Files:** `src/presentation/prompt.rs` (new), `src/tree.rs` (Field node), `src/server.rs` (`completionProvider`), `src/commands.rs`, `src/protocol.rs`, `src/ui.rs`, `lua/magit-lsp/prompt.lua`, `clients/vscode/lib/prompt.js`, `clients/vscode/lib/requests.js`, `tests/data/client-contracts.json`, `docs/plain-support.md` (generated), `tests/plain_prompt.rs` (new).
-- **Reference Files:** `TASKS.md` sections 3.5 and 3.6; sections C and D of `docs/evidence/harness-reassessment-inputs.md`; the current `PromptUi` and the recording `Ui`.
+- **Reference Files:** `docs/ARCHITECTURE.md` sections 3.5 and 3.6; sections C and D of `docs/evidence/harness-reassessment-inputs.md`; the current `PromptUi` and the recording `Ui`.
 - **Constraints:**
   - A `Field` is a tree node with a tracked range. Read only the text that the user typed from the document store. Never read structure from text. Repair edits outside fields. A field is one line and has a size limit.
   - A client must never filter, parse or resolve Git state.
@@ -294,7 +303,7 @@ T006–T007 implementation acceptance is complete; final Phase 2 orchestrator ga
 
 - **Depends on:** T008. Old ticket: R-PLAIN-SELECT.
 - **Target Files:** `src/presentation/plain.rs`, `src/commands.rs`, `src/session.rs`, `tests/plain_select.rs` (new).
-- **Reference Files:** `TASKS.md` section 3.7; the log select implementation from R-5.1.
+- **Reference Files:** `docs/ARCHITECTURE.md` section 3.7; the log select implementation from R-5.1.
 - **Constraints:** Build on the `pick` abstraction from T008. Do not make a second mechanism. A commit identity comes from structured nodes. Never read it from text.
 - **Acceptance:** The log select view works as a normal Plain document. Confirm, cancel and toggle-mark are code actions. A free-text revision uses a field. The commit identity comes from `ActionTarget`. Confirm and cancel both return the caller. A stale selection is rejected and changes nothing. Scenario: select a fixup target. Then, in a second run, cancel. The second run must change nothing.
 - **Verify:** Run `make test-rust FILTER="--test plain_select"`.
@@ -303,7 +312,7 @@ T006–T007 implementation acceptance is complete; final Phase 2 orchestrator ga
 
 - **Depends on:** T007. Old ticket: R-PLAIN-DRAFT.
 - **Target Files:** `src/presentation/plain.rs`, `src/editor.rs`, `tests/plain_draft.rs` (new).
-- **Reference Files:** `TASKS.md` section 3.10 (the real-file contract); T007 item 6.
+- **Reference Files:** `docs/ARCHITECTURE.md` section 3.10 (the real-file contract); T007 item 6.
 - **Constraints:** Reuse the real-file workflow and the `magit.command` confirm. Identify `COMMIT_EDITMSG` by its canonical path and URI. Never use `languageId`. Do not add a new draft protocol.
 - **Acceptance:**
   1. For `editDocument` when the client declares `showDocument`: if the document store shows that the URI is open, send a versioned `applyEdit` that replaces the whole buffer with the new template. Then send `showDocument` with `takeFocus`. If the URI is not open, send `showDocument` only.
@@ -368,7 +377,7 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 
 - **Depends on:** none (R-ARGS and R-5.1 are done). Old ticket: R-SELECT-OPS.
 - **Target Files:** `src/session.rs`, `src/commands.rs`, the log select view (confirm), `tests/commands.rs`, `tests/ui/scenarios/commit-select-*.scn` (new).
-- **Reference Files:** `TASKS.md` section 3.7; the current log select code and the `PromptAction` continuation.
+- **Reference Files:** `docs/ARCHITECTURE.md` section 3.7; the current log select code and the `PromptAction` continuation.
 - **Constraints:** The identity of a selection is the full commit id from the structured node. Never use rendered text or a row index.
 - **Acceptance:** The full selected commit id, the captured operation arguments and the caller all survive the select-mode continuation. Tests cover confirm, cancel and a stale selection.
 - **Verify:** Run `make test-rust FILTER="--test commands"` and `make ui-file FILE='tests/ui/scenarios/commit-select-*.scn'`.
@@ -441,13 +450,13 @@ Interactive rebase stays on the release gate. Use Neovim for native evidence in 
 ### T022 plain-gate (S)
 
 - **Depends on:** T006, T013, T015, T019, T020, T021. Old ticket: R-PLAIN-GATE.
-- **Target Files:** `tests/plain_e2e.rs`, `docs/plain-support.md`.
+- **Target Files:** `tests/plain_harness.rs`, `tests/dispatch.rs`, `docs/plain-support.md`. The existing harness owns these proofs; do not create a duplicate `plain_e2e` harness.
 - **Acceptance:**
   1. Run the T015 and T019 scenarios through the fake-editor harness. Assert the exact repository state.
   2. Add a minimal fake provider. It must prove that the dispatcher and the view interaction work without Git. Do not build a jj backend.
   3. Generate `docs/plain-support.md` again. No command may be `Unavailable` without a reason.
   4. Record the results of `make test`, `make ui-test` and `make hygiene`. Disposition every hygiene finding by fixing/deleting it, allowlisting with a concrete reason, or assigning an exact owner task; report missing tools and launch failures, and do not call report-only exit 0 debt-free.
-- **Verify:** Run `make test`, `make ui-test` and `make test-rust FILTER="--test plain_e2e"`.
+- **Verify:** Run `make test`, `make ui-test` and `make test-rust FILTER="--test plain_harness --test dispatch"`. This reconciles the existing proof ownership recorded at `9ba3c0d`, not a waiver of exact-state or non-Git-provider acceptance.
 
 ## Phase 6A: Rich protocol v1 and client prototypes
 
@@ -461,7 +470,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 
 - **Depends on:** none.
 - **Target Files:** `docs/design/rich-protocol-audit.md` (new). Read these files: `src/protocol.rs`, `src/session.rs`, `src/server.rs`, `lua/magit-lsp/view.lua`, `lua/magit-lsp/buffer.lua`, `clients/vscode/lib/render.js`, `clients/vscode/lib/requests.js`, `clients/vscode/lib/effects.js`.
-- **Reference Files:** `docs/CLIENT_SPEC.md`; `docs/evidence/harness-reassessment-inputs.md`; `TASKS.md` sections 3.3, 3.6 and 3.9.
+- **Reference Files:** `docs/CLIENT_SPEC.md`; `docs/evidence/harness-reassessment-inputs.md`; `docs/ARCHITECTURE.md` sections 3.3, 3.6 and 3.9.
 - **Constraints:** Do not change code. This ticket only finds out the facts. The list below comes from the evidence reports. Treat each item as unproven until you read the code.
 - **Acceptance:** For each item, write a section with: the status (real, not real, or unknown); the evidence (file and line); a proposal; whether the proposal changes the wire; the risk and the effort.
   1. The keymap `version` reuses the render version. Draft keymaps use version 0.
@@ -473,7 +482,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   7. VS Code cannot replay a `passThrough` key that is not a printable character or a clipboard shortcut.
   8. A static client learns about a mode change only through context notifications. Check that this works for entry through invoke, key, menu and `setMode`.
   9. Positional requests use the last acked tree. Before the first ack, they use the current tree. The spec does not say this.
-  10. `TASKS.md` section 3.6 says a prompt is a request. The code sends a notification, and the client answers with `view/promptRespond`.
+  10. Revalidate the historical prompt-request wording against maintained `docs/ARCHITECTURE.md` section 3.6 and `docs/PROTOCOL.md` section 4: check notification delivery and the `view/promptRespond` answer. The old TASKS.md wording is a historical audit premise, not an assertion of a current defect.
   11. VS Code declares layouts that it does not honor (T004 fixes the declaration).
   12. Add each other wart that you find while you read the code.
 - **Verify:** The audit file exists. Each item has a status and evidence. A reviewer confirms that no code changed.
@@ -481,7 +490,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
 ### T113 rich-protocol-decisions (S)
 
 - **Depends on:** T112. Use the stage 1 findings of T115, T116 and T117 when they exist. A later finding changes the record only through an additive change.
-- **Target Files:** `docs/design/rich-protocol-v1.md` (new), `TASKS.md` sections 3.6, 3.9 and 4.
+- **Target Files:** `docs/design/rich-protocol-v1.md` (new), `docs/ARCHITECTURE.md` sections 3.6 and 3.9, `docs/PROTOCOL.md` section 4.
 - **Reference Files:** `docs/design/rich-protocol-audit.md`.
 - **Constraints:** Decide as little as possible. Choose the simplest rule that works for the clients that exist now.
 - **Acceptance:** The decision record states these decisions:
@@ -598,7 +607,7 @@ A second backend (for example jj) reuses the views, key bindings and protocol. I
   5. Read dialogs as DOM text. Click them by role.
   6. The native tier is optional on your machine (`MAGIT_NATIVE=1`). CI always runs it.
   7. Add one line to the README. Say that bindings such as `shift+/` assume a US-like layout.
-- **Verify:** Add a Make target for the native VSCode host suite, preserving `MAGIT_NATIVE=1`; no such target exists yet. Run that target on a non-US desktop layout and record the private display's keyboard-layout state through the maintained runner. `make vscode-test` is not native-host acceptance.
+- **Verify:** Use the existing `make vscode-e2e` native host target, preserving `MAGIT_NATIVE=1`. Run it on a non-US desktop layout and record the private display's keyboard-layout state through the maintained runner. `make vscode-test` is not native-host acceptance.
 
 ### T026 host-cases (L)
 
@@ -661,6 +670,8 @@ Current commands and staged-only publication semantics are defined in [docs/FORM
 One-time disposable checks cover staged-hook preservation, malformed-input rejection, changed-range detection and the empty-tree first-push baseline. Final safety evidence: immutable `9702973:TASKS_PART_SEVEN.md`; live completion is recorded only in [TASKS.md](TASKS.md#ad-hoc).
 
 ## Phase 8: Release (starts after phases 1 to 6)
+
+The historical heading remains a stable anchor. Also require the Phase 6A release subset T105/T112/T113/T114/T119; do not require all prototypes or T118 stable freeze. TASKS.md owns actual status, and T033 still needs explicit human release approval.
 
 Do not schedule other feature work between the gates and the release. A ticket stays open until its evidence exists.
 
@@ -840,13 +851,12 @@ Do not start these tickets until the owner asks.
 | T102 | cross-hunk-selection-audit | none | Find out if a selection across hunks acts on lines or on whole hunks. Fix only a bug that you can show. |
 | T103 | same-session-read-redesign | none | Keep a published state for each view. Handle acks directly. Queue resize events. Ask the owner before you start if the work needs a rewrite of `View` or `CommandCtx`. |
 | T104 | editor-lifecycle-residuals | none | Check these cases for the real-file editor: exit from the last window, shutdown with a dirty buffer, builds of other versions, and wider reload and workspace changes. |
-| T105 | vscode-f5-cause | none | Find why VS Code intercepts F5 in the magit view. The cause is not proven. |
 | T106 | pick-delivery-modes | T008 | Add paged picks (the first page and `hasMore`) and query picks (the client sends the typed text, the server returns ranked matches). Build them only when a command needs a file or commit-search picker. |
 | T107 | skip-at-point-option | T008 | Add an opt-in setting (default off) that skips the picker when the cursor is on a commit or ref. It can ask for a confirm. |
 | T108 | server-fuzzy-picker | T106 | Add a server-side fuzzy picker. It needs one round trip for each key press. |
 | T109 | multi-client-repository | none | Study two clients on one repository: mutation order, watcher refresh to all clients, and stale targets across clients. Today this is not supported. |
 | T110 | rich-protocol-form | T038 | Decide the form of the rich protocol after real use. The rich protocol stays, and it must be able to compete with native extensions. Measure latency, the capabilities that Plain plus a key shim lacks, and the code and test cost. Until the decision, any extension that has one real consumer stays. |
-| T111 | open-design-questions | none | Decide these questions: the default VS Code menu (QuickPick or a text document); trust for the config file in each repository (`.magit-lsp.toml`); the minimum Git version (run the IMM-1 tests on old versions); use of LSP 3.18 `workspace/textDocumentContent`; mirroring of the VS Code fold shortcuts when the user changes `editor.toggleFold`. |
+| T111 | open-design-questions | none | Retain config trust for each repository (`.magit-lsp.toml`) and LSP 3.18 `workspace/textDocumentContent` questions here. The default VS Code menu (QuickPick or text document) and fold-shortcut mirroring route to T113; the minimum Git version/old-version IMM-1 tests route to T119. This routing does not decide those questions. |
 
 ## Old numbers to new numbers
 
