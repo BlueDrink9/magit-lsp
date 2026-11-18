@@ -80,10 +80,10 @@ Readiness means no known missing Make entry point, not completion or permission 
 
 Historical inventories are inputs to revalidation, not deletion instructions. The roadmap's historical order/header freeze is superseded only by this user-authorized documentation compaction/reordering; no other restriction is waived.
 
-- [x] **Provision reproducible Knip checker** — check: `make hygiene` executes Knip through the workspace-local binary or PATH. Findings remain report-only and belong to the existing audit items below.
-  - Provisioning: resolved by container-environment fix (user statement 2026-11-19); no repo evidence expected.
-  - Verified: `make hygiene` → `knip: NONZERO (exit 1)`; Knip launched but could not run because the `oxc-parser` native binding is unavailable. No clean-hygiene result is claimed.
-  - Done: `make hygiene` invokes Knip reproducibly from the workspace-local install or PATH.
+- [x] **Provision reproducible Knip checker** — check: `make hygiene` executes `knip` as a plain `PATH` command, exactly like `cargo-machete` and `luacheck`. Findings remain report-only and belong to the existing audit items below.
+  - Provisioning: `knip` is provided on `PATH` by the container/dev environment (user statement 2026-11-19); `scripts/hygiene.py` holds no workspace-local binary path. Historically the workspace-local `clients/vscode/node_modules/.bin/knip` launched but could not run because its `oxc-parser` native binding was unavailable; no repo evidence is expected.
+  - Verified: `make hygiene` → `knip: NONZERO (exit 1)`; Knip ran from `PATH` and reported real findings (1 unused file, 1 unused devDependency, 1 unlisted dependency, 74 unused exports), not an invocation failure. No clean-hygiene result is claimed.
+  - Done: `make hygiene` invokes Knip reproducibly from `PATH`.
 - [ ] **Resolve the vscode-jsonrpc/node direct dependency** — `clients/vscode/test/e2e/real-file-native.js:391`; declare it in the owning package and verify with pinned Knip plus VSCode E2E dependency install.
 - [ ] **Audit unused VSCode exports: commands and context** — `clients/vscode/lib/commands.js` (`openStatus`, `viewport`, `pressCommand`, `invokeCommand`, `mirrorFoldShortcuts`, `keybindingsPath`); `context.js` (`deriveContext`, `inactiveContext`, `staticScope`). Verify focused VSCode tests and Knip.
 - [ ] **Audit unused VSCode exports: draft and edit lifecycle** — `clients/vscode/lib/drafts.js` (`cancel`, `close`, `confirm`, `disconnect`, `handleInvoke`, `onChanged`, `onClosed`, `save`, `setContext`, `setup`); `edit.js` (`KIND`, `SCHEME`, `draftAction`, `isEditEffect`, `languageForKind`); `edits.js` (`onDocumentClosed`, `onActiveEditorChanged`, `confirmEditCommand`, `cancelEditCommand`, `currentEdit`). Verify edit lifecycle tests and Knip.
