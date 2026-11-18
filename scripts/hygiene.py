@@ -52,11 +52,21 @@ def run_check(label, command, cwd, paths=()):
         print(output)
 
 
+def knip_command(root):
+    """Return the knip invocation: PATH first, else the workspace-local binary."""
+    if shutil.which("knip"):
+        return ["knip"]
+    local = root / "clients/vscode/node_modules/.bin/knip"
+    if local.is_file():
+        return [str(local)]
+    return ["knip"]
+
+
 def report(root=ROOT):
     """Print tool status, tracked-file sizes, and tracked source markers."""
     paths = tracked(root)
     run_check("cargo machete", ["cargo", "machete"], root)
-    run_check("knip", ["knip"], root / "clients/vscode")
+    run_check("knip", knip_command(root), root / "clients/vscode")
     lua_paths = [p for p in paths if p.endswith(".lua")]
     run_check("luacheck", ["luacheck", "--config", str(root / ".luacheckrc")], root, lua_paths)
 
