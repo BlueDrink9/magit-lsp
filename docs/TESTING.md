@@ -17,6 +17,11 @@ confirm, choice and `edit_document(|text| …)` replies.
 
 ### 8.2 Determinism
 
+`make vscode-e2e` runs the focused A06 quit/reopen scenario in an isolated real
+VSCode host. It requires a supported `code`/`codium` binary, `DISPLAY`, the
+built server, and `xdotool`; missing prerequisites fail rather than skip.
+Structured text evidence is written to the runner's isolated evidence folder.
+
 Fixtures set `GIT_AUTHOR_DATE`, `GIT_COMMITTER_DATE`, `GIT_CONFIG_NOSYSTEM=1`,
 a temp `HOME`, `XDG_CONFIG_HOME` to a temp dir, `LC_ALL=C`, fixed author and
 committer, so hashes are stable and appear verbatim in snapshots. Normalise

@@ -1,4 +1,6 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -51,7 +53,7 @@ const focusedEdit = suiteMode === 'edit';
 const focusedHead = suiteMode === 'head';
 const focusedVersion = suiteMode === 'version';
 const strictFocused = focusedEdit || focusedHead || focusedVersion
-  || ['A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
+  || ['A06', 'A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
   process.exit(strictFocused ? 1 : 0);
@@ -64,9 +66,13 @@ if (!existsSync(`${root}/target/debug/magit-lsp`)) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: missing target/debug/magit-lsp; run cargo build first`);
   process.exit(strictFocused ? 1 : 0);
 }
+if (process.env.MAGIT_VSCODE_A06_ONLY === '1' && !resolveCommand('xdotool')) {
+  console.log('FAIL e2e: xdotool is required for the A06 physical refresh check');
+  process.exit(1);
+}
 
 // Launch an isolated real editor; never reuse or close the user's instance.
-const directory = mkdtempSync('/tmp/opencode/vscode-review-');
+const directory = mkdtempSync(join(tmpdir(), 'vscode-review-'));
 const repo = `${directory}/repo`;
 const mirror = require('../../lib/foldkeys.js').mapFoldKeys([
   { key: 'ctrl+alt+]', command: 'editor.toggleFold' },
@@ -169,7 +175,7 @@ if (focusedEdit || focusedHead || focusedVersion) {
 if (focusedHead) env.MAGIT_VSCODE_HEAD_ONLY = '1';
 if (focusedVersion) env.MAGIT_VSCODE_VERSION_ONLY = '1';
 const args = [
-  '--wait', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
+  '--wait', '--verbose', '--no-sandbox', '--disable-gpu', '--skip-welcome', '--skip-release-notes',
   `--remote-debugging-port=${env.MAGIT_VSCODE_CDP_PORT}`,
   '--disable-workspace-trust', '--user-data-dir', `${directory}/user`,
   '--extensions-dir', `${directory}/extensions`,

@@ -123,6 +123,9 @@ vscode-version-startup: build vscode-deps
 vscode-version-warning: build vscode-deps
 	MAGIT_VSCODE_VERSION_WARNING_ONLY=1 node clients/vscode/test/e2e/run.mjs
 
+vscode-e2e: build vscode-deps
+	MAGIT_VSCODE_A06_ONLY=1 node clients/vscode/test/e2e/run.mjs
+
 update-schema:
 	$(call run,update-schema,cargo run -q --bin generate-schema)
 
