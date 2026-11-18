@@ -70,21 +70,22 @@ class HygieneTests(unittest.TestCase):
         self.assertIn("cargo machete: FINDINGS (exit 1)", output)
         self.assertIn("tool output", output)
         self.assertEqual(calls[0], (["cargo", "machete"], self.root))
-        self.assertIn("knip: DISABLED (owner: Provision reproducible Knip checker; repair pending)", output)
-        self.assertNotIn("knip", [Path(c[0][0]).name for c in calls])
-        self.assertEqual(calls[1], (["luacheck", "--config", str(self.root / ".luacheckrc")], self.root))
+        self.assertIn("knip: CLEAN (exit 0)", output)
+        self.assertEqual(calls[1], (["knip"], self.root / "clients/vscode"))
+        self.assertEqual(calls[2], (["luacheck", "--config", str(self.root / ".luacheckrc")], self.root))
 
     def test_nonzero_is_reported(self):
         output, _ = self.execute({"cargo": (7, "tool output")})
         self.assertIn("cargo machete: NONZERO (exit 7)", output)
-        self.assertIn("knip: DISABLED", output)
-        self.assertNotIn("knip: CLEAN", output)
+        self.assertIn("knip: CLEAN (exit 0)", output)
 
-    def test_knip_disabled_checker_is_not_launched(self):
-        output, calls = self.execute(missing={"knip"})
-        self.assertIn("knip: DISABLED", output)
-        self.assertNotIn("knip: CLEAN", output)
-        self.assertEqual([c[0][0] for c in calls], ["cargo", "luacheck"])
+    def test_knip_is_invoked_as_plain_path_command(self):
+        output, calls = self.execute({"knip": (0, "")})
+        self.assertIn("knip: CLEAN (exit 0)", output)
+        knip_call = next(c for c in calls if Path(c[0][0]).name == "knip")
+        self.assertEqual(knip_call, (["knip"], self.root / "clients/vscode"))
+        self.assertEqual(knip_call[0][0], Path(knip_call[0][0]).name)
+        self.assertNotIn("node_modules", knip_call[0][0])
 
     def test_sizes_and_markers_are_deterministic(self):
         self.assertEqual(self.runner.LIMIT, 20)
