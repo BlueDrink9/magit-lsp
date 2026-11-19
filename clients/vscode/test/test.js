@@ -632,6 +632,7 @@ if (failures.length > 0) {
 
 require('./open.test')().then(async () => {
   await require('./open.test').protocolAdmission();
+  passed += await require('./server-download.test')();
   console.log(`ok ${passed} tests`);
 }).catch((error) => {
   console.error(error && error.stack ? error.stack : error);
