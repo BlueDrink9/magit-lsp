@@ -31,14 +31,14 @@ categories:
   - LSP
 
 source:
-  id: pkg:github/BlueDrink9/magit-lsp@v0.1.0
+  id: pkg:github/BlueDrink9/magit-lsp@v0.2.0
   asset:
     - target: linux_x64_gnu
-      file: magit-lsp-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+      file: magit-lsp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
       # The release archive places its files under a top-level directory, like
       # golangci-lint's tarballs (packages/golangci-lint/package.yaml): bin is
       # the path inside the extracted archive, not a bare filename.
-      bin: magit-lsp-v0.1.0-x86_64-unknown-linux-gnu/magit-lsp
+      bin: magit-lsp-v0.2.0-x86_64-unknown-linux-gnu/magit-lsp
 
 bin:
   magit-lsp: "{{source.asset.bin}}"

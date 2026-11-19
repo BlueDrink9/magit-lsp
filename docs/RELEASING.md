@@ -61,13 +61,13 @@ Run from the repository root:
 
 ```sh
 cargo build --release --locked
-sh scripts/package-release.sh 0.1.0 target/release/magit-lsp dist
+sh scripts/package-release.sh 0.2.0 target/release/magit-lsp dist
 PYTHONDONTWRITEBYTECODE=1 MAGIT_LSP_TEST_BINARY=target/release/magit-lsp python3 -m unittest discover -s tests/release -p 'test_*.py' -v
 shellcheck scripts/install.sh scripts/package-release.sh
 git diff --check
 ```
 
-Use the matching Cargo/extension version, not the future proposed v0.2.0.
+Use the matching Cargo/extension version (0.2.0).
 The packager checks both versions and the supplied binary's `--version`.
 The build workflow also checks any tag equals `v<Cargo version>`; manual runs use
 the checked-out version. Inputs enter shell through quoted environment variables,

@@ -1512,7 +1512,7 @@ async function run() {
           managed: managed.resolve,
         }),
         /reports version 9\.9\.9/,
-        /requires 0\.1\.0/,
+        new RegExp(`requires ${VERSION.replaceAll('.', '\\.')}`),
       );
       await rejectsSource(
         resolveServerSource({

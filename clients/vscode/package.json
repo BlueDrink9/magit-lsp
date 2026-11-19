@@ -2,7 +2,7 @@
   "name": "magit-lsp",
   "displayName": "magit-lsp",
   "description": "Magit-style Git views rendered by the magit-lsp language server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "magit-lsp",
   "private": true,
   "packageManager": "pnpm@10.13.1",

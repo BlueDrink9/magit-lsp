@@ -1,6 +1,6 @@
 [package]
 name = "magit-lsp"
-version = "0.1.0"
+version = "0.2.0"
 license = "GPL-3.0-only"
 description = "A Git repository interface for editors over the Language Server Protocol"
 repository = "https://github.com/BlueDrink9/magit-lsp"
