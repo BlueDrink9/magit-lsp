@@ -1,5 +1,7 @@
 # User buffer wipes (not common.quit) must reach the server request handler.
 # Repeated nested reopen/pop returns to the live parent and then status.
+# Wipe through native Ex via RPC: menus capture `:`, and C-t legitimately
+# closes the menu before toggling its owning document's text mode.
 fixture: modified-two-files
 ---
 wait
@@ -12,9 +14,7 @@ keys vim: g ?
 wait screen contains "Transient and dwim commands"
 expect view_stack.count == 3
 snapshot: nested-before-close
-keys: C-t
-wait
-keys: :bwipeout! Enter
+sh: nvim --headless --server ../nvim.sock --remote-expr "execute('bwipeout!')"
 wait
 expect view_stack.count == 2
 expect windows.floating == 0
@@ -24,15 +24,11 @@ keys standard: ?
 keys vim: g ?
 wait screen contains "Transient and dwim commands"
 expect view_stack.count == 3
-keys: C-t
-wait
-keys: :bwipeout! Enter
+sh: nvim --headless --server ../nvim.sock --remote-expr "execute('bwipeout!')"
 wait
 expect view_stack.count == 2
 expect screen contains "Process log"
-keys: C-t
-wait
-keys: :bwipeout! Enter
+sh: nvim --headless --server ../nvim.sock --remote-expr "execute('bwipeout!')"
 wait
 expect view_stack.count == 1
 expect screen contains "Unstaged changes"
