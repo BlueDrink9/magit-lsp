@@ -701,6 +701,59 @@ async function run() {
     }
   });
 
+  await check('stale dead-owner lock is reclaimed and a foreign-host lock is not stolen', async () => {
+    const root = temporaryRoot();
+    try {
+      const entry = entryOf(root);
+      fs.mkdirSync(path.dirname(entry), { recursive: true });
+      // The pid comes from a process that has already exited, so reclamation
+      // is the only way this lock can ever be resolved.
+      const deadPid = Number(
+        execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }),
+      );
+      assert.ok(Number.isSafeInteger(deadPid) && deadPid > 0, 'spawned a process whose pid is known');
+      const stale = `${entry}.lock`;
+      fs.mkdirSync(stale);
+      fs.writeFileSync(path.join(stale, 'owner'), `${os.hostname()} ${deadPid}\n`);
+      const fixture = releaseFixture();
+      const resolved = await resolveServer({
+        version: VERSION,
+        cacheRoot: root,
+        transport: fixture.transport,
+        runtime: RUNTIME,
+      });
+      assert.equal(resolved.executable, path.join(entry, 'magit-lsp'));
+      assertCompleteInstall(entry, BINARY, VERSION);
+      assert.equal(fs.existsSync(stale), false, 'the reclaimed lock left nothing behind');
+
+      // Ownership is hostname-scoped: another host's lock is never stolen and
+      // the failure names the lock the user has to remove.
+      const foreignRoot = temporaryRoot();
+      try {
+        const foreignEntry = entryOf(foreignRoot);
+        fs.mkdirSync(path.dirname(foreignEntry), { recursive: true });
+        const foreign = `${foreignEntry}.lock`;
+        fs.mkdirSync(foreign);
+        fs.writeFileSync(path.join(foreign, 'owner'), `another-host.invalid ${process.pid}\n`);
+        const other = releaseFixture();
+        await assert.rejects(
+          resolveServer({ version: VERSION, cacheRoot: foreignRoot, transport: other.transport, runtime: RUNTIME }),
+          (error) => {
+            assert.equal(error.name, 'ServerDownloadError', `readable failure: ${error.message}`);
+            assert.match(error.message, /timed out waiting for another process/);
+            assert.ok(error.message.includes(foreign), `failure names the lock: ${error.message}`);
+            return true;
+          },
+        );
+        assert.equal(fs.existsSync(foreign), true, "another host's lock is kept");
+      } finally {
+        fs.rmSync(foreignRoot, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   await check('tampered cache is replaced rather than launched', async () => {
     const root = temporaryRoot();
     try {

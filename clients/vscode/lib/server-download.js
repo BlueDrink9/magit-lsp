@@ -275,7 +275,7 @@ function acquireEntryLock(entry) {
     if (removeStaleLock(lock)) continue;
     pause(LIMITS.lockWaitMilliseconds);
   }
-  fail(`timed out waiting for another process to finish installing magit-lsp in ${entry}`);
+  fail(`timed out waiting for another process to finish installing magit-lsp; remove ${lock} if no other VS Code window is installing`);
 }
 
 /**
