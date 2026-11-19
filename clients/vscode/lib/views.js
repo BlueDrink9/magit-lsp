@@ -2,9 +2,9 @@
 
 const vscode = require('vscode');
 
-const contextKeys = require('./context');
-const menus = require('./menus');
-const requests = require('./requests');
+const { deriveContext, inactiveContext } = require('./context');
+const { showMenu, hideMenu } = require('./menus');
+const { applyRender } = require('./requests');
 const { SCHEME, store } = require('./store');
 const { message } = require('./util');
 
@@ -87,7 +87,7 @@ function ensureView(descriptor) {
   const pending = store.pendingRenders.get(descriptor.id);
   if (pending) {
     store.pendingRenders.delete(descriptor.id);
-    requests.applyRender(pending);
+    applyRender(pending);
   }
   return state;
 }
@@ -103,7 +103,7 @@ async function showView(descriptor) {
     return;
   }
   if (isMenuKind(descriptor.kind) || state.menu) {
-    menus.showMenu(state);
+    showMenu(state);
     return;
   }
   await showDocument(state);
@@ -169,8 +169,8 @@ function applyCursor(state, cursor) {
 function activateView(state) {
   store.activeViewId = state ? state.id : undefined;
   const values = state
-    ? contextKeys.deriveContext(state.descriptor, state.mode)
-    : contextKeys.inactiveContext();
+    ? deriveContext(state.descriptor, state.mode)
+    : inactiveContext();
   for (const [key, value] of Object.entries(values)) {
     void vscode.commands.executeCommand('setContext', key, value);
   }
@@ -188,7 +188,7 @@ async function closeView(viewId, focusPrevious) {
     return;
   }
 
-  menus.hideMenu(state);
+  hideMenu(state);
   store.views.delete(viewId);
   store.uriToView.delete(state.uri.toString());
   store.documentsChanged.fire(state.uri);
@@ -228,7 +228,7 @@ async function closeRoot(rootId) {
   const states = Array.from(store.views.values()).filter((state) => state.rootId === rootId);
   const uris = new Set(states.map((state) => state.uri.toString()));
   for (const state of states) {
-    menus.hideMenu(state);
+    hideMenu(state);
     store.views.delete(state.id);
     store.uriToView.delete(state.uri.toString());
     store.pendingRenders.delete(state.id);
@@ -253,7 +253,7 @@ async function focusView(viewId) {
     return;
   }
   if (isMenuKind(state.descriptor.kind) || state.menu) {
-    menus.showMenu(state);
+    showMenu(state);
     return;
   }
   activateView(state);

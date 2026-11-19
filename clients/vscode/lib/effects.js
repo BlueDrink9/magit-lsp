@@ -2,8 +2,6 @@
 
 const vscode = require('vscode');
 
-const drafts = require('./drafts');
-const views = require('./views');
 const { store } = require('./store');
 
 const REPLAY_COMMANDS = {
@@ -61,6 +59,10 @@ function showMessage(effect) {
  * @param {import('../types/protocol').Effect.Root[]|undefined} effectList
  */
 async function applyEffects(effectList, originViewId) {
+  // `drafts` and `views` load through this module's consumers, so resolve them
+  // after the require cycle has finished initialising.
+  const { open } = require('./drafts');
+  const { closeRoot, closeView, ensureView, focusView, showView } = require('./views');
   const origin = originViewId && store.views.get(originViewId);
   let rootId = origin && origin.rootId;
   for (const effect of effectList || []) {
@@ -77,19 +79,19 @@ async function applyEffects(effectList, originViewId) {
         break;
       case 'pushView':
         {
-          const state = views.ensureView(effect.descriptor);
+          const state = ensureView(effect.descriptor);
           if (state) state.rootId = rootId;
         }
-        await views.showView(effect.descriptor);
+        await showView(effect.descriptor);
         break;
       case 'popView':
-        await views.closeView(effect.viewId, true);
+        await closeView(effect.viewId, true);
         break;
       case 'focusView':
-        await views.focusView(effect.viewId);
+        await focusView(effect.viewId);
         break;
       case 'quit':
-        await views.closeRoot(rootId || originViewId);
+        await closeRoot(rootId || originViewId);
         break;
       case 'visitFile': {
         const document = await vscode.workspace.openTextDocument(
@@ -108,7 +110,7 @@ async function applyEffects(effectList, originViewId) {
         break;
       }
       case 'editDocument':
-        await drafts.open(effect, rootId || originViewId);
+        await open(effect, rootId || originViewId);
         break;
       default: {
         // The server owns this union; a newer server may send a tag this

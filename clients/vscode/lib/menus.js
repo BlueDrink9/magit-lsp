@@ -2,9 +2,8 @@
 
 const vscode = require('vscode');
 
-const menu = require('./menu');
-const requests = require('./requests');
-const views = require('./views');
+const { quickPickItems, routeTyped } = require('./menu');
+const { press } = require('./requests');
 const { store } = require('./store');
 const { message } = require('./util');
 
@@ -29,10 +28,12 @@ const { message } = require('./util');
  * @param {object} state
  */
 function showMenu(state) {
+  // `views` requires this module; resolve its export after the cycle loads.
+  const { activateView } = require('./views');
   if (state.quickPick) {
     updateQuickPick(state);
     state.quickPick.show();
-    views.activateView(state);
+    activateView(state);
     return;
   }
 
@@ -50,7 +51,7 @@ function showMenu(state) {
     if (!value) {
       return;
     }
-    const steps = menu.routeTyped(value);
+    const steps = routeTyped(value);
     // Clearing the input raises one empty change event, which is ignored.
     quickPick.value = '';
     queueSteps(state, steps);
@@ -75,7 +76,7 @@ function showMenu(state) {
   });
 
   quickPick.show();
-  views.activateView(state);
+  activateView(state);
 }
 
 /**
@@ -98,7 +99,7 @@ function updateQuickPick(state) {
  * @returns {MenuQuickPickItem[]}
  */
 function menuItems(model) {
-  return menu.quickPickItems(model).map((row) => {
+  return quickPickItems(model).map((row) => {
     if (row.kind === 'separator') {
       return { label: row.label, kind: vscode.QuickPickItemKind.Separator };
     }
@@ -146,7 +147,7 @@ function queueSteps(state, steps) {
         if (!store.views.has(state.id)) {
           return;
         }
-        await requests.press(state.id, step, { cursor: { line: 0, column: 0 } });
+        await press(state.id, step, { cursor: { line: 0, column: 0 } });
         if (!store.views.has(state.id)) {
           return;
         }

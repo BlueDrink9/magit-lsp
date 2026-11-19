@@ -11,8 +11,15 @@
 
 const vscode = require('vscode');
 
-const edit = require('./edit');
-const views = require('./views');
+const {
+  SCHEME,
+  draftAction,
+  editingContext,
+  inactiveContext,
+  isEditEffect,
+  languageForKind,
+} = require('./edit');
+const { activateView, focusView, tabUri } = require('./views');
 const { store } = require('./store');
 const { message } = require('./util');
 
@@ -81,7 +88,7 @@ function ownsBarrier(record, client, generation) {
  */
 function current() {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.uri.scheme !== edit.SCHEME) {
+  if (!editor || editor.document.uri.scheme !== SCHEME) {
     return undefined;
   }
   const record = forUri(editor.document.uri);
@@ -397,7 +404,7 @@ function acknowledged(result, type, record, version) {
 async function closeTab(record) {
   const tabs = vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => views.tabUri(tab) === record.uri.toString());
+    .filter((tab) => tabUri(tab) === record.uri.toString());
   if (tabs.length === 0) {
     return;
   }
@@ -453,11 +460,11 @@ async function forget(record, guard) {
     if (store.activeDraftId === record.runId) {
       store.activeDraftId = undefined;
     }
-    await setContext(edit.inactiveContext());
+    await setContext(inactiveContext());
     if (guard && !ownsTeardown(record, guard)) {
       record.closing = false;
       store.activeDraftId = record.runId;
-      await setContext(edit.editingContext(record.effect));
+      await setContext(editingContext(record.effect));
       fail(record, 'the commit draft changed or disconnected during abort teardown; text was retained');
       return false;
     }
@@ -473,9 +480,9 @@ async function forget(record, guard) {
     store.draftUris.delete(record.uri.toString());
     const viewId = baseViewId(record);
     if (viewId) {
-      await views.focusView(viewId);
+      await focusView(viewId);
     } else {
-      views.activateView(undefined);
+      activateView(undefined);
     }
     return true;
   } finally {
@@ -592,7 +599,7 @@ async function cancel(record) {
  */
 async function open(effect, originViewId) {
   if (!Number.isInteger(effect?.version) || effect.version < 1
-    || !edit.isEditEffect({ ...effect, version: 1 })) {
+    || !isEditEffect({ ...effect, version: 1 })) {
     vscode.window.showErrorMessage('magit-lsp: invalid managed commit draft announcement; no document was opened.');
     return;
   }
@@ -600,7 +607,7 @@ async function open(effect, originViewId) {
   if (existing) {
     if (existing.uri.toString() === effect.uri && live(existing) && !existing.disconnected) {
       await vscode.window.showTextDocument(existing.document, { preview: false });
-      await setContext(edit.editingContext(existing.effect));
+      await setContext(editingContext(existing.effect));
     }
     return;
   }
@@ -644,7 +651,7 @@ async function open(effect, originViewId) {
     try {
       await vscode.languages.setTextDocumentLanguage(
         document,
-        edit.languageForKind(effect.kind)
+        languageForKind(effect.kind)
       );
     } catch (error) {
       store.output.appendLine(`setTextDocumentLanguage failed: ${message(error)}`);
@@ -657,7 +664,7 @@ async function open(effect, originViewId) {
     await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
     record.document = document;
     record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => views.tabUri(tab) === record.uri.toString()));
+      .filter((tab) => tabUri(tab) === record.uri.toString()));
   } catch (error) {
     store.output.appendLine(`commit draft document failed: ${message(error)}`);
     seen.delete(record.runId);
@@ -668,7 +675,7 @@ async function open(effect, originViewId) {
     return;
   }
 
-  await setContext(edit.editingContext(effect));
+  await setContext(editingContext(effect));
   await attach(record);
   if (store.activeDraftId !== record.runId) {
     store.activeDraftId = record.runId;
@@ -689,7 +696,7 @@ async function handleInvoke(args) {
   const command = typeof args === 'string'
     ? args
     : args && /** @type {{command?: string}} */ (args).command;
-  const action = edit.draftAction(command);
+  const action = draftAction(command);
   if (action === 'confirm') {
     await confirm(record);
   } else if (action === 'cancel') {
@@ -753,16 +760,16 @@ async function onClosed(document) {
 function onTabsChanged(event) {
   if (store.disposing || !event) return;
   const closed = new Set((event.closed || [])
-    .map((tab) => views.tabUri(tab))
+    .map((tab) => tabUri(tab))
     .filter((uri) => typeof uri === 'string'));
   const open = new Set(vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .map((tab) => views.tabUri(tab))
+    .map((tab) => tabUri(tab))
     .filter((uri) => typeof uri === 'string'));
   for (const record of store.drafts.values()) {
     const ownedClose = (event.closed || []).some((tab) => record.tabs?.has(tab));
     record.tabs = new Set(vscode.window.tabGroups.all.flatMap((group) => group.tabs)
-      .filter((tab) => views.tabUri(tab) === record.uri.toString()));
+      .filter((tab) => tabUri(tab) === record.uri.toString()));
     if (!ownedClose || !closed.has(record.uri.toString()) || !record.attached || record.closing
       || record.changingLanguage || record.disconnected) {
       continue;
