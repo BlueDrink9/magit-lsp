@@ -5,11 +5,11 @@ replacements land.
 
 ### 4.1 Client → server (current contract)
 
-Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#completed-work). Wire decisions are recorded in the [rich protocol v1 decision record](design/rich-protocol-v1.md); planned changes below are marked as planned, not current.
+Initialize selects Plain when `capabilities.experimental.magit` is absent. A declared Rich v1 capability object is strictly validated. Effective capability and quirk reporting already exists; T005 is complete through its authoritative [Ad hoc children](../TASKS.md#completed-work). Wire decisions are recorded in the [rich protocol v1 decision record](design/rich-protocol-v1.md); the version handshake below is implemented in the server and both bundled clients.
 
 | Method | Params | Returns |
 | --- | --- | --- |
-| `initialize` | `clientInfo`; rich clients declare `capabilities.experimental.magit` v1. Absence selects Plain. `profile?` remains in initializationOptions. | server capabilities |
+| `initialize` | `clientInfo`; rich clients declare `capabilities.experimental.magit` with `v` and optional `minimumVersion`. Absence selects Plain. `profile?` remains in initializationOptions. | server capabilities, including `experimental.magit.protocolVersion` |
 | `view/open` | `{kind, args?, placement?, viewport}` (`status` carries `args.repo_path`) | `ViewDescriptor` |
 | `view/close` | `{viewId}` | — |
 | `view/key` | `{viewId, version, key, editorMode, cursor: {line, column}, selection?: {startLine, endLine}}` | `{effects: [...]}` |
@@ -29,24 +29,26 @@ validated-offer rules, the exact current version; a stale version produces the
 readable stale-view warning. The two policies are deliberate; see the decision
 record.
 
-**Planned version negotiation (T113 decision; not implemented).** The
-initialize result will report
-`capabilities.experimental.magit.protocolVersion`, the version of every
-accepted rich session (currently `1`), not a maximum. A rich declaration will
-carry `v`, the single session version it selects, and `minimumVersion`, the
-oldest server session version it can use; `minimumVersion` defaults to `v`,
-must be a positive integer and must not exceed `v`. The server accepts a
-session only when `minimumVersion <= v == protocolVersion`, rejects `v != 1`
-with the existing readable error, and rejects an invalid `minimumVersion` with
-a readable initialize error naming the values. It never clamps, downgrades,
-retries or substitutes a version. A client that receives a missing, malformed
-or different `protocolVersion` shows a readable message, opens no rich view and
-sends no rich traffic; it does not treat the advertisement as `1` or fall back
-to Plain. Initialize rejections reach the user through the language client's
-start error (VS Code) or a failed-client notification (Neovim); post-initialize
-failures use each client's existing notification channel. The decision record
-tabulates every outcome. The current contract checks only `v = 1` and
-advertises no protocol version.
+**Version negotiation (implemented; T113 decision).** The initialize result
+reports `capabilities.experimental.magit.protocolVersion`, the version of every
+accepted rich session (currently `1`), not a maximum. A rich declaration
+carries `v`, the single session version it selects, and optional
+`minimumVersion`, the oldest server session version it can use; `minimumVersion`
+defaults to `v`, and a present value must be a positive integer no greater than
+`v` (a present `null` is rejected). The server accepts a session only when
+`minimumVersion <= v == protocolVersion`, rejects `v != 1` with the existing
+readable error, and rejects a malformed or out-of-range `minimumVersion` with a
+readable initialize error; the out-of-range error names both numbers. It never
+clamps, downgrades, retries or substitutes a version. Both bundled clients declare `v = 1` and
+`minimumVersion = 1`; each requires a present, positive-integer advertisement
+equal to its declared version. A missing, malformed or different advertisement
+shows a readable required/advertised-version message, opens no rich view and
+sends no rich traffic; neither client treats the advertisement as `1` or falls
+back to Plain. Neovim also stops the transport on that failure. Initialize
+rejections reach the user through the language client's start error (VS Code)
+or a failed-client notification (Neovim); post-initialize failures use each
+client's existing notification channel. The [decision record](design/rich-protocol-v1.md)
+tabulates every outcome.
 
 ### 4.2 Server → client
 
