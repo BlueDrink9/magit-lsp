@@ -89,4 +89,4 @@ function customChoice(text) {
   return { cancelled: false, value: { custom: text } };
 }
 
-module.exports = { CUSTOM_ID, promptItems, answerFor, customChoice };
+module.exports = { promptItems, answerFor, customChoice };

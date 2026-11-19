@@ -63,4 +63,4 @@ function applyRender(lines, version, render) {
   return { lines: current, version, mode: render.mode, status: 'none' };
 }
 
-module.exports = { applyRender, applyEdit };
+module.exports = { applyRender };

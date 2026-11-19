@@ -329,4 +329,3 @@ exports.handlePrompt = handlePrompt;
 exports.promptFor = promptFor;
 exports.handlePick = handlePick;
 exports.pickFor = pickFor;
-exports.resync = resync;
