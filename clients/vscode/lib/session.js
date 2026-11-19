@@ -143,12 +143,20 @@ function activate(context) {
   client.onNotification('view/effects', (params) => {
     void applyEffects(params && params.effects, store.activeViewId);
   });
-  store.clientReady = client.start().then(() => {
+  store.clientReady = client.start().then(async () => {
     const versionWarning = warning(extensionVersion,
       client.initializeResult?.serverInfo?.version, executable);
     if (versionWarning) vscode.window.showWarningMessage(versionWarning);
     const protocolFailure = protocolError(client.initializeResult, PROTOCOL_VERSION);
-    if (protocolFailure) throw new Error(protocolFailure);
+    if (protocolFailure) {
+      const rejection = new Error(protocolFailure);
+      try {
+        await client.stop();
+      } catch (cleanupError) {
+        store.output.appendLine(`language client cleanup failed: ${message(cleanupError)}`);
+      }
+      throw rejection;
+    }
     store.semanticChanged = register(
       vscode,
       client,

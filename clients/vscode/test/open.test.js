@@ -364,7 +364,7 @@ function settle() {
  * Build one admission harness: a minimal editor fake, a client fake and the
  * scripted initialize result or start rejection.
  *
- * @param {{startError?: string, protocolVersion?: unknown, includeProtocol?: boolean}} options
+ * @param {{startError?: string, stopError?: string, protocolVersion?: unknown, includeProtocol?: boolean}} options
  */
 function admissionHarness(options) {
   const commands = new Map();
@@ -373,6 +373,7 @@ function admissionHarness(options) {
   const output = [];
   const requests = [];
   const notifications = [];
+  const lifecycle = [];
   let semanticRegistrations = 0;
   const vscode = {
     Uri: { from: (parts) => parts, parse: (value) => value },
@@ -437,11 +438,19 @@ function admissionHarness(options) {
     registerFeature(feature) { this.features.push(feature); }
     onNotification(name, handler) { this.handlers.set(name, handler); }
     start() {
+      lifecycle.push('start');
       return options.startError
         ? Promise.reject(new Error(options.startError))
-        : Promise.resolve();
+        : Promise.resolve().then(() => { lifecycle.push('started'); });
     }
-    stop() { return Promise.resolve(); }
+    // anchor: vscode-languageclient 9.0.1 LanguageClient.start()/stop() lifecycle (client.d.ts), production clients/vscode/lib/session.js:146-176 and docs/CLIENT_SPEC.md:60-78 failed-handshake transport shutdown; this fake records lifecycle order only, not transport shutdown.
+    stop() {
+      lifecycle.push('stop');
+      if (options.stopError && lifecycle.filter((entry) => entry === 'stop').length === 1) {
+        return Promise.reject(new Error(options.stopError));
+      }
+      return Promise.resolve();
+    }
     async sendRequest(method, params) {
       requests.push({ method, params });
       return {};
@@ -452,7 +461,7 @@ function admissionHarness(options) {
   }
   return {
     vscode, LanguageClient, commands, errorMessages, warnings, output, requests,
-    notifications, semanticRegistrations: () => semanticRegistrations,
+    notifications, lifecycle, semanticRegistrations: () => semanticRegistrations,
   };
 }
 
@@ -480,6 +489,8 @@ async function testProtocolAdmission() {
       const extension = loadExtension(harness.vscode, harness.LanguageClient);
       extension.activate({ subscriptions: [] });
       await settle();
+      assert.deepEqual(harness.lifecycle, ['start', 'started', 'stop'],
+        `${variant.name}: rejected advertisement stops the started transport before deactivate`);
       assert.equal(harness.semanticRegistrations(), 0, `${variant.name}: no semantic registration`);
       assert.equal(
         harness.errorMessages.some((text) => text.includes('required version 1')
@@ -497,16 +508,36 @@ async function testProtocolAdmission() {
       await harness.commands.get('magit.open')();
       assert.equal(harness.requests.length, 0, `${variant.name}: no rich requests on repeated open`);
       assert.equal(harness.notifications.length, 0, `${variant.name}: no rich notifications on repeated open`);
+      assert.equal(
+        harness.errorMessages.filter((text) => text.includes('required version 1')
+          && text.includes(`server advertised ${variant.advertised}`)).length >= 3,
+        true,
+        `${variant.name}: repeated opens keep reporting the readable rejection`
+      );
       assert.equal(store.views.size, 0, `${variant.name}: no rich view opened`);
       assert.equal(store.semanticChanged, undefined, `${variant.name}: no semantic invalidation channel`);
       await extension.deactivate();
     }
+
+    harness = admissionHarness({ protocolVersion: 1 });
+    const acceptedExtension = loadExtension(harness.vscode, harness.LanguageClient);
+    acceptedExtension.activate({ subscriptions: [] });
+    await settle();
+    assert.deepEqual(harness.lifecycle, ['start', 'started'],
+      'accepted startup keeps the transport running until deactivate');
+    assert.equal(harness.semanticRegistrations(), 1, 'accepted startup registers the rich session');
+    assert.deepEqual(harness.errorMessages, [], 'accepted startup reports no admission error');
+    await acceptedExtension.deactivate();
+    assert.deepEqual(harness.lifecycle, ['start', 'started', 'stop'],
+      'deactivate stops the accepted transport');
 
     const rejection = 'capabilities.experimental.magit unsupported rich protocol version';
     harness = admissionHarness({ startError: rejection });
     const extension = loadExtension(harness.vscode, harness.LanguageClient);
     extension.activate({ subscriptions: [] });
     await settle();
+    assert.deepEqual(harness.lifecycle, ['start'],
+      'initialize rejection never started a transport to stop');
     assert.equal(
       harness.errorMessages.some((text) => text.includes(rejection)),
       true,
@@ -524,6 +555,26 @@ async function testProtocolAdmission() {
       'repeated opens keep reporting the readable rejection'
     );
     await extension.deactivate();
+
+    harness = admissionHarness({ protocolVersion: 2, stopError: 'stop failed' });
+    const cleanupExtension = loadExtension(harness.vscode, harness.LanguageClient);
+    cleanupExtension.activate({ subscriptions: [] });
+    await settle();
+    assert.deepEqual(harness.lifecycle, ['start', 'started', 'stop'],
+      'failed cleanup is attempted before readiness rejection');
+    assert.equal(
+      harness.errorMessages.some((text) => text.includes('required version 1')
+        && text.includes('server advertised 2')),
+      true,
+      'cleanup failure preserves the required/advertised diagnostic'
+    );
+    assert.equal(
+      harness.output.some((text) => text.includes('language client cleanup failed')
+        && text.includes('stop failed')),
+      true,
+      'cleanup failure is logged without replacing the admission error'
+    );
+    await cleanupExtension.deactivate();
   } finally {
     process.removeListener('unhandledRejection', onUnhandled);
   }
