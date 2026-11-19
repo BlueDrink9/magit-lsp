@@ -191,6 +191,13 @@ vscode-version-warning: build vscode-deps
 vscode-download-startup: vscode-prereqs build vscode-deps
 	$(call run,vscode-download-startup,MAGIT_VSCODE_DOWNLOAD_ONLY=1 node clients/vscode/test/e2e/run.mjs)
 
+# Native VSIX install smoke: install the packaged archive into an isolated
+# profile, launch with no development path, and prove the installed extension
+# activates and starts its managed seeded-cache server offline.
+.PHONY: vscode-vsix-install
+vscode-vsix-install: vscode-prereqs vscode-package build vscode-deps
+	$(call run,vscode-vsix-install,MAGIT_VSCODE_VSIX_INSTALL_ONLY=1 node clients/vscode/test/e2e/run.mjs)
+
 # Focused native server management: against the pre-seeded managed release, the
 # server-info command must report it and install/reinstall must force a fresh
 # verified download and atomically replace the cached binary.

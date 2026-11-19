@@ -6,6 +6,7 @@ const modes = [
   ['MAGIT_VSCODE_EDIT_ONLY', 'edit'],
   ['MAGIT_VSCODE_HEAD_ONLY', 'head'],
   ['MAGIT_VSCODE_DOWNLOAD_ONLY', 'download'],
+  ['MAGIT_VSCODE_VSIX_INSTALL_ONLY', 'vsix-install'],
   ['MAGIT_VSCODE_SERVER_COMMANDS_ONLY', 'server-commands'],
   ['MAGIT_VSCODE_A34_ONLY', 'a34'],
   ['MAGIT_VSCODE_A33_ONLY', 'a33'],

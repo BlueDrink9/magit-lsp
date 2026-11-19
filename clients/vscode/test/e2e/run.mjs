@@ -54,9 +54,10 @@ const focusedHead = suiteMode === 'head';
 const focusedVersion = suiteMode === 'version';
 const focusedF5 = suiteMode === 'f5';
 const focusedDownload = suiteMode === 'download';
+const focusedVsix = suiteMode === 'vsix-install';
 const focusedCommands = suiteMode === 'server-commands';
 const strictFocused = focusedEdit || focusedHead || focusedVersion || focusedF5 || focusedDownload
-  || focusedCommands
+  || focusedVsix || focusedCommands
   || ['A06', 'A29', 'A33', 'A34'].some((id) => process.env[`MAGIT_VSCODE_${id}_ONLY`] === '1');
 if (!editor) {
   console.log(`${strictFocused ? 'FAIL' : 'skip'} e2e: no \`code\`/\`codium\` binary found (set MAGIT_VSCODE_BIN to run it)`);
@@ -103,7 +104,7 @@ writeFileSync(`${directory}/user/User/settings.json`, JSON.stringify({
   // Server source and path are machine-scoped, so only user settings apply.
   // The automatic download case forces managed source so PATH discovery cannot
   // pick a host binary; it resolves the seeded pinned release from the cache.
-  ...(focusedDownload || focusedCommands
+  ...(focusedDownload || focusedVsix || focusedCommands
     ? { 'magit-lsp.server.source': 'managed' }
     : { 'magit-lsp.server.path': `${root}/target/debug/magit-lsp` }),
 }));
@@ -142,7 +143,7 @@ await new Promise((resolve) => listener.close(resolve));
 // Seed the isolated profile's exact-version cache through the production
 // resolver, then let the real extension find it with managed source configured.
 let downloadFixture;
-if (focusedDownload || focusedCommands) {
+if (focusedDownload || focusedVsix || focusedCommands) {
   downloadFixture = await require('./download-startup.js').prepareDownloadCache({
     directory,
     binary: `${root}/target/debug/magit-lsp`,
@@ -191,13 +192,17 @@ if (focusedVersion) {
   versionFixture = require('./version-fixture.js').createVersionFixture(directory);
   env.MAGIT_VSCODE_VERSION_FIXTURE = versionFixture.extensionPath;
 }
-if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands) {
-  mkdirSync(`${directory}/launcher`);
-  writeFileSync(`${directory}/launcher/package.json`, JSON.stringify({
+// The VSIX mode may not use a development path, so its launcher and the real
+// installed extension both live in the isolated extensions directory.
+const launcherDirectory = focusedVsix
+  ? `${directory}/extensions/test.vsix-launcher-1.0.0` : `${directory}/launcher`;
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedVsix || focusedCommands) {
+  mkdirSync(launcherDirectory, { recursive: true });
+  writeFileSync(`${launcherDirectory}/package.json`, JSON.stringify({
     publisher: 'test', name: 'native-edit-launcher', version: '1.0.0',
     engines: { vscode: '^1.85.0' }, main: './launcher.js', activationEvents: ['*'],
   }));
-  writeFileSync(`${directory}/launcher/launcher.js`, `
+  writeFileSync(`${launcherDirectory}/launcher.js`, `
     /** Run production acceptance in a normal extension host. */
     exports.activate = function () {
       process.env.MAGIT_VSCODE_SUITE_MODE = ${JSON.stringify(suiteMode)};
@@ -212,6 +217,26 @@ if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCo
     };
   `);
 }
+// Install the real packaged archive into the isolated profile. The VSIX mode
+// must load this installed copy, so it is installed before any editor launch.
+let vsixPath;
+if (focusedVsix) {
+  const version = JSON.parse(readFileSync(`${root}/clients/vscode/package.json`, 'utf8')).version;
+  vsixPath = `${root}/build/vscode/magit-lsp-${version}.vsix`;
+  if (!existsSync(vsixPath)) {
+    console.log(`FAIL e2e: missing packaged VSIX ${vsixPath}; run make vscode-package first`);
+    process.exit(1);
+  }
+  try {
+    execFileSync(editor, ['--install-extension', vsixPath, '--force',
+      '--extensions-dir', `${directory}/extensions`,
+      '--user-data-dir', `${directory}/user`], { stdio: 'inherit' });
+  } catch (error) {
+    console.log(`FAIL e2e: installing ${vsixPath} failed: ${error.message}`);
+    process.exit(1);
+  }
+  env.MAGIT_VSCODE_VSIX_PATH = vsixPath;
+}
 if (focusedHead) env.MAGIT_VSCODE_HEAD_ONLY = '1';
 if (focusedVersion) env.MAGIT_VSCODE_VERSION_ONLY = '1';
 const args = [
@@ -219,14 +244,14 @@ const args = [
   `--remote-debugging-port=${env.MAGIT_VSCODE_CDP_PORT}`,
   '--disable-workspace-trust', '--user-data-dir', `${directory}/user`,
   '--extensions-dir', `${directory}/extensions`,
-  `--extensionDevelopmentPath=${root}/clients/vscode`,
+  ...(focusedVsix ? [] : [`--extensionDevelopmentPath=${root}/clients/vscode`]),
   ...(focusedVersion ? [`--extensionDevelopmentPath=${versionFixture.extensionPath}`] : []),
-   ...(focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands
-    ? [`--extensionDevelopmentPath=${directory}/launcher`]
+   ...(focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedVsix || focusedCommands
+    ? (focusedVsix ? [] : [`--extensionDevelopmentPath=${directory}/launcher`])
     : [`--extensionTestsPath=${root}/clients/vscode/test/e2e/suite.js`]), repo,
 ];
 let result;
-if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedCommands) {
+if (focusedEdit || focusedHead || focusedVersion || focusedDownload || focusedVsix || focusedCommands) {
   const child = spawn(editor, args, { env, stdio: 'inherit' });
   let launchError;
   child.on('error', (error) => { launchError = error; });
@@ -263,12 +288,16 @@ const f5Evidence = focusedF5 && existsSync(`${directory}/f5-evidence.json`)
 // The download evidence records failures too, so readiness requires a pass.
 const downloadEvidence = focusedDownload && existsSync(`${directory}/download-startup-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/download-startup-evidence.json`, 'utf8')) : null;
+// The VSIX evidence records failures too, so readiness requires a pass.
+const vsixEvidence = focusedVsix && existsSync(`${directory}/vsix-install-evidence.json`)
+  ? JSON.parse(readFileSync(`${directory}/vsix-install-evidence.json`, 'utf8')) : null;
 // The command evidence records failures too, so readiness requires a pass.
 const commandEvidence = focusedCommands && existsSync(`${directory}/server-commands-evidence.json`)
   ? JSON.parse(readFileSync(`${directory}/server-commands-evidence.json`, 'utf8')) : null;
 const evidenceReady = focusedVersion ? existsSync(`${directory}/version-warning-evidence.json`)
   : focusedCommands ? commandEvidence?.status === 'pass'
   : focusedDownload ? downloadEvidence?.status === 'pass'
+  : focusedVsix ? vsixEvidence?.status === 'pass'
   : focusedHead ? headEvidence?.status === 'pass' && headEvidence.cases?.length === 8 : focusedEdit
   ? existsSync(`${directory}/real-file-native-evidence.json`)
   : focusedF5
@@ -296,6 +325,8 @@ if (!evidenceReady) {
       ? 'Missing native F5 evidence; see the isolated evidence directory above.'
       : focusedDownload
       ? 'Missing native automatic cached-server startup evidence; see the isolated evidence directory above.'
+      : focusedVsix
+      ? 'Missing native VSIX install evidence; see the isolated evidence directory above.'
       : focusedCommands
       ? 'Missing native server management command evidence; see the isolated evidence directory above.'
       : process.env.MAGIT_VSCODE_A34_ONLY === '1'

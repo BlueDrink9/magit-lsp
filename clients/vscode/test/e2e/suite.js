@@ -65,6 +65,9 @@ async function run() {
   const evidence = process.env.MAGIT_VSCODE_EVIDENCE;
   assert(evidence, 'MAGIT_VSCODE_EVIDENCE must name the isolated evidence directory');
   const extension = vscode.extensions.getExtension('magit-lsp.magit-lsp');
+  if (suiteMode === 'vsix-install') {
+    assert(extension, 'the installed VSIX provides the magit-lsp.magit-lsp extension');
+  }
   const requests = [];
   const draftNotes = [];
   const draftMessages = [];
@@ -255,6 +258,84 @@ async function run() {
   }).result.value;
   const captureFailure = () => checkpoint('failure-screen.json');
   await extension.activate();
+  if (suiteMode === 'vsix-install') {
+    // The editor was launched without any --extensionDevelopmentPath, so only
+    // the archive installed into this profile can provide the extension. The
+    // harness suite runs from the source tree and patches its own client copy,
+    // so this case observes production state directly: the rendered document
+    // and the extension instance's own store module.
+    const vsixPath = process.env.MAGIT_VSCODE_VSIX_PATH;
+    const expected = process.env.MAGIT_VSCODE_DOWNLOAD_EXPECTED;
+    const cacheRoot = process.env.MAGIT_VSCODE_DOWNLOAD_CACHE;
+    assert(vsixPath && fs.statSync(vsixPath).isFile(), 'the packaged VSIX exists');
+    assert(expected, 'MAGIT_VSCODE_DOWNLOAD_EXPECTED must name the seeded executable');
+    assert(cacheRoot, 'MAGIT_VSCODE_DOWNLOAD_CACHE must name the isolated global storage');
+    const installedRoot = path.join(evidence, 'extensions');
+    assert.equal(path.dirname(extension.extensionPath), installedRoot,
+      'the active extension is installed in the isolated profile');
+    const sourceExtension = path.resolve(__dirname, '../../../..', 'clients/vscode');
+    assert.notEqual(extension.extensionPath, sourceExtension,
+      'the active extension is not the source tree');
+    assert.equal(extension.isActive, true, 'the installed extension is active');
+    const { store } = require(`${extension.extensionPath}/lib/store.js`);
+    const { PROTOCOL_VERSION } = require(`${extension.extensionPath}/lib/version.js`);
+    assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('server.path') || '', '',
+      'the install smoke runs without a configured server path');
+    assert.equal(vscode.workspace.getConfiguration('magit-lsp').get('server.source'), 'managed',
+      'the install smoke uses the managed seeded server');
+    await vscode.commands.executeCommand('magit.open');
+    await waitFor(() => {
+      const active = vscode.window.activeTextEditor;
+      return Boolean(active && active.document.uri.scheme === 'magit'
+        && /tracked\.txt/.test(active.document.getText()));
+    }, 'managed seeded-server status render');
+    const statusText = vscode.window.activeTextEditor.document.getText();
+    await waitFor(() => Boolean(store.clientReady), 'installed extension client promise');
+    await store.clientReady;
+    const initialized = store.client?.initializeResult;
+    assert(initialized, 'the managed server completed initialization');
+    const protocolVersion = initialized.capabilities?.experimental?.magit?.protocolVersion;
+    assert.equal(protocolVersion, PROTOCOL_VERSION,
+      'the managed server accepts the client protocol version');
+    const listing = execFileSync('ps', ['-ww', '-eo', 'pid=,args=']).toString()
+      .split('\n').map((line) => line.trim()).filter(Boolean);
+    const commandOf = (line) => line.split(/\s+/).slice(1).join(' ');
+    const launched = listing.filter((line) => commandOf(line) === expected);
+    assert.equal(launched.length, 1, 'exactly one server process runs the seeded executable');
+    const sourceBinary = path.resolve(__dirname, '../../../..', 'target/debug/magit-lsp');
+    assert.equal(listing.filter((line) => commandOf(line) === sourceBinary).length, 0,
+      'no process runs the source-tree binary');
+    const evidencePath = `${evidence}/vsix-install-evidence.json`;
+    fs.writeFileSync(evidencePath, JSON.stringify({
+      status: 'pass',
+      install: {
+        method: 'code --install-extension',
+        vsix: vsixPath,
+        installedExtensionPath: extension.extensionPath,
+        installedVersion: extension.packageJSON.version,
+        sourceTreeExtensionPath: sourceExtension,
+        sourceTreeLoaded: false,
+      },
+      extensionId: extension.id,
+      extensionActive: extension.isActive,
+      editorVersion: vscode.version,
+      serverVersion: initialized.serverInfo?.version,
+      serverSourceSetting: 'managed',
+      expectedExecutable: expected,
+      cacheRoot,
+      launchedProcessCommand: launched[0],
+      sourceBinaryRunning: false,
+      protocolVersion,
+      protocolVersionExpected: PROTOCOL_VERSION,
+      statusText,
+      cacheSeededBy: 'real resolveServer with a fixture archive of target/debug/magit-lsp; '
+        + 'no live release download',
+      cleanup: 'isolated editor and server stopped by the native runner',
+      evidencePath,
+    }, null, 2));
+    console.log(`PASS native VSIX install: ${evidencePath}`);
+    return;
+  }
   let windowId;
   let windowGeometry = 'unknown';
   try {
