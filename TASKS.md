@@ -244,6 +244,7 @@ The overlapping P0 operand-protection item above is reopened for the remaining d
   - **Done when:** With signing defaults both enabled and disabled, the real prompt flow creates a lightweight ref at HEAD without an editor/signer, preserves configuration and leaves HEAD unchanged; `make test-rust FILTER="--test commands tag_create"` and `make ui-file FILE=tests/ui/scenarios/tag-create.scn` pass.
   - **Constraints:** Do not implement annotated/signed-tag workflows, change global Git configuration, launch interactive tools in tests, or weaken invalid/duplicate-name refusals.
   - Verified: `create_tag` runs `-c tag.gpgSign=false tag -- <name>`, leaving configuration untouched. The extended `tag_create_prompts_and_creates_tag_at_head` sets repo-local `tag.gpgSign=true`, `core.editor=false` and `gpg.program=false`, then asserts `cat-file -t` is `commit`, the tag OID equals the captured HEAD, configuration is unchanged and HEAD is on `main`; `make test-rust FILTER="--test commands"` → `ok: rust` (83 passed, 0 failed).
+  - Done: `279f9a3`.
 
 - [x] **[P1] Refuse unsupported tag and remote-add menu arguments before mutation** (`src/commands.rs:1642-1662`, `tag_create`, `remote_add`; `src/menus/tag.rs:14-20`; `src/menus/remote.rs:13-30`)
   - **Problem:** VERIFIED: the menus offer selectable signing/annotation/force options and “Fetch after add”, and `Session::handle_menu_key` forwards selected arguments (`src/session/menu.rs:459-464,518-530`), but the new handlers discard `ctx.args`. A selected sign option therefore silently creates an unsigned tag, and selected fetch-after-add silently does not fetch.
@@ -252,6 +253,7 @@ The overlapping P0 operand-protection item above is reopened for the remaining d
   - **Done when:** Unsupported selections cannot produce a tag/remote or a success message; the warning identifies the unsupported selection. `make test-rust FILTER="--test commands"`, `make ui-file FILE=tests/ui/scenarios/tag-create.scn`, and `make ui-file FILE=tests/ui/scenarios/remote-add.scn` pass.
   - **Constraints:** Do not implement signing, annotation, force replacement or network fetching in this ticket; do not forward arbitrary strings as Git flags or change the shared menu wire representation.
   - Verified: `refuse_unsupported_args` decodes `menu::Args`; any selected switch or option key emits a Warn message naming the command and keys and returns before prompting. Guards protect `tag_create`, `remote_add`, `tag_delete`, `remote_remove`, `remote_rename` and `remote_prune`. `tag_create_refuses_selected_menu_arguments` (`-s`, `=u`) and `remote_add_refuses_selected_menu_arguments` (`-f`, `=u`) assert the message, `!has_pending_prompt`, unchanged refs/remote list and unchanged local config; `make test-rust FILTER="--test commands"` → `ok: rust` (83 passed, 0 failed).
+  - Done: `279f9a3`.
 
 - [x] **[P2] Make branch-reset acceptance distinguish mutation from a no-op** (`tests/ui/scenarios/branch-reset.scn:1-19`; `tests/commands/more.rs`, `branch_reset_moves_a_side_branch_to_a_revision_without_switching`, `branch_reset_of_current_branch_hard_resets_to_a_distinct_commit`)
   - **Problem:** VERIFIED: the native scenario creates `feature` at HEAD and resets it to the same HEAD, so its repository assertion also passes if the reset is skipped. The refusal test compares `main` with symbolic HEAD after the operation; those move together, so that equality does not prove the branch stayed at its original commit.
@@ -268,6 +270,7 @@ The overlapping P0 operand-protection item above is reopened for the remaining d
   - **Done when:** The helper documentation no longer promises offline operation; record `make test-rust FILTER="--test commands remote_prune"` as the existing behavioral check, with no new test for this prose correction.
   - **Constraints:** Do not change pruning semantics, replace the missing-remote diagnostic with an assumed string from another subcommand, add network-dependent tests, or claim a review-time execution result.
   - Verified: `src/git.rs:715-719` now states that `prune_remote` contacts the remote to discover its current refs and deletes stale local tracking refs without fetching new objects; a probe showed `git remote prune` queries the remote's refs. Pruning semantics are unchanged and no network-dependent test was added.
+  - Done: `279f9a3`.
 
 ## Ready independent work
 
